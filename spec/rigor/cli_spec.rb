@@ -1409,11 +1409,98 @@ RSpec.describe Rigor::CLI do
       end
     end
 
+    it "emits TeamCity inspection service messages" do
+      status, out, _err = run_format("teamcity")
+
+      expect(status).to eq(1)
+      expect(out).to include("##teamcity[inspectionType id='rigor'")
+      expect(out).to include("##teamcity[inspection typeId='rigor'")
+      expect(out).to include("file='demo.rb'").and include("line='2'").and include("SEVERITY='ERROR'")
+    end
+
     it "rejects an unsupported format as a usage error" do
       status, _out, err = run_format("csv")
 
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
       expect(err).to include("unsupported format: csv")
+    end
+  end
+
+  # ADR-51 WD7 — CI auto-detection (first-class native / second-class reviewdog).
+  describe "check CI auto-detection (ADR-51 WD7)" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    # The suite forces RIGOR_CI_DETECT=0 (spec_helper) for determinism; each
+    # example opts back in and simulates one platform, restoring all touched
+    # keys afterwards.
+    def with_ci_env(vars)
+      keys = vars.keys + ["RIGOR_CI_DETECT"]
+      saved = keys.to_h { |k| [k, ENV.fetch(k, nil)] }
+      ENV["RIGOR_CI_DETECT"] = "1"
+      vars.each { |k, v| ENV[k] = v }
+      yield
+    ensure
+      saved.each { |k, v| v.nil? ? ENV.delete(k) : (ENV[k] = v) }
+    end
+
+    def run_check_in(vars, *extra)
+      Dir.chdir(tmpdir) do
+        File.write("demo.rb", "x = \"hello\"\nx.no_such_method_here\n")
+        with_ci_env(vars) { run_cli("check", "--no-cache", "--no-stats", *extra, "demo.rb") }
+      end
+    end
+
+    it "augments default text output with github annotations under GitHub Actions" do
+      status, out, _err = run_check_in("GITHUB_ACTIONS" => "true")
+
+      expect(status).to eq(1)
+      # The human text line is still present...
+      expect(out).to include("demo.rb:2:3: error:")
+      # ...and the workflow-command annotation is appended.
+      expect(out).to include("::error file=demo.rb,line=2,col=3,title=call.undefined-method::")
+    end
+
+    it "augments with teamcity service messages under TeamCity" do
+      status, out, _err = run_check_in("TEAMCITY_VERSION" => "2024.03")
+
+      expect(status).to eq(1)
+      expect(out).to include("demo.rb:2:3: error:")
+      expect(out).to include("##teamcity[inspection typeId='rigor'")
+    end
+
+    it "prints a reviewdog hint to stderr under a second-class CI (CircleCI)" do
+      status, out, err = run_check_in("CIRCLECI" => "true")
+
+      expect(status).to eq(1)
+      expect(out).to include("demo.rb:2:3: error:")
+      expect(out).not_to include("::error")
+      expect(err).to include("CircleCI detected").and include("reviewdog")
+    end
+
+    it "prints a format hint to stderr under GitLab CI" do
+      _status, out, err = run_check_in("GITLAB_CI" => "true")
+
+      expect(out).not_to include("\"fingerprint\"") # not the gitlab JSON itself
+      expect(err).to include("GitLab CI detected").and include("--format gitlab")
+    end
+
+    it "does not augment when --no-ci-detect is passed" do
+      status, out, err = run_check_in({ "GITHUB_ACTIONS" => "true" }, "--no-ci-detect")
+
+      expect(status).to eq(1)
+      expect(out).not_to include("::error file=")
+      expect(err).not_to include("detected")
+    end
+
+    it "does not augment when an explicit --format is chosen" do
+      status, out, _err = run_check_in({ "GITHUB_ACTIONS" => "true" }, "--format=json")
+
+      expect(status).to eq(1)
+      # JSON only — no annotation lines mixed into the machine stream.
+      expect(out).not_to include("::error file=")
+      expect { JSON.parse(out) }.not_to raise_error
     end
   end
 

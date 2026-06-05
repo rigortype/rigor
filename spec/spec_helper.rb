@@ -37,6 +37,14 @@ $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 # only here — downstream `rigortype` users keep the warning.
 Warning[:experimental] = false if Warning.respond_to?(:[]=)
 
+# ADR-51 WD7 — disable CI auto-detection for the whole suite so the many
+# `rigor check` text-output specs are deterministic regardless of whether
+# the suite itself runs under a CI (Rigor's own CI is GitHub Actions, which
+# would otherwise make `rigor check` augment its output with `::error`
+# annotations). The CiDetector specs opt back in per-example by setting the
+# platform env var + `RIGOR_CI_DETECT=1` and restoring both after.
+ENV["RIGOR_CI_DETECT"] = "0"
+
 require "rigor"
 
 Dir[File.expand_path("support/**/*.rb", __dir__)].each { |f| require f }

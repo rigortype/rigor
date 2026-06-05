@@ -78,14 +78,20 @@ GitLab CI, and others — building on the distribution / CI channel of
 users running Rigor in *their* pipelines.)
 
 **Landed (the CI diagnostic-output + templates + skill half — [ADR-51](adr/51-ci-diagnostic-output-formats.md)):**
-the integration half shipped. `rigor check --format` gained five CI-native
+the integration half shipped. `rigor check --format` gained six CI-native
 renderings of the diagnostic stream — `sarif` (SARIF 2.1.0, the
 cross-platform anchor), `github` (GitHub Actions workflow commands → inline
 PR annotations), `gitlab` (GitLab Code Quality → the MR widget), `checkstyle`
 (Checkstyle XML → reviewdog `-f=checkstyle` posts to *any* reviewdog reporter
-+ Jenkins), and `junit` (JUnit XML → test-report CIs) — each a pure
-presentation layer over the `--format json` fields
-(`lib/rigor/cli/diagnostic_formats.rb`). The copy-paste CI setup templates
++ Jenkins), `junit` (JUnit XML → test-report CIs), and `teamcity` (TeamCity
+inspection messages) — each a pure presentation layer over the `--format
+json` fields (`lib/rigor/cli/diagnostic_formats.rb`). On top, **runtime CI
+auto-detection** (`lib/rigor/cli/ci_detector.rb`, PHPStan-modelled) makes the
+default `text` output emit the native form automatically: first-class CIs
+(GitHub Actions → `github`, TeamCity → `teamcity`) augment the log with
+annotations, GitLab + second-class CIs (CircleCI/Jenkins/…) get a one-line
+reviewdog/format hint; opt-out `--no-ci-detect` / `RIGOR_CI_DETECT=0`. The
+copy-paste CI setup templates
 ADR-27 § WD3 left queued shipped under `docs/manual/ci-templates/`
 (SARIF + annotations + reviewdog `.github/workflows/rigor.yml`, `.gitlab-ci.yml`,
 generic recipe), plus the bundled `rigor-ci-setup` skill (`rigor skill`),

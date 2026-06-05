@@ -29,7 +29,7 @@ module Rigor
     # ruleless producers (parse / internal errors), which each format
     # degrades gracefully.
     module DiagnosticFormats
-      FORMATS = %w[sarif github gitlab checkstyle junit].freeze
+      FORMATS = %w[sarif github gitlab checkstyle junit teamcity].freeze
 
       module_function
 
@@ -46,6 +46,7 @@ module Rigor
         when "gitlab" then GitlabCodeQuality.new(result).render
         when "checkstyle" then Checkstyle.new(result).render
         when "junit" then Junit.new(result).render
+        when "teamcity" then Teamcity.new(result).render
         end
       end
 
@@ -295,6 +296,48 @@ module Rigor
             %(    <failure type="#{diagnostic.severity}" message="#{xml_escape(diagnostic.message)}" />),
             "  </testcase>"
           ]
+        end
+      end
+
+      # TeamCity inspection service messages — the `##teamcity[…]` lines a
+      # TeamCity build agent parses out of the build log into its Inspections
+      # view. The one stdout-native format (besides `github`) that
+      # CI-detection auto-emits. One `inspectionType` declares the category;
+      # each diagnostic is an `inspection` typed by severity.
+      class Teamcity
+        SEVERITIES = { error: "ERROR", warning: "WARNING", info: "INFO" }.freeze
+
+        def initialize(result)
+          @result = result
+        end
+
+        def render
+          return "" if @result.diagnostics.empty?
+
+          lines = [message("inspectionType", id: "rigor", name: "rigor",
+                                             category: "rigor", description: "Rigor inspection")]
+          @result.diagnostics.each { |diagnostic| lines << inspection(diagnostic) }
+          lines.join("\n")
+        end
+
+        private
+
+        def inspection(diagnostic)
+          rule_id = diagnostic.qualified_rule
+          text = rule_id ? "#{diagnostic.message} [#{rule_id}]" : diagnostic.message
+          message("inspection", typeId: "rigor", message: text, file: diagnostic.path,
+                                line: diagnostic.line, SEVERITY: SEVERITIES.fetch(diagnostic.severity, "WARNING"))
+        end
+
+        def message(name, attrs)
+          pairs = attrs.map { |key, value| "#{key}='#{escape(value)}'" }.join(" ")
+          "##teamcity[#{name} #{pairs}]"
+        end
+
+        # TeamCity's documented service-message escaping.
+        def escape(value)
+          value.to_s.gsub("|", "||").gsub("'", "|'").gsub("\n", "|n")
+               .gsub("\r", "|r").gsub("[", "|[").gsub("]", "|]")
         end
       end
     end

@@ -78,8 +78,16 @@ unchanged (`0` clean, `1` on errors), so the job still gates.
 **The GitHub default is `github` (annotations).** It is the one path that
 works on every repository with zero setup — no upload step, no extra
 permissions, no paid features — so lead with it unless the user asks for
-more. (It is also what PHPStan recommends for GitHub Actions.) Upgrade only
-when there is a concrete reason:
+more. (It is also what PHPStan recommends for GitHub Actions.)
+
+In fact, on GitHub Actions and TeamCity Rigor **auto-detects the CI and
+emits the native annotations even without `--format`** (it augments the
+default text output; ADR-51 WD7). So the simplest GitHub setup is the
+minimal workflow — plain `rigor check`, no `--format` — and you still get
+inline annotations. Pass `--format github` only when you want *just* the
+annotation stream (e.g. piping elsewhere); use `--no-ci-detect` to turn the
+augmentation off. Upgrade beyond annotations only when there is a concrete
+reason:
 
 - **`sarif`** *only when code scanning is available* — i.e. a **public**
   repo (free) or a **private** repo with **GitHub Advanced Security /

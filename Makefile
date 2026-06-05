@@ -101,7 +101,7 @@ lint:
 # (only `Rigor::VERSION`), so an engine edit at the same version could be
 # masked by a stale hit. The gate always re-runs the analysis fresh.
 check:
-	bundle exec exe/rigor check --no-cache lib
+	bundle exec exe/rigor check --no-cache --no-ci-detect lib
 
 # Self-check the bundled plugin / example LIB trees against the
 # `Plugin::Base` contract. ADR-43 ancestor resolution makes a plugin's
@@ -112,7 +112,7 @@ check:
 # stay clean for the same reason `check` does: fix the cause, never
 # disable the rule.
 check-plugins:
-	bundle exec exe/rigor check --no-cache plugins/*/lib examples/*/lib
+	bundle exec exe/rigor check --no-cache --no-ci-detect plugins/*/lib examples/*/lib
 
 # ADR-46 incremental-analysis acceptance gate. `--verify-incremental`
 # runs a baseline analysis, re-analyzes a subset of files and serves the

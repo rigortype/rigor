@@ -11,6 +11,7 @@ require_relative "analysis/diagnostic"
 require_relative "analysis/result"
 require_relative "cli/options"
 require_relative "cli/diagnostic_formats"
+require_relative "cli/ci_detector"
 
 module Rigor
   # The CLI class is a dispatcher: each `run_*` method delegates to a
@@ -100,6 +101,7 @@ module Rigor
       result = apply_baseline_filter(raw_result, configuration, options)
 
       write_result(result, options.fetch(:format))
+      emit_ci_detected_output(result, options)
       write_run_stats(result.stats) if result.stats
       write_trace_appendices
       runner.cache_store&.evict!
@@ -375,13 +377,20 @@ module Rigor
         # of the prior run's per-file diagnostics + dependency graph,
         # re-analyzes only the changed closure and serves the rest from the
         # snapshot. Off by default.
-        incremental: false
+        incremental: false,
+        # ADR-51 WD7 — CI auto-detection. When the default `text` format is
+        # in effect and a first-class CI is detected (GitHub Actions /
+        # TeamCity), also emit that platform's native annotations on top of
+        # the human output; for GitLab / reviewdog-routed CIs, print a
+        # one-line hint. On by default; `--no-ci-detect` (or
+        # `RIGOR_CI_DETECT=0`) disables it.
+        ci_detect: true
       }
       parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
         opts.banner = "Usage: rigor check [options] [paths]"
         opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
         opts.on("--format=FORMAT",
-                "Output format: text, json, sarif, github, gitlab, checkstyle, junit") do |value|
+                "Output format: text, json, sarif, github, gitlab, checkstyle, junit, teamcity") do |value|
           options[:format] = value
         end
         opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
@@ -420,6 +429,10 @@ module Rigor
         opts.on("--incremental",
                 "ADR-46: re-analyze only files changed since the last run (cross-process cache)") do
           options[:incremental] = true
+        end
+        opts.on("--no-ci-detect",
+                "ADR-51: do not auto-emit CI-native output when a CI environment is detected") do
+          options[:ci_detect] = false
         end
       end
       parser.parse!(@argv)
@@ -879,6 +892,41 @@ module Rigor
         @out.puts(output) unless output.empty?
       else
         raise OptionParser::InvalidArgument, "unsupported format: #{format}"
+      end
+    end
+
+    # ADR-51 WD7 — CI auto-detection. Only augments the default human
+    # (`text`) output: an explicit `--format` means the caller is in control
+    # and is left untouched. For a first-class stdout-native CI (GitHub
+    # Actions / TeamCity) the platform's annotations are emitted on top of
+    # the text output (so the human log AND the inline surface both appear,
+    # like PHPStan's CI-detecting table formatter). For GitLab (native but
+    # artifact-based) and the reviewdog-routed CIs, a one-line hint goes to
+    # stderr — but only when there are diagnostics, so a clean run stays
+    # quiet.
+    def emit_ci_detected_output(result, options)
+      return unless options.fetch(:ci_detect)
+      return unless options.fetch(:format) == "text"
+
+      platform = CLI::CiDetector.detect
+      return if platform.nil?
+
+      if platform.native_stdout?
+        output = CLI::DiagnosticFormats.render(result, platform.format)
+        @out.puts(output) unless output.empty?
+      elsif !result.success? || result.diagnostics.any?
+        @err.puts(ci_detected_hint(platform))
+      end
+    end
+
+    def ci_detected_hint(platform)
+      tail = "see `rigor skill print rigor-ci-setup`"
+      if platform.native_artifact?
+        "rigor: #{platform.name} detected — for the inline report run " \
+          "`rigor check --format #{platform.format}` and publish it as the platform's report artifact (#{tail})."
+      else
+        "rigor: #{platform.name} detected — Rigor has no native format for it; pipe " \
+          "`rigor check --format checkstyle` through reviewdog, or use `--format junit` (#{tail})."
       end
     end
 

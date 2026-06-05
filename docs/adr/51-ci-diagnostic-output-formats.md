@@ -1,16 +1,21 @@
 # ADR-51 — CI-native diagnostic output formats
 
-Status: **Accepted, 2026-06-06; partially implemented (v0.1.18).** Five
+Status: **Accepted, 2026-06-06; partially implemented (v0.1.18).** Six
 CI-native renderings of the existing diagnostic stream land behind
 `rigor check --format`: **`sarif`** (SARIF 2.1.0, the cross-platform
 anchor), **`github`** (GitHub Actions workflow commands), **`gitlab`**
 (GitLab Code Quality report JSON), **`checkstyle`** (Checkstyle XML — the
-reviewdog / Jenkins lint-interchange format), and **`junit`** (JUnit XML —
-the broad test-report format). Each is a presentation layer over the same
+reviewdog / Jenkins lint-interchange format), **`junit`** (JUnit XML —
+the broad test-report format), and **`teamcity`** (TeamCity inspection
+service messages). Each is a presentation layer over the same
 `Analysis::Diagnostic` fields `--format json` already exposes — no new
-analysis, no new diagnostic information. The formatters live in
-[`lib/rigor/cli/diagnostic_formats.rb`](../../lib/rigor/cli/diagnostic_formats.rb);
-the copy-paste CI setup templates (ADR-27 § WD3), the
+analysis, no new diagnostic information. On top of the formats, **runtime
+CI auto-detection** (WD7) emits the platform-native form automatically on the
+default output when a first-class CI is detected. The formatters and the
+detector live in
+[`lib/rigor/cli/diagnostic_formats.rb`](../../lib/rigor/cli/diagnostic_formats.rb)
++ [`lib/rigor/cli/ci_detector.rb`](../../lib/rigor/cli/ci_detector.rb); the
+copy-paste CI setup templates (ADR-27 § WD3), the
 [`rigor-ci-setup`](../../skills/rigor-ci-setup/SKILL.md) bundled skill, and
 the manual update ship in the same cut.
 
@@ -120,11 +125,11 @@ adds the same broad-reach pair, leaving `teamcity` demand-gated.
 Each format maps Rigor's `:error` / `:warning` / `:info` and the qualified
 rule id into its own vocabulary. The mappings, fixed here as contract:
 
-| Rigor | SARIF `level` | GitHub command | GitLab `severity` | Checkstyle `severity` | JUnit `failure type` |
-| --- | --- | --- | --- | --- | --- |
-| `:error` | `error` | `::error` | `major` | `error` | `error` |
-| `:warning` | `warning` | `::warning` | `minor` | `warning` | `warning` |
-| `:info` | `note` | `::notice` | `info` | `info` | `info` |
+| Rigor | SARIF `level` | GitHub command | GitLab `severity` | Checkstyle `severity` | JUnit `failure type` | TeamCity `SEVERITY` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `:error` | `error` | `::error` | `major` | `error` | `error` | `ERROR` |
+| `:warning` | `warning` | `::warning` | `minor` | `warning` | `warning` | `WARNING` |
+| `:info` | `note` | `::notice` | `info` | `info` | `info` | `INFO` |
 
 Identifier: the **qualified rule** (`<source_family>.<rule>`, or the bare
 rule for the `:builtin` family — `Diagnostic#qualified_rule`) is the stable
@@ -188,6 +193,40 @@ that walks a user through choosing a platform, format, and (optional)
 reviewdog path. The templates, the skill, and the manual's CI chapter
 ([`docs/manual/11-ci.md`](../manual/11-ci.md)) are the onboarding face of
 this ADR; the formats are its engine.
+
+### WD7 — Runtime CI auto-detection (first-class native / second-class reviewdog)
+
+Modelled on PHPStan's `CiDetectedErrorFormatter` (which uses
+`OndraM/ci-detector`): `rigor check` detects the CI environment at runtime
+from its env vars (`Rigor::CLI::CiDetector`) and, **on the default `text`
+output only**, surfaces diagnostics the platform-native way without the user
+choosing a `--format`. This is the "it just works in CI" default and the
+formal home of the *first-class / second-class* split:
+
+- **First-class, stdout-native** (GitHub Actions → `github`, TeamCity →
+  `teamcity`): the native annotations are emitted **on top of** the human
+  text (so the readable log *and* the inline surface both appear, exactly as
+  PHPStan augments its `table`). These are the platforms whose native format
+  renders purely from stdout.
+- **First-class, artifact-based** (GitLab CI → `gitlab`): the Code Quality
+  report needs a CI-wired artifact, not stdout, so auto-detection cannot
+  emit it onto the log; instead a one-line stderr hint tells the user to run
+  `--format gitlab` and publish the artifact.
+- **Second-class** (CircleCI, Jenkins, Travis, Azure, Bitbucket, Buildkite,
+  Drone, …): no native Rigor format, so a one-line stderr hint routes the
+  user to **reviewdog** (`--format checkstyle | reviewdog`) or `--format
+  junit`. The hint is the runtime expression of the second-class tier.
+
+Guardrails: it augments **only** the default `text` output — an explicit
+`--format` means the caller is in control and is left byte-for-byte
+untouched (so machine consumers are never polluted). Hints fire only when
+there are diagnostics (a clean run stays quiet). It is on by default but
+fully suppressible with `--no-ci-detect` or `RIGOR_CI_DETECT=0` — the latter
+is the seam Rigor's own `make check` / spec suite use so that running under
+GitHub Actions does not change their output. The augmentation of `text`
+under a detected CI is the one behavioural change here; it is additive
+(annotations on top, never replacing the human lines), gated to CI, and
+opt-out, so it does not regress the false-positive-discipline posture.
 
 ## Rejected / deferred alternatives
 

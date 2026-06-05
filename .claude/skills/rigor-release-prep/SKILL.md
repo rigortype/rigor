@@ -122,9 +122,42 @@ are running on a smaller / faster model, slow down here rather than racing to
 the version bump, because it is the one release step a later `make verify`
 cannot rescue.
 
+### Write the release summary
+
+Immediately under the new `## [x.y.z] - YYYY-MM-DD` heading, **before the
+first `###` section**, write a short prose summary — a few simple sentences
+(≈3–4), in the CHANGELOG's language (English) — that gives a reader the
+*themes* of the release before the itemised entries. It complements the
+bullets: the bullets are the precise "what changed", the summary is the
+narrative "what this release is about".
+
+- **Lead with the dominant theme** (the biggest performance thread, the
+  headline feature, …), then name one or two secondary threads, then close
+  with a short "other fixes" clause — mirroring the bullets' weight.
+- **Keep it short.** It is a lead, not a recap of every bullet — one clause
+  per theme, no exhaustive enumeration.
+- **Link sparingly**, using the file's existing repo-relative convention
+  (`[ADR-46](docs/adr/46-…)`, `[the Elixir v1.20 review](docs/notes/…)`) — a
+  pointer to the driving ADR / note for a theme, not a link per bullet.
+- It is **user-facing prose**: the same "would a user care?" bar as the
+  bullets; no internal class names or measured-number dumps (those live in
+  the bullets and their child items).
+
+Example shape (the 0.1.17 summary):
+
+> v0.1.17 focuses on making analysis of real projects markedly faster — an
+> incremental analysis cache, an unchanged-project fast path, and a large
+> allocation reduction on big Rails apps. Inspired by the Elixir v1.20 type
+> system, control-flow narrowing is strengthened for several methods. It also
+> folds `Data.define` value objects to precise types and adds new
+> clause-reachability and conformance diagnostics; fixes include a
+> block-parameter binding crash and a pathological route-helper re-read.
+
 ### Release mechanics
 
 - Add a new `## [x.y.z] - YYYY-MM-DD` section immediately below `[Unreleased]`.
+- Open it with the release summary above, then the `### Added` / `### Changed`
+  / `### Fixed` sections.
 - Use Keep a Changelog section headings verbatim: `Added`, `Changed`,
   `Deprecated`, `Removed`, `Fixed`, `Security`. Do NOT inline a description
   into the heading (`### Added — feature X` is wrong; the heading is just
@@ -318,6 +351,8 @@ with a merge commit) and keep the `Bump up version to x.y.z` commit intact.
   new `## [x.y.z]` section has two sentences, an em-dash clause, internal-only
   detail, or a merge artefact. (This is the step `make verify` cannot check;
   confirm it by eye.)
+- The new `## [x.y.z]` section opens with a short release-summary paragraph
+  (themes, a few simple sentences) before `### Added`.
 - `[Unreleased]` / `[x.y.z]` compare links resolve.
 - `make verify` passed.
 - `gem build rigortype.gemspec` succeeded and the produced `.gem` is not

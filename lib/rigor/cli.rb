@@ -381,7 +381,9 @@ module Rigor
         opts.banner = "Usage: rigor check [options] [paths]"
         opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
         opts.on("--format=FORMAT",
-                "Output format: text, json, sarif, github, gitlab") { |value| options[:format] = value }
+                "Output format: text, json, sarif, github, gitlab, checkstyle, junit") do |value|
+          options[:format] = value
+        end
         opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
         opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
         opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }

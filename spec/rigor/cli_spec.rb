@@ -1363,6 +1363,42 @@ RSpec.describe Rigor::CLI do
       expect(JSON.parse(second).fetch(0)["fingerprint"]).to eq(entry["fingerprint"])
     end
 
+    it "emits a Checkstyle XML document grouped by file" do
+      status, out, _err = run_format("checkstyle")
+
+      expect(status).to eq(1)
+      expect(out).to start_with('<?xml version="1.0" encoding="UTF-8"?>')
+      expect(out).to include("<checkstyle>").and include("</checkstyle>")
+      expect(out).to include('<file name="demo.rb">')
+      expect(out).to include(
+        '<error line="2" column="3" severity="error" '
+      )
+      expect(out).to include('source="call.undefined-method"')
+      # XML special characters in the message are escaped.
+      expect(out).to include("&quot;hello&quot;")
+    end
+
+    it "emits a JUnit testsuite with a failure per diagnostic" do
+      status, out, _err = run_format("junit")
+
+      expect(status).to eq(1)
+      expect(out).to include('<testsuite name="rigor" tests="1" failures="1">')
+      expect(out).to include('<testcase name="demo.rb:2:3" classname="call.undefined-method">')
+      expect(out).to include('<failure type="error" message=')
+      expect(out).to include("</testsuite>")
+    end
+
+    it "emits a clean JUnit suite with one passing case for a clean file" do
+      Dir.chdir(tmpdir) do
+        File.write("clean.rb", "x = 1\n")
+        status, out, _err = run_cli("check", "--no-cache", "--no-stats", "--format=junit", "clean.rb")
+
+        expect(status).to eq(0)
+        expect(out).to include('<testsuite name="rigor" tests="1" failures="0">')
+        expect(out).to include('<testcase name="rigor" />')
+      end
+    end
+
     it "emits an empty GitHub stream and exits 0 for a clean file" do
       Dir.chdir(tmpdir) do
         File.write("clean.rb", "x = 1\n")

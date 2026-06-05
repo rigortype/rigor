@@ -16,12 +16,15 @@ cycles live in dedicated archives:
 
 ### Added
 
-- **[cli]** `rigor check --format` gains three CI-native output formats so diagnostics surface inline in a pull / merge request instead of only in the job log ([ADR-51](docs/adr/51-ci-diagnostic-output-formats.md)):
+- **[cli]** `rigor check --format` gains five CI-native output formats so diagnostics surface inline in a pull / merge request instead of only in the job log ([ADR-51](docs/adr/51-ci-diagnostic-output-formats.md)):
   - `--format sarif` writes a SARIF 2.1.0 report. GitHub's `upload-sarif` renders it on the PR diff and in the Security tab, and any other SARIF-aware tool consumes the same file — the cross-platform option.
   - `--format github` emits GitHub Actions workflow commands (`::error file=…,line=…::`) that the runner turns into inline PR annotations, with no upload step.
   - `--format gitlab` emits a GitLab Code Quality (CodeClimate-subset) report that GitLab reads from a `codequality` artifact to populate the merge-request widget.
-  - All three are a presentation layer over the same diagnostics as `--format json` — no new analysis. Severities map per format (error/warning/info → SARIF `error`/`warning`/`note`, GitHub `::error`/`::warning`/`::notice`, GitLab `major`/`minor`/`info`), and the exit code is unchanged (`0` clean, `1` on errors) so the job still gates the pipeline.
-- **[docs]** Copy-paste CI setup templates under [`docs/manual/ci-templates/`](docs/manual/ci-templates/) — a SARIF and an annotations `.github/workflows/rigor.yml`, a `.gitlab-ci.yml`, and a generic recipe — wiring the new formats into a Ruby-4.0 isolated job (the templates [ADR-27](docs/adr/27-tool-distribution-model.md) § WD3 left queued). The CI manual chapter ([docs/manual/11-ci.md](docs/manual/11-ci.md)) documents each.
+  - `--format checkstyle` emits Checkstyle XML — the format [reviewdog](https://github.com/reviewdog/reviewdog) reads (`-f=checkstyle`) to post findings to any of its reporters (GitHub PR review, GitLab MR discussion, Gerrit, Bitbucket, Gitea), and that Jenkins and other tools consume too.
+  - `--format junit` emits JUnit XML — the test-report format GitHub test reporting, GitLab, CircleCI, and Jenkins render.
+  - All five are a presentation layer over the same diagnostics as `--format json` — no new analysis. Severities map per format (e.g. error/warning/info → SARIF `error`/`warning`/`note`, GitHub `::error`/`::warning`/`::notice`, GitLab `major`/`minor`/`info`), and the exit code is unchanged (`0` clean, `1` on errors) so the job still gates the pipeline.
+- **[docs]** Copy-paste CI setup templates under [`docs/manual/ci-templates/`](docs/manual/ci-templates/) — SARIF / annotations / reviewdog `.github/workflows/rigor.yml` variants, a `.gitlab-ci.yml`, and a generic recipe — wiring the new formats into a Ruby-4.0 isolated job (the templates [ADR-27](docs/adr/27-tool-distribution-model.md) § WD3 left queued). The CI manual chapter ([docs/manual/11-ci.md](docs/manual/11-ci.md)) documents each.
+- **[skill]** New bundled `rigor-ci-setup` Agent Skill (discoverable via `rigor skill`) that walks a project through wiring Rigor into its CI — choosing the platform, the output format, and the optional reviewdog path via [`reviewdog/action-setup`](https://github.com/reviewdog/action-setup).
 
 ## [0.1.17] - 2026-06-06
 

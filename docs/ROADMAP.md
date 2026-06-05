@@ -77,20 +77,25 @@ GitLab CI, and others — building on the distribution / CI channel of
 `ci.yml` / `release-gate.yml`, which test Rigor itself; this goal is about
 users running Rigor in *their* pipelines.)
 
-**Landed (the CI diagnostic-output + templates half — [ADR-51](adr/51-ci-diagnostic-output-formats.md)):**
-the integration half shipped. `rigor check --format` gained three CI-native
+**Landed (the CI diagnostic-output + templates + skill half — [ADR-51](adr/51-ci-diagnostic-output-formats.md)):**
+the integration half shipped. `rigor check --format` gained five CI-native
 renderings of the diagnostic stream — `sarif` (SARIF 2.1.0, the
 cross-platform anchor), `github` (GitHub Actions workflow commands → inline
-PR annotations), and `gitlab` (GitLab Code Quality → the MR widget) — each a
-pure presentation layer over the `--format json` fields
+PR annotations), `gitlab` (GitLab Code Quality → the MR widget), `checkstyle`
+(Checkstyle XML → reviewdog `-f=checkstyle` posts to *any* reviewdog reporter
++ Jenkins), and `junit` (JUnit XML → test-report CIs) — each a pure
+presentation layer over the `--format json` fields
 (`lib/rigor/cli/diagnostic_formats.rb`). The copy-paste CI setup templates
 ADR-27 § WD3 left queued shipped under `docs/manual/ci-templates/`
-(SARIF + annotations `.github/workflows/rigor.yml`, `.gitlab-ci.yml`, generic
-recipe), documented in `docs/manual/11-ci.md`. The two open scoping
-decisions were resolved: a **new ADR** (ADR-51, not an ADR-27 amendment) and
-**all three formats now** (SARIF the recommended default). Demand-gated
-follow-ups recorded in ADR-51: `--output FILE`, JUnit XML, richer SARIF
-rule metadata.
+(SARIF + annotations + reviewdog `.github/workflows/rigor.yml`, `.gitlab-ci.yml`,
+generic recipe), plus the bundled `rigor-ci-setup` skill (`rigor skill`),
+documented in `docs/manual/11-ci.md`. The open scoping decisions were
+resolved: a **new ADR** (ADR-51, not an ADR-27 amendment), **all five formats**
+(SARIF the recommended default; `checkstyle` + `junit` added for reviewdog /
+Jenkins / test-report reach — the comparator is PHPStan, which ships
+github/gitlab/checkstyle/junit/teamcity but no SARIF). Demand-gated
+follow-ups recorded in ADR-51: `--output FILE`, reviewdog native `rdjson`,
+TeamCity, richer SARIF rule metadata.
 
 Concrete surface — original scope (the onboarding half below is partly
 absorbed; remaining items stand):

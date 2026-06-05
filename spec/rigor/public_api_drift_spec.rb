@@ -179,7 +179,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   PLUGIN_BASE_SINGLETON = %w[
-    dynamic_return(keyreq:receivers,block:block)
+    dynamic_return(keyreq:receivers,key:methods,block:block)
     dynamic_returns()
     manifest(keyrest:fields)
     node_file_context(block:block)
@@ -551,6 +551,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     symbol_arg(req:call_node,req:index)
     symbol_arguments(req:call_node)
     symbol_name(req:node)
+    symbol_named?(req:node,req:name)
     symbol_or_string(req:node)
     symbol_or_string_name(req:node)
   ].freeze

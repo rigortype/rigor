@@ -372,6 +372,81 @@ RSpec.describe Rigor::Plugin::Base do
         end
       end.to raise_error(ArgumentError, /non-empty Array/)
     end
+
+    describe "optional methods: gate" do
+      let(:plugin_with_methods) do
+        Class.new(described_class) do
+          manifest(id: "dr-methods", version: "0.1.0")
+          dynamic_return receivers: ["Foo"], methods: %i[unwrap unwrap!] do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("Bar")
+          end
+        end.new(services: services)
+      end
+
+      it "fires for a declared method name" do
+        type = plugin_with_methods.dynamic_return_type(
+          call_node: call("x.unwrap"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.nominal_of("Foo")
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Bar"))
+      end
+
+      it "fires for each declared method name" do
+        type = plugin_with_methods.dynamic_return_type(
+          call_node: call("x.unwrap!"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.nominal_of("Foo")
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Bar"))
+      end
+
+      it "declines for an undeclared method name (even on a matching receiver)" do
+        type = plugin_with_methods.dynamic_return_type(
+          call_node: call("x.other"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.nominal_of("Foo")
+        )
+        expect(type).to be_nil
+      end
+
+      it "still declines for a non-matching receiver even if method matches" do
+        type = plugin_with_methods.dynamic_return_type(
+          call_node: call("x.unwrap"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.nominal_of("Other")
+        )
+        expect(type).to be_nil
+      end
+
+      it "accepts String method names and normalises them to symbols" do
+        plugin = Class.new(described_class) do
+          manifest(id: "dr-str", version: "0.1.0")
+          dynamic_return receivers: ["Foo"], methods: %w[fetch] do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("Val")
+          end
+        end.new(services: services)
+        type = plugin.dynamic_return_type(
+          call_node: call("x.fetch"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.nominal_of("Foo")
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Val"))
+      end
+
+      it "rejects an empty methods: list" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "bad-dm", version: "0.1.0")
+            dynamic_return(receivers: ["Foo"], methods: []) { nil }
+          end
+        end.to raise_error(ArgumentError, /methods/)
+      end
+
+      it "rejects non-symbol/string entries in methods:" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "bad-dm2", version: "0.1.0")
+            dynamic_return(receivers: ["Foo"], methods: [123]) { nil }
+          end
+        end.to raise_error(ArgumentError, /methods/)
+      end
+    end
   end
 
   describe ".type_specifier / #type_specifier_facts (ADR-37 slice 2)" do

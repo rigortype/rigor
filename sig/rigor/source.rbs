@@ -16,6 +16,7 @@ module Rigor
       def self?.symbol_or_string_name: (untyped? node) -> String?
       def self?.symbol: (untyped? node) -> Symbol?
       def self?.symbol_name: (untyped? node) -> String?
+      def self?.symbol_named?: (untyped? node, String name) -> bool
       def self?.symbol_arguments: (untyped? call_node) -> Array[Symbol]
       def self?.symbol_arg: (untyped? call_node, Integer index) -> Symbol?
     end

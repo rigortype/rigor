@@ -191,32 +191,58 @@ module Rigor
         end
 
         # ADR-37 slice 2 — declares a per-call-site return-type
-        # contribution, receiver-gated. The narrow successor to the
-        # `return_type` slot of `flow_contribution_for`:
+        # contribution, receiver-gated (and optionally method-gated). The
+        # narrow successor to the `return_type` slot of
+        # `flow_contribution_for`:
         #
+        #   # receiver-gated only:
         #   dynamic_return receivers: ["ActiveRecord::Base"] do |call_node, scope|
         #     # self = plugin instance; return a Rigor::Type or nil
+        #   end
+        #
+        #   # receiver + method gated (preferred for focused rules):
+        #   dynamic_return receivers: ["Result"], methods: [:unwrap, :unwrap!] do |call_node, scope|
+        #     # fires only for Result#unwrap / Result#unwrap!
         #   end
         #
         # `receivers:` is a non-empty Array of class names; the engine
         # calls the block only when the call's receiver type's class
         # equals or inherits from one of them (via
-        # `Environment#class_ordering`). Method-name and type-shape
-        # refinement stays in the block, which returns a `Rigor::Type`
-        # (or `nil` to decline). The block runs through `instance_exec`,
-        # so `config` / `services` are in scope. This is the
-        # {.producer}-style class DSL (it carries logic needing the
-        # instance, not pure data).
-        def dynamic_return(receivers:, &block)
+        # `Environment#class_ordering`).
+        #
+        # `methods:` is an optional Array of Symbol method names. When
+        # provided, the block is also skipped unless `call_node.name` is
+        # in the list — equivalent to `next if call_node.name != :foo`
+        # at the top of the block, but declarative and cheaper (the
+        # check runs before the block is entered). When omitted, every
+        # method on a matching receiver is forwarded to the block as
+        # before (backwards-compatible with existing rules).
+        #
+        # Method-name and type-shape refinement can still be done inside
+        # the block. The block runs through `instance_exec`, so `config`
+        # / `services` are in scope.
+        def dynamic_return(receivers:, methods: nil, &block)
           raise ArgumentError, "Plugin::Base.dynamic_return requires a block body" if block.nil?
           unless receivers.is_a?(Array) && !receivers.empty? && receivers.all? { |r| r.is_a?(String) && !r.empty? }
             raise ArgumentError,
                   "Plugin::Base.dynamic_return receivers: must be a non-empty Array of class-name Strings, " \
                   "got #{receivers.inspect}"
           end
+          if methods && !(methods.is_a?(Array) && !methods.empty? &&
+                          methods.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) })
+            raise ArgumentError,
+                  "Plugin::Base.dynamic_return methods: must be a non-empty Array of Symbol/String or nil, " \
+                  "got #{methods.inspect}"
+          end
+
+          normalized_methods = methods&.map(&:to_sym)&.freeze
 
           @dynamic_returns ||= []
-          @dynamic_returns << { receivers: receivers.map { |r| r.dup.freeze }.freeze, block: block }.freeze
+          @dynamic_returns << {
+            receivers: receivers.map { |r| r.dup.freeze }.freeze,
+            methods: normalized_methods,
+            block: block
+          }.freeze
           nil
         end
 
@@ -405,6 +431,7 @@ module Rigor
         environment = scope&.environment
         rules.each do |rule|
           next unless rule[:receivers].any? { |c| class_matches_receiver?(class_name, c, environment) }
+          next if rule[:methods] && !rule[:methods].include?(call_node.name)
 
           result = instance_exec(call_node, scope, &rule[:block])
           return result if result

@@ -3713,6 +3713,66 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "`rigor:v1:conforms-to` conformance directive" do
+    def analyze_conforms_to(class_body:, interface_body: "def rewind: () -> void\n  def read: () -> String",
+                            interface: "_RewindableBuffer")
+      sig = { "buffer.rbs" => <<~RBS }
+        interface #{interface}
+          #{interface_body}
+        end
+
+        %a{rigor:v1:conforms-to #{interface}}
+        class ConformDemo
+          #{class_body}
+        end
+      RBS
+      analyze("x = 1\n", sig: sig)
+    end
+
+    it "flags a class that declares conforms-to but is missing a required method" do
+      result = analyze_conforms_to(class_body: "def read: () -> String")
+      diag = result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("ConformDemo")
+      expect(diag.message).to include("_RewindableBuffer")
+      expect(diag.message).to include("`#rewind`")
+      expect(diag.message).not_to include("`#read`")
+      expect(diag.severity).to eq(:warning)
+      expect(diag.path).to include("buffer.rbs")
+    end
+
+    it "stays silent when the class provides every required method (own + inherited)" do
+      result = analyze_conforms_to(class_body: "def rewind: () -> void\n  def read: () -> String")
+
+      expect(result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }).to be_nil
+    end
+
+    it "lists every missing method when several are absent" do
+      result = analyze_conforms_to(class_body: "def unrelated: () -> bool")
+      diag = result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("`#rewind`")
+      expect(diag.message).to include("`#read`")
+      expect(diag.message).to include("2 required methods")
+    end
+
+    it "surfaces an unknown interface name as `dynamic.rbs-extended.unresolved`" do
+      sig = { "buffer.rbs" => <<~RBS }
+        %a{rigor:v1:conforms-to _NotDeclared}
+        class UnresolvedConformDemo
+        end
+      RBS
+      result = analyze("x = 1\n", sig: sig)
+      diag = result.diagnostics.find { |d| d.rule == "dynamic.rbs-extended.unresolved" }
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("_NotDeclared")
+      expect(diag.message).to include("not loaded")
+    end
+  end
+
   describe "editor mode degrades Ractor pool to sequential (slice 7)" do
     it "runs sequentially even when workers > 0 is requested" do
       Dir.mktmpdir("rigor-editor-pool-degrade-") do |tmpdir|

@@ -501,6 +501,27 @@ module Rigor
         # registry rather than crashing.
       end
 
+      # Like {#each_class_decl_annotation}, but also yields the
+      # owning class / module's RBS name as the first block
+      # argument: `(class_name, annotation_string, location)`. Used
+      # by {Rigor::RbsExtended::ConformanceChecker} to resolve a
+      # `rigor:v1:conforms-to` directive back to the class it
+      # annotates. Same fail-soft policy as the un-named variant.
+      def each_class_decl_annotation_with_name
+        return enum_for(:each_class_decl_annotation_with_name) unless block_given?
+        return if env.nil?
+
+        env.class_decls.each do |rbs_name, entry|
+          entry.each_decl do |decl|
+            next unless decl.respond_to?(:annotations)
+
+            decl.annotations.each { |a| yield rbs_name.to_s, a.string, a.location }
+          end
+        end
+      rescue ::RBS::BaseError, ::Ractor::IsolationError
+        # fail-soft: see #each_class_decl_annotation.
+      end
+
       # Returns a frozen `Hash<String, String>` mapping each loaded
       # class / module name (top-level prefixed) to the file path of
       # its FIRST declaration's RBS source. Used by
@@ -569,6 +590,39 @@ module Rigor
         return nil unless definition
 
         definition.methods[method_name.to_sym]
+      end
+
+      # @return [Array<Symbol>, nil] every instance-method name on
+      #   `class_name` — own, inherited, and included — as resolved
+      #   by `RBS::DefinitionBuilder`. Returns `nil` (NOT `[]`) when
+      #   the class definition cannot be built so callers can tell
+      #   "no methods" apart from "unknown class". Used by the
+      #   `rigor:v1:conforms-to` presence check
+      #   ({Rigor::RbsExtended::ConformanceChecker}).
+      def instance_method_names(class_name)
+        definition = instance_definition(class_name)
+        return nil unless definition
+
+        definition.methods.keys
+      end
+
+      # @return [Array<Symbol>, nil] every method name required by
+      #   the RBS interface `interface_name` (`_RewindableStream`),
+      #   including methods inherited from interface ancestors.
+      #   Returns `nil` when the name does not resolve to a loaded
+      #   interface (a typo, or the defining library / sig set is
+      #   not on the load path) so the conformance checker can
+      #   surface that as an unresolved-directive notice rather than
+      #   a spurious non-conformance. Fail-soft on RBS build errors.
+      def interface_method_names(interface_name)
+        rbs_name = parse_type_name(interface_name)
+        return nil unless rbs_name
+        return nil if env.nil?
+        return nil unless env.interface_decls.key?(rbs_name)
+
+        builder.build_interface(rbs_name).methods.keys
+      rescue ::RBS::BaseError
+        nil
       end
 
       # @return [RBS::Definition, nil] the resolved singleton (class

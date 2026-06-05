@@ -41,6 +41,7 @@ ID; `rigor explain` with no argument lists them all.
 | `def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor. |
 | `def.override-return-widened` | An override's declared return type widens the inherited return (covariance). |
 | `def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). |
+| `rbs_extended.unsatisfied-conformance` | A class declares `%a{rigor:v1:conforms-to _Interface}` in its RBS but is missing a method the interface requires. Presence-based: only definitively-absent required methods fire. |
 | `assert.type-mismatch` | An `assert_type` expectation does not match the inferred type. |
 | `dump.type` | A `dump_type` call — informational, prints the inferred type. |
 

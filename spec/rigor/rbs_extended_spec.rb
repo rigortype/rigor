@@ -487,6 +487,35 @@ RSpec.describe Rigor::RbsExtended do
     end
   end
 
+  describe ".parse_conforms_to_annotation" do
+    it "extracts the interface name from a conforms-to directive" do
+      expect(described_class.parse_conforms_to_annotation("rigor:v1:conforms-to _RewindableStream"))
+        .to eq("_RewindableStream")
+    end
+
+    it "strips a leading `::` from the interface name" do
+      expect(described_class.parse_conforms_to_annotation("rigor:v1:conforms-to ::IO::_Reader"))
+        .to eq("IO::_Reader")
+    end
+
+    it "accepts a namespaced interface name" do
+      expect(described_class.parse_conforms_to_annotation("rigor:v1:conforms-to Net::_Stream"))
+        .to eq("Net::_Stream")
+    end
+
+    it "returns nil for a non-conforms-to directive" do
+      expect(described_class.parse_conforms_to_annotation("rigor:v1:return: non-empty-string")).to be_nil
+    end
+
+    it "returns nil when the right-hand side is not an interface name (no `_` segment)" do
+      expect(described_class.parse_conforms_to_annotation("rigor:v1:conforms-to RewindableStream")).to be_nil
+    end
+
+    it "returns nil for a nil input" do
+      expect(described_class.parse_conforms_to_annotation(nil)).to be_nil
+    end
+  end
+
   describe "AssertEffect#to_fact (ADR-7 § 'Slice 4-A')" do
     it "lifts class-name assert effects into a Nominal-typed Fact" do
       effect = Rigor::RbsExtended::AssertEffect.new(

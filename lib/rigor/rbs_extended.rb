@@ -608,6 +608,45 @@ module Rigor
       ParamOverride.new(param_name: match[:param].to_sym, type: type)
     end
 
+    # A class- / module-level directive declaring that the
+    # annotated class satisfies a named structural interface as
+    # part of its public contract (spec:
+    # `docs/type-specification/rbs-extended.md` § "Explicit
+    # conformance directive"). Unlike the per-method directives
+    # above, this attaches to a `class` / `module` declaration and
+    # names a single RBS interface (`_RewindableStream`); the
+    # right-hand side is therefore an interface name (its last
+    # segment begins with `_`), never a refinement payload.
+    #
+    # This parser only extracts the interface name; the
+    # conformance check itself lives in
+    # {Rigor::RbsExtended::ConformanceChecker}, which the
+    # {Rigor::Analysis::Runner} runs once per project run.
+    CONFORMS_TO_DIRECTIVE_PATTERN = /
+      \A
+      rigor:v1:conforms-to
+      \s+
+      (?<interface>(?:::)?(?:[A-Z]\w*::)*_[A-Za-z]\w*)
+      \s*
+      \z
+    /x
+    private_constant :CONFORMS_TO_DIRECTIVE_PATTERN
+
+    # Returns the interface name (leading `::` stripped) for a
+    # `rigor:v1:conforms-to <Interface>` annotation, or `nil` when
+    # the string is not a conforms-to directive (so callers can
+    # walk an annotation list without pre-filtering). The name is
+    # returned verbatim otherwise — namespace resolution happens at
+    # the loader boundary when the interface is built.
+    def parse_conforms_to_annotation(string)
+      return nil if string.nil?
+
+      match = CONFORMS_TO_DIRECTIVE_PATTERN.match(string)
+      return nil if match.nil?
+
+      match[:interface].to_s.sub(/\A::/, "")
+    end
+
     # The shared {Rigor::FlowContribution::Provenance} for every
     # bundle this module produces. `source_family: :rbs_extended`
     # so consumers (today the documentation surface; v0.1.0 the

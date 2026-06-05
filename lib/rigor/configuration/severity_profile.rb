@@ -55,7 +55,11 @@ module Rigor
           "def.override-visibility-reduced" => :off,
           "def.override-return-widened" => :off,
           "def.override-param-narrowed" => :off,
-          "def.ivar-write-mismatch" => :warning
+          "def.ivar-write-mismatch" => :warning,
+          # Opt-in author assertion: you only see it if you wrote a
+          # `conforms-to` directive, so it stays a :warning even in
+          # lenient — it is never unsolicited noise.
+          "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         balanced: {
           "call.undefined-method" => :error,
@@ -79,7 +83,8 @@ module Rigor
           "def.override-visibility-reduced" => :warning,
           "def.override-return-widened" => :warning,
           "def.override-param-narrowed" => :warning,
-          "def.ivar-write-mismatch" => :warning
+          "def.ivar-write-mismatch" => :warning,
+          "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         strict: {
           "call.undefined-method" => :error,
@@ -102,7 +107,8 @@ module Rigor
           "def.override-visibility-reduced" => :error,
           "def.override-return-widened" => :error,
           "def.override-param-narrowed" => :error,
-          "def.ivar-write-mismatch" => :error
+          "def.ivar-write-mismatch" => :error,
+          "rbs_extended.unsatisfied-conformance" => :error
         }.freeze
       }.freeze
 

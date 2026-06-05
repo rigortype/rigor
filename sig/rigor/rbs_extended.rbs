@@ -45,6 +45,8 @@ module Rigor
 
     def self?.read_flow_contribution: (untyped method_def) -> untyped?
 
+    def self?.parse_conforms_to_annotation: (String? string) -> String?
+
     class ParamOverride
       attr_reader param_name: Symbol
       attr_reader type: Type::t

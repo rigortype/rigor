@@ -11,6 +11,7 @@ require_relative "../cache/rbs_descriptor"
 require_relative "../plugin"
 require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
+require_relative "../rbs_extended/conformance_checker"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
@@ -134,6 +135,12 @@ module Rigor
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = [].freeze
         @synthesized_namespaces_snapshot = [].freeze
+        # `rigor:v1:conforms-to` results, snapshotted from the
+        # per-run RBS env in `analyze_files_sequentially` (gated on
+        # the project declaring `signature_paths:`) and drained by
+        # `conforms_to_diagnostics`. Inline default per the comment
+        # above so the engine's own flow analysis sees it seeded.
+        @conformance_results_snapshot = [].freeze
         @cached_plugin_prepare_diagnostics = [].freeze
         @project_discovered_classes = {}.freeze
         @project_discovered_def_nodes = {}.freeze
@@ -172,6 +179,7 @@ module Rigor
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = []
         @synthesized_namespaces_snapshot = []
+        @conformance_results_snapshot = []
 
         if @prebuilt
           adopt_prebuilt_project_scan(@prebuilt)
@@ -298,6 +306,7 @@ module Rigor
         @analyzed_files = targets
         diagnostics += analyze_files(targets, environment: environment)
         diagnostics += rbs_synthesized_namespace_diagnostics
+        diagnostics += conforms_to_diagnostics
         diagnostics += rbs_extended_reporter_diagnostics
         diagnostics += boundary_cross_diagnostics
         diagnostics + source_rbs_synthesis_diagnostics
@@ -527,6 +536,11 @@ module Rigor
         # warm `.rigor/cache` on a bare `--no-stats` run.
         @synthesized_namespaces_snapshot =
           project_signature_paths? ? (environment.rbs_loader&.synthesized_namespaces || []) : []
+        # `rigor:v1:conforms-to` lives only in the project's own
+        # `signature_paths:` RBS, so gate the scan the same way and
+        # reuse the already-built env (no extra RBS load).
+        @conformance_results_snapshot =
+          project_signature_paths? ? RbsExtended::ConformanceChecker.scan(environment.rbs_loader) : []
         result = files.flat_map { |path| analyze_file(path, environment) }
         if @collect_stats
           loader = environment.rbs_loader
@@ -1357,6 +1371,52 @@ module Rigor
         return [] if synthesized.nil? || synthesized.empty?
 
         [build_rbs_synthesized_namespace_diagnostic(synthesized)]
+      end
+
+      # Maps the per-run `rigor:v1:conforms-to` scan results into
+      # diagnostics (spec: `rbs-extended.md` § "Explicit conformance
+      # directive"). A class that declares `conforms-to _Interface`
+      # but is missing a required interface method surfaces as
+      # `rbs_extended.unsatisfied-conformance`; an unresolvable
+      # interface name surfaces as `dynamic.rbs-extended.unresolved`
+      # `:info` (the same fail-soft channel the other directive
+      # parsers use). Empty for a project with no directive, a
+      # well-formed conformance, or a non-sequential pool run (the
+      # snapshot mirrors `synthesized_namespaces`).
+      def conforms_to_diagnostics
+        results = @conformance_results_snapshot
+        return [] if results.nil? || results.empty?
+
+        results.map { |record| build_conformance_diagnostic(record) }
+      end
+
+      def build_conformance_diagnostic(record)
+        case record
+        when RbsExtended::ConformanceChecker::Unsatisfied
+          path, line, column = location_fields(record.location)
+          Diagnostic.new(
+            path: path, line: line, column: column,
+            message: "`#{record.class_name}` declares `conforms-to #{record.interface_name}` " \
+                     "but does not provide #{pluralize_methods(record.missing_methods)}: " \
+                     "#{record.missing_methods.map { |m| "`##{m}`" }.join(', ')}. Implement the " \
+                     "missing method(s) or remove the directive.",
+            severity: :warning,
+            rule: "rbs_extended.unsatisfied-conformance",
+            source_family: :builtin
+          )
+        else # UnresolvedInterface
+          build_reporter_diagnostic(
+            record.location,
+            rule: "dynamic.rbs-extended.unresolved",
+            message: "`#{record.class_name}` declares `conforms-to #{record.interface_name}` but " \
+                     "interface `#{record.interface_name}` is not loaded. Check for a typo or add " \
+                     "the `sig`/library that declares it to the RBS load path."
+          )
+        end
+      end
+
+      def pluralize_methods(methods)
+        methods.size == 1 ? "required method" : "#{methods.size} required methods"
       end
 
       # True when the project declares its own `signature_paths:` (the

@@ -23,9 +23,9 @@ The 6 remaining Mastodon errors are unrelated to engine precision: 5 nil-receive
 ## Next-session entry point
 
 > **Recommended next work (pick one — all bounded, no external corpus needed):**
-> 1. **`rigor:v1:conforms-to` directive** (open since v0.1.1; [ROADMAP](ROADMAP.md) § "Type-language / engine") — a structural-interface-conformance RBS::Extended directive. New directive grammar (`lib/rigor/rbs_extended.rb`) + structural conformance check at call sites. Moderate; needs design.
-> 2. **ADR-24 slice 4** — gated `undefined-method` on resolved closed-class self-calls (see § "ADR-24" below for the evaluation-time recorder approach; WD4 corpus gate required before default-on).
-> 3. **`rigor check --incremental` manual entry** — CLI reference + caching chapter for `--incremental` / `--verify-incremental`; extend `--verify-incremental` CI gate to Mastodon + GitLab survey trees.
+> 1. **ADR-24 slice 4** — gated `undefined-method` on resolved closed-class self-calls (see § "ADR-24" below for the evaluation-time recorder approach; WD4 corpus gate required before default-on).
+> 2. **`rigor check --incremental` CI-gate extension** — the manual entry (CLI reference + caching chapter) already ships; the remaining piece is extending the `--verify-incremental` CI gate to the Mastodon + GitLab survey trees (needs the external corpus).
+> 3. **`rigor:v1:conforms-to` signature-compatibility follow-up** — the presence-based first cut LANDED (v0.1.17; `rbs_extended.unsatisfied-conformance` + `RbsExtended::ConformanceChecker`). The deferred half is signature-compatibility checking on the *provided* methods (param contravariance / return covariance) — FP-gated, since comparing inferred signatures is where the false positives live. See [ROADMAP](ROADMAP.md) § "Type-language / engine".
 >
 > **LRU eviction for `Cache::Store` — COMPLETE** ([ADR-6](adr/6-cache-persistence-backend.md) § Eviction). `cache.max_bytes:` in `.rigor.yml` keeps the cache bounded; `Cache::Store#evict!` runs at end of each `rigor check`; cross-process LRU tracked via mtime touch-on-disk-read.
 >

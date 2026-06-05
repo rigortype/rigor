@@ -38,9 +38,12 @@ incomplete-inference diagnostic family. A 2026-06-03 survey found:
   three guards uncapped. The memory profile points straight at unbounded
   union / structural growth — the unwired `union_size` /
   `structural_growth` categories.
-- **The manual mis-documents `budget_per_gem`** (claims "time budget in
-  ms, default 1000"; it is a method-definition count, default 5000), and
-  there is no user-facing explanation of budgets at all.
+- **The manual mis-documented `budget_per_gem`** (claimed "time budget in
+  ms, default 1000"; it is a method-definition count, default 5000) — since
+  corrected in [`docs/manual/03-configuration.md`](../manual/03-configuration.md)
+  and the wired-guards table in [`inference-budgets.md`](../type-specification/inference-budgets.md)
+  § "Implementation status". A broader user-facing explanation of the
+  *configurable* `budgets:` surface still awaits its Layer 2 wiring.
 
 ### What the prior-art survey established
 

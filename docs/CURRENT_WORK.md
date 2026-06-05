@@ -78,13 +78,13 @@ Engine-internal items the next implementer benefits from seeing directly. The fu
 
 Remaining: a `Plugin` hook letting plugins contribute their own recognisers (deferred). (`receiver_type` / `method_name` structured fields on `Analysis::Diagnostic` shipped in v0.1.8; the SKILL integration shipped with the v0.1.9 trio.)
 
-### Inference budgets — spec table is unwired; Layer 1 doc hygiene remains
+### Inference budgets — spec table is unwired (Layer 1 doc hygiene DONE)
 
 The spec's configurable `budgets:` table ([`docs/type-specification/inference-budgets.md`](type-specification/inference-budgets.md)) is normative-for-v1 but **not wired** — the only operative cutoffs are three hard-coded silent guards (recursion re-entry ≈ depth 1, ancestor walk 100, HKT fuel 64) plus ADR-10 `budget_per_gem`. Survey + the `RIGOR_BUDGET_TRACE` / `RIGOR_HEAP_PROFILE` / `RIGOR_HEAP_TRACE` probes landed 2026-06-03 (note [`docs/notes/20260603-inference-budget-reality-survey.md`](notes/20260603-inference-budget-reality-survey.md)); the probes are reusable.
 
 **Layer 2 resolved, and it was not a budget.** The large-app cost cliff was traced to 4.2 M retained Strings from one unmemoized failure in `rigor-activerecord` (`schema_table_or_nil` when `db/schema.rb` is missing) — fixed in v0.1.16 (Redmine 1518 MB / 173 s → 217 MB / 84 s). `union_size` was refuted as uncorrelated with memory. Budget wiring is now **demand-deferred** — no corpus project demonstrates a budget-shaped cost; if one ever does, re-run the 2a-style distribution probe first ([ADR-41 WD3](adr/41-inference-budget-design.md)).
 
-**Layer 1 (demand-gated doc/spec hygiene, awaits ADR-41 acceptance):** fix the `docs/manual/03-configuration.md` `budget_per_gem` description (it says "time budget in ms, default 1000"; really a method-def **count**, default **5000**); reconcile `recursion_depth` (spec 5 vs the wired depth-1 termination guard — split "termination floor" from "precision-unroll depth"); add `ancestor_walk` (100) + `hkt_fuel` (64) rows to the documented table; author the missing user-facing budget explanation (placement TBD).
+**Layer 1 (doc/spec hygiene) — DONE 2026-06-05.** `docs/manual/03-configuration.md` `budget_per_gem` is correct (method-def **count**, default **5000**, range 1250–20000); `recursion_depth` is reconciled in `inference-budgets.md` § "Implementation status" (the wired `(receiver, method)` re-entry guard ≈ depth 1 is split from the configurable precision-unroll `recursion_depth` the table envisions); the three hard-coded guards (recursion / `ancestor_walk` 100 / `hkt_fuel` 64) + `budget_per_gem` now sit in a **wired-guards table** in that section, deliberately separate from the *configurable* `budgets:` table (they are fixed termination floors, not `.rigor.yml` knobs); the stale ADR-41 "manual mis-documents" finding is corrected. The remaining user-facing explanation of the *configurable* `budgets:` surface is intentionally deferred to **Layer 2 wiring** (demand-gated — see below), since there is nothing configurable to explain until it is wired.
 
 ### Performance / caching / incremental (ADR-44 / 45 / 46) — in flight
 

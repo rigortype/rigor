@@ -425,4 +425,5 @@ section sequentially. Three useful pointers:
 If you want to compare against another tool, the sibling
 appendix pages cover [Steep](appendix-steep.md) — Ruby's other
 static checker — plus [TypeScript](appendix-typescript.md),
-[PHPStan](appendix-phpstan.md), and [mypy](appendix-mypy.md).
+[PHPStan](appendix-phpstan.md), [mypy](appendix-mypy.md), and
+[Java / C#](appendix-java-csharp.md).

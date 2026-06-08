@@ -122,6 +122,16 @@ different choices.
   analysis trade, why `rigor sig-gen` is the direct analogue
   to the `typeprof` CLI, and the diagnostics-vs-RBS-output
   split.
+- [**Coming from Java or C#**](appendix-java-csharp.md) — the
+  two nominal, statically-typed languages share enough reflexes
+  (annotate-everything, generics, records, sealed
+  hierarchies, pattern-matching `switch`) to share one page.
+  Covers the inference-first vs annotate-first inversion,
+  records ↔ `Data.define`, C#'s `string?` / Java's
+  `Optional<T>` ↔ `T?`, declaration-site (C#) vs use-site
+  (Java) variance ↔ RBS, `dynamic` ↔ `Dynamic[Top]`, and why
+  Rigor reports *unreachable* `case` clauses rather than
+  enforcing sealed-type exhaustiveness.
 
 ### Appendix — Protocols and structural typing
 

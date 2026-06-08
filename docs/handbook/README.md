@@ -132,6 +132,30 @@ different choices.
   (Java) variance ↔ RBS, `dynamic` ↔ `Dynamic[Top]`, and why
   Rigor reports *unreachable* `case` clauses rather than
   enforcing sealed-type exhaustiveness.
+- [**Coming from Rust**](appendix-rust.md) — the sum-type and
+  exhaustive-`match` peer. `Option<T>` ↔ `T?`, `Result<T, E>`
+  ↔ Ruby's raising model, `enum` variants ↔ a union of
+  `Data.define`, `match` ↔ `case`/`in` with the
+  enforce-totality vs report-unreachable inversion, traits
+  (nominal, coherent) ↔ RBS structural interfaces, and
+  refinements ↔ the newtype pattern. Ownership is a noted
+  non-goal.
+- [**Coming from Go**](appendix-go.md) — the structural-typing
+  cousin. Go's implicitly satisfied `interface` *is* Rigor's
+  RBS interface, so the feature Java/C# readers stumble on is
+  the one a Go reader already has by reflex. Covers
+  `interface{}` / `any` ↔ `Dynamic[Top]`, type switch ↔
+  `case`/`in`, errors-as-values ↔ raising, and the unions /
+  literal types / refinements Go simply does not have.
+- [**Coming from Elixir**](appendix-elixir.md) — the closest
+  *philosophical* match: dynamic origin, gradual typing, and a
+  success-typing / no-false-positives stance shared with
+  Dialyzer. Covers pattern matching + guards ↔ narrowing (the
+  `flow.unreachable-clause` rule was modelled on Elixir's
+  clause-reachability work, [ADR-47](../adr/47-narrowing-driven-clause-reachability.md)),
+  set-theoretic types ↔ Rigor's unions + `~T` / `T - U`
+  operators, atoms ↔ symbols, and protocols / behaviours ↔
+  structural interfaces.
 
 ### Appendix — Protocols and structural typing
 

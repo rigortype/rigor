@@ -481,4 +481,6 @@ sequentially. Useful pointers:
 If you want to compare against another tool, the sibling
 appendix pages cover [TypeScript](appendix-typescript.md),
 [PHPStan](appendix-phpstan.md), [mypy](appendix-mypy.md),
-[Steep](appendix-steep.md), and [TypeProf](appendix-typeprof.md).
+[Steep](appendix-steep.md), [TypeProf](appendix-typeprof.md),
+[Rust](appendix-rust.md), [Go](appendix-go.md), and
+[Elixir](appendix-elixir.md).

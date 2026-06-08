@@ -343,8 +343,9 @@ section sequentially. Three useful pointers:
   same project (the project itself).
 
 If you want to compare against another tool, the sibling
-appendix pages cover [TypeScript](appendix-typescript.md),
+appendix pages cover [TypeProf](appendix-typeprof.md) — Ruby's
+inference-first tool, the closest cousin to Rigor's own
+`sig-gen` — plus [TypeScript](appendix-typescript.md),
 [PHPStan](appendix-phpstan.md), [mypy](appendix-mypy.md),
-[Java / C#](appendix-java-csharp.md), and
-[TypeProf](appendix-typeprof.md) — Ruby's inference-first tool,
-the closest cousin to Rigor's own `sig-gen`.
+[Java / C#](appendix-java-csharp.md), [Rust](appendix-rust.md),
+[Go](appendix-go.md), and [Elixir](appendix-elixir.md).

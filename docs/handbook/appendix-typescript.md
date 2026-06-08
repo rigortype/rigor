@@ -340,5 +340,6 @@ section sequentially. Three useful pointers:
 If you want to compare against another tool, the sibling
 appendix pages cover [PHPStan](appendix-phpstan.md),
 [mypy](appendix-mypy.md), [Steep](appendix-steep.md),
-[TypeProf](appendix-typeprof.md), and
-[Java / C#](appendix-java-csharp.md).
+[TypeProf](appendix-typeprof.md),
+[Java / C#](appendix-java-csharp.md), [Rust](appendix-rust.md),
+[Go](appendix-go.md), and [Elixir](appendix-elixir.md).

@@ -273,6 +273,8 @@ module Rigor
                 "got #{methods.inspect}"
         end
 
+        private :validate_dynamic_return_receivers!, :validate_dynamic_return_methods!
+
         # ADR-37 slice 2 — declares a predicate/assertion narrowing
         # contribution, method-gated. The narrow successor to the
         # `post_return_facts` slot of `flow_contribution_for`:

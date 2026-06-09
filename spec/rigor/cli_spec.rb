@@ -1435,9 +1435,15 @@ RSpec.describe Rigor::CLI do
     # The suite forces RIGOR_CI_DETECT=0 (spec_helper) for determinism; each
     # example opts back in and simulates one platform, restoring all touched
     # keys afterwards.
+    #
+    # All known CI provider variables are also saved and cleared so that running
+    # the suite under a real CI (e.g. GitHub Actions) does not bleed its own
+    # GITHUB_ACTIONS=true into tests that simulate a different platform.
     def with_ci_env(vars)
-      keys = vars.keys + ["RIGOR_CI_DETECT"]
+      all_provider_vars = Rigor::CLI::CiDetector::PROVIDERS.map { |p| p[:var] }
+      keys = (vars.keys + ["RIGOR_CI_DETECT"] + all_provider_vars).uniq
       saved = keys.to_h { |k| [k, ENV.fetch(k, nil)] }
+      keys.each { |k| ENV.delete(k) }
       ENV["RIGOR_CI_DETECT"] = "1"
       vars.each { |k, v| ENV[k] = v }
       yield

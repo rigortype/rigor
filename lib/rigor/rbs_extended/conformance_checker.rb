@@ -200,32 +200,42 @@ module Rigor
       #     provided will raise.
       # Skipped when either side has a keyword rest (`**kwargs`).
       def keyword_detail(required_method, provided_method)
-        req_func  = required_method.method_types.first.type
-        prov_func = provided_method.method_types.first.type
-        return nil unless req_func.respond_to?(:required_keywords)
-        return nil unless prov_func.respond_to?(:required_keywords)
-        return nil unless req_func.rest_keywords.nil? && prov_func.rest_keywords.nil?
+        req_func, prov_func = keyword_funcs(required_method, provided_method)
+        return nil unless req_func
 
-        prov_accepted = prov_func.required_keywords.keys + prov_func.optional_keywords.keys
-        req_accepted  = req_func.required_keywords.keys  + req_func.optional_keywords.keys
+        prov_accepted = accepted_keywords(prov_func)
+        req_accepted  = accepted_keywords(req_func)
 
-        # (a) interface-required keyword not accepted by provided
         not_accepted = req_func.required_keywords.keys - prov_accepted
-        if not_accepted.any?
-          listed = not_accepted.sort.map { |k| "`#{k}:`" }.join(", ")
-          noun = not_accepted.size == 1 ? "keyword" : "keywords"
-          return "does not accept required #{noun} #{listed}"
-        end
+        return keyword_mismatch_message("does not accept required", not_accepted) if not_accepted.any?
 
-        # (b) provided requires keyword not in interface contract
         extra_required = prov_func.required_keywords.keys - req_accepted
         if extra_required.any?
-          listed = extra_required.sort.map { |k| "`#{k}:`" }.join(", ")
-          noun = extra_required.size == 1 ? "keyword" : "keywords"
-          return "requires #{noun} #{listed} not declared by the interface"
+          return keyword_mismatch_message("requires", extra_required,
+                                          suffix: " not declared by the interface")
         end
 
         nil
+      end
+
+      def keyword_funcs(required_method, provided_method)
+        req_func  = required_method.method_types.first.type
+        prov_func = provided_method.method_types.first.type
+        return [nil, nil] unless req_func.respond_to?(:required_keywords)
+        return [nil, nil] unless prov_func.respond_to?(:required_keywords)
+        return [nil, nil] unless req_func.rest_keywords.nil? && prov_func.rest_keywords.nil?
+
+        [req_func, prov_func]
+      end
+
+      def accepted_keywords(func)
+        func.required_keywords.keys + func.optional_keywords.keys
+      end
+
+      def keyword_mismatch_message(prefix, kw_keys, suffix: "")
+        listed = kw_keys.sort.map { |k| "`#{k}:`" }.join(", ")
+        noun   = kw_keys.size == 1 ? "keyword" : "keywords"
+        "#{prefix} #{noun} #{listed}#{suffix}"
       end
 
       def positional_param_types(method_def)

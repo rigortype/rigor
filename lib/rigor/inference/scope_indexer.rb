@@ -328,7 +328,7 @@ module Rigor
         end
       end
 
-      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars,
+      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars, # rubocop:disable Metrics/CyclomaticComplexity
                            read_before_write = nil, init_writes = nil)
         return unless node.is_a?(Prism::Node)
 

@@ -223,17 +223,9 @@ module Rigor
         # / `services` are in scope.
         def dynamic_return(receivers:, methods: nil, &block)
           raise ArgumentError, "Plugin::Base.dynamic_return requires a block body" if block.nil?
-          unless receivers.is_a?(Array) && !receivers.empty? && receivers.all? { |r| r.is_a?(String) && !r.empty? }
-            raise ArgumentError,
-                  "Plugin::Base.dynamic_return receivers: must be a non-empty Array of class-name Strings, " \
-                  "got #{receivers.inspect}"
-          end
-          if methods && !(methods.is_a?(Array) && !methods.empty? &&
-                          methods.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) })
-            raise ArgumentError,
-                  "Plugin::Base.dynamic_return methods: must be a non-empty Array of Symbol/String or nil, " \
-                  "got #{methods.inspect}"
-          end
+
+          validate_dynamic_return_receivers!(receivers)
+          validate_dynamic_return_methods!(methods)
 
           normalized_methods = methods&.map(&:to_sym)&.freeze
 
@@ -262,6 +254,24 @@ module Rigor
           @dynamic_returns_snapshot ||= (@dynamic_returns || []).dup.freeze
         end
         # rubocop:enable Naming/MemoizedInstanceVariableName
+
+        def validate_dynamic_return_receivers!(receivers)
+          return if receivers.is_a?(Array) && !receivers.empty? && receivers.all? { |r| r.is_a?(String) && !r.empty? }
+
+          raise ArgumentError,
+                "Plugin::Base.dynamic_return receivers: must be a non-empty Array of class-name Strings, " \
+                "got #{receivers.inspect}"
+        end
+
+        def validate_dynamic_return_methods!(methods)
+          return if methods.nil?
+          return if methods.is_a?(Array) && !methods.empty? &&
+                    methods.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) }
+
+          raise ArgumentError,
+                "Plugin::Base.dynamic_return methods: must be a non-empty Array of Symbol/String or nil, " \
+                "got #{methods.inspect}"
+        end
 
         # ADR-37 slice 2 — declares a predicate/assertion narrowing
         # contribution, method-gated. The narrow successor to the

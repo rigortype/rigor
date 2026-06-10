@@ -73,6 +73,14 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-06-03 | [Typing plugin files against the `Plugin::Base` contract — spike findings](20260603-plugin-contract-self-typing-spike.md) |
 | 2026-06-03 | [Session report — typing the plugin contract (the 6-commit landing)](20260603-plugin-contract-typing-session-report.md) |
 
+## Performance & profiling
+
+| Date | Note |
+| --- | --- |
+| 2026-06-04 | [Profiling `rigor check` on Mastodon — allocation-bound analysis](20260604-mastodon-allocation-profile.md) |
+| 2026-06-04 | [Profiling `rigor check` on GitLab — plugin-contribution churn](20260604-gitlab-plugin-contribution-allocation.md) |
+| 2026-06-10 | [プラグインアーキテクチャ構造監査 — per-call 消費経路の最適化余地](20260610-plugin-architecture-perf-audit.md) |
+
 ## Process & meta
 
 | Date | Note |

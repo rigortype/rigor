@@ -60,6 +60,10 @@ The 6 remaining Mastodon errors are unrelated to engine precision: 5 nil-receive
 
 Engine-internal items the next implementer benefits from seeing directly. The full demand-driven backlog lives in [`docs/ROADMAP.md`](ROADMAP.md) § "Future cycles".
 
+### ADR-52 — compiled plugin contribution dispatch (proposed, ready to implement)
+
+[ADR-52](adr/52-compiled-plugin-contribution-dispatch.md) + the grounding [structural audit note](notes/20260610-plugin-architecture-perf-audit.md) (2026-06-10). Six slices — entry slice is **slice 1** (compile the contribution table out of `Registry::ContributionIndex`, rewire the six engine call sites; no contract change, diagnostics byte-identical by construction). Slices 2–5 grow the `dynamic_return`/`type_specifier` DSL vocabulary (name-only gates → run-time receiver sets → per-file name sets), migrate the five legacy `flow_contribution_for` plugins (sorbet, activesupport-core-ext, activerecord, activestorage, rspec), then **delete the legacy hook** (sanctioned pre-1.0 BC break; must land before the ADR-50 v1.0 freeze). Slice 6 (single node-rule walk per file) is independent and can land any time after slice 1. Gate per slice: byte-identical diagnostics on Mastodon `app/models` + GitLab configured subset (cwd=target, project's own `.rigor.yml`) + stackprof deltas in a notes entry.
+
 ### ADR-24 — implicit-self method-call resolution, remaining
 
 - **Slice 4 (recorder + `call.self-undefined-method` rule, shipped `:off`) — LANDED v0.1.17.** **Remaining (needs external corpus):** the WD4 FP eval before flipping a profile on, then widening the standalone-only gate to superclass / include chains (record ancestor-chain-resolution-completeness at the recorder). **Arity diagnostics** on resolved closed-class self-calls were NOT part of slice 4 (undefined-method only) — a later extension once the rule proves out.

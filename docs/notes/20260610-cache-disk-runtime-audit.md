@@ -124,4 +124,23 @@ schema が安定すると、**rbs gem のバージョン bump や `signature_pat
 
 ## Follow-up
 
-所見 1–3 は [ADR-54](../adr/54-cache-slimming.md) に設計判断としてまとめた。
+所見 1–3 は [ADR-54](../adr/54-cache-slimming.md) に設計判断としてまとめ、
+**同日 WD1–WD4 として実装着地**(commits `5f53db09` / `0c671e04` /
+`d2465fe1` / `5ced88f1`)。着地時の実測:
+
+- 圧縮後の `rbs.environment` エントリ = **1.76MB**(raw 11.0MB の 16%)。
+  アクティブセット全体で **~2.2MB/プロジェクト**(実測 5 の予想どおり)。
+- WD3 の孤児ストーリーはこのリポジトリ自身で生体確認: `.rigor/cache` に
+  **~180MB / 47 エントリ**が堆積(アクティブは ~2MB / 14 エントリ)。
+  4MB 上限の試行ランが stale 分だけを刈り、次ランは warm のまま。
+- スライスゲート: cache / environment / configuration スペック、
+  self-check 診断の `--no-cache` / cold / warm 一致、Mastodon コーパスの
+  no-cache / cold / warm 一致(`--format json` の diagnostics 配列 2,061 件が
+  3 ラン完全一致; `stats.wall_seconds` 等のメタデータは比較から除外)。
+- Mastodon の `.rigor` ディレクトリ実測: **37MB → 2.6MB**。warm ラン
+  (ADR-45 ヒット経路)は新フォーマット下で real ~15s / user ~2.6s
+  (並行スペック実行下の参考値; cold は real ~171s)。
+- 検証手法の教訓: 旧バージョン比較を `git worktree` + `bundle exec ruby
+  <worktree>/exe/rigor` で行うと**両ツリーの Rigor が混載ロード**される
+  (`already initialized constant Rigor::VERSION`)。健全なゲートは同一コードでの
+  `--no-cache` vs cold vs warm 比較(分析ロジックはキャッシュ非依存)。

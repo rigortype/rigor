@@ -244,9 +244,9 @@ The v0.1.17 perf cycle. Shipped detail is in `CHANGELOG.md` § `[0.1.17]`; engin
 
 **[ADR-52](adr/52-compiled-plugin-contribution-dispatch.md)** — the structural successor to ADR-44's spot fixes on the plugin consumption path, grounded in the [2026-06-10 structural audit](notes/20260610-plugin-architecture-perf-audit.md). Criterion: every per-call / per-def / per-file / per-node plugin consultation is gated by a key the engine already holds, via a table compiled once per run at registry build; plugin code runs only on candidate hits. Six slices, in order: (1) compiled contribution table + engine call-site rewiring (no contract change); (2) method-name-only `dynamic_return` gating → migrate rigor-sorbet + rigor-activesupport-core-ext; (3) run-time receiver sets (callable resolved once after `#prepare`) → migrate rigor-activerecord + rigor-activestorage; (4) per-file name sets → migrate rigor-rspec; (5) **delete** `flow_contribution_for` (deliberate pre-1.0 BC break; ADR-2/37 status updates + plugin-author skill + CHANGELOG migration note); (6) single engine-owned node-rule walk per file (independent of 2–5). Every slice gates on byte-identical diagnostics over the Mastodon (6-plugin) / GitLab (11-plugin) corpora + stackprof deltas + `make bench-perf`. Slice 5 must land **before the v1.0 contract freeze** (ADR-50) — that timing asymmetry is the reason this is one coherent restructuring rather than further demand-gated spot fixes.
 
-### Performance / scalability — cache disk + warm-load slimming (ADR-54, proposed)
+### Performance / scalability — cache disk + warm-load slimming (ADR-54, SHIPPED 2026-06-10)
 
-**[ADR-54](adr/54-cache-slimming.md)** — closes the cache-layer disk/load axis the ADR-44/45/46 cycle left untouched, grounded in the [2026-06-10 cache audit](notes/20260610-cache-disk-runtime-audit.md). Today every project's `.rigor/cache` weighs ~32 MB (three RBS Marshal blobs; byte-identical across no-sig projects → >1 GB duplicated on a survey-corpus machine) and warm runs pay ~700 ms of `Marshal.load` to materialise them. Criterion: a cache tier earns its bytes only if it beats recomputation from the next-cheapest tier on the warm path. Four WDs, roughly in landing order: (1) **retire the `rbs.instance_definitions` / `rbs.singleton_definitions` disk blobs** — measured net-negative given the cached env (366 ms load vs 137 ms build-all; 23.4 MB/project); dispatch path goes lazy per-class on the existing per-process memos, the ADR-15 prewarm/Reflection consumers keep eager full tables built from the cached env; (2) **zlib-deflate every entry's value payload** behind a `Store::HEADER` format-byte bump (blobs compress to 13–16 %; inflate ~50 ms vs the ~700 ms `Marshal.load` it replaces nothing of — runtime-neutral; old entries read as silent misses, no migration code); (3) **default `cache.max_bytes` to 256 MB** so `evict!` stops being a permanent no-op once `SCHEMA_VERSION` stabilises and superseded blobs would otherwise orphan forever; (4) memoise `RbsDescriptor.build` per run. Envelope: ~33.7 MB → ~1.7 MB per project (−95 %); warm runs touching definitions save up to ~550 ms / 1.6 M allocs; cold runs shed the eager build-all + 23 MB write. Partially supersedes ADR-7 § Slice 6-D. Deferred/rejected: cross-project shared cache root (post-slimming duplication is ~1.7 MB × N — not worth a second root), `fresh?` mtime fast-path (soundness), zstd (new dependency). Every slice gates on byte-identical diagnostics + `make bench-perf`.
+**[ADR-54](adr/54-cache-slimming.md)** — closed the cache-layer disk/load axis the ADR-44/45/46 cycle left untouched, grounded in the [2026-06-10 cache audit](notes/20260610-cache-disk-runtime-audit.md). Before: every project's `.rigor/cache` weighed ~32 MB (three RBS Marshal blobs; byte-identical across no-sig projects → >1 GB duplicated on a survey-corpus machine) and warm runs paid ~700 ms of `Marshal.load` to materialise them. Criterion: a cache tier earns its bytes only if it beats recomputation from the next-cheapest tier on the warm path. **All four WDs landed** (commits `5f53db09` / `0c671e04` / `d2465fe1` / `5ced88f1`): (1) the `rbs.instance_definitions` / `rbs.singleton_definitions` disk blobs retired — measured net-negative given the cached env (366 ms load vs 137 ms build-all; 23.4 MB/project); dispatch path lazy per-class on the existing per-process memos, the ADR-15 prewarm/Reflection consumers keep eager full tables built from the cached env; (2) every entry's value payload zlib-deflated behind a `Store::HEADER` format-byte bump (the env blob lands at 1.76 MB = 16 % of raw; old entries read as silent misses, no migration code); (3) `cache.max_bytes` defaults to 256 MB so `evict!` stops being a permanent no-op — the rigor repo's own cache had accumulated ~180 MB of orphans against a ~2 MB active set (explicit `null` restores unbounded); (4) `RbsDescriptor.build` memoised per loader. Landed envelope: ~33.7 MB → ~2 MB per project (−94 %); warm runs touching definitions save up to ~550 ms / 1.6 M allocs; cold runs shed the eager build-all + 23 MB write. Partially supersedes ADR-7 § Slice 6-D. Deferred/rejected: cross-project shared cache root (post-slimming duplication is ~1.7 MB × N — not worth a second root), `fresh?` mtime fast-path (soundness), zstd (new dependency). Gated per slice on diagnostics-identical self-check (`--no-cache`/cold/warm) + Mastodon-corpus runs.
 
 ### Internal architecture — pre-1.0 re-examination (next work targets)
 
@@ -337,6 +337,81 @@ showcases this against the ADR-32 ascdesc pattern. See
 ### Documentation — user-facing docs overhaul (COMPLETE)
 
 The [`doc-coauthoring`](../.claude/skills/) user-friendliness pass over the user-facing docs is **done and pushed**: the handbook (all 19 files), the manual (all 14 chapters + per-plugin pages for all 30 bundled checker plugins — the "(ii)" split: consumer view in the published manual, developer/contract material in slimmed `plugins/<id>/README.md`s), and [`docs/types.md`](types.md), with chapter orientation + mini-TOCs, cold-read-verified anchors, and a batch of code-verified doc-accuracy fixes (recorded in `CHANGELOG.md` § `[0.1.16]` Fixed). The two plugin-*code* gaps it surfaced (`rigor-dry-validation` RBS-overlay wiring, `rigor-shoulda-matchers` double-prefixed rule ids) are fixed and in v0.1.16. The migration *method* is preserved in [`docs/notes/20260603-plugin-doc-migration-playbook.md`](notes/20260603-plugin-doc-migration-playbook.md) for future plugin additions.
+
+### Documentation — user-facing docs review battery (queued)
+
+A continuous quality gate for [`docs/manual/`](manual/README.md) and
+[`docs/handbook/`](handbook/README.md), adapted from the multi-lens review
+battery used for the chibirigor book. Design note:
+[`docs/notes/20260610-user-docs-review-battery-design.md`](notes/20260610-user-docs-review-battery-design.md).
+
+The key difference from the book battery: **this is software documentation, not
+a book** — prose depth is not a virtue, and the battery's job is correctness and
+necessary clarity, not narrative richness. The "reading balance" layer is
+*inverted* (bloat detector, not depth booster). The largest structural addition is
+a **mechanical L0 layer** — decisions about snippets and CLI surface are
+deterministically verifiable, so a `spec/docs/` harness does the work that the
+book battery delegates to a reproducibility reviewer.
+
+Five layers, run in order (full cycle at milestones; individual layers on demand):
+
+1. **L0 機械 — `spec/docs/` harness (permanent gate, not a lens).** Three
+   checkers wired as `make docs-check`:
+   - **Snippet execution:** extract ` ```ruby ` blocks from handbook chapters,
+     run via `rigor check`, validate `assert_type` / `dump_type` claims against
+     actual inference output. Direct analogue to chibirigor's scoring harness,
+     but the subject is the docs themselves, not a reader's re-implementation.
+   - **CLI/config drift:** cross-reference `docs/manual/02-cli-reference.md`
+     flags + subcommands against the CLI option parser; `03-configuration.md`
+     keys against the config schema; `04-diagnostics.md` /
+     `08-understanding-errors.md` rule IDs against the rule registry.
+   - **Link integrity:** relative links + ADR number references resolve to real
+     targets.
+   L0 runs in CI alongside `make verify`; the LLM battery runs only when L0 is
+   green.
+
+2. **L1 真 — semantic fidelity (LLM lens).** Claims that cannot be mechanically
+   verified: cache invalidation conditions, diagnostic firing conditions, severity
+   profile mappings. Handbook claims checked against the
+   [spec corpus](type-specification/README.md) (spec binds); manual claims checked
+   against implementation + actual CLI behaviour. Reviewer has read access to
+   `lib/rigor/` and may run the CLI. The type-theory expert lens applies to
+   `appendix-type-theory.md` and the cross-checker appendices only.
+
+3. **L2 伝 — reader lenses (LLM lenses, parallel).** Three sub-lenses:
+   - **Ruby-only reader** — handbook README's stated audience (Ruby programmer, no
+     static-typing background assumed). Ported from chibirigor lens 8 verbatim,
+     including the "do not over-simplify" constraint.
+   - **Procedure reproduction** — manual chapters 01 and 14 (installation + Rails
+     quickstart): can a reader complete the procedure from the text alone?
+     Execution-mode lens.
+   - **Appendix reader** — "Coming from X" appendices: sampled at the appendix
+     that changed, read by a reader with that language background. All nine in a
+     full cycle; changed ones only on a targeted pass.
+
+4. **L3 簡 — bloat detector (LLM lens, inverted from the book battery).** Does
+   NOT flag thin prose — that is L2's job. Flags only the *fat* direction:
+   - Manual / handbook overlap (the README-declared split is the criterion).
+   - Prose that a table or annotated code block would express more precisely.
+   - handbook non-goal violations: content beyond "a few hours to read cover to
+     cover," content that belongs in the spec corpus, plugin authoring guidance
+     (belongs in `examples/`).
+
+5. **L4 整 — English copyedit + convention compliance (LLM lens, always last).**
+   Technical writing quality (AI-flavoured phrasing, passive-voice drift),
+   the `interface` → *structural interface* / *RBS interface* naming rule
+   (semi-mechanisable), `docs/manual` ↔ `docs/handbook` cross-reference hygiene.
+
+**Output notes:** lens findings go to `docs/notes/YYYYMMDD-docs-review-<scope>.md`,
+not into the doc directories themselves.
+
+**Pending work, in priority order:**
+1. Implement the L0 harness as `spec/docs/` and wire `make docs-check` into CI.
+2. Author `.claude/skills/rigor-docs-review/SKILL.md` (freeze L1–L4 lens
+   personas + layer-gate protocol).
+3. Run the first full cycle; L1 is expected to surface ADR-51 CI-format
+   follow-through gaps (`11-ci.md` was rewritten after the v0.1.16
+   code-verification pass).
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 

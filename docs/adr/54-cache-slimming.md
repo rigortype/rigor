@@ -1,9 +1,19 @@
 # ADR-54 — Cache slimming: definitions-blob retirement, payload compression, default eviction
 
-Status: **Proposed, 2026-06-10.** Grounded in the
+Status: **Accepted — WD1–WD4 implemented, 2026-06-10** (same day as
+proposal; commits `5f53db09` WD1, `0c671e04` WD2, `d2465fe1` WD3,
+`5ced88f1` WD4). Grounded in the
 [2026-06-10 cache disk + warm-load audit](../notes/20260610-cache-disk-runtime-audit.md)
-(all numbers below are from that note; Mastodon cache, v0.1.17 working tree).
-Nothing implemented yet.
+(all numbers below are from that note; Mastodon cache, v0.1.17 working
+tree). Landed observations: the compressed `rbs.environment` entry
+measures 1.76 MB (16 % of the 11.0 MB raw blob); the repo's own
+`.rigor/cache` — a long-lived checkout — held ~180 MB / 47 entries
+against a ~2 MB / 14-entry active set, confirming WD3's orphan story
+live (a capped run reaped exactly the stale entries and the next run
+stayed warm). Every slice gated on diagnostics-identical self-check
+runs (`--no-cache` / cold / warm) + cache/environment/config specs;
+the cross-corpus Mastodon equivalence run is recorded in the audit
+note's follow-up.
 
 ## Context
 

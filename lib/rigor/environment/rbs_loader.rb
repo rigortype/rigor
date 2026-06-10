@@ -559,29 +559,17 @@ module Rigor
       #   definition cannot be built (RBS may raise on broken hierarchies;
       #   we fail-soft and return nil so the caller can fall back).
       #
-      # When `cache_store` is set, the loader fetches the per-class
-      # definition through {Cache::RbsInstanceDefinitions.fetch} so
-      # subsequent runs (and other loaders sharing the same Store)
-      # skip the `RBS::DefinitionBuilder.build_instance` step.
-      # In-memory `@instance_definition_cache` keeps the per-process
-      # short-circuit on top.
+      # Built on demand from the (possibly cache-loaded) env; the
+      # in-memory `@instance_definition_cache` keeps the per-process
+      # short-circuit. ADR-54 WD1 retired the definitions disk blob:
+      # given a cached env, `Marshal.load`-ing every definition was
+      # measurably slower (and allocation-heavier) than rebuilding
+      # the ones a run actually touches.
       def instance_definition(class_name)
         key = class_name.to_s
         return @instance_definition_cache[key] if @instance_definition_cache.key?(key)
 
-        @instance_definition_cache[key] = if cache_store
-                                            cached_instance_definition(class_name)
-                                          else
-                                            build_instance_definition(class_name)
-                                          end
-      end
-
-      # Public uncached accessor used by the cache producer
-      # ({Rigor::Cache::RbsInstanceDefinitions}). Avoids the
-      # `private_method_called` round-trip a `loader.send(...)`
-      # callsite would require.
-      def uncached_instance_definition(class_name)
-        build_instance_definition(class_name)
+        @instance_definition_cache[key] = build_instance_definition(class_name)
       end
 
       # @return [RBS::Definition::Method, nil]
@@ -636,24 +624,14 @@ module Rigor
       #   those inherited from `Class` and `Module` for class types.
       #   Returns nil for unknown names and on RBS build errors (fail-soft).
       #
-      # When `cache_store` is set, the loader fetches the per-class
-      # singleton definition through
-      # {Cache::RbsSingletonDefinitions.fetch}; the same caching
-      # discipline as {#instance_definition}.
+      # Built on demand from the env with a per-process memo; the
+      # same on-demand discipline as {#instance_definition} (ADR-54
+      # WD1).
       def singleton_definition(class_name)
         key = class_name.to_s
         return @singleton_definition_cache[key] if @singleton_definition_cache.key?(key)
 
-        @singleton_definition_cache[key] = if cache_store
-                                             cached_singleton_definition(class_name)
-                                           else
-                                             build_singleton_definition(class_name)
-                                           end
-      end
-
-      # Public uncached accessor used by the cache producer.
-      def uncached_singleton_definition(class_name)
-        build_singleton_definition(class_name)
+        @singleton_definition_cache[key] = build_singleton_definition(class_name)
       end
 
       # @return [RBS::Definition::Method, nil] the class method on
@@ -762,18 +740,20 @@ module Rigor
       end
 
       # ADR-15 Phase 4b.x — eagerly drives every cached
-      # producer so a subsequent worker Ractor can serve all
-      # of its RBS queries from the Marshal blob on disk
-      # without ever calling `RBS::EnvironmentLoader.new`.
+      # producer (plus the eager definitions tables, computed
+      # from the cached env since ADR-54 WD1) so a subsequent
+      # worker Ractor can serve all of its RBS queries without
+      # ever calling `RBS::EnvironmentLoader.new`.
       # The loader path that calls `EnvironmentLoader.new`
       # transitively reads a chain of non-`Ractor.shareable?`
       # module constants
       # (`RBS::EnvironmentLoader::DEFAULT_CORE_ROOT`,
       # `RBS::Repository::DEFAULT_STDLIB_ROOT`,
       # `Gem::Requirement::DefaultRequirement`, …) and trips
-      # `Ractor::IsolationError`. Pre-warming the cache on
-      # the main Ractor and letting workers consult ONLY the
-      # Marshal-loaded blob sidesteps the whole chain.
+      # `Ractor::IsolationError`. Pre-warming on the main
+      # Ractor — env blob loaded, derived tables built — keeps
+      # workers off that chain (`RBS::DefinitionBuilder` over
+      # an already-built env does not touch it).
       #
       # No-op when `cache_store` is nil — without a Store the
       # worker has no choice but to build env via the loader,
@@ -969,43 +949,34 @@ module Rigor
         Cache::RbsEnvironment.fetch(loader: self, store: cache_store)
       end
 
-      # Per-process Hash<String, RBS::Definition> for the instance
-      # side. Loaded once on first miss through the
-      # {Cache::RbsInstanceDefinitions} producer (single Marshal
-      # blob); subsequent calls are pure Hash lookups. Cold runs
-      # build every known class once and persist; warm runs (and
-      # other loaders sharing the same Store) skip the
-      # `RBS::DefinitionBuilder.build_instance` work entirely.
-      def cached_instance_definition(class_name)
-        instance_definitions_table[normalise_class_key(class_name)]
-      end
-
+      # Full `Hash<String, RBS::Definition>` tables for the
+      # {#prewarm} / {#reflection} consumers (ADR-15 Phase 2b/4b.x),
+      # which need every definition materialised up front. Built
+      # from the (cached) env via `RBS::DefinitionBuilder` — ADR-54
+      # WD1 retired the disk blobs these used to `Marshal.load`
+      # (building all definitions from a cached env is faster), so
+      # the eager-table cost is now a compute, not a load. Keys stay
+      # in `RBS::TypeName#to_s` form (top-level prefixed `"::Hash"`)
+      # — the shape {Environment::Reflection} documents.
       def instance_definitions_table
-        @state[:instance_definitions_table] ||= begin
-          require_relative "../cache/rbs_instance_definitions"
-          fetch_or_compute_producer(Cache::RbsInstanceDefinitions)
+        @state[:instance_definitions_table] ||= build_definitions_table do |name|
+          build_instance_definition(name)
         end
-      end
-
-      def cached_singleton_definition(class_name)
-        singleton_definitions_table[normalise_class_key(class_name)]
       end
 
       def singleton_definitions_table
-        @state[:singleton_definitions_table] ||= begin
-          require_relative "../cache/rbs_instance_definitions"
-          fetch_or_compute_producer(Cache::RbsSingletonDefinitions)
+        @state[:singleton_definitions_table] ||= build_definitions_table do |name|
+          build_singleton_definition(name)
         end
       end
 
-      # The cache producers persist class names in
-      # `RBS::TypeName#to_s` form (top-level prefixed
-      # `"::Hash"`); plain-name lookups (`"Hash"`) normalise
-      # before the Hash query so callers stay agnostic to the
-      # prefix.
-      def normalise_class_key(class_name)
-        s = class_name.to_s
-        s.start_with?("::") ? s : "::#{s}"
+      def build_definitions_table
+        table = {}
+        each_known_class_name do |name|
+          definition = yield(name)
+          table[name] = definition if definition
+        end
+        table
       end
 
       def builder

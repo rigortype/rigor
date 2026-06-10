@@ -58,10 +58,8 @@ module Rigor
       def rbs_module?: (String | Symbol name) -> bool
       def instance_definition: (String | Symbol class_name) -> untyped?
       def instance_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
-      def uncached_instance_definition: (String | Symbol class_name) -> untyped?
       def singleton_definition: (String | Symbol class_name) -> untyped?
       def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
-      def uncached_singleton_definition: (String | Symbol class_name) -> untyped?
       def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
       def constant_type: (String name) -> Type::t?

@@ -144,3 +144,11 @@ schema が安定すると、**rbs gem のバージョン bump や `signature_pat
   <worktree>/exe/rigor` で行うと**両ツリーの Rigor が混載ロード**される
   (`already initialized constant Rigor::VERSION`)。健全なゲートは同一コードでの
   `--no-cache` vs cold vs warm 比較(分析ロジックはキャッシュ非依存)。
+- 追補(同日 `8c65c0c5`): フォーマット bump だけでは旧 v1 エントリは
+  「読めないが消えない」(32MB は 256MB キャップ未満で eviction 対象外)
+  ことが判明 → `schema_version.txt` マーカーを
+  `"<SCHEMA_VERSION>.<FORMAT_VERSION>"` に拡張し、既存の root-clear 経路で
+  初回書き込みラン時に回収する(本リポジトリで生体確認: marker 3 → 3.2、
+  ルート再構築、診断不変)。Store を経由しない ADR-46 incremental snapshot
+  も同様に deflate(SCHEMA 4→5)。サーベイコーパスに残る旧キャッシュは
+  各プロジェクトの次回ランで自動回収される。

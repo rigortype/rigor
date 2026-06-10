@@ -4,27 +4,44 @@ require_relative "blueprint"
 
 module Rigor
   module Plugin
-    # Categorises a loaded plugin set by which per-call contribution
-    # paths each plugin actually implements, so the engine's per-dispatch
-    # `collect_plugin_contributions` can iterate only the relevant
-    # plugins instead of calling into every plugin on every call site (a
-    # top hotspot on plugin-heavy projects — GitLab's 11 plugins, of which
-    # only 2 implement any per-call path). Built once per {Registry}; the
+    # ADR-52 WD1 — the compiled contribution table. Categorises a loaded
+    # plugin set by which per-call contribution paths each plugin
+    # actually implements, AND compiles the declarative gates (method
+    # names, `block_as_methods` verbs, `owns_receivers`) into frozen
+    # lookup structures, so the engine's hot sites discover "no plugin
+    # cares about this call" in O(1) instead of O(plugins × rules) — a
+    # top hotspot on plugin-heavy projects (GitLab's 11 plugins, of
+    # which only 2 implement any per-call path). Built once per
+    # {Registry}.
+    #
+    # Ordering contract: the gates only PRUNE consultations that could
+    # not fire (every pruned rule would have failed its own `methods:` /
+    # `verbs:` check); the engine still iterates the plugin subsets in
+    # registry order and each plugin's rules in declaration order, so
+    # the surviving contributions arrive in exactly the order the
+    # ungated walk produced — diagnostics stay byte-identical. The
     # receiver-class ancestry match for `dynamic_return` still happens
-    # per-dispatch inside `Plugin::Base#dynamic_return_type`, so this only
-    # prunes plugins that *structurally* cannot contribute, preserving the
-    # exact contribution order and result.
+    # per-dispatch inside `Plugin::Base#dynamic_return_type`.
     class ContributionIndex
       # Ordered (registry-order) subsets relevant to each collector, and
-      # the membership sets used to gate the two paths within a plugin.
-      attr_reader :for_method_dispatch, :for_statement
+      # the membership sets used to gate the paths within a plugin.
+      # `for_file_diagnostics` is the subset the runner's per-file
+      # diagnostic loop visits: plugins overriding
+      # `#diagnostics_for_file` or declaring at least one `node_rule`.
+      attr_reader :for_method_dispatch, :for_statement, :for_file_diagnostics
+
+      EMPTY_BLOCK_ENTRIES = [].freeze
+      private_constant :EMPTY_BLOCK_ENTRIES
 
       def initialize(plugins)
-        @flow = plugins.select { |p| flow_overridden?(p) }.to_set
-        @dynamic = plugins.reject { |p| p.class.dynamic_returns.empty? }.to_set
-        @type_specifier = plugins.reject { |p| p.class.type_specifiers.empty? }.to_set
-        @for_method_dispatch = plugins.select { |p| @flow.include?(p) || @dynamic.include?(p) }.freeze
-        @for_statement = plugins.select { |p| @flow.include?(p) || @type_specifier.include?(p) }.freeze
+        compile_memberships(plugins)
+        compile_gates
+        @block_entries_by_verb = build_block_entries(plugins)
+        @owns_receivers = plugins.flat_map { |p| manifest_for(p)&.owns_receivers || [] }.uniq.freeze
+        # Per-run ancestry verdict memo, keyed by environment identity
+        # then class name. Mutable inside the frozen index — sound
+        # because the class graph is fixed for the lifetime of a run.
+        @owns_receiver_memo = {}.compare_by_identity
         freeze
       end
 
@@ -32,12 +49,166 @@ module Rigor
       def dynamic?(plugin) = @dynamic.include?(plugin)
       def type_specifier?(plugin) = @type_specifier.include?(plugin)
 
+      # O(1) "could any plugin contribute a return type for a call named
+      # `method_name`?" — false only when no plugin overrides the legacy
+      # flow hook AND every `dynamic_return` rule is `methods:`-gated on
+      # other names, in which case the ungated walk would have produced
+      # zero contributions too.
+      def dispatch_candidate?(method_name)
+        return true unless @flow.empty?
+        return true if @dynamic_global_gate.nil?
+
+        @dynamic_global_gate.include?(method_name)
+      end
+
+      # O(1) statement-path sibling of {#dispatch_candidate?} over the
+      # `type_specifier` rules (which are always `methods:`-gated).
+      def statement_candidate?(method_name)
+        return true unless @flow.empty?
+        return true if @type_specifier_global_gate.nil?
+
+        @type_specifier_global_gate.include?(method_name)
+      end
+
+      # Per-plugin gate: false when the plugin declares no
+      # `dynamic_return` rules at all, or when every rule is
+      # `methods:`-gated and none lists `method_name` — i.e. when
+      # `#dynamic_return_type` would return nil without ever entering a
+      # rule block. Subsumes the old `dynamic?(plugin)` membership
+      # check at the collector's call site.
+      def dynamic_candidate_for?(plugin, method_name)
+        return false unless @dynamic.include?(plugin)
+
+        gate = @dynamic_gates[plugin]
+        gate.nil? || gate.include?(method_name)
+      end
+
+      # Per-plugin gate over `type_specifier` rules; same contract as
+      # {#dynamic_candidate_for?}.
+      def type_specifier_candidate_for?(plugin, method_name)
+        return false unless @type_specifier.include?(plugin)
+
+        gate = @type_specifier_gates[plugin]
+        gate.nil? || gate.include?(method_name)
+      end
+
+      # The `Macro::BlockAsMethod` entries whose `verbs` include `verb`,
+      # in (plugin registration, manifest declaration) order — the same
+      # first-match order the previous plugins × entries walk visited.
+      def block_entries_for(verb)
+        @block_entries_by_verb.fetch(verb, EMPTY_BLOCK_ENTRIES)
+      end
+
+      # True when `class_name` equals or inherits from any plugin's
+      # manifest-declared `owns_receivers:` entry. The union is compiled
+      # at build time (almost always empty → O(1) false) and per-class
+      # verdicts memoise per environment.
+      def owns_receiver?(class_name, environment)
+        return false if @owns_receivers.empty? || class_name.nil?
+
+        memo = (@owns_receiver_memo[environment] ||= {})
+        memo.fetch(class_name) do
+          memo[class_name] =
+            @owns_receivers.any? { |owner| class_matches_owner?(class_name, owner, environment) }
+        end
+      end
+
       private
+
+      # The categorisation sets + the ordered per-collector subsets.
+      def compile_memberships(plugins)
+        @flow = plugins.select { |p| flow_overridden?(p) }.to_set
+        @dynamic = plugins.reject { |p| p.class.dynamic_returns.empty? }.to_set
+        @type_specifier = plugins.reject { |p| p.class.type_specifiers.empty? }.to_set
+        compile_collector_subsets(plugins)
+      end
+
+      def compile_collector_subsets(plugins)
+        @for_method_dispatch = plugins.select { |p| @flow.include?(p) || @dynamic.include?(p) }.freeze
+        @for_statement = plugins.select { |p| @flow.include?(p) || @type_specifier.include?(p) }.freeze
+        @for_file_diagnostics =
+          plugins.select { |p| file_diagnostics_overridden?(p) || !p.class.node_rules.empty? }.freeze
+      end
+
+      # The per-plugin and registry-global method-name gates.
+      def compile_gates
+        @dynamic_gates = build_name_gates(@dynamic) { |p| p.class.dynamic_returns }
+        @type_specifier_gates = build_name_gates(@type_specifier) { |p| p.class.type_specifiers }
+        @dynamic_global_gate = union_gate(@dynamic_gates)
+        @type_specifier_global_gate = union_gate(@type_specifier_gates)
+      end
 
       # A plugin contributes via the legacy `flow_contribution_for` slot
       # only when it overrides the no-op base implementation.
       def flow_overridden?(plugin)
         plugin.method(:flow_contribution_for).owner != Rigor::Plugin::Base
+      end
+
+      # Same `Method#owner` trick for the per-file diagnostics hook —
+      # the Base default returns `[]`, so a non-overriding plugin can be
+      # skipped without calling it.
+      def file_diagnostics_overridden?(plugin)
+        plugin.method(:diagnostics_for_file).owner != Rigor::Plugin::Base
+      end
+
+      # `plugin → Set[Symbol] | nil`. A frozen Set when EVERY rule of
+      # the plugin is `methods:`-gated (the union of those names); nil
+      # when any rule is ungated (the plugin must be consulted for every
+      # method name, exactly as before).
+      def build_name_gates(members)
+        gates = {}
+        members.each do |plugin|
+          rules = yield(plugin)
+          gates[plugin] =
+            (rules.flat_map { |rule| rule[:methods].to_a }.to_set.freeze if rules.all? { |rule| rule[:methods] })
+        end
+        gates.freeze
+      end
+
+      # The registry-wide union of per-plugin gates, or nil when any
+      # plugin is ungated (no global pruning possible). An empty
+      # plugin set unions to an empty frozen Set — the collectors'
+      # `relevant.empty?` early return fires before it is consulted.
+      def union_gate(gates)
+        return nil if gates.value?(nil)
+
+        gates.values.reduce(Set.new) { |acc, names| acc.merge(names) }.freeze
+      end
+
+      # `verb Symbol → [BlockAsMethod entries]`, insertion-ordered by
+      # (plugin, declaration). Verbs are Symbol-normalised by
+      # `Macro::BlockAsMethod#initialize`.
+      def build_block_entries(plugins)
+        table = {}
+        plugins.each do |plugin|
+          entries = manifest_for(plugin)&.block_as_methods || []
+          entries.each do |entry|
+            entry.verbs.each { |verb| (table[verb] ||= []) << entry }
+          end
+        end
+        table.each_value(&:freeze)
+        table.freeze
+      end
+
+      # Mirrors `MethodDispatcher`'s previous per-dispatch matching:
+      # exact-name fast path, then `Environment#class_ordering`,
+      # degrading to "no match" on any resolution failure.
+      def class_matches_owner?(class_name, owner, environment)
+        return true if class_name == owner
+        return false if environment.nil?
+
+        %i[equal subclass].include?(environment.class_ordering(class_name, owner))
+      rescue StandardError
+        false
+      end
+
+      # Manifest access tolerant of manifest-less plugin doubles in unit
+      # specs (a real loaded plugin always carries one — the loader
+      # validates it).
+      def manifest_for(plugin)
+        plugin.manifest
+      rescue StandardError
+        nil
       end
     end
 
@@ -78,6 +249,18 @@ module Rigor
         @load_errors = load_errors.dup.freeze
         @blueprints = blueprints.dup.freeze
         @contribution_index = ContributionIndex.new(@plugins)
+        # ADR-52 WD1 — aggregate queries the engine issues per def /
+        # per diagnostic candidate / per path are compiled once here
+        # (the registry is frozen, so the flat_map-on-every-call
+        # versions re-derived an invariant). `@contracts_by_path` is a
+        # mutable per-path memo inside the frozen registry — safe
+        # because the contract set and the glob semantics are fixed
+        # for the lifetime of the run.
+        @additional_initializers = @plugins.flat_map { |p| safe_manifest(p)&.additional_initializers || [] }.freeze
+        @open_receivers = @plugins.flat_map { |p| (safe_manifest(p)&.open_receivers || []).map(&:to_s) }.uniq.freeze
+        @open_receivers_set = @open_receivers.to_set.freeze
+        @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
+        @contracts_by_path = {}
         freeze
       end
 
@@ -158,14 +341,15 @@ module Rigor
       # beyond its RBS-declared method surface. `open_receiver?`
       # is the membership predicate `Analysis::CheckRules` consults
       # to skip the `call.undefined-method` rule for such a class.
-      def open_receivers
-        plugins.flat_map { |plugin| plugin.manifest.open_receivers }
-      end
+      # Compiled at construction (ADR-52 WD1) — the predicate runs per
+      # undefined-method candidate, so the previous per-call flat_map
+      # re-derived a frozen invariant.
+      attr_reader :open_receivers
 
       def open_receiver?(class_name)
         return false if class_name.nil?
 
-        open_receivers.include?(class_name.to_s)
+        @open_receivers_set.include?(class_name.to_s)
       end
 
       # ADR-28 — flat, ordered list of every loaded plugin's
@@ -176,10 +360,10 @@ module Rigor
       # Consumed by `Inference::MethodParameterBinder` (the
       # parameter-type provision) and by contributing plugins'
       # `#diagnostics_for_file` hooks (the presence + return-type
-      # check).
-      def protocol_contracts
-        plugins.flat_map(&:protocol_contracts)
-      end
+      # check). Compiled at construction (ADR-52 WD1); a plugin's
+      # config-folding `#protocol_contracts` override is stable for the
+      # run because config is injected at construction.
+      attr_reader :protocol_contracts
 
       # ADR-38 — flat, ordered list of every loaded plugin's
       # manifest-declared `Rigor::Plugin::AdditionalInitializer`
@@ -187,9 +371,9 @@ module Rigor
       # read-before-write nil soundness gate: a `def` whose name an
       # entry covers, on a class that equals or inherits from the
       # entry's `receiver_constraint`, is treated like `initialize`.
-      def additional_initializers
-        plugins.flat_map { |plugin| plugin.manifest.additional_initializers }
-      end
+      # Compiled at construction (ADR-52 WD1) — consulted per `def`
+      # node, ×2 sites in `ScopeIndexer`.
+      attr_reader :additional_initializers
 
       # ADR-28 — the subset of `protocol_contracts` whose
       # `path_glob` matches `path`. Contract globs are authored
@@ -201,11 +385,15 @@ module Rigor
       # suffix. `File::FNM_PATHNAME` keeps `*` from crossing `/`;
       # `File::FNM_EXTGLOB` enables `{a,b}` groups. Returns `[]` for
       # a nil path so the binder can call this unconditionally.
+      # Memoised per path (ADR-52 WD1) — consulted per `def` node by
+      # `MethodParameterBinder`, and the fnmatch sweep over every
+      # contract is pure in (contract set, path).
       def contracts_for_path(path)
         return [] if path.nil?
 
         path_s = path.to_s
-        protocol_contracts.select { |contract| path_matches_glob?(contract.path_glob, path_s) }
+        @contracts_by_path[path_s] ||=
+          protocol_contracts.select { |contract| path_matches_glob?(contract.path_glob, path_s) }.freeze
       end
 
       # ADR-32 WD4 + WD5 — flat ordered list of
@@ -232,14 +420,33 @@ module Rigor
       FNMATCH_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
       private_constant :FNMATCH_FLAGS
 
-      EMPTY = new.freeze
-
       private
 
       def path_matches_glob?(glob, path)
         File.fnmatch?(glob, path, FNMATCH_FLAGS) ||
           File.fnmatch?(File.join("**", glob), path, FNMATCH_FLAGS)
       end
+
+      # Construction-time manifest access tolerant of manifest-less
+      # plugin doubles in unit specs (a real loaded plugin always
+      # carries one — the loader validates it). Mirrors
+      # `ContributionIndex#manifest_for`.
+      def safe_manifest(plugin)
+        plugin.manifest
+      rescue StandardError
+        nil
+      end
+
+      def safe_protocol_contracts(plugin)
+        plugin.protocol_contracts || []
+      rescue StandardError
+        []
+      end
     end
+
+    # Assigned after the class body completes — `Registry.new` runs at
+    # assignment time and `#initialize` calls private helpers defined
+    # late in the body.
+    Registry::EMPTY = Registry.new.freeze
   end
 end

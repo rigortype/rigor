@@ -1433,7 +1433,11 @@ module Rigor
       # `MethodDispatcher#collect_plugin_contributions`: visit only the
       # registry-ordered subset of plugins that implement a per-call path
       # (`for_statement` = overrides `flow_contribution_for` or declares a
-      # `type_specifier`), gate each path by membership, and accumulate
+      # `type_specifier`), gate each path by membership AND by the ADR-52
+      # WD1 method-name gates (every `type_specifier` rule is
+      # `methods:`-gated, so when no legacy flow plugin is loaded the
+      # common no-candidate case is a single Set probe; a pruned
+      # consultation could only have returned `[]`), and accumulate
       # lazily (shared frozen empty array otherwise). Same contributions in
       # the same order as visiting every plugin; the caller is read-only.
       def collect_plugin_contributions(registry, call_node, current_scope)
@@ -1441,13 +1445,23 @@ module Rigor
         relevant = index.for_statement
         return EMPTY_CONTRIBUTIONS if relevant.empty?
 
+        name = call_node.respond_to?(:name) ? call_node.name : nil
+        return EMPTY_CONTRIBUTIONS unless index.statement_candidate?(name)
+
+        collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
+      end
+
+      # The post-gate walk: registry order, flow path before
+      # type-specifier path within a plugin — the same order the
+      # ungated walk used.
+      def collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
         result = nil
         relevant.each do |plugin|
           if index.flow?(plugin)
             legacy = plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
             (result ||= []) << legacy if legacy.is_a?(Rigor::FlowContribution)
           end
-          if index.type_specifier?(plugin)
+          if index.type_specifier_candidate_for?(plugin, name)
             facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
             (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
           end

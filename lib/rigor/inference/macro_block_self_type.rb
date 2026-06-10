@@ -51,11 +51,16 @@ module Rigor
         receiver_class_name = singleton_receiver_class_name(receiver_type)
         return nil if receiver_class_name.nil?
 
-        verb = call_node.name
-        registry.plugins.each do |plugin|
-          plugin.manifest.block_as_methods.each do |entry| # rigor:disable undefined-method
-            return instance_type_for(receiver_class_name, environment) if matches?(entry, verb, receiver_class_name,
-                                                                                   environment)
+        # ADR-52 WD1 — the verb-keyed table compiled at registry build
+        # replaces the per-call plugins × block_as_methods linear scan.
+        # Entries arrive in (plugin registration, declaration) order, so
+        # the first ancestry match below is the same entry the previous
+        # walk returned; the verb membership the old `matches?` checked
+        # is guaranteed by the table key.
+        entries = registry.contribution_index.block_entries_for(call_node.name)
+        entries.each do |entry|
+          if receiver_class_inherits_from?(receiver_class_name, entry.receiver_constraint, environment)
+            return instance_type_for(receiver_class_name, environment)
           end
         end
         nil
@@ -71,12 +76,6 @@ module Rigor
         return nil unless receiver_type.is_a?(Type::Singleton)
 
         receiver_type.class_name
-      end
-
-      def matches?(entry, verb, receiver_class_name, environment)
-        return false unless entry.verbs.include?(verb)
-
-        receiver_class_inherits_from?(receiver_class_name, entry.receiver_constraint, environment)
       end
 
       def receiver_class_inherits_from?(class_name, constraint, environment)

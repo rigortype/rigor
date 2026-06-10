@@ -1695,10 +1695,14 @@ module Rigor
       # I/O Policy" — a raise from one plugin becomes a
       # `:plugin_loader` `runtime-error` diagnostic without
       # affecting other plugins or the rest of the run.
+      # ADR-52 WD1 — only the plugins that overrode
+      # `#diagnostics_for_file` or declared a `node_rule` are visited
+      # (`contribution_index.for_file_diagnostics`); a skipped plugin's
+      # two hooks could only have returned `[]`.
       def plugin_emitted_diagnostics(path, root, scope)
         return [] if @plugin_registry.empty?
 
-        @plugin_registry.plugins.flat_map do |plugin|
+        @plugin_registry.contribution_index.for_file_diagnostics.flat_map do |plugin|
           collect_plugin_diagnostics(plugin, path, root, scope)
         end
       end

@@ -643,23 +643,15 @@ module Rigor
         Type::Combinator.untyped
       end
 
+      # ADR-52 WD1 — the per-dispatch plugins × owns_receivers ×
+      # `class_ordering` walk moved into the compiled contribution
+      # table: the union is built once per registry (almost always
+      # empty → O(1) false) and per-class verdicts memoise per run.
       def plugin_owns_receiver?(class_name, environment)
         registry = environment&.plugin_registry
         return false if registry.nil? || registry.empty?
 
-        registry.plugins.any? do |plugin|
-          owns = plugin.manifest.owns_receivers # rigor:disable undefined-method
-          owns.any? { |owner| receiver_matches_owner?(class_name, owner, environment) }
-        end
-      end
-
-      def receiver_matches_owner?(class_name, owner, environment)
-        return true if class_name == owner
-
-        ordering = environment.class_ordering(class_name, owner)
-        %i[equal subclass].include?(ordering)
-      rescue StandardError
-        false
+        registry.contribution_index.owns_receiver?(class_name, environment)
       end
 
       def dep_source_class_name(receiver_type)
@@ -692,18 +684,35 @@ module Rigor
       # 2. Contributions accumulate lazily — allocate only when one
       #    actually appears, and share a frozen empty array otherwise. The
       #    caller treats the result as read-only (`.empty?` / `Merger.merge`).
+      # 3. ADR-52 WD1 — method-name gates compiled at registry build. The
+      #    global gate makes the common "no plugin cares about this call"
+      #    case a single Set probe (it only engages when no legacy
+      #    `flow_contribution_for` plugin is loaded — those stay ungated
+      #    until their ADR-52 WD3 migration); the per-plugin gate skips a
+      #    plugin whose `dynamic_return` rules are all `methods:`-gated on
+      #    other names. A pruned consultation could only have returned
+      #    nil, so contribution order and content are unchanged.
       def collect_plugin_contributions(registry, call_node, scope, receiver_type)
         index = registry.contribution_index
         relevant = index.for_method_dispatch
         return EMPTY_CONTRIBUTIONS if relevant.empty?
 
+        name = call_node.name
+        return EMPTY_CONTRIBUTIONS unless index.dispatch_candidate?(name)
+
+        collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)
+      end
+
+      # The post-gate walk: registry order, flow path before dynamic
+      # path within a plugin — the same order the ungated walk used.
+      def collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)
         result = nil
         relevant.each do |plugin|
           if index.flow?(plugin)
             legacy = plugin.flow_contribution_for(call_node: call_node, scope: scope)
             (result ||= []) << legacy if legacy.is_a?(FlowContribution)
           end
-          if index.dynamic?(plugin)
+          if index.dynamic_candidate_for?(plugin, name)
             dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
             (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
           end

@@ -417,10 +417,14 @@ module Rigor
 
         diagnostics = []
         Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
+          # One frozen NodeContext per node, shared across the rules
+          # that match it (ADR-52 WD1) — built lazily so non-matching
+          # nodes (the vast majority) allocate nothing.
+          context = nil
           rules.each do |rule|
             next unless node.is_a?(rule[:node_type])
 
-            context = NodeContext.new(ancestors)
+            context ||= NodeContext.new(ancestors)
             diagnostics.concat(Array(instance_exec(node, scope, path, file_context, context, &rule[:block])))
           end
         end
@@ -442,8 +446,11 @@ module Rigor
 
         environment = scope&.environment
         rules.each do |rule|
-          next unless rule[:receivers].any? { |c| class_matches_receiver?(class_name, c, environment) }
+          # Method-name gate first — a Symbol-array probe vs the
+          # receiver ancestry resolution below (ADR-52 WD1). Both are
+          # pure predicates, so the order only affects cost.
           next if rule[:methods] && !rule[:methods].include?(call_node.name)
+          next unless rule[:receivers].any? { |c| class_matches_receiver?(class_name, c, environment) }
 
           result = instance_exec(call_node, scope, &rule[:block])
           return result if result

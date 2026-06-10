@@ -19,9 +19,23 @@ byte-identical); **rigor-activerecord is blocked** on the receiver-type gate
 a migration attempt was made and reverted; see "rigor-activerecord blocker").
 **Slice 4 (run-time method-name-set callable) partly implemented**
 (`79dc790d` engine + `46b14280` rigor-lisp-eval / rigor-pattern examples,
-end-to-end-spec + demo byte-identical); rigor-sorbet (catalog) and rigor-rspec
-(per-file) remain. Slices 5–6 (hook deletion — blocked on AR + sorbet + rspec;
-single node-rule walk — independent) remain.
+end-to-end-spec + demo byte-identical). **rigor-sorbet migrated 2026-06-11**:
+its `flow_contribution_for` became a `dynamic_return methods:` callable (the
+static assertion vocabulary ∪ `:absurd` ∪ a new `Catalog#method_names`
+enumerator) plus a `type_specifier methods: [:bind]` carrying `T.bind`'s
+self-narrowing fact (the dispatcher path only consumes `return_type` from the
+merge and the statement path only `post_return_facts`, so the split is
+behaviour-preserving — `T.absurd`'s `exceptional: :raises` slot was already
+dropped by the dispatcher's `Merger.merge(...).return_type`, the `bot` return
+carries the unreachability); side effects (absurd/reveal/assert-type
+recording, sigil gate) moved into the rule block; gated on the 63-example
+end-to-end integration spec + byte-identical `rigor check` on the strap and
+dependabot-core sorbet corpora. The migration also delivered the first big
+WD3 throughput win: dependabot-core (20 sig-heavy files) 1262.6s → 33.4s
+(~38×) — the ungated hook ran a catalog chain lookup (incl. a per-dispatch
+receiver re-type via `scope.type_of`) on every named call. rigor-rspec (per-file) remains. Slices 5–6
+(hook deletion — blocked on AR + rspec; single node-rule walk — independent)
+remain.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -141,10 +155,12 @@ implementation, per the ADR-50 precedent):
   the registry name gate (unknown at registry-build time), so the plugin is
   consulted on every dispatch and the name filter runs in the instance
   `dynamic_return_type` path — the block still fires only for a listed name, so
-  diagnostics are unchanged. **This is the form rigor-sorbet needs** (its catalog
+  diagnostics are unchanged. **This is the form rigor-sorbet uses** (its catalog
   keys arbitrary `def` method names harvested at run time; see "Audit
-  correction") — sorbet remains. Per-file name sets (rigor-rspec's lets,
-  per-file dynamic) are the file-scoped specialisation, also remaining.
+  correction") — **migrated 2026-06-11** via a new `Catalog#method_names`
+  enumerator + the `type_specifier` split for `T.bind`'s self-narrowing fact.
+  Per-file name sets (rigor-rspec's lets, per-file dynamic) are the
+  file-scoped specialisation, still remaining.
 
 ### rigor-activerecord blocker (2026-06-10)
 
@@ -259,9 +275,13 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
    implicit-self gate) before it can leave the hook.
 4. **PARTLY DONE** — WD2 run-time method-name-set callable (`79dc790d`) +
    migrate the config-gated `rigor-lisp-eval` and `rigor-pattern` examples
-   (`46b14280`, end-to-end-spec + demo byte-identical). Remaining: rigor-sorbet
-   (catalog), rigor-rspec (per-file name set), and AR's AST-keyed gate form
-   (design open — see "rigor-activerecord blocker").
+   (`46b14280`, end-to-end-spec + demo byte-identical) + **rigor-sorbet
+   (2026-06-11)** — `dynamic_return methods:` callable over
+   `SORBET_ASSERTIONS ∪ :absurd ∪ Catalog#method_names`, `type_specifier`
+   for `T.bind`'s fact, side effects relocated into the rule block;
+   strap + dependabot-core corpora byte-identical. Remaining: rigor-rspec
+   (per-file name set) and AR's AST-keyed gate form (design open — see
+   "rigor-activerecord blocker").
 5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the
    plugin-author skill, `examples/` walkthroughs, CHANGELOG migration note.
 6. WD4 single-walk node rules (independent of 2–5; may land any time after 1).

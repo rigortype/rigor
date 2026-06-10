@@ -28,16 +28,15 @@ module Rigor
       #
       # ## Two-phase mechanism
       #
-      # The recogniser is invoked from `flow_contribution_for`
+      # The recogniser is invoked from the plugin's `dynamic_return` rule
       # where the per-node `scope:` carries the proper narrowing
-      # context. It returns:
+      # context. The rule:
       #
-      # - A `FlowContribution` with `return_type: bot` and
-      #   `exceptional: :raises` regardless of reachability
-      #   (faithful to `T.absurd`'s runtime behaviour: it always
-      #   raises). This lets the engine's existing flow analysis
-      #   treat code after `T.absurd` as unreachable, matching
-      #   what users of Sorbet expect.
+      # - Contributes a `bot` return type regardless of
+      #   reachability (faithful to `T.absurd`'s runtime
+      #   behaviour: it always raises). This lets the engine's
+      #   existing flow analysis treat code after `T.absurd` as
+      #   unreachable, matching what users of Sorbet expect.
       # - When the branch is REACHABLE (the discriminant's type
       #   isn't `bot`), the recogniser also records the call
       #   node in a per-plugin set. The plugin's
@@ -47,7 +46,7 @@ module Rigor
       #   call_node whose object identity matches the recorded
       #   set. We rely on the runner only parsing each file
       #   once per run, so the same Prism node object is seen
-      #   in both `flow_contribution_for` and
+      #   in both the `dynamic_return` rule and
       #   `diagnostics_for_file`.
       module AbsurdRecognizer
         # @param call_node [Prism::CallNode]
@@ -81,26 +80,6 @@ module Rigor
           # raise; treat as "can't prove unreachable" so the
           # diagnostic fires conservatively.
           false
-        end
-
-        # The contribution every `T.absurd` call gets,
-        # regardless of static reachability — `T.absurd` raises
-        # at runtime, so its return type is `bot` and the call
-        # is exceptional. This lets the engine's flow analysis
-        # treat code after the call as unreachable (no
-        # `flow.unreachable-branch` from us; that's an engine
-        # rule that consults the same effect lattice).
-        def self.contribution(call_node, plugin_id)
-          Rigor::FlowContribution.new(
-            return_type: Rigor::Type::Combinator.bot,
-            exceptional: :raises,
-            provenance: Rigor::FlowContribution::Provenance.new(
-              source_family: "plugin.#{plugin_id}",
-              plugin_id: plugin_id,
-              node: call_node,
-              descriptor: nil
-            )
-          )
         end
       end
     end

@@ -6,7 +6,7 @@ module Rigor
       # Per-run table of method signatures keyed by the
       # `(class_name, method_name, kind)` triple. Built by
       # {CatalogWalker} during the plugin's lazy pre-walk; read
-      # by {Sorbet#flow_contribution_for} at every call site.
+      # by the plugin's `dynamic_return` rule at every gated call site.
       #
       # The catalog is mutable while it is being built, then
       # frozen via {#freeze!} before the first read. Construction
@@ -78,6 +78,22 @@ module Rigor
 
         def empty?
           @entries.empty?
+        end
+
+        # ADR-52 slice 4 — the distinct method names the catalog
+        # carries at least one signature for, across every
+        # `(class_name, kind)` owner. Feeds the plugin's run-time
+        # `dynamic_return methods:` name gate: the engine only
+        # consults the plugin for a call whose name appears here
+        # (or in the static assertion vocabulary), and the
+        # precise `(class, kind)` lookup stays in the rule block.
+        # Computed fresh per call — the plugin memoises the
+        # resolved set, and `freeze!` freezes the catalog itself
+        # so a lazy memo ivar here would raise.
+        #
+        # @return [Array<Symbol>]
+        def method_names
+          @entries.keys.map { |key| key[1] }.uniq
         end
 
         def size

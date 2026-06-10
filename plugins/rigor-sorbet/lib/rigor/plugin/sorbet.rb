@@ -39,8 +39,8 @@ module Rigor
     # access by walking every configured `paths:` entry's `.rb`
     # files plus every `rbi_paths:` entry's `.rbi` files (slice
     # 4) via the plugin's `IoBoundary`. The catalog is frozen
-    # after the first build and consulted by
-    # `#flow_contribution_for` at every call site. RBI files
+    # after the first build and consulted by the `dynamic_return`
+    # rule at every gated call site. RBI files
     # share the catalog with project-source sigs — both produce
     # `MethodSignature` entries keyed by
     # `(class_name, method_name, kind)`. When a key collides
@@ -101,7 +101,7 @@ module Rigor
         @enforce_sigil = config.fetch("enforce_sigil")
         # ADR-11 deferred follow-up — per-call-site assertion
         # gating. Catalog harvest's `@sigil_by_path` cache is
-        # consulted at every `flow_contribution_for` call so
+        # consulted at every per-call recognition so
         # `T.let` / `T.cast` / `T.must` / `T.bind` /
         # `T.assert_type!` only fire in files Sorbet itself
         # would enforce (`# typed: true` / `:strict` /
@@ -118,7 +118,7 @@ module Rigor
         @parse_errors_by_path = {}
         @catalog_built = false
         # ADR-11 slice 6 — Prism nodes for `T.absurd` calls
-        # we observed in `flow_contribution_for` to be
+        # we observed in the `dynamic_return` rule to be
         # *reachable* (i.e., their discriminant didn't narrow
         # to `bot`). `diagnostics_for_file` walks the per-file
         # AST and surfaces these as `plugin.sorbet.absurd-reachable`
@@ -128,7 +128,7 @@ module Rigor
         # plugin hooks.
         @reachable_absurd_nodes = {}.compare_by_identity
         # ADR-11 light follow-up — `T.reveal_type` calls
-        # observed in `flow_contribution_for`, paired with the
+        # observed in the `dynamic_return` rule, paired with the
         # display string for the inferred type at the call site.
         # Mirrors the absurd-node compare-by-identity hash;
         # `diagnostics_for_file` surfaces each entry as a
@@ -136,7 +136,7 @@ module Rigor
         @reveal_type_calls = {}.compare_by_identity
         # T.bind / T.assert_type! priority slice 1 —
         # `T.assert_type!` calls observed in
-        # `flow_contribution_for` whose static subtype check
+        # the `dynamic_return` rule whose static subtype check
         # FAILED, paired with the inferred + asserted type
         # display strings. Same compare-by-identity discipline.
         # `diagnostics_for_file` walks the file AST for
@@ -160,9 +160,52 @@ module Rigor
         diagnostics
       end
 
-      # ADR-11 slice 1 — return-type contribution from the
-      # parsed `sig { ... }` block. Resolves the receiver in two
-      # passes:
+      # ADR-52 slice 4 — the per-call return-type path, migrated off
+      # the legacy `flow_contribution_for` hook onto the
+      # method-name-gated `dynamic_return` DSL. The recognised name
+      # set is only known at run time (the catalog's `def` names come
+      # from the lazy catalog build), so it is declared as a
+      # callable: the engine `instance_exec`s it once per run on
+      # first dispatch (always after `#prepare`) and memoises the
+      # resolved Symbol Set. The gate is a safe over-approximation —
+      # a project method merely *named* `cast` or `find` passes it
+      # and is declined by the block's own `T.`-receiver / catalog
+      # checks, exactly as the ungated hook used to decline.
+      dynamic_return methods: -> { recognised_method_names } do |call_node, scope|
+        contribution_return_type(call_node, scope)
+      end
+
+      # ADR-52 slice 4 — `T.bind(self, T)`'s self-narrowing fact,
+      # migrated off the legacy hook's `post_return_facts` slot onto
+      # the method-gated `type_specifier` DSL (once
+      # `flow_contribution_for` is gone, the statement evaluator
+      # consults only this path for narrowing facts). The
+      # return-type half (`Constant[nil]`) flows through the
+      # `dynamic_return` rule above; the block re-checks the `T.`
+      # receiver via the recogniser, so an unrelated `bind` call
+      # contributes nothing.
+      type_specifier methods: [:bind] do |call_node, scope|
+        bind_post_return_facts(call_node, scope)
+      end
+
+      private
+
+      # ADR-52 slice 4 — the run-time method-name gate for the
+      # `dynamic_return` rule: the static assertion vocabulary
+      # (`T.let` / `T.cast` / …), `T.absurd`, and every method name
+      # the catalog carries a sig for.
+      def recognised_method_names
+        ensure_catalog
+        names = AssertionRecognizer::SORBET_ASSERTIONS.dup
+        names << :absurd
+        names.concat(@catalog.method_names)
+        names
+      end
+
+      # The migrated body of the legacy `flow_contribution_for` —
+      # same recognition order, but returns the bare `Rigor::Type`
+      # the `dynamic_return` contract expects. Resolves the receiver
+      # in two passes:
       #
       # 1. Constant receiver (`User.find(...)`) → singleton-side
       #    catalog lookup.
@@ -173,18 +216,22 @@ module Rigor
       # Implicit-self calls (no receiver, current-class method)
       # are deferred to slice 2 — slice 1 covers the common case
       # where the sig is on the called method's own class.
-      def flow_contribution_for(call_node:, scope:)
+      def contribution_return_type(call_node, scope)
         return nil unless call_node.is_a?(Prism::CallNode)
 
         # ADR-11 slice 6 — `T.absurd(x)` exhaustiveness. Always
-        # contributes a `bot` return + raise effect (matches
-        # Sorbet's runtime behaviour); when the discriminant
-        # *isn't* narrowed to `bot` at this scope, also records
-        # the call node so `diagnostics_for_file` can surface a
-        # `plugin.sorbet.absurd-reachable` warning.
+        # contributes a `bot` return (matches Sorbet's runtime
+        # behaviour: `T.absurd` raises, so its value type is `bot`
+        # and the engine's flow analysis treats code after it as
+        # unreachable; the legacy contribution's `exceptional:
+        # :raises` slot was never consumed on the dispatcher path —
+        # only `return_type` survives the merge). When the
+        # discriminant *isn't* narrowed to `bot` at this scope, also
+        # records the call node so `diagnostics_for_file` can surface
+        # a `plugin.sorbet.absurd-reachable` warning.
         if AbsurdRecognizer.absurd_call?(call_node)
           @reachable_absurd_nodes[call_node] = true unless AbsurdRecognizer.exhaustive?(call_node, scope)
-          return AbsurdRecognizer.contribution(call_node, manifest.id)
+          return Rigor::Type::Combinator.bot
         end
 
         # ADR-11 slice 2 — `T.let` / `T.cast` / `T.must` /
@@ -214,30 +261,30 @@ module Rigor
           if assertion
             record_reveal_type_call(call_node, assertion.return_type) if call_node.name == :reveal_type
             record_assert_type_check(call_node, scope) if call_node.name == :assert_type!
-            return assertion
+            return assertion.return_type
           end
         end
 
         return nil if @catalog.nil? || @catalog.empty?
 
-        signature = lookup_signature(call_node, scope)
-        return nil if signature.nil?
-
-        return_type = signature.return_type
-        return nil if return_type.nil?
-
-        Rigor::FlowContribution.new(
-          return_type: return_type,
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.#{manifest.id}",
-            plugin_id: manifest.id,
-            node: call_node,
-            descriptor: nil
-          )
-        )
+        lookup_signature(call_node, scope)&.return_type
       end
 
-      private
+      # The `type_specifier` body for `T.bind` — same sigil gate as
+      # the return-type path, then the recogniser's
+      # `post_return_facts` (the `Fact(target_kind: :self)` that
+      # narrows `scope.self_type` for the rest of the block).
+      def bind_post_return_facts(call_node, scope)
+        return nil unless call_node.is_a?(Prism::CallNode)
+
+        ensure_catalog
+        return nil unless assertion_enforced_here?(scope)
+
+        contribution = AssertionRecognizer.recognize(
+          call_node: call_node, scope: scope, plugin_id: manifest.id
+        )
+        contribution&.post_return_facts
+      end
 
       # ADR-11 deferred follow-up — per-call-site assertion
       # gating. With `enforce_sigil: false`, the gate is fully
@@ -441,7 +488,7 @@ module Rigor
         # magic comment by skipping the file entirely.
         level = SigilDetector.detect(contents)
         # Per-call-site assertion gating consults this map at
-        # `flow_contribution_for`. Recorded BEFORE the ignored
+        # recognition time. Recorded BEFORE the ignored
         # short-circuit so a `# typed: ignore` file still
         # reports its level to the gate (the gate then chooses
         # to suppress assertions there too — `ignore` is
@@ -481,7 +528,7 @@ module Rigor
       # nodes and emits a `plugin.sorbet.absurd-reachable`
       # warning for any whose object identity matches
       # `@reachable_absurd_nodes` (populated during the engine's
-      # earlier pass through `flow_contribution_for`). Pops
+      # earlier pass through the `dynamic_return` rule). Pops
       # matched entries so a duplicate run doesn't double-emit.
       def absurd_reachable_diagnostics(path, root)
         return [] if @reachable_absurd_nodes.empty?

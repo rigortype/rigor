@@ -24,8 +24,8 @@ module Rigor
       # identically — per-call-site sigil honouring (e.g. only
       # firing `T.let` recognition in `# typed: true`+ files)
       # requires threading the file path through
-      # `flow_contribution_for`, which lives behind a future
-      # plugin-contract widening slice.
+      # the per-call recognition path, which lives behind a
+      # future plugin-contract widening slice.
       module SigilDetector
         # Sorbet's strictness-level names. Stored as symbols to
         # match the analyzer's existing convention for level

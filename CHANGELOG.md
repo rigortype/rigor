@@ -35,6 +35,7 @@ cycles live in dedicated archives:
 ### Changed
 
 - **[cache]** `.rigor/cache` no longer stores the two RBS definitions blobs (`rbs.instance_definitions` / `rbs.singleton_definitions`, ~23 MB per project) — method definitions are now built on demand from the already-cached RBS environment, which measured *faster* than loading the blobs ([ADR-54](docs/adr/54-cache-slimming.md) WD1). Warm runs get quicker and allocate less; diagnostics are unchanged. Stale blob entries left by older versions are ignored.
+- **[cache]** Cache entries are now zlib-compressed on disk ([ADR-54](docs/adr/54-cache-slimming.md) WD2) — the RBS environment entry shrinks from ~11 MB to ~1.8 MB (16 %), at a read cost an order of magnitude below the deserialisation it sits next to. Together with the blob retirement, a typical project's cache drops from ~33 MB to ~2 MB. The on-disk format version is bumped: entries written by older Rigor versions are transparently treated as misses and rebuilt on the next run — no action needed.
 
 ### Fixed
 

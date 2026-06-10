@@ -1,6 +1,6 @@
 /.bundle/
 /.direnv/
-.rigor/cache/
+**/.rigor/cache/
 # Developer-local Rigor config override. The committed default is
 # `.rigor.dist.yml`; auto-discovery prefers `.rigor.yml` when present
 # (no implicit merge).

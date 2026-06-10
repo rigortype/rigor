@@ -110,6 +110,24 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
       expect(index.type_specifier_candidate_for?(plugin, :assert_kind_of)).to be(true)
       expect(index.type_specifier_candidate_for?(plugin, :each)).to be(false)
     end
+
+    it "treats a run-time (callable) methods: rule as ungated by name (ADR-52 slice 4)" do
+      # A callable methods: set is unknown at registry-build time, so it
+      # cannot compile into the name gate — the plugin is consulted on
+      # every dispatch and filters in the instance path.
+      runtime_methods_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "rtm", version: "0.0.1")
+        dynamic_return methods: -> { [:evaluate] } do |_call_node, _scope|
+          nil
+        end
+      end
+      plugin = build_plugin(runtime_methods_class)
+      index = described_class.new([plugin])
+
+      expect(index.dynamic_candidate_for?(plugin, :evaluate)).to be(true)
+      expect(index.dynamic_candidate_for?(plugin, :anything)).to be(true)
+      expect(index.dispatch_candidate?(:anything)).to be(true)
+    end
   end
 
   describe "#for_file_diagnostics" do

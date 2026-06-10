@@ -561,6 +561,70 @@ RSpec.describe Rigor::Plugin::Base do
         end.not_to raise_error
       end
     end
+
+    describe "run-time methods: callable (ADR-52 slice 4)" do
+      let(:plugin_runtime_methods) do
+        Class.new(described_class) do
+          manifest(id: "dr-rtm", version: "0.1.0")
+          # The method-name set is built at run time (config / a catalog).
+          def recognised = @recognised ||= []
+
+          dynamic_return methods: -> { recognised } do |call_node, _scope|
+            next nil unless call_node.name == :evaluate
+
+            Rigor::Type::Combinator.nominal_of("Resolved")
+          end
+        end.new(services: services)
+      end
+
+      def call(source) = Prism.parse(source).value.statements.body.first
+
+      it "fires for a method name in the run-time set (receiver-independent)" do
+        plugin_runtime_methods.recognised << :evaluate
+        type = plugin_runtime_methods.dynamic_return_type(
+          call_node: call("x.evaluate"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Resolved"))
+      end
+
+      it "declines for a method name outside the run-time set" do
+        plugin_runtime_methods.recognised << :evaluate
+        type = plugin_runtime_methods.dynamic_return_type(
+          call_node: call("x.something_else"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(type).to be_nil
+      end
+
+      it "memoises the resolved name set — the callable runs once per rule" do
+        calls = 0
+        klass = Class.new(described_class) do
+          manifest(id: "dr-rtm-memo", version: "0.1.0")
+          define_method(:bump) { calls += 1 }
+          dynamic_return methods: -> { bump; [:evaluate] } do |_call_node, _scope| # rubocop:disable Style/Semicolon
+            Rigor::Type::Combinator.nominal_of("Resolved")
+          end
+        end
+        plugin = klass.new(services: services)
+        2.times do
+          plugin.dynamic_return_type(
+            call_node: call("x.evaluate"), scope: Rigor::Scope.empty,
+            receiver_type: Rigor::Type::Combinator.untyped
+          )
+        end
+        expect(calls).to eq(1)
+      end
+
+      it "accepts a callable methods: at declaration without receivers:" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "dr-rtm-ok", version: "0.1.0")
+            dynamic_return(methods: -> { [] }) { nil }
+          end
+        end.not_to raise_error
+      end
+    end
   end
 
   describe ".type_specifier / #type_specifier_facts (ADR-37 slice 2)" do

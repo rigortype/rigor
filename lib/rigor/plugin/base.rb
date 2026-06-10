@@ -249,6 +249,22 @@ module Rigor
         # time. The resolved set is a safe over-approximation of the
         # block's own filter (it admits subclasses too), so the block
         # stays the precise gate and diagnostics are unchanged.
+        #
+        # ADR-52 slice 4 — `methods:` may ALSO be a callable, for a
+        # method-name set the plugin only knows at run time (a Sorbet
+        # catalog's keys, a config-derived DSL method name):
+        #
+        #   dynamic_return methods: -> { catalog.method_names } do |call_node, scope|
+        #     ...
+        #   end
+        #
+        # Same contract as a callable `receivers:` — `instance_exec`'d,
+        # resolved lazily after `#prepare`, memoised, idempotent. A
+        # callable method set cannot be compiled into the registry's
+        # name gate (it is unknown at registry-build time), so the
+        # plugin is consulted on every dispatch and the name filter runs
+        # in this instance path instead — the block still only fires for
+        # a listed name, so diagnostics are unchanged.
         def dynamic_return(receivers: nil, methods: nil, &block)
           raise ArgumentError, "Plugin::Base.dynamic_return requires a block body" if block.nil?
 
@@ -259,7 +275,7 @@ module Rigor
           @dynamic_returns ||= []
           @dynamic_returns << {
             receivers: normalize_dynamic_return_receivers(receivers),
-            methods: methods&.map(&:to_sym)&.freeze,
+            methods: normalize_dynamic_return_methods(methods),
             block: block
           }.freeze
           nil
@@ -274,6 +290,17 @@ module Rigor
           receivers.map { |r| r.dup.freeze }.freeze
         end
         private :normalize_dynamic_return_receivers
+
+        # A method-name Array is symbol-normalised + frozen; a run-time
+        # callable (ADR-52 slice 4) is stored verbatim and resolved per
+        # instance.
+        def normalize_dynamic_return_methods(methods)
+          return nil if methods.nil?
+          return methods if methods.respond_to?(:call)
+
+          methods.map(&:to_sym).freeze
+        end
+        private :normalize_dynamic_return_methods
 
         # Frozen snapshot of the declared dynamic-return rules. Memoised:
         # `@dynamic_returns` is built once at class-definition time (via
@@ -297,7 +324,7 @@ module Rigor
         # fire on every dispatch).
         def validate_dynamic_return_gate!(receivers, methods)
           return unless receivers.nil?
-          return if methods.is_a?(Array) && !methods.empty?
+          return if (methods.is_a?(Array) && !methods.empty?) || methods.respond_to?(:call)
 
           raise ArgumentError,
                 "Plugin::Base.dynamic_return requires receivers:, methods:, or both — a rule gated on " \
@@ -317,12 +344,15 @@ module Rigor
 
         def validate_dynamic_return_methods!(methods)
           return if methods.nil?
+          # ADR-52 slice 4 — a run-time callable resolves to the name set
+          # per instance after `#prepare`; its shape is checked then.
+          return if methods.respond_to?(:call)
           return if methods.is_a?(Array) && !methods.empty? &&
                     methods.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) }
 
           raise ArgumentError,
-                "Plugin::Base.dynamic_return methods: must be a non-empty Array of Symbol/String or nil, " \
-                "got #{methods.inspect}"
+                "Plugin::Base.dynamic_return methods: must be a non-empty Array of Symbol/String, a callable, " \
+                "or nil, got #{methods.inspect}"
         end
 
         private :validate_dynamic_return_gate!, :validate_dynamic_return_receivers!,
@@ -769,13 +799,27 @@ module Rigor
       # cost. A receiver-less rule (ADR-52 WD2) skips the ancestry check
       # entirely and fires on the method name alone.
       def dynamic_return_rule_applies?(rule, call_node, class_name, environment)
-        return false if rule[:methods] && !rule[:methods].include?(call_node.name)
+        return false if rule[:methods] && !resolved_dynamic_return_methods(rule).include?(call_node.name)
 
         receivers = resolved_dynamic_return_receivers(rule)
         return true if receivers.nil?
         return false if class_name.nil?
 
         receivers.any? { |c| class_matches_receiver?(class_name, c, environment) }
+      end
+
+      # ADR-52 slice 4 — the rule's method-name set. A static Array is
+      # returned as-is (`#include?` over Symbols); a run-time callable is
+      # `instance_exec`'d against this plugin and memoised as a Symbol Set,
+      # same lazy/idempotent contract as a callable `receivers:`. The
+      # cache key is namespaced so a rule that makes both `methods:` and
+      # `receivers:` callable keeps two distinct memo slots.
+      def resolved_dynamic_return_methods(rule)
+        methods = rule[:methods]
+        return methods unless methods.respond_to?(:call)
+
+        (@dynamic_return_runtime_cache ||= {})[[:methods, rule]] ||=
+          Array(instance_exec(&methods)).to_set(&:to_sym).freeze
       end
 
       # ADR-52 slice 3 — the rule's receiver class-name Array. A static

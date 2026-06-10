@@ -159,8 +159,15 @@ module Rigor
         gates = {}
         members.each do |plugin|
           rules = yield(plugin)
+          # A static method-name Array can be compiled into the gate. A
+          # run-time callable `methods:` (ADR-52 slice 4) is unknown until
+          # after `#prepare`, and a receiver-only rule has no `methods:` —
+          # either makes the plugin ungated-by-name (nil), consulted on
+          # every dispatch and filtered in the instance path.
           gates[plugin] =
-            (rules.flat_map { |rule| rule[:methods].to_a }.to_set.freeze if rules.all? { |rule| rule[:methods] })
+            if rules.all? { |rule| rule[:methods].is_a?(Array) }
+              rules.flat_map { |rule| rule[:methods] }.to_set.freeze
+            end
         end
         gates.freeze
       end

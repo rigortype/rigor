@@ -773,6 +773,20 @@ module Rigor
         self
       end
 
+      # ADR-54 WD4 — the shared cache descriptor for every RBS-derived
+      # producer consulting this loader. Building it digests every
+      # `.rbs` file under `signature_paths` + the vendored gem sigs,
+      # and the result is identical across producers, so one build is
+      # memoised per loader (on `@state`, alongside `:env` — the env
+      # itself is loader-lifetime-memoised, so this adds no new
+      # staleness class).
+      def rbs_cache_descriptor
+        @state[:rbs_cache_descriptor] ||= begin
+          require_relative "../cache/rbs_descriptor"
+          Cache::RbsDescriptor.build(self)
+        end
+      end
+
       # ADR-15 Phase 2b — return the loader's read-only
       # query surface as a frozen, `Ractor.shareable?`
       # {Reflection} value object. Built lazily on first

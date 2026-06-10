@@ -20,7 +20,11 @@ module Rigor
     # structural contract.
     class RbsCacheProducer
       def self.fetch(loader:, store:)
-        descriptor = RbsDescriptor.build(loader)
+        # ADR-54 WD4 — the descriptor is identical for every producer
+        # consulting the same loader (same sig files, same libraries),
+        # so the loader memoises one build per process instead of
+        # re-digesting every .rbs file once per producer.
+        descriptor = loader.rbs_cache_descriptor
         store.fetch_or_compute(producer_id: self::PRODUCER_ID, params: {}, descriptor: descriptor) do
           compute(loader)
         end

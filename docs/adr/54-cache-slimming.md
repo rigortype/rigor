@@ -1,0 +1,126 @@
+# ADR-54 — Cache slimming: definitions-blob retirement, payload compression, default eviction
+
+Status: **Proposed, 2026-06-10.** Grounded in the
+[2026-06-10 cache disk + warm-load audit](../notes/20260610-cache-disk-runtime-audit.md)
+(all numbers below are from that note; Mastodon cache, v0.1.17 working tree).
+Nothing implemented yet.
+
+## Context
+
+Every project's `.rigor/cache` weighs a near-uniform **~32 MB** regardless of
+project size, dominated by three single-blob RBS producers:
+`rbs.instance_definitions` (14.5 MB), `rbs.environment` (10.6 MB),
+`rbs.singleton_definitions` (9.0 MB). Projects without their own
+`signature_paths:` produce **byte-identical** entries, so a machine with the
+~30-project survey corpus carries >1 GB of duplicated data. On the warm path,
+loading the three blobs costs **~760 ms / 2.2 M allocations**, of which
+`Marshal.load` is ~700 ms — disk read + SHA-256 envelope verification total
+~15 ms and need no attention.
+
+The audit's pivotal measurement: with the env blob already cached, **building
+all 492 instance definitions from it takes 137 ms / 0.5 M allocs — versus
+366 ms / 1.06 M allocs to `Marshal.load` the instance-definitions blob**
+(singleton side: 178 ms build-all vs 180 ms load — break-even, and a lazy
+per-class build of what a run actually touches is near-zero: 12 common
+classes = 0.0 ms). The definitions blobs cost 23.4 MB/project to make warm
+runs *slower*.
+
+ADR-7 § "Slice 6-D" chose the single-blob layout because **per-class disk
+entries** were slower than `--no-cache`; it never measured *blob versus
+recompute-from-cached-env*. That comparison now exists, and the blobs lose.
+
+## Decision
+
+Adopt the criterion: **a cache tier earns its bytes only if it beats
+recomputation from the next-cheapest tier on the warm path** — measured
+against its own upstream cache, not against a cold rebuild. Applied:
+
+1. retire the `rbs.instance_definitions` / `rbs.singleton_definitions` disk
+   producers (WD1),
+2. deflate-compress the value payload of every entry (WD2),
+3. give eviction a non-nil default cap (WD3).
+
+Expected envelope: **33.7 MB → ~1.7 MB per project (−95 %)** on disk; warm
+runs that touch definitions save up to ~550 ms / 1.6 M allocs; cold runs
+shed the eager build-all + 23 MB write. Precision/diagnostics are untouched
+— every slice gates on byte-identical diagnostics + `make bench-perf`.
+
+## Working decisions
+
+**WD1 — retire the definitions blobs; build from the cached env.**
+`cached_instance_definition` / `cached_singleton_definition`
+(`rbs_loader.rb` ~L979/L990) switch from table lookup to per-class
+`build_*_definition` on demand; the existing per-process memos
+(`@instance_definition_cache` / `@singleton_definition_cache`) already
+short-circuit repeats. Delete `lib/rigor/cache/rbs_instance_definitions.rb`
+(both producer classes). **Constraint — the ADR-15 prewarm/Reflection
+consumers stay eager:** `RbsLoader#prewarm` (~L765) and `#reflection`
+(~L809) need full tables (pool workers must never call
+`RBS::EnvironmentLoader.new`; the fork backend COW-shares the
+parent-warmed tables). For them, `instance_definitions_table` /
+`singleton_definitions_table` keep building the full table — now computed
+from the cached env (315 ms for both sides) instead of Marshal-loaded
+(546 ms). `RBS::DefinitionBuilder` over an already-built env does not touch
+the `EnvironmentLoader` constant chain, so the Ractor-isolation rationale is
+preserved.
+
+**WD2 — deflate the value payload.** `Store#write_entry` deflates
+`value_bytes` (zlib, stdlib — no new dependency); `#read_entry` inflates.
+Bump the format byte (`HEADER` `RIGOR\x00\x01` → `\x02`, `store.rb:30`) —
+old-format entries then fail the magic check and read as silent misses, so
+**no migration code**: the next run recomputes and overwrites (the existing
+fault-tolerance contract). The SHA-256 trailer keeps covering the stored
+(compressed) bytes. Measured: blobs compress to 13–16 %; inflate costs
+~50 ms total against the ~700 ms `Marshal.load` it sits next to —
+runtime-neutral within noise.
+
+**WD3 — default eviction cap.** `cache.max_bytes` defaults to nil
+(`configuration.rb:78`), making `Store#evict!` (already wired at
+`cli.rb:107`) a permanent no-op. Today entry counts stay at 1/producer only
+because `Descriptor::SCHEMA_VERSION` bumps have been clearing the root; once
+the schema stabilises, an `rbs` gem bump or `signature_paths:` change writes
+a new key and orphans the old entries forever. Default the cap to a
+generous **256 MB** (post-WD1/WD2 a full per-project set is ~2 MB, so the
+cap only ever trims orphans); explicit `max_bytes:` config still overrides.
+
+**WD4 (minor) — memoise `RbsDescriptor.build` per loader.** It runs once per
+producer fetch (7×/run, identical result). Measured 1.3 ms × 7 today —
+noise — but it scales linearly with `signature_paths:` size
+(`gem_rbs_collection` checkouts), and the memo is one line.
+
+## Rejected / deferred alternatives
+
+| Alternative | Verdict | Reason |
+| --- | --- | --- |
+| Keep the definitions blobs but compress them | Rejected | Dominated by WD1 — a compressed blob still `Marshal.load`s slower than recomputing from the cached env, and still pays the disk. |
+| Cross-project shared cache root (XDG `~/.cache/rigor` for the `rbs.*` producers) | Deferred | Safe (entries are content-keyed; ADR-6 deferred only cross-*machine* sharing) but post-WD1/WD2 the duplication shrinks to ~1.7 MB × N — not worth a second root, its locking story, and the read-only/editor-mode interactions. Re-evaluate if the env blob grows an order of magnitude. |
+| mtime fast-path for ADR-45 `fresh?` re-digest | Rejected | Saves ~50–150 ms warm on Mastodon-scale dep sets at the cost of the digest-strict soundness ADR-45 was built on. |
+| zstd via a gem dependency | Rejected | zlib is stdlib and already within 13–16 %; a compression gem violates the no-new-dependency posture ADR-6 chose the own-format backend for. |
+| Per-class disk entries (re-litigating ADR-7 slice 6-D) | Stays rejected | ADR-7's measurement stands: per-entry disk open + load made warm runs slower than `--no-cache`. WD1 removes the tier entirely rather than re-sharding it. |
+| Seek-indexed lazy blob (offset table + partial reads) | Rejected | Solves the same eager-load problem as WD1 with strictly more format machinery. |
+
+## Consequences
+
+- **Positive:** ~95 % smaller per-project cache; >1 GB reclaimed on a
+  survey-corpus machine; warm runs touching definitions save up to ~550 ms
+  and 1.6 M allocations; cold runs skip an eager 983-definition build and a
+  23 MB write; pool-mode prewarm gets faster (315 ms compute vs 546 ms
+  load).
+- **Negative / cost:** one-time full cache invalidation on the WD2 format
+  bump (silent miss + rebuild — the standard path); pool workers that
+  lazily build a definition the parent didn't prewarm duplicate that small
+  build per worker (bounded by build-all at 315 ms, COW makes it rare).
+- **Status ripple:** ADR-7 § Slice 6-D is **partially superseded** — the
+  definitions-blob half retires; the env blob and the rejection of
+  per-class disk entries stand. ADR-6's format version policy covers the
+  WD2 header bump.
+
+## Relationship to other ADRs
+
+- **ADR-6** — storage backend; owns the on-disk format whose version byte
+  WD2 bumps. Its deferred "cross-machine sharing" row is unaffected.
+- **ADR-7** — slice 6-D partially superseded by WD1 (see above).
+- **ADR-15** — the prewarm/Reflection eager-table contract (Phase 2b /
+  4b.x) is the binding constraint on WD1's lazy/eager split.
+- **ADR-44/45/46** — same perf programme; this ADR closes the cache-layer
+  disk/load axis those left untouched.

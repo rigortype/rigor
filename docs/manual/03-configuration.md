@@ -80,6 +80,7 @@ cache:
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `cache.path` | String | `.rigor/cache` | Persistent cache directory. See [Caching](12-caching.md). |
+| `cache.max_bytes` | Integer or `null` | `268435456` (256 MB) | LRU eviction cap for the cache directory; `null` disables eviction. See [Caching § Size and eviction](12-caching.md#size-and-eviction). |
 | `parallel.workers` | Integer | `0` | Parallel worker processes for per-file analysis (fork-based pool today; ADR-15); `0` is sequential. CLI `--workers` and `RIGOR_RACTOR_WORKERS` take precedence. |
 | `plugins_io.network` | String | `"disabled"` | Plugin network policy — `disabled` or `allowlist`. |
 | `plugins_io.allowed_paths` | Array | `[]` | Filesystem paths plugins may read. |

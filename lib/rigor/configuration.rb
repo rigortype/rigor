@@ -70,12 +70,15 @@ module Rigor
       "fold_platform_specific_paths" => false,
       "cache" => {
         "path" => ".rigor/cache",
-        # LRU eviction cap in bytes. nil (the default) disables eviction;
-        # the cache grows until the user runs `rigor check --clear-cache`.
-        # Set to a positive integer (e.g. 536870912 for 512 MB) to keep the
-        # cache bounded — the least-recently-used entries are removed at the
-        # end of each run when the total exceeds this limit.
-        "max_bytes" => nil
+        # LRU eviction cap in bytes (ADR-54 WD3). The least-recently-used
+        # entries are removed at the end of a run when the total exceeds
+        # this limit. The 256 MB default exists to reap orphans — entries
+        # whose content key nothing references any more (an rbs gem bump,
+        # a signature change) and that no run would otherwise ever delete;
+        # a full active per-project set is ~2 MB, so the cap never touches
+        # live entries. Set explicitly to `null` to disable eviction
+        # (pre-WD3 behaviour: the cache grows until `--clear-cache`).
+        "max_bytes" => 268_435_456
       },
       "plugins_io" => {
         "network" => "disabled",

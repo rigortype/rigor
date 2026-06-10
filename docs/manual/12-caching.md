@@ -51,6 +51,27 @@ There is no config key to disable caching permanently — the
 flags are per-run toggles. To run without a persistent cache
 habitually, point `cache.path` at a disposable directory.
 
+## Size and eviction
+
+A project's active cache set is small (around 2 MB). Entries
+are content-keyed, so events like a gem upgrade or an `.rbs`
+edit write fresh entries and leave the old ones *orphaned* —
+nothing references them, and no run would otherwise delete
+them. To reap those, Rigor evicts least-recently-used entries
+at the end of a run once the cache directory exceeds
+`cache.max_bytes` (default **256 MB** — far above any active
+set, so eviction only ever touches orphans):
+
+```yaml
+cache:
+  max_bytes: 67108864   # tighten the cap to 64 MB…
+```
+
+```yaml
+cache:
+  max_bytes: null       # …or disable eviction entirely
+```
+
 ## Incremental analysis
 
 The cache above makes an *unchanged* project fast — a second

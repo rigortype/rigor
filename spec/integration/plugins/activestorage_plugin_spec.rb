@@ -117,7 +117,7 @@ RSpec.describe "plugins/rigor-activestorage" do
     end
   end
 
-  describe "flow_contribution_for return-type narrowing" do
+  describe "dynamic_return return-type narrowing" do
     it "narrows `user.avatar` to `Nominal[ActiveStorage::Attached::One]`" do
       _result, index = run_as("x = 1\n")
       plugin = Rigor::Plugin::Activestorage.allocate
@@ -128,10 +128,11 @@ RSpec.describe "plugins/rigor-activestorage" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("User")
       end
-      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      scope.define_singleton_method(:environment) { nil }
+      receiver_type = Rigor::Type::Combinator.nominal_of("User")
+      type = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
 
-      expect(contribution).to be_a(Rigor::FlowContribution)
-      expect(contribution.return_type).to eq(
+      expect(type).to eq(
         Rigor::Type::Combinator.nominal_of("ActiveStorage::Attached::One")
       )
     end
@@ -146,9 +147,11 @@ RSpec.describe "plugins/rigor-activestorage" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("User")
       end
-      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      scope.define_singleton_method(:environment) { nil }
+      receiver_type = Rigor::Type::Combinator.nominal_of("User")
+      type = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
 
-      expect(contribution.return_type).to eq(
+      expect(type).to eq(
         Rigor::Type::Combinator.nominal_of("ActiveStorage::Attached::Many")
       )
     end
@@ -163,9 +166,10 @@ RSpec.describe "plugins/rigor-activestorage" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.untyped
       end
-      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      receiver_type = Rigor::Type::Combinator.untyped
+      type = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
 
-      expect(contribution).to be_nil
+      expect(type).to be_nil
     end
 
     it "declines on attachment-name calls with arguments" do
@@ -178,9 +182,10 @@ RSpec.describe "plugins/rigor-activestorage" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("User")
       end
-      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      receiver_type = Rigor::Type::Combinator.nominal_of("User")
+      type = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
 
-      expect(contribution).to be_nil
+      expect(type).to be_nil
     end
 
     it "declines on unknown class names" do
@@ -193,9 +198,10 @@ RSpec.describe "plugins/rigor-activestorage" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("Unknown")
       end
-      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      receiver_type = Rigor::Type::Combinator.nominal_of("Unknown")
+      type = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
 
-      expect(contribution).to be_nil
+      expect(type).to be_nil
     end
   end
 end

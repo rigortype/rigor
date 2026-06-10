@@ -79,47 +79,41 @@ module Rigor
 
       # Return-type contribution: when the receiver is
       # `Nominal[Model]` and the method matches a discovered
-      # attachment, narrow to
+      # attachment, narrows to
       # `Nominal[ActiveStorage::Attached::One]` (singular) or
-      # `Nominal[ActiveStorage::Attached::Many]` (collection).
+      # `Nominal[ActiveStorage::Attached::Many]` (collection)
+      # via a `dynamic_return` rule keyed on the live set of
+      # model class names from the attachment index.
       # The chained call (`.attached?`, `.purge`, `.url`)
       # then resolves through ActiveStorage's RBS surface.
       # Attachment setters (`user.avatar=`) decline — they
       # take side-effecting argument types that the RBS
       # surface already covers.
-      def flow_contribution_for(call_node:, scope:)
-        return nil unless call_node.is_a?(Prism::CallNode)
-        return nil if call_node.receiver.nil?
-        return nil unless call_node.arguments.nil?
+      dynamic_return receivers: -> { attachment_index&.class_names || [] } do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil if call_node.receiver.nil?
+        next nil unless call_node.arguments.nil?
 
         index = attachment_index
-        return nil if index.nil? || index.empty?
+        next nil if index.nil? || index.empty?
 
         receiver_type = scope.type_of(call_node.receiver)
-        return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
+        next nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
         attachments = index.attachments_for(receiver_type.class_name) ||
                       index.attachments_for("::#{receiver_type.class_name}")
-        return nil if attachments.nil?
+        next nil if attachments.nil?
 
         attachment = attachments.find { |a| a[:name] == call_node.name.to_s }
-        return nil if attachment.nil?
+        next nil if attachment.nil?
 
         target = case attachment[:kind]
                  when :singular then "ActiveStorage::Attached::One"
                  when :collection then "ActiveStorage::Attached::Many"
                  end
-        return nil if target.nil?
+        next nil if target.nil?
 
-        Rigor::FlowContribution.new(
-          return_type: Rigor::Type::Combinator.nominal_of(target),
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.#{manifest.id}",
-            plugin_id: manifest.id,
-            node: call_node,
-            descriptor: nil
-          )
-        )
+        Rigor::Type::Combinator.nominal_of(target)
       end
 
       # @!visibility private

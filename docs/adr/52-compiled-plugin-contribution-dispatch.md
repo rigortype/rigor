@@ -9,8 +9,13 @@ the new name gate and silently nil-ing the block type, fixed + pinned by
 regression specs in the second commit). Wall time is neutral at this slice,
 as designed: the global gate stays inert while legacy `flow_contribution_for`
 plugins are loaded, so the throughput win arrives with the WD3 migrations.
-Slices 2–6 (WD2 DSL vocabulary, WD3 legacy-hook migration + deletion, WD4
-single node-rule walk) remain — the slice plan below is current.
+**Slice 2 (WD2, the receiver-less `dynamic_return` form) implemented
+2026-06-10** (commits `c3550b00` + `cd5d5990`: `receivers:` is now optional, a
+rule may gate on `methods:` alone; the `rigor-units` example migrated off
+`flow_contribution_for` onto it, byte-identical on the units demo). The
+**audit's slice-2 plugin targets were wrong** and are corrected below — see
+"Audit correction". Slices 3–6 (run-time receiver/method-set callables,
+the remaining legacy-hook migrations + deletion, single node-rule walk) remain.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -105,23 +110,48 @@ lookups. No DSL change; diagnostics identical by construction.
 **WD2 — Three DSL vocabulary additions** (def-forms open to adjustment at
 implementation, per the ADR-50 precedent):
 
+- *Static method-name-only gating*: `dynamic_return methods: [...]` with no
+  `receivers:` (receiver-independent rules whose name set is known at class
+  definition). **Implemented 2026-06-10** (`c3550b00`); migrated `rigor-units`
+  (`cd5d5990`), whose gate is the receiver *dimension* — a refinement carrier
+  with no nominal class — read inside the block.
 - *Run-time receiver sets*: `dynamic_return receivers: -> { model_index.keys }`
   — a callable evaluated **once per run after `#prepare`**, result frozen into
   the table. Covers rigor-activerecord / -activestorage, whose receiver sets
   exist only after their `prepare`-time project scan.
-- *Method-name-only gating*: `dynamic_return methods: [...]` with no
-  `receivers:` (receiver-independent rules). Covers rigor-sorbet (`T.let`,
-  `T.cast`, `T.must`, `T.absurd`, …) and rigor-activesupport-core-ext.
-- *Per-file name sets*: a declared per-file gate
-  (`dynamic_return file_methods: ->(path) { ... }`-shaped) evaluated once per
-  analysed file and merged into a per-file name gate. Covers rigor-rspec's
-  lets, which are per-file dynamic.
+- *Run-time method-name sets*: the method-name analogue of the above — a
+  `methods:` callable resolved after `#prepare`. **This is the form rigor-sorbet
+  needs** (its catalog keys arbitrary `def` method names harvested at run time;
+  see "Audit correction"), not the static form. Per-file name sets (rigor-rspec's
+  lets, per-file dynamic) are the file-scoped specialisation.
 
-**WD3 — Migrate the five legacy plugins, then remove the hook.** Migration
-order = cheapest gate first: sorbet + activesupport-core-ext (name sets) →
-activerecord + activestorage (run-time receiver sets) → rspec (per-file).
-Each migration gates on byte-identical diagnostics over its integration spec
-plus the relevant OSS corpus. After the last migration,
+### Audit correction (2026-06-10)
+
+The grounding audit's slice-2 plugin table was wrong on both counts, discovered
+when implementing the migration:
+
+- **rigor-activesupport-core-ext ships no `flow_contribution_for` at all** — it
+  is a pure RBS-bundle plugin (`signature_paths:` only, zero analyzer code). It
+  is not a migration target; the audit's grep matched a comment that says so.
+- **rigor-sorbet does not fit a static name gate.** Its `flow_contribution_for`
+  has three paths: the `T.*` assertions (static names), `T.absurd` (one name),
+  **and a catalog lookup that fires on any `def` method carrying an ingested
+  sig** — a run-time name set, not a static one. So sorbet belongs to the
+  *run-time method-name set* form (slice 3+), not the static slice-2 form.
+
+Net effect: **no production plugin fit the static slice-2 gate**; the static
+form's first real consumer is the `rigor-units` example. The four production
+plugins (activerecord, activestorage, rspec, sorbet) all need a run-time
+(receiver- or method-) set, consolidating them into the slice-3 callable work.
+The slice list below is renumbered accordingly.
+
+**WD3 — Migrate the remaining legacy plugins, then remove the hook.** The four
+production users all need a run-time set (per "Audit correction"): activerecord
++ activestorage (run-time receiver sets), sorbet (run-time method-name set, its
+catalog keys), rspec (per-file name set). The two `examples/` users still on the
+hook (lisp-eval, pattern, both config-gated on a single method name) migrate
+alongside. Each migration gates on byte-identical diagnostics over its
+integration spec plus the relevant OSS corpus. After the last migration,
 `flow_contribution_for` is **deleted** (base method, both collectors, the
 `ContributionIndex` flow path) — not kept as a shim. Pre-1.0 removal is the
 point (see Context); third-party authors (ADR-31) get a CHANGELOG migration
@@ -156,10 +186,14 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
 
 ## Implementation slices
 
-1. WD1 table + engine call-site rewiring (no contract change).
-2. WD2 name-set vocabulary + migrate rigor-sorbet, rigor-activesupport-core-ext.
+1. **DONE** (`67a552de` + `1deecb2f`) — WD1 table + engine call-site rewiring
+   (no contract change).
+2. **DONE** (`c3550b00` + `cd5d5990`) — WD2 static method-name-only
+   `dynamic_return` (receiver-less) + migrate the `rigor-units` example (the
+   only consumer that fits the static gate; see "Audit correction").
 3. WD2 run-time receiver sets + migrate rigor-activerecord, rigor-activestorage.
-4. WD2 per-file gate + migrate rigor-rspec.
+4. WD2 run-time method-name set + migrate rigor-sorbet (catalog); per-file name
+   set + migrate rigor-rspec; the config-gated examples (lisp-eval, pattern).
 5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the
    plugin-author skill, `examples/` walkthroughs, CHANGELOG migration note.
 6. WD4 single-walk node rules (independent of 2–5; may land any time after 1).

@@ -32,19 +32,29 @@ spec binds. Observations taken against Rigor v0.1.17 (working tree @ `54062b0a`)
 statement evaluator の assertion 収集）で無条件に呼ばれる。ゲート条件はプラグイン内部の
 コードに埋まっており、エンジン側からインデックス化できない。
 
-残存ユーザーは production の最大手 5 つ:
+残存ユーザーは production の最大手 4 つ + examples 3 つ:
 
 | プラグイン | 実際のゲート条件 | 宣言化に必要な語彙 |
 | --- | --- | --- |
 | rigor-activerecord | receiver がモデルクラス／Relation（`prepare` で構築する `model_index` のキー集合） | **run 時解決の receiver 集合**（callable、`prepare` 後に 1 回評価） |
 | rigor-activestorage | 同上（attachment 宣言インデックス） | 同上 |
-| rigor-activesupport-core-ext | core_ext メソッド名集合 | メソッド名ゲート（receiver 不問） |
-| rigor-sorbet | `T.let` / `T.cast` / `T.must` / `T.absurd` 等の名前集合 | メソッド名ゲート（receiver 不問） |
+| rigor-sorbet | `T.*` アサーション（静的名）**+ catalog 経路（ingest した sig を持つ任意の def メソッド）** | **run 時解決のメソッド名集合**（catalog キー、`prepare` 後評価） |
 | rigor-rspec | ファイルごとの let 名（per-file 動的） | **per-file 名前集合**フック |
+| examples/rigor-units | receiver の*次元*（refinement carrier、nominal class なし）+ 静的メソッド名集合 | **静的メソッド名ゲート（receiver 不問）** |
+| examples/rigor-lisp-eval / -pattern | config 由来の単一メソッド名 | run 時メソッド名（config 由来） |
 
-`dynamic_return` DSL（ADR-37 slice 2）は receiver を**静的なクラス名 Array**でしか
-宣言できないため、この 5 つは移行できずに残っている。表の右列 3 語彙が埋まれば全員
-移行可能で、レガシーフックは外部互換 shim に格下げできる。
+> **2026-06-10 訂正**: 当初この表は「rigor-activesupport-core-ext = メソッド名集合」
+> を 5 番目に挙げ、sorbet を「静的メソッド名ゲート」に分類していた。実装時の精査で
+> 両方とも誤りと判明した — **activesupport-core-ext は `flow_contribution_for` を
+> 持たない純 RBS バンドル**（移行対象ですらない。grep はコメント言及にヒットした）、
+> **sorbet は catalog 経路で任意 def メソッドにマッチする**ため静的名前集合に収まらず
+> run 時集合が必要。結果、**静的メソッド名ゲートに収まる実プラグインは存在せず**、
+> その最初の消費者は examples/rigor-units だった（ADR-52 slice 2 で移行済み）。
+
+`dynamic_return` DSL（ADR-37 slice 2）は当初 receiver を**静的なクラス名 Array**でしか
+宣言できなかった。ADR-52 WD2 slice 2 で **receiver 不問（`methods:` のみ）の静的ゲート**
+を追加し units を移行。残る production 4 + config 由来 examples 2 は run 時集合
+（receiver / メソッド名 / per-file）が必要で、slice 3 以降で対応する。
 
 ### 2. 同一コールノードへの二重問い合わせ
 

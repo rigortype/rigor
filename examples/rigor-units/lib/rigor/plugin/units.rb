@@ -24,13 +24,12 @@ module Rigor
     # | dimensional mismatch in `+`/`-`/`*`/`/`/comparison | `:error` | `dimension-mismatch` |
     # | wrong `.in_<unit>` for the dimension  | `:error` | `in-method-mismatch` |
     #
-    # The plugin only emits diagnostics — same scope-note as
-    # `examples/rigor-lisp-eval/`. Once Rigor's plugin contract
-    # grows a return-type contribution surface, the same
-    # {Analyzer} body moves from emitting diagnostics to
-    # supplying `FlowContribution` bundles for each call site,
-    # and the demo's `sig/units.rbs` can drop its `untyped`
-    # boundaries.
+    # In addition to diagnostics the plugin contributes return
+    # types for every recognised call site via {.dynamic_return},
+    # so the engine's flow analysis threads the dimensional type
+    # (`Distance` / `Speed` / …) through assignments and into
+    # downstream calls instead of seeing the DSL's untyped RBS
+    # boundary.
     #
     # Usage in `.rigor.yml`:
     #
@@ -43,9 +42,9 @@ module Rigor
         description: "Types a units-of-measure DSL (Distance / Time / Speed / Acceleration)."
       )
 
-      # Dimension → Rigor type. Used by `flow_contribution_for`
+      # Dimension → Rigor type. Used by the {.dynamic_return} rule
       # to translate the {MethodTable} dispatch result back into
-      # the carrier the analyzer threads through call sites.
+      # the carrier the engine threads through call sites.
       DIMENSION_NOMINALS = {
         distance: "Distance",
         time: "Time",
@@ -67,42 +66,48 @@ module Rigor
         "Numeric" => :numeric
       }.freeze
 
+      # Union of every method name {MethodTable.dispatch} can recognise:
+      # numeric unit constructors, chained speed/acceleration constructors,
+      # arithmetic and comparison operators, and every `.in_<unit>` query
+      # across all receiver dimensions. Used as the `methods:` gate for the
+      # {.dynamic_return} declaration below so the engine skips this block
+      # for every call to an unrelated method.
+      RECOGNISED_METHODS = (
+        MethodTable::DISTANCE_UNIT_METHODS +
+        MethodTable::TIME_UNIT_METHODS +
+        MethodTable::DISTANCE_PER_TIME +
+        MethodTable::DISTANCE_PER_TIME_SQUARED +
+        %i[+ - * /] +
+        MethodTable::COMPARISON_OPS +
+        MethodTable::IN_METHODS.values.flatten
+      ).uniq.freeze
+
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         Analyzer.new(path: path).analyze(root).diagnostics
       end
 
-      # v0.1.2 — return-type contribution. The same {MethodTable}
-      # the diagnostics path consults supplies the call-site
-      # return type when both receiver and argument map cleanly
-      # to a known dimension. Dimensional mismatches stay at the
-      # RBS-level untyped return — surfacing the existing
-      # `dimension-mismatch` / `in-method-mismatch` error
-      # diagnostic without propagating `bot` downstream.
-      def flow_contribution_for(call_node:, scope:)
-        return nil unless call_node.is_a?(Prism::CallNode)
-        return nil if call_node.receiver.nil?
+      # v0.1.2 — return-type contribution via the {.dynamic_return} DSL.
+      # The same {MethodTable} the diagnostics path consults supplies the
+      # call-site return type when both receiver and argument map cleanly
+      # to a known dimension. Dimensional mismatches stay at the RBS-level
+      # untyped return — surfacing the existing `dimension-mismatch` /
+      # `in-method-mismatch` error diagnostic without propagating `bot`
+      # downstream. The engine wraps a non-nil return in a
+      # `FlowContribution`; the block returns a bare `Rigor::Type`.
+      dynamic_return methods: RECOGNISED_METHODS do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil if call_node.receiver.nil?
 
         receiver_dim = dimension_for_type(scope.type_of(call_node.receiver))
-        return nil if receiver_dim.nil?
+        next nil if receiver_dim.nil?
 
         arg_dims = call_node.arguments&.arguments&.map { |arg| dimension_for_type(scope.type_of(arg)) } || []
-        return nil if arg_dims.any?(&:nil?)
+        next nil if arg_dims.any?(&:nil?)
 
         result = MethodTable.dispatch(receiver: receiver_dim, method: call_node.name, args: arg_dims)
-        return nil if result.nil? || result.error || result.dimension.nil?
+        next nil if result.nil? || result.error || result.dimension.nil?
 
-        return_type = type_for_dimension(result.dimension)
-        return nil if return_type.nil?
-
-        Rigor::FlowContribution.new(
-          return_type: return_type,
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.#{manifest.id}",
-            plugin_id: manifest.id,
-            node: call_node,
-            descriptor: nil
-          )
-        )
+        type_for_dimension(result.dimension)
       end
 
       private

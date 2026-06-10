@@ -447,6 +447,56 @@ RSpec.describe Rigor::Plugin::Base do
         end.to raise_error(ArgumentError, /methods/)
       end
     end
+
+    describe "receiver-less (methods-only) rule (ADR-52 WD2)" do
+      let(:plugin_methods_only) do
+        Class.new(described_class) do
+          manifest(id: "dr-mo", version: "0.1.0")
+          dynamic_return methods: %i[kilometers per_hour] do |call_node, _scope|
+            next nil unless call_node.name == :kilometers
+
+            Rigor::Type::Combinator.nominal_of("Distance")
+          end
+        end.new(services: services)
+      end
+
+      it "fires on the method name regardless of the receiver carrier shape" do
+        # A receiver carrier with no nominal class (untyped/Dynamic) —
+        # a receiver-gated rule could not match it, but a methods-only
+        # rule reads the shape inside its own block.
+        type = plugin_methods_only.dynamic_return_type(
+          call_node: call("100.kilometers"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Distance"))
+      end
+
+      it "declines for an undeclared method name" do
+        type = plugin_methods_only.dynamic_return_type(
+          call_node: call("100.megaparsecs"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(type).to be_nil
+      end
+
+      it "rejects a rule gated on neither receivers: nor methods:" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "bad-ungated", version: "0.1.0")
+            dynamic_return { nil }
+          end
+        end.to raise_error(ArgumentError, /receivers:, methods:, or both/)
+      end
+
+      it "treats an empty methods: list with no receivers: as ungated and rejects it" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "bad-empty", version: "0.1.0")
+            dynamic_return(methods: []) { nil }
+          end
+        end.to raise_error(ArgumentError, /receivers:, methods:, or both/)
+      end
+    end
   end
 
   describe ".type_specifier / #type_specifier_facts (ADR-37 slice 2)" do

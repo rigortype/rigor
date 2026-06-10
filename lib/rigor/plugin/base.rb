@@ -190,9 +190,9 @@ module Rigor
           defined?(@node_file_context_block) ? @node_file_context_block : nil
         end
 
-        # ADR-37 slice 2 — declares a per-call-site return-type
-        # contribution, receiver-gated (and optionally method-gated). The
-        # narrow successor to the `return_type` slot of
+        # ADR-37 slice 2 / ADR-52 WD2 — declares a per-call-site
+        # return-type contribution, gated by receiver class, method name,
+        # or both. The narrow successor to the `return_type` slot of
         # `flow_contribution_for`:
         #
         #   # receiver-gated only:
@@ -205,33 +205,45 @@ module Rigor
         #     # fires only for Result#unwrap / Result#unwrap!
         #   end
         #
+        #   # method-gated only (ADR-52 WD2 — receiver-independent rules,
+        #   # e.g. a unit-dimension DSL whose receiver carrier is a
+        #   # refinement, not a nominal class):
+        #   dynamic_return methods: [:kilometers, :per_hour, :in_meters] do |call_node, scope|
+        #     # fires for any receiver when the method name matches;
+        #     # the block reads the receiver's shape itself
+        #   end
+        #
         # `receivers:` is a non-empty Array of class names; the engine
         # calls the block only when the call's receiver type's class
         # equals or inherits from one of them (via
-        # `Environment#class_ordering`).
+        # `Environment#class_ordering`). It MAY be omitted — then the rule
+        # is receiver-independent and fires on `methods:` alone.
         #
-        # `methods:` is an optional Array of Symbol method names. When
-        # provided, the block is also skipped unless `call_node.name` is
-        # in the list — equivalent to `next if call_node.name != :foo`
-        # at the top of the block, but declarative and cheaper (the
-        # check runs before the block is entered). When omitted, every
-        # method on a matching receiver is forwarded to the block as
-        # before (backwards-compatible with existing rules).
+        # `methods:` is an Array of Symbol method names. When provided, the
+        # block is skipped unless `call_node.name` is in the list —
+        # declarative and cheaper than an in-block guard (the engine
+        # compiles it into the registry's contribution table, ADR-52 WD1).
+        # It is REQUIRED when `receivers:` is omitted: a rule gated on
+        # neither would fire on every dispatch, which is exactly the
+        # ungated cost the `flow_contribution_for` escape valve carries —
+        # `dynamic_return` declines to reintroduce it.
         #
         # Method-name and type-shape refinement can still be done inside
         # the block. The block runs through `instance_exec`, so `config`
         # / `services` are in scope.
-        def dynamic_return(receivers:, methods: nil, &block)
+        def dynamic_return(receivers: nil, methods: nil, &block)
           raise ArgumentError, "Plugin::Base.dynamic_return requires a block body" if block.nil?
 
-          validate_dynamic_return_receivers!(receivers)
+          validate_dynamic_return_gate!(receivers, methods)
+          validate_dynamic_return_receivers!(receivers) unless receivers.nil?
           validate_dynamic_return_methods!(methods)
 
           normalized_methods = methods&.map(&:to_sym)&.freeze
+          normalized_receivers = receivers&.map { |r| r.dup.freeze }&.freeze
 
           @dynamic_returns ||= []
           @dynamic_returns << {
-            receivers: receivers.map { |r| r.dup.freeze }.freeze,
+            receivers: normalized_receivers,
             methods: normalized_methods,
             block: block
           }.freeze
@@ -255,6 +267,18 @@ module Rigor
         end
         # rubocop:enable Naming/MemoizedInstanceVariableName
 
+        # ADR-52 WD2 — a rule must gate on something. `receivers:` alone,
+        # `methods:` alone, or both are valid; neither is not (it would
+        # fire on every dispatch).
+        def validate_dynamic_return_gate!(receivers, methods)
+          return unless receivers.nil?
+          return if methods.is_a?(Array) && !methods.empty?
+
+          raise ArgumentError,
+                "Plugin::Base.dynamic_return requires receivers:, methods:, or both — a rule gated on " \
+                "neither would fire on every dispatch (that is what flow_contribution_for is for)"
+        end
+
         def validate_dynamic_return_receivers!(receivers)
           return if receivers.is_a?(Array) && !receivers.empty? && receivers.all? { |r| r.is_a?(String) && !r.empty? }
 
@@ -273,7 +297,8 @@ module Rigor
                 "got #{methods.inspect}"
         end
 
-        private :validate_dynamic_return_receivers!, :validate_dynamic_return_methods!
+        private :validate_dynamic_return_gate!, :validate_dynamic_return_receivers!,
+                :validate_dynamic_return_methods!
 
         # ADR-37 slice 2 — declares a predicate/assertion narrowing
         # contribution, method-gated. The narrow successor to the
@@ -441,16 +466,15 @@ module Rigor
         rules = self.class.dynamic_returns
         return nil if rules.empty? || receiver_type.nil?
 
+        # `class_name` is nil for a receiver carrier with no nominal
+        # class (a refinement dimension, an inferred shape) — fine for a
+        # receiver-less (methods-only) rule (ADR-52 WD2), which gates on
+        # the method name alone and reads the receiver shape inside its
+        # own block.
         class_name = dynamic_return_receiver_class_name(receiver_type)
-        return nil if class_name.nil?
-
         environment = scope&.environment
         rules.each do |rule|
-          # Method-name gate first — a Symbol-array probe vs the
-          # receiver ancestry resolution below (ADR-52 WD1). Both are
-          # pure predicates, so the order only affects cost.
-          next if rule[:methods] && !rule[:methods].include?(call_node.name)
-          next unless rule[:receivers].any? { |c| class_matches_receiver?(class_name, c, environment) }
+          next unless dynamic_return_rule_applies?(rule, call_node, class_name, environment)
 
           result = instance_exec(call_node, scope, &rule[:block])
           return result if result
@@ -703,6 +727,19 @@ module Rigor
         case receiver_type
         when Rigor::Type::Nominal, Rigor::Type::Singleton then receiver_type.class_name
         end
+      end
+
+      # The gate for one `dynamic_return` rule. Method-name gate first —
+      # a Symbol-array probe vs the receiver ancestry resolution below
+      # (ADR-52 WD1); both are pure predicates, so order only affects
+      # cost. A receiver-less rule (ADR-52 WD2) skips the ancestry check
+      # entirely and fires on the method name alone.
+      def dynamic_return_rule_applies?(rule, call_node, class_name, environment)
+        return false if rule[:methods] && !rule[:methods].include?(call_node.name)
+        return true if rule[:receivers].nil?
+        return false if class_name.nil?
+
+        rule[:receivers].any? { |c| class_matches_receiver?(class_name, c, environment) }
       end
 
       # True when `class_name` equals or inherits from `constraint`,

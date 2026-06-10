@@ -6,6 +6,7 @@ require_relative "scope/discovery_index"
 require_relative "analysis/fact_store"
 require_relative "analysis/dependency_recorder"
 require_relative "inference/expression_typer"
+require_relative "inference/flow_tracer"
 require_relative "inference/statement_evaluator"
 
 module Rigor
@@ -119,6 +120,8 @@ module Rigor
     end
 
     def with_local(name, type)
+      # `rigor trace` — the moment a local enters the scope.
+      Inference::FlowTracer.bind(name, type) if Inference::FlowTracer.active?
       new_locals = @locals.merge(name.to_sym => type).freeze
       new_fact_store = fact_store.invalidate_target(Analysis::FactStore::Target.local(name))
       # Rebinding `name` invalidates every "after `receiver[key]

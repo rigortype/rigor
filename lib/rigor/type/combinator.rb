@@ -17,6 +17,7 @@ require_relative "refined"
 require_relative "intersection"
 require_relative "bound_method"
 require_relative "../inference/budget_trace"
+require_relative "../inference/flow_tracer"
 
 module Rigor
   module Type
@@ -382,6 +383,10 @@ module Rigor
         if Inference::BudgetTrace.enabled? && result.is_a?(Union)
           Inference::BudgetTrace.observe(Inference::BudgetTrace::UNION_ARITY, result.members.size)
         end
+        # `rigor trace` — degenerate merges (`1 | 1 → 1`, Dynamic
+        # absorption) are recorded too; the collapse itself is the
+        # teachable moment.
+        Inference::FlowTracer.union(types, result) if Inference::FlowTracer.active? && types.size >= 2
         result
       end
 

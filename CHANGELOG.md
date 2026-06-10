@@ -16,6 +16,7 @@ cycles live in dedicated archives:
 
 ### Added
 
+- **[cli]** New `rigor trace FILE` command — a teaching probe that replays HOW the engine typed a file as a step-through terminal animation. Each frame highlights the source range under evaluation beside the scope's locals and narrates one inference moment: a local binding entering the scope (`bind`), branch types merging into a union — including degenerate collapses (`union`), and a method call resolving or fail-softening to `Dynamic[top]` (`dispatch`). On a tty the replay steps on a key press (`--delay` autoplays); `--verbose` adds every expression enter/result frame, `--line=N` filters to one line, and `--format=json` dumps the raw event stream for tooling or course material. Recording is observational — the engine pays one integer check per instrumented site when tracing is off, and traced inference is identical to `rigor check`'s.
 - **[cli]** `rigor check --format` gains six CI-native output formats so diagnostics surface inline in a pull / merge request instead of only in the job log ([ADR-51](docs/adr/51-ci-diagnostic-output-formats.md)):
   - `--format sarif` writes a SARIF 2.1.0 report. GitHub's `upload-sarif` renders it on the PR diff and in the Security tab, and any other SARIF-aware tool consumes the same file — the cross-platform option.
   - `--format github` emits GitHub Actions workflow commands (`::error file=…,line=…::`) that the runner turns into inline PR annotations, with no upload step.

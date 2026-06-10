@@ -8,6 +8,7 @@ require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
 require_relative "budget_trace"
 require_relative "fallback"
+require_relative "flow_tracer"
 require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
@@ -219,6 +220,15 @@ module Rigor
       end
 
       def type_of(node)
+        return untraced_type_of(node) unless FlowTracer.active?
+
+        # `rigor trace` — bracket the recursion with enter/result events.
+        # The tracer is observational only: the inferred type flows
+        # through unchanged (see FlowTracer's contract).
+        FlowTracer.trace_node(node) { untraced_type_of(node) }
+      end
+
+      def untraced_type_of(node)
         # Slice A-declarations. ScopeIndexer pre-fills
         # `scope.declared_types` for declaration-position nodes
         # (`module Foo` / `class Bar` headers) with the qualified

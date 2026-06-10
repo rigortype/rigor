@@ -26,6 +26,7 @@ module Rigor
       "init" => :run_init,
       "annotate" => :run_annotate,
       "type-of" => :run_type_of,
+      "trace" => :run_trace,
       "type-scan" => :run_type_scan,
       "explain" => :run_explain,
       "diff" => :run_diff,
@@ -795,6 +796,12 @@ module Rigor
       TypeOfCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_trace
+      require_relative "cli/trace_command"
+
+      TraceCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def run_type_scan
       require_relative "cli/type_scan_command"
 
@@ -956,6 +963,7 @@ module Rigor
           init       Create a starter .rigor.yml
           annotate   Print FILE with each line's last-expression type
           type-of    Print the inferred type at FILE:LINE:COL
+          trace      Replay how the engine typed FILE as a terminal animation
           type-scan  Report Scope#type_of coverage across PATHs
           explain    Print the description of one or all CheckRules
           diff       Compare current diagnostics to a saved baseline JSON

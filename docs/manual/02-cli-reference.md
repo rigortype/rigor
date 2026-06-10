@@ -14,6 +14,7 @@ option, exits `64` — the conventional "usage error" code.
 > **Commands**
 > [check](#rigor-check) · [init](#rigor-init) ·
 > [annotate](#rigor-annotate) · [type-of](#rigor-type-of) ·
+> [trace](#rigor-trace) ·
 > [type-scan](#rigor-type-scan) · [explain](#rigor-explain) ·
 > [diff](#rigor-diff) · [sig-gen](#rigor-sig-gen) ·
 > [lsp](#rigor-lsp) · [baseline](#rigor-baseline) ·
@@ -95,6 +96,27 @@ Accepts the position as a single `file:line:col` triple or as
 three arguments. `--format=json` emits a machine-readable
 form; `--trace` records fail-soft fallbacks. The editor-mode
 `--tmp-file` / `--instead-of` pair is accepted as on `check`.
+
+## `rigor trace`
+
+Replay HOW the engine typed a file, step by step, as a
+terminal animation — a teaching probe over the same inference
+`rigor check` runs.
+
+```sh
+rigor trace [--delay=SECONDS] [--line=N] [--verbose] [--format=json] FILE
+```
+
+Each frame highlights the source range being evaluated next to
+the scope's locals and describes one inference moment: a local
+binding entering the scope (`bind`), branch types merging
+(`union`), or a method call resolving — or fail-softening to
+`Dynamic[top]` (`dispatch`). On a tty the replay steps on a key
+press (`q` quits); `--delay` autoplays. `--verbose` adds every
+expression enter/result frame, `--line=N` keeps only events on
+one line, and `--format=json` dumps the raw event stream for
+tooling or course material. See
+[Inspecting inferred types](05-inspecting-types.md).
 
 ## `rigor type-scan`
 

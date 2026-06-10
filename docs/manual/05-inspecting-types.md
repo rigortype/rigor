@@ -72,11 +72,33 @@ rigor type-of lib/example.rb:12:8
 This is the same query the editor integration answers on
 hover.
 
+## `rigor trace` — watch the inference happen
+
+Where `annotate` and `type-of` show the *answer*, `rigor trace
+FILE` shows the *derivation*: it re-runs the engine over the
+file and replays the recorded inference events as a
+step-through terminal animation — the moment a local enters the
+scope, the moment two branch types merge into a union, the
+moment a method call resolves (or fail-softens to
+`Dynamic[top]`).
+
+```sh
+rigor trace lib/example.rb            # step on key press
+rigor trace --delay=0.5 lib/example.rb # autoplay
+rigor trace --format=json lib/example.rb # raw event stream
+```
+
+`--verbose` adds an enter/result frame for every expression the
+typer visits; the default keeps only the three teachable event
+kinds. The JSON stream is stable enough to build course
+material or figures from.
+
 ## Which to reach for
 
 | You want… | Use |
 | --- | --- |
 | One expression's type, from the shell | `rigor type-of` |
 | Every line of a file surveyed | `rigor annotate` |
+| The derivation replayed step by step | `rigor trace` |
 | A type printed mid-analysis, in context | `dump_type` |
 | A type *asserted* and regression-checked | `assert_type` |

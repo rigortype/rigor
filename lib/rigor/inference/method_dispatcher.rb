@@ -6,6 +6,7 @@ require_relative "../flow_contribution"
 require_relative "../flow_contribution/merger"
 require_relative "../builtins/hkt_builtins"
 require_relative "../builtins/static_return_refinements"
+require_relative "flow_tracer"
 require_relative "method_dispatcher/call_context"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
@@ -73,9 +74,28 @@ module Rigor
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def dispatch(receiver_type:, method_name:, arg_types:,
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)
+        result = resolve(
+          receiver_type: receiver_type, method_name: method_name, arg_types: arg_types,
+          block_type: block_type, environment: environment,
+          call_node: call_node, scope: scope
+        )
+        # `rigor trace` — record the dispatch outcome (resolved type, or
+        # the fail-soft `nil` the caller widens to `Dynamic[Top]`).
+        if FlowTracer.active?
+          FlowTracer.dispatch(
+            receiver: receiver_type, method_name: method_name, args: arg_types,
+            result: result, location: call_node&.location
+          )
+        end
+        result
+      end
+
+      def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+                  block_type: nil, environment: nil,
+                  call_node: nil, scope: nil)
         return nil if receiver_type.nil?
 
         # Build the call context once and thread it — unchanged —

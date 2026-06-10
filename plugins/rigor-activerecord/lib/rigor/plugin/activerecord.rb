@@ -197,44 +197,82 @@ module Rigor
         MIGRATION_PATH_PATTERNS.any? { |pattern| path_s.match?(pattern) }
       end
 
-      # v0.1.2 — return-type contribution. `Model.find(id)`
-      # narrows the call site's return type to `Nominal[Model]`,
-      # so chained calls (`User.find(1).name`) resolve through
-      # the analyzer's normal dispatch instead of the RBS-level
-      # untyped fall-back. `Model.find_by(...)` narrows to
-      # `Nominal[Model] | nil` because Rails returns nil when no
-      # row matches. `where` / `find_or_*` are intentionally
-      # deferred — they return relations, and Rigor does not yet
-      # carry an Enumerable-backed relation shape that would be
-      # more precise than the RBS envelope.
-      def flow_contribution_for(call_node:, scope:)
+      # The class-side finder / relation entry-point names
+      # `finder_return_type` recognises. Static half of the
+      # `dynamic_return` name gate; the run-time half comes from
+      # the model index (scopes, associations, columns).
+      FINDER_METHOD_NAMES = %i[find find_by! find_by where all order limit none select].freeze
+      private_constant :FINDER_METHOD_NAMES
+
+      # v0.1.2 — return-type contribution; ADR-52 slice 5b —
+      # migrated off `flow_contribution_for` onto the run-time
+      # `methods:` name gate. `Model.find(id)` narrows the call
+      # site's return type to `Nominal[Model]`, so chained calls
+      # (`User.find(1).name`) resolve through the analyzer's
+      # normal dispatch instead of the RBS-level untyped
+      # fall-back; scopes, association accessors, and column
+      # readers narrow per the paths below.
+      #
+      # WHY a method-name gate and not `receivers:` — the ADR-52
+      # "rigor-activerecord blocker": a project model not in RBS
+      # types its constant as `Dynamic[top]`, so a receiver-type
+      # gate declines exactly the calls this plugin exists for. A
+      # *name* gate never reads the receiver type; the block keeps
+      # the plugin's own AST-constant / `self_type` / `type_of`
+      # resolution, so the Dynamic-constant case still reaches it
+      # (the same shape as rigor-sorbet's catalog path). The set —
+      # the static finder names ∪ every scope, association, and
+      # column name (plus `column?` predicate forms) the model
+      # index discovered — is exactly the union of names the four
+      # resolution paths below can return a type for, so gating on
+      # it is byte-identical to the old ungated hook. It is broad
+      # (`name`, `id`, …), but membership is one Set probe and the
+      # expensive block runs only on candidate hits.
+      dynamic_return methods: -> { recognised_method_names } do |call_node, scope|
+        contribution_return_type(call_node, scope)
+      end
+
+      private
+
+      # The run-time name gate: finders ∪ scopes ∪ associations ∪
+      # column readers (+ `?` predicates). Resolved lazily on first
+      # dispatch (after `#prepare` built the index), memoised by the
+      # engine. Returns [] when discovery found nothing — the gate
+      # then declines every call, matching the old hook's
+      # `index.nil? || index.empty?` early return.
+      def recognised_method_names
+        index = model_index
+        return [] if index.nil? || index.empty?
+
+        names = FINDER_METHOD_NAMES.dup
+        index.entries.each_value do |entry|
+          names.concat(entry.scopes.map(&:to_sym))
+          names.concat(entry.association_names.map(&:to_sym))
+          entry.column_names.each do |column|
+            names << column.to_sym
+            names << :"#{column}?"
+          end
+        end
+        names
+      end
+
+      # The migrated body of the legacy `flow_contribution_for` —
+      # same resolution order, returning the bare type the
+      # `dynamic_return` contract expects.
+      def contribution_return_type(call_node, scope)
         return nil unless call_node.is_a?(Prism::CallNode)
 
         index = model_index
         return nil if index.nil? || index.empty?
 
-        return_type =
-          if call_node.receiver
-            class_call_return_type(call_node, index) ||
-              relation_call_return_type(call_node, scope, index) ||
-              instance_call_return_type(call_node, scope, index)
-          else
-            implicit_self_class_call_return_type(call_node, scope, index)
-          end
-        return nil if return_type.nil?
-
-        Rigor::FlowContribution.new(
-          return_type: return_type,
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.#{manifest.id}",
-            plugin_id: manifest.id,
-            node: call_node,
-            descriptor: nil
-          )
-        )
+        if call_node.receiver
+          class_call_return_type(call_node, index) ||
+            relation_call_return_type(call_node, scope, index) ||
+            instance_call_return_type(call_node, scope, index)
+        else
+          implicit_self_class_call_return_type(call_node, scope, index)
+        end
       end
-
-      private
 
       def class_call_return_type(call_node, index)
         model_name = constant_receiver_name(call_node.receiver)

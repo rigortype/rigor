@@ -355,7 +355,7 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
-  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+  describe "dynamic_return / #dynamic_return_type return-type contribution (v0.1.2)" do
     # The plugin's `Model.find(id)` rule contributes
     # `Nominal[Model]` so chained call sites resolve through
     # the analyzer's normal dispatch — without the contribution
@@ -420,9 +420,9 @@ RSpec.describe "plugins/rigor-activerecord" do
     # rigor-activerecord now records `has_many` / `belongs_to`
     # / `has_one` declarations in the ModelIndex (and
     # contributes `Nominal[Target] | nil` for the singular
-    # cases via `flow_contribution_for`). The integration
+    # cases via `dynamic_return`). The integration
     # spec asserts via the model-index lookup that the right
-    # rows landed; the singular flow contribution is covered
+    # rows landed; the singular return-type contribution is covered
     # via direct unit specs on the plugin classes
     # (`spec/examples/activerecord/` — not bundled here).
 
@@ -533,7 +533,7 @@ RSpec.describe "plugins/rigor-activerecord" do
     it "publishes a non-nullable `Nominal[Target]` for a required belongs_to" do
       # `belongs_to` is required (non-`nil`) by default since
       # Rails 5, so `post.user` narrows to `Nominal[User]` with no
-      # nil arm. Spec the contribution shape directly on the plugin
+      # nil arm. Spec the return type directly on the plugin
       # instance — Rigor's diagnostic rule contract for chained
       # calls is independent of the plugin's return-type publication.
       index = model_index_after_run(models: POST_USER_MODELS)
@@ -545,10 +545,13 @@ RSpec.describe "plugins/rigor-activerecord" do
       double_scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("Post")
       end
-      contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
+      double_scope.define_singleton_method(:environment) { nil }
+      type = runner_plugin.dynamic_return_type(
+        call_node: call_node, scope: double_scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
 
-      expect(contribution).to be_a(Rigor::FlowContribution)
-      expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("User"))
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("User"))
     end
 
     it "publishes a nullable `Nominal[Target] | nil` for has_one" do
@@ -563,9 +566,13 @@ RSpec.describe "plugins/rigor-activerecord" do
       double_scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("User")
       end
-      contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
+      double_scope.define_singleton_method(:environment) { nil }
+      type = runner_plugin.dynamic_return_type(
+        call_node: call_node, scope: double_scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
 
-      expect(contribution.return_type).to eq(
+      expect(type).to eq(
         Rigor::Type::Combinator.union(
           Rigor::Type::Combinator.nominal_of("Profile"),
           Rigor::Type::Combinator.constant_of(nil)
@@ -573,7 +580,7 @@ RSpec.describe "plugins/rigor-activerecord" do
       )
     end
 
-    it "publishes a nullable type for `belongs_to ..., optional: true`" do
+    it "publishes a nullable type for `belongs_to ..., optional: true`" do # rubocop:disable RSpec/ExampleLength
       models = {
         "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
         "app/models/post.rb" => <<~RUBY,
@@ -592,9 +599,13 @@ RSpec.describe "plugins/rigor-activerecord" do
       double_scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("Post")
       end
-      contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
+      double_scope.define_singleton_method(:environment) { nil }
+      type = runner_plugin.dynamic_return_type(
+        call_node: call_node, scope: double_scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
 
-      expect(contribution.return_type).to eq(
+      expect(type).to eq(
         Rigor::Type::Combinator.union(
           Rigor::Type::Combinator.nominal_of("User"),
           Rigor::Type::Combinator.constant_of(nil)
@@ -612,9 +623,13 @@ RSpec.describe "plugins/rigor-activerecord" do
       double_scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of("User")
       end
-      contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
+      double_scope.define_singleton_method(:environment) { nil }
+      type = runner_plugin.dynamic_return_type(
+        call_node: call_node, scope: double_scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
 
-      expect(contribution.return_type).to eq(
+      expect(type).to eq(
         Rigor::Type::Combinator.nominal_of(
           "ActiveRecord::Relation",
           type_args: [Rigor::Type::Combinator.nominal_of("Post")]
@@ -773,8 +788,12 @@ RSpec.describe "plugins/rigor-activerecord" do
       call_node = Prism.parse("select(:title).group(:title)").value.statements.body.first.receiver
       scope = Object.new
       scope.define_singleton_method(:self_type) { Rigor::Type::Combinator.singleton_of("Post") }
-      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
-      expect(contribution.return_type).to eq(
+      scope.define_singleton_method(:environment) { nil }
+      type = plugin.dynamic_return_type(
+        call_node: call_node, scope: scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
+      expect(type).to eq(
         Rigor::Type::Combinator.nominal_of(
           "ActiveRecord::Relation",
           type_args: [Rigor::Type::Combinator.nominal_of("Post")]
@@ -789,7 +808,13 @@ RSpec.describe "plugins/rigor-activerecord" do
       call_node = Prism.parse("select(:title)").value.statements.body.first
       scope = Object.new
       scope.define_singleton_method(:self_type) { Rigor::Type::Combinator.singleton_of("RandomClass") }
-      expect(plugin.flow_contribution_for(call_node: call_node, scope: scope)).to be_nil
+      scope.define_singleton_method(:environment) { nil }
+      expect(
+        plugin.dynamic_return_type(
+          call_node: call_node, scope: scope,
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+      ).to be_nil
     end
   end
 
@@ -1030,7 +1055,7 @@ RSpec.describe "plugins/rigor-activerecord" do
   end
 
   describe "association coverage — HABTM / polymorphic / composed_of / delegated_type" do
-    def flow_contribution_for_call(index:, source:, receiver_class:)
+    def dynamic_return_type_for_call(index:, source:, receiver_class:)
       plugin = Rigor::Plugin::Activerecord.allocate
       plugin.instance_variable_set(:@model_index, index)
       call_node = Prism.parse(source).value.statements.body.first
@@ -1038,7 +1063,11 @@ RSpec.describe "plugins/rigor-activerecord" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of(receiver_class)
       end
-      plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      scope.define_singleton_method(:environment) { nil }
+      plugin.dynamic_return_type(
+        call_node: call_node, scope: scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
     end
 
     it "records `has_and_belongs_to_many` as a collection association" do
@@ -1095,10 +1124,10 @@ RSpec.describe "plugins/rigor-activerecord" do
 
       it "declines to contribute a (wrong) Nominal type for the polymorphic accessor" do
         _result, index = run_ar_with_index("x = 1\n", models: poly_models, schema: poly_schema)
-        contribution = flow_contribution_for_call(
+        type = dynamic_return_type_for_call(
           index: index, source: "comment.commentable", receiver_class: "Comment"
         )
-        expect(contribution).to be_nil
+        expect(type).to be_nil
       end
     end
 
@@ -1141,10 +1170,10 @@ RSpec.describe "plugins/rigor-activerecord" do
 
       it "contributes `Nominal[ValueClass]` for the aggregation accessor" do
         _result, index = run_ar_with_index("x = 1\n", models: composed_models, schema: composed_schema)
-        contribution = flow_contribution_for_call(
+        type = dynamic_return_type_for_call(
           index: index, source: "account.balance", receiver_class: "Account"
         )
-        expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("Money"))
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Money"))
       end
     end
 
@@ -1289,7 +1318,11 @@ RSpec.describe "plugins/rigor-activerecord" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of(receiver_class)
       end
-      plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      scope.define_singleton_method(:environment) { nil }
+      plugin.dynamic_return_type(
+        call_node: call_node, scope: scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
     end
 
     let(:bool_union) do
@@ -1301,30 +1334,30 @@ RSpec.describe "plugins/rigor-activerecord" do
 
     it "contributes the column value type for a string accessor" do
       _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
-      contribution = column_contribution(index: index, source: "user.name", receiver_class: "User")
+      type = column_contribution(index: index, source: "user.name", receiver_class: "User")
 
-      expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("String"))
     end
 
     it "contributes Integer for the implicit `id` column" do
       _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
-      contribution = column_contribution(index: index, source: "user.id", receiver_class: "User")
+      type = column_contribution(index: index, source: "user.id", receiver_class: "User")
 
-      expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
     end
 
     it "contributes `bool` for a boolean column accessor" do
       _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
-      contribution = column_contribution(index: index, source: "user.admin", receiver_class: "User")
+      type = column_contribution(index: index, source: "user.admin", receiver_class: "User")
 
-      expect(contribution.return_type).to eq(bool_union)
+      expect(type).to eq(bool_union)
     end
 
     it "contributes `bool` for the generated `<column>?` predicate" do
       _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
-      contribution = column_contribution(index: index, source: "user.name?", receiver_class: "User")
+      type = column_contribution(index: index, source: "user.name?", receiver_class: "User")
 
-      expect(contribution.return_type).to eq(bool_union)
+      expect(type).to eq(bool_union)
     end
 
     it "declines for a json / jsonb (`Object`-typed) column" do
@@ -1340,16 +1373,16 @@ RSpec.describe "plugins/rigor-activerecord" do
         end
       SCHEMA
       _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
-      contribution = column_contribution(index: index, source: "account.preferences", receiver_class: "Account")
+      type = column_contribution(index: index, source: "account.preferences", receiver_class: "Account")
 
-      expect(contribution).to be_nil
+      expect(type).to be_nil
     end
 
     it "declines for a method that is neither a column nor an association" do
       _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
-      contribution = column_contribution(index: index, source: "user.totally_unknown", receiver_class: "User")
+      type = column_contribution(index: index, source: "user.totally_unknown", receiver_class: "User")
 
-      expect(contribution).to be_nil
+      expect(type).to be_nil
     end
 
     it "types an accessor end-to-end so a chained typo on the column surfaces" do
@@ -1391,24 +1424,24 @@ RSpec.describe "plugins/rigor-activerecord" do
 
       it "wraps a `t.bigint ..., array: true` accessor in Array[Integer]" do
         _result, index = run_ar_with_index("x = 1\n", models: array_models, schema: array_schema)
-        contribution = column_contribution(index: index, source: "report.status_ids", receiver_class: "Report")
-        expect(contribution.return_type).to eq(
+        type = column_contribution(index: index, source: "report.status_ids", receiver_class: "Report")
+        expect(type).to eq(
           Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
         )
       end
 
       it "wraps a `t.string ..., array: true` accessor in Array[String]" do
         _result, index = run_ar_with_index("x = 1\n", models: array_models, schema: array_schema)
-        contribution = column_contribution(index: index, source: "report.tag_names", receiver_class: "Report")
-        expect(contribution.return_type).to eq(
+        type = column_contribution(index: index, source: "report.tag_names", receiver_class: "Report")
+        expect(type).to eq(
           Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")])
         )
       end
 
       it "wraps a `t.column ..., array: true` accessor in Array[<inner>]" do
         _result, index = run_ar_with_index("x = 1\n", models: array_models, schema: array_schema)
-        contribution = column_contribution(index: index, source: "report.preferences", receiver_class: "Report")
-        expect(contribution.return_type).to eq(
+        type = column_contribution(index: index, source: "report.preferences", receiver_class: "Report")
+        expect(type).to eq(
           Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")])
         )
       end
@@ -1495,7 +1528,11 @@ RSpec.describe "plugins/rigor-activerecord" do
       scope.define_singleton_method(:type_of) do |_node|
         Rigor::Type::Combinator.nominal_of(receiver_class)
       end
-      plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      scope.define_singleton_method(:environment) { nil }
+      plugin.dynamic_return_type(
+        call_node: call_node, scope: scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
     end
 
     let(:scope_models) do
@@ -1527,23 +1564,23 @@ RSpec.describe "plugins/rigor-activerecord" do
 
     it "contributes `ActiveRecord::Relation[Model]` for `Model.where`" do
       _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
-      contribution = relation_contribution(index: index, source: "User.where(admin: true)", receiver_class: "User")
+      type = relation_contribution(index: index, source: "User.where(admin: true)", receiver_class: "User")
 
-      expect(contribution.return_type).to eq(relation_type("User"))
+      expect(type).to eq(relation_type("User"))
     end
 
     it "contributes a relation for a user-declared `scope`" do
       _result, index = run_ar_with_index("x = 1\n", models: scope_models, schema: scope_schema)
-      contribution = relation_contribution(index: index, source: "Post.published", receiver_class: "Post")
+      type = relation_contribution(index: index, source: "Post.published", receiver_class: "Post")
 
-      expect(contribution.return_type).to eq(relation_type("Post"))
+      expect(type).to eq(relation_type("Post"))
     end
 
     it "contributes a relation for a `has_and_belongs_to_many` accessor" do
       _result, index = run_ar_with_index("x = 1\n", models: scope_models, schema: scope_schema)
-      contribution = relation_contribution(index: index, source: "post.tags", receiver_class: "Post")
+      type = relation_contribution(index: index, source: "post.tags", receiver_class: "Post")
 
-      expect(contribution.return_type).to eq(relation_type("Tag"))
+      expect(type).to eq(relation_type("Tag"))
     end
 
     it "re-contributes the relation type for a scope invoked ON a relation" do
@@ -1557,9 +1594,13 @@ RSpec.describe "plugins/rigor-activerecord" do
       post_relation = relation_type("Post")
       scope = Object.new
       scope.define_singleton_method(:type_of) { |_node| post_relation }
-      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      scope.define_singleton_method(:environment) { nil }
+      type = plugin.dynamic_return_type(
+        call_node: call_node, scope: scope,
+        receiver_type: Rigor::Type::Combinator.untyped
+      )
 
-      expect(contribution.return_type).to eq(relation_type("Post"))
+      expect(type).to eq(relation_type("Post"))
     end
 
     it "keeps a chained relation query method type-checking cleanly" do

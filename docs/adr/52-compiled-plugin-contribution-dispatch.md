@@ -40,9 +40,21 @@ file path, memoised per `(rule, path)`, mutually exclusive with `methods:`
 (one name gate, two scopes), nil-path fail-closed; rigor-rspec's let-binding
 `flow_contribution_for` migrated onto it (gate set = `LetScopeIndex#let_names`,
 a safe over-approximation of the block's line-scoped `let_block_at`), gated on
-the end-to-end integration spec + byte-identical demo + GitLab corpus. **Hook
-deletion (slice 5b) is now blocked only on rigor-activerecord.** Slice 6
-(single node-rule walk — independent) remains.
+the end-to-end integration spec + byte-identical demo + GitLab corpus.
+**rigor-activerecord migrated 2026-06-11 — the blocker is RESOLVED, and no new
+gate form was needed**: the 2026-06-11 blocker analysis fixated on `receivers:`
+gating (which the Dynamic-typed model constants defeat), but a **run-time
+`methods:` name gate never reads the receiver type** — the rule block keeps
+AR's own AST-constant / `self_type` / `type_of` resolution (the rigor-sorbet
+shape). The gate set is exactly the union of names AR's four paths can type:
+the static finder names ∪ every scope, association, and column name (+
+`column?` predicates) from the model index — so gating on it is byte-identical
+to the ungated hook by construction. The previously-proposed option A
+(Singleton-typing discovered constants) and option B (AST-keyed gate form) are
+both unnecessary and rejected. Gated on AR's 93-example end-to-end integration
+spec (the suite that caught the reverted `receivers:` attempt) + the GitLab
+corpus. **All five legacy users are now migrated; slice 5b (hook deletion) is
+unblocked.** Slice 6 (single node-rule walk — independent) remains.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -172,7 +184,19 @@ implementation, per the ADR-50 precedent):
   exclusive with `methods:`, nil-path fail-closed); rigor-rspec's let-binding
   rule is its first consumer.
 
-### rigor-activerecord blocker (2026-06-10)
+### rigor-activerecord blocker (2026-06-10) — RESOLVED 2026-06-11
+
+**Resolution: neither option A nor option B was needed.** The blocker below is
+real for `receivers:` gating, but AR fits the slice-4 run-time **`methods:`**
+gate, which never reads the receiver type: the gate set is the union of names
+AR's four paths can type (static finders ∪ scopes ∪ associations ∪ columns +
+`column?` predicates, all enumerable from the model index), and the rule block
+keeps AR's own AST-constant / `self_type` / `type_of` resolution — the same
+shape rigor-sorbet's catalog path uses. Gating on that set is byte-identical to
+the ungated hook by construction (every path's success requires the name to be
+in the set). The original analysis fixated on receiver gating and overlooked
+the name-gate route; recorded here so the failed-attempt record below is read
+with that correction. The historical record:
 
 A first attempt to migrate rigor-activerecord onto the run-time receiver-set
 callable was **made and reverted** — it regressed AR's most common case, caught
@@ -292,10 +316,14 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
    strap + dependabot-core corpora byte-identical.
 4a. **DONE (slice 5a, 2026-06-11)** — per-file `file_methods:` gate form +
    migrate rigor-rspec's let-binding rule (demo + GitLab corpus
-   byte-identical, end-to-end spec green). Remaining: AR's AST-keyed gate
-   form (design open — see "rigor-activerecord blocker").
+   byte-identical, end-to-end spec green).
+4b. **DONE (2026-06-11)** — migrate rigor-activerecord via the run-time
+   `methods:` gate (no new gate form needed — see the blocker's RESOLVED
+   header; 93-example end-to-end spec + GitLab corpus byte-identical). All
+   five legacy users migrated.
 5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the
    plugin-author skill, `examples/` walkthroughs, CHANGELOG migration note.
+   **Unblocked as of 4b.**
 6. WD4 single-walk node rules (independent of 2–5; may land any time after 1).
 
 ## Rejected / deferred alternatives

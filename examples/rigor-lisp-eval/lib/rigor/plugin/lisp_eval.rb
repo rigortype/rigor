@@ -62,7 +62,7 @@ module Rigor
       # (receiver + method-name match) is the gate the old hand-rolled
       # walker applied, so the plugin no longer ships its own traversal;
       # the `Walker` retains only the receiver-matching helper that this
-      # gate and `#flow_contribution_for` share.
+      # gate and `#dynamic_return` block share.
       node_rule Prism::CallNode do |node, _scope, path|
         next [] unless eval_call?(node)
 
@@ -70,34 +70,25 @@ module Rigor
         found ? [found] : []
       end
 
-      # v0.1.2 — return-type contribution. The same Interpreter
-      # walk feeds two channels: this hook returns the inferred
-      # carrier so downstream call sites narrow naturally
-      # (`Lisp.eval([:+, 1, 2]).bit_length` resolves on
-      # `Integer`), while `#diagnostics_for_file` keeps the
-      # human-facing trace per the README's "the diagnostic
-      # stays as a user-facing trace" promise.
-      def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
-        return nil unless eval_call?(call_node)
+      # ADR-52 slice 4 — return-type contribution via the compiled
+      # dispatch DSL. The `methods:` callable resolves after `#init`
+      # so `@method_name` is available. The block re-checks `eval_call?`
+      # for the AST receiver guard, then delegates to the Interpreter;
+      # the engine wraps the bare `Rigor::Type` return in a
+      # `FlowContribution` automatically.
+      dynamic_return methods: -> { [@method_name] } do |call_node, _scope|
+        next nil unless eval_call?(call_node)
 
         argument = first_argument(call_node)
-        return nil if argument.nil?
+        next nil if argument.nil?
 
         result = @interpreter.evaluate(argument)
-        return nil if result.is_a?(Interpreter::TypeError) || result.is_a?(Interpreter::UnknownExpression)
+        next nil if result.is_a?(Interpreter::TypeError) || result.is_a?(Interpreter::UnknownExpression)
 
         return_type = type_for_result(result)
-        return nil if return_type.nil?
+        next nil if return_type.nil?
 
-        Rigor::FlowContribution.new(
-          return_type: return_type,
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.#{manifest.id}",
-            plugin_id: manifest.id,
-            node: call_node,
-            descriptor: nil
-          )
-        )
+        return_type
       end
 
       private

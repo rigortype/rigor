@@ -80,41 +80,35 @@ module Rigor
         found ? [found] : []
       end
 
-      # v0.1.2 — return-type contribution. Runtime `validate`
-      # returns its `value` argument when the regex matches and
-      # raises otherwise, so on a successful match we narrow the
-      # call site's return type to the value argument's type
-      # (typically `Constant<String>` after Rigor's literal-
-      # string folding). Mismatches keep the existing
-      # `literal-mismatch` diagnostic and stay at the RBS-level
-      # untyped return — propagating `bot` would silence the
-      # diagnostic-driven feedback the README centres on.
-      def flow_contribution_for(call_node:, scope:)
-        return nil unless validate_call?(call_node)
+      # ADR-52 slice 4 — return-type contribution via the compiled
+      # dispatch DSL. The `methods:` callable resolves after `#init`
+      # so `@method_name` is available. Runtime `validate` returns
+      # its `value` argument when the regex matches and raises
+      # otherwise, so on a successful match we narrow the call
+      # site's return type to the value argument's type (typically
+      # `Constant<String>` after Rigor's literal-string folding).
+      # Mismatches keep the existing `literal-mismatch` diagnostic
+      # and stay at the RBS-level untyped return. The engine wraps
+      # the bare `Rigor::Type` return in a `FlowContribution`
+      # automatically.
+      dynamic_return methods: -> { [@method_name] } do |call_node, scope|
+        next nil unless validate_call?(call_node)
 
         pattern_name = literal_symbol_arg(call_node, 0)
-        return nil if pattern_name.nil?
+        next nil if pattern_name.nil?
 
         pattern = @patterns[pattern_name.to_s]
-        return nil if pattern.nil?
+        next nil if pattern.nil?
 
         value_node = call_node.arguments.arguments[1]
-        return nil if value_node.nil?
+        next nil if value_node.nil?
 
         value_type = scope.type_of(value_node)
-        return nil unless services.type.literal_string_compatible?(value_type)
+        next nil unless services.type.literal_string_compatible?(value_type)
 
-        return nil if literal_mismatch?(value_type, pattern)
+        next nil if literal_mismatch?(value_type, pattern)
 
-        Rigor::FlowContribution.new(
-          return_type: value_type,
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.#{manifest.id}",
-            plugin_id: manifest.id,
-            node: call_node,
-            descriptor: nil
-          )
-        )
+        value_type
       end
 
       private

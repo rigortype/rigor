@@ -278,14 +278,34 @@ module Rigor
       def plugin_emitted_diagnostics(path, root, scope)
         return [] if @plugin_registry.empty?
 
+        # ADR-52 WD4 — single engine-owned node-rule walk per file; the
+        # results are bucketed per plugin (registry order) so emission
+        # stays plugin-major and byte-identical with the per-plugin walk.
+        node_results = node_rule_results_by_plugin(path, root, scope)
+
         @plugin_registry.plugins.flat_map do |plugin|
-          collect_plugin_diagnostics(plugin, path, root, scope)
+          collect_plugin_diagnostics(plugin, path, root, scope, node_results[plugin])
         end
       end
 
-      def collect_plugin_diagnostics(plugin, path, root, scope)
+      def node_rule_results_by_plugin(path, root, scope)
+        walk = @plugin_registry.node_rule_walk
+        return {}.compare_by_identity if walk.empty?
+
+        results = walk.diagnostics_for_file(path: path, scope: scope, root: root)
+        results.each_with_object({}.compare_by_identity) do |result, by_plugin|
+          by_plugin[result.plugin] = result
+        end
+      end
+
+      def collect_plugin_diagnostics(plugin, path, root, scope, node_result)
         raw = Array(plugin.diagnostics_for_file(path: path, scope: scope, root: root))
-        raw += plugin.node_rule_diagnostics(path: path, scope: scope, root: root)
+        # A node-rule context/rule raise isolates the whole plugin's
+        # node-rule contribution, matching the old combined per-plugin
+        # rescue (which discarded `diagnostics_for_file` output too).
+        raise node_result.error if node_result&.error
+
+        raw += node_result.diagnostics if node_result
         raw.map { |diagnostic| stamp_plugin_diagnostic(diagnostic, plugin.manifest.id) }
       rescue StandardError => e
         [plugin_runtime_error_diagnostic(path, plugin, e)]

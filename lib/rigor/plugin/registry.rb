@@ -274,8 +274,16 @@ module Rigor
         @open_receivers_set = @open_receivers.to_set.freeze
         @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
         @contracts_by_path = {}
+        # ADR-52 WD4 — the single engine-owned node-rule walk, compiled
+        # once per run from the node-rule plugin subset (registry order).
+        # The runner reuses it for every file; it builds fresh per-file
+        # state internally, so it is safe to freeze and share.
+        @node_rule_walk = NodeRuleWalk.new(@plugins)
         freeze
       end
+
+      # ADR-52 WD4 — the per-run node-rule walk (see {NodeRuleWalk}).
+      attr_reader :node_rule_walk
 
       # ADR-15 Phase 3 — build a fresh Registry from the supplied
       # blueprint set by replaying {Blueprint#materialize} per

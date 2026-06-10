@@ -250,6 +250,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     hkt_overlay_registry()
     ids()
     load_errors()
+    node_rule_walk()
     open_receiver?(req:class_name)
     open_receivers()
     plugins()

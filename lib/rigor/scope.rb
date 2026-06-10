@@ -2,6 +2,7 @@
 
 require_relative "type"
 require_relative "environment"
+require_relative "scope/discovery_index"
 require_relative "analysis/fact_store"
 require_relative "analysis/dependency_recorder"
 require_relative "inference/expression_typer"
@@ -17,15 +18,29 @@ module Rigor
   # See docs/internal-spec/inference-engine.md for the binding contract.
   # rubocop:disable Metrics/ClassLength,Metrics/ParameterLists
   class Scope
-    attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
+    attr_reader :environment, :locals, :fact_store, :self_type,
                 :ivars, :cvars, :globals,
-                :class_ivars, :class_cvars, :program_globals,
-                :discovered_classes, :in_source_constants, :discovered_methods,
-                :discovered_def_nodes, :discovered_def_sources, :discovered_method_visibilities,
-                :discovered_superclasses, :discovered_includes, :discovered_class_sources,
-                :data_member_layouts,
                 :indexed_narrowings, :method_chain_narrowings,
-                :source_path
+                :source_path, :discovery
+
+    # ADR-53 Track A — the seed-time discovery tables live on the
+    # {DiscoveryIndex} the scope carries by a single reference; the
+    # per-table readers stay on Scope so engine call sites and plugins
+    # are unaffected by the extraction.
+    def declared_types = @discovery.declared_types
+    def class_ivars = @discovery.class_ivars
+    def class_cvars = @discovery.class_cvars
+    def program_globals = @discovery.program_globals
+    def discovered_classes = @discovery.discovered_classes
+    def in_source_constants = @discovery.in_source_constants
+    def discovered_methods = @discovery.discovered_methods
+    def discovered_def_nodes = @discovery.discovered_def_nodes
+    def discovered_def_sources = @discovery.discovered_def_sources
+    def discovered_method_visibilities = @discovery.discovered_method_visibilities
+    def discovered_superclasses = @discovery.discovered_superclasses
+    def discovered_includes = @discovery.discovered_includes
+    def discovered_class_sources = @discovery.discovered_class_sources
+    def data_member_layouts = @discovery.data_member_layouts
 
     # Narrowing key for an indexed read `receiver[key]` where both
     # the receiver and the key are stable enough to address. The
@@ -60,13 +75,10 @@ module Rigor
     # multi-hop loses the LoD guarantee).
     ChainKey = Data.define(:receiver_kind, :receiver_name, :method_name)
 
-    EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
-    EMPTY_CLASS_BINDINGS = {}.freeze
     EMPTY_INDEXED_NARROWINGS = {}.freeze
     EMPTY_CHAIN_NARROWINGS = {}.freeze
-    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS,
-                     :EMPTY_CLASS_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
+    private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS
 
     class << self
@@ -80,23 +92,10 @@ module Rigor
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
       self_type: nil,
-      declared_types: EMPTY_DECLARED_TYPES,
       ivars: EMPTY_VAR_BINDINGS,
       cvars: EMPTY_VAR_BINDINGS,
       globals: EMPTY_VAR_BINDINGS,
-      class_ivars: EMPTY_CLASS_BINDINGS,
-      class_cvars: EMPTY_CLASS_BINDINGS,
-      program_globals: EMPTY_VAR_BINDINGS,
-      discovered_classes: EMPTY_VAR_BINDINGS,
-      in_source_constants: EMPTY_VAR_BINDINGS,
-      discovered_methods: EMPTY_CLASS_BINDINGS,
-      discovered_def_nodes: EMPTY_CLASS_BINDINGS,
-      discovered_def_sources: EMPTY_CLASS_BINDINGS,
-      discovered_method_visibilities: EMPTY_CLASS_BINDINGS,
-      discovered_superclasses: EMPTY_CLASS_BINDINGS,
-      discovered_includes: EMPTY_CLASS_BINDINGS,
-      discovered_class_sources: EMPTY_CLASS_BINDINGS,
-      data_member_layouts: EMPTY_CLASS_BINDINGS,
+      discovery: DiscoveryIndex::EMPTY,
       indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
       method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
       source_path: nil
@@ -105,23 +104,10 @@ module Rigor
       @locals = locals
       @fact_store = fact_store
       @self_type = self_type
-      @declared_types = declared_types
       @ivars = ivars
       @cvars = cvars
       @globals = globals
-      @class_ivars = class_ivars
-      @class_cvars = class_cvars
-      @program_globals = program_globals
-      @discovered_classes = discovered_classes
-      @in_source_constants = in_source_constants
-      @discovered_methods = discovered_methods
-      @discovered_def_nodes = discovered_def_nodes
-      @discovered_def_sources = discovered_def_sources
-      @discovered_method_visibilities = discovered_method_visibilities
-      @discovered_superclasses = discovered_superclasses
-      @discovered_includes = discovered_includes
-      @discovered_class_sources = discovered_class_sources
-      @data_member_layouts = data_member_layouts
+      @discovery = discovery
       @indexed_narrowings = indexed_narrowings
       @method_chain_narrowings = method_chain_narrowings
       @source_path = source_path
@@ -173,6 +159,13 @@ module Rigor
       rebuild(source_path: path)
     end
 
+    # ADR-53 Track A — swaps the whole discovery index in one transition.
+    # The canonical seeding path; the per-table `with_discovered_*` writers
+    # below are shims over it and are queued for removal in slice A2.
+    def with_discovery(index)
+      rebuild(discovery: index)
+    end
+
     # Slice A-declarations. Returns a scope that carries an
     # identity-comparing Hash of `Prism::Node => Rigor::Type`
     # overrides. `ExpressionTyper#type_of(node)` MUST consult
@@ -187,7 +180,7 @@ module Rigor
     # `with_local` / `with_fact` / `with_self_type` carry it
     # transparently.
     def with_declared_types(table)
-      rebuild(declared_types: table)
+      rebuild(discovery: @discovery.with(declared_types: table))
     end
 
     # Slice 7 phase 1 — instance/class/global variable bindings.
@@ -243,11 +236,11 @@ module Rigor
     def class_ivars_for(class_name)
       return EMPTY_VAR_BINDINGS if class_name.nil?
 
-      @class_ivars[class_name.to_s] || EMPTY_VAR_BINDINGS
+      @discovery.class_ivars[class_name.to_s] || EMPTY_VAR_BINDINGS
     end
 
     def with_class_ivars(table)
-      rebuild(class_ivars: table)
+      rebuild(discovery: @discovery.with(class_ivars: table))
     end
 
     # Slice 7 phase 6 — class-level cvar accumulator (same shape
@@ -257,11 +250,11 @@ module Rigor
     def class_cvars_for(class_name)
       return EMPTY_VAR_BINDINGS if class_name.nil?
 
-      @class_cvars[class_name.to_s] || EMPTY_VAR_BINDINGS
+      @discovery.class_cvars[class_name.to_s] || EMPTY_VAR_BINDINGS
     end
 
     def with_class_cvars(table)
-      rebuild(class_cvars: table)
+      rebuild(discovery: @discovery.with(class_cvars: table))
     end
 
     # Slice 7 phase 6 — program-level globals accumulator.
@@ -271,7 +264,7 @@ module Rigor
     # plus the top-level program scope. `ScopeIndexer` populates
     # it from a single program-wide pre-pass.
     def with_program_globals(table)
-      rebuild(program_globals: table)
+      rebuild(discovery: @discovery.with(program_globals: table))
     end
 
     # Slice 7 phase 7 — in-source class discovery. Maps a
@@ -283,7 +276,7 @@ module Rigor
     # `ScopeIndexer` from every `Prism::ClassNode` and
     # `Prism::ModuleNode` it walks.
     def with_discovered_classes(table)
-      rebuild(discovered_classes: table)
+      rebuild(discovery: @discovery.with(discovered_classes: table))
     end
 
     # Slice 7 phase 9 — in-source constant-value tracking.
@@ -298,7 +291,7 @@ module Rigor
     # precedence: a constant defined in user code is the
     # authoritative value).
     def with_in_source_constants(table)
-      rebuild(in_source_constants: table)
+      rebuild(discovery: @discovery.with(in_source_constants: table))
     end
 
     # Slice 7 phase 12 — in-source method discovery. Maps a
@@ -311,7 +304,7 @@ module Rigor
     # user has defined dynamically, even when no RBS sig
     # describes them.
     def discovered_method?(class_name, method_name, kind)
-      table = @discovered_methods[class_name.to_s]
+      table = @discovery.discovered_methods[class_name.to_s]
       return false unless table
 
       table[method_name.to_sym] == kind
@@ -332,7 +325,7 @@ module Rigor
     end
 
     def with_discovered_methods(table)
-      rebuild(discovered_methods: table)
+      rebuild(discovery: @discovery.with(discovered_methods: table))
     end
 
     # v0.0.2 #5 — per-class table mapping
@@ -345,7 +338,7 @@ module Rigor
     # inference when the receiver class is user-defined and
     # has no RBS sig.
     def user_def_for(class_name, method_name)
-      table = @discovered_def_nodes[class_name.to_s]
+      table = @discovery.discovered_def_nodes[class_name.to_s]
       node = table && table[method_name.to_sym]
       record_cross_file_method(class_name, method_name, node) if Analysis::DependencyRecorder.active?
       node
@@ -361,7 +354,7 @@ module Rigor
         # ADR-46 slice 4 — pass the symbol so the recorder tracks this as a
         # method-call (symbol-granularity) edge rather than a file-level edge.
         Analysis::DependencyRecorder.read_site(
-          @discovered_def_sources.dig(class_name.to_s, method_name.to_sym),
+          @discovery.discovered_def_sources.dig(class_name.to_s, method_name.to_sym),
           "#{class_name}##{method_name}"
         )
       else
@@ -378,7 +371,7 @@ module Rigor
     # consumers should treat its presence as an opaque
     # implementation detail and go through this accessor.
     def top_level_def_for(method_name)
-      table = @discovered_def_nodes[Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY]
+      table = @discovery.discovered_def_nodes[Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY]
       node = table && table[method_name.to_sym]
       record_cross_file_toplevel(method_name, node) if Analysis::DependencyRecorder.active?
       node
@@ -396,7 +389,7 @@ module Rigor
       key = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
       if node
         Analysis::DependencyRecorder.read_site(
-          @discovered_def_sources.dig(key, method_name.to_sym),
+          @discovery.discovered_def_sources.dig(key, method_name.to_sym),
           "#{key}##{method_name}"
         )
       else
@@ -406,7 +399,7 @@ module Rigor
     private :record_cross_file_toplevel
 
     def with_discovered_def_nodes(table)
-      rebuild(discovered_def_nodes: table)
+      rebuild(discovery: @discovery.with(discovered_def_nodes: table))
     end
 
     # Companion to {#user_def_for}: returns the `"path:line"` where
@@ -420,14 +413,14 @@ module Rigor
     # can point at `pre_eval:` (ADR-17) instead of reading as a bare
     # unresolved call.
     def user_def_site_for(class_name, method_name)
-      table = @discovered_def_sources[class_name.to_s]
+      table = @discovery.discovered_def_sources[class_name.to_s]
       return nil unless table
 
       table[method_name.to_sym]
     end
 
     def with_discovered_def_sources(table)
-      rebuild(discovered_def_sources: table)
+      rebuild(discovery: @discovery.with(discovered_def_sources: table))
     end
 
     # ADR-24 slice 2 — per-class table mapping a fully
@@ -442,11 +435,11 @@ module Rigor
     # walk time against the call's lexical nesting.
     def superclass_of(class_name)
       record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
-      @discovered_superclasses[class_name.to_s]
+      @discovery.discovered_superclasses[class_name.to_s]
     end
 
     def with_discovered_superclasses(table)
-      rebuild(discovered_superclasses: table)
+      rebuild(discovery: @discovery.with(discovered_superclasses: table))
     end
 
     # ADR-48 — per-class table mapping a fully qualified class name to its
@@ -458,7 +451,7 @@ module Rigor
     # `Singleton[Point]` receiver materialises a precise member instance.
     # Returns nil when the class has no recorded layout.
     def data_member_layout(class_name)
-      layout = @data_member_layouts[class_name.to_s]
+      layout = @discovery.data_member_layouts[class_name.to_s]
       # Record the ancestry dependency only on a hit — DataFolding consults
       # this for every `Singleton[*].new`, and a miss (the common case: an
       # ordinary class) must not manufacture a spurious cross-file edge.
@@ -467,7 +460,7 @@ module Rigor
     end
 
     def with_data_member_layouts(table)
-      rebuild(data_member_layouts: table)
+      rebuild(discovery: @discovery.with(data_member_layouts: table))
     end
 
     # ADR-24 slice 2 — per-class/module table mapping a fully
@@ -481,11 +474,11 @@ module Rigor
     # are resolved to qualified classes at walk time.
     def includes_of(class_name)
       record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
-      @discovered_includes[class_name.to_s] || []
+      @discovery.discovered_includes[class_name.to_s] || []
     end
 
     def with_discovered_includes(table)
-      rebuild(discovered_includes: table)
+      rebuild(discovery: @discovery.with(discovered_includes: table))
     end
 
     # ADR-46 slice 1 — per-class table mapping a fully qualified user
@@ -500,7 +493,7 @@ module Rigor
     # (a superclass read also pulls in the include-declaring files) — the
     # conservative direction ADR-46 mandates.
     def with_discovered_class_sources(table)
-      rebuild(discovered_class_sources: table)
+      rebuild(discovery: @discovery.with(discovered_class_sources: table))
     end
 
     # Records, for a resolved cross-class ancestry read, every file that
@@ -509,7 +502,7 @@ module Rigor
     # stdlib / gem names never appear in the source map). Gated by the
     # caller on the recorder being active.
     def record_class_dependency(class_name)
-      sites = @discovered_class_sources[class_name.to_s]
+      sites = @discovery.discovered_class_sources[class_name.to_s]
       return if sites.nil?
 
       sites.each { |site| Analysis::DependencyRecorder.read_site(site) }
@@ -526,14 +519,14 @@ module Rigor
     # so explicit-non-self calls to a private method surface
     # a diagnostic.
     def discovered_method_visibility(class_name, method_name)
-      table = @discovered_method_visibilities[class_name.to_s]
+      table = @discovery.discovered_method_visibilities[class_name.to_s]
       return nil unless table
 
       table[method_name.to_sym]
     end
 
     def with_discovered_method_visibilities(table)
-      rebuild(discovered_method_visibilities: table)
+      rebuild(discovery: @discovery.with(discovered_method_visibilities: table))
     end
 
     # Closes the "`params[:f] ||= []; params[:f] << x`" precision
@@ -674,16 +667,8 @@ module Rigor
 
     def rebuild(
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
-      declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
-      class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
-      discovered_classes: @discovered_classes, in_source_constants: @in_source_constants,
-      discovered_methods: @discovered_methods, discovered_def_nodes: @discovered_def_nodes,
-      discovered_def_sources: @discovered_def_sources,
-      discovered_method_visibilities: @discovered_method_visibilities,
-      discovered_superclasses: @discovered_superclasses,
-      discovered_includes: @discovered_includes,
-      discovered_class_sources: @discovered_class_sources,
-      data_member_layouts: @data_member_layouts,
+      ivars: @ivars, cvars: @cvars, globals: @globals,
+      discovery: @discovery,
       indexed_narrowings: @indexed_narrowings,
       method_chain_narrowings: @method_chain_narrowings,
       source_path: @source_path
@@ -691,20 +676,8 @@ module Rigor
       self.class.new(
         environment: environment, locals: locals,
         fact_store: fact_store, self_type: self_type,
-        declared_types: declared_types,
         ivars: ivars, cvars: cvars, globals: globals,
-        class_ivars: class_ivars, class_cvars: class_cvars,
-        program_globals: program_globals,
-        discovered_classes: discovered_classes,
-        in_source_constants: in_source_constants,
-        discovered_methods: discovered_methods,
-        discovered_def_nodes: discovered_def_nodes,
-        discovered_def_sources: discovered_def_sources,
-        discovered_method_visibilities: discovered_method_visibilities,
-        discovered_superclasses: discovered_superclasses,
-        discovered_includes: discovered_includes,
-        discovered_class_sources: discovered_class_sources,
-        data_member_layouts: data_member_layouts,
+        discovery: discovery,
         indexed_narrowings: indexed_narrowings,
         method_chain_narrowings: method_chain_narrowings,
         source_path: source_path
@@ -733,23 +706,10 @@ module Rigor
         locals: joined_locals.freeze,
         fact_store: fact_store.join(other.fact_store),
         self_type: self_type == other.self_type ? self_type : nil,
-        declared_types: declared_types,
         ivars: joined_ivars,
         cvars: joined_cvars,
         globals: joined_globals,
-        class_ivars: class_ivars,
-        class_cvars: class_cvars,
-        program_globals: program_globals,
-        discovered_classes: discovered_classes,
-        in_source_constants: in_source_constants,
-        discovered_methods: discovered_methods,
-        discovered_def_nodes: discovered_def_nodes,
-        discovered_def_sources: discovered_def_sources,
-        discovered_method_visibilities: discovered_method_visibilities,
-        discovered_superclasses: discovered_superclasses,
-        discovered_includes: discovered_includes,
-        discovered_class_sources: discovered_class_sources,
-        data_member_layouts: data_member_layouts,
+        discovery: @discovery,
         indexed_narrowings: join_bindings(@indexed_narrowings, other.indexed_narrowings),
         method_chain_narrowings: join_bindings(@method_chain_narrowings, other.method_chain_narrowings),
         source_path: source_path

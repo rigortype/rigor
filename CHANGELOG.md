@@ -30,6 +30,7 @@ cycles live in dedicated archives:
   - It augments only the default `text` output — an explicit `--format` is left untouched — and is fully suppressible with `--no-ci-detect` or `RIGOR_CI_DETECT=0`.
 - **[docs]** Copy-paste CI setup templates under [`docs/manual/ci-templates/`](docs/manual/ci-templates/) — SARIF / annotations / reviewdog `.github/workflows/rigor.yml` variants, a `.gitlab-ci.yml`, and a generic recipe — wiring the new formats into a Ruby-4.0 isolated job (the templates [ADR-27](docs/adr/27-tool-distribution-model.md) § WD3 left queued). The CI manual chapter ([docs/manual/11-ci.md](docs/manual/11-ci.md)) documents each.
 - **[skill]** New bundled `rigor-ci-setup` Agent Skill (discoverable via `rigor skill`) that walks a project through wiring Rigor into its CI — choosing the platform, the output format, and the optional reviewdog path via [`reviewdog/action-setup`](https://github.com/reviewdog/action-setup).
+- **[plugin-api]** `Rigor::Scope#discovery` / `#with_discovery` expose the new immutable `Scope::DiscoveryIndex` — the single object now carrying every seed-time discovery table (`discovered_*`, `declared_types`, the class-level accumulators, `data_member_layouts`) that control flow never varies ([ADR-53](docs/adr/53-scope-discovery-index-separation.md) Track A). All existing per-table readers and `with_discovered_*` writers keep working unchanged; the writers are now shims over `with_discovery`.
 
 ### Changed
 
@@ -37,7 +38,7 @@ cycles live in dedicated archives:
 
 ### Fixed
 
-- **[engine]** `Data.define` member folding now works inside method bodies. The method-entry scope dropped the member-layout table recorded at index time, so a member read like `Point.new(3, 4).x` inside a `def` silently degraded to `Dynamic[top]` instead of folding to `3` ([ADR-48](docs/adr/48-data-struct-value-folding.md)). The restored precision also taught acceptance that a folded member instance is a value of its tagging class, so a declared return such as `AssertEffect?` accepts it without a spurious `def.return-type-mismatch`.
+- **[engine]** `Data.define` member folding now works inside method bodies. The method-entry scope dropped the member-layout table recorded at index time, so a member read like `Point.new(3, 4).x` inside a `def` silently degraded to `Dynamic[top]` instead of folding to `3` ([ADR-48](docs/adr/48-data-struct-value-folding.md)). The restored precision also taught acceptance that a folded member instance is a value of its tagging class, so a declared return such as `AssertEffect?` accepts it without a spurious `def.return-type-mismatch`. The [ADR-53](docs/adr/53-scope-discovery-index-separation.md) Track A extraction then closed the same gap structurally at the second hand-copy site (re-typed user-method bodies, which had also been dropping the method-visibility table): nested body scopes now inherit the whole discovery index by reference, so a table can no longer be lost to a missed per-field copy.
 
 ## [0.1.17] - 2026-06-06
 

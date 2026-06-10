@@ -1565,7 +1565,7 @@ module Rigor
       # nil when the parameter shape is too complex for the
       # first-iteration binder (rest args, keyword args,
       # block params, etc.).
-      def build_user_method_body_scope(def_node, receiver, arg_types) # rubocop:disable Metrics/AbcSize
+      def build_user_method_body_scope(def_node, receiver, arg_types)
         params = def_node.parameters
         required = params&.requireds || []
         return nil unless params.nil? || user_method_param_shape_simple?(params)
@@ -1578,30 +1578,17 @@ module Rigor
         locals = {}
         required.each_with_index { |param, index| locals[param.name.to_sym] = arg_types[index] }
 
-        # Construct the body scope in a SINGLE allocation. The previous
+        # Construct the body scope in a SINGLE allocation — the previous
         # `Scope.empty.with_*.with_*…` chain allocated a fresh frozen Scope
-        # per field — ~12 throwaway Scopes to build one body scope, run per
-        # user-method-call inference, which made these `with_*` the dominant
-        # `Scope#rebuild` source. Each field here is a plain inherited
-        # reference (the project-wide indexes + self_type); every unset
-        # field defaults to the same empty binding the old chain left it at,
-        # so the result is identical (ADR-44).
+        # per field, run per user-method-call inference (ADR-44). The
+        # discovery index is inherited whole by reference (ADR-53 Track A);
+        # the hand-copied per-field list this replaces had silently dropped
+        # `data_member_layouts` and `discovered_method_visibilities`.
         Scope.new(
           environment: scope.environment,
           locals: locals.freeze,
           self_type: receiver,
-          declared_types: scope.declared_types,
-          discovered_classes: scope.discovered_classes,
-          in_source_constants: scope.in_source_constants,
-          class_ivars: scope.class_ivars,
-          class_cvars: scope.class_cvars,
-          program_globals: scope.program_globals,
-          discovered_methods: scope.discovered_methods,
-          discovered_def_nodes: scope.discovered_def_nodes,
-          discovered_def_sources: scope.discovered_def_sources,
-          discovered_superclasses: scope.discovered_superclasses,
-          discovered_includes: scope.discovered_includes,
-          discovered_class_sources: scope.discovered_class_sources
+          discovery: scope.discovery
         )
       end
 

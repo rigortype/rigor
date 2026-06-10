@@ -1834,31 +1834,18 @@ module Rigor
       # ScopeIndexer-populated declaration overrides
       # (`Prism::ConstantReadNode` for `module Foo` headers, etc.)
       # remain reachable from inside nested bodies.
-      def build_fresh_body_scope # rubocop:disable Metrics/AbcSize
-        # Single allocation instead of a 13-deep `with_*` chain — this runs
-        # per class/method body on the main walk, so the chain's dozen
-        # throwaway intermediate Scopes were a top `Scope#rebuild` source.
-        # Local-empty by design; every field is a plain inherited reference
-        # and the unset fields default to the same empty bindings the chain
-        # (from `Scope.empty`) left them at, so the scope is identical (ADR-44).
+      def build_fresh_body_scope
+        # Single allocation instead of a deep `with_*` chain — this runs
+        # per class/method body on the main walk, so the chain's throwaway
+        # intermediate Scopes were a top `Scope#rebuild` source (ADR-44).
+        # Local-empty by design; the discovery index is inherited whole by
+        # reference (ADR-53 Track A), so a table added to the index can no
+        # longer be dropped here by a missed per-field copy.
         Scope.new(
           environment: scope.environment,
           locals: {}.freeze,
           source_path: scope.source_path,
-          declared_types: scope.declared_types,
-          discovered_classes: scope.discovered_classes,
-          in_source_constants: scope.in_source_constants,
-          class_ivars: scope.class_ivars,
-          class_cvars: scope.class_cvars,
-          program_globals: scope.program_globals,
-          discovered_methods: scope.discovered_methods,
-          discovered_def_nodes: scope.discovered_def_nodes,
-          discovered_def_sources: scope.discovered_def_sources,
-          discovered_superclasses: scope.discovered_superclasses,
-          discovered_includes: scope.discovered_includes,
-          discovered_class_sources: scope.discovered_class_sources,
-          discovered_method_visibilities: scope.discovered_method_visibilities,
-          data_member_layouts: scope.data_member_layouts
+          discovery: scope.discovery
         )
       end
 

@@ -60,6 +60,16 @@ State changes MUST be expressed as new scopes returned from explicit transition 
 
 The fact-store buckets are an internal optimisation boundary. `Scope` may expose fact queries and fact-adding transitions, but callers MUST NOT mutate bucket storage in place.
 
+### Discovery Index (ADR-53 Track A)
+
+Alongside its flow state, every `Rigor::Scope` snapshot carries a single immutable **discovery index** (`Rigor::Scope::DiscoveryIndex`) holding the seed-time discovery tables — `declared_types`, `class_ivars`, `class_cvars`, `program_globals`, `discovered_classes`, `in_source_constants`, `discovered_methods`, `discovered_def_nodes`, `discovered_def_sources`, `discovered_method_visibilities`, `discovered_superclasses`, `discovered_includes`, `discovered_class_sources`, and `data_member_layouts`. Membership is fixed by the criterion in [ADR-53](../adr/53-scope-discovery-index-separation.md): a field belongs in the index **iff no flow transition ever produces a scope whose value for that field differs from its seed**.
+
+- The index MUST be immutable; a seeded index is derived through `DiscoveryIndex#with`.
+- Every flow transition (`with_local`, `with_fact`, `join`, …) MUST carry the receiver's index through to the result by reference, unexamined. `Scope#==` MUST NOT compare the index (it is ambient context, not flow state).
+- `Scope` MUST keep exposing the per-table readers (`user_def_for`, `superclass_of`, `includes_of`, `discovered_method?`, `data_member_layout`, `class_ivars_for`, …) as delegates, so engine call sites and plugins are independent of the storage split. The ADR-46 dependency-recording instrumentation lives in those delegates and they MUST remain the only read path.
+- `Scope#with_discovery(index)` is the canonical seeding transition. The per-table `with_discovered_*` writers are compatibility shims over it (scheduled for removal in ADR-53 slice A2).
+- A scope constructed for a nested body (method-entry, class-body, or re-typed user-method body) MUST inherit the parent scope's index whole — never by per-table copy, which is how `data_member_layouts` was silently dropped twice before the extraction.
+
 ## Fail-Soft Policy
 
 When the typer encounters a node it does not yet recognise — either a Prism node whose class the engine has not yet wired in or a `Rigor::AST::Node` of an unknown kind — `Scope#type_of(node)` MUST return `Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.top)`, the canonical `Dynamic[Top]` representation of "untyped, unchecked".

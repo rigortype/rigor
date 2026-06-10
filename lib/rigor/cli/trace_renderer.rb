@@ -96,17 +96,16 @@ module Rigor
           raw = gutter + line
           painted = (current ? BOLD + gutter + RESET : DIM + gutter + RESET) + paint_line(line, location, number)
           rows << [raw, painted]
-          rows << marker_row(gutter.length, location) if current
+          rows << marker_row(gutter.length, line, location) if current
         end
         rows
       end
 
-      def marker_row(gutter_width, location)
-        start_col = location[:start_column]
-        end_col = location[:end_line] == location[:start_line] ? location[:end_column] : start_col + 1
-        width = [end_col - start_col, 1].max
-        raw = (" " * (gutter_width + start_col)) + ("▔" * width)
-        [raw, (" " * (gutter_width + start_col)) + BOLD + ("▔" * width) + RESET]
+      def marker_row(gutter_width, line, location)
+        before, slice, = split_at_range(line, location)
+        indent = " " * (gutter_width + before.length)
+        width = [slice.length, 1].max
+        [indent + ("▔" * width), indent + BOLD + ("▔" * width) + RESET]
       end
 
       # Highlights the in-range slice with reverse video; everything else
@@ -115,13 +114,22 @@ module Rigor
       def paint_line(line, location, number)
         return PrismColorizer.colorize(line) unless location && number == location[:start_line]
 
-        from = [location[:start_column], line.length].min
-        to = location[:end_line] == location[:start_line] ? [location[:end_column], line.length].min : line.length
-        return PrismColorizer.colorize(line) if to <= from
+        before, slice, after = split_at_range(line, location)
+        return PrismColorizer.colorize(line) if slice.empty?
 
-        PrismColorizer.colorize(line[0...from]).chomp +
-          HIGHLIGHT + line[from...to] + RESET +
-          PrismColorizer.colorize(line[to..] || "").chomp
+        PrismColorizer.colorize(before).chomp +
+          HIGHLIGHT + slice + RESET +
+          PrismColorizer.colorize(after).chomp
+      end
+
+      # Prism columns are BYTE columns — split the line with byteslice
+      # so a multibyte character earlier on the line cannot shift (or
+      # overrun) the highlight range. Returns `[before, slice, after]`.
+      def split_at_range(line, location)
+        from = [location[:start_column], line.bytesize].min
+        to = location[:end_line] == location[:start_line] ? [location[:end_column], line.bytesize].min : line.bytesize
+        to = from if to < from
+        [line.byteslice(0, from), line.byteslice(from, to - from), line.byteslice(to, line.bytesize - to) || ""]
       end
 
       def scope_panel_rows(locals)

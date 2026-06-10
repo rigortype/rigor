@@ -70,6 +70,22 @@ RSpec.describe Rigor::CLI::TraceCommand do
     end
   end
 
+  it "replays a file containing multibyte characters (Prism offsets are bytes)" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "multibyte.rb")
+      # An em dash before the code shifts every later byte offset off
+      # its character index; a multibyte literal exercises the
+      # highlight slicing itself.
+      File.write(path, "# コメント — note\na = \"あ\"\nb = a + \"い\"\n")
+
+      status, out, err = run_cli("trace", path)
+
+      expect(status).to eq(0)
+      expect(err).to eq("")
+      expect(out).to include("bind     a ← ")
+    end
+  end
+
   it "fails with a message when the file does not exist" do
     status, _out, err = run_cli("trace", "no_such_file.rb")
 

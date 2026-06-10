@@ -41,12 +41,19 @@ module Rigor
       # @return [String] the source with ANSI colour escapes, or
       #   the input unchanged when lexing surfaces an error.
       def colorize(source)
+        # Sources read under a POSIX locale arrive tagged US-ASCII even
+        # when they carry UTF-8 bytes; retag so the token regexes below
+        # do not raise on multibyte comments.
+        source = source.dup.force_encoding(Encoding::UTF_8) unless source.encoding == Encoding::UTF_8
         result = Prism.lex(source)
         return source unless result.errors.empty?
 
         render(source, result.value)
       end
 
+      # Prism token offsets are BYTE offsets — slice with byteslice, or
+      # any multibyte character earlier in the source shifts every
+      # subsequent token boundary.
       def render(source, lexed)
         out = +""
         offset = 0
@@ -54,15 +61,15 @@ module Rigor
         lexed.each do |entry|
           token = entry.first
           location = token.location
-          out << source[offset...location.start_offset]
+          out << (source.byteslice(offset, [location.start_offset - offset, 0].max) || "")
           break if token.type == :EOF
 
-          text = source[location.start_offset...location.end_offset]
+          text = source.byteslice(location.start_offset, location.end_offset - location.start_offset) || ""
           out << paint(text, effective_category(token.type, previous_type))
           offset = location.end_offset
           previous_type = token.type
         end
-        out << (source[offset..] || "")
+        out << (source.byteslice(offset, source.bytesize - offset) || "")
         out
       end
 

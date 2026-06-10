@@ -71,7 +71,7 @@ module Rigor
 
       def execute(file:, options:)
         configuration = Configuration.load(options.fetch(:config))
-        source = File.read(file)
+        source = File.read(file, encoding: Encoding::UTF_8)
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 

@@ -1857,7 +1857,8 @@ module Rigor
           discovered_superclasses: scope.discovered_superclasses,
           discovered_includes: scope.discovered_includes,
           discovered_class_sources: scope.discovered_class_sources,
-          discovered_method_visibilities: scope.discovered_method_visibilities
+          discovered_method_visibilities: scope.discovered_method_visibilities,
+          data_member_layouts: scope.data_member_layouts
         )
       end
 

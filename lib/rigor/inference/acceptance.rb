@@ -243,6 +243,12 @@ module Rigor
           when Type::HashShape
             accepts(self_type, project_hash_shape_to_nominal(other_type), mode: mode)
               .with_reason("projected HashShape to Nominal[Hash]")
+          when Type::DataInstance
+            # ADR-48: a class-tagged member instance is exactly one value of
+            # its tagging class, so it projects to that class's nominal (the
+            # anonymous local-bound form projects to `Data` itself).
+            accepts(self_type, project_data_instance_to_nominal(other_type), mode: mode)
+              .with_reason("projected DataInstance to Nominal[#{other_type.class_name || 'Data'}]")
           when Type::Difference, Type::Refined
             # A refinement carrier's value set is a subset of its
             # base. So if `self` (Nominal) accepts the base, it
@@ -374,6 +380,10 @@ module Rigor
               type_args: [Type::Combinator.union(*tuple.elements)]
             )
           end
+        end
+
+        def project_data_instance_to_nominal(instance)
+          Type::Combinator.nominal_of(instance.class_name || "Data")
         end
 
         def project_hash_shape_to_nominal(shape)

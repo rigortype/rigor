@@ -31,6 +31,10 @@ cycles live in dedicated archives:
 - **[docs]** Copy-paste CI setup templates under [`docs/manual/ci-templates/`](docs/manual/ci-templates/) — SARIF / annotations / reviewdog `.github/workflows/rigor.yml` variants, a `.gitlab-ci.yml`, and a generic recipe — wiring the new formats into a Ruby-4.0 isolated job (the templates [ADR-27](docs/adr/27-tool-distribution-model.md) § WD3 left queued). The CI manual chapter ([docs/manual/11-ci.md](docs/manual/11-ci.md)) documents each.
 - **[skill]** New bundled `rigor-ci-setup` Agent Skill (discoverable via `rigor skill`) that walks a project through wiring Rigor into its CI — choosing the platform, the output format, and the optional reviewdog path via [`reviewdog/action-setup`](https://github.com/reviewdog/action-setup).
 
+### Fixed
+
+- **[engine]** `Data.define` member folding now works inside method bodies. The method-entry scope dropped the member-layout table recorded at index time, so a member read like `Point.new(3, 4).x` inside a `def` silently degraded to `Dynamic[top]` instead of folding to `3` ([ADR-48](docs/adr/48-data-struct-value-folding.md)). The restored precision also taught acceptance that a folded member instance is a value of its tagging class, so a declared return such as `AssertEffect?` accepts it without a spurious `def.return-type-mismatch`.
+
 ## [0.1.17] - 2026-06-06
 
 v0.1.17 focuses on making analysis of real projects markedly faster — most visibly an incremental analysis cache that re-checks only the files an edit affects, an unchanged-project fast path, and a large allocation reduction on big Rails apps. Inspired by the [Elixir v1.20 type system](docs/notes/20260604-elixir-v1.20-type-system-rigor-review.md), control-flow narrowing is strengthened for several methods, so non-empty `Array` guards and `Hash` key-presence checks now refine reads precisely. It also folds `Data.define` value objects to precise member types and adds new clause-reachability and conformance diagnostics. Fixes include a block-parameter binding crash on the `|a, *b, c|` shape and a pathological route-helper re-read.

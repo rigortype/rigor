@@ -343,6 +343,32 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
+  describe "DataInstance acceptance (ADR-48 member instances)" do
+    def data_instance(class_name = nil)
+      Rigor::Type::Combinator.data_instance_of(
+        members: { x: int_constant }, class_name: class_name
+      )
+    end
+
+    it "Nominal of the tagging class accepts a DataInstance via projection" do
+      point = Rigor::Type::Combinator.nominal_of("Point")
+      expect(accepts(point, data_instance("Point"))).to be_yes
+    end
+
+    it "an optional declared return (Nominal | nil) accepts a DataInstance" do
+      declared = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("Point"),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+      expect(accepts(declared, data_instance("Point"))).to be_yes
+    end
+
+    it "Nominal[Data] accepts the anonymous local-bound form via projection" do
+      data_nominal = Rigor::Type::Combinator.nominal_of("Data")
+      expect(accepts(data_nominal, data_instance)).to be_yes
+    end
+  end
+
   describe "HashShape acceptance (Slice 5)" do
     def shape(pairs = nil, **options)
       if pairs.nil?

@@ -80,6 +80,20 @@ RSpec.describe "Data.define value folding", type: :runner do
         dump_type(Point[3, 4])
       RUBY
     end
+
+    # Regression: `build_fresh_body_scope` (the ADR-44 single-allocation
+    # body-scope constructor) must carry `data_member_layouts` like every
+    # other discovery table — it was omitted when ADR-48 added the table,
+    # so member folding silently degraded inside method bodies.
+    it "keeps the member layout visible inside a method body" do
+      expect(dumped_types(<<~RUBY)).to eq(["3"])
+        Point = Data.define(:x, :y)
+        def reader
+          inner = Point.new(3, 4)
+          dump_type(inner.x)
+        end
+      RUBY
+    end
   end
 
   describe "the named-subclass form" do

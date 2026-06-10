@@ -697,7 +697,14 @@ module Rigor
         relevant = index.for_method_dispatch
         return EMPTY_CONTRIBUTIONS if relevant.empty?
 
-        name = call_node.name
+        # `call_node` is not always a CallNode — the `&:symbol` block
+        # path dispatches with the `Prism::BlockArgumentNode` itself
+        # (`ExpressionTyper#symbol_block_return_type`). A bare `.name`
+        # here raised, and the raise was silently absorbed by
+        # `block_return_type_for`'s rescue, nil-ing the block type and
+        # flipping `select(&:p)`-style calls onto their no-block
+        # Enumerator overloads (caught by the GitLab corpus gate).
+        name = call_node.respond_to?(:name) ? call_node.name : nil
         return EMPTY_CONTRIBUTIONS unless index.dispatch_candidate?(name)
 
         collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)

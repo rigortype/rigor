@@ -178,6 +178,36 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
     end
   end
 
+  # The `&:symbol` block path dispatches with the BlockArgumentNode
+  # itself as `call_node` (`ExpressionTyper#symbol_block_return_type`),
+  # so the collector's name gate must tolerate nodes without `#name` —
+  # a raise here is silently absorbed upstream and nils the block type
+  # (GitLab corpus regression: `select(&:presence)` flipped onto its
+  # no-block Enumerator overload).
+  describe "dispatcher collection with a non-CallNode (ADR-52 slice-1 regression)" do
+    def block_argument_node
+      Prism.parse("foo(&:bar)").value.statements.body.first.block
+    end
+
+    it "returns no contributions through the global gate instead of raising" do
+      registry = Rigor::Plugin::Registry.new(plugins: [build_plugin(gated_dynamic_class)])
+
+      contributions = Rigor::Inference::MethodDispatcher.send(
+        :collect_plugin_contributions, registry, block_argument_node, nil, nil
+      )
+      expect(contributions).to eq([])
+    end
+
+    it "walks an ungated plugin without raising" do
+      registry = Rigor::Plugin::Registry.new(plugins: [build_plugin(ungated_dynamic_class)])
+
+      contributions = Rigor::Inference::MethodDispatcher.send(
+        :collect_plugin_contributions, registry, block_argument_node, nil, nil
+      )
+      expect(contributions).to eq([])
+    end
+  end
+
   describe "registry-level compiled aggregates" do
     it "answers open_receiver? from the compiled set" do
       open_class = Class.new(Rigor::Plugin::Base) do

@@ -181,7 +181,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   PLUGIN_BASE_SINGLETON = %w[
-    dynamic_return(key:receivers,key:methods,block:block)
+    dynamic_return(key:receivers,key:methods,key:file_methods,block:block)
     dynamic_returns()
     manifest(keyrest:fields)
     node_file_context(block:block)

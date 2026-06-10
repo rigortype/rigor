@@ -485,7 +485,7 @@ RSpec.describe Rigor::Plugin::Base do
             manifest(id: "bad-ungated", version: "0.1.0")
             dynamic_return { nil }
           end
-        end.to raise_error(ArgumentError, /receivers:, methods:, or both/)
+        end.to raise_error(ArgumentError, /receivers:, methods:, or file_methods:/)
       end
 
       it "treats an empty methods: list with no receivers: as ungated and rejects it" do
@@ -494,7 +494,7 @@ RSpec.describe Rigor::Plugin::Base do
             manifest(id: "bad-empty", version: "0.1.0")
             dynamic_return(methods: []) { nil }
           end
-        end.to raise_error(ArgumentError, /receivers:, methods:, or both/)
+        end.to raise_error(ArgumentError, /receivers:, methods:, or file_methods:/)
       end
     end
 
@@ -623,6 +623,93 @@ RSpec.describe Rigor::Plugin::Base do
             dynamic_return(methods: -> { [] }) { nil }
           end
         end.not_to raise_error
+      end
+    end
+
+    describe "per-file file_methods: callable (ADR-52 slice 5a)" do
+      let(:plugin_file_methods) do
+        Class.new(described_class) do
+          manifest(id: "dr-pfm", version: "0.1.0")
+          # The per-file name set — here a hand-seeded path → names map;
+          # in a real plugin a per-file index (rspec's LetScopeIndex).
+          def names_by_path = @names_by_path ||= {}
+
+          dynamic_return file_methods: ->(path) { names_by_path[path] } do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("LetBound")
+          end
+        end.new(services: services)
+      end
+
+      def call(source) = Prism.parse(source).value.statements.body.first
+
+      def scope_for(path) = Rigor::Scope.empty(source_path: path)
+
+      it "fires for a name in the call site's own file set" do
+        plugin_file_methods.names_by_path["/a_spec.rb"] = [:user]
+        type = plugin_file_methods.dynamic_return_type(
+          call_node: call("user"), scope: scope_for("/a_spec.rb"),
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("LetBound"))
+      end
+
+      it "declines for a name only listed in a different file's set" do
+        plugin_file_methods.names_by_path["/a_spec.rb"] = [:user]
+        type = plugin_file_methods.dynamic_return_type(
+          call_node: call("user"), scope: scope_for("/b_spec.rb"),
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(type).to be_nil
+      end
+
+      it "declines when the scope has no source path (fail-closed)" do
+        plugin_file_methods.names_by_path["/a_spec.rb"] = [:user]
+        type = plugin_file_methods.dynamic_return_type(
+          call_node: call("user"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(type).to be_nil
+      end
+
+      it "memoises the resolved set per (rule, path)" do
+        calls = 0
+        klass = Class.new(described_class) do
+          manifest(id: "dr-pfm-memo", version: "0.1.0")
+          define_method(:bump) { calls += 1 }
+          dynamic_return file_methods: ->(_path) { bump; [:user] } do |_call_node, _scope| # rubocop:disable Style/Semicolon
+            Rigor::Type::Combinator.nominal_of("LetBound")
+          end
+        end
+        plugin = klass.new(services: services)
+        2.times do
+          plugin.dynamic_return_type(
+            call_node: call("user"), scope: scope_for("/a_spec.rb"),
+            receiver_type: Rigor::Type::Combinator.untyped
+          )
+        end
+        plugin.dynamic_return_type(
+          call_node: call("user"), scope: scope_for("/b_spec.rb"),
+          receiver_type: Rigor::Type::Combinator.untyped
+        )
+        expect(calls).to eq(2)
+      end
+
+      it "rejects a non-callable file_methods:" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "bad-pfm", version: "0.1.0")
+            dynamic_return(file_methods: [:user]) { nil }
+          end
+        end.to raise_error(ArgumentError, /must be a callable/)
+      end
+
+      it "rejects combining file_methods: with methods:" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "bad-pfm-combo", version: "0.1.0")
+            dynamic_return(file_methods: ->(_p) { [] }, methods: [:user]) { nil }
+          end
+        end.to raise_error(ArgumentError, /one name gate/)
       end
     end
   end

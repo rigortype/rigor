@@ -33,9 +33,16 @@ end-to-end integration spec + byte-identical `rigor check` on the strap and
 dependabot-core sorbet corpora. The migration also delivered the first big
 WD3 throughput win: dependabot-core (20 sig-heavy files) 1262.6s → 33.4s
 (~38×) — the ungated hook ran a catalog chain lookup (incl. a per-dispatch
-receiver re-type via `scope.type_of`) on every named call. rigor-rspec (per-file) remains. Slices 5–6
-(hook deletion — blocked on AR + rspec; single node-rule walk — independent)
-remain.
+receiver re-type via `scope.type_of`) on every named call. **Slice 5a
+(per-file name-set gate + rigor-rspec) implemented 2026-06-11**: the last
+WD2 DSL form — `dynamic_return file_methods:` takes a callable receiving the
+file path, memoised per `(rule, path)`, mutually exclusive with `methods:`
+(one name gate, two scopes), nil-path fail-closed; rigor-rspec's let-binding
+`flow_contribution_for` migrated onto it (gate set = `LetScopeIndex#let_names`,
+a safe over-approximation of the block's line-scoped `let_block_at`), gated on
+the end-to-end integration spec + byte-identical demo + GitLab corpus. **Hook
+deletion (slice 5b) is now blocked only on rigor-activerecord.** Slice 6
+(single node-rule walk — independent) remains.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -160,7 +167,10 @@ implementation, per the ADR-50 precedent):
   correction") — **migrated 2026-06-11** via a new `Catalog#method_names`
   enumerator + the `type_specifier` split for `T.bind`'s self-narrowing fact.
   Per-file name sets (rigor-rspec's lets, per-file dynamic) are the
-  file-scoped specialisation, still remaining.
+  file-scoped specialisation — **implemented 2026-06-11** as `dynamic_return
+  file_methods:` (callable receiving the path, memoised per `(rule, path)`,
+  exclusive with `methods:`, nil-path fail-closed); rigor-rspec's let-binding
+  rule is its first consumer.
 
 ### rigor-activerecord blocker (2026-06-10)
 
@@ -279,9 +289,11 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
    (2026-06-11)** — `dynamic_return methods:` callable over
    `SORBET_ASSERTIONS ∪ :absurd ∪ Catalog#method_names`, `type_specifier`
    for `T.bind`'s fact, side effects relocated into the rule block;
-   strap + dependabot-core corpora byte-identical. Remaining: rigor-rspec
-   (per-file name set) and AR's AST-keyed gate form (design open — see
-   "rigor-activerecord blocker").
+   strap + dependabot-core corpora byte-identical.
+4a. **DONE (slice 5a, 2026-06-11)** — per-file `file_methods:` gate form +
+   migrate rigor-rspec's let-binding rule (demo + GitLab corpus
+   byte-identical, end-to-end spec green). Remaining: AR's AST-keyed gate
+   form (design open — see "rigor-activerecord blocker").
 5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the
    plugin-author skill, `examples/` walkthroughs, CHANGELOG migration note.
 6. WD4 single-walk node rules (independent of 2–5; may land any time after 1).

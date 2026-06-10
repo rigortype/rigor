@@ -265,17 +265,39 @@ module Rigor
         # plugin is consulted on every dispatch and the name filter runs
         # in this instance path instead — the block still only fires for
         # a listed name, so diagnostics are unchanged.
-        def dynamic_return(receivers: nil, methods: nil, &block)
+        # ADR-52 slice 5a — `file_methods:` is the per-file
+        # specialisation of the run-time `methods:` callable, for a name
+        # set that varies per analysed file (rigor-rspec's `let` names —
+        # the names depend on each file's `describe`/`let` structure, so
+        # one run-wide set cannot exist). The callable receives the file
+        # path, runs through `instance_exec`, and is memoised per
+        # `(rule, path)`:
+        #
+        #   dynamic_return file_methods: ->(path) { let_names_for(path) } do |call_node, scope|
+        #     ...
+        #   end
+        #
+        # Same idempotence contract as the other callables, plus: it MUST
+        # tolerate any path the engine analyses (return `[]` / nil for a
+        # file it has no names for — never raise). Like a callable
+        # `methods:`, it cannot compile into the registry name gate, so
+        # the plugin is consulted on every dispatch and filtered here.
+        # `file_methods:` replaces `methods:` (declaring both is
+        # rejected — they are the same gate at two scopes); it MAY
+        # combine with `receivers:`.
+        def dynamic_return(receivers: nil, methods: nil, file_methods: nil, &block)
           raise ArgumentError, "Plugin::Base.dynamic_return requires a block body" if block.nil?
 
-          validate_dynamic_return_gate!(receivers, methods)
+          validate_dynamic_return_gate!(receivers, methods, file_methods)
           validate_dynamic_return_receivers!(receivers) unless receivers.nil?
           validate_dynamic_return_methods!(methods)
+          validate_dynamic_return_file_methods!(file_methods, methods)
 
           @dynamic_returns ||= []
           @dynamic_returns << {
             receivers: normalize_dynamic_return_receivers(receivers),
             methods: normalize_dynamic_return_methods(methods),
+            file_methods: file_methods,
             block: block
           }.freeze
           nil
@@ -322,13 +344,31 @@ module Rigor
         # ADR-52 WD2 — a rule must gate on something. `receivers:` alone,
         # `methods:` alone, or both are valid; neither is not (it would
         # fire on every dispatch).
-        def validate_dynamic_return_gate!(receivers, methods)
-          return unless receivers.nil?
+        def validate_dynamic_return_gate!(receivers, methods, file_methods)
+          return unless receivers.nil? && file_methods.nil?
           return if (methods.is_a?(Array) && !methods.empty?) || methods.respond_to?(:call)
 
           raise ArgumentError,
-                "Plugin::Base.dynamic_return requires receivers:, methods:, or both — a rule gated on " \
-                "neither would fire on every dispatch (that is what flow_contribution_for is for)"
+                "Plugin::Base.dynamic_return requires receivers:, methods:, or file_methods: — a rule " \
+                "gated on none would fire on every dispatch (that is what flow_contribution_for is for)"
+        end
+
+        # ADR-52 slice 5a — `file_methods:` must be a callable, and is
+        # mutually exclusive with `methods:` (one name gate, two scopes —
+        # declaring both is a contradiction, not a composition).
+        def validate_dynamic_return_file_methods!(file_methods, methods)
+          return if file_methods.nil?
+
+          unless file_methods.respond_to?(:call)
+            raise ArgumentError,
+                  "Plugin::Base.dynamic_return file_methods: must be a callable receiving the file path, " \
+                  "got #{file_methods.inspect}"
+          end
+          return if methods.nil?
+
+          raise ArgumentError,
+                "Plugin::Base.dynamic_return file_methods: replaces methods: — declare one name gate, " \
+                "not both"
         end
 
         def validate_dynamic_return_receivers!(receivers)
@@ -356,7 +396,7 @@ module Rigor
         end
 
         private :validate_dynamic_return_gate!, :validate_dynamic_return_receivers!,
-                :validate_dynamic_return_methods!
+                :validate_dynamic_return_methods!, :validate_dynamic_return_file_methods!
 
         # ADR-37 slice 2 — declares a predicate/assertion narrowing
         # contribution, method-gated. The narrow successor to the
@@ -538,7 +578,7 @@ module Rigor
         class_name = dynamic_return_receiver_class_name(receiver_type)
         environment = scope&.environment
         rules.each do |rule|
-          next unless dynamic_return_rule_applies?(rule, call_node, class_name, environment)
+          next unless dynamic_return_rule_applies?(rule, call_node, class_name, environment, scope)
 
           result = instance_exec(call_node, scope, &rule[:block])
           return result if result
@@ -798,8 +838,16 @@ module Rigor
       # (ADR-52 WD1); both are pure predicates, so order only affects
       # cost. A receiver-less rule (ADR-52 WD2) skips the ancestry check
       # entirely and fires on the method name alone.
-      def dynamic_return_rule_applies?(rule, call_node, class_name, environment)
+      def dynamic_return_rule_applies?(rule, call_node, class_name, environment, scope)
         return false if rule[:methods] && !resolved_dynamic_return_methods(rule).include?(call_node.name)
+
+        if rule[:file_methods]
+          # The path is read here, not in `dynamic_return_type`, so a
+          # spec-double scope without `source_path` only affects
+          # `file_methods:` rules (other gate forms never touch it).
+          path = scope.respond_to?(:source_path) ? scope.source_path : nil
+          return false unless resolved_dynamic_return_file_methods(rule, path).include?(call_node.name)
+        end
 
         receivers = resolved_dynamic_return_receivers(rule)
         return true if receivers.nil?
@@ -820,6 +868,25 @@ module Rigor
 
         (@dynamic_return_runtime_cache ||= {})[[:methods, rule]] ||=
           Array(instance_exec(&methods)).to_set(&:to_sym).freeze
+      end
+
+      # ADR-52 slice 5a — the rule's per-file method-name set. The
+      # `file_methods:` callable is `instance_exec`'d with the file path
+      # and memoised per `(rule, path)` — one resolution per analysed
+      # file, the per-file analogue of the run-wide `methods:` memo. A
+      # nil path (synthetic call sites with no file context) resolves to
+      # the empty set: the gate has nothing to key on, so the rule
+      # declines — fail-closed, consistent with the gate's purpose. A
+      # raising callable degrades to "declines this dispatch" via
+      # `dynamic_return_type`'s surrounding rescue.
+      EMPTY_NAME_SET = Set.new.freeze
+      private_constant :EMPTY_NAME_SET
+
+      def resolved_dynamic_return_file_methods(rule, path)
+        return EMPTY_NAME_SET if path.nil?
+
+        (@dynamic_return_runtime_cache ||= {})[[:file_methods, rule, path]] ||=
+          Array(instance_exec(path, &rule[:file_methods])).to_set(&:to_sym).freeze
       end
 
       # ADR-52 slice 3 — the rule's receiver class-name Array. A static

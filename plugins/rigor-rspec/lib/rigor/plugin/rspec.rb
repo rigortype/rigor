@@ -90,16 +90,16 @@ module Rigor
         @services = services
         @factory_index_resolved = false
         @factory_index = nil
-        # Per-path `LetScopeIndex` cache. The plugin's
-        # `flow_contribution_for` is called for every call
-        # node the dispatcher visits; building the index once
+        # Per-path `LetScopeIndex` cache. The let-binding
+        # `dynamic_return` rule (and its `file_methods:` gate)
+        # consult the index per call node; building it once
         # per file is essential for performance.
         @let_index_cache = {}
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         # Build the let-scope index for this file while we
-        # have the parsed root in hand — `flow_contribution_for`
+        # have the parsed root in hand — the let-binding rule
         # picks it up from `@let_index_cache` keyed on path.
         @let_index_cache[path] ||= LetScopeIndex.build(root)
         Analyzer.diagnose(path: path, root: root).map { |diag| build_diagnostic(diag) }
@@ -112,23 +112,32 @@ module Rigor
         MatcherAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
       end
 
-      # Pillar 2 Slice 2 — binds local reads in `it` / spec bodies to
-      # their `let(:name) { ... }` block's inferred return type. This is
-      # a *method-gated return type* (keyed on the let-bound name read),
-      # which the receiver-gated `dynamic_return` cannot express, so it
-      # stays on `flow_contribution_for` — the deprecated escape valve
-      # (ADR-37 slice 2 § "Outcome").
-      def flow_contribution_for(call_node:, scope:)
-        let_binding_contribution(call_node, scope)
+      # Pillar 2 Slice 2 / ADR-52 slice 5a — binds local reads in `it` /
+      # spec bodies to their `let(:name) { ... }` block's inferred return
+      # type. The name set varies per file (each spec file's
+      # `describe`/`let` structure), so the rule gates on the per-file
+      # `file_methods:` form: the engine resolves the file's let names
+      # once per analysed file and consults the block only for a listed
+      # name; the line-scoped shadowing resolution stays in the block.
+      dynamic_return file_methods: ->(path) { let_names_for(path) } do |call_node, scope|
+        let_binding_return_type(call_node, scope)
       end
 
       private
 
+      # The `file_methods:` gate set — every `let` / `subject` name the
+      # file declares anywhere. A safe over-approximation of the block's
+      # own `let_block_at` line-scoped lookup (a name read outside its
+      # describe scope passes the gate and is declined by the block).
+      def let_names_for(path)
+        let_scope_index_for(path)&.let_names || []
+      end
+
       # Pillar 2 Slice 2 — when the call node is a no-receiver
       # method call (`user`, `subject`, etc.) inside an RSpec
       # `describe` block whose lets include a matching name,
-      # return a `FlowContribution(return_type: <inferred>)`.
-      def let_binding_contribution(call_node, scope)
+      # return the let block's inferred type.
+      def let_binding_return_type(call_node, scope)
         return nil if scope.nil?
         return nil unless candidate_call?(call_node)
 
@@ -140,15 +149,12 @@ module Rigor
         return nil if block_node.nil?
 
         describe_const = index.describe_const_at(line)
-        type = LetTypeResolver.resolve(
+        LetTypeResolver.resolve(
           block_node,
           describe_const: describe_const,
           factory_index: factory_index_or_nil,
           environment: scope.environment
         )
-        return nil if type.nil?
-
-        Rigor::FlowContribution.new(return_type: type)
       end
 
       def candidate_call?(call_node)

@@ -21,8 +21,8 @@ module Rigor
       #   { ... }` and `subject(:name) { ... }` declarations.
       #   `:subject` is the key for the implicit `subject { ... }`.
       #
-      # Pillar 2 Slice 2 — used by the plugin's
-      # `flow_contribution_for` hook to bind `let`-named
+      # Pillar 2 Slice 2 — used by the plugin's let-binding
+      # `dynamic_return` rule to bind `let`-named
       # method-shape calls inside `it` bodies to the let
       # block's inferred type.
       class LetScopeIndex
@@ -46,6 +46,16 @@ module Rigor
         # the outer `let`).
         def records_at(line)
           @records.select { |rec| rec.contains?(line) }
+        end
+
+        # ADR-52 slice 5a — every `let` / `subject` name declared
+        # anywhere in the file, across all describe scopes. Feeds the
+        # plugin's `dynamic_return file_methods:` gate: the engine only
+        # consults the rule for a call whose name appears here; the
+        # precise line-scoped resolution stays in `let_block_at`.
+        # @return [Array<Symbol>]
+        def let_names
+          @records.flat_map { |rec| rec.lets.keys }.uniq
         end
 
         # Resolves a `let` name at the given line by walking

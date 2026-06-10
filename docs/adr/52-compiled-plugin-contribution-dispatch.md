@@ -1,6 +1,16 @@
 # ADR-52 — Compiled plugin contribution dispatch
 
-Status: **Proposed, 2026-06-10.** Slice plan below; nothing implemented yet.
+Status: **Accepted — slice 1 (WD1) implemented 2026-06-10** (commits
+`67a552de` + `1deecb2f`: the compiled contribution table + the six engine
+call-site rewirings; gated per WD6 on byte-identical diagnostics over the
+Mastodon 6-plugin and GitLab 11-plugin corpora — the first GitLab sweep
+caught a real regression, a nameless `&:symbol` BlockArgumentNode raising in
+the new name gate and silently nil-ing the block type, fixed + pinned by
+regression specs in the second commit). Wall time is neutral at this slice,
+as designed: the global gate stays inert while legacy `flow_contribution_for`
+plugins are loaded, so the throughput win arrives with the WD3 migrations.
+Slices 2–6 (WD2 DSL vocabulary, WD3 legacy-hook migration + deletion, WD4
+single node-rule walk) remain — the slice plan below is current.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).

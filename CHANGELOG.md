@@ -41,6 +41,8 @@ cycles live in dedicated archives:
 
 ### Fixed
 
+- **[engine]** An `untyped` argument no longer selects a value-pinning RBS overload purely by declaration order. `Kernel#Array` declares `(nil) -> []` first, so `Array(arg)` over an untyped `arg` typed as the empty tuple `[]` — folding downstream guards like `keys.uniq.size == keys.size` to constants and firing a false `flow.always-truthy-condition` (surfaced by the self-check on `Type::HashShape`). Overloads whose parameters admit only specific values (`nil` / literal types) now require the argument to prove the value; calls with a literal argument (`Array(nil)` → `[]`) keep their precise fold, and methods whose only overload is value-pinning are unaffected.
+
 - **[engine]** `Data.define` member folding now works inside method bodies. The method-entry scope dropped the member-layout table recorded at index time, so a member read like `Point.new(3, 4).x` inside a `def` silently degraded to `Dynamic[top]` instead of folding to `3` ([ADR-48](docs/adr/48-data-struct-value-folding.md)). The restored precision also taught acceptance that a folded member instance is a value of its tagging class, so a declared return such as `AssertEffect?` accepts it without a spurious `def.return-type-mismatch`. The [ADR-53](docs/adr/53-scope-discovery-index-separation.md) Track A extraction then closed the same gap structurally at the second hand-copy site (re-typed user-method bodies, which had also been dropping the method-visibility table): nested body scopes now inherit the whole discovery index by reference, so a table can no longer be lost to a missed per-field copy.
 
 ## [0.1.17] - 2026-06-06

@@ -249,6 +249,37 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       end
     end
 
+    describe "value-pinning params vs untyped args (hash_shape.rb:182 regression)" do
+      # `Kernel#Array` declares `(nil) -> []` FIRST. An `untyped`
+      # arg gradually accepts against every param, so pass 2 used
+      # to lock in that overload purely by list position — typing
+      # `Array(dynamic_keys)` as the empty tuple `[]` and folding
+      # every downstream `keys.uniq.size == keys.size` guard to a
+      # false `always-truthy-condition` (surfaced by the self-check
+      # on `Type::HashShape#canonical_key_list`). A value-pinning
+      # param (nil / literal carriers) must not be matched by an
+      # arg that carries zero evidence for the pinned value.
+      it "does not let an untyped arg select `Kernel#Array: (nil) -> []`" do
+        mt = select("Kernel", :Array, [Rigor::Type::Combinator.untyped])
+        expect(mt.type.return_type).to be_a(RBS::Types::ClassInstance)
+        expect(mt.type.return_type.name.relative!.to_s).to eq("Array")
+      end
+
+      it "still picks the precise `(nil) -> []` overload for a proven nil arg" do
+        mt = select("Kernel", :Array, [Rigor::Type::Combinator.constant_of(nil)])
+        expect(mt.type.return_type).to be_a(RBS::Types::Tuple)
+        expect(mt.type.return_type.types).to be_empty
+      end
+
+      it "keeps a value-pinning overload reachable via the fallback when nothing else matches" do
+        # `NilClass#&` has a single `(untyped) -> false` overload —
+        # the literal return must still resolve for an untyped arg
+        # (the first-overload fallback, unchanged behaviour).
+        mt = select("NilClass", :&, [Rigor::Type::Combinator.untyped])
+        expect(mt).not_to be_nil
+      end
+    end
+
     describe "block passed to a method whose overloads declare none" do
       # In Ruby a block handed to a method that never yields it is
       # simply ignored. `Integer#succ` (`() -> Integer`, no block

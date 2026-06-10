@@ -32,7 +32,16 @@ module Rigor
       #    matches, accept the first arity-and-gradual-accept match
       #    (the v0.1.1 behaviour). Alias / Interface / Intersection
       #    params still reach this pass, so call sites whose only
-      #    candidate IS an alias-typed overload keep working.
+      #    candidate IS an alias-typed overload keep working. One
+      #    exclusion: an `untyped` argument does NOT gradually match
+      #    a value-pinning param (`nil` / literal types — carriers
+      #    that admit only specific values). Those overloads carry
+      #    value-precise returns (`Kernel#Array: (nil) -> []`,
+      #    `Regexp#=~: (nil) -> nil`) that would otherwise win purely
+      #    by list position and inject false constants into the flow;
+      #    they remain selectable when the argument PROVES the value
+      #    (strict pass) or when no other overload matches (step 4's
+      #    fallback picks the first overload regardless).
       # 4. If no overload matches at all, fall back to
       #    `method_types.first` so existing call sites keep their
       #    phase 1 / 2b behavior. This preserves the fail-soft
@@ -393,8 +402,31 @@ module Rigor
               instance_type: instance_type,
               type_vars: type_vars
             )
+            # An `untyped` arg gradually accepts against every param,
+            # so a value-pinning param would be "matched" with zero
+            # evidence and its value-precise return (`(nil) -> []`)
+            # would beat broader overloads purely by list position.
+            # Decline the pair; only the strict pass (where the arg
+            # proves the value) or the final first-overload fallback
+            # may select such an overload. (Pass 1 already skips
+            # untyped args entirely, so this only engages pass 2.)
+            return false if untyped_arg?(arg) && value_pinning?(param_type)
+
             result = param_type.accepts(arg, mode: :gradual)
             result.yes? || result.maybe?
+          end
+
+          # A type that admits only specific VALUES rather than a
+          # class of values: a `Constant` carrier (RBS `nil` and
+          # literal types both translate to one) or a union made up
+          # entirely of them (`true | false`, `1 | 2`, `nil?`-style
+          # optionals of literals).
+          def value_pinning?(type)
+            case type
+            when Type::Constant then true
+            when Type::Union then type.members.all? { |member| value_pinning?(member) }
+            else false
+            end
           end
         end
       end

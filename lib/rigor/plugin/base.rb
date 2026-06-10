@@ -231,6 +231,24 @@ module Rigor
         # Method-name and type-shape refinement can still be done inside
         # the block. The block runs through `instance_exec`, so `config`
         # / `services` are in scope.
+        # ADR-52 slice 3 — `receivers:` may also be a **callable**
+        # (a `-> { ... }` resolved once per run, lazily, the first time
+        # the rule is consulted — always after `#prepare`) for a receiver
+        # set the plugin only knows at run time:
+        #
+        #   dynamic_return receivers: -> { attachment_index.model_names } do |call_node, scope|
+        #     # fires when the receiver class is one a `prepare`-time scan
+        #     # found; the block does the precise per-call lookup
+        #   end
+        #
+        # The callable runs through `instance_exec`, so it reads the
+        # plugin's own `#prepare`-built indexes. It MUST be idempotent and
+        # post-`#prepare`-safe — reference a lazily-built / memoised index
+        # (as activestorage's `attachment_index` and activerecord's
+        # `model_index` are), never a value captured at class-definition
+        # time. The resolved set is a safe over-approximation of the
+        # block's own filter (it admits subclasses too), so the block
+        # stays the precise gate and diagnostics are unchanged.
         def dynamic_return(receivers: nil, methods: nil, &block)
           raise ArgumentError, "Plugin::Base.dynamic_return requires a block body" if block.nil?
 
@@ -238,17 +256,24 @@ module Rigor
           validate_dynamic_return_receivers!(receivers) unless receivers.nil?
           validate_dynamic_return_methods!(methods)
 
-          normalized_methods = methods&.map(&:to_sym)&.freeze
-          normalized_receivers = receivers&.map { |r| r.dup.freeze }&.freeze
-
           @dynamic_returns ||= []
           @dynamic_returns << {
-            receivers: normalized_receivers,
-            methods: normalized_methods,
+            receivers: normalize_dynamic_return_receivers(receivers),
+            methods: methods&.map(&:to_sym)&.freeze,
             block: block
           }.freeze
           nil
         end
+
+        # A class-name Array is frozen element-wise; a run-time callable
+        # (ADR-52 slice 3) is stored verbatim and resolved per instance.
+        def normalize_dynamic_return_receivers(receivers)
+          return nil if receivers.nil?
+          return receivers if receivers.respond_to?(:call)
+
+          receivers.map { |r| r.dup.freeze }.freeze
+        end
+        private :normalize_dynamic_return_receivers
 
         # Frozen snapshot of the declared dynamic-return rules. Memoised:
         # `@dynamic_returns` is built once at class-definition time (via
@@ -280,11 +305,14 @@ module Rigor
         end
 
         def validate_dynamic_return_receivers!(receivers)
+          # ADR-52 slice 3 — a run-time callable is resolved per instance
+          # after `#prepare`; its shape is checked at resolution time.
+          return if receivers.respond_to?(:call)
           return if receivers.is_a?(Array) && !receivers.empty? && receivers.all? { |r| r.is_a?(String) && !r.empty? }
 
           raise ArgumentError,
-                "Plugin::Base.dynamic_return receivers: must be a non-empty Array of class-name Strings, " \
-                "got #{receivers.inspect}"
+                "Plugin::Base.dynamic_return receivers: must be a non-empty Array of class-name Strings " \
+                "or a callable, got #{receivers.inspect}"
         end
 
         def validate_dynamic_return_methods!(methods)
@@ -340,6 +368,12 @@ module Rigor
       def initialize(services:, config: {})
         @services = services
         @config = merge_config_defaults(config).freeze
+        # ADR-52 slice 3 — per-rule cache of resolved run-time
+        # `dynamic_return receivers:` callables. Created here (before any
+        # subclass `initialize` freezes the instance) so the lazy
+        # memo-on-first-dispatch is a Hash-content mutation, sound even on
+        # a self-freezing plugin.
+        @dynamic_return_runtime_cache = {}
       end
 
       # Override in subclasses to wire any state the plugin needs
@@ -736,10 +770,32 @@ module Rigor
       # entirely and fires on the method name alone.
       def dynamic_return_rule_applies?(rule, call_node, class_name, environment)
         return false if rule[:methods] && !rule[:methods].include?(call_node.name)
-        return true if rule[:receivers].nil?
+
+        receivers = resolved_dynamic_return_receivers(rule)
+        return true if receivers.nil?
         return false if class_name.nil?
 
-        rule[:receivers].any? { |c| class_matches_receiver?(class_name, c, environment) }
+        receivers.any? { |c| class_matches_receiver?(class_name, c, environment) }
+      end
+
+      # ADR-52 slice 3 — the rule's receiver class-name Array. A static
+      # Array is returned as-is; a run-time callable is `instance_exec`'d
+      # against this plugin (so it reads the `#prepare`-built indexes) and
+      # memoised per rule for the run. Resolution is lazy — first reached
+      # during file analysis, always after `#prepare` — and the callable
+      # is required to be idempotent, so the memoised set is stable. A
+      # callable that raises degrades to "no receivers match" (the rule
+      # declines), never a crash, consistent with the surrounding rescue.
+      def resolved_dynamic_return_receivers(rule)
+        receivers = rule[:receivers]
+        return receivers unless receivers.respond_to?(:call)
+
+        # `||= {}` keeps the path correct even when a caller bypassed
+        # `initialize` (`allocate` in unit specs that inject a fake
+        # index); a self-freezing plugin already has the Hash from
+        # `initialize`, so the `||=` is a no-op there (never a FrozenError).
+        (@dynamic_return_runtime_cache ||= {})[rule] ||=
+          Array(instance_exec(&receivers)).map { |c| c.to_s.dup.freeze }.freeze
       end
 
       # True when `class_name` equals or inherits from `constraint`,

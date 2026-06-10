@@ -497,6 +497,70 @@ RSpec.describe Rigor::Plugin::Base do
         end.to raise_error(ArgumentError, /receivers:, methods:, or both/)
       end
     end
+
+    describe "run-time receivers: callable (ADR-52 slice 3)" do
+      let(:plugin_runtime) do
+        Class.new(described_class) do
+          manifest(id: "dr-rt", version: "0.1.0")
+          # The set the callable returns is built at run time — here a
+          # mutable accumulator the test fills after the class is defined,
+          # standing in for a `#prepare`-built index.
+          def model_names = @model_names ||= []
+
+          dynamic_return receivers: -> { model_names } do |_call_node, _scope|
+            Rigor::Type::Combinator.nominal_of("Resolved")
+          end
+        end.new(services: services)
+      end
+
+      def call(source) = Prism.parse(source).value.statements.body.first
+
+      it "resolves the callable against the instance and fires for a member of the run-time set" do
+        plugin_runtime.model_names << "Post"
+        type = plugin_runtime.dynamic_return_type(
+          call_node: call("x.recent"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.nominal_of("Post")
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Resolved"))
+      end
+
+      it "declines for a receiver outside the run-time set" do
+        plugin_runtime.model_names << "Post"
+        type = plugin_runtime.dynamic_return_type(
+          call_node: call("x.recent"), scope: Rigor::Scope.empty,
+          receiver_type: Rigor::Type::Combinator.nominal_of("Comment")
+        )
+        expect(type).to be_nil
+      end
+
+      it "memoises the resolved set — the callable is evaluated once per rule" do
+        calls = 0
+        klass = Class.new(described_class) do
+          manifest(id: "dr-rt-memo", version: "0.1.0")
+          define_method(:bump) { calls += 1 }
+          dynamic_return receivers: -> { bump; ["Post"] } do |_call_node, _scope| # rubocop:disable Style/Semicolon
+            Rigor::Type::Combinator.nominal_of("Resolved")
+          end
+        end
+        plugin = klass.new(services: services)
+        2.times do
+          plugin.dynamic_return_type(
+            call_node: call("x.recent"), scope: Rigor::Scope.empty,
+            receiver_type: Rigor::Type::Combinator.nominal_of("Post")
+          )
+        end
+        expect(calls).to eq(1)
+      end
+
+      it "accepts a callable at declaration without a static receivers: array" do
+        expect do
+          Class.new(described_class) do
+            manifest(id: "dr-rt-ok", version: "0.1.0")
+            dynamic_return(receivers: -> { [] }) { nil }
+          end
+        end.not_to raise_error
+      end
+    end
   end
 
   describe ".type_specifier / #type_specifier_facts (ADR-37 slice 2)" do

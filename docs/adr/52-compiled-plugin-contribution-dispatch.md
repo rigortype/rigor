@@ -17,8 +17,11 @@ correction". **Slice 3 (run-time receiver-set callable) partly implemented**
 byte-identical); **rigor-activerecord is blocked** on the receiver-type gate
 (class-side paths are AST/`self_type`-keyed, model constants type as `Dynamic` —
 a migration attempt was made and reverted; see "rigor-activerecord blocker").
-Slices 4–6 (AR's AST-keyed gate form, run-time method-name set + rspec/sorbet,
-hook deletion, single node-rule walk) remain.
+**Slice 4 (run-time method-name-set callable) partly implemented**
+(`79dc790d` engine + `46b14280` rigor-lisp-eval / rigor-pattern examples,
+end-to-end-spec + demo byte-identical); rigor-sorbet (catalog) and rigor-rspec
+(per-file) remain. Slices 5–6 (hook deletion — blocked on AR + sorbet + rspec;
+single node-rule walk — independent) remain.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -131,10 +134,17 @@ implementation, per the ADR-50 precedent):
   (it admits subclasses), so the block stays the precise gate. rigor-activerecord
   **cannot use this gate** — see "rigor-activerecord blocker".
 - *Run-time method-name sets*: the method-name analogue of the above — a
-  `methods:` callable resolved after `#prepare`. **This is the form rigor-sorbet
-  needs** (its catalog keys arbitrary `def` method names harvested at run time;
-  see "Audit correction"), not the static form. Per-file name sets (rigor-rspec's
-  lets, per-file dynamic) are the file-scoped specialisation.
+  `methods:` callable resolved after `#prepare`, memoised, symmetric with the
+  receiver-set callable. **Implemented 2026-06-11** (`79dc790d`); migrated the
+  `rigor-lisp-eval` and `rigor-pattern` examples (`46b14280`, their end-to-end
+  specs + demos byte-identical). A callable method set cannot be compiled into
+  the registry name gate (unknown at registry-build time), so the plugin is
+  consulted on every dispatch and the name filter runs in the instance
+  `dynamic_return_type` path — the block still fires only for a listed name, so
+  diagnostics are unchanged. **This is the form rigor-sorbet needs** (its catalog
+  keys arbitrary `def` method names harvested at run time; see "Audit
+  correction") — sorbet remains. Per-file name sets (rigor-rspec's lets,
+  per-file dynamic) are the file-scoped specialisation, also remaining.
 
 ### rigor-activerecord blocker (2026-06-10)
 
@@ -247,9 +257,11 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
    `Dynamic`) — see "rigor-activerecord blocker"; it needs a new gate form
    (engine Singleton-typing of discovered classes, or an AST-constant /
    implicit-self gate) before it can leave the hook.
-4. The AST-keyed gate form for AR (design open), then WD2 run-time method-name
-   set + migrate rigor-sorbet (catalog); per-file name set + migrate
-   rigor-rspec; the config-gated examples (lisp-eval, pattern).
+4. **PARTLY DONE** — WD2 run-time method-name-set callable (`79dc790d`) +
+   migrate the config-gated `rigor-lisp-eval` and `rigor-pattern` examples
+   (`46b14280`, end-to-end-spec + demo byte-identical). Remaining: rigor-sorbet
+   (catalog), rigor-rspec (per-file name set), and AR's AST-keyed gate form
+   (design open — see "rigor-activerecord blocker").
 5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the
    plugin-author skill, `examples/` walkthroughs, CHANGELOG migration note.
 6. WD4 single-walk node rules (independent of 2–5; may land any time after 1).

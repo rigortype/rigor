@@ -14,9 +14,11 @@ plugins are loaded, so the throughput win arrives with the WD3 migrations.
 `rigor-units`). The **audit's slice-2 plugin targets were wrong** — see "Audit
 correction". **Slice 3 (run-time receiver-set callable) partly implemented**
 (`fb5aea04`/`0f1a64b2` engine + `be4c532c` rigor-activestorage, GitLab-corpus
-byte-identical); rigor-activerecord remains on its own slice. Slices 4–6
-(run-time method-name set + rspec/sorbet, hook deletion, single node-rule walk)
-remain.
+byte-identical); **rigor-activerecord is blocked** on the receiver-type gate
+(class-side paths are AST/`self_type`-keyed, model constants type as `Dynamic` —
+a migration attempt was made and reverted; see "rigor-activerecord blocker").
+Slices 4–6 (AR's AST-keyed gate form, run-time method-name set + rspec/sorbet,
+hook deletion, single node-rule walk) remain.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -127,12 +129,50 @@ implementation, per the ADR-50 precedent):
   carries no `methods:` gate, so the registry sees it exactly as a static-receiver
   rule); the resolved set is a safe over-approximation of the block's own filter
   (it admits subclasses), so the block stays the precise gate. rigor-activerecord
-  remains (the largest receiver-set plugin — its own slice).
+  **cannot use this gate** — see "rigor-activerecord blocker".
 - *Run-time method-name sets*: the method-name analogue of the above — a
   `methods:` callable resolved after `#prepare`. **This is the form rigor-sorbet
   needs** (its catalog keys arbitrary `def` method names harvested at run time;
   see "Audit correction"), not the static form. Per-file name sets (rigor-rspec's
   lets, per-file dynamic) are the file-scoped specialisation.
+
+### rigor-activerecord blocker (2026-06-10)
+
+A first attempt to migrate rigor-activerecord onto the run-time receiver-set
+callable was **made and reverted** — it regressed AR's most common case, caught
+by the plugin's own end-to-end specs before any corpus run.
+
+Root cause: the `dynamic_return` receiver gate keys on the call's
+**`receiver_type`** (the engine extracts a class name from a `Nominal` /
+`Singleton` carrier). But AR's two class-side paths do not read the receiver
+type — `class_call_return_type` reads the **AST** (`constant_receiver_name`),
+and `implicit_self_class_call_return_type` reads **`scope.self_type`**. For a
+project model that is not in RBS — i.e. nearly every real model — the constant
+`User` types as **`Dynamic[top]`**, not `Singleton[User]` (verified: `User.find(1)`
+dispatches with `receiver_type = Dynamic`, `class_name = nil`). So the gate
+declines `User.find`, `u` never narrows to `Nominal[User]`, and the whole
+instance chain (`u.name → String`) collapses. The old `flow_contribution_for`
+never saw `receiver_type`; it read the AST, so it worked regardless of how the
+constant typed.
+
+This is a real limit of the receiver-type gate, not an AR bug. AR's
+instance/relation paths (`user.posts`, `relation.scope`) *would* gate fine
+(those receivers are real `Nominal[...]`), but a partial migration that leaves
+the hook for the class-side paths defeats the purpose (slice 5 wants the hook
+*gone*). So AR stays on `flow_contribution_for` until one of:
+
+- **(A)** the engine types a discovered in-source class constant as
+  `Singleton[Class]` (broad, high-risk dispatch change — its own ADR);
+- **(B)** a new gate form that keys on the **AST receiver constant name** (a set
+  the engine already holds at the call node) and/or **implicit-self in a class
+  body**, rather than the receiver *type* — the honest successor form for
+  AST-keyed plugins. This is the slice-4+ design question AR raises.
+
+The exact-membership-Set refinement of the callable gate (O(1) for large model
+sets, vs the ancestor-walk `any?`) was prototyped alongside this attempt and
+reverted with it — it is only worth landing together with a working AR
+migration, since activestorage's set is small enough that the ancestor-walk
+cost is negligible.
 
 ### Audit correction (2026-06-10)
 
@@ -202,10 +242,14 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
    only consumer that fits the static gate; see "Audit correction").
 3. **PARTLY DONE** — WD2 run-time receiver-set callable (`fb5aea04`/`0f1a64b2`)
    + migrate rigor-activestorage (`be4c532c`, GitLab-corpus byte-identical).
-   rigor-activerecord (the 595-line, highest-corpus-impact receiver-set plugin)
-   remains, on its own slice.
-4. WD2 run-time method-name set + migrate rigor-sorbet (catalog); per-file name
-   set + migrate rigor-rspec; the config-gated examples (lisp-eval, pattern).
+   **rigor-activerecord is BLOCKED** on the receiver-type gate (its class-side
+   paths are AST/`self_type`-keyed, and project model constants type as
+   `Dynamic`) — see "rigor-activerecord blocker"; it needs a new gate form
+   (engine Singleton-typing of discovered classes, or an AST-constant /
+   implicit-self gate) before it can leave the hook.
+4. The AST-keyed gate form for AR (design open), then WD2 run-time method-name
+   set + migrate rigor-sorbet (catalog); per-file name set + migrate
+   rigor-rspec; the config-gated examples (lisp-eval, pattern).
 5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the
    plugin-author skill, `examples/` walkthroughs, CHANGELOG migration note.
 6. WD4 single-walk node rules (independent of 2–5; may land any time after 1).

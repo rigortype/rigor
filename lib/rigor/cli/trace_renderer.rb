@@ -11,15 +11,27 @@ module Rigor
     # events), and an event panel describing the current step and the
     # expression stack.
     #
+    # The frame is fitted to the measured terminal: the source panel
+    # scrolls vertically (a window centred on the line under evaluation)
+    # instead of overflowing the screen height, over-long rows are
+    # clipped with an ellipsis instead of wrapping, and the event panel
+    # keeps a minimum height of {EVENT_PANE_MIN} rows so the narration
+    # never collapses to a sliver.
+    #
     # Pure ANSI + `io/console` (both stdlib) per ADR-0's zero-runtime-
     # dependency policy. When the output is not a TTY the frames are
-    # printed sequentially without cursor control, which keeps the
-    # renderer deterministic under test.
+    # printed sequentially without cursor control against a default
+    # 80×24 layout, which keeps the renderer deterministic under test.
     class TraceRenderer
       RESET = "\e[0m"
       DIM = "\e[90m"
       BOLD = "\e[1m"
       HIGHLIGHT = "\e[7m" # reverse video for the frame's source range
+
+      EVENT_PANE_MIN = 2     # minimum event-panel rows
+      SCOPE_WIDTH_MIN = 19   # minimum scope-column width
+      BODY_HEIGHT_MIN = 3    # never shrink the source window below this
+      DEFAULT_SIZE = [24, 80].freeze
 
       # @param out [IO]
       # @param source [String] the traced file's source.
@@ -37,6 +49,8 @@ module Rigor
       #   nil = step on key press when interactive.
       # @param interactive [Boolean] whether to clear/redraw and wait.
       def play(events, delay: nil, interactive: false)
+        @rows, @cols = interactive ? terminal_size : DEFAULT_SIZE
+        @interactive = interactive
         locals_per_frame = accumulate_locals(events)
         events.each_with_index do |event, index|
           @out.print("\e[H\e[2J") if interactive
@@ -54,6 +68,19 @@ module Rigor
 
       private
 
+      # `IO.console` reflects the controlling terminal even when stdout
+      # is, say, a StringIO under test — which is why the measured size
+      # is only used for interactive replays.
+      def terminal_size
+        require "io/console"
+        size = IO.console&.winsize
+        return size if size && size[0].positive? && size[1].positive?
+
+        DEFAULT_SIZE
+      rescue LoadError, SystemCallError
+        DEFAULT_SIZE
+      end
+
       # Replays :bind events into a per-frame snapshot of the locals
       # panel, so frame N shows exactly the bindings visible after the
       # first N events.
@@ -66,21 +93,86 @@ module Rigor
       end
 
       def render_frame(event, index:, total:, locals:)
+        inner = @cols - 3 # three vertical borders
+        lines = event_pane_lines(event, inner - 1)
+        body_height = body_height_for(lines.size)
+
         source_rows = source_panel_rows(event)
-        scope_rows = scope_panel_rows(locals)
-        lines = event_lines(event)
-        left_width = panel_width(source_rows.map(&:first), minimum: 24)
-        right_width = panel_width(scope_rows, minimum: 18)
-        # Widen the scope column so the event panel (whose box spans both
-        # columns) never overflows the frame.
-        widest_event = lines.map(&:length).max || 0
-        right_width = [right_width, widest_event + 1 - left_width].max
+        left_width, right_width = column_widths(source_rows, inner)
+        source_rows = clip_rows(scroll_window(source_rows, body_height), left_width)
+        scope_rows = fit_rows(scope_panel_rows(locals), body_height, right_width)
 
         @out.puts(top_border(left_width, right_width))
         body_rows(source_rows, scope_rows, left_width, right_width)
         @out.puts(divider(left_width, right_width, label: " step #{index + 1}/#{total} · #{event.kind} "))
         lines.each { |line| @out.puts(boxed_line(line, left_width + right_width + 1)) }
         @out.puts(bottom_border(left_width + right_width + 1))
+      end
+
+      # Screen budget: borders (3 rows) + event pane + the key-hint row
+      # when stepping interactively; whatever remains belongs to the
+      # source/scope body, floored at {BODY_HEIGHT_MIN}.
+      def body_height_for(event_rows)
+        chrome = 3 + event_rows + (@interactive ? 1 : 0)
+        [@rows - chrome, BODY_HEIGHT_MIN].max
+      end
+
+      # The event pane keeps at least {EVENT_PANE_MIN} rows (padding with
+      # blanks) so the bottom of the frame is visually stable across
+      # event kinds; over-long lines are clipped to the frame width.
+      def event_pane_lines(event, max_width)
+        lines = [describe_event(event), stack_line(event)].compact
+        lines << "" while lines.size < EVENT_PANE_MIN
+        lines.map { |line| clip(line, max_width) }
+      end
+
+      # Source rows win the width contest; the scope column keeps its
+      # minimum and absorbs whatever the source does not need.
+      def column_widths(source_rows, inner)
+        left_need = (source_rows.map { |raw, _| raw.length }.max || 0) + 1
+        left_width = left_need.clamp(24, [inner - SCOPE_WIDTH_MIN, 24].max)
+        [left_width, [inner - left_width, SCOPE_WIDTH_MIN].max]
+      end
+
+      # Vertical scroll: when the panel is taller than the window, keep
+      # a slice centred on the row under evaluation (the `▶` row, which
+      # the marker row directly follows).
+      def scroll_window(rows, height)
+        return rows if rows.size <= height
+
+        focus = rows.index { |raw, _| raw.start_with?("▶") } || 0
+        start = (focus - (height / 2)).clamp(0, rows.size - height)
+        rows[start, height]
+      end
+
+      def clip_rows(rows, width)
+        rows.map do |raw, painted|
+          next [raw, painted] if raw.length <= width
+
+          # Re-paint from the clipped raw text — clipping the painted
+          # string directly would cut ANSI escapes in half.
+          clipped = clip(raw, width)
+          [clipped, repaint_clipped(clipped)]
+        end
+      end
+
+      # A clipped row loses its highlight/marker alignment guarantees, so
+      # it is repainted with plain syntax colouring (gutter dimmed).
+      def repaint_clipped(clipped)
+        gutter = clipped[0, 6]
+        rest = clipped[6..] || ""
+        DIM + gutter + RESET + PrismColorizer.colorize(rest).chomp
+      end
+
+      def fit_rows(rows, height, width)
+        rows = rows[0, height - 1] + ["  … (+#{rows.size - height + 1} more)"] if rows.size > height
+        rows.map { |row| clip(row, width) }
+      end
+
+      def clip(text, width)
+        return text if text.length <= width
+
+        "#{text[0, [width - 1, 0].max]}…"
       end
 
       # Each row is `[raw_text, painted_text]` so width math runs on the
@@ -139,10 +231,6 @@ module Rigor
         locals.map { |name, type| format(" %-#{width}s : %s", name, type) }
       end
 
-      def event_lines(event)
-        [describe_event(event), stack_line(event)].compact
-      end
-
       def describe_event(event)
         data = event.data
         case event.kind
@@ -169,10 +257,6 @@ module Rigor
       end
 
       # -- box drawing ---------------------------------------------------
-
-      def panel_width(raw_rows, minimum:)
-        [raw_rows.map(&:length).max || 0, minimum].max + 1
-      end
 
       def top_border(left, right)
         "┌#{pad_label("─ #{@file} ", left)}┬#{pad_label('─ scope ', right)}┐"

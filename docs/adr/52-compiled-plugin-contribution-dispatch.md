@@ -9,13 +9,14 @@ the new name gate and silently nil-ing the block type, fixed + pinned by
 regression specs in the second commit). Wall time is neutral at this slice,
 as designed: the global gate stays inert while legacy `flow_contribution_for`
 plugins are loaded, so the throughput win arrives with the WD3 migrations.
-**Slice 2 (WD2, the receiver-less `dynamic_return` form) implemented
-2026-06-10** (commits `c3550b00` + `cd5d5990`: `receivers:` is now optional, a
-rule may gate on `methods:` alone; the `rigor-units` example migrated off
-`flow_contribution_for` onto it, byte-identical on the units demo). The
-**audit's slice-2 plugin targets were wrong** and are corrected below — see
-"Audit correction". Slices 3–6 (run-time receiver/method-set callables,
-the remaining legacy-hook migrations + deletion, single node-rule walk) remain.
+**Slice 2 (WD2 static receiver-less form) implemented 2026-06-10** (`c3550b00`
++ `cd5d5990`: `receivers:` optional, gate on `methods:` alone; migrated
+`rigor-units`). The **audit's slice-2 plugin targets were wrong** — see "Audit
+correction". **Slice 3 (run-time receiver-set callable) partly implemented**
+(`fb5aea04`/`0f1a64b2` engine + `be4c532c` rigor-activestorage, GitLab-corpus
+byte-identical); rigor-activerecord remains on its own slice. Slices 4–6
+(run-time method-name set + rspec/sorbet, hook deletion, single node-rule walk)
+remain.
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -116,9 +117,17 @@ implementation, per the ADR-50 precedent):
   (`cd5d5990`), whose gate is the receiver *dimension* — a refinement carrier
   with no nominal class — read inside the block.
 - *Run-time receiver sets*: `dynamic_return receivers: -> { model_index.keys }`
-  — a callable evaluated **once per run after `#prepare`**, result frozen into
-  the table. Covers rigor-activerecord / -activestorage, whose receiver sets
-  exist only after their `prepare`-time project scan.
+  — a callable `instance_exec`'d against the plugin and memoised per rule,
+  resolved lazily the first time the rule is consulted (always after
+  `#prepare`). Covers rigor-activerecord / -activestorage, whose receiver sets
+  exist only after their `prepare`-time project scan. **Implemented 2026-06-10**
+  (`fb5aea04`/`0f1a64b2`); migrated `rigor-activestorage` (`be4c532c`,
+  GitLab-corpus byte-identical). The resolution lives in the instance
+  `dynamic_return_type` path, not the `ContributionIndex` (a receiver-gated rule
+  carries no `methods:` gate, so the registry sees it exactly as a static-receiver
+  rule); the resolved set is a safe over-approximation of the block's own filter
+  (it admits subclasses), so the block stays the precise gate. rigor-activerecord
+  remains (the largest receiver-set plugin — its own slice).
 - *Run-time method-name sets*: the method-name analogue of the above — a
   `methods:` callable resolved after `#prepare`. **This is the form rigor-sorbet
   needs** (its catalog keys arbitrary `def` method names harvested at run time;
@@ -191,7 +200,10 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
 2. **DONE** (`c3550b00` + `cd5d5990`) — WD2 static method-name-only
    `dynamic_return` (receiver-less) + migrate the `rigor-units` example (the
    only consumer that fits the static gate; see "Audit correction").
-3. WD2 run-time receiver sets + migrate rigor-activerecord, rigor-activestorage.
+3. **PARTLY DONE** — WD2 run-time receiver-set callable (`fb5aea04`/`0f1a64b2`)
+   + migrate rigor-activestorage (`be4c532c`, GitLab-corpus byte-identical).
+   rigor-activerecord (the 595-line, highest-corpus-impact receiver-set plugin)
+   remains, on its own slice.
 4. WD2 run-time method-name set + migrate rigor-sorbet (catalog); per-file name
    set + migrate rigor-rspec; the config-gated examples (lisp-eval, pattern).
 5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the

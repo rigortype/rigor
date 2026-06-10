@@ -5,6 +5,7 @@ require "fileutils"
 require "json"
 require "monitor"
 require "securerandom"
+require "zlib"
 
 require_relative "descriptor"
 
@@ -17,17 +18,22 @@ module Rigor
     # and nothing else.
     #
     # Read failures (missing file, bad magic, format-version mismatch,
-    # corrupt SHA-256 trailer, unmarshal-able payload) are silently
-    # treated as cache misses; the producer block reruns and the
-    # next write replaces the bad entry. The trailing SHA-256 catches
-    # accidental corruption (partial writes, FS errors); it is **not**
-    # a security boundary, per ADR-2's trusted-gem trust model.
+    # corrupt SHA-256 trailer, un-inflatable or unmarshal-able payload)
+    # are silently treated as cache misses; the producer block reruns
+    # and the next write replaces the bad entry. The trailing SHA-256
+    # catches accidental corruption (partial writes, FS errors); it is
+    # **not** a security boundary, per ADR-2's trusted-gem trust model.
     class Store # rubocop:disable Metrics/ClassLength
       # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte
       # format version. Bumped on incompatible on-disk format changes
       # (independent of {Descriptor::SCHEMA_VERSION}, which covers
       # the descriptor schema rather than the byte layout).
-      HEADER = "RIGOR\x00\x01".b.freeze
+      # v2 (ADR-54 WD2): the value payload is zlib-deflated on write
+      # and inflated on read — Marshal blobs compress to 13–16 % at
+      # an inflate cost an order of magnitude below their
+      # `Marshal.load`. v1 entries fail the header check and read as
+      # silent misses; the next run recomputes and overwrites.
+      HEADER = "RIGOR\x00\x02".b.freeze
 
       VALID_PRODUCER_ID = /\A[a-z][a-z0-9._-]*\z/
 
@@ -348,11 +354,15 @@ module Rigor
       LOAD_FAILED = Object.new.freeze
       private_constant :LOAD_FAILED
 
+      # Inflates the stored value payload (ADR-54 WD2), then hands the
+      # raw bytes to the deserialiser. Any failure — corrupt deflate
+      # stream included — reads as a miss.
       def safe_load(bytes, deserialize)
+        raw = Zlib::Inflate.inflate(bytes)
         if deserialize
-          deserialize.call(bytes)
+          deserialize.call(raw)
         else
-          Marshal.load(bytes) # rubocop:disable Security/MarshalLoad
+          Marshal.load(raw) # rubocop:disable Security/MarshalLoad
         end
       rescue StandardError
         LOAD_FAILED
@@ -362,7 +372,7 @@ module Rigor
         FileUtils.mkdir_p(File.dirname(path))
 
         descriptor_bytes = descriptor.to_canonical_bytes
-        value_bytes = serialize_value(value, serialize)
+        value_bytes = Zlib::Deflate.deflate(serialize_value(value, serialize))
 
         body = +"".b
         body << HEADER

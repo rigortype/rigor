@@ -141,9 +141,13 @@ RSpec.describe Rigor::Cache::Store do
       expect(result).to eq("hello")
     end
 
-    it "writes raw serialised bytes (no Marshal wrapping)" do
+    it "stores raw serialised bytes (no Marshal wrapping) under the deflate envelope" do
       json_serialize = ->(value) { JSON.generate(value) }
-      json_deserialize = ->(bytes) { JSON.parse(bytes) }
+      seen_bytes = nil
+      json_deserialize = lambda { |bytes|
+        seen_bytes = bytes.dup
+        JSON.parse(bytes)
+      }
       store.fetch_or_compute(
         producer_id: "demo", params: {}, descriptor: descriptor,
         serialize: json_serialize, deserialize: json_deserialize
@@ -152,8 +156,40 @@ RSpec.describe Rigor::Cache::Store do
       key = descriptor.cache_key_for(producer_id: "demo", params: {})
       entry_path = File.join(cache_root, "demo", key[0, 2], "#{key[2..]}.entry")
       bytes = File.binread(entry_path)
-      # Custom serialiser bytes must appear verbatim somewhere in the entry body.
-      expect(bytes).to include('{"name":"Alice","age":30}')
+      # ADR-54 WD2 — the value payload is zlib-deflated on disk, so
+      # the serialiser output no longer appears verbatim in the file...
+      expect(bytes).not_to include('{"name":"Alice","age":30}')
+
+      # ...but the deserialiser receives EXACTLY the serialiser's
+      # bytes back (no Marshal wrapping; compression is transparent
+      # at the contract layer). A fresh Store forces the disk read.
+      fresh = described_class.new(root: cache_root)
+      result = fresh.fetch_or_compute(
+        producer_id: "demo", params: {}, descriptor: descriptor,
+        serialize: json_serialize, deserialize: json_deserialize
+      ) { :should_not_run }
+      expect(seen_bytes).to eq('{"name":"Alice","age":30}')
+      expect(result).to eq({ "name" => "Alice", "age" => 30 })
+    end
+
+    it "treats a pre-compression (format v1) entry as a cache miss" do
+      store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :v2_value }
+      key = descriptor.cache_key_for(producer_id: "demo", params: {})
+      entry_path = File.join(cache_root, "demo", key[0, 2], "#{key[2..]}.entry")
+      bytes = File.binread(entry_path).dup
+      bytes[6] = "\x01".b # rewind the format-version byte to v1
+
+      File.binwrite(entry_path, bytes)
+
+      called = 0
+      result = described_class.new(root: cache_root).fetch_or_compute(
+        producer_id: "demo", params: {}, descriptor: descriptor
+      ) do
+        called += 1
+        :recomputed
+      end
+      expect(called).to eq(1)
+      expect(result).to eq(:recomputed)
     end
 
     it "raises TypeError when serialize returns a non-String" do

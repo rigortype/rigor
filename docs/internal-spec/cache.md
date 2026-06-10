@@ -237,21 +237,29 @@ as a cache miss per the read fault-tolerance rules above.
 A single entry file is laid out as:
 
 ```
-"RIGOR\x00\x01"      6 bytes — 5-byte magic, 1-byte separator, 1-byte format version
+"RIGOR\x00\x02"      7 bytes — 5-byte magic, 1-byte separator, 1-byte format version
 varint               byte length of the descriptor payload
 descriptor payload   canonical-JSON Descriptor (UTF-8, binary-encoded for transport)
 varint               byte length of the value payload
-value payload        Marshal.dump of the producer-returned object
+value payload        zlib-deflated serialised bytes (Marshal.dump by default)
 sha256               32 bytes — integrity hash of every preceding byte
 ```
 
 Descriptor and value are stored separately so a future cache-
 inspection tool can read just the descriptor without paying the
-`Marshal.load` cost. The format version (currently `1`) is
-distinct from `Descriptor::SCHEMA_VERSION` — the former covers
+inflate + `Marshal.load` cost. The format version (currently `2`)
+is distinct from `Descriptor::SCHEMA_VERSION` — the former covers
 the byte layout, the latter the descriptor schema. Bumping the
 format version invalidates entries on the read path (header
 mismatch → cache miss).
+
+Format v2 ([ADR-54](../adr/54-cache-slimming.md) WD2) deflates
+the value payload on write and inflates on read; the descriptor
+payload and the SHA-256 trailer (computed over the stored,
+compressed bytes) are unchanged. Compression is invisible to
+producers: a custom `serialize:` / `deserialize:` pair still
+round-trips its exact bytes. v1 entries fail the header check
+and read as silent misses — no migration.
 
 ## Bundled RBS producer contract
 

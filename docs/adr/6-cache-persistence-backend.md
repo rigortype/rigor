@@ -79,13 +79,18 @@ The three candidate backends were:
 A cache entry is a single binary file with this layout:
 
 ```
-"RIGOR\0\1"          - magic (5 bytes) + format version (1 byte)
+"RIGOR\0\2"          - magic (5 bytes + separator) + format version (1 byte)
 length (varint)      - byte length of the descriptor payload
 descriptor payload   - canonical-JSON-encoded Descriptor (UTF-8)
 length (varint)      - byte length of the value payload
-value payload        - producer-defined bytes (typically Marshal.dump)
+value payload        - producer-defined bytes (typically Marshal.dump), zlib-deflated
 sha256 (32 bytes)    - integrity check over the prior bytes
 ```
+
+*(Format version 2, [ADR-54](54-cache-slimming.md) WD2: the value
+payload is zlib-deflated on write and inflated on read — Marshal
+blobs compress to 13–16 % at negligible read cost. v1 entries read
+as misses per the migration rule below.)*
 
 - The magic + version pair lets future format migrations detect
   old files cheaply and treat them as misses.

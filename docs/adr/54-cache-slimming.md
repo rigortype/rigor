@@ -84,6 +84,16 @@ fault-tolerance contract). The SHA-256 trailer keeps covering the stored
 ~50 ms total against the ~700 ms `Marshal.load` it sits next to —
 runtime-neutral within noise.
 
+*Addendum (landed follow-up, same day):* a format bump alone makes old
+entries unreadable but never deletes them — and at ~32 MB they sit below
+the WD3 cap forever. The `schema_version.txt` marker therefore now carries
+`"<SCHEMA_VERSION>.<FORMAT_VERSION>"` (`Store.schema_marker_value`), so
+the first writable run after a format bump clears the root through the
+established marker-mismatch path and reclaims the bytes. The ADR-46
+incremental snapshot — the one cache artefact that bypasses `Store` —
+gets the same deflate treatment (its `SCHEMA` bumped 4 → 5; a raw pre-5
+blob fails the inflate and loads as nil, the usual cold-run path).
+
 **WD3 — default eviction cap.** `cache.max_bytes` defaults to nil
 (`configuration.rb:78`), making `Store#evict!` (already wired at
 `cli.rb:107`) a permanent no-op. Today entry counts stay at 1/producer only

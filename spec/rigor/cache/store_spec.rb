@@ -89,7 +89,7 @@ RSpec.describe Rigor::Cache::Store do
     it "writes a schema_version.txt marker at the cache root" do
       store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
       marker = File.join(cache_root, "schema_version.txt")
-      expect(File.read(marker).strip).to eq(Rigor::Cache::Descriptor::SCHEMA_VERSION.to_s)
+      expect(File.read(marker).strip).to eq(described_class.schema_marker_value)
     end
 
     it "leaves no .tmp files behind on a successful write" do
@@ -118,7 +118,27 @@ RSpec.describe Rigor::Cache::Store do
       expect(called).to eq(1)
       expect(result).to eq(:second)
       expect(File.read(File.join(cache_root, "schema_version.txt")).strip)
-        .to eq(Rigor::Cache::Descriptor::SCHEMA_VERSION.to_s)
+        .to eq(described_class.schema_marker_value)
+    end
+  end
+
+  describe "format-version marker (ADR-54)" do
+    it "clears the root left by a pre-compression Rigor (old marker without the format suffix)" do
+      # A pre-WD2 cache: marker carries only the descriptor schema
+      # ("3"), and its entries are unreadable v1 bytes that no run
+      # would otherwise ever reclaim (they sit below the eviction cap).
+      FileUtils.mkdir_p(File.join(cache_root, "p", "ab"))
+      stale_entry = File.join(cache_root, "p", "ab", "cdef.entry")
+      File.binwrite(stale_entry, "RIGOR\x00\x01stale-v1-bytes#{"\x00" * 32}")
+      File.write(File.join(cache_root, "schema_version.txt"),
+                 "#{Rigor::Cache::Descriptor::SCHEMA_VERSION}\n")
+
+      described_class.new(root: cache_root)
+                     .fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :fresh }
+
+      expect(File.exist?(stale_entry)).to be(false)
+      expect(File.read(File.join(cache_root, "schema_version.txt")).strip)
+        .to eq(described_class.schema_marker_value)
     end
   end
 
@@ -279,7 +299,7 @@ RSpec.describe Rigor::Cache::Store do
       store.fetch_or_compute(producer_id: "beta", params: {}, descriptor: descriptor) { :c }
 
       inv = described_class.disk_inventory(root: cache_root)
-      expect(inv[:schema_version]).to eq(Rigor::Cache::Descriptor::SCHEMA_VERSION.to_s)
+      expect(inv[:schema_version]).to eq(described_class.schema_marker_value)
       expect(inv[:total_entries]).to eq(3)
       expect(inv[:total_bytes]).to be > 0
       ids = inv[:producers].map { |p| p[:id] }

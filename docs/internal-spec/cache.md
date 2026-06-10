@@ -184,18 +184,26 @@ boundary, per ADR-2's trusted-gem trust model.
 
 ### Schema-version marker
 
-`<root>/schema_version.txt` carries a single integer — currently
-`Rigor::Cache::Descriptor::SCHEMA_VERSION`. On every
-`fetch_or_compute` call:
+`<root>/schema_version.txt` carries
+`Store.schema_marker_value` —
+`"<Descriptor::SCHEMA_VERSION>.<Store::FORMAT_VERSION>"`
+(currently `3.2`), covering both invalidation axes: the
+descriptor schema and the on-disk byte layout. Checked once per
+`Store` instance (first `fetch_or_compute` / `fetch_or_validate`):
 
-- Marker missing → write the current version, proceed.
+- Marker missing → write the current value, proceed.
 - Marker matches → proceed.
 - Marker disagrees → wipe every entry under `<root>` (`unlink`
   every child via `FileUtils.rm_rf`), rewrite the marker, and
   proceed as if the cache were empty.
 
-A bump of `SCHEMA_VERSION` therefore drops every cache file on
-the next run without any explicit migration step.
+A bump of either version therefore drops every cache file on
+the next writable run without any explicit migration step. The
+format-version half matters for disk reclamation: a format bump
+alone makes old entries unreadable (header mismatch → miss) but
+would never delete them — they can sit below the eviction cap
+indefinitely. The marker mismatch is what reclaims their bytes
+(ADR-54).
 
 ### On-disk layout
 

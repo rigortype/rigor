@@ -2,6 +2,7 @@
 
 require "fileutils"
 require "digest"
+require "zlib"
 
 module Rigor
   module Cache
@@ -28,8 +29,12 @@ module Rigor
     # is cold). A cache must never break a run (the ADR-45 invariant).
     class IncrementalSnapshot
       # Bump when the on-disk shape changes so stale snapshots are ignored
-      # rather than mis-deserialized.
-      SCHEMA = 4
+      # rather than mis-deserialized. 5: the blob is zlib-deflated
+      # (ADR-54 WD2 parity with `Store` entries — the snapshot is the
+      # one cache artefact that does not go through `Store`); a raw
+      # pre-5 blob fails the inflate and loads as nil, the usual
+      # fault-tolerant cold-run path.
+      SCHEMA = 5
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -103,7 +108,7 @@ module Rigor
       # The stored {Payload}, or nil when absent / unreadable / schema or
       # fingerprint mismatch / corrupt. Never raises.
       def load(fingerprint:)
-        data = Marshal.load(File.binread(@path)) # rubocop:disable Security/MarshalLoad
+        data = Marshal.load(Zlib::Inflate.inflate(File.binread(@path))) # rubocop:disable Security/MarshalLoad
         return nil unless data.is_a?(Hash) && data[:schema] == SCHEMA && data[:fingerprint] == fingerprint
 
         Payload.new(
@@ -125,7 +130,7 @@ module Rigor
       # raises).
       def save(fingerprint:, payload:)
         FileUtils.mkdir_p(File.dirname(@path))
-        blob = Marshal.dump(
+        raw = Marshal.dump(
           schema: SCHEMA, fingerprint: fingerprint,
           cache: payload.cache, sources: payload.sources,
           digests: payload.digests, analyzed: payload.analyzed,
@@ -135,6 +140,7 @@ module Rigor
           missing: payload.missing,
           class_decls: payload.class_decls
         )
+        blob = Zlib::Deflate.deflate(raw)
         tmp = "#{@path}.#{Process.pid}.tmp"
         File.binwrite(tmp, blob)
         File.rename(tmp, @path)

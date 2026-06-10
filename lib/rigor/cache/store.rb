@@ -24,16 +24,21 @@ module Rigor
     # catches accidental corruption (partial writes, FS errors); it is
     # **not** a security boundary, per ADR-2's trusted-gem trust model.
     class Store # rubocop:disable Metrics/ClassLength
-      # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte
-      # format version. Bumped on incompatible on-disk format changes
-      # (independent of {Descriptor::SCHEMA_VERSION}, which covers
-      # the descriptor schema rather than the byte layout).
+      # On-disk byte-layout version. Bumped on incompatible format
+      # changes (independent of {Descriptor::SCHEMA_VERSION}, which
+      # covers the descriptor schema rather than the byte layout).
       # v2 (ADR-54 WD2): the value payload is zlib-deflated on write
       # and inflated on read — Marshal blobs compress to 13–16 % at
       # an inflate cost an order of magnitude below their
       # `Marshal.load`. v1 entries fail the header check and read as
-      # silent misses; the next run recomputes and overwrites.
-      HEADER = "RIGOR\x00\x02".b.freeze
+      # silent misses; the `schema_version.txt` marker additionally
+      # carries this version, so the first writable run after a bump
+      # clears the root and reclaims the unreadable bytes.
+      FORMAT_VERSION = 2
+
+      # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte
+      # format version.
+      HEADER = "RIGOR\x00#{FORMAT_VERSION.chr}".b.freeze
 
       VALID_PRODUCER_ID = /\A[a-z][a-z0-9._-]*\z/
 
@@ -54,6 +59,7 @@ module Rigor
         @root = root.to_s.dup.freeze
         @read_only = read_only
         @max_bytes = max_bytes&.then { |n| Integer(n) }
+        @schema_version_ensured = false
         @hits = 0
         @misses = 0
         @writes = 0
@@ -113,6 +119,18 @@ module Rigor
       #   When the root does not exist or has no schema-version
       #   marker, `schema_version` is nil and the producer list is
       #   empty.
+      # The `schema_version.txt` marker content. Covers BOTH
+      # invalidation axes: the descriptor schema and the on-disk byte
+      # layout ({FORMAT_VERSION}, ADR-54). A format bump leaves the
+      # old entries permanently unreadable (header mismatch → miss)
+      # but, alone, would never reclaim their bytes — they can sit
+      # below the eviction cap forever. Folding the format version
+      # into the marker routes the bump through the established
+      # clear-the-root path instead.
+      def self.schema_marker_value
+        "#{Descriptor::SCHEMA_VERSION}.#{FORMAT_VERSION}"
+      end
+
       def self.disk_inventory(root:)
         root_s = root.to_s
         marker = File.join(root_s, "schema_version.txt")
@@ -418,10 +436,15 @@ module Rigor
         # never collides with a read under the old). The next
         # writable run will repair the cache.
         return if @read_only
+        # The marker is process-stable; one check per Store is
+        # enough (a benign double-check under a thread race just
+        # repeats idempotent work).
+        return if @schema_version_ensured
 
+        @schema_version_ensured = true
         FileUtils.mkdir_p(@root)
         marker = File.join(@root, "schema_version.txt")
-        current = Descriptor::SCHEMA_VERSION.to_s
+        current = self.class.schema_marker_value
 
         if File.file?(marker)
           on_disk = File.read(marker).strip

@@ -257,24 +257,25 @@ role separation, and waste on hot call paths — and found the foundation sound
 remains is queued here as the next work targets, in four phases (full rationale
 and `file:line` grounding in the note):
 
-1. **Phase 1 — mechanical, no ADR needed, start any time.**
-   (a) Fix the one public-API boundary violation before the ADR-50 freeze:
-   `rigor-sorbet` calls `Rigor::Inference::Acceptance.accepts` directly
-   (`plugins/rigor-sorbet/lib/rigor/plugin/sorbet.rb:585`); rewrite onto the
-   public `Type#accepts`. (b) Stop rebuilding `CallContext` mid-dispatch
-   (entry + Tier-B promotion `method_dispatcher.rb:476` + user-class fallback
-   `:791` → `Data#with` copies). (c) Move the last inline CLI command body,
-   `run_check` (`cli.rb:83-287`), onto a `CheckCommand` like the other 14
-   subcommands. Gate: `make verify` + byte-identical diagnostics.
+1. **Phase 1 — mechanical fixes. DONE (2026-06-11).**
+   (a) the `rigor-sorbet` public-API boundary violation rewritten onto
+   `Type#accepts` (`9946b3ea`); (b) the user-class-fallback `CallContext`
+   rebuild derived from the entry context via `#with` (`495cdf5a`; the Tier-B
+   promotion rebuild deliberately stays — no context reaches it, and threading
+   one would cascade signatures for no behavioural gain); (c) `rigor check`
+   extracted into `CLI::CheckCommand` (`d5b0e108`, cli.rb ~990 → ~320 lines).
+   Follow-up flagged, not done: cli.rb keeps a few now-transitively-unused
+   requires (behaviour-adjacent for embedders, separate slice).
 2. **Phase 2 — [ADR-52](adr/52-compiled-plugin-contribution-dispatch.md)
-   implementation** (see the dedicated section below), plus a WD addendum the
-   re-review motivates: apply the same compiled gate-by-held-key idea to the
-   *built-in* `PRECISE_TIERS` loop (all 14 tiers run on every call today —
-   `String#+` pays ~50–70 no-op micro-ops before reaching RbsDispatch; a
-   receiver-class / method-name pre-filter skips the singleton folders that
-   can never match). Same WD6 gate.
-3. **Phase 3 — structural, behaviour-preserving, no new ADR.**
-   (a) Decompose the 2011-line `Analysis::Runner` monolith into
+   implementation: DONE (the ADR is complete, slices 1–6 landed 2026-06-10/11).**
+   Still open from the re-review: the WD addendum applying the same compiled
+   gate-by-held-key idea to the *built-in* `PRECISE_TIERS` loop (all 14 tiers
+   run on every call — `String#+` pays ~50–70 no-op micro-ops before reaching
+   RbsDispatch; a receiver-class / method-name pre-filter skips the singleton
+   folders that can never match). Same WD6 gate; design-sensitive (the tier
+   order is load-bearing), so it gets its own slice.
+3. **Phase 3 — structural, behaviour-preserving, no new ADR. REMAINING.**
+   (a) Decompose the ~2000-line `Analysis::Runner` monolith into
    `PoolCoordinator` / `ProjectPrePasses` / `DiagnosticAggregator` (also the
    footing for the queued LSP pre-built-Environment refactor). (b) Unify the
    duplicated certainty judgments — `case`/`when` branch certainty lives in
@@ -282,12 +283,12 @@ and `file:line` grounding in the note):
    truthy/falsey `→ Bot?` idiom in both Typer and Evaluator — so Narrowing is
    the sole owner and Typer/Evaluator are callers. Inference hot path: full
    suite + diagnostics-identical gate, not a casual cleanup.
-4. **Phase 4 — [ADR-53](adr/53-scope-discovery-index-separation.md)
-   (proposed).** The two design-judgment items: Track A `Scope::DiscoveryIndex`
-   extraction (14 seed-time tables out of the flow-state carrier; readers stay
-   as delegates), Track B the single engine-owned check-rule walk behind a
-   mandatory shadow-run equivalence harness. See the ADR for criteria,
-   staging (A1→A2, B1→B4), and gates.
+4. **Phase 4 — [ADR-53](adr/53-scope-discovery-index-separation.md):
+   Track A DONE (A1 `031f161e` + A2 `063823e4`, 2026-06-10/11); Track B
+   REMAINING.** Track B = the single engine-owned check-rule walk behind a
+   mandatory shadow-run equivalence harness (B1 harness → B2 flow-collector
+   merge → B3 full consolidation → B4 convergence with ADR-52 WD4's
+   now-landed `Plugin::NodeRuleWalk`). See the ADR for criteria and gates.
 
 ### Performance / scalability — other levers
 - **O4 Layer 3 — `Gemfile.lock` parse + `gem_rbs_collection` version matching.** Sits on top of v0.1.5's `BundleSigDiscovery` MVP. The MVP's auto-skip list (`SKIPPED_GEMS_BY_DEFAULT`) becomes a versioned resolution table; rigor consumes `Bundler::LockfileParser` output + queries `ruby/gem_rbs_collection` for the best-matching version. Unblocked by O7's failure-memo (conflicts now warn rather than hang).

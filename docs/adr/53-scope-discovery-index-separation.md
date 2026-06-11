@@ -1,9 +1,21 @@
 # ADR-53 — Scope discovery-index separation + check-rule walk consolidation
 
-Status: **Proposed, 2026-06-10.** Archetype: deliberative. Stakes: high
+Status: **Accepted — Track A complete (slices A1 + A2 landed 2026-06-10/11);
+Track B not started, 2026-06-11.** Archetype: deliberative. Stakes: high
 (state-carrier restructure in the inference engine + traversal changes under
 correctness-critical rules; every slice gates on byte-identical diagnostics).
-Nothing implemented yet.
+A1 (`031f161e`): `Scope::DiscoveryIndex` extracted, readers delegated,
+writers shimmed; landing it surfaced and fixed the predicted bug class twice
+— both ADR-44 single-allocation body-scope constructors had silently dropped
+later-added tables (`data_member_layouts` in `build_fresh_body_scope`,
+`data_member_layouts` + `discovered_method_visibilities` in
+`build_user_method_body_scope`). A2 (`063823e4`): the 14 per-table writers
+deleted, the three seeding sites collapsed onto `with_discovery`. Gates held:
+suite + steep green, self-check and Mastodon (146) / Redmine (12) corpus
+diagnostics byte-identical, bench-perf wall flat. **Remaining: Track B**
+(B1 shadow-run equivalence harness → B2 flow-collector merge → B3 full
+rule-walk consolidation → B4 convergence with ADR-52 WD4's
+`Plugin::NodeRuleWalk`, which has since landed and is the natural host).
 
 Grounding:
 [`docs/notes/20260610-lib-rigor-architecture-rereview.md`](../notes/20260610-lib-rigor-architecture-rereview.md)

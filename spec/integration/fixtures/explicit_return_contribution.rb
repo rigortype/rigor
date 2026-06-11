@@ -61,3 +61,16 @@ def outer(_flag)
 end
 
 assert_type('"outer"', outer(some_bool))
+
+# A multi-value `return a, b` packs a Tuple in Ruby (`return 1, "x"` is
+# `[1, "x"]`). The early multi-value return must contribute its Tuple to
+# the method return alongside the tail Tuple. Without the fix the
+# multi-value return was dropped entirely (the collector handled only
+# single/bare returns), leaving just the tail.
+def pair(flag)
+  return 1, "x" if flag
+
+  [2, "y"]
+end
+
+assert_type('[1, "x"] | [2, "y"]', pair(some_bool))

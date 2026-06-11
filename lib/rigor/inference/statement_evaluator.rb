@@ -2518,15 +2518,18 @@ module Rigor
 
       def record_return_value(node, sink)
         args = node.arguments&.arguments || []
-        # `return` with no argument returns nil; `return a, b` packs a Tuple.
-        # The single-value form (the overwhelming majority) records the
-        # argument's type; the bare form records nil. Multi-value returns are
-        # left to the body's tail handling to keep this conservative.
+        # `return` with no argument returns nil; `return a` records the
+        # argument's type; `return a, b, c` packs a Tuple — in Ruby a
+        # multi-value return yields the array `[a, b, c]`, so the inferred
+        # return contributes the corresponding Tuple element-by-element.
         if args.empty?
           sink << Type::Combinator.constant_of(nil)
         elsif args.size == 1
           type, = sub_eval(args.first, scope)
           sink << type
+        else
+          element_types = args.map { |arg| sub_eval(arg, scope).first }
+          sink << Type::Combinator.tuple_of(*element_types)
         end
       end
 

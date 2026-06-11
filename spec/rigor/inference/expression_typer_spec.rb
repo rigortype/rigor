@@ -638,8 +638,10 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "resolves user-defined classes through Scope#discovered_classes (Slice 7 phase 7)" do
-        bound = scope.with_discovered_classes(
-          { "Account" => Rigor::Type::Combinator.singleton_of("Account") }.freeze
+        bound = scope.with_discovery(
+          scope.discovery.with(
+            discovered_classes: { "Account" => Rigor::Type::Combinator.singleton_of("Account") }.freeze
+          )
         )
         type = bound.type_of(parse_expression("Account"))
         expect(type).to be_a(Rigor::Type::Singleton)
@@ -648,7 +650,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
       it "resolves in-source constant values through Scope#in_source_constants (Slice 7 phase 9)" do
         constants = { "BUCKETS" => Rigor::Type::Combinator.constant_of(:hello) }.freeze
-        bound = scope.with_in_source_constants(constants)
+        bound = scope.with_discovery(scope.discovery.with(in_source_constants: constants))
         type = bound.type_of(parse_expression("BUCKETS"))
         expect(type).to eq(Rigor::Type::Combinator.constant_of(:hello))
       end
@@ -659,7 +661,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         # semantics (user code is the authoritative source for
         # its own constants).
         constants = { "Float::INFINITY" => Rigor::Type::Combinator.constant_of(:overridden) }.freeze
-        bound = scope.with_in_source_constants(constants)
+        bound = scope.with_discovery(scope.discovery.with(in_source_constants: constants))
         type = bound.type_of(parse_expression("Float::INFINITY"))
         expect(type).to eq(Rigor::Type::Combinator.constant_of(:overridden))
       end
@@ -671,8 +673,10 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "returns Nominal[T] from `Singleton[T].new` for user-defined classes" do
-        bound = scope.with_discovered_classes(
-          { "ScanAccumulator" => Rigor::Type::Combinator.singleton_of("ScanAccumulator") }.freeze
+        bound = scope.with_discovery(
+          scope.discovery.with(
+            discovered_classes: { "ScanAccumulator" => Rigor::Type::Combinator.singleton_of("ScanAccumulator") }.freeze
+          )
         )
         type = bound.type_of(parse_expression("ScanAccumulator.new"))
         expect(type).to be_a(Rigor::Type::Nominal)

@@ -96,7 +96,8 @@ module Rigor
         parse_result = Prism.parse(source, filepath: path, version: @configuration.target_ruby)
         return if parse_result.errors.any?
 
-        base_scope = Scope.empty(environment: environment).with_discovered_classes(discovered_classes)
+        base_scope = Scope.empty(environment: environment)
+        base_scope = base_scope.with_discovery(base_scope.discovery.with(discovered_classes: discovered_classes))
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
         bindings = collect_rspec_bindings(parse_result.value, scope_index)
 
@@ -104,11 +105,10 @@ module Rigor
       end
 
       # Pre-walks `@source_paths` to collect every qualified
-      # class / module declaration. The result feeds
-      # `Scope#with_discovered_classes` for each observe-tree
-      # scope so `Foo.new` and `Foo` resolve to the right
-      # singleton carrier even when no RBS sig describes
-      # `Foo` yet.
+      # class / module declaration. The result seeds the
+      # `discovered_classes` table on each observe-tree scope so
+      # `Foo.new` and `Foo` resolve to the right singleton carrier
+      # even when no RBS sig describes `Foo` yet.
       def preindex_source_classes
         accumulator = {}
         resolve_paths(@source_paths).each { |path| harvest_classes_from(path, accumulator) }

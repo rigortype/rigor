@@ -11,7 +11,8 @@ RSpec.describe Rigor::Reflection do
     end
 
     it "returns true for a class discovered in source" do
-      scope = Rigor::Scope.empty.with_discovered_classes("MyClass" => :class)
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_classes: { "MyClass" => :class })
+      scope = Rigor::Scope.empty.with_discovery(index)
       expect(described_class.class_known?("MyClass", scope: scope)).to be(true)
     end
 
@@ -55,7 +56,8 @@ RSpec.describe Rigor::Reflection do
   describe ".constant_type_for" do
     it "prefers in-source constants over RBS constants" do
       override = Rigor::Type::Combinator.constant_of(42)
-      scope = Rigor::Scope.empty.with_in_source_constants("Foo" => override)
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: { "Foo" => override })
+      scope = Rigor::Scope.empty.with_discovery(index)
       expect(described_class.constant_type_for("Foo", scope: scope)).to eq(override)
     end
 
@@ -127,9 +129,11 @@ RSpec.describe Rigor::Reflection do
 
   describe ".discovered_class? / .discovered_method?" do
     let(:scope) do
-      Rigor::Scope.empty.with_discovered_classes("MyClass" => :class).with_discovered_methods(
-        "MyClass" => { do_thing: :instance }
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+        discovered_classes: { "MyClass" => :class },
+        discovered_methods: { "MyClass" => { do_thing: :instance } }
       )
+      Rigor::Scope.empty.with_discovery(index)
     end
 
     it "reports discovered class presence" do

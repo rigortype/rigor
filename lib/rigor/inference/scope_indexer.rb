@@ -68,16 +68,17 @@ module Rigor
         # collision — same-file declarations are the most
         # specific authority.
         merged_classes = default_scope.discovered_classes.merge(discovered_classes)
-        seeded_scope = default_scope
-                       .with_declared_types(declared_types)
-                       .with_discovered_classes(merged_classes)
+        seeded_scope = default_scope.with_discovery(
+          default_scope.discovery.with(declared_types: declared_types,
+                                       discovered_classes: merged_classes)
+        )
 
         # Slice 7 phase 2. Pre-pass over every class/module body
         # to collect the per-class ivar accumulator. Seeded after
         # declared_types so the rvalue typer in the pre-pass can
         # see declaration overrides.
         class_ivars = build_class_ivar_index(root, seeded_scope)
-        seeded_scope = seeded_scope.with_class_ivars(class_ivars)
+        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_ivars: class_ivars))
 
         # Slice 7 phase 6. Same pre-pass shape for cvars (per
         # class) and globals (program-wide). Globals are also
@@ -86,9 +87,9 @@ module Rigor
         # not enter a method body) observe the precise type
         # without consulting the accumulator on every lookup.
         class_cvars = build_class_cvar_index(root, seeded_scope)
-        seeded_scope = seeded_scope.with_class_cvars(class_cvars)
+        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
         program_globals = build_program_global_index(root, seeded_scope)
-        seeded_scope = seeded_scope.with_program_globals(program_globals)
+        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(program_globals: program_globals))
         program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
 
         # Slice 7 phase 9. In-source constant value tracking.
@@ -99,7 +100,9 @@ module Rigor
         # references resolve correctly. Multiple writes to the
         # same qualified name union via `Type::Combinator.union`.
         in_source_constants = build_in_source_constants(root, seeded_scope)
-        seeded_scope = seeded_scope.with_in_source_constants(in_source_constants)
+        seeded_scope = seeded_scope.with_discovery(
+          seeded_scope.discovery.with(in_source_constants: in_source_constants)
+        )
 
         # Slice 7 phase 12. In-source method discovery. Walks
         # every class/module body for `Prism::DefNode` and
@@ -115,7 +118,7 @@ module Rigor
         discovered_methods = deep_merge_class_methods(
           default_scope.discovered_methods, build_discovered_methods(root)
         )
-        seeded_scope = seeded_scope.with_discovered_methods(discovered_methods)
+        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(discovered_methods: discovered_methods))
 
         # v0.0.2 #5 + ADR-24 slice 2 — record per-instance-method
         # def nodes, the class -> superclass map, and the
@@ -179,12 +182,15 @@ module Rigor
           build_data_member_layouts(root)
         )
 
-        seeded_scope
-          .with_discovered_def_nodes(def_nodes)
-          .with_discovered_superclasses(superclasses)
-          .with_discovered_includes(includes)
-          .with_discovered_method_visibilities(method_visibilities)
-          .with_data_member_layouts(data_member_layouts)
+        seeded_scope.with_discovery(
+          seeded_scope.discovery.with(
+            discovered_def_nodes: def_nodes,
+            discovered_superclasses: superclasses,
+            discovered_includes: includes,
+            discovered_method_visibilities: method_visibilities,
+            data_member_layouts: data_member_layouts
+          )
+        )
       end
 
       # Slice 7 phase 2. Builds the class-level ivar accumulator

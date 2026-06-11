@@ -27,7 +27,14 @@ module Rigor
     # ADR-53 Track A — the seed-time discovery tables live on the
     # {DiscoveryIndex} the scope carries by a single reference; the
     # per-table readers stay on Scope so engine call sites and plugins
-    # are unaffected by the extraction.
+    # are unaffected by the extraction. The whole index is swapped in
+    # one transition through {#with_discovery}.
+    #
+    # `declared_types` carries the identity-comparing
+    # `Prism::Node => Rigor::Type` declaration overrides
+    # `ExpressionTyper#type_of(node)` MUST consult before any other
+    # dispatch (a `module Foo` / `class Bar` header types as
+    # `Singleton[<qualified path>]` rather than `Dynamic[Top]`).
     def declared_types = @discovery.declared_types
     def class_ivars = @discovery.class_ivars
     def class_cvars = @discovery.class_cvars
@@ -164,27 +171,10 @@ module Rigor
     end
 
     # ADR-53 Track A — swaps the whole discovery index in one transition.
-    # The canonical seeding path; the per-table `with_discovered_*` writers
-    # below are shims over it and are queued for removal in slice A2.
+    # The sole seeding path; the per-table writers it replaced are derived
+    # off-`Scope` through `scope.discovery.with(table_name: table)`.
     def with_discovery(index)
       rebuild(discovery: index)
-    end
-
-    # Slice A-declarations. Returns a scope that carries an
-    # identity-comparing Hash of `Prism::Node => Rigor::Type`
-    # overrides. `ExpressionTyper#type_of(node)` MUST consult
-    # `declared_types[node]` before any other dispatch and
-    # return the recorded type as-is when present. The table is
-    # populated by `ScopeIndexer` for declaration-position
-    # nodes (the `constant_path` of `Prism::ModuleNode` and
-    # `Prism::ClassNode`) so a `module Foo` / `class Bar`
-    # header types as `Singleton[<qualified path>]` instead of
-    # falling through to `Dynamic[Top]`. The table is shared
-    # by structural reference across every derived scope so
-    # `with_local` / `with_fact` / `with_self_type` carry it
-    # transparently.
-    def with_declared_types(table)
-      rebuild(discovery: @discovery.with(declared_types: table))
     end
 
     # Slice 7 phase 1 — instance/class/global variable bindings.
@@ -243,10 +233,6 @@ module Rigor
       @discovery.class_ivars[class_name.to_s] || EMPTY_VAR_BINDINGS
     end
 
-    def with_class_ivars(table)
-      rebuild(discovery: @discovery.with(class_ivars: table))
-    end
-
     # Slice 7 phase 6 — class-level cvar accumulator (same shape
     # as `class_ivars` but populated from `Prism::ClassVariableWriteNode`
     # writes, and seeded on BOTH instance and singleton method
@@ -255,47 +241,6 @@ module Rigor
       return EMPTY_VAR_BINDINGS if class_name.nil?
 
       @discovery.class_cvars[class_name.to_s] || EMPTY_VAR_BINDINGS
-    end
-
-    def with_class_cvars(table)
-      rebuild(discovery: @discovery.with(class_cvars: table))
-    end
-
-    # Slice 7 phase 6 — program-level globals accumulator.
-    # Globals are process-wide in Ruby, so the analyzer carries a
-    # single map (`Hash[Symbol, Type]`) keyed by the variable name
-    # and seeded into every method body (instance and singleton)
-    # plus the top-level program scope. `ScopeIndexer` populates
-    # it from a single program-wide pre-pass.
-    def with_program_globals(table)
-      rebuild(discovery: @discovery.with(program_globals: table))
-    end
-
-    # Slice 7 phase 7 — in-source class discovery. Maps a
-    # qualified class name (e.g. `"Account"`) to its
-    # `Type::Singleton` so references to user-defined classes
-    # in the analyzed files resolve through
-    # `ExpressionTyper#resolve_constant_name` even when no RBS
-    # decl exists. Populated once at index time by
-    # `ScopeIndexer` from every `Prism::ClassNode` and
-    # `Prism::ModuleNode` it walks.
-    def with_discovered_classes(table)
-      rebuild(discovery: @discovery.with(discovered_classes: table))
-    end
-
-    # Slice 7 phase 9 — in-source constant-value tracking.
-    # Maps a qualified constant name (e.g. `"BUCKETS"` or
-    # `"Rigor::Analysis::FactStore::BUCKETS"`) to the type of
-    # the rvalue assigned at its `Prism::ConstantWriteNode` /
-    # `Prism::ConstantPathWriteNode`. Populated by
-    # `ScopeIndexer` once at index time. `ExpressionTyper#resolve_constant_name`
-    # consults this map after class lookups so an in-source
-    # constant assignment overrides any RBS-declared constant
-    # of the same qualified name (matching Ruby's runtime
-    # precedence: a constant defined in user code is the
-    # authoritative value).
-    def with_in_source_constants(table)
-      rebuild(discovery: @discovery.with(in_source_constants: table))
     end
 
     # Slice 7 phase 12 — in-source method discovery. Maps a
@@ -326,10 +271,6 @@ module Rigor
     # leniency (ADR-24 WD3 → WD4) does not apply.
     def toplevel?
       @self_type.nil?
-    end
-
-    def with_discovered_methods(table)
-      rebuild(discovery: @discovery.with(discovered_methods: table))
     end
 
     # v0.0.2 #5 — per-class table mapping
@@ -402,10 +343,6 @@ module Rigor
     end
     private :record_cross_file_toplevel
 
-    def with_discovered_def_nodes(table)
-      rebuild(discovery: @discovery.with(discovered_def_nodes: table))
-    end
-
     # Companion to {#user_def_for}: returns the `"path:line"` where
     # the project defines `class_name#method_name` (instance-side),
     # or nil. Populated only by the cross-file project pre-pass
@@ -423,10 +360,6 @@ module Rigor
       table[method_name.to_sym]
     end
 
-    def with_discovered_def_sources(table)
-      rebuild(discovery: @discovery.with(discovered_def_sources: table))
-    end
-
     # ADR-24 slice 2 — per-class table mapping a fully
     # qualified user-class name to its superclass name AS
     # WRITTEN at the `class Foo < Bar` declaration (`"Bar"`,
@@ -440,10 +373,6 @@ module Rigor
     def superclass_of(class_name)
       record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
       @discovery.discovered_superclasses[class_name.to_s]
-    end
-
-    def with_discovered_superclasses(table)
-      rebuild(discovery: @discovery.with(discovered_superclasses: table))
     end
 
     # ADR-48 — per-class table mapping a fully qualified class name to its
@@ -463,10 +392,6 @@ module Rigor
       layout
     end
 
-    def with_data_member_layouts(table)
-      rebuild(discovery: @discovery.with(data_member_layouts: table))
-    end
-
     # ADR-24 slice 2 — per-class/module table mapping a fully
     # qualified user class or module to the list of module
     # names it `include`s / `prepend`s, AS WRITTEN at the
@@ -481,30 +406,14 @@ module Rigor
       @discovery.discovered_includes[class_name.to_s] || []
     end
 
-    def with_discovered_includes(table)
-      rebuild(discovery: @discovery.with(discovered_includes: table))
-    end
-
-    # ADR-46 slice 1 — per-class table mapping a fully qualified user
-    # class/module name to the set of `"path:line"` sites that declare,
-    # reopen, set the superclass of, or `include` into it. Populated only
-    # by the cross-file project pre-pass
-    # ({Inference::ScopeIndexer.discovered_def_index_for_paths}) and
-    # consumed by {#superclass_of} / {#includes_of} when dependency
-    # recording is active: resolving a class's ancestry edge records every
-    # file that contributes to that class's declaration shape, so a later
-    # edit to any of them re-checks the consumer. Over-records by design
-    # (a superclass read also pulls in the include-declaring files) — the
-    # conservative direction ADR-46 mandates.
-    def with_discovered_class_sources(table)
-      rebuild(discovery: @discovery.with(discovered_class_sources: table))
-    end
-
     # Records, for a resolved cross-class ancestry read, every file that
     # declares `class_name` (its declaration / reopening / superclass /
-    # include sites). No-op when the class is not a project class (core /
-    # stdlib / gem names never appear in the source map). Gated by the
-    # caller on the recorder being active.
+    # include sites). The `discovered_class_sources` table it reads is
+    # populated only by the cross-file project pre-pass
+    # ({Inference::ScopeIndexer.discovered_def_index_for_paths}) and only
+    # when dependency recording is active. No-op when the class is not a
+    # project class (core / stdlib / gem names never appear in the source
+    # map). Gated by the caller on the recorder being active.
     def record_class_dependency(class_name)
       sites = @discovery.discovered_class_sources[class_name.to_s]
       return if sites.nil?
@@ -527,10 +436,6 @@ module Rigor
       return nil unless table
 
       table[method_name.to_sym]
-    end
-
-    def with_discovered_method_visibilities(table)
-      rebuild(discovery: @discovery.with(discovered_method_visibilities: table))
     end
 
     # Closes the "`params[:f] ||= []; params[:f] << x`" precision

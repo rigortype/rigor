@@ -1856,29 +1856,28 @@ module Rigor
       # without the project pre-pass (e.g. a single-file probe)
       # keeps an empty seed.
       def seed_project_scope(scope)
-        scope = scope.with_discovered_classes(@project_discovered_classes) unless @project_discovered_classes.empty?
-        unless @project_discovered_def_nodes.empty?
-          scope = scope.with_discovered_def_nodes(@project_discovered_def_nodes)
-        end
-        unless @project_discovered_def_sources.empty?
-          scope = scope.with_discovered_def_sources(@project_discovered_def_sources)
-        end
+        tables = {}
+        tables[:discovered_classes] = @project_discovered_classes unless @project_discovered_classes.empty?
+        tables[:discovered_def_nodes] = @project_discovered_def_nodes unless @project_discovered_def_nodes.empty?
+        tables[:discovered_def_sources] = @project_discovered_def_sources unless @project_discovered_def_sources.empty?
         unless @project_discovered_superclasses.empty?
-          scope = scope.with_discovered_superclasses(@project_discovered_superclasses)
+          tables[:discovered_superclasses] = @project_discovered_superclasses
         end
-        scope = scope.with_discovered_includes(@project_discovered_includes) unless @project_discovered_includes.empty?
+        tables[:discovered_includes] = @project_discovered_includes unless @project_discovered_includes.empty?
         unless @project_discovered_method_visibilities.empty?
-          scope = scope.with_discovered_method_visibilities(@project_discovered_method_visibilities)
+          tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
         end
-        scope = scope.with_discovered_methods(@project_discovered_methods) unless @project_discovered_methods.empty?
-        scope = scope.with_data_member_layouts(@project_data_member_layouts) unless @project_data_member_layouts.empty?
+        tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
+        tables[:data_member_layouts] = @project_data_member_layouts unless @project_data_member_layouts.empty?
         # ADR-46 slice 1 — the class-declaration source map is read only by
         # the ancestry accessors during dependency recording, so seed it
         # only when recording is on; a normal run never carries it.
         if @record_dependencies && !@project_discovered_class_sources.empty?
-          scope = scope.with_discovered_class_sources(@project_discovered_class_sources)
+          tables[:discovered_class_sources] = @project_discovered_class_sources
         end
-        scope
+        return scope if tables.empty?
+
+        scope.with_discovery(scope.discovery.with(**tables))
       end
 
       # ADR-46 slice 1 — when dependency recording is enabled, wrap the

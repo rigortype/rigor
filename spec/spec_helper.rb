@@ -58,17 +58,17 @@ RSpec.configure do |config|
     meta[:type] = :runner
   end
 
-  # ADR-15 Phase 4b — `spec/rigor/analysis/runner_pool_spec.rb`
-  # spawns real Ractors via `Runner.new(workers: N).run(...)`.
-  # Ruby 4.0 + rbs 4.0.2 occasionally surfaces a Bus Error in
-  # the inference path of LATER specs after Ractor cleanup
-  # (likely RBS C-extension state interacting with main-Ractor
-  # GC). The pool spec is excluded from the default suite to
-  # keep `make verify` deterministic; set
-  # `RIGOR_INCLUDE_RACTOR_POOL=1` to opt back in (run pool spec
-  # in isolation via `make test-ractor-pool` if you want
-  # repeatable coverage). The Phase 4b commit shipped with
-  # this flake masked by run-to-run variance; Phase 4c will
-  # address the worker-side env build stability.
+  # ADR-15 Phase 4b — `spec/rigor/analysis/runner_pool_spec.rb` is
+  # excluded from the default suite and runs as its own rspec
+  # process via `make test-ractor-pool` (part of `make verify` and
+  # CI). The original reason was real Ractor spawns destabilising
+  # LATER same-process specs (Bus Error in the inference path —
+  # likely RBS C-extension state interacting with main-Ractor GC
+  # after Ractor cleanup). Since the fork-backend default
+  # (86ed9129, `Runner#pool_backend`) the file spawns no Ractors
+  # unless RIGOR_POOL_BACKEND=ractor is exported; the exclusion is
+  # kept so an exported backend override can never destabilise the
+  # main suite. Set `RIGOR_INCLUDE_RACTOR_POOL=1` to opt the file
+  # back in to a same-process run.
   config.exclude_pattern = "spec/rigor/analysis/runner_pool_spec.rb" unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
 end

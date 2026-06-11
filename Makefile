@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -79,10 +79,14 @@ test:
 	bundle exec rspec
 
 # ADR-15 Phase 4b — runs `spec/rigor/analysis/runner_pool_spec.rb`
-# in isolation. Excluded from the default `test` target because
-# Ractor cleanup interacts with the RBS C-extension state and
-# occasionally surfaces as a Bus Error in later sequential
-# specs (see `spec/spec_helper.rb`).
+# as its own rspec process (excluded from the default suite via
+# `spec/spec_helper.rb`). Since the fork-backend default (86ed9129)
+# the file spawns no Ractors unless RIGOR_POOL_BACKEND=ractor is
+# exported; the separate process is kept so that override can never
+# destabilise the main suite (historical Bus Error via RBS
+# C-extension state after Ractor cleanup). Part of `verify` and CI —
+# a deterministic failure here once rotted unnoticed for three weeks
+# because nothing ran this target automatically.
 test-ractor-pool:
 	RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec spec/rigor/analysis/runner_pool_spec.rb
 
@@ -157,23 +161,24 @@ coverage:
 bench-perf:
 	bundle exec ruby scripts/bench.rb --target lib
 
-# `verify` chains the spec suite, rubocop, `rigor check lib`, and the
-# plugin-tree contract check. The spec phase runs in parallel by
-# default (3-4× faster on multi-core hosts than the sequential rspec
-# invocation). `lint` is already process-parallel via rubocop's
-# built-in worker pool; `check` / `check-plugins` are short rigor
-# invocations.
+# `verify` chains the spec suite, the gated pool-runner spec (its
+# own rspec process — see `test-ractor-pool`), rubocop, `rigor check
+# lib`, and the plugin-tree contract check. The spec phase runs in
+# parallel by default (3-4× faster on multi-core hosts than the
+# sequential rspec invocation). `lint` is already process-parallel
+# via rubocop's built-in worker pool; `check` / `check-plugins` are
+# short rigor invocations.
 #
 # Total wall time on a 12-core laptop: ~60s (vs ~200s for the
 # sequential variant below). Use `verify-sequential` when chasing
 # parallel-only flakes — the worker isolation hides certain
 # ordering bugs that surface only in a single-process run.
-verify: test-parallel lint check check-plugins
+verify: test-parallel test-ractor-pool lint check check-plugins
 
 # Sequential variant. Identical phases as `verify` but `test`
 # runs single-process. Slower but bit-for-bit reproducible
 # without inter-worker scheduling effects.
-verify-sequential: test lint check check-plugins
+verify-sequential: test test-ractor-pool lint check check-plugins
 
 # Backward-compatible alias for the previous `verify-parallel`
 # target name. Identical to `verify` now that parallel is the

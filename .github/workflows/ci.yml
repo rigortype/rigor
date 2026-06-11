@@ -42,6 +42,14 @@ jobs:
       - name: Run tests
         run: make test-parallel
 
+      # The pool-runner spec is excluded from the default suite (see
+      # spec/spec_helper.rb) and runs as its own rspec process. Without
+      # this step the gated file has no CI coverage at all — a
+      # deterministic failure in it once rotted unnoticed for three
+      # weeks (fork-backend default 86ed9129 → fixed 7ebeac08).
+      - name: Run pool-runner spec
+        run: make test-ractor-pool
+
   # ── 2. RuboCop ───────────────────────────────────────────────────
   lint:
     name: Lint

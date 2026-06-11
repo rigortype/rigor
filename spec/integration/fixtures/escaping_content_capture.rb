@@ -52,3 +52,18 @@ OptionParser.new do |opts|
   opts.on("--format=F") { |v| chained[:format] = v }
 end.tap { |_| nil }
 assert_type("Hash[Dynamic[top], Dynamic[top]]", chained)
+
+# The cross-method-boundary variant: a content-mutable local passed to a
+# toplevel helper that RETURNS an object holding an escaping closure over it
+# (the `build_option_parser(options).parse!` idiom). The helper resolves to a
+# user def whose `options` parameter is escape-mutated inside a nested
+# `opts.on { options[:k] = v }` block; the caller floors the argument it
+# passed, even though the helper call sits in the receiver position of the
+# chained `.tap`.
+def build_opts(options)
+  sink.tap { |p| p.on("--format=F") { |v| options[:format] = v } }
+end
+
+handed = { mode: "print" }
+build_opts(handed).tap { |_| nil }
+assert_type("Hash[Dynamic[top], Dynamic[top]]", handed)

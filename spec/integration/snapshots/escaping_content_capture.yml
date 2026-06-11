@@ -3,6 +3,7 @@ locals:
   buffer: String
   chained: Hash[Dynamic[top], Dynamic[top]]
   collected: Array[Dynamic[top]]
+  handed: '{ mode: "print" }'
   nested: Hash[Dynamic[top], Dynamic[top]]
   options: Hash[Dynamic[top], Dynamic[top]]
   seen: "{}"

@@ -1282,6 +1282,18 @@ module Rigor
         # justification when the value is mutated. Always-safe
         # (loses precision, never invents facts).
         post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope)
+        # ADR-57 slice 3 work-item 1 (cross-method-boundary variant). When a
+        # self-call resolves to a user method that CONTENT-mutates one of its
+        # parameters inside an escaping block (the `build_option_parser(opts)`
+        # idiom — the callee returns an `OptionParser` whose
+        # `opts.on { o[:k] = v }` blocks close over the passed-in hash), floor
+        # the matching caller-argument local. The callee's escape is invisible
+        # across the boundary, so without this the caller's `options` keeps its
+        # seed and `options.fetch(:mode)` folds to a wrong constant. Precise:
+        # fires only when the resolved callee actually escape-mutates that
+        # parameter (not for every self-call), and sound — only loses
+        # precision on the floored argument.
+        post_scope = widen_callee_escaped_argument_captures(node, post_scope)
         # And the same widening for outer-scope locals / ivars
         # mutated inside the block body (`items.each { |x| arr << x }`):
         # the block lives in a child scope so without an explicit
@@ -1828,6 +1840,132 @@ module Rigor
             stability: :unstable
           )
         )
+      end
+
+      # Floor each caller-argument local whose matching parameter the resolved
+      # callee escape-mutates (see the call-site comment). Only self-dispatch
+      # calls resolving to a discovered user def are considered; the per-def
+      # "which parameters escape-mutate" set is memoised on the def node.
+      def widen_callee_escaped_argument_captures(node, base_scope)
+        # Apply to the statement call AND every call in its receiver chain: the
+        # `build_option_parser(options).parse!(argv)` idiom puts the escape-
+        # mutating helper call in the RECEIVER position, where its argument is
+        # never the statement node's own argument.
+        acc = floor_callee_escaped_args_for_call(node, base_scope)
+        receiver = node.receiver
+        while receiver.is_a?(Prism::CallNode)
+          acc = floor_callee_escaped_args_for_call(receiver, acc)
+          receiver = receiver.receiver
+        end
+        acc
+      end
+
+      def floor_callee_escaped_args_for_call(node, base_scope)
+        return base_scope unless self_dispatch_call?(node)
+
+        def_node = resolve_self_callee_def(node)
+        return base_scope if def_node.nil?
+
+        escaped = escaped_content_parameters(def_node)
+        return base_scope if escaped.empty?
+
+        floor_arguments_at_positions(node, escaped, base_scope)
+      end
+
+      # The user def a self-dispatch `node` resolves to in the enclosing class,
+      # or nil. Reuses the discovery index `Scope#user_def_for` reads; no
+      # ancestor walk (the boundary-escape idiom is same-class), keeping this
+      # off the hot path for the overwhelming majority of self-calls that
+      # resolve to nothing escaping.
+      def resolve_self_callee_def(node)
+        class_name = enclosing_class_name_for(scope.self_type)
+        return scope.top_level_def_for(node.name) if class_name.nil?
+
+        scope.user_def_for(class_name, node.name)
+      end
+
+      def self_dispatch_call?(node)
+        return false unless node.is_a?(Prism::CallNode)
+
+        node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+      end
+
+      # The set of `[name, position]` parameters of `def_node` whose content a
+      # block in the body escape-mutates. Memoised per def node (the body walk
+      # is otherwise repeated at every call site). A parameter is "escape-
+      # mutated" when a `param[k] = v` / `param << x` mutation on it appears
+      # inside a block whose receiving call is not proven non-escaping.
+      def escaped_content_parameters(def_node)
+        cache = (@escaped_param_cache ||= {}.compare_by_identity)
+        cache[def_node] ||= compute_escaped_content_parameters(def_node)
+      end
+
+      def compute_escaped_content_parameters(def_node)
+        positions = positional_parameter_positions(def_node)
+        return {} if positions.empty?
+
+        mutated = Set.new
+        Source::NodeWalker.each(def_node.body) do |descendant|
+          next unless descendant.is_a?(Prism::CallNode) && descendant.block.is_a?(Prism::BlockNode)
+          next if syntactically_non_escaping_call?(descendant)
+
+          collect_content_mutations(descendant.block.body).each_key do |name|
+            mutated << name if positions.key?(name)
+          end
+        end
+        positions.slice(*mutated)
+      end
+
+      # A receiver-independent over-approximation of `ClosureEscapeAnalyzer`'s
+      # non-escaping verdict, used when scanning a callee body where the block-
+      # owning call's receiver TYPE is not available. A call whose method name
+      # is a known structural iterator (`each` / `map` / `tap` / …) runs its
+      # block synchronously and does not retain it, so its captured mutations
+      # are not a cross-boundary escape. Any other name (`on`, `subscribe`,
+      # `define_method`, an unknown DSL hook) is treated as escaping — sound,
+      # since mis-classifying a truly-non-escaping call only floors an argument
+      # that was about to be precise.
+      SYNTACTIC_NON_ESCAPING_BLOCK_METHODS = (
+        ClosureEscapeAnalyzer::ENUMERABLE_NON_ESCAPING +
+        ClosureEscapeAnalyzer::OBJECT_NON_ESCAPING +
+        ClosureEscapeAnalyzer::ARRAY_EXTRA +
+        ClosureEscapeAnalyzer::HASH_EXTRA +
+        ClosureEscapeAnalyzer::RANGE_EXTRA +
+        ClosureEscapeAnalyzer::INTEGER_EXTRA
+      ).to_set.freeze
+      private_constant :SYNTACTIC_NON_ESCAPING_BLOCK_METHODS
+
+      def syntactically_non_escaping_call?(call_node)
+        SYNTACTIC_NON_ESCAPING_BLOCK_METHODS.include?(call_node.name)
+      end
+
+      # `{ name => position }` for the required / optional positional
+      # parameters of a def. Keyword / rest / block parameters are skipped —
+      # the boundary-escape idiom passes a plain positional collection.
+      def positional_parameter_positions(def_node)
+        params = def_node.parameters
+        return {} if params.nil?
+
+        ordered = (params.requireds || []) + (params.optionals || [])
+        positions = {}
+        ordered.each_with_index do |param, index|
+          positions[param.name] = index if param.respond_to?(:name)
+        end
+        positions
+      end
+
+      def floor_arguments_at_positions(node, positions, base_scope)
+        args = node.arguments
+        return base_scope unless args.respond_to?(:arguments)
+
+        argument_nodes = args.arguments
+        positions.values.uniq.reduce(base_scope) do |acc, index|
+          arg = argument_nodes[index]
+          next acc unless arg.is_a?(Prism::LocalVariableReadNode) && acc.locals.key?(arg.name)
+
+          floored = content_floor_for(acc.local(arg.name))
+          floored.nil? ? acc : acc.with_local(arg.name, floored)
+        end
       end
 
       # Walk the receiver chain of `node` and fold the escaping-content

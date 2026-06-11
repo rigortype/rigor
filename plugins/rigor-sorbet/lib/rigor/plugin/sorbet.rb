@@ -616,8 +616,8 @@ module Rigor
       # static subtype check at recogniser time and records the
       # call only when the inferred type is *provably
       # incompatible* with the asserted type. Gradual
-      # consistency rules (`Inference::Acceptance.accepts(...)`
-      # mode `:gradual`): a `Dynamic[top]` inferred type
+      # consistency rules (`Type#accepts` mode `:gradual`): a
+      # `Dynamic[top]` inferred type
       # silences the check; a definite `:no` records for
       # diagnostic emission; `:maybe` (uncertain) is treated as
       # "trust the user" and silenced — the runtime check is
@@ -629,7 +629,7 @@ module Rigor
         inferred, asserted = check
         return if inferred.nil?
 
-        result = Rigor::Inference::Acceptance.accepts(asserted, inferred)
+        result = asserted.accepts(inferred)
         return unless result.no?
 
         @assert_type_mismatches[call_node] = [display_for_type(inferred), display_for_type(asserted)]

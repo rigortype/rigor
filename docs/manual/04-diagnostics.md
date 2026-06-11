@@ -36,6 +36,7 @@ ID; `rigor explain` with no argument lists them all.
 | `flow.unreachable-branch` | An `if` / `unless` / ternary branch is statically dead. |
 | `flow.always-truthy-condition` | A condition is provably always truthy or always falsey. |
 | `flow.dead-assignment` | A local is written but never read in the same method. |
+| `flow.unreachable-clause` | A `case`/`when` or `case`/`in` clause is statically dead — its subject type is disjoint with the pattern, or a prior clause already exhausted the subject. |
 | `def.return-type-mismatch` | The method body's result violates its declared RBS return type. |
 | `def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write. |
 | `def.method-visibility-mismatch` | An explicit-receiver call reaches a private method. |

@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check check-plugins check-incremental verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -125,6 +125,14 @@ check-plugins:
 check-incremental:
 	bundle exec exe/rigor check --verify-incremental --no-stats lib
 	bundle exec exe/rigor check --verify-incremental --no-stats plugins/*/lib examples/*/lib
+
+# Verify that docs/handbook/ executable snippets are accurate and that
+# docs/handbook/ + docs/manual/ relative links and doc↔code references are
+# consistent.  Runs spec/docs/ in isolation so failures are attributed
+# clearly.  Already included in the `test`/`test-parallel` suite; this
+# target is the named gate for a focused docs-only run.
+docs-check:
+	bundle exec rspec spec/docs/
 
 check-json:
 	bundle exec exe/rigor check --format=json lib

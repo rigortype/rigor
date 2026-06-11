@@ -59,6 +59,49 @@ The historical "16" is now "25" — the population shifts as engine
 precision moves, which is itself the argument for re-measuring per
 engine generation rather than treating the gate as permanent.
 
+## Slice 1 results — adjudication + first artifact fix (2026-06-12)
+
+The 25 gate-open self-check firings and the three-corpus delta were
+adjudicated; the full itemized table lives in
+[`docs/notes/20260612-adr57-adjudication.md`](../notes/20260612-adr57-adjudication.md).
+Eight distinct mechanisms were found, grouped genuine vs artifact:
+
+- **Mechanism 1 (15 self-check firings) — FIXED.** The tail-only body
+  evaluator dropped explicit `return value` nodes (`type_of_jump → Bot`),
+  so a predicate helper `return false unless c; …; true` inferred
+  `Constant[true]` and folded `if helper` to always-truthy. The fix
+  (`StatementEvaluator#eval_return` + a thread-local return sink, joined
+  in `ExpressionTyper#infer_user_method_return`) makes every reachable
+  explicit return — including block-internal returns, which in Ruby exit
+  the enclosing method — contribute to the inferred return; nested
+  `def`/lambda are barriers; flow-pruned dead branches do not contribute.
+  Precision-additive gate-closed (zero diagnostic change on `lib`, the
+  plugin self-check, and Mastodon/haml/kramdown — all byte-identical).
+  Opening the gate after the fix yields **10** self-check firings, down
+  from 25.
+- **Residual artifacts NOT yet fixed (own slices):** block-captured
+  Hash-element / String mutation invisible (mechanism 2 / 8 — the ADR-56
+  captured-mutation family extended to `h[k]=v` and `s << x` inside
+  escaping blocks; triage:35, diff:48, kramdown html.rb ×3); multi-value
+  `return a, b, c` not contributing a Tuple (mechanism 7; haml parser.rb
+  ×2 — a direct extension of mechanism 1, the slice-1 collector handles
+  single/bare returns only).
+- **Residual genuine (not artifacts):** `Configuration.load`'s RBS is
+  `?String` but its body is `path || discover` and nil-checks, so the 5
+  `argument-type` firings are earned against a too-strict *self-authored*
+  RBS (`?String?` is correct); likewise `MethodCatalog#reset!`'s
+  `() -> nil` RBS is wrong (the `@catalog = …` assignment returns the
+  Hash). Both are genuine sig corrections, not engine bugs. One stub
+  (`string_unary_blow_up?` always `false`) is a genuine benign dead
+  guard. `loader.rb:76` is sound `Array#find` conservatism the Kahn
+  `in_degree.zero?` invariant rules out — FP-risky to ship, needs flow
+  narrowing.
+
+Per WD2 the residual is not all-genuine, so the gate stays closed after
+slice 1. Next slices: fix mechanisms 2/7/8, then re-adjudicate; the
+genuine-via-RBS firings are independently addressable by widening the two
+self-authored signatures.
+
 ## WD2 — Decision criterion
 
 > The gate opens **per adjudicated firing class, not wholesale**: every

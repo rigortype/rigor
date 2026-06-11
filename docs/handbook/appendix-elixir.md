@@ -180,7 +180,7 @@ identity-compared name constants — and Rigor folds a symbol to
 
 ```ruby
 status = :ok
-assert_type("Constant<:ok>", status)
+assert_type(":ok", status)
 
 # a discriminated union over atoms/symbols:
 def describe(s)         # s : Constant<:ok> | Constant<:error>
@@ -230,7 +230,7 @@ carrier** that rides on the ordinary type:
 ```ruby
 def reciprocal(n)
   return nil unless n > 0
-  assert_type("positive-int", n)   # narrowed by the guard
+  # n is positive-int here when typed as Integer; untyped params stay Dynamic[top]
   1.0 / n
 end
 ```

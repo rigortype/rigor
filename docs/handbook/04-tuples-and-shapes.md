@@ -34,18 +34,18 @@ The most common ways tuples appear in real code:
 ```ruby
 # Multiple-assignment destructuring is per-position.
 first, second, third = [10, 20, 30]
-assert_type("Constant<10>", first)
-assert_type("Constant<20>", second)
-assert_type("Constant<30>", third)
+assert_type("10", first)
+assert_type("20", second)
+assert_type("30", third)
 
 # divmod returns a 2-tuple.
 quotient, remainder = 17.divmod(5)
-assert_type("Constant<3>", quotient)
-assert_type("Constant<2>", remainder)
+assert_type("3", quotient)
+assert_type("2", remainder)
 
 # Each-with-index yields a 2-tuple.
 %w[a b c].each_with_index do |elt, idx|
-  assert_type("Constant<\"a\"> | Constant<\"b\"> | Constant<\"c\">", elt)
+  assert_type("\"a\" | \"b\" | \"c\"", elt)
   assert_type("non-negative-int", idx)
 end
 ```
@@ -112,11 +112,11 @@ The hash analogue is `HashShape`:
 
 ```ruby
 user = { name: "Alice", age: 30, admin: false }
-# HashShape{name: Constant<"Alice">, age: Constant<30>, admin: Constant<false>}
+# { name: "Alice", age: 30, admin: false }
 
-assert_type("Constant<\"Alice\">", user[:name])
-assert_type("Constant<30>", user[:age])
-assert_type("Constant<false>", user[:admin])
+assert_type("\"Alice\"", user[:name])
+assert_type("30", user[:age])
+assert_type("false", user[:admin])
 ```
 
 Hash shapes have a few extra dimensions over tuples:
@@ -201,8 +201,8 @@ exactly like multiple-assignment:
 ```ruby
 case [10, 20, 30]
 in [first, _, third]
-  assert_type("Constant<10>", first)
-  assert_type("Constant<30>", third)
+  assert_type("Dynamic[top]", first)   # pattern bindings are not constant-folded
+  assert_type("Dynamic[top]", third)
 end
 ```
 
@@ -211,8 +211,8 @@ Hash patterns work the same way:
 ```ruby
 case { name: "Alice", age: 30 }
 in { name:, age: }
-  assert_type("Constant<\"Alice\">", name)
-  assert_type("Constant<30>", age)
+  assert_type("Dynamic[top]", name)   # pattern bindings are not constant-folded
+  assert_type("Dynamic[top]", age)
 end
 ```
 

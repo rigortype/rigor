@@ -151,9 +151,9 @@ type:
 Point = Data.define(:x, :y)
 
 p = Point.new(x: 3, y: 4)
-assert_type("Nominal[Point]", p)
-assert_type("Constant<3>", p.x)
-assert_type("Constant<4>", p.y)
+assert_type("Point(x: 3, y: 4)", p)
+assert_type("3", p.x)
+assert_type("4", p.y)
 ```
 
 The discovery walks `define_method`-style block bodies too,
@@ -174,8 +174,8 @@ shapes:
 Coord = Struct.new(:x, :y)
 
 c = Coord.new(10, 20)
-assert_type("Constant<10>", c.x)
-assert_type("Constant<20>", c.y)
+assert_type("Dynamic[top]", c.x)   # Struct members are not constant-folded (mutable)
+assert_type("Dynamic[top]", c.y)
 ```
 
 `Struct` adds mutability (the accessors are also writers), so

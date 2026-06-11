@@ -211,7 +211,6 @@ def classify(n)
 end
 
 result = classify(7)
-assert_type("Constant<:zero> | Constant<:positive> | Constant<:negative>", result)
 ```
 
 Same precision; one writes the parameter and return

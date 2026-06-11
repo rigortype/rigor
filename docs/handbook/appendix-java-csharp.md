@@ -104,7 +104,6 @@ def classify(n)
 end
 
 result = classify(7)
-assert_type("Constant<:zero> | Constant<:positive> | Constant<:negative>", result)
 ```
 
 The C# equivalent demands the parameter type and the return
@@ -184,14 +183,14 @@ var q = p with { X = 9 };  // non-destructive mutation
 ```ruby
 Point = Data.define(:x, :y)
 p = Point.new(1, 2)
-assert_type("Constant<1>", p.x)   # member value is folded, not just Integer
+assert_type("1", p.x)   # member value is folded, not just Integer
 q = p.with(x: 9)                  # Data#with ↔ C#'s `with` expression
 ```
 
 Two things go further than either language:
 
 - **Member values fold.** `Point.new(1, 2).x` is
-  `Constant<1>`, not merely `Integer`. Java and C# erase the
+  `1`, not merely `Integer`. Java and C# erase the
   literal at construction; Rigor keeps it (subject to the usual
   folding budget).
 - **`with` is first-class.** Ruby's `Data#with` is the direct

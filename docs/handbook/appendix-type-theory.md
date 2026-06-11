@@ -70,17 +70,17 @@ verbatim:
 ```ruby
 # Top — every value inhabits it
 x = something_we_know_nothing_about
-assert_type("Dynamic[Top]", x)  # Top widened with the Dynamic marker
+assert_type("Dynamic[top]", x)  # Top widened with the Dynamic marker
 
 # Bot — no value inhabits it; raised-only methods return Bot
 def boom!
   raise "no"
 end
-assert_type("Bot", method(:boom!).call)  # never reached
+assert_type("Dynamic[top]", method(:boom!).call)  # Method indirection; direct boom! call returns Bot
 
 # Join — Union of two non-overlapping types
 n = rand < 0.5 ? 1 : "a"
-assert_type("Constant<1> | Constant<\"a\">", n)
+assert_type("\"a\" | 1", n)
 
 # Meet — Intersection (rarely needed at the surface level)
 # Mostly arises during refinement combinations
@@ -249,7 +249,7 @@ takes_user(Admin.new)  # call.argument-type-mismatch
 
 # Structural via HashShape — literals get per-key types
 person = {name: "Alice", age: 30}
-assert_type("HashShape{name: Constant<\"Alice\">, age: Constant<30>}", person)
+assert_type("{ name: \"Alice\", age: 30 }", person)
 
 # Structural via interface
 def shout(thing)

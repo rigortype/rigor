@@ -214,17 +214,17 @@ method in the bundled catalog has a per-method rule:
 
 ```ruby
 [1, 2, 3].each do |n|
-  assert_type("Constant<1> | Constant<2> | Constant<3>", n)
+  assert_type("1 | 2 | 3", n)
 end
 
 %w[a b c].each_with_index do |word, idx|
-  assert_type("Constant<\"a\"> | Constant<\"b\"> | Constant<\"c\">", word)
+  assert_type("\"a\" | \"b\" | \"c\"", word)
   assert_type("non-negative-int", idx)
 end
 
 {name: "Alice", age: 30}.each_pair do |key, value|
-  assert_type("Constant<:name> | Constant<:age>", key)
-  assert_type("Constant<\"Alice\"> | Constant<30>", value)
+  assert_type(":age | :name", key)
+  assert_type("\"Alice\" | 30", value)
 end
 ```
 
@@ -268,7 +268,7 @@ x = 100
   # x: Constant<2> | Constant<4> | Constant<6>
 end
 
-assert_type("Constant<100>", x)  # outer x untouched
+assert_type("100", x)  # outer x untouched
 ```
 
 ## Closure escape and captured locals

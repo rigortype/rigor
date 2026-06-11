@@ -226,12 +226,11 @@ Snippet conventions:
 
 ```ruby
 n = 1 + 2
-assert_type("Constant<3>", n)  # Rigor folds the literal sum
+assert_type("3", n)  # Rigor folds the literal sum
 ```
 
 means: at the `assert_type` call, Rigor's inference for `n` is
-`Constant<3>` — the `Type::Constant` carrier with the literal
-value `3`.
+`3` — the folded literal value.
 
 Wording convention — **"interface"**: Ruby has no `interface`
 keyword, so most readers import the word's meaning from another

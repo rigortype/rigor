@@ -230,13 +230,13 @@ let q = Point { x: 9, ..p };       // functional update
 ```ruby
 Point = Data.define(:x, :y)
 p = Point.new(1, 2)
-assert_type("Constant<1>", p.x)    # member value is folded, not just Integer
+assert_type("1", p.x)    # member value is folded, not just Integer
 q = p.with(x: 9)                   # Data#with ↔ Rust's ..p update
 ```
 
 Two things go beyond Rust here:
 
-- **Member values fold.** `Point.new(1, 2).x` is `Constant<1>`,
+- **Member values fold.** `Point.new(1, 2).x` is `1`,
   not merely `Integer`. Rust erases the literal at
   construction; Rigor keeps it (subject to the folding budget).
 - **`with` is first-class.** `Data#with` is the analogue of

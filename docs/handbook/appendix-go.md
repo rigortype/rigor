@@ -202,13 +202,13 @@ q.X = 9            // Go structs are mutable; this copies-then-mutates
 ```ruby
 Point = Data.define(:x, :y)
 p = Point.new(1, 2)
-assert_type("Constant<1>", p.x)   # member value is folded, not just Integer
+assert_type("1", p.x)   # member value is folded, not just Integer
 q = p.with(x: 9)                  # immutable update — returns a new Point
 ```
 
 Two notes for a Go reader:
 
-- **Member values fold.** `Point.new(1, 2).x` is `Constant<1>`,
+- **Member values fold.** `Point.new(1, 2).x` is `1`,
   not merely `Integer`. Go erases the literal; Rigor keeps it
   (subject to the folding budget).
 - **`Data` is immutable.** Unlike a Go `struct`, `Data.define`

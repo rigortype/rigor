@@ -99,9 +99,21 @@ module Rigor
         Prism::SingletonClassNode => :eval_singleton_class,
         Prism::CallNode => :eval_call,
         Prism::BlockNode => :eval_block,
+        Prism::ReturnNode => :eval_return,
         Prism::MatchWriteNode => :eval_match_write
       }.freeze
       private_constant :HANDLERS
+
+      # Thread-local sink (an Array) collecting the value types of explicit
+      # `return value` nodes reached while evaluating a method body, so
+      # `ExpressionTyper#infer_user_method_return` can join them into the
+      # method's inferred return type. The flow value of a `return` is still
+      # `Bot` (it transfers control rather than producing a value); the sink
+      # only records what the method *returns* through that edge. nil means
+      # "not collecting" — a top-level / DSL-block walk, or inside a nested
+      # `def` barrier (whose returns belong to the inner method).
+      RETURN_SINK_KEY = :rigor_return_sink
+      private_constant :RETURN_SINK_KEY
 
       # Lexical class frame: the `name:` field is the qualified class
       # name as it would render in Ruby (e.g., `"Foo::Bar"`); the
@@ -127,6 +139,25 @@ module Rigor
         @tracer = tracer
         @on_enter = on_enter
         @class_context = class_context.freeze
+      end
+
+      # Runs `block` with a fresh return sink installed, then yields the
+      # collected explicit-`return` value types to the caller. The sink is
+      # an array of `Rigor::Type`. Nested invocations stack: the previous
+      # sink is restored on exit so a `def` evaluated inside another method's
+      # body (which itself installed a sink) does not corrupt the outer one.
+      # Used by `ExpressionTyper#infer_user_method_return` to join the
+      # explicit returns into the inferred method-return type.
+      def self.with_return_sink
+        previous = Thread.current[RETURN_SINK_KEY]
+        sink = []
+        Thread.current[RETURN_SINK_KEY] = sink
+        begin
+          result = yield
+        ensure
+          Thread.current[RETURN_SINK_KEY] = previous
+        end
+        [result, sink]
       end
 
       # Evaluate `node` under the receiver scope. Returns `[type, scope']`
@@ -1178,8 +1209,18 @@ module Rigor
         # like a singleton-side call. Observed surfacing 915 false
         # positives in `prism-1.9.0`'s auto-generated `copy`
         # methods alone.
-        sub_eval(node.parameters, body_scope, class_context: @class_context) if node.parameters
-        sub_eval(node.body, body_scope, class_context: @class_context) if node.body
+        # A nested `def` is a return barrier: its body's `return`s belong to
+        # the inner method, not the one currently being inferred. Suspend the
+        # return sink across the nested body so `eval_return` does not record
+        # them into the outer method's return type.
+        outer_sink = Thread.current[RETURN_SINK_KEY]
+        Thread.current[RETURN_SINK_KEY] = nil
+        begin
+          sub_eval(node.parameters, body_scope, class_context: @class_context) if node.parameters
+          sub_eval(node.body, body_scope, class_context: @class_context) if node.body
+        ensure
+          Thread.current[RETURN_SINK_KEY] = outer_sink
+        end
         [Type::Combinator.constant_of(node.name), scope]
       end
 
@@ -2460,6 +2501,34 @@ module Rigor
       end
 
       # ----- helpers -----
+
+      # Explicit `return value` (including `return` inside a block, which in
+      # Ruby returns from the *enclosing method*). The control-transfer value
+      # is `Bot` — a `return` produces no value at its own position — but the
+      # returned expression's type is recorded into the active return sink so
+      # the method-return inference joins it with the body's tail type.
+      # Returns inside a nested `def`/lambda are barriers: `eval_def` clears
+      # the sink around the nested body, so this handler only ever appends a
+      # return that genuinely exits the method currently being inferred.
+      def eval_return(node)
+        sink = Thread.current[RETURN_SINK_KEY]
+        record_return_value(node, sink) if sink
+        [Type::Combinator.bot, scope]
+      end
+
+      def record_return_value(node, sink)
+        args = node.arguments&.arguments || []
+        # `return` with no argument returns nil; `return a, b` packs a Tuple.
+        # The single-value form (the overwhelming majority) records the
+        # argument's type; the bare form records nil. Multi-value returns are
+        # left to the body's tail handling to keep this conservative.
+        if args.empty?
+          sink << Type::Combinator.constant_of(nil)
+        elsif args.size == 1
+          type, = sub_eval(args.first, scope)
+          sink << type
+        end
+      end
 
       def sub_eval(node, with_scope, class_context: @class_context)
         StatementEvaluator.new(

@@ -1682,7 +1682,7 @@ module Rigor
           if outermost
             fixpoint_user_method_return(def_node, body_scope, context)
           else
-            type, _post = body_scope.evaluate(def_node.body)
+            type, = evaluate_body_with_returns(body_scope, def_node.body)
             clamp_unroll_result(type, context.would_have_been_guarded)
           end
         ensure
@@ -1692,6 +1692,27 @@ module Rigor
             Thread.current[INFERENCE_SUMMARY_KEY] = nil
           end
         end
+      end
+
+      # Evaluates a method body and joins the value types of every explicit
+      # `return value` reached during the walk with the body's tail type.
+      #
+      # The tail-only evaluator (`statements_type_for` → `type_of(body.last)`)
+      # models only the fall-through value; an early `return false` or a
+      # block-internal `return x` produces `Bot` at its own position and is
+      # otherwise invisible to method-return inference. Without this join a
+      # predicate helper shaped `return false unless cond; ...; true` infers
+      # `Constant[true]` (the early `return false` dropped), which folds
+      # `if helper` to always-truthy. `StatementEvaluator.with_return_sink`
+      # collects the returns (nested `def`/lambda are barriers; block-internal
+      # returns correctly bubble to the enclosing method) so the inferred
+      # return is `tail | return_1 | … | return_n`, matching Ruby semantics.
+      def evaluate_body_with_returns(body_scope, body)
+        (type, post_scope), returns = StatementEvaluator.with_return_sink do
+          body_scope.evaluate(body)
+        end
+        joined = returns.empty? ? type : Type::Combinator.union(type, *returns)
+        [joined, post_scope]
       end
 
       # ADR-55 slice 2 — Kleene fixpoint over a recursive method's return
@@ -1712,7 +1733,7 @@ module Rigor
 
         RECURSION_FIXPOINT_CAP.times do |iteration|
           summaries[plain_signature][:consulted] = false
-          type, _post = body_scope.evaluate(def_node.body)
+          type, = evaluate_body_with_returns(body_scope, def_node.body)
           computed = clamp_unroll_result(type, context.would_have_been_guarded)
 
           # The summary was never consulted — the method did not recurse on

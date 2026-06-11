@@ -65,8 +65,12 @@ class Walker
   # The base case is an explicit early `return` whose value the tail-only
   # body evaluator never folds into the result, so the fixpoint cannot
   # see the `nil`. The bot-collapse fix detects the reachable explicit
-  # `return` and floors to the sound `Dynamic[top]` (the pre-slice-2
-  # observable) instead of the unsound `bot`.
+  # `return` and floored to the sound `Dynamic[top]` (the pre-slice-2
+  # observable) instead of the unsound `bot`. ADR-57 slice 2 then made
+  # explicit-return values contribute to method-return inference, so the
+  # `nil` is now visible: `pick` infers its true return `nil` (the base
+  # case joined with the bare recursive branch, which the fixpoint
+  # resolves to `nil`), no longer needing the `Dynamic[top]` floor.
   def pick(n)
     return nil if n <= 0
 
@@ -75,7 +79,7 @@ class Walker
 end
 
 assert_type(":done", Walker.new.passthrough(some_int))
-assert_type("Dynamic[top]", Walker.new.pick(some_int))
+assert_type("nil", Walker.new.pick(some_int))
 
 # A method that ONLY recurses never returns: its summary stays `bot`
 # (the always-diverging shape) without hanging or blowing the stack.

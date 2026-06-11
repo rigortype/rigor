@@ -16,6 +16,9 @@ cycles live in dedicated archives:
 
 ### Added
 
+- **[inference]** Explicit `return value` statements now contribute to a user method's inferred return type, where previously only the body's fall-through (tail) expression was modelled.
+  - A predicate helper shaped `return false unless cond; …; true` now infers `bool` instead of `Constant[true]`; an early `return` / `return nil` joins `nil` into the return; and a `return` inside a block (which in Ruby returns from the *enclosing* method) bubbles its value up. Nested `def` / lambda bodies remain return barriers — their returns belong to the inner callable. Dead branches pruned by flow narrowing do not contribute (reachability is respected).
+  - Purely precision-additive on its own: zero diagnostic change across `rigor check lib`, the plugin self-check, and the Mastodon `app/models` / haml `lib` / kramdown `lib` corpora (all byte-identical). The win surfaces when the implicit-self call return-adoption gate (ADR-24 WD3 / ADR-57) opens — it removes the largest artifact class (15 of the 25 gate-open self-check firings) that previously made the gate unsafe to open.
 - **[inference]** `Array#flatten` now recovers the flattened element type instead of widening to `Array[Dynamic[top]]`.
   - A tuple-of-tuples literal folds exactly: `[[1, 2], [3, 4]].flatten` types as `[1, 2, 3, 4]`, deep nesting flattens fully (`[1, [2, [3]]].flatten` → `[1, 2, 3]`), and a `Constant[Integer]` depth bounds the flatten (`[[1, 2], [3, 4]].flatten(1)`).
   - An `Array[Array[T]]` nominal receiver joins one nesting level (`Array[Array[Integer]]#flatten` → `Array[Integer]`); a non-nested `Array[T]` flattens to `Array[T]`. Purely precision-additive: a non-static depth argument or a bare `Array` keeps today's answer, and no new diagnostic can fire.

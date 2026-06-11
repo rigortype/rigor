@@ -764,13 +764,37 @@ module Rigor
       # filter the common cases first. Adding a precise tier is a
       # one-line append here rather than another link in a hand-written
       # `||` ladder.
-      PRECISE_TIERS = Ractor.make_shareable([
-        ConstantFolding, LiteralStringFolding, ShapeDispatch,
-        FileFolding, ShellwordsFolding, MathFolding, TimeFolding,
-        RegexpFolding, CGIFolding, URIFolding, SetFolding,
+      PRECISE_TIERS_HEAD = Ractor.make_shareable([
+        ConstantFolding, LiteralStringFolding, ShapeDispatch
+      ].freeze)
+      private_constant :PRECISE_TIERS_HEAD
+
+      # ADR-53 re-review follow-up (gate-by-held-key applied to the
+      # built-in tiers): the eight stdlib singleton folders are mutually
+      # exclusive — each fires only on `Singleton[<its class>]`, the
+      # first check in every `try_dispatch` — so at most one can match a
+      # given receiver and their relative trial order was never
+      # observable. Compiling them into a class-name table turns eight
+      # no-op trials per call into one Hash read, skipped entirely when
+      # the receiver is not a `Singleton` (the overwhelmingly common
+      # case). The table sits where the eight sat in the old flat list:
+      # after ShapeDispatch, before KernelDispatch.
+      STDLIB_SINGLETON_FOLDERS = Ractor.make_shareable({
+        "File" => FileFolding,
+        "Shellwords" => ShellwordsFolding,
+        "Math" => MathFolding,
+        "Time" => TimeFolding,
+        "Regexp" => RegexpFolding,
+        "CGI" => CGIFolding,
+        "URI" => URIFolding,
+        "Set" => SetFolding
+      }.freeze)
+      private_constant :STDLIB_SINGLETON_FOLDERS
+
+      PRECISE_TIERS_TAIL = Ractor.make_shareable([
         KernelDispatch, MethodFolding, BlockFolding
       ].freeze)
-      private_constant :PRECISE_TIERS
+      private_constant :PRECISE_TIERS_TAIL
 
       def dispatch_precise_tiers(context)
         # ADR-48 — Data value folding runs ahead of meta-introspection:
@@ -785,7 +809,18 @@ module Rigor
         meta_result = try_meta_introspection(context.receiver, context.method_name, context.args)
         return meta_result if meta_result
 
-        PRECISE_TIERS.each do |tier|
+        PRECISE_TIERS_HEAD.each do |tier|
+          result = tier.try_dispatch(context)
+          return result if result
+        end
+
+        receiver = context.receiver
+        if receiver.is_a?(Type::Singleton) && (folder = STDLIB_SINGLETON_FOLDERS[receiver.class_name])
+          result = folder.try_dispatch(context)
+          return result if result
+        end
+
+        PRECISE_TIERS_TAIL.each do |tier|
           result = tier.try_dispatch(context)
           return result if result
         end

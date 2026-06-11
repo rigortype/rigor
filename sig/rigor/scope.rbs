@@ -75,6 +75,7 @@ module Rigor
     def with_ivar: (String | Symbol name, Type::t type) -> Scope
     def with_cvar: (String | Symbol name, Type::t type) -> Scope
     def with_global: (String | Symbol name, Type::t type) -> Scope
+    def forget_match_globals: () -> Scope
     def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool

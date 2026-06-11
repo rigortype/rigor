@@ -1373,4 +1373,94 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
     end
   end
+
+  describe ".predicate_scopes — C1 regex match-data globals" do
+    def string_t = Rigor::Type::Combinator.nominal_of("String")
+    def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")
+    def string_or_nil = Rigor::Type::Combinator.union(string_t, constant_nil)
+
+    def edges(source)
+      predicate = parse_predicate(source, locals: %i[x])
+      described_class.predicate_scopes(predicate, scope)
+    end
+
+    it "binds $~/$&/$1 non-nil on the truthy edge of `/re/ =~ x`" do
+      truthy, falsey = edges("/(\\d+)/ =~ x")
+      expect(truthy.global(:$~)).to eq(matchdata_t)
+      expect(truthy.global(:$&)).to eq(string_t)
+      expect(truthy.global(:$1)).to eq(string_t)
+      expect(falsey.global(:$~)).to eq(constant_nil)
+      expect(falsey.global(:$1)).to eq(constant_nil)
+    end
+
+    it "narrows the same regardless of `=~` receiver order" do
+      truthy, = edges("x =~ /(\\d+)/")
+      expect(truthy.global(:$1)).to eq(string_t)
+    end
+
+    it "leaves an optional group `(y)?` nilable on the truthy edge" do
+      truthy, = edges("/x(y)?/ =~ x")
+      expect(truthy.global(:$1)).to be_nil # falls back to default String | nil
+    end
+
+    it "leaves every group nilable when the pattern contains alternation" do
+      truthy, = edges("/(a)|(b)/ =~ x")
+      expect(truthy.global(:$1)).to be_nil
+      expect(truthy.global(:$2)).to be_nil
+    end
+
+    it "promotes only the unconditional sibling of an optional group" do
+      truthy, = edges("/(\\d+)x(y)?/ =~ x")
+      expect(truthy.global(:$1)).to eq(string_t)
+      expect(truthy.global(:$2)).to be_nil
+    end
+
+    it "treats `+`-quantified groups as unconditional" do
+      truthy, = edges("/(a)+/ =~ x")
+      expect(truthy.global(:$1)).to eq(string_t)
+    end
+
+    it "disqualifies a group nested under an optional ancestor" do
+      truthy, = edges("/((a))?/ =~ x")
+      expect(truthy.global(:$1)).to be_nil
+      expect(truthy.global(:$2)).to be_nil
+    end
+
+    it "does not narrow on `x.match?(/re/)` (match? sets no globals)" do
+      truthy, falsey = edges("x.match?(/(z)/)")
+      expect(truthy.global(:$1)).to be_nil
+      expect(falsey.global(:$1)).to be_nil
+    end
+  end
+
+  describe ".case_when_scopes — C1 regex `when` clause globals" do
+    def string_t = Rigor::Type::Combinator.nominal_of("String")
+    def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")
+
+    def when_body_scope(case_source)
+      program = parse_program(case_source, locals: %i[x])
+      case_node = program.statements.body.first
+      branch = case_node.conditions.first
+      body, = described_class.case_when_scopes(case_node.predicate, branch.conditions, scope)
+      body
+    end
+
+    it "narrows $~/$1 on a `when /re(x)/` body edge" do
+      body = when_body_scope("case x\nwhen /a(b)c/ then 1\nend")
+      expect(body.global(:$~)).to eq(matchdata_t)
+      expect(body.global(:$1)).to eq(string_t)
+    end
+
+    it "leaves optional groups nilable in a `when` body" do
+      body = when_body_scope("case x\nwhen /(p)(q)?/ then 1\nend")
+      expect(body.global(:$1)).to eq(string_t)
+      expect(body.global(:$2)).to be_nil
+    end
+
+    it "promotes only $~/$& with multiple regex conditions" do
+      body = when_body_scope("case x\nwhen /a(b)/, /c(d)/ then 1\nend")
+      expect(body.global(:$~)).to eq(matchdata_t)
+      expect(body.global(:$1)).to be_nil
+    end
+  end
 end

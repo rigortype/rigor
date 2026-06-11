@@ -423,13 +423,45 @@ module Rigor
       # @param scope [Rigor::Scope]
       # @return [Array(Rigor::Scope, Rigor::Scope)]
       def case_when_scopes(subject, conditions, scope)
-        return [scope, scope] unless subject.is_a?(Prism::LocalVariableReadNode)
+        # C1 — `case x when /re/` runs `/re/ === x`, which sets the
+        # regex match-data globals exactly as a successful `=~` does.
+        # Narrow `$~`/`$&`/`$1..$N` on the clause body (the match
+        # edge); the falsey scope keeps the entry globals because a
+        # later clause may match a different regex. Applied even when
+        # the subject is not a narrowable local read.
+        body_scope = apply_when_regex_globals(conditions, scope)
+
+        return [body_scope, scope] unless subject.is_a?(Prism::LocalVariableReadNode)
 
         local_name = subject.name
         current = scope.local(local_name)
-        return [scope, scope] if current.nil?
+        return [body_scope, scope] if current.nil?
 
-        accumulate_case_when_scopes(scope, local_name, current, conditions)
+        truthy, = accumulate_case_when_scopes(body_scope, local_name, current, conditions)
+        _, falsey = accumulate_case_when_scopes(scope, local_name, current, conditions)
+        [truthy, falsey]
+      end
+
+      # When the clause has exactly one `RegularExpressionNode`
+      # literal condition, narrow the match-data globals on the body
+      # edge (same rule as `analyse_regex_match_predicate`'s truthy
+      # edge). With multiple regex conditions (`when /a/, /b/`) the
+      # body is reachable through any of them, so only `$~`/`$&` are
+      # safely non-nil; numbered groups whose presence differs per
+      # alternative stay `String | nil`. With no regex condition the
+      # entry scope passes through unchanged.
+      def apply_when_regex_globals(conditions, scope)
+        regexes = conditions.grep(Prism::RegularExpressionNode)
+        return scope if regexes.empty?
+
+        unconditional =
+          if regexes.size == 1
+            unconditional_capture_groups(regexes.first.unescaped)
+          else
+            Set.new
+          end
+        truthy, = regex_match_predicate_scopes(scope, unconditional)
+        truthy
       end
 
       # Internal analyser. Returns `[truthy_scope, falsey_scope]` when
@@ -1230,8 +1262,8 @@ module Rigor
           regex_node = regex_match_literal(node.receiver, node.arguments.arguments.first)
           return nil if regex_node.nil?
 
-          group_count = count_regex_capture_groups(regex_node.unescaped)
-          regex_match_predicate_scopes(scope, group_count)
+          unconditional = unconditional_capture_groups(regex_node.unescaped)
+          regex_match_predicate_scopes(scope, unconditional)
         end
 
         def regex_match_literal(left, right)
@@ -1247,7 +1279,15 @@ module Rigor
         REGEX_MATCH_GLOBALS = %i[$~ $& $` $' $+].freeze
         private_constant :REGEX_MATCH_GLOBALS
 
-        def regex_match_predicate_scopes(scope, group_count)
+        # `unconditional` is the Set of 1-based numbered-capture
+        # indices whose group is guaranteed to participate in any
+        # successful match (no optional quantifier on the group or
+        # an ancestor, no alternation in the pattern). Those `$N`
+        # are bound to `String`; every other numbered group present
+        # in the pattern stays `String | nil` on both edges (a
+        # truthy match leaves an optional group nil at runtime), so
+        # we do not narrow it on the truthy edge.
+        def regex_match_predicate_scopes(scope, unconditional)
           string_t = Type::Combinator.nominal_of("String")
           match_data_t = Type::Combinator.nominal_of("MatchData")
           nil_t = Type::Combinator.constant_of(nil)
@@ -1262,45 +1302,127 @@ module Rigor
             truthy = truthy.with_global(name, string_t)
             falsey = falsey.with_global(name, nil_t)
           end
-          group_count.times do |i|
-            name = :"$#{i + 1}"
+          unconditional.each do |index|
+            name = :"$#{index}"
             truthy = truthy.with_global(name, string_t)
             falsey = falsey.with_global(name, nil_t)
           end
           [truthy, falsey]
         end
 
-        # Counts capture groups (numbered + named — both
-        # contribute to `$1..$N`) in a regex source. Backslash
-        # escapes are skipped; non-capturing `(?:...)`, lookahead
-        # `(?=...)` / `(?!...)`, and lookbehind `(?<=...)` /
-        # `(?<!...)` do NOT count. Named groups `(?<name>...)`
-        # DO count. The walker is intentionally light — it does
-        # not parse the regex AST, just scans char-by-char — so
-        # exotic constructs that overlap the lookaround syntax
-        # may miscount; the unsoundness is bounded (over- or
-        # under-binding a few `$N` globals) and we already accept
-        # the same shape of unsoundness for `analyse_match_write`.
-        def count_regex_capture_groups(source)
-          i = 0
-          total = 0
+        # Returns the Set of 1-based numbered-capture indices that
+        # are UNCONDITIONAL in `source`: present on every successful
+        # match because no optional quantifier (`?`, `*`, `{0,…}`)
+        # applies to the group or any ancestor group, and the
+        # pattern contains no alternation (`|`). Optional and
+        # alternation-reachable groups are excluded — at runtime `$N`
+        # is `nil` for them even when the overall match succeeds, so
+        # narrowing them to non-nil `String` would be unsound. The
+        # walker is intentionally light (char scan, not a regex-AST
+        # parse): backslash escapes are skipped; `(?:…)`, lookahead
+        # `(?=…)`/`(?!…)`, and lookbehind `(?<=…)`/`(?<!…)` do not
+        # capture; named groups `(?<name>…)` do. Conservatism is
+        # one-directional — when in doubt a group is treated as
+        # conditional (dropped from the Set), never the reverse.
+        def unconditional_capture_groups(source)
+          # `unconditional` collects every capturing index; a group is
+          # later removed (with its whole subtree) when it is optionally
+          # quantified, nested under an optional ancestor, or sits in an
+          # alternation branch. `stack` holds one frame per open group
+          # (plus a virtual root frame for the top level) as
+          # `[group_index_or_nil, descendant_indices, alternated?]`.
+          # A `|` marks the CURRENT group's frame alternated — its
+          # branches are mutually exclusive, so its descendant captures
+          # may be absent on a successful match; the group itself still
+          # participates. Closing a frame rolls its subtree up to the
+          # parent so an optional / alternated ancestor disqualifies it.
+          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0 }
+          pos = 0
           length = source.length
-          while i < length
-            c = source[i]
-            if c == "\\"
-              i += 2
+          while pos < length
+            chr = source[pos]
+            if chr == "\\"
+              pos += 2
               next
             end
-            if c == "("
-              if source[i + 1] == "?"
-                total += 1 if source[i + 2] == "<" && source[i + 3] != "=" && source[i + 3] != "!"
-              else
-                total += 1
-              end
+            if chr == "["
+              pos = skip_char_class(source, pos) + 1
+              next
             end
-            i += 1
+            scan_group_char(source, pos, chr, state)
+            pos += 1
           end
-          total
+          # Drain the virtual root: a top-level `|` disqualifies all.
+          finalize_frame(state, state[:stack].pop, optional: false)
+          state[:unconditional]
+        end
+
+        # Updates the walk `state` at a group-relevant char during
+        # {#unconditional_capture_groups}: `(` pushes a frame, `)` pops
+        # and resolves it, `|` flags the current frame as alternated.
+        def scan_group_char(source, pos, chr, state)
+          case chr
+          when "("
+            idx = nil
+            if capturing_group?(source, pos)
+              idx = (state[:group_index] += 1)
+              state[:unconditional] << idx
+            end
+            state[:stack].push([idx, [], false])
+          when ")"
+            finalize_frame(state, state[:stack].pop, optional: next_quantifier_optional?(source, pos + 1))
+          when "|"
+            state[:stack].last[2] = true
+          end
+        end
+
+        # Resolves a closed (or virtual-root) group frame: its subtree is
+        # its own index plus every descendant index. The subtree is
+        # disqualified when the group is optionally quantified or its
+        # branches are alternated (only the descendants in that case —
+        # but a self subtree always keeps its own index unless optional).
+        def finalize_frame(state, frame, optional:)
+          idx, descendants, alternated = frame
+          subtree = descendants.dup
+          subtree << idx if idx
+          state[:unconditional].subtract(subtree) if optional
+          # Alternation disqualifies the branch contents (descendants),
+          # never the enclosing group itself.
+          state[:unconditional].subtract(descendants) if alternated
+          state[:stack].last && state[:stack].last[1].concat(subtree)
+        end
+
+        # True when the group whose closing paren is at `source[pos]`
+        # is followed by a quantifier that permits zero repetitions
+        # (`?`, `*`, `{0…}`). `+` and `{1,…}` do NOT make a group
+        # optional. A lazy/possessive suffix (`*?`, `*+`) is still
+        # zero-permitting on the base quantifier.
+        def next_quantifier_optional?(source, pos)
+          case source[pos]
+          when "?", "*" then true
+          when "{" then source[pos + 1] == "0"
+          else false
+          end
+        end
+
+        def capturing_group?(source, pos)
+          return true unless source[pos + 1] == "?"
+
+          # `(?<name>…)` captures; `(?<=…)`/`(?<!…)` (lookbehind) and
+          # `(?:…)`/`(?=…)`/`(?!…)` do not.
+          source[pos + 2] == "<" && source[pos + 3] != "=" && source[pos + 3] != "!"
+        end
+
+        def skip_char_class(source, start)
+          pos = start + 1
+          pos += 1 if source[pos] == "^"
+          pos += 1 if source[pos] == "]" # literal ] as first member
+          while pos < source.length
+            return pos if source[pos] == "]"
+
+            pos += source[pos] == "\\" ? 2 : 1
+          end
+          pos
         end
 
         def dispatch_call_numeric(node, scope, name)

@@ -214,6 +214,23 @@ module Rigor
       rebuild(globals: @globals.merge(name.to_sym => type).freeze)
     end
 
+    # Regex match-data globals (`$~`, `$&`, `$1..$9`, the pre/post-match
+    # and last-paren back-references). Narrowed on a successful-`=~` /
+    # `case`-`when` match edge (see `Narrowing#regex_match_predicate_scopes`);
+    # any subsequent method call could run another match and rebind every
+    # one of them, so `eval_call` forgets the narrowed facts here. Always
+    # safe — only drops facts, so a subsequent read falls back to the
+    # default `String | nil`. Program-level `$GLOBAL = ...` seeds use other
+    # names and are untouched.
+    MATCH_DATA_GLOBALS = %i[$~ $& $` $' $+ $1 $2 $3 $4 $5 $6 $7 $8 $9].freeze
+    private_constant :MATCH_DATA_GLOBALS
+
+    def forget_match_globals
+      return self unless @globals.keys.any? { |k| MATCH_DATA_GLOBALS.include?(k) }
+
+      rebuild(globals: @globals.except(*MATCH_DATA_GLOBALS).freeze)
+    end
+
     # Slice 7 phase 2 — class-level ivar accumulator. Keyed by
     # the qualified class name (e.g. `"Rigor::Scope"`); the
     # value is a `Hash[Symbol, Type::t]` of every ivar that

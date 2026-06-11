@@ -48,6 +48,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     evaluate(req:node,key:tracer)
     fact_store()
     facts_for(key:target,key:bucket)
+    forget_match_globals()
     global(req:name)
     globals()
     hash()

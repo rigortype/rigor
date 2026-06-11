@@ -57,6 +57,37 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  describe "#forget_match_globals" do
+    it "drops narrowed regex match-data globals so reads fall back to the default" do
+      md = Rigor::Type::Combinator.nominal_of("MatchData")
+      str = Rigor::Type::Combinator.nominal_of("String")
+      narrowed = scope.with_global(:$~, md).with_global(:$1, str).with_global(:$&, str)
+
+      forgotten = narrowed.forget_match_globals
+
+      expect(forgotten.global(:$~)).to be_nil
+      expect(forgotten.global(:$1)).to be_nil
+      expect(forgotten.global(:$&)).to be_nil
+    end
+
+    it "leaves non-match program globals untouched" do
+      str = Rigor::Type::Combinator.nominal_of("String")
+      seeded = scope.with_global(:$LOAD_PATH, str).with_global(:$1, str)
+
+      forgotten = seeded.forget_match_globals
+
+      expect(forgotten.global(:$LOAD_PATH)).to eq(str)
+      expect(forgotten.global(:$1)).to be_nil
+    end
+
+    it "returns the same scope when no match globals are present" do
+      str = Rigor::Type::Combinator.nominal_of("String")
+      seeded = scope.with_global(:$stdout, str)
+
+      expect(seeded.forget_match_globals).to equal(seeded)
+    end
+  end
+
   describe "#with_fact" do
     it "returns a new scope with the fact added" do
       fact = Rigor::Analysis::FactStore::Fact.new(

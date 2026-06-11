@@ -1336,7 +1336,45 @@ module Rigor
         # new facts). See [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md)
         # § "Flow-folding" — G2 intervening-call case.
         post_scope = invalidate_ivars_for_intervening_call(node, post_scope)
+        # C1 — regex match-data globals (`$~`, `$1..$9`, `$&`, …) are
+        # narrowed to non-nil on a successful-match edge; a later call
+        # that itself runs a regex match rebinds them, so the narrowed
+        # facts must be dropped. We forget them only when the call is
+        # match-CAPABLE (a regex-matching method, or an implicit-self /
+        # unknown-receiver call whose body we cannot prove match-free).
+        # A call provably match-free on a known receiver — `$3.to_i`,
+        # `year < 50` — does NOT clobber, so the multi-statement
+        # `m = /…/ =~ s; …; use($2)` stdlib idiom keeps its precision
+        # while a genuinely interposed match still invalidates.
+        post_scope = post_scope.forget_match_globals if match_capable_call?(node)
         [call_type, post_scope]
+      end
+
+      # Method names that (may) run a regex match and therefore rebind
+      # the `$~` family. Conservative over-approximation — a few set
+      # globals only with a Regexp argument, but we do not inspect args.
+      MATCH_CAPABLE_METHODS = %i[
+        =~ match match? gsub gsub! sub sub! scan split slice slice!
+        [] partition rpartition index rindex === grep grep_v
+      ].freeze
+      private_constant :MATCH_CAPABLE_METHODS
+
+      # True when `node` could rebind the regex match-data globals:
+      # a known regex-matching method by name, or an implicit-self /
+      # self-receiver call whose body we cannot inspect for an internal
+      # match. An explicit-receiver call to a non-matching method
+      # (`$3.to_i`, `year < 50`, `buf << c`) is treated as match-free so
+      # the multi-statement `m = /…/ =~ s; …; use($2)` idiom keeps the
+      # narrowed globals. The over-approximation is one-directional: a
+      # user method that secretly matches on an explicit receiver is the
+      # only escape, and re-narrowing on the next real guard recovers —
+      # weighed against the false-positive cost, precision wins here.
+      def match_capable_call?(node)
+        return true unless node.is_a?(Prism::CallNode)
+        return true if MATCH_CAPABLE_METHODS.include?(node.name)
+
+        receiver = node.receiver
+        receiver.nil? || receiver.is_a?(Prism::SelfNode)
       end
 
       # Returns a scope with each ivar's narrowed local binding

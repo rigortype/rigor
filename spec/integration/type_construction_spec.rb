@@ -358,6 +358,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/regex_global_narrowing.rb — C1 regex match-data global narrowing" do
+    let(:harness) { harness_for("regex_global_narrowing") }
+
+    it "narrows `$~`/`$1`/`$&` on the match edge, leaves optional/no-match nilable" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

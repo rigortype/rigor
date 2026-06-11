@@ -23,6 +23,9 @@ module Rigor
     # - {RECURSION_UNROLL_FUEL} — the constant-arg recursion unroll
     #   (ADR-55 slice 1) exhausted its per-entry fuel and fell back to
     #   the plain `(receiver, method)` guard (in-cycle call → `Dynamic[top]`).
+    # - {RECURSION_FIXPOINT_CAP} — the fixpoint return-summary iteration
+    #   (ADR-55 slice 2) hit its 3-evaluation cap without converging and
+    #   collapsed the summary to `untyped` (today's behaviour).
     #
     # Enabled only when `RIGOR_BUDGET_TRACE` is set (to any non-empty
     # value) in the environment, or via {enable!} in tests. When
@@ -43,9 +46,16 @@ module Rigor
       # call widened to `Dynamic[top]` exactly as it does without the
       # unroll.
       RECURSION_UNROLL_FUEL = :recursion_unroll_fuel
+      # `ExpressionTyper#infer_user_method_return` ran the fixpoint
+      # return-summary iteration (ADR-55 slice 2) to its 3-evaluation cap
+      # without reaching convergence and collapsed the summary to
+      # `untyped` — the in-cycle result widens to `Dynamic[top]` exactly
+      # as it does without the fixpoint.
+      RECURSION_FIXPOINT_CAP = :recursion_fixpoint_cap
 
       CATEGORIES = [
-        RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL
+        RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL,
+        RECURSION_FIXPOINT_CAP
       ].freeze
 
       # Distribution (histogram) categories — read-only observations of

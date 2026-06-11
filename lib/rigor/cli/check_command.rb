@@ -474,6 +474,7 @@ module Rigor
         @err.puts("  ancestor-walk-limit hits:  #{counts[Inference::BudgetTrace::ANCESTOR_WALK_LIMIT]}")
         @err.puts("  hkt-fuel-exhausted hits:   #{counts[Inference::BudgetTrace::HKT_FUEL_EXHAUSTED]}")
         @err.puts("  recursion-unroll-fuel hits: #{counts[Inference::BudgetTrace::RECURSION_UNROLL_FUEL]}")
+        @err.puts("  recursion-fixpoint-cap hits: #{counts[Inference::BudgetTrace::RECURSION_FIXPOINT_CAP]}")
         write_budget_distributions
       end
 

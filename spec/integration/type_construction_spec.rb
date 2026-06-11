@@ -1028,5 +1028,18 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/recursive_fixpoint_summary.rb — ADR-55 slice 2 fixpoint return summaries" do
+      let(:harness) { harness_for("recursive_fixpoint_summary") }
+
+      # A non-constant-arg recursive method's in-cycle contribution is the
+      # method's real return type, not `Dynamic[top]`: factorial → `1 |
+      # Integer`, the string builder → `String`, an only-recursing method →
+      # `bot` (without hanging), and mutual recursion terminates.
+      it "computes Dynamic-free recursive return summaries and terminates" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
   end
 end

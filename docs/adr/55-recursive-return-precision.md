@@ -1,14 +1,22 @@
 # ADR-55 — Recursive-method return-type precision (constant-arg bounded unroll + fixpoint return summaries)
 
 Status: **Accepted, 2026-06-11. Slice 1 (constant-arg bounded unroll)
-implemented 2026-06-11; slice 2 (fixpoint return summaries) not yet
-implemented.** Both are precision-additive — no new diagnostic, no
-false-positive surface; every exhaustion path degrades to today's
-behaviour. Slice 1 ships the fuel-bounded value-keyed guard
-(`RECURSION_UNROLL_FUEL = 32`, 64-node value-size cap), the
-`BudgetTrace::RECURSION_UNROLL_FUEL` counter, and the value-pinned
-self-call adoption that lets a folded constant frame surface inside a
-method body (`factorial(5) → Constant[120]`).
+and slice 2 (fixpoint return summaries) both implemented 2026-06-11.**
+Both are precision-additive — no new diagnostic, no false-positive
+surface; every exhaustion path degrades to today's behaviour. Slice 1
+ships the fuel-bounded value-keyed guard (`RECURSION_UNROLL_FUEL = 32`,
+64-node value-size cap), the `BudgetTrace::RECURSION_UNROLL_FUEL`
+counter, and the value-pinned self-call adoption that lets a folded
+constant frame surface inside a method body (`factorial(5) →
+Constant[120]`). Slice 2 ships the Kleene fixpoint return summary
+(`RECURSION_FIXPOINT_CAP = 3`, value-pinned widening on the final
+iteration, the `BudgetTrace::RECURSION_FIXPOINT_CAP` counter): the
+in-cycle re-entry returns the assumed summary (seeded `bot`) instead of
+`Dynamic[top]`, so a recursive String builder called with a
+non-constant arg returns `String` and `factorial(x : Integer)` returns
+`1 | Integer` — neither carries a `Dynamic[top]` contribution. Both
+Mastodon `app/models` and haml `lib` are byte-identical to the
+pre-slice-2 baseline.
 
 Archetype: deliberative. Stakes: mid (engine return-inference core; the
 mechanisms are FP-neutral by construction but touch the recursion
@@ -143,6 +151,35 @@ recurses genuinely never returns (its summary stays `bot`, the
 always-diverging shape `adoptable_self_call_result?` already treats as
 safe). Mutual recursion remains depth-bounded by the unchanged guard
 stack; summaries make the in-cycle result *more* precise, never deeper.
+
+**Implementation notes (2026-06-11).** Two design points settled during
+the slice-2 landing:
+
+- *The summary table is keyed by the plain `(receiver, method)`
+  signature*, not the slice-1 value-extended one, so a constant-arg
+  unroll and the plain recursion share one summary. The outermost frame
+  for a plain signature owns the table entry and runs the iteration;
+  nested extended frames evaluate the body once and let the owner
+  iterate. The entry is dropped when the guard stack drains to empty
+  (mirroring the per-entry fuel reset). A per-signature *consulted* flag
+  gates the fixpoint: a non-recursive body that merely shares
+  `infer_user_method_return` never consults the summary, so it returns
+  its computed type directly with no extra iteration.
+- *WD4 composition was narrowed.* WD4 step 5 envisioned slice 1's
+  fuel-exhaustion **and** clamp fallbacks both routing to the summary.
+  The in-cycle guard hit and the fuel-exhausted plain re-entry do route
+  to the summary (via `consult_summary`). The slice-1 **clamp**
+  (`clamp_unroll_result`), however, keeps returning bare `untyped`: it
+  is a soundness backstop for an *untrustworthy unrolled value*, while
+  the in-progress summary is a Kleene *lower* bound mid-iteration —
+  routing the clamp to it dropped a real base-case constituent in the
+  `recursive_unroll_clamp` fixture (`1 | "s"` collapsing to `"s"`). The
+  clamp therefore stays the conservative `untyped` upper bound; only the
+  guard/fuel paths consult the summary.
+- Mutual recursion across two distinct signatures terminates but does
+  not generally fold to a precise summary (each signature owns its own
+  Kleene iterate), so it degrades soundly to `Dynamic[top]` — today's
+  behaviour, the load-bearing property being termination.
 
 ### WD3 — Cost envelope and gate
 

@@ -1553,6 +1553,21 @@ module Rigor
       INFERENCE_UNROLL_FUEL_KEY = :__rigor_user_method_unroll_fuel__
       private_constant :INFERENCE_UNROLL_FUEL_KEY
 
+      # ADR-55 slice 2 — thread-local fixpoint return-summary table,
+      # keyed by the plain `(receiver, method)` signature (NOT the
+      # value-extended signature: extended frames from slice 1 share the
+      # same summary). Each entry is `{ assumption:, consulted: }` where
+      # `assumption` is the current Kleene iterate (seeded `bot`) and
+      # `consulted` flips true when an in-cycle re-entry returns it.
+      INFERENCE_SUMMARY_KEY = :__rigor_user_method_return_summary__
+      private_constant :INFERENCE_SUMMARY_KEY
+
+      # Total body evaluations the fixpoint iteration is permitted per
+      # outermost entry for a signature (ADR-55 WD2). Hard, non-configurable
+      # — the iteration cap is part of the termination story (ADR-41 WD4).
+      RECURSION_FIXPOINT_CAP = 3
+      private_constant :RECURSION_FIXPOINT_CAP
+
       # Hard, non-configurable caps for the ADR-55 slice 1 constant-arg
       # unroll. `RECURSION_UNROLL_FUEL` bounds the number of extended
       # (value-keyed) frames per outermost inference entry;
@@ -1601,9 +1616,17 @@ module Rigor
         extended = value_key && unroll_fuel_remaining(stack).positive?
         signature = [plain_signature, value_key] if extended
 
+        summaries = (Thread.current[INFERENCE_SUMMARY_KEY] ||= {})
+
         if stack.include?(signature)
           BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
-          return Type::Combinator.untyped
+          # ADR-55 slice 2: in-cycle re-entries return the current assumed
+          # summary (Kleene iterate, seeded `bot`) instead of bare
+          # `untyped`. The fixpoint loop below seeds the entry on the
+          # outermost frame; if a re-entry beats it here the entry already
+          # exists. The WD4 composition: slice 1's clamp/fuel fallbacks
+          # also route here when a summary is active.
+          return consult_summary(summaries, plain_signature)
         end
 
         # ADR-55 WD1 clamp (governing rule): the constant-arg unroll may
@@ -1620,17 +1643,101 @@ module Rigor
           extended &&
           stack.any? { |frame| plain_part(frame) == plain_signature }
 
+        evaluate_guarded_user_method_body(
+          def_node, body_scope, stack, signature,
+          summaries: summaries, plain_signature: plain_signature,
+          would_have_been_guarded: would_have_been_guarded
+        )
+      end
+
+      # Pushes the recursion-guard frame, evaluates the body (the outermost
+      # frame for a plain signature runs the ADR-55 slice 2 fixpoint; nested
+      # extended frames evaluate once and let the owner iterate), and on the
+      # way out pops the frame and resets the per-outermost-entry fuel and
+      # summary tables when the guard stack drains to empty.
+      def evaluate_guarded_user_method_body(
+        def_node, body_scope, stack, signature,
+        summaries:, plain_signature:, would_have_been_guarded:
+      )
+        # The outermost frame for this plain signature owns the summary
+        # entry and runs the fixpoint loop. ADR-55 WD2.
+        outermost = stack.none? { |frame| plain_part(frame) == plain_signature }
         stack.push(signature)
         begin
-          type, _post = body_scope.evaluate(def_node.body)
-          clamp_unroll_result(type, would_have_been_guarded)
+          if outermost
+            fixpoint_user_method_return(
+              def_node, body_scope, summaries, plain_signature, would_have_been_guarded
+            )
+          else
+            type, _post = body_scope.evaluate(def_node.body)
+            clamp_unroll_result(type, would_have_been_guarded)
+          end
         ensure
           stack.pop
-          # Fuel is per-outermost-entry: clear it once the guard stack
-          # drains back to empty so the next top-level inference starts
-          # with full fuel.
-          Thread.current[INFERENCE_UNROLL_FUEL_KEY] = nil if stack.empty?
+          if stack.empty?
+            Thread.current[INFERENCE_UNROLL_FUEL_KEY] = nil
+            Thread.current[INFERENCE_SUMMARY_KEY] = nil
+          end
         end
+      end
+
+      # ADR-55 slice 2 — Kleene fixpoint over a recursive method's return
+      # summary. Seeds the assumption to `bot`, evaluates the body, and (only
+      # if the summary was actually consulted during evaluation — i.e. the
+      # method really recursed) iterates: if the computed return is subsumed
+      # by the assumption the fixpoint is reached; otherwise the assumption
+      # joins in the computed return and the body re-evaluates. Capped at
+      # `RECURSION_FIXPOINT_CAP` total evaluations; the final permitted
+      # iteration widens value-pinned constituents to their nominal base to
+      # force convergence, and any residual instability collapses to
+      # `untyped` (today's behaviour).
+      def fixpoint_user_method_return(def_node, body_scope, summaries, plain_signature, would_have_been_guarded)
+        summaries[plain_signature] = { assumption: Type::Combinator.bot, consulted: false }
+        computed = nil
+
+        RECURSION_FIXPOINT_CAP.times do |iteration|
+          summaries[plain_signature][:consulted] = false
+          type, _post = body_scope.evaluate(def_node.body)
+          computed = clamp_unroll_result(type, would_have_been_guarded)
+
+          # The summary was never consulted — the method did not recurse on
+          # this evaluation, so there is no fixpoint to chase. Return the
+          # computed type directly (pre-fixpoint behaviour for non-recursive
+          # bodies that merely share `infer_user_method_return`).
+          return computed unless summaries.dig(plain_signature, :consulted)
+
+          assumption = summaries[plain_signature][:assumption]
+          last_iteration = iteration == RECURSION_FIXPOINT_CAP - 1
+          candidate = last_iteration ? widen_value_pinned(computed) : computed
+          joined = Type::Combinator.union(assumption, candidate)
+
+          # Convergence: the assumption already subsumes the computed return
+          # (joining it back changes nothing).
+          return candidate if joined == assumption
+
+          if last_iteration
+            # Out of iterations and still unstable — collapse to today's
+            # widening behaviour.
+            BudgetTrace.hit(BudgetTrace::RECURSION_FIXPOINT_CAP)
+            summaries[plain_signature][:assumption] = Type::Combinator.untyped
+            return Type::Combinator.untyped
+          end
+
+          summaries[plain_signature][:assumption] = joined
+        end
+      end
+
+      # Returns the current assumed summary for `plain_signature`, recording
+      # that it was consulted (so the fixpoint owner knows the body actually
+      # recursed). Falls back to `untyped` when no summary is active — e.g. a
+      # nested extended frame guarded before its plain signature seeded an
+      # entry, which is the pre-slice-2 observable.
+      def consult_summary(summaries, plain_signature)
+        entry = summaries[plain_signature]
+        return Type::Combinator.untyped if entry.nil?
+
+        entry[:consulted] = true
+        entry[:assumption]
       end
 
       # ADR-55 WD1 governing-rule clamp. When the just-evaluated frame
@@ -1643,7 +1750,34 @@ module Rigor
         return type unless would_have_been_guarded && !fully_value_pinned?(type)
 
         BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+        # ADR-55 WD1 clamp: a guarded extended frame whose body is non-pinned
+        # must be byte-identical to the plain guard's `untyped`. This path
+        # deliberately does NOT route to the in-progress fixpoint summary:
+        # the summary is a Kleene lower bound mid-iteration, while the clamp
+        # is a soundness backstop for an untrustworthy unrolled value, so it
+        # must stay the conservative `untyped` upper bound. (WD4's
+        # summary-composition applies to the in-cycle guard and fuel paths,
+        # which DO return the assumed summary — see `consult_summary`.)
         Type::Combinator.untyped
+      end
+
+      # Widens every value-pinned constituent of `type` to its nominal base
+      # (`Constant[1]` → `Integer`, `Tuple[Constant…]` → its element bases),
+      # leaving non-pinned constituents untouched. Used on the fixpoint's
+      # final permitted iteration (ADR-55 WD2) to force convergence — the
+      # tower of distinct constant iterates collapses to one nominal type.
+      def widen_value_pinned(type)
+        case type
+        when Type::Constant
+          value = type.value
+          return type if value.nil?
+
+          Type::Combinator.nominal_of(value.class.name)
+        when Type::Union
+          Type::Combinator.union(*type.members.map { |member| widen_value_pinned(member) })
+        else
+          type
+        end
       end
 
       # Consumes one unit from the thread-local unroll-fuel counter and

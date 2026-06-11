@@ -1306,17 +1306,16 @@ module Rigor
           end
         end
 
-        # `String#reverse` / `#swapcase` etc. produce a
-        # string the same size as the receiver; only the
-        # already-handled binary `:+` / `:*` paths can
-        # explode the output. No unary string method
-        # currently in the catalogue grows beyond the input
-        # size, so this hook is a no-op today — kept as a
-        # placeholder so future additions (e.g. `:succ` on
-        # very long strings) can be guarded without
-        # restructuring.
-        def string_unary_blow_up?(_receiver_value, _method_name)
-          false
+        # `String#reverse` / `#swapcase` / `#succ` etc. produce a string
+        # at least as large as the receiver. The binary `:+` / `:*` paths
+        # have their own `string_blow_up?` output guard; this is the unary
+        # analogue — decline to fold a unary String op whose receiver is
+        # already at or beyond `STRING_FOLD_BYTE_LIMIT`, since the folded
+        # output would be just as large and constant-materialising it buys
+        # no precision worth the bytes. Non-String receivers never blow up
+        # through a unary op, so they pass.
+        def string_unary_blow_up?(receiver_value, _method_name)
+          receiver_value.is_a?(String) && receiver_value.bytesize >= STRING_FOLD_BYTE_LIMIT
         end
 
         # Scalar / String / Symbol values fold; everything

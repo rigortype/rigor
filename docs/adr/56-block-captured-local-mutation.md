@@ -141,6 +141,29 @@ a nil receiver — and five message-rewordings at identical sites
 (`undefined method 'value' for nil` → `possible nil receiver` as the
 receiver types `T | nil` not pure `nil`), zero new genuine firings).
 
+### WD2.5 — Slice C: receiver-content element-type join (added 2026-06-12)
+
+The 2026-06-12 Dynamic-fall survey
+([`docs/notes/20260612-dynamic-fall-pattern-survey.md`](../notes/20260612-dynamic-fall-pattern-survey.md),
+buckets B1/B3/B4) found the slice-A/B write-back covers local
+**rebinding** but not receiver **content** mutation: `out = [0];
+[1, 2, 3].each { |x| out << x }` types `Array[0]` (runtime
+`[0, 1, 2, 3]`) — **unsound**, and it propagates
+(`out.first.zero? → true`). The existing `MutationWidening` path widens
+the variable but never joins the appended element type into the
+collection's element parameter; a non-empty seed keeps only the seed's
+elements. Slice C: when a non-escaping block body (or loop body)
+invokes a content-mutating method (`<<`, `push`, `unshift`, `[]=`,
+`concat`, `merge!`, String `<<`, …) on a captured outer local, the
+continuation element/key/value/content type is the **join of the
+pre-state content type and the mutated-in types**, computed under the
+same `BodyFixpoint` cap/widen/floor discipline (the floor for content
+is `Array[Dynamic[top]]` / the bare collection — already the sound
+empty-seed behaviour). `each_with_object`'s return adopts the same
+joined memo type (B3). The decision criterion above already covers
+this — "rebind" reads as "rebind or content-mutate"; slice C is the
+content half arriving.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

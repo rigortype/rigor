@@ -1,0 +1,4 @@
+---
+locals:
+  f: Dynamic[top]
+  x: Integer

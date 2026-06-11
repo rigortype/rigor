@@ -1016,5 +1016,17 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/recursive_unroll_clamp.rb — ADR-55 WD1 precision-envelope clamps" do
+      let(:harness) { harness_for("recursive_unroll_clamp") }
+
+      # (1) value-pinned self-call adoption is inert outside an unroll;
+      # (2) a guarded re-entry whose body folds to a non-pinned type
+      #     clamps back to the plain guard's `untyped`.
+      it "confines value-pinned adoption to the unroll envelope" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
   end
 end

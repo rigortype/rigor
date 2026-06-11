@@ -1,0 +1,4 @@
+---
+locals:
+  o: Dynamic[top]
+  w: Dynamic[top]

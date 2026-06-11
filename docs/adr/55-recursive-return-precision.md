@@ -78,6 +78,41 @@ never take this path. New `BudgetTrace` counter
 (`RECURSION_UNROLL_FUEL`). Default-on: the caps are termination guards,
 not measurement-gated precision budgets (ADR-41 WD3 does not apply).
 
+**Governing clamp rule (necessary, not optional).** The constant-arg
+unroll may only ever surface a *fully value-pinned* result; any other
+outcome MUST be byte-identical to the plain guard's `untyped`. Two
+clamps enforce this, both confining precision to the unroll's own
+envelope:
+
+1. A frame that took the extended (value-keyed) path but whose plain
+   `(receiver, method)` signature is already on the guard stack — in
+   plain form or as the plain part of an extended frame — *would have
+   been guarded before slice 1*. After its body evaluates, if the
+   result is not fully value-pinned it is clamped back to `untyped`
+   (counting a `RECURSION_GUARD` hit). Frames that would not have been
+   guarded keep their exact pre-slice-1 result paths.
+2. The value-pinned self-call *adoption* (a folded constant surfacing
+   inside a method body) is admissible ONLY while an unroll is in
+   progress — i.e. the guard stack already carries an extended frame.
+   In the main check walk the stack is empty, so adoption returns to
+   exactly `self_type.nil? || Bot`.
+
+> **Corpus-FAIL note (2026-06-11).** WD3's corpus gate caught three new
+> diagnostics the first slice-1 landing leaked: a mastodon
+> `account.rb:496` `undefined method 'in?' for :denied` (a self-call
+> return, previously `Dynamic[top]`, resolving to a concrete Symbol
+> union an ActiveSupport gap then mis-dispatched), a mastodon
+> `base_action.rb:32` always-truthy, and a haml
+> `children_compiler.rb:112` always-falsey (`find_else_index` mis-folded
+> to always-nil — the body evaluator does not model a non-local
+> `return` inside an iteration block, and the blanket adoption surfaced
+> that wrong pinned value). Root cause: the blanket
+> `adoptable_self_call_result?` broadening adopted *any* fully
+> value-pinned result project-wide, exposing the body evaluator's known
+> blind spots that the `Dynamic[top]` gate had masked. The two clamps
+> above are the fix; both corpora are byte-identical to the pre-slice-1
+> baseline after it.
+
 ### WD2 — Slice 2: fixpoint return summaries
 
 Replace the cycle result `untyped` with a **Kleene iteration from

@@ -20,6 +20,7 @@ cycles live in dedicated archives:
   - When every argument of a recursive call is a literal value (a constant, or a tuple of constants), distinct constant frames are allowed to recurse so e.g. `factorial(5)` types as `120` and a `String`-building recursive method returns the built string literal.
   - A hard, non-configurable budget keeps termination safe: at most 32 unrolled constant frames per call, and frames whose argument values are structurally large are skipped. On exhaustion the result degrades to exactly the previous behaviour (no folding, no error, no hang).
   - `RIGOR_BUDGET_TRACE` reports a new `recursion-unroll-fuel` counter for how often the fuel budget was hit. Non-constant-argument calls are unaffected.
+  - The folded constant only ever surfaces as a precise value: the unroll is confined to its own envelope so it can never leak a less-precise (or, where the body evaluator has a known blind spot, a wrong) type into ordinary type-checking. Outside a constant-argument unroll, behaviour is identical to before.
 
 ## [0.1.18] - 2026-06-11
 

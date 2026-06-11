@@ -1359,7 +1359,43 @@ module Rigor
       #   brings (measured: unconditional adoption regressed
       #   `rigor check lib` by 16 diagnostics).
       def adoptable_self_call_result?(type)
-        scope.self_type.nil? || type.is_a?(Type::Bot) || fully_value_pinned?(type)
+        return true if scope.self_type.nil? || type.is_a?(Type::Bot)
+
+        # ADR-55 slice 1 (corpus-confined): a value-pinned self-call
+        # result is adopted inside a method body ONLY while an unroll is
+        # in progress — i.e. the guard stack already carries an extended
+        # (value-keyed) frame. In the main check walk the stack is empty,
+        # so this returns to exactly `self_type.nil? || Bot`. Adopting any
+        # pinned result project-wide leaked precision past the body
+        # evaluator's blind spots (e.g. block-internal `return`), which
+        # produce WRONG pinned values previously masked by the Dynamic[top]
+        # gate (mastodon/haml corpus regression, 2026-06-11).
+        inside_unroll? && fully_value_pinned?(type)
+      end
+
+      # True when the thread-local guard stack currently contains at least
+      # one extended (value-keyed) frame — i.e. a constant-arg unroll is in
+      # progress. Used to confine value-pinned self-call adoption to the
+      # unroll's own envelope (ADR-55 WD1 clamp).
+      def inside_unroll?
+        stack = Thread.current[INFERENCE_GUARD_KEY]
+        return false if stack.nil?
+
+        stack.any? { |frame| extended_frame?(frame) }
+      end
+
+      # An extended (value-keyed) guard frame is `[plain_signature,
+      # value_key]` where `plain_signature` is itself the `[receiver,
+      # method]` pair; a plain frame is that pair directly.
+      def extended_frame?(frame)
+        frame.is_a?(Array) && frame.size == 2 && frame.first.is_a?(Array)
+      end
+
+      # The plain `(receiver, method)` signature carried by a guard frame:
+      # the frame itself for a plain frame, or its first element for an
+      # extended (value-keyed) frame.
+      def plain_part(frame)
+        extended_frame?(frame) ? frame.first : frame
       end
 
       # True when `type` is a concrete value — a `Type::Constant` or a
@@ -1562,17 +1598,32 @@ module Rigor
         # args never reach this path.
         signature = plain_signature
         value_key = constant_argument_value_key(arg_types)
-        signature = [plain_signature, value_key] if value_key && unroll_fuel_remaining(stack).positive?
+        extended = value_key && unroll_fuel_remaining(stack).positive?
+        signature = [plain_signature, value_key] if extended
 
         if stack.include?(signature)
           BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
           return Type::Combinator.untyped
         end
 
+        # ADR-55 WD1 clamp (governing rule): the constant-arg unroll may
+        # only ever surface a fully value-pinned result; any other outcome
+        # must be byte-identical to the plain guard's `untyped`. A frame
+        # that took the extended (value-keyed) path but whose plain
+        # `(receiver, method)` signature is already on the stack — in
+        # plain form or as the plain part of an extended frame — would
+        # have been guarded before slice 1. If such a frame's body folds
+        # to a non-pinned type, the unroll surfaced a precise value the
+        # plain guard would have masked (and the body evaluator's blind
+        # spots can make that value wrong), so clamp it back to `untyped`.
+        would_have_been_guarded =
+          extended &&
+          stack.any? { |frame| plain_part(frame) == plain_signature }
+
         stack.push(signature)
         begin
           type, _post = body_scope.evaluate(def_node.body)
-          type
+          clamp_unroll_result(type, would_have_been_guarded)
         ensure
           stack.pop
           # Fuel is per-outermost-entry: clear it once the guard stack
@@ -1580,6 +1631,19 @@ module Rigor
           # with full fuel.
           Thread.current[INFERENCE_UNROLL_FUEL_KEY] = nil if stack.empty?
         end
+      end
+
+      # ADR-55 WD1 governing-rule clamp. When the just-evaluated frame
+      # took the extended (value-keyed) path but its plain signature was
+      # already guarded (`would_have_been_guarded`), the unroll may only
+      # surface a fully value-pinned result; any other outcome must be
+      # byte-identical to the plain guard's `untyped` (and counts a
+      # `RECURSION_GUARD` hit, matching the pre-slice-1 observable).
+      def clamp_unroll_result(type, would_have_been_guarded)
+        return type unless would_have_been_guarded && !fully_value_pinned?(type)
+
+        BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+        Type::Combinator.untyped
       end
 
       # Consumes one unit from the thread-local unroll-fuel counter and

@@ -25,6 +25,14 @@ require "rigor/plugin"
 #   independently running `prepare` on its own plugin instance
 #   (deterministic-per-plugin contract; coordinator keeps the
 #   first worker's snapshot).
+#
+# ADR-15 Amendment (2026-05-20): the ACTIVE `workers > 0` backend
+# is the fork pool; the Ractor pool survives behind
+# `RIGOR_POOL_BACKEND=ractor`. The equivalence examples here
+# exercise whichever backend the environment selects (fork on
+# fork-capable platforms) — the contracts hold for both. Only the
+# no-cache_store degradation example pins the Ractor backend,
+# because that precondition is Ractor-specific (Phase 4b.x).
 RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
   # Per-file diagnostic comparison key. Severity is stripped
   # because the severity-profile re-stamping is identical on
@@ -139,7 +147,20 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
       end
     end
 
-    it "degrades gracefully to sequential when pool mode is configured without a cache_store" do
+    # ADR-15 Phase 4b.x — the no-cache_store degradation is a
+    # RACTOR-backend precondition: without the cache pre-warm a
+    # worker's first reflection query would fall through to
+    # `RBS::EnvironmentLoader.new` and trip
+    # `Ractor::IsolationError`. The fork backend copy-on-write
+    # inherits the parent's warm Environment and needs no
+    # cache_store — its counterpart contract (no degradation)
+    # lives in `runner_fork_pool_spec.rb`. The guard fires
+    # BEFORE any Ractor spawns, so pinning the backend here is
+    # deterministic and carries none of the pool's Bus-Error
+    # exposure.
+    it "degrades gracefully to sequential when the Ractor backend is configured without a cache_store" do
+      original = ENV.fetch("RIGOR_POOL_BACKEND", nil)
+      ENV["RIGOR_POOL_BACKEND"] = "ractor"
       Dir.mktmpdir do |dir|
         path = File.join(dir, "code.rb")
         File.write(path, "x = 1\n")
@@ -155,6 +176,8 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         expect(degraded.severity).to eq(:warning)
         expect(degraded.message).to include("requires a cache_store")
       end
+    ensure
+      original.nil? ? ENV.delete("RIGOR_POOL_BACKEND") : (ENV["RIGOR_POOL_BACKEND"] = original)
     end
 
     it "preserves original path order even when workers complete out of order" do

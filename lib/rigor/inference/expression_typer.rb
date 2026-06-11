@@ -678,26 +678,17 @@ module Rigor
       end
 
       # Returns `:truthy`, `:falsey`, or `nil` for an arbitrary
-      # predicate expression under three-valued logic. Uses the
-      # same {Narrowing} probe as `StatementEvaluator#eval_if`:
-      # the predicate is truthy when its falsey fragment is `Bot`,
-      # falsey when its truthy fragment is `Bot`. So
-      # `Nominal[Integer]` (always truthy in Ruby), `Constant[nil]`,
-      # and `Constant[false]` fold one branch; `Union[true, false]`,
-      # `Dynamic[T]`, and `Top` keep both branches live.
+      # predicate expression under three-valued logic.
+      # {Narrowing.predicate_certainty} owns the judgment (the same
+      # one `StatementEvaluator#live_branch_for_if` reads on the
+      # scope side): `Nominal[Integer]` (always truthy in Ruby),
+      # `Constant[nil]`, and `Constant[false]` fold one branch;
+      # `Union[true, false]`, `Dynamic[T]`, and `Top` keep both
+      # branches live.
       def constant_predicate_polarity(predicate)
         return nil if predicate.nil?
 
-        type = type_of(predicate)
-        return nil if type.nil? || type.is_a?(Type::Bot)
-
-        truthy_bot = Narrowing.narrow_truthy(type).is_a?(Type::Bot)
-        falsey_bot = Narrowing.narrow_falsey(type).is_a?(Type::Bot)
-
-        return :falsey if truthy_bot && !falsey_bot
-        return :truthy if !truthy_bot && falsey_bot
-
-        nil
+        Narrowing.predicate_certainty(type_of(predicate))
       end
 
       def type_of_else(node)
@@ -828,28 +819,13 @@ module Rigor
       # `:maybe` — the existing union fallback handles them.
       def case_when_pattern_certainty(subject_type, pattern_node)
         class_name = build_constant_path_name(pattern_node)
-        return class_pattern_certainty(subject_type, class_name) if class_name
+        return Narrowing.class_pattern_certainty(subject_type, class_name, environment: scope.environment) if class_name
 
         literal = literal_pattern_value(pattern_node)
-        return literal_pattern_certainty(subject_type, literal[:value]) if literal
+        return Narrowing.value_pattern_certainty(subject_type, literal[:value]) if literal
 
         :maybe
       end
-
-      def class_pattern_certainty(subject_type, class_name)
-        env = scope.environment
-        truthy_bot = Narrowing.narrow_class(subject_type, class_name, environment: env).is_a?(Type::Bot)
-        falsey_bot = Narrowing.narrow_not_class(subject_type, class_name, environment: env).is_a?(Type::Bot)
-
-        return :no if truthy_bot && !falsey_bot
-        return :yes if !truthy_bot && falsey_bot
-
-        :maybe
-      end
-
-      VALUE_EQUALITY_CLASSES = [Integer, Float, Rational, Complex, String, Symbol,
-                                TrueClass, FalseClass, NilClass].freeze
-      private_constant :VALUE_EQUALITY_CLASSES
 
       # Returns `{ value: v }` when `pattern_node` types to a
       # `Constant[v]` of a value-equality-safe class (so `===`
@@ -859,16 +835,9 @@ module Rigor
       def literal_pattern_value(pattern_node)
         type = type_of(pattern_node)
         return nil unless type.is_a?(Type::Constant)
-        return nil unless VALUE_EQUALITY_CLASSES.any? { |klass| type.value.is_a?(klass) }
+        return nil unless Narrowing::VALUE_EQUALITY_CLASSES.any? { |klass| type.value.is_a?(klass) }
 
         { value: type.value }
-      end
-
-      def literal_pattern_certainty(subject_type, pattern_value)
-        return :maybe unless subject_type.is_a?(Type::Constant)
-        return :maybe unless VALUE_EQUALITY_CLASSES.any? { |klass| subject_type.value.is_a?(klass) }
-
-        pattern_value == subject_type.value ? :yes : :no
       end
 
       # `when` clauses for `case` and `in` clauses for `case ... in` have

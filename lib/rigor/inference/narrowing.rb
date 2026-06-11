@@ -123,6 +123,66 @@ module Rigor
         end
       end
 
+      # Three-valued truthiness certainty of a predicate's type,
+      # derived from the truthy / falsey fragments above: `:truthy`
+      # when no inhabitant is falsey (the falsey fragment is `Bot`),
+      # `:falsey` when no inhabitant is truthy, nil when both
+      # fragments are inhabited — or when the type itself is nil /
+      # `Bot` (dead code is not a certainty claim). This is the single
+      # owner of the judgment both branch-elision consumers read
+      # (`ExpressionTyper#elide_or_union` on the value side,
+      # `StatementEvaluator#live_branch_for_if` on the scope side), so
+      # the type a dead branch is elided from and the scope that stops
+      # flowing through it can never disagree.
+      def predicate_certainty(type)
+        return nil if type.nil? || type.is_a?(Type::Bot)
+
+        truthy_bot = narrow_truthy(type).is_a?(Type::Bot)
+        falsey_bot = narrow_falsey(type).is_a?(Type::Bot)
+
+        return :falsey if truthy_bot && !falsey_bot
+        return :truthy if !truthy_bot && falsey_bot
+
+        nil
+      end
+
+      # Three-valued certainty of `C === subject` for a class / module
+      # `when` pattern, derived from {.narrow_class} /
+      # {.narrow_not_class}: `:no` when no inhabitant of the subject
+      # matches, `:yes` when every inhabitant matches, `:maybe`
+      # otherwise. The value-side counterpart of the scope narrowing
+      # {.case_when_scopes} performs for the same condition shape, kept
+      # here so the branch a `case` expression's type drops and the
+      # clause whose body scope goes dead derive from one judgment.
+      def class_pattern_certainty(subject_type, class_name, environment:)
+        truthy_bot = narrow_class(subject_type, class_name, environment: environment).is_a?(Type::Bot)
+        falsey_bot = narrow_not_class(subject_type, class_name, environment: environment).is_a?(Type::Bot)
+
+        return :no if truthy_bot && !falsey_bot
+        return :yes if !truthy_bot && falsey_bot
+
+        :maybe
+      end
+
+      # Classes whose `===` is plain value equality, so a literal
+      # `when` pattern against a pinned `Constant` subject is exact in
+      # both directions. Anything else keeps custom-`===` semantics
+      # and stays `:maybe` in {.value_pattern_certainty}.
+      VALUE_EQUALITY_CLASSES = [Integer, Float, Rational, Complex, String, Symbol,
+                                TrueClass, FalseClass, NilClass].freeze
+
+      # Three-valued certainty of `<literal> === subject` for a
+      # value-equality literal pattern: exact (`:yes` / `:no`) only
+      # when the subject is itself a pinned `Constant` of a
+      # value-equality class; `:maybe` otherwise (the runtime value
+      # isn't pinned, or `===` may be user-defined).
+      def value_pattern_certainty(subject_type, pattern_value)
+        return :maybe unless subject_type.is_a?(Type::Constant)
+        return :maybe unless VALUE_EQUALITY_CLASSES.any? { |klass| subject_type.value.is_a?(klass) }
+
+        pattern_value == subject_type.value ? :yes : :no
+      end
+
       # Equality fragment of `type` against a trusted literal.
       #
       # String/Symbol/Integer equality narrows only when the current

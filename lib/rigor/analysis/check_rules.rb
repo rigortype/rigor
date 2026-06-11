@@ -7,6 +7,7 @@ require_relative "../source/node_walker"
 require_relative "../type"
 require_relative "diagnostic"
 require_relative "dependency_recorder"
+require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
@@ -183,11 +184,38 @@ module Rigor
           end
         end
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
-        diagnostics.concat(always_truthy_condition_diagnostics(path, root, scope_index))
-        diagnostics.concat(unreachable_clause_diagnostics(path, root, scope_index))
+        always_truthy_results, unreachable_clause_results = flow_collector_results(root, scope_index)
+        diagnostics.concat(always_truthy_condition_diagnostics(path, always_truthy_results))
+        diagnostics.concat(unreachable_clause_diagnostics(path, unreachable_clause_results))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, root, scope_index))
         diagnostics.concat(dead_assignment_diagnostics(path, root, scope_index))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
+      end
+
+      # ADR-53 Track B (slice B2) — both flow collectors ride one
+      # {RuleWalk} traversal instead of walking the file once each.
+      # Under `RIGOR_SHADOW_RULE_WALK=1` the legacy per-collector walks
+      # also run as the oracle and any divergence aborts the run — the
+      # corpus-scale half of the equivalence harness (the curated half
+      # is `rule_walk_equivalence_spec`).
+      def flow_collector_results(root, scope_index)
+        always_truthy = AlwaysTruthyConditionCollector.new(scope_index)
+        unreachable_clauses = UnreachableClauseCollector.new(scope_index)
+        RuleWalk.run(root, [always_truthy, unreachable_clauses])
+        if ENV["RIGOR_SHADOW_RULE_WALK"]
+          shadow_verify_flow_collectors(root, scope_index, always_truthy.results, unreachable_clauses.results)
+        end
+        [always_truthy.results, unreachable_clauses.results]
+      end
+
+      def shadow_verify_flow_collectors(root, scope_index, always_truthy_results, unreachable_clause_results)
+        legacy_always = AlwaysTruthyConditionCollector.new(scope_index).collect(root)
+        legacy_clauses = UnreachableClauseCollector.new(scope_index).collect(root)
+        return if legacy_always == always_truthy_results && legacy_clauses == unreachable_clause_results
+
+        raise "RIGOR_SHADOW_RULE_WALK divergence: always-truthy legacy=#{legacy_always.size} " \
+              "walk=#{always_truthy_results.size}; unreachable-clause legacy=#{legacy_clauses.size} " \
+              "walk=#{unreachable_clause_results.size}"
       end
 
       def call_node_diagnostics(path, node, scope_index)
@@ -251,8 +279,8 @@ module Rigor
       # predicate skip envelope (see
       # `Analysis::CheckRules::AlwaysTruthyConditionCollector`
       # for the full triage rationale).
-      def always_truthy_condition_diagnostics(path, root, scope_index)
-        AlwaysTruthyConditionCollector.new(scope_index).collect(root).map do |result|
+      def always_truthy_condition_diagnostics(path, results)
+        results.map do |result|
           build_always_truthy_condition_diagnostic(path, result.node, result.polarity)
         end
       end
@@ -261,8 +289,8 @@ module Rigor
       # the flow engine's narrowing proves can never match (its narrowed
       # subject is `bot`). The squiggle lands on the dead clause's body,
       # mirroring `flow.unreachable-branch`.
-      def unreachable_clause_diagnostics(path, root, scope_index)
-        UnreachableClauseCollector.new(scope_index).collect(root).map do |result|
+      def unreachable_clause_diagnostics(path, results)
+        results.map do |result|
           build_unreachable_clause_diagnostic(path, result)
         end
       end

@@ -56,6 +56,10 @@ module Rigor
 
         Result = Data.define(:node, :polarity)
 
+        # ADR-53 Track B — the node classes the shared {RuleWalk}
+        # dispatches to this collector (outside loop / block bodies).
+        NODE_CLASSES = [Prism::IfNode, Prism::UnlessNode].freeze
+
         # @return [Array<Result>] one entry per qualifying
         #   predicate. Empty when the tree carries no firing
         #   predicates.
@@ -64,8 +68,21 @@ module Rigor
           @results = []
         end
 
+        # Legacy single-collector walk — kept as the oracle the
+        # ADR-53 Track B equivalence harness compares {RuleWalk}
+        # against; deleted when Track B completes.
         def collect(root)
           walk(root, in_loop_or_block: false)
+          @results.freeze
+        end
+
+        # {RuleWalk} entry point: the per-node logic of the legacy walk,
+        # invoked under the same traversal contract.
+        def visit(node)
+          collect_predicate(node)
+        end
+
+        def results
           @results.freeze
         end
 
@@ -74,7 +91,7 @@ module Rigor
         def walk(node, in_loop_or_block:)
           return unless node.is_a?(Prism::Node)
 
-          collect_predicate(node) if conditional_node?(node) && !in_loop_or_block
+          visit(node) if conditional_node?(node) && !in_loop_or_block
 
           child_in_loop_or_block = in_loop_or_block || enters_loop_or_block?(node)
           node.compact_child_nodes.each { |child| walk(child, in_loop_or_block: child_in_loop_or_block) }

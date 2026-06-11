@@ -263,8 +263,9 @@ module Rigor
     # scope (no enclosing `class` / `module` body). True at the top
     # of a file AND inside a top-level `def` body (since toplevel
     # defs leave `self_type` nil per the existing scope-construction
-    # contract, mirroring how ADR-24's `adoptable_self_call_result?`
-    # also keys on `self_type.nil?` for the same context). Used by
+    # contract — the same nil-`self_type` signal ADR-24's self-call
+    # return adoption historically keyed on before ADR-57 opened the
+    # gate unconditionally). Used by
     # `CheckRules#unresolved_toplevel_diagnostic` to gate the
     # `call.unresolved-toplevel` rule so it fires only outside
     # class / module bodies, where Rails-DSL metaprogramming

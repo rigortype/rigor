@@ -29,20 +29,21 @@ o = Outside.new
 assert_type("42", o.leaf)
 
 # `caller`'s body calls `leaf` (a value-pinned self-call) with a
-# non-nil self_type and an empty guard stack. Pre-fix, the blanket
-# `fully_value_pinned?` adoption folded the body to `Constant[42]`;
-# the clamp makes adoption inert outside an unroll, so the body's
-# self-call result stays `Dynamic[top]` — byte-identical to pre-ADR-55.
-assert_type("Dynamic[top]", o.caller)
+# non-nil self_type. ADR-57 opened the self-call return-adoption gate
+# permanently (2026-06-12), so the body now adopts `leaf`'s precise
+# `Constant[42]` return. The body-evaluator blind spots that historically
+# made in-body adoption unsafe (and kept this `Dynamic[top]` under the old
+# ADR-55 clamp) were fixed at their root across ADR-55/56/57 — the block-
+# internal `return` collector exercised in case (2) is one of them.
+assert_type("42", o.caller)
 
-# (2) The haml `find_else_index` mechanism: a non-local `return` inside
-#     an iteration block is a body-evaluator blind spot — the body folds
-#     to `nil` (the fallthrough) as if the block-internal `return` never
-#     fired. Pre-fix, a self-call to `find` from another method body
-#     adopted that WRONG pinned `nil`, mis-folding the caller to always
-#     nil (haml's new always-falsey warning). The clamp keeps the
-#     self-call result `Dynamic[top]` outside an unroll, masking the
-#     blind spot exactly as pre-ADR-55.
+# (2) The haml `find_else_index` mechanism: a non-local `return` inside an
+#     iteration block exits the ENCLOSING method. ADR-57 slice 1's explicit-
+#     return sink now collects those block-internal returns, so `find`'s real
+#     return is `1 | 2 | 3 | nil` (the three early returns joined with the
+#     `nil` fallthrough) — not the WRONG pinned `nil` the old tail-only
+#     evaluator inferred. With the blind spot fixed, the now-open gate adopts
+#     the CORRECT precise return at the caller.
 class Walk
   def find(n)
     [1, 2, 3].each do |i|
@@ -57,10 +58,8 @@ class Walk
 end
 
 w = Walk.new
-# `caller_of_find`'s body calls `find` (a value-pinned `nil` result from
-# the block-return blind spot) with a non-nil self_type; the clamp keeps
-# it `Dynamic[top]` rather than adopting the wrong `nil`.
-assert_type("Dynamic[top]", w.caller_of_find)
+# `caller_of_find`'s body adopts `find`'s correct `1 | 2 | 3 | nil` return.
+assert_type("1 | 2 | 3 | nil", w.caller_of_find)
 
 # (3) Governing-rule clamp inside the unroll. `go`'s in-cycle frames
 #     fold to a genuinely NON-pinned union (`1 | "s"`); the constant-arg

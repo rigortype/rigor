@@ -96,6 +96,12 @@ against the enclosing definition's `self` type:
 4. On a miss, the call stays `Dynamic[top]` — today's behaviour
    preserved (WD3).
 
+> **WD3 gate opened by [ADR-57](57-self-call-return-adoption.md)
+> (2026-06-12).** In-body adoption was originally restricted to `Bot`
+> returns; ADR-57 adjudicated the gate-open firings, fixed the engine
+> artifacts, and removed `adoptable_self_call_result?` so a resolved
+> user-method call adopts its inferred return unconditionally.
+
 The change is **precision-additive** for v1: it only ever replaces a
 `Dynamic[top]` with a more precise type. It does NOT, in v1, newly
 emit `call.undefined-method` for an *unresolved* self-call (WD4) —

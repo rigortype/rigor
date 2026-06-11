@@ -1,10 +1,13 @@
 # ADR-57 — Opening the implicit-self call return-adoption gate (ADR-24 WD3 revisit)
 
-Status: **Proposed, 2026-06-12.** Measurement done (WD1); the gate stays
-closed until the itemized firing classes are adjudicated and the
-artifact classes fixed (WD2/WD3). Archetype: evaluation-proposal.
-Stakes: high (the gate exists because of a measured FP regression; the
-FP-discipline value binds).
+Status: **Accepted — gate opened 2026-06-12 (slices 1–3).** The
+adjudication arc completed: every gate-open firing class was classified
+and the artifacts fixed at their root (slices 1–3), the residual reduced
+to genuine-or-win, and the gate opened permanently per WD2.
+`ExpressionTyper#adoptable_self_call_result?` is removed — a resolved
+user-method call unconditionally adopts the callee's inferred return.
+Archetype: evaluation-proposal. Stakes: high (the gate existed because of
+a measured FP regression; the FP-discipline value binds).
 
 Grounding: the gate-open experiment below (2026-06-12) and the
 [2026-06-12 Dynamic-fall survey](../notes/20260612-dynamic-fall-pattern-survey.md)
@@ -101,6 +104,60 @@ Per WD2 the residual is not all-genuine, so the gate stays closed after
 slice 1. Next slices: fix mechanisms 2/7/8, then re-adjudicate; the
 genuine-via-RBS firings are independently addressable by widening the two
 self-authored signatures.
+
+## Slices 2–3 + gate open (2026-06-12)
+
+Slice 2 fixed the two corpus/self-check artifact families the slice-1
+adjudication deferred: multi-value `return a, b, c` now contributes a
+Tuple (mechanism 7), and an escaping block that content-mutates a
+captured outer local floors that local to its bare collection (mechanisms
+2 / 8), so an `OptionParser#on { options[:k] = v }` callback no longer
+leaves `options` an unsoundly-precise empty seed. The two genuine-via-RBS
+firings were resolved by correcting the over-strict `Configuration.load`
+parameter and `MethodCatalog#reset!` return signatures.
+
+Slice 3 closed the residual:
+
+- **Escaping content floor — receiver-chain + cross-boundary variants.**
+  The slice-2 floor fired only for a block attached directly to the
+  statement-level call. The real CLI shape hides the mutating block one
+  hop up — `OptionParser.new do |opts| opts.on { o[:k] = v } end
+  .parse!(argv)` (block in the receiver chain) and `build_option_parser(
+  options).parse!(argv)` (block retained inside a *callee* that received
+  `options` as a parameter). The escape handler now walks the receiver
+  chain, and a self-call resolving to a user def whose parameter is
+  escape-mutated (a memoised per-def body scan) floors the matching
+  caller argument. Both are sound (precision-loss only) and gate-closed
+  byte-identical.
+- **FP-safe optional-tuple-slot destructure.** A destructured tuple slot
+  flow-typed as `X | nil` softens to its non-`nil` part. A nil-able slot
+  is almost always made optional across a correlated invariant flow
+  cannot prove (haml's `parse_tag` 9-tuple; `node, @parent = @parent,
+  @parent.parent`); manufacturing a `possible nil receiver` per slot
+  frightens working code. This *removed two gate-closed false positives*
+  on haml `parser.rb:546` — an adjudicated win.
+- **Live String fold-guard.** `string_unary_blow_up?` was an always-false
+  stub whose guard folded dead under adoption; it now performs a real
+  byte-size check (behaviour-identical for every current fold).
+
+With these, the gate-open delta is: **zero** self-check + plugin-contract
+firings; haml / kramdown corpora identical to their (now-improved)
+gate-closed baselines; Mastodon shows one firing — the same pre-existing
+`compact_blank!` error with a *more precise* receiver type in its message
+(a win, not a new firing). The residual is all genuine-or-win, so per WD2
+the gate opened permanently: `adoptable_self_call_result?` is removed and
+`try_local_def_dispatch` / `try_user_method_inference` adopt the inferred
+return directly. The historical `self_type.nil?` / `Bot` /
+fixpoint-summary / unroll special cases are all subsumed; the ADR-55 WD1
+`clamp_unroll_result` backstop is retained independently.
+
+Cost: the cold `rigor check --no-cache lib` wall rises ~12 % (≈26.7 s →
+≈29.9 s) — the intrinsic cost of re-typing resolved callee bodies that
+previously short-circuited to `Dynamic`. The obvious per-call-site
+return-result memo is deferred: ADR-52 WD5 rejected a per-call-node
+result cache on scope-sensitivity / FP grounds, and ADR-24 WD5 forbids
+arg-type-keying the recursion guard. A sound result-memo is a queued
+perf follow-up; the warm cached path (ADR-45 / ADR-46) is unaffected.
 
 ## WD2 — Decision criterion
 

@@ -91,5 +91,50 @@ conservatism (loader.rb:76, FP-risky), and 2 block-captured-Hash
 artifacts (mechanism 2). Corpus residual is 5 firings across mechanisms
 7 and 8.
 
-The residual is NOT all-genuine, so per ADR-57 WD2 the gate stays closed.
-Recommendation below.
+The residual is NOT all-genuine, so per ADR-57 WD2 the gate stays closed
+after slice 1.
+
+## Slices 2–3 + gate open (2026-06-12)
+
+The remaining artifact classes were fixed and the gate opened. Final
+disposition of the slice-1 residual:
+
+- **Mechanism 7 (multi-value `return a, b, c`)** — fixed slice 2: the
+  return sink now packs a Tuple. Removed the haml `parser.rb:469/470`
+  over-optional-destructure firings.
+- **Mechanisms 2 / 8 (escaping block-captured Hash-element / String
+  mutation)** — fixed slice 2's escaping-content floor, extended in
+  slice 3 to two structurally harder shapes the floor missed: the
+  *receiver-chain* idiom (`OptionParser.new { … }.parse!` — the
+  mutating block hangs off the receiver, not the statement call) and the
+  *cross-method-boundary* idiom (`build_option_parser(options).parse!`
+  — the block is retained inside a callee that received `options` as a
+  parameter; a memoised per-def body scan floors the matching caller
+  argument). Cleared triage:35, diff:48, sig_gen:59, kramdown html.rb
+  ×3.
+- **GENUINE-via-RBS (`Configuration.load` `?String`; `reset!` `()->nil`)**
+  — fixed by correcting the two self-authored signatures (slice 1
+  follow-up, commit 57da77c8).
+- **`string_unary_blow_up?` stub (constant_folding:1176)** — fixed
+  slice 3: the always-false placeholder became a real byte-size guard,
+  so it no longer folds dead under adoption.
+- **`loader.rb:76` (`Array#find` conservatism)** — did NOT reappear in
+  the final gate-open delta (the surrounding flow now rules the nil out
+  given the upstream precision); no separate fix needed.
+- **haml `parser.rb:546` (`node, @parent = @parent, @parent.parent`)** —
+  surfaced as a *gate-closed* FP once the multi-value Tuple landed;
+  resolved by slice 3's FP-safe optional-tuple-slot destructure
+  softening (the `respond_to?("close_#{node.type}")` guard is the
+  correlated invariant). Counted as a gate-closed FP *removal* — a win.
+
+**Final gate-open delta (vs the slice-1-3 gate-closed baseline):** zero
+`rigor check lib` firings, zero plugin-contract firings, haml + kramdown
+identical to their gate-closed baselines, Mastodon one firing — the same
+pre-existing `compact_blank!` undefined-method error with a *more
+precise* receiver type (`[Dynamic, "jpeg" | Dynamic]`) in its message, a
+win not a new firing. Residual all genuine-or-win ⇒ per WD2 the gate
+opened permanently: `adoptable_self_call_result?` removed,
+`try_local_def_dispatch` / `try_user_method_inference` adopt the inferred
+return unconditionally. Cost ~+12 % cold `--no-cache lib` wall (callee
+body re-typing); sound return-result memo deferred (ADR-52 WD5 / ADR-24
+WD5). `make verify` green.

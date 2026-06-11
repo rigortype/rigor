@@ -1166,14 +1166,12 @@ module Rigor
         return nil unless local_def
 
         local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
-        return local_inference if local_inference && adoptable_self_call_result?(local_inference)
+        return local_inference if local_inference
 
         # The local def matches by name but the inference was
-        # disqualified — either the parameter shape is too complex
-        # for the first-iteration binder (kwargs / optionals /
-        # rest), or ADR-24 slice 1's conservative gate declined
-        # the resolved return type inside a class body (see
-        # `adoptable_self_call_result?`). `Dynamic[Top]` is the
+        # disqualified — the parameter shape is too complex for the
+        # first-iteration binder (kwargs / optionals / rest), so the
+        # body could not be re-typed. `Dynamic[Top]` is the
         # safest answer: RBS dispatch would be wrong (the method
         # is user-defined and shadows whatever ancestor method the
         # dispatch would find), and `Dynamic[Top]` propagates
@@ -1231,11 +1229,7 @@ module Rigor
         # the body with the call's argument types bound and
         # return the body's last-expression type.
         user_inference = try_user_method_inference(receiver, node, arg_types)
-        if user_inference
-          return user_inference if adoptable_self_call_result?(user_inference)
-
-          return dynamic_top
-        end
+        return user_inference if user_inference
 
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and
         # no positive rule resolves the call, the result inherits the
@@ -1341,55 +1335,34 @@ module Rigor
       # definitions and the file's top-level defs. Before
       # slice 1 every such call typed `Dynamic[top]`.
       #
-      # The adoption of the resolved return type is gated:
+      # The resolved return type is adopted UNCONDITIONALLY — a resolved
+      # user-method call site reads the callee's inferred return, exactly as a
+      # toplevel call has since v0.0.3.
       #
-      # - At top-level / inside a DSL block (`scope.self_type`
-      #   is nil) the result is adopted unchanged — this is
-      #   the pre-slice-1 surface (the v0.0.3 A local-`def`
-      #   shortcut) and MUST keep working.
-      # - Inside a class body / method body (`self_type` set)
-      #   the result is adopted ONLY when it is `Bot`. A `Bot`
-      #   return is an always-diverging guard helper; adopting
-      #   it can only ever enable correct terminating-branch
-      #   narrowing, never a new `undefined-method` /
-      #   argument-type false positive. A non-`Bot` resolved
-      #   return is kept as `Dynamic[top]` (WD3) — adopting
-      #   precise non-`Bot` returns project-wide awaits the
-      #   callee-return-inference precision a later slice
-      #   brings (measured: unconditional adoption regressed
-      #   `rigor check lib` by 16 diagnostics).
-      def adoptable_self_call_result?(type)
-        return true if scope.self_type.nil? || type.is_a?(Type::Bot)
-        # ADR-55 slice 2: a recursive in-cycle re-entry returns the fixpoint
-        # summary assumption (Kleene iterate) for the signature being
-        # iterated. That value is a sound recursive-return summary — not a
-        # leaked unroll value — so it must be adopted regardless of
-        # pinned-ness, otherwise the assumption can never propagate back
-        # into the body and the iteration diverges into `Dynamic[top]`.
-        return true if active_fixpoint_summary?(type)
-
-        # ADR-55 slice 1 (corpus-confined): a value-pinned self-call
-        # result is adopted inside a method body ONLY while an unroll is
-        # in progress — i.e. the guard stack already carries an extended
-        # (value-keyed) frame. In the main check walk the stack is empty,
-        # so this returns to exactly `self_type.nil? || Bot`. Adopting any
-        # pinned result project-wide leaked precision past the body
-        # evaluator's blind spots (e.g. block-internal `return`), which
-        # produce WRONG pinned values previously masked by the Dynamic[top]
-        # gate (mastodon/haml corpus regression, 2026-06-11).
-        inside_unroll? && fully_value_pinned?(type)
-      end
-
-      # True when the thread-local guard stack currently contains at least
-      # one extended (value-keyed) frame — i.e. a constant-arg unroll is in
-      # progress. Used to confine value-pinned self-call adoption to the
-      # unroll's own envelope (ADR-55 WD1 clamp).
-      def inside_unroll?
-        stack = Thread.current[INFERENCE_GUARD_KEY]
-        return false if stack.nil?
-
-        stack.any? { |frame| extended_frame?(frame) }
-      end
+      # ADR-24 WD3 originally gated this: inside a class / method body only a
+      # `Bot` return was adopted, everything else stayed `Dynamic[top]`, because
+      # an early unconditional-adoption experiment regressed `rigor check lib`
+      # by 16 diagnostics. ADR-55 / ADR-56 then chipped the gate open for the
+      # recursive-fixpoint summary and the value-pinned unroll envelope. ADR-57
+      # closed the arc: it re-ran the gate-open experiment per engine generation
+      # and adjudicated every firing as genuine-or-artifact, fixing the
+      # artifacts at their root — the tail-only body evaluator dropping explicit
+      # `return` (slice 1), multi-value returns not contributing a Tuple
+      # (slice 1), escaping block-captured content mutation surviving as a
+      # precise seed both inline and across a method boundary (slices 2/3), two
+      # over-strict self-authored RBS signatures (slice 1), and an over-optional
+      # tuple-slot destructure (slice 3). With the residual all genuine-or-win,
+      # the gate opened permanently on 2026-06-12 (ADR-57 WD2): the gate-open
+      # `rigor check lib` + plugin self-check delta is zero, and the Mastodon /
+      # haml / kramdown corpora show only adjudicated wins (a more precise error
+      # message; FP removals).
+      #
+      # The historical `adoptable_self_call_result?` predicate (its
+      # `self_type.nil?` / `Bot` / fixpoint-summary / unroll special cases) is
+      # now subsumed by unconditional adoption and removed; `try_local_def_
+      # dispatch` / `try_user_method_inference` simply return the inferred
+      # return. `clamp_unroll_result` still backstops an untrustworthy unrolled
+      # value independently of adoption.
 
       # An extended (value-keyed) guard frame is `[plain_signature,
       # value_key]` where `plain_signature` is itself the `[receiver,
@@ -1860,19 +1833,6 @@ module Rigor
 
         entry[:consulted] = true
         entry[:assumption]
-      end
-
-      # True while a fixpoint iteration is in progress for `type` — i.e.
-      # `type` is the live assumption object of some active summary entry.
-      # The self-call adoption gate uses this so a recursive in-cycle result
-      # (the summary assumption returned by `consult_summary`) is adopted
-      # regardless of pinned-ness, letting the assumption propagate back into
-      # the body across iterations (ADR-55 slice 2 bot-collapse fix).
-      def active_fixpoint_summary?(type)
-        summaries = Thread.current[INFERENCE_SUMMARY_KEY]
-        return false if summaries.nil?
-
-        summaries.any? { |_sig, entry| entry[:assumption].equal?(type) }
       end
 
       # ADR-55 WD1 governing-rule clamp. When the just-evaluated frame

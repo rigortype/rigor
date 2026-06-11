@@ -1862,6 +1862,10 @@ module Rigor
 
       def floor_callee_escaped_args_for_call(node, base_scope)
         return base_scope unless self_dispatch_call?(node)
+        # Fast path — the floor only ever touches a local passed as an
+        # argument, so a call with no arguments cannot floor anything. Skip the
+        # def resolution + body scan entirely (the overwhelming common case).
+        return base_scope unless call_passes_local_argument?(node)
 
         def_node = resolve_self_callee_def(node)
         return base_scope if def_node.nil?
@@ -1952,6 +1956,30 @@ module Rigor
           positions[param.name] = index if param.respond_to?(:name)
         end
         positions
+      end
+
+      # True when at least one argument of `node` is a bare local-variable read
+      # (positional or keyword value) bound in the current scope — a cheap
+      # pre-filter so the def resolution / body scan only runs for calls that
+      # could actually floor something.
+      def call_passes_local_argument?(node)
+        args = node.arguments
+        return false unless args.respond_to?(:arguments)
+
+        args.arguments.any? do |arg|
+          case arg
+          when Prism::LocalVariableReadNode
+            scope.locals.key?(arg.name)
+          when Prism::KeywordHashNode
+            arg.elements.any? do |pair|
+              pair.is_a?(Prism::AssocNode) &&
+                pair.value.is_a?(Prism::LocalVariableReadNode) &&
+                scope.locals.key?(pair.value.name)
+            end
+          else
+            false
+          end
+        end
       end
 
       def floor_arguments_at_positions(node, positions, base_scope)

@@ -564,6 +564,7 @@ module Rigor
           dependency_source_index: -> { @dependency_source_index },
           synthetic_method_index: -> { @synthetic_method_index },
           project_patched_methods: -> { @project_patched_methods },
+          project_scope_seed: -> { project_scope_seed_tables },
           analyze_file: ->(path, environment) { analyze_file(path, environment) }
         )
         @diagnostic_aggregator = DiagnosticAggregator.new(
@@ -792,6 +793,17 @@ module Rigor
       # without the project pre-pass (e.g. a single-file probe)
       # keeps an empty seed.
       def seed_project_scope(scope)
+        tables = project_scope_seed_tables
+        return scope if tables.empty?
+
+        scope.with_discovery(scope.discovery.with(**tables))
+      end
+
+      # The cross-file pre-pass tables {#seed_project_scope} applies, as a
+      # plain Hash so the fork-pool path can hand the same seed to its
+      # {WorkerSession} (whose per-file scopes would otherwise miss every
+      # cross-file def — ADR-15 sequential-equivalence contract).
+      def project_scope_seed_tables
         tables = {}
         tables[:discovered_classes] = @project_discovered_classes unless @project_discovered_classes.empty?
         tables[:discovered_def_nodes] = @project_discovered_def_nodes unless @project_discovered_def_nodes.empty?
@@ -811,9 +823,7 @@ module Rigor
         if @record_dependencies && !@project_discovered_class_sources.empty?
           tables[:discovered_class_sources] = @project_discovered_class_sources
         end
-        return scope if tables.empty?
-
-        scope.with_discovery(scope.discovery.with(**tables))
+        tables
       end
 
       # ADR-46 slice 1 — when dependency recording is enabled, wrap the

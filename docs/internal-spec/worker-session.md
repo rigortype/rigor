@@ -29,11 +29,18 @@ The constructor accepts only inputs that cross a worker boundary safely:
   (`Ractor.shareable?`); the per-worker plugin instances are materialised
   from these (see [`plugin.md`](plugin.md#concurrency-and-value-object-shareability-adr-15)).
 - `explain` — a Boolean.
-- `synthetic_method_index` / `project_patched_methods` — optional, default
-  `nil`. These are **not** `Ractor.shareable?`, so a Ractor pool leaves
-  them unset; the fork backend (which builds the session pre-fork on the
-  parent) threads the runner's project-scan results through so per-file
-  inference matches the sequential path exactly.
+- `synthetic_method_index` / `project_patched_methods` /
+  `project_scope_seed` — optional, default `nil` / `{}`. These are **not**
+  `Ractor.shareable?` (the seed tables carry Prism def nodes), so a Ractor
+  pool leaves them unset; the fork backend (which builds the session
+  pre-fork on the parent) threads the runner's project-scan results through
+  so per-file inference matches the sequential path exactly.
+  `project_scope_seed` is the runner's cross-file pre-pass table set
+  (`Runner#project_scope_seed_tables` — the same tables
+  `seed_project_scope` applies on the sequential path); a session
+  constructed without it cannot resolve calls to methods defined in other
+  project files and violates the equivalence contract with false
+  `call.undefined-method` diagnostics.
 
 ## Ownership boundary
 

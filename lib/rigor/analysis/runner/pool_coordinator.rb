@@ -50,12 +50,15 @@ module Rigor
         # @param dependency_source_index [#call] reader.
         # @param synthetic_method_index [#call] reader.
         # @param project_patched_methods [#call] reader.
+        # @param project_scope_seed [#call] reader for the cross-file
+        #   pre-pass seed tables (`Runner#project_scope_seed_tables`).
         # @param analyze_file [#call] `(path, environment) -> diagnostics`.
         def initialize(configuration:, cache_store:, explain:, workers:, collect_stats:, # rubocop:disable Metrics/ParameterLists
                        buffer:, environment_override:, rbs_extended_reporter:,
                        boundary_cross_reporter:, source_rbs_synthesis_reporter:,
                        snapshots:, plugin_registry:, dependency_source_index:,
-                       synthetic_method_index:, project_patched_methods:, analyze_file:)
+                       synthetic_method_index:, project_patched_methods:,
+                       analyze_file:, project_scope_seed: -> { {} })
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
@@ -71,6 +74,7 @@ module Rigor
           @dependency_source_index_reader = dependency_source_index
           @synthetic_method_index_reader = synthetic_method_index
           @project_patched_methods_reader = project_patched_methods
+          @project_scope_seed_reader = project_scope_seed
           @analyze_file = analyze_file
         end
 
@@ -352,7 +356,7 @@ module Rigor
         # A child that exits non-zero (crash / unmarshalable payload) is
         # degraded: the parent re-analyses that slice in-process and
         # prepends a `pool-degraded` warning.
-        def analyze_files_in_fork_pool(files) # rubocop:disable Metrics/AbcSize
+        def analyze_files_in_fork_pool(files) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
           Environment::ClassRegistry.default
 
           session = WorkerSession.new(
@@ -362,6 +366,7 @@ module Rigor
             explain: @explain,
             synthetic_method_index: synthetic_method_index,
             project_patched_methods: project_patched_methods,
+            project_scope_seed: project_scope_seed,
             source_files: files
           )
           # Force the full RBS load on the parent so children
@@ -553,6 +558,10 @@ module Rigor
 
         def project_patched_methods
           @project_patched_methods_reader.call
+        end
+
+        def project_scope_seed
+          @project_scope_seed_reader.call
         end
       end
     end

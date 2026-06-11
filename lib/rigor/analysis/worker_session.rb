@@ -39,12 +39,19 @@ module Rigor
     # - `plugin_blueprints` — Phase 3a
     #   (`Array<Plugin::Blueprint>` is `Ractor.shareable?`).
     # - `explain` — Boolean.
-    # - `synthetic_method_index` / `project_patched_methods` —
-    #   optional (default `nil`). NOT `Ractor.shareable?`, so the
-    #   Ractor pool path leaves them unset; the fork backend
+    # - `synthetic_method_index` / `project_patched_methods` /
+    #   `project_scope_seed` — optional (default `nil` / `{}`). NOT
+    #   `Ractor.shareable?` (the seed tables carry Prism def nodes),
+    #   so the Ractor pool path leaves them unset; the fork backend
     #   (ADR-15 Amendment), which builds the session pre-fork on the
     #   parent, threads the runner's project-scan results through so
     #   per-file inference matches the sequential path exactly.
+    #   `project_scope_seed` is `Runner#project_scope_seed_tables` —
+    #   the cross-file discovery tables `seed_project_scope` applies
+    #   to every per-file scope on the sequential path; without it a
+    #   worker cannot resolve calls to methods defined in OTHER
+    #   project files and emits `call.undefined-method` false
+    #   positives the sequential path does not.
     #
     # Internally the session OWNS (and never shares):
     #
@@ -97,13 +104,14 @@ module Rigor
       def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength,Metrics/ParameterLists
                      plugin_blueprints: [], explain: false, buffer: nil,
                      synthetic_method_index: nil, project_patched_methods: nil,
-                     source_files: [])
+                     project_scope_seed: {}, source_files: [])
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
         @buffer = buffer
         @synthetic_method_index = synthetic_method_index
         @project_patched_methods = project_patched_methods
+        @project_scope_seed = project_scope_seed || {}
         # ADR-32 WD4 — full project file list (frozen
         # Array<String>) for env-build-time invocation of any
         # loaded plugin's `source_rbs_synthesizer` callable.
@@ -165,7 +173,7 @@ module Rigor
           return parse_diagnostics(path, parse_result)
         end
 
-        scope = Scope.empty(environment: @environment, source_path: path)
+        scope = seed_project_scope(Scope.empty(environment: @environment, source_path: path))
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         diagnostics = CheckRules.diagnose(
           path: path,
@@ -199,6 +207,17 @@ module Rigor
       end
 
       private
+
+      # Mirrors {Runner#seed_project_scope}: applies the cross-file
+      # pre-pass discovery tables the constructor received (fork
+      # backend only — see the class comment) to a fresh per-file
+      # scope, so worker-side inference resolves project-internal
+      # cross-file calls exactly like the sequential path.
+      def seed_project_scope(scope)
+        return scope if @project_scope_seed.empty?
+
+        scope.with_discovery(scope.discovery.with(**@project_scope_seed))
+      end
 
       # See {Runner#parse_source}. Same contract: if `@buffer`
       # binds `path` to a physical file, read the physical bytes

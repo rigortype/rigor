@@ -1,6 +1,8 @@
 ---
 locals:
   buffer: String
+  chained: Hash[Dynamic[top], Dynamic[top]]
   collected: Array[Dynamic[top]]
+  nested: Hash[Dynamic[top], Dynamic[top]]
   options: Hash[Dynamic[top], Dynamic[top]]
   seen: "{}"

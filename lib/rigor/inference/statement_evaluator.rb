@@ -1800,12 +1800,24 @@ module Rigor
       # A `:non_escaping` classification (or any block-less call)
       # leaves the post-call scope unchanged.
       def record_closure_escape_if_any(node)
-        return scope unless node.block.is_a?(Prism::BlockNode)
+        # ADR-57 slice 3 work-item 1: an escaping block can also be attached
+        # to a RECEIVER call in a chain rather than to `node` itself — the
+        # canonical `OptionParser.new do |opts| opts.on { o[:k] = v } end
+        # .parse!(argv)` idiom, where the content-mutating block hangs off
+        # `OptionParser.new` but the statement-level call node is the chained
+        # `.parse!`. A receiver call is evaluated as an expression, never as a
+        # statement, so its block never reaches this escape handler on its own.
+        # Fold each escaping receiver-chain block's content widening into the
+        # continuation here so the captured collection is floored regardless of
+        # how deep in the receiver chain its mutating block lives.
+        post_scope = widen_escaping_receiver_chain_captures(node, scope)
+
+        return post_scope unless node.block.is_a?(Prism::BlockNode)
 
         classification = classify_closure_escape(node)
-        return scope if classification == :non_escaping
+        return post_scope if classification == :non_escaping
 
-        post_scope = drop_captured_narrowing(node.block, scope)
+        post_scope = drop_captured_narrowing(node.block, post_scope)
         post_scope = widen_escaping_content_captures(node.block, post_scope)
         post_scope.with_fact(
           Analysis::FactStore::Fact.new(
@@ -1816,6 +1828,25 @@ module Rigor
             stability: :unstable
           )
         )
+      end
+
+      # Walk the receiver chain of `node` and fold the escaping-content
+      # widening of every block-bearing, escaping receiver call into
+      # `base_scope`. Only receiver calls are walked — `node` itself is handled
+      # by the caller. A `:non_escaping` receiver block is left to slice C's
+      # non-escaping write-back (which the receiver expression evaluation
+      # already drives), so we only floor the escaping / unknown ones here.
+      def widen_escaping_receiver_chain_captures(node, base_scope)
+        receiver = node.receiver
+        acc = base_scope
+        while receiver.is_a?(Prism::CallNode)
+          if receiver.block.is_a?(Prism::BlockNode) &&
+             classify_closure_escape(receiver) != :non_escaping
+            acc = widen_escaping_content_captures(receiver.block, acc)
+          end
+          receiver = receiver.receiver
+        end
+        acc
       end
 
       # ADR-57 slice 2 (ADR-56 mechanisms 2 / 8 extended to escaping blocks).

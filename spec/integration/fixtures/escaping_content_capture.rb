@@ -30,8 +30,25 @@ collected = []
 sink.subscribe { |item| collected << item }
 assert_type("Array[Dynamic[top]]", collected)
 
+# A capture content-mutated in a block NESTED inside another escaping block
+# (the canonical `OptionParser.new do |opts| opts.on { o[:k] = v } end`
+# idiom) must also widen: the mutation lives at capture depth >= 2 from the
+# outer block, but the slice-2 collector must still find it.
+nested = {}
+sink.tap { |outer| outer.on("--x V") { |v| nested[:x] = v } }
+assert_type("Hash[Dynamic[top], Dynamic[top]]", nested)
+
 # A read-only capture in an escaping block is untouched: `seen` is only
 # read, never content-mutated, so it keeps its precise empty-hash type.
 seen = {}
 sink.tap { |_| seen.size }
 assert_type("{}", seen)
+
+# The exact CLI parse_options idiom: the block is attached to
+# `OptionParser.new` but the OUTER call node is the chained `.parse!`. The
+# mutated captures live in `opts.on { ... }` blocks nested inside it.
+chained = { format: "text" }
+OptionParser.new do |opts|
+  opts.on("--format=F") { |v| chained[:format] = v }
+end.tap { |_| nil }
+assert_type("Hash[Dynamic[top], Dynamic[top]]", chained)

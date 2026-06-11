@@ -280,6 +280,148 @@ module Rigor
         carriers = kinds.map { |name| Type::Combinator.nominal_of(name) }
         carriers.size == 1 ? carriers.first : Type::Combinator.union(*carriers)
       end
+
+      # ----------------------------------------------------------------
+      # ADR-56 slice C — receiver-content element-type JOIN.
+      #
+      # `widen_after_block` above forgets a literal-shape carrier's arity
+      # when a captured local is content-mutated inside a block, but it
+      # keeps only the SEED's element types — an unsound under-
+      # approximation for a non-empty seed (`out = [0]; arr.each { |x|
+      # out << x }` types `Array[0]` while the runtime array is
+      # `[0, 1, 2, 3]`). Slice C joins the appended/stored element (and
+      # key/value) types INTO the continuation collection's parameter, so
+      # the result is `Array[0 | Integer]` rather than `Array[0]`.
+      #
+      # Array content-mutators that append/store ELEMENTS. The appended
+      # element type is the call's argument type(s); `[]=`'s value is its
+      # LAST argument (the keys precede it). Subset of `ARRAY_MUTATORS`:
+      # only the element-INTRODUCING methods (removers / reorderers add no
+      # new element evidence and are already covered by the arity-forget).
+      ARRAY_CONTENT_ADDERS = %i[
+        << push append prepend unshift concat insert []= fill replace
+      ].to_set.freeze
+
+      # Hash content-mutators that store a key→value pair. For `[]=` /
+      # `store` the key is the first argument and the value the last.
+      HASH_CONTENT_ADDERS = %i[[]= store].to_set.freeze
+
+      # String content-mutators that append to the buffer. String carries
+      # no element parameter, so these contribute nothing to a join — they
+      # are listed so the orchestrator recognises them as content mutators
+      # (the binding already widens to `String` via normal typing); the
+      # join helpers below short-circuit on a non-collection pre-state.
+      STRING_CONTENT_ADDERS = %i[<< concat prepend insert replace].to_set.freeze
+
+      # Every method name that mutates a captured local's CONTENT — the
+      # union the orchestrator scans the block body for.
+      CONTENT_ADDERS = (ARRAY_CONTENT_ADDERS | HASH_CONTENT_ADDERS | STRING_CONTENT_ADDERS).freeze
+
+      # The element types a single content-mutator call introduces into an
+      # Array, given the per-argument types (already typed in the block
+      # body scope). `concat`/`replace` take collection arguments, so their
+      # element evidence is the arguments' OWN element types unioned; the
+      # rest append the argument values directly. Returns `[]` when no
+      # element evidence (e.g. a `<<` with no resolvable arg).
+      def array_added_elements(method_name, arg_types)
+        return [] if arg_types.empty?
+
+        case method_name
+        when :concat, :replace
+          arg_types.flat_map { |t| collection_element_types(t) }
+        when :insert
+          # `insert(index, *objs)` — first arg is the position.
+          arg_types.drop(1)
+        when :[]=
+          # `arr[i] = v` / `arr[i, n] = v` — value is the last argument.
+          [arg_types.last]
+        when :fill
+          # `fill(value)` — only the no-block single-value form adds a
+          # concrete element; block / range forms are conservatively
+          # ignored (the arity-forget already widened the binding).
+          arg_types.size == 1 ? arg_types : []
+        else # << push append prepend unshift
+          arg_types
+        end
+      end
+
+      # Builds the continuation Array type from the pre-state binding and
+      # the appended element types. The floor is `Array[Dynamic[top]]`
+      # (the sound empty-seed behaviour) when there is no element evidence
+      # at all.
+      def join_array_content(pre_state, added_elements)
+        seed_elements = collection_element_types(pre_state)
+        added = added_elements.compact
+        # The empty-seed floor element is `Dynamic[top]` (no element
+        # evidence). When real appended evidence exists that floor carries
+        # nothing, so drop it — an empty accumulator built by `out << x*2`
+        # reads `Array[Integer]`, not `Array[Integer | Dynamic[top]]`.
+        seed_elements = drop_dynamic(seed_elements) unless added.empty?
+        elements = seed_elements + added
+        return Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped]) if elements.empty?
+
+        Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.union(*elements)])
+      end
+
+      # Builds the continuation Hash type from the pre-state binding and a
+      # list of `[key_type, value_type]` pairs stored by `[]=` / `store`.
+      def join_hash_content(pre_state, added_pairs)
+        seed_keys, seed_values = hash_shape_key_values(pre_state)
+        added_keys = added_pairs.map(&:first).compact
+        added_values = added_pairs.map(&:last).compact
+        seed_keys = drop_dynamic(seed_keys) unless added_keys.empty?
+        seed_values = drop_dynamic(seed_values) unless added_values.empty?
+        keys = seed_keys + added_keys
+        values = seed_values + added_values
+        key_t = keys.empty? ? Type::Combinator.untyped : Type::Combinator.union(*keys)
+        value_t = values.empty? ? Type::Combinator.untyped : Type::Combinator.union(*values)
+        Type::Combinator.nominal_of("Hash", type_args: [key_t, value_t])
+      end
+
+      # Drops `Dynamic` (incl. `untyped`) constituents from a type list.
+      def drop_dynamic(types)
+        types.grep_v(Type::Dynamic)
+      end
+
+      # Element types carried by a collection binding, regardless of which
+      # carrier holds them: a `Tuple` lists them, a `Nominal[Array, [E]]`
+      # has one element param, a bare `Array` / anything else yields none.
+      def collection_element_types(type)
+        case type
+        when Type::Tuple
+          type.elements
+        when Type::Nominal
+          type.class_name == "Array" ? type.type_args : []
+        when Type::Union
+          # A loop's single-pass join can union the widened collection with
+          # its un-widened literal seed (`Array[0] | [0]`); pull element
+          # evidence from every Array-ish member.
+          type.members.flat_map { |m| collection_element_types(m) }
+        else
+          []
+        end
+      end
+
+      # `[keys, values]` evidence from a Hash-ish pre-state binding —
+      # a `HashShape` (literal pairs) or a `Nominal[Hash, [K, V]]`.
+      def hash_shape_key_values(type)
+        case type
+        when Type::HashShape
+          return [[], []] if type.pairs.empty?
+
+          [[key_union_for(type.pairs.keys)], type.pairs.values]
+        when Type::Nominal
+          type.class_name == "Hash" && type.type_args.size == 2 ? [[type.type_args[0]], [type.type_args[1]]] : [[], []]
+        when Type::Union
+          type.members.each_with_object([[], []]) do |m, (ks, vs)|
+            mk, mv = hash_shape_key_values(m)
+            ks.concat(mk)
+            vs.concat(mv)
+          end
+        else
+          [[], []]
+        end
+      end
     end
   end
 end

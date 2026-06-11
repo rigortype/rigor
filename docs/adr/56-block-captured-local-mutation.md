@@ -1,6 +1,7 @@
 # ADR-56 — Block-captured local write-back and loop-body fixpoint (mutation-effect soundness)
 
-Status: **Accepted, 2026-06-11. Slices A + B implemented 2026-06-11.**
+Status: **Accepted, 2026-06-11. Slices A + B implemented 2026-06-11;
+slice C (receiver-content element-type join, WD2.5) implemented 2026-06-12.**
 Sequenced as slice A (block captured-local write-back — **landed**) then
 slice B (loop-body fixpoint widening — **landed**). Unlike ADR-55 these
 are **soundness fixes, not
@@ -163,6 +164,54 @@ empty-seed behaviour). `each_with_object`'s return adopts the same
 joined memo type (B3). The decision criterion above already covers
 this — "rebind" reads as "rebind or content-mutate"; slice C is the
 content half arriving.
+
+**Implemented 2026-06-12.** Three composing seams, all reusing the
+slice-A/B `MutationWidening` carrier-widening helpers:
+
+1. **Blocks** — `StatementEvaluator#content_writeback_block_captures`
+   runs in `eval_call` after `MutationWidening.widen_after_block` (which
+   already forgets the literal arity but kept only the seed's elements).
+   It walks the block body for content-mutator calls on captured outer
+   locals (`MutationWidening::CONTENT_ADDERS` = Array `<< push append
+   prepend unshift concat insert []= fill replace`, Hash `[]= store`,
+   String `<< concat prepend insert replace`) plus index-write forms
+   (`h[k] ||= v`), types each mutator's arguments in the block-entry
+   scope, and JOINs the appended / stored element / key / value types
+   into the continuation collection parameter via
+   `MutationWidening.join_array_content` / `join_hash_content`. Pre-state
+   is read from `post_scope`, so a local both rebound (slice A) and
+   content-mutated composes. The empty-seed `Dynamic[top]` floor is
+   dropped once real evidence exists (`out = []; arr.each { |x| out <<
+   x*2 }` → `Array[Integer]`, not `Array[Integer | Dynamic[top]]`).
+
+2. **Loops** — `eval_loop` overlays `loop_content_writeback` on both the
+   fast-path single-pass join and the slice-B fixpoint result; arguments
+   are typed against the fixpoint-widened `post_loop` so an appended loop
+   counter reads `Integer`, not its entry constant.
+
+3. **`each_with_object` return (B3)** — `each_with_object_return`
+   computes the joined memo type from the memo block-param's content
+   mutations and adopts it as the call's return, replacing the
+   `Dynamic[top]` the dispatcher otherwise produces.
+
+A String accumulator widens to the `String` nominal base (no element
+parameter; the constant value is no longer sound). An index-write that
+content-mutates a Hash through a nested collection (`h[k] ||= []; h[k] <<
+v`) floors the value to `Dynamic[top]` but no longer leaves `h` an empty
+`{}` (which folded `h.empty?` to a wrong `true`). Gate: `make verify`
+green (no new self-check / plugin-check firings); a probe table confirms
+all four survey repro shapes (`Array[0]` → `Array[0 | 1 | 2 | 3]`,
+`out.first.zero?` no longer a wrong `true`, empty-seed → `Array[Integer]`,
+`each_with_object` → the joined memo, Hash build → `Hash[K, V]`); corpus
+(Mastodon `app/models` byte-identical; haml `lib` **one removal** —
+`parser.rb:746`'s `dynamic_attributes << …`-in-`each` then
+`dynamic_attributes == "{}"` no longer folds to a wrong always-falsey;
+kramdown `lib` one message-rewording at an identical site
+(`undefined method 'strip!' for nil` → `possible nil receiver` as the
+receiver types `T | nil`), zero new genuine firings); perf neutral (lib
+self-check ~19.9s). The `loop_body_fixpoint` fixture's `acc.push(m)` case
+tightened from the imprecise-but-sound `Array[Dynamic[top]] | []` to
+`Array[Integer]` (a slice-C precision win, fixture + spec updated).
 
 ### WD3 — One mechanism, shared
 

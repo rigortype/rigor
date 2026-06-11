@@ -825,10 +825,11 @@ module Rigor
         rebound, body_first = loop_body_local_writes(node.statements, post_pred)
         names = rebound + body_first
 
-        # Fast path: a loop whose body rebinds no local stays byte-identical
-        # to the historical single-pass join — the overwhelming majority of
-        # loops, and any loop whose body only reads / mutates receivers.
-        return [Type::Combinator.constant_of(nil), base_scope] if names.empty?
+        # Fast path: a loop whose body rebinds no local skips the rebind
+        # fixpoint, but still needs the slice-C content writeback (a loop may
+        # content-mutate a collection without rebinding any local — `acc <<
+        # x`), so apply it to the single-pass join before returning.
+        return [Type::Combinator.constant_of(nil), loop_content_writeback(node.statements, base_scope)] if names.empty?
 
         # ADR-56 slice B — loop-body fixpoint. The body runs 0..N times and
         # may compound (`d *= 2`), so the historical single body pass joined
@@ -841,22 +842,57 @@ module Rigor
         # a local FIRST assigned inside the body seeds with `nil` so the
         # 0-iteration path (the body may never run) degrades it to
         # `T | nil`, matching the historical nil-injection treatment.
-        nil_const = Type::Combinator.constant_of(nil)
-        seed = names.to_h do |name|
-          [name, post_pred.local(name) || nil_const]
-        end
+        result = loop_rebind_fixpoint(node, post_pred, names, body_first)
+        post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
+        # ADR-56 slice C — loop-body receiver-content element-type join. A
+        # loop that content-mutates a collection (`acc << n`) keeps only the
+        # seed's element types after the single-pass widen (B1 unsoundness:
+        # `acc = [0]; while …; acc << n; end` → `Array[0]`, runtime
+        # `[0, n, …]`). Join the appended/stored types into the continuation
+        # collection. Pre-state is read from `post_loop` so a local both
+        # rebound and content-mutated composes.
+        post_loop = loop_content_writeback(node.statements, post_loop)
+        [Type::Combinator.constant_of(nil), post_loop]
+      end
 
-        result = BodyFixpoint.converge(
+      # Joins loop-body content mutations into the continuation collection
+      # bindings. The mutator arguments are typed against `post_loop`, whose
+      # locals already carry the loop-body fixpoint widening (so an
+      # appended `n` that the loop decrements types `Integer`, not its
+      # entry `Constant[3]` — otherwise only the first iteration's value
+      # would be captured, an unsound under-approximation). Pre-state is
+      # read from `post_loop` too. A loop body shares the surrounding scope,
+      # so the receiver is any `LocalVariableReadNode` (no depth filter).
+      def loop_content_writeback(statements, post_loop)
+        return post_loop if statements.nil?
+
+        mutations = Hash.new { |h, k| h[k] = [] }
+        Source::NodeWalker.each(statements) do |descendant|
+          name, node = content_mutation_target(descendant) { |_r| true }
+          mutations[name] << node unless name.nil?
+        end
+        return post_loop if mutations.empty?
+
+        mutations.reduce(post_loop) do |acc, (name, calls)|
+          joined = join_content_for_local(name, calls, acc, post_loop)
+          joined.nil? ? acc : acc.with_local(name, joined)
+        end
+      end
+
+      # Runs the slice-B loop-body rebind fixpoint, returning the per-name
+      # continuation binding. Seed: a pre-existing local seeds with its
+      # post-predicate binding; a local FIRST assigned inside the body seeds
+      # with `nil` so the 0-iteration path (the body may never run) degrades
+      # it to `T | nil`, matching the historical nil-injection treatment.
+      def loop_rebind_fixpoint(node, post_pred, names, body_first)
+        nil_const = Type::Combinator.constant_of(nil)
+        seed = names.to_h { |name| [name, post_pred.local(name) || nil_const] }
+        BodyFixpoint.converge(
           names: names,
           seed_bindings: seed,
           widen: Type::Combinator.method(:widen_value_pinned),
-          evaluate_body: lambda { |bindings|
-            loop_body_exit_bindings(node, post_pred, bindings, names, body_first)
-          }
+          evaluate_body: ->(bindings) { loop_body_exit_bindings(node, post_pred, bindings, names, body_first) }
         )
-
-        post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
-        [Type::Combinator.constant_of(nil), post_loop]
       end
 
       # Names of locals the loop body can rebind, partitioned into those
@@ -1165,6 +1201,11 @@ module Rigor
       # observe the outer scope, matching Ruby evaluation order.
       def eval_call(node)
         call_type = scope.type_of(node, tracer: tracer)
+        # ADR-56 slice C (B3) — `each_with_object(memo) { |x, acc| acc << … }`
+        # returns the memo; the engine otherwise types the call `Dynamic[top]`.
+        # Compute the joined memo type from the block's content mutations of
+        # the memo block-param and adopt it as the call's return type.
+        call_type = each_with_object_return(node, call_type)
         evaluate_block_if_present(node)
         # `ruby2_keywords def foo(...)` (and similar wrappers like
         # `private def`, `public def`, `module_function def`) parse
@@ -1208,6 +1249,14 @@ module Rigor
         # precision — so blindly applying is safe regardless of
         # whether the block actually runs.
         post_scope = MutationWidening.widen_after_block(call_node: node, outer_scope: post_scope)
+        # ADR-56 slice C — receiver-content element-type join. The widening
+        # above forgets a content-mutated collection's literal arity but
+        # keeps only the seed's element types (the B1 unsound under-
+        # approximation for a non-empty seed). Join the appended / stored
+        # element / key / value types into the continuation collection's
+        # parameter so `out = [0]; arr.each { |x| out << x }` types
+        # `Array[0 | Integer]`, not `Array[0]`. Always sound — only widens.
+        post_scope = content_writeback_block_captures(node, post_scope)
         # Indexed-collection narrowing — drop any
         # `receiver[key] ||= default` narrowing the analyzer
         # recorded earlier when an intervening `[]=` writes the
@@ -1814,6 +1863,271 @@ module Rigor
         )
 
         result.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # ADR-56 slice C — receiver-content element-type join. After the
+      # rebind write-back and `MutationWidening.widen_after_block` (which
+      # forgets a content-mutated collection's literal arity but keeps only
+      # the SEED's element types), join the appended/stored element / key /
+      # value types INTO the continuation collection's parameter, so
+      # `out = [0]; arr.each { |x| out << x }` types `out` as
+      # `Array[0 | Integer]` (sound) rather than `Array[0]` (the B1
+      # under-approximation: the runtime array is `[0, 1, 2, 3]`).
+      #
+      # Pre-state is read from `post_scope` so a local that is BOTH rebound
+      # and content-mutated composes: the rebind fixpoint result feeds the
+      # content join. The block body is typed once for argument evidence;
+      # the floor is `Array[Dynamic[top]]` / `Hash[untyped, untyped]` (the
+      # sound empty-seed behaviour). Always sound — only ever widens.
+      def content_writeback_block_captures(call_node, post_scope)
+        block = call_node.block
+        return post_scope unless block.is_a?(Prism::BlockNode)
+        return post_scope unless classify_closure_escape(call_node) == :non_escaping
+
+        body = block.body
+        return post_scope if body.nil?
+
+        mutations = collect_content_mutations(body)
+        return post_scope if mutations.empty?
+
+        entry = build_block_entry_scope(call_node, block)
+        mutations.reduce(post_scope) do |acc, (name, calls)|
+          joined = join_content_for_local(name, calls, acc, entry)
+          joined.nil? ? acc : acc.with_local(name, joined)
+        end
+      end
+
+      # ADR-56 slice C (B3). For `recv.each_with_object(memo) { |x, acc| … }`
+      # the return is the memo object after the block has mutated it through
+      # the `acc` alias. Compute the joined memo type the same way captured-
+      # local content mutations are joined: pre-state = the memo argument's
+      # type, added evidence = the content-mutator args on the memo block
+      # param. Returns `call_type` unchanged for any other call, a missing
+      # block, or a memo whose pre-state is not a collection.
+      def each_with_object_return(call_node, call_type)
+        return call_type unless call_node.name == :each_with_object
+
+        block = call_node.block
+        return call_type unless block.is_a?(Prism::BlockNode)
+
+        memo_arg = call_node.arguments&.arguments&.first
+        return call_type if memo_arg.nil?
+
+        memo_param = each_with_object_memo_param(block)
+        return call_type if memo_param.nil?
+
+        body = block.body
+        return call_type if body.nil?
+
+        # The memo alias is a block-local (depth 0) — collect content
+        # mutations on it directly rather than via the captured-local walk.
+        calls = body_content_mutations_on(body, memo_param)
+        return call_type if calls.empty?
+
+        pre_state = scope.type_of(memo_arg, tracer: tracer)
+        entry = build_block_entry_scope(call_node, block)
+        joined = join_content_for_param(calls, pre_state, entry)
+        joined || call_type
+      end
+
+      # The name of the memo block parameter (the SECOND positional param of
+      # an `each_with_object` block), or nil when the block does not bind a
+      # second positional param.
+      def each_with_object_memo_param(block)
+        params_root = block.parameters
+        return nil unless params_root.is_a?(Prism::BlockParametersNode)
+
+        params = params_root.parameters
+        return nil if params.nil?
+
+        requireds = params.requireds
+        return nil if requireds.size < 2
+
+        second = requireds[1]
+        second.respond_to?(:name) ? second.name : nil
+      end
+
+      # Content-mutator calls on a block-local receiver `var_name`
+      # (depth 0) within `body`.
+      def body_content_mutations_on(body, var_name)
+        calls = []
+        Source::NodeWalker.each(body) do |descendant|
+          next unless descendant.is_a?(Prism::CallNode)
+          next unless MutationWidening::CONTENT_ADDERS.include?(descendant.name)
+
+          receiver = descendant.receiver
+          next unless receiver.is_a?(Prism::LocalVariableReadNode)
+          next unless receiver.name == var_name
+
+          calls << descendant
+        end
+        calls
+      end
+
+      # Joins content evidence for a memo / param given its pre-state and a
+      # list of mutator calls, dispatching Array vs Hash by the mutator set.
+      def join_content_for_param(calls, pre_state, block_entry)
+        return nil if pre_state.nil?
+
+        if stringish?(pre_state)
+          # String carries no element parameter; mutating `<<`/`concat`
+          # makes the constant value unsound (`s = "a"; s << x` → runtime
+          # `"a…"`), so widen to the nominal base. Sound — only widens.
+          Type::Combinator.nominal_of("String")
+        elsif hashish?(pre_state) || (hash_mutations?(calls) && !arrayish?(pre_state))
+          join_hash_param(calls, pre_state, block_entry)
+        else
+          join_array_param(calls, pre_state, block_entry)
+        end
+      end
+
+      def join_hash_param(calls, pre_state, block_entry)
+        pairs = calls.flat_map { |c| hash_pair_types(c, block_entry) }
+        return nil if pairs.empty? && !hashish?(pre_state)
+
+        MutationWidening.join_hash_content(pre_state, pairs)
+      end
+
+      def join_array_param(calls, pre_state, block_entry)
+        return nil unless arrayish?(pre_state)
+
+        added = calls.flat_map do |c|
+          # Index-write on an array (`a[i] += v`) introduces no new element
+          # evidence we can cheaply attribute — the array-arity forget
+          # already widened the binding; contribute nothing.
+          next [] if index_write?(c)
+
+          MutationWidening.array_added_elements(c.name, content_arg_types(c, block_entry))
+        end
+        MutationWidening.join_array_content(pre_state, added)
+      end
+
+      # Walks the block body for content-mutator calls (`<<`, `push`,
+      # `[]=`, …) whose receiver is a captured outer local (depth >= 1),
+      # returning `{ name => [call_node, ...] }`. Mirrors the
+      # `MutationWidening.widen_after_block` walk (descends into nested
+      # blocks; the depth check keeps nested block-locals out).
+      def collect_content_mutations(body)
+        mutations = Hash.new { |h, k| h[k] = [] }
+        Source::NodeWalker.each(body) do |descendant|
+          name, node = content_mutation_target(descendant) { |r| r.is_a?(Prism::LocalVariableReadNode) && r.depth.positive? }
+          mutations[name] << node unless name.nil?
+        end
+        mutations
+      end
+
+      # Index-write forms (`h[k] ||= v`, `h[k] += v`, `h[k] = v` via a
+      # multi-assign target) that mutate a collection's CONTENT without a
+      # `[]=` CallNode. `h[k] ||= []; h[k] << v` mutates `h` through the
+      # OrWrite even though the appended values land on the nested array —
+      # leaving `h` an empty `{}` is unsound (`h.empty?` folds to `true`).
+      INDEX_WRITE_NODES = [
+        Prism::IndexOrWriteNode,
+        Prism::IndexAndWriteNode,
+        Prism::IndexOperatorWriteNode,
+        Prism::IndexTargetNode
+      ].freeze
+      private_constant :INDEX_WRITE_NODES
+
+      # `[receiver_name, node]` when `node` is a content mutation whose
+      # receiver is a local variable satisfying `accept` (depth predicate),
+      # else `[nil, nil]`. Covers `[]=`-style CallNode mutators and the
+      # index-write node forms.
+      def content_mutation_target(node)
+        is_call_mutator = node.is_a?(Prism::CallNode) && MutationWidening::CONTENT_ADDERS.include?(node.name)
+        return [nil, nil] unless is_call_mutator || index_write?(node)
+
+        receiver = node.receiver
+        return [nil, nil] unless receiver.is_a?(Prism::LocalVariableReadNode)
+        return [nil, nil] unless yield(receiver)
+
+        [receiver.name, node]
+      end
+
+      # Computes the joined continuation collection type for one captured
+      # local from its content-mutator calls. Returns `nil` (no overlay)
+      # when the pre-state is neither an Array-ish nor a Hash-ish binding —
+      # e.g. a String accumulator, whose `<<` carries no element parameter
+      # and whose binding already types as `String`.
+      def join_content_for_local(name, calls, post_scope, block_entry)
+        join_content_for_param(calls, post_scope.local(name), block_entry)
+      end
+
+      def hash_mutations?(calls)
+        calls.any? do |c|
+          index_write?(c) || (c.is_a?(Prism::CallNode) && MutationWidening::HASH_CONTENT_ADDERS.include?(c.name))
+        end
+      end
+
+      def index_write?(node)
+        INDEX_WRITE_NODES.any? { |k| node.is_a?(k) }
+      end
+
+      def arrayish?(type)
+        case type
+        when Type::Tuple then true
+        when Type::Nominal then type.class_name == "Array"
+        when Type::Union then type.members.any? { |m| arrayish?(m) }
+        else false
+        end
+      end
+
+      def hashish?(type)
+        case type
+        when Type::HashShape then true
+        when Type::Nominal then type.class_name == "Hash"
+        when Type::Union then type.members.any? { |m| hashish?(m) }
+        else false
+        end
+      end
+
+      def stringish?(type)
+        (type.is_a?(Type::Constant) && type.value.is_a?(String)) ||
+          (type.is_a?(Type::Nominal) && type.class_name == "String")
+      end
+
+      # `[key_type, value_type]` for a `h[k] = v` / `h.store(k, v)` call or
+      # an index-write node (`h[k] ||= v`), typed in the block-entry scope.
+      # For an index-write the stored value is opaque (the appended values
+      # often land on a NESTED collection via `h[k] << v`), so the value is
+      # floored to `untyped` — sound: it only ever widens the value param.
+      # Returns `[]` for other forms.
+      def hash_pair_types(node, block_entry)
+        if index_write?(node)
+          key = index_key_type(node, block_entry)
+          return [] if key.nil?
+
+          return [[key, Type::Combinator.untyped]]
+        end
+
+        args = content_arg_types(node, block_entry)
+        return [] if args.size < 2
+
+        [[args.first, args.last]]
+      end
+
+      # Type of the index expression of an index-write node (`h[k] ||= v`).
+      def index_key_type(node, block_entry)
+        args = node.arguments
+        return nil unless args.is_a?(Prism::ArgumentsNode)
+
+        first = args.arguments.first
+        first.nil? ? nil : block_entry.type_of(first, tracer: tracer)
+      rescue StandardError
+        nil
+      end
+
+      # Argument types for a content-mutator call, typed against the
+      # block-entry scope (block params bound). A sub-evaluator over
+      # `block_entry` keeps the argument typing flow-correct for params /
+      # `;`-locals without leaking into the outer scope.
+      def content_arg_types(call_node, block_entry)
+        arguments = call_node.arguments
+        return [] if arguments.nil?
+
+        arguments.arguments.map { |arg| block_entry.type_of(arg, tracer: tracer) }
+      rescue StandardError
+        []
       end
 
       # Evaluates `block`'s body once with each written outer local bound to

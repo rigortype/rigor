@@ -61,18 +61,19 @@ while counter < 2
 end
 assert_type("Integer?", fresh)
 
-# --- Receiver mutation of a NON-rebound local is untouched by the
-# fixpoint: `acc.push(m)` widens `acc`'s Tuple to an `Array` exactly as
-# the historical single-pass join did (the fixpoint overlays only the
-# locals the body REBINDS, here just the counter `m`). This pins down that
-# slice B preserves the pre-existing mutation-widening path. ---
+# --- Receiver CONTENT mutation of a NON-rebound local: the slice-B
+# fixpoint overlays only the locals the body REBINDS (here the counter
+# `m`); the slice-C content writeback then JOINS the pushed element type
+# (`m` → `Integer`) into `acc`'s element parameter. Pre-slice-C this read
+# the imprecise-but-sound `Array[Dynamic[top]] | []`; slice C tightens it
+# to `Array[Integer]` (the pushed value's widened type). ---
 acc = []
 m = 0
 while m < 3
   acc.push(m)
   m += 1
 end
-assert_type("Array[Dynamic[top]] | []", acc)
+assert_type("Array[Integer]", acc)
 
 # --- Loop with `break`: the sound widening applies (the accumulator
 # still compounds), and the break / exit-edge behaviour is preserved —

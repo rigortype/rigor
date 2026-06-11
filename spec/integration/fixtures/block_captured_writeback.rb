@@ -83,3 +83,77 @@ assert_type("Dynamic[top]", growing)
 escaped = 1
 define_method(:sink) { escaped = 42 }
 assert_type("Dynamic[top]", escaped)
+
+# ===================================================================
+# ADR-56 slice C — receiver-content element-type JOIN. The block body
+# CONTENT-mutates a captured collection (`out << x`) rather than
+# rebinding it. Before this slice a NON-EMPTY seed kept only the seed's
+# elements (`Array[0]` for a really-`[0, 1, 2, 3]` array — UNSOUND, the
+# B1 survey bug: `out.first.zero?` folded to a wrong `true`). The
+# appended / stored types must JOIN into the element / key / value
+# parameter.
+# ===================================================================
+
+# --- Non-empty Array seed: the appended element joins the seed element
+# (B1 — the unsound case). Pre-slice this was `Array[0]`. ---
+out = [0]
+[1, 2, 3].each { |x| out << x }
+assert_type("Array[0 | 1 | 2 | 3]", out)
+
+# --- and the wrong constant fold it caused is gone: `first` over the
+# joined array is the element union, not the seed's `0`. ---
+assert_type("0 | 1 | 2 | 3", out.first)
+
+# --- Empty Array seed built by `<<` of a computed element (B4): the
+# `Dynamic[top]` floor is dropped once real element evidence exists. ---
+built = []
+[1, 2, 3].each { |x| built << (x * 2) }
+assert_type("Array[2 | 4 | 6]", built)
+
+# --- `push` form of the same. ---
+pushed = []
+[1, 2, 3].each { |x| pushed.push(x) }
+assert_type("Array[1 | 2 | 3]", pushed)
+
+# --- `concat` of a literal pair joins both elements. ---
+catted = [0]
+[1, 2, 3].each { |x| catted.concat([x, x + 1]) }
+assert_type("Array[0 | 1 | 2 | 3 | 4]", catted)
+
+# --- Hash `[]=` joins key and value parameters (the canonical build-a-
+# hash idiom). ---
+table = {}
+[1, 2, 3].each { |x| table[x] = x.to_s }
+assert_type('Hash[1 | 2 | 3, "1" | "2" | "3"]', table)
+
+# --- String accumulation via `<<` widens to the nominal base (String
+# carries no element parameter; the constant value is no longer sound). ---
+sbuf = "a"
+[1, 2, 3].each { |x| sbuf << x.to_s }
+assert_type("String", sbuf)
+
+# --- Nested `h[k] ||= []; h[k] << v` — the appended values land on the
+# NESTED array, but `h` itself is content-mutated through the index-write,
+# so it must NOT stay an empty `{}` (which would fold `h.empty?` to a
+# wrong `true`). The value floors to `Dynamic[top]` (opaque), keys join. ---
+groups = {}
+[1, 2, 3].each do |x|
+  groups[x] ||= []
+  groups[x] << x
+end
+assert_type("Hash[1 | 2 | 3, Dynamic[top]]", groups)
+
+# --- `each_with_object` adopts the joined memo type as its RETURN (B3),
+# both the Array and Hash memo forms. Pre-slice these were `Dynamic[top]`. ---
+ewo_arr = [1, 2, 3].each_with_object([]) { |x, acc| acc << (x * 2) }
+assert_type("Array[2 | 4 | 6]", ewo_arr)
+
+ewo_hash = [1, 2, 3].each_with_object({}) { |x, h| h[x] = x * 2 }
+assert_type("Hash[1 | 2 | 3, 2 | 4 | 6]", ewo_hash)
+
+# --- A non-content-mutation block over a collection stays byte-identical:
+# the block only READS the captured local, so its exact literal Tuple is
+# preserved (no spurious widening from the slice-C walk). ---
+readonly = [1, 2]
+[1, 2, 3].each { |x| x + 1 }
+assert_type("[1, 2]", readonly)

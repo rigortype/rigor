@@ -1,0 +1,24 @@
+---
+locals:
+  buffer: String
+  built: Array[2 | 4 | 6]
+  catted: Array[0 | 1 | 2 | 3 | 4]
+  counter: Integer
+  escaped: Dynamic[top]
+  ewo_arr: Array[2 | 4 | 6]
+  ewo_hash: Hash[1 | 2 | 3, 2 | 4 | 6]
+  fact: Integer
+  flag: 1 | 99
+  groups: Hash[1 | 2 | 3, Dynamic[top]]
+  growing: Dynamic[top]
+  left: 1 | 2
+  memo: 5?
+  out: Array[0 | 1 | 2 | 3]
+  power: Integer
+  pushed: Array[1 | 2 | 3]
+  readonly: "[1, 2]"
+  right: 1 | 2
+  sbuf: String
+  table: Hash[1 | 2 | 3, "1" | "2" | "3"]
+  total: Integer
+  untouched: '7'

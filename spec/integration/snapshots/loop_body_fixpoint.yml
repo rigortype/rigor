@@ -1,0 +1,18 @@
+---
+locals:
+  a: Integer
+  acc: Array[Integer]
+  b: Integer
+  c: Integer
+  counter: Integer
+  d: Integer
+  fresh: Integer?
+  g: Dynamic[top]
+  i: Integer
+  j: Integer
+  k: Integer
+  m: Integer
+  "n": Integer
+  p: Integer
+  q: Integer
+  total: Integer

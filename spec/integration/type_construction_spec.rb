@@ -1086,11 +1086,14 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
 
-      it "leaves a receiver-mutated non-rebound local on the historical widening path" do
-        # `acc.push(m)` widens `acc`'s Tuple — the fixpoint overlays only
-        # rebound locals, so this stays exactly what the single-pass join
-        # produced (Array | empty-tuple), unaffected by slice B.
-        expect(harness.local(:acc)).to be_a(Rigor::Type::Union)
+      it "joins the pushed element type of a receiver-content-mutated non-rebound local (slice C)" do
+        # `acc.push(m)` widens `acc`'s Tuple AND the slice-C content
+        # writeback joins the pushed `m` (→ `Integer`) into the element
+        # parameter, so the continuation is `Array[Integer]` — sounder and
+        # more precise than the pre-slice-C `Array[Dynamic[top]] | []`.
+        expect(harness.local(:acc)).to eq(
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
+        )
       end
 
       it "floors a compounding loop-carried local to Dynamic[top] at the cap" do

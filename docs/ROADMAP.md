@@ -274,15 +274,17 @@ and `file:line` grounding in the note):
    folder's first check is `Singleton[<its one class>]` — so the collapse is
    observably identical; the table sits where the eight sat in the flat
    list). Non-singleton calls skip all eight no-op trials.
-3. **Phase 3 — structural, behaviour-preserving, no new ADR. REMAINING.**
-   (a) Decompose the ~2000-line `Analysis::Runner` monolith into
-   `PoolCoordinator` / `ProjectPrePasses` / `DiagnosticAggregator` (also the
-   footing for the queued LSP pre-built-Environment refactor). (b) Unify the
-   duplicated certainty judgments — `case`/`when` branch certainty lives in
-   both `expression_typer.rb:791-862` and `narrowing.rb:365`, and the
-   truthy/falsey `→ Bot?` idiom in both Typer and Evaluator — so Narrowing is
-   the sole owner and Typer/Evaluator are callers. Inference hot path: full
-   suite + diagnostics-identical gate, not a casual cleanup.
+3. **Phase 3 — structural, behaviour-preserving. DONE (2026-06-11).**
+   (a) `Analysis::Runner` decomposed into
+   `runner/{pool_coordinator,project_pre_passes,diagnostic_aggregator,run_snapshots}`
+   (~2000 → ~970-line orchestrator; reader-proc injection preserves read
+   timing; also the footing for the queued LSP pre-built-Environment
+   refactor). (b) Narrowing is now the sole owner of the certainty
+   judgments — `predicate_certainty` / `class_pattern_certainty` /
+   `value_pattern_certainty` derived from its own fragments; Typer and
+   Evaluator are callers (the `&&`/`||` `constant_value_polarity` gate
+   deliberately stays Constant-only — full-probe precision there would be
+   a behaviour change, queued as demand-gated).
 4. **Phase 4 — [ADR-53](adr/53-scope-discovery-index-separation.md):
    Track A DONE (A1 `031f161e` + A2 `063823e4`, 2026-06-10/11); Track B
    REMAINING.** Track B = the single engine-owned check-rule walk behind a

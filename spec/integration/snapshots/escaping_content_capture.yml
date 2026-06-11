@@ -1,0 +1,6 @@
+---
+locals:
+  buffer: String
+  collected: Array[Dynamic[top]]
+  options: Hash[Dynamic[top], Dynamic[top]]
+  seen: "{}"

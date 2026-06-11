@@ -1806,6 +1806,7 @@ module Rigor
         return scope if classification == :non_escaping
 
         post_scope = drop_captured_narrowing(node.block, scope)
+        post_scope = widen_escaping_content_captures(node.block, post_scope)
         post_scope.with_fact(
           Analysis::FactStore::Fact.new(
             bucket: :dynamic_origin,
@@ -1815,6 +1816,51 @@ module Rigor
             stability: :unstable
           )
         )
+      end
+
+      # ADR-57 slice 2 (ADR-56 mechanisms 2 / 8 extended to escaping blocks).
+      # An escaping / unknown block that CONTENT-mutates a captured outer
+      # local (`options[:k] = v` in an `OptionParser#on` block, `s << x` in a
+      # stored proc) previously left that local's content untouched — only its
+      # narrowing was dropped, so a constant seed (`options = {}`, `s = ""`)
+      # survived and its element fold (`options[:format]` -> `"text"`,
+      # `s.empty?` -> `true`) was unsoundly precise.
+      #
+      # An escaping block may run later and any number of times, so joining a
+      # bounded evidence set is not sound (unlike slice C's non-escaping
+      # join): the sound continuation is the bare-collection floor — Array ->
+      # `Array[Dynamic[top]]`, Hash -> `Hash[untyped, untyped]`, String ->
+      # `String`. The seed's element/key/value precision is forgotten; only
+      # the carrier survives. Read-only captures and locals the block merely
+      # rebinds (already floored by `drop_captured_narrowing`) are untouched.
+      def widen_escaping_content_captures(block_node, post_scope)
+        body = block_node.body
+        return post_scope if body.nil?
+
+        mutations = collect_content_mutations(body)
+        return post_scope if mutations.empty?
+
+        mutations.keys.reduce(post_scope) do |acc, name|
+          floored = content_floor_for(acc.local(name))
+          floored.nil? ? acc : acc.with_local(name, floored)
+        end
+      end
+
+      # The Dynamic-floor carrier for a content-mutated escaping capture, or
+      # nil when the pre-state is not a recognised mutable collection (leave
+      # it alone — e.g. an already-`Dynamic` binding or an unknown shape).
+      def content_floor_for(type)
+        return nil if type.nil?
+
+        if stringish?(type)
+          Type::Combinator.nominal_of("String")
+        elsif hashish?(type)
+          Type::Combinator.nominal_of("Hash",
+                                      type_args: [Type::Combinator.untyped,
+                                                  Type::Combinator.untyped])
+        elsif arrayish?(type)
+          Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
+        end
       end
 
       def classify_closure_escape(call_node)

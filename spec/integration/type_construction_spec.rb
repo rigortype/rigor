@@ -1059,6 +1059,20 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/escaping_content_capture.rb — ADR-57 slice 2 escaping-block content widening" do
+      let(:harness) { harness_for("escaping_content_capture") }
+
+      # An escaping / unknown block that content-mutates a captured outer
+      # local widens that local to its bare-collection floor (Hash →
+      # Hash[untyped, untyped], String → String, Array → Array[Dynamic[top]])
+      # instead of keeping the unsoundly-precise empty seed. A read-only
+      # capture is untouched.
+      it "widens content-mutated escaping captures to the Dynamic floor" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
+
     describe "fixtures/block_captured_writeback.rb — ADR-56 slice A captured-local write-back" do
       let(:harness) { harness_for("block_captured_writeback") }
 

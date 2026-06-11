@@ -226,10 +226,51 @@ module Rigor
           case type
           when Type::Constant then [type.value]
           when Type::Union
-            return nil unless type.members.all?(Type::Constant)
+            return type.members.map(&:value) if type.members.all?(Type::Constant)
 
-            type.members.map(&:value)
+            # A union that mixes `Constant<Integer>` and `IntegerRange`
+            # members (e.g. an accumulator's running fixpoint assumption
+            # `1 | int<1, 6>`) folds as the bounding interval. The
+            # range-arithmetic path (`try_fold_binary_range`) then keeps
+            # the result an `IntegerRange` instead of bailing to Dynamic.
+            union_integer_bounds(type)
           when Type::IntegerRange then type
+          end
+        end
+
+        # Returns the bounding `IntegerRange` over a union whose members
+        # are each an Integer `Constant` or an `IntegerRange`; `nil`
+        # otherwise (a Float constant or any non-numeric member declines,
+        # so precision is never silently lost).
+        def union_integer_bounds(union)
+          lowers = []
+          uppers = []
+          union.members.each do |member|
+            case member
+            when Type::Constant
+              return nil unless member.value.is_a?(Integer)
+
+              lowers << member.value
+              uppers << member.value
+            when Type::IntegerRange
+              lowers << member.lower
+              uppers << member.upper
+            else
+              return nil
+            end
+          end
+          # `IntegerRange#lower`/`#upper` surface an unbounded edge as
+          # `±Float::INFINITY`; `integer_range` wants the `±∞` *sentinel*,
+          # so map the extremum back.
+          Type::Combinator.integer_range(infinity_to_sentinel(lowers.min),
+                                         infinity_to_sentinel(uppers.max))
+        end
+
+        def infinity_to_sentinel(bound)
+          case bound
+          when -Float::INFINITY then Type::IntegerRange::NEG_INFINITY
+          when Float::INFINITY then Type::IntegerRange::POS_INFINITY
+          else bound
           end
         end
 

@@ -17,6 +17,15 @@ power = 1
 1.upto(6) { power *= 2 }
 assert_type("Integer", power)
 
+# `upto` flows the bounded-int refinement (`int<1, 6>`) into the block
+# param, so `fact *= i` multiplies the running fixpoint assumption
+# (`1 | int<1, 6>`) by a refinement. The mixed `Constant | IntegerRange`
+# union must fold as the bounding interval (not bail to `Dynamic[top]`),
+# otherwise the accumulator never converges below the cap floor.
+fact = 1
+1.upto(6) { |i| fact *= i }
+assert_type("Integer", fact)
+
 # A param-driven accumulator (`each`'s element is `Integer`) over `+=`.
 total = 1
 [1, 2, 3].each { |i| total += i }

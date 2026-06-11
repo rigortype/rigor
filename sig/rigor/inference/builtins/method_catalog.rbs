@@ -1,4 +1,4 @@
 class Rigor::Inference::Builtins::MethodCatalog
   def initialize: (path: String, ?mutating_selectors: Hash[String, Set[untyped]]) -> void
-  def reset!: () -> nil
+  def reset!: () -> Hash[String, untyped]
 end

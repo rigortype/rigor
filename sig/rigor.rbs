@@ -11,7 +11,7 @@ module Rigor
     attr_reader cache_path: String
     attr_reader baseline_path: String?
 
-    def self.load: (?String path) -> Configuration
+    def self.load: (?String? path) -> Configuration
     def self.discover: () -> String?
     def self.load_with_includes: (String path, ?visited: Set[String]) -> Hash[String, untyped]
     def initialize: (?Hash[String, untyped] data) -> void

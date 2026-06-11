@@ -100,17 +100,60 @@ module Rigor
 
         def decompose_tuple(tuple, front_count, back_count, rest_present:)
           elements = tuple.elements
-          fronts = Array.new(front_count) { |i| elements[i] || Type::Combinator.constant_of(nil) }
+          fronts = Array.new(front_count) { |i| slot_type(elements, i) }
           if rest_present
             middle_end = [elements.size - back_count, front_count].max
             middle = elements[front_count...middle_end] || []
             rest_type = Type::Combinator.tuple_of(*middle)
-            backs = Array.new(back_count) { |i| elements[middle_end + i] || Type::Combinator.constant_of(nil) }
+            backs = Array.new(back_count) { |i| slot_type(elements, middle_end + i) }
           else
             rest_type = nil
-            backs = Array.new(back_count) { |i| elements[front_count + i] || Type::Combinator.constant_of(nil) }
+            backs = Array.new(back_count) { |i| slot_type(elements, front_count + i) }
           end
           [fronts, rest_type, backs]
+        end
+
+        # The per-slot type for index `i` of a tuple decomposition, FP-safely
+        # softened: a missing slot is `nil` (the runtime value of an
+        # over-destructured positional), and a PRESENT but nil-bearing slot
+        # (`X | nil`) is softened to its non-`nil` part — for a heterogeneous
+        # `Tuple` whose optional slot was made optional by flow.
+        #
+        # Rationale (ADR-57 slice 3 work-item 2): a destructure of a tuple
+        # element that flow typed as optional is almost always guarded by a
+        # CORRELATED invariant the flow engine cannot prove. The canonical case
+        # is haml's `parse_tag`, which returns `[..., last_line || @line.index
+        # + 1]` — a 9-tuple whose `last_line` slot widens to `Dynamic[top]?`
+        # through a loop-nested destructure; at the call site `..., last_line =
+        # parse_tag(text); raise(..., last_line - 1) if parse && value.empty?`
+        # the `last_line` is nil ONLY when an earlier element is too, and the
+        # guard short-circuits — but that correlation lives across slots, so
+        # per-slot flow sees `last_line` as nil-able and `last_line - 1` fires a
+        # spurious `possible nil receiver`. Manufacturing a `T?` for every
+        # destructured slot frightens working code; FP discipline (the program
+        # works) outranks the worst-case per-slot reading, so we drop the `nil`
+        # from a destructured slot and keep the non-`nil` constituent (a bare
+        # `nil` slot stays `nil` — there is nothing to soften). A pure non-
+        # optional element keeps its precise type unchanged.
+        def slot_type(elements, index)
+          element = elements[index]
+          return Type::Combinator.constant_of(nil) if element.nil?
+
+          soften_optional_slot(element)
+        end
+
+        def soften_optional_slot(element)
+          return element unless element.is_a?(Type::Union)
+          return element unless element.members.any? { |m| nil_literal?(m) }
+
+          non_nil = element.members.reject { |m| nil_literal?(m) }
+          return element if non_nil.empty? # a bare `nil` slot: nothing to soften
+
+          Type::Combinator.union(*non_nil)
+        end
+
+        def nil_literal?(member)
+          member.is_a?(Type::Constant) && member.value.nil?
         end
 
         def decompose_default(front_count, back_count, rest_present:)

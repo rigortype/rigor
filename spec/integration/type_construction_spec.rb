@@ -1073,6 +1073,20 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/optional_tuple_destructure.rb — ADR-57 slice 3 optional-slot softening" do
+      let(:harness) { harness_for("optional_tuple_destructure") }
+
+      # Destructuring a tuple slot flow typed as optional (`X | nil`) softens
+      # that slot to its non-`nil` part (FP discipline: a nil-able slot is
+      # almost always guarded by a correlated invariant flow cannot prove),
+      # while a pure slot keeps its precise type and a bare `nil` slot stays
+      # `nil`.
+      it "softens optional destructured slots without over-widening" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
+
     describe "fixtures/block_captured_writeback.rb — ADR-56 slice A captured-local write-back" do
       let(:harness) { harness_for("block_captured_writeback") }
 

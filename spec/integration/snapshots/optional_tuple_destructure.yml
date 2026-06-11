@@ -1,0 +1,7 @@
+---
+locals:
+  _: Dynamic[top]
+  b: Dynamic[top]
+  c: Dynamic[top]
+  d: Dynamic[top]
+  f: Dynamic[top]

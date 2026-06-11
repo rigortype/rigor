@@ -1,0 +1,8 @@
+---
+locals:
+  fact: Integer
+  joined: String
+  ranged: Integer
+  sum: Integer
+  sum2: Integer
+  upper: Integer

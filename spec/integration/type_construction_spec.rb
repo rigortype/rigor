@@ -1033,9 +1033,13 @@ RSpec.describe "Rigor type construction (integration)" do
       let(:harness) { harness_for("recursive_fixpoint_summary") }
 
       # A non-constant-arg recursive method's in-cycle contribution is the
-      # method's real return type, not `Dynamic[top]`: factorial → `1 |
-      # Integer`, the string builder → `String`, an only-recursing method →
-      # `bot` (without hanging), and mutual recursion terminates.
+      # method's real return type, not `Dynamic[top]`. The discriminating
+      # cases are the bare-self-call recursions: `passthrough → :done` (the
+      # fixpoint discovers the base case) and `pick → Dynamic[top]` (the
+      # bot-collapse floor for an explicit-return base case); an
+      # only-recursing method → `bot` (without hanging); mutual recursion
+      # terminates. Factorial / Builder are RBS-absorption anchors, not
+      # fixpoint discriminators (see the fixture's note).
       it "computes Dynamic-free recursive return summaries and terminates" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty

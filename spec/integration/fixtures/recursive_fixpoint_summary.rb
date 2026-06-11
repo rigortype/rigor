@@ -13,10 +13,19 @@ include Rigor::Testing
 # joined the recursive call with `Dynamic[top]`.
 def some_int = [1, 2, 3].sample
 
-# factorial with a non-constant argument: the recursive `of(n - 1)`
-# contribution is now `Integer`, not `Dynamic[top]`. The base case
-# stays the literal `Constant[1]`, so the joined return is the precise,
-# Dynamic-free `1 | Integer`.
+# factorial / String-builder recursions. NOTE (2026-06-11 audit): these
+# two assertions are NOT slice-2 wins — the pre-slice-2 baseline
+# (commit 2ba608a0) already typed `Factorial#of` as `1 | Integer` and
+# `Builder#build` as `String`. The recursive `of(n - 1)` / `build(n - 1)`
+# branch is an *arithmetic / `String#+`* expression whose result type is
+# fixed by RBS return-type absorption (`Integer#*`, `String#+`)
+# REGARDLESS of what the recursive call itself returns, so the in-cycle
+# `Dynamic[top]` was already absorbed away before slice 2. They are kept
+# as termination + non-regression anchors, not as discriminating
+# fixpoint evidence. The passthrough / pick cases below DO discriminate:
+# their recursive branch is a *bare* self-call whose type flows straight
+# through, so the fixpoint summary (not RBS absorption) decides the
+# result.
 class Factorial
   def of(n)
     n <= 1 ? 1 : n * of(n - 1)
@@ -25,9 +34,6 @@ end
 
 assert_type("1 | Integer", Factorial.new.of(some_int))
 
-# A String-building recursion called with a non-constant argument now
-# returns `String` cleanly — pre-slice-2 it was `String | Dynamic[top]`
-# (`"" | Dynamic[top]` where the recursive contribution was unanalyzed).
 class Builder
   def build(n)
     n <= 0 ? "" : "x" + build(n - 1)
@@ -35,6 +41,41 @@ class Builder
 end
 
 assert_type("String", Builder.new.build(some_int))
+
+# DISCRIMINATING fixpoint case. The recursive branch is a *bare*
+# self-call (`passthrough(n - 1)`), so its type flows straight through
+# with no RBS absorption to mask it. Slice 2 raises this from the
+# pre-slice-2 `Dynamic[top]` to the precise `:done` — the Kleene
+# iteration discovers the base-case constituent and the recursive branch
+# contributes exactly the summary, not `untyped`.
+#
+# Regression guard for the 2026-06-11 bot-collapse bug: the call-site
+# argument (`some_int : 1 | 2 | 3`) narrows `n <= 0` to always-false and
+# prunes the `:done` tail branch, so the body computes `bot`; the
+# unguarded `joined == assumption` check converged at the `bot` seed and
+# returned `bot` (UNSOUND — `passthrough` returns `:done` at runtime,
+# `bot` means never-returns and feeds ADR-47 reachability). The fix
+# re-runs the fixpoint over a parameter-widened body scope that un-prunes
+# the base case.
+class Walker
+  def passthrough(n)
+    n <= 0 ? :done : passthrough(n - 1)
+  end
+
+  # The base case is an explicit early `return` whose value the tail-only
+  # body evaluator never folds into the result, so the fixpoint cannot
+  # see the `nil`. The bot-collapse fix detects the reachable explicit
+  # `return` and floors to the sound `Dynamic[top]` (the pre-slice-2
+  # observable) instead of the unsound `bot`.
+  def pick(n)
+    return nil if n <= 0
+
+    pick(n - 1)
+  end
+end
+
+assert_type(":done", Walker.new.passthrough(some_int))
+assert_type("Dynamic[top]", Walker.new.pick(some_int))
 
 # A method that ONLY recurses never returns: its summary stays `bot`
 # (the always-diverging shape) without hanging or blowing the stack.

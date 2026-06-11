@@ -1360,6 +1360,13 @@ module Rigor
       #   `rigor check lib` by 16 diagnostics).
       def adoptable_self_call_result?(type)
         return true if scope.self_type.nil? || type.is_a?(Type::Bot)
+        # ADR-55 slice 2: a recursive in-cycle re-entry returns the fixpoint
+        # summary assumption (Kleene iterate) for the signature being
+        # iterated. That value is a sound recursive-return summary — not a
+        # leaked unroll value — so it must be adopted regardless of
+        # pinned-ness, otherwise the assumption can never propagate back
+        # into the body and the iteration diverges into `Dynamic[top]`.
+        return true if active_fixpoint_summary?(type)
 
         # ADR-55 slice 1 (corpus-confined): a value-pinned self-call
         # result is adopted inside a method body ONLY while an unroll is
@@ -1562,6 +1569,17 @@ module Rigor
       INFERENCE_SUMMARY_KEY = :__rigor_user_method_return_summary__
       private_constant :INFERENCE_SUMMARY_KEY
 
+      # Per-inference recursion context threaded through the guard /
+      # fixpoint helpers (ADR-55 slice 2). Bundles the call descriptor
+      # (`receiver`, `arg_types`, `plain_signature`), the thread-local
+      # summary table, and the WD1 clamp flag so the helpers stay within the
+      # parameter-list budget. `def_node` is carried separately (it is the
+      # body owner, not call context).
+      RecursionContext = Data.define(
+        :receiver, :arg_types, :plain_signature, :summaries, :would_have_been_guarded
+      )
+      private_constant :RecursionContext
+
       # Total body evaluations the fixpoint iteration is permitted per
       # outermost entry for a signature (ADR-55 WD2). Hard, non-configurable
       # — the iteration cap is part of the termination story (ADR-41 WD4).
@@ -1643,11 +1661,11 @@ module Rigor
           extended &&
           stack.any? { |frame| plain_part(frame) == plain_signature }
 
-        evaluate_guarded_user_method_body(
-          def_node, body_scope, stack, signature,
-          summaries: summaries, plain_signature: plain_signature,
-          would_have_been_guarded: would_have_been_guarded
+        context = RecursionContext.new(
+          receiver: receiver, arg_types: arg_types, plain_signature: plain_signature,
+          summaries: summaries, would_have_been_guarded: would_have_been_guarded
         )
+        evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
       end
 
       # Pushes the recursion-guard frame, evaluates the body (the outermost
@@ -1655,22 +1673,17 @@ module Rigor
       # extended frames evaluate once and let the owner iterate), and on the
       # way out pops the frame and resets the per-outermost-entry fuel and
       # summary tables when the guard stack drains to empty.
-      def evaluate_guarded_user_method_body(
-        def_node, body_scope, stack, signature,
-        summaries:, plain_signature:, would_have_been_guarded:
-      )
+      def evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
         # The outermost frame for this plain signature owns the summary
         # entry and runs the fixpoint loop. ADR-55 WD2.
-        outermost = stack.none? { |frame| plain_part(frame) == plain_signature }
+        outermost = stack.none? { |frame| plain_part(frame) == context.plain_signature }
         stack.push(signature)
         begin
           if outermost
-            fixpoint_user_method_return(
-              def_node, body_scope, summaries, plain_signature, would_have_been_guarded
-            )
+            fixpoint_user_method_return(def_node, body_scope, context)
           else
             type, _post = body_scope.evaluate(def_node.body)
-            clamp_unroll_result(type, would_have_been_guarded)
+            clamp_unroll_result(type, context.would_have_been_guarded)
           end
         ensure
           stack.pop
@@ -1691,14 +1704,16 @@ module Rigor
       # iteration widens value-pinned constituents to their nominal base to
       # force convergence, and any residual instability collapses to
       # `untyped` (today's behaviour).
-      def fixpoint_user_method_return(def_node, body_scope, summaries, plain_signature, would_have_been_guarded)
+      def fixpoint_user_method_return(def_node, body_scope, context, widened: false)
+        plain_signature = context.plain_signature
+        summaries = context.summaries
         summaries[plain_signature] = { assumption: Type::Combinator.bot, consulted: false }
         computed = nil
 
         RECURSION_FIXPOINT_CAP.times do |iteration|
           summaries[plain_signature][:consulted] = false
           type, _post = body_scope.evaluate(def_node.body)
-          computed = clamp_unroll_result(type, would_have_been_guarded)
+          computed = clamp_unroll_result(type, context.would_have_been_guarded)
 
           # The summary was never consulted — the method did not recurse on
           # this evaluation, so there is no fixpoint to chase. Return the
@@ -1706,25 +1721,111 @@ module Rigor
           # bodies that merely share `infer_user_method_return`).
           return computed unless summaries.dig(plain_signature, :consulted)
 
-          assumption = summaries[plain_signature][:assumption]
-          last_iteration = iteration == RECURSION_FIXPOINT_CAP - 1
-          candidate = last_iteration ? widen_value_pinned(computed) : computed
-          joined = Type::Combinator.union(assumption, candidate)
-
-          # Convergence: the assumption already subsumes the computed return
-          # (joining it back changes nothing).
-          return candidate if joined == assumption
-
-          if last_iteration
-            # Out of iterations and still unstable — collapse to today's
-            # widening behaviour.
-            BudgetTrace.hit(BudgetTrace::RECURSION_FIXPOINT_CAP)
-            summaries[plain_signature][:assumption] = Type::Combinator.untyped
-            return Type::Combinator.untyped
+          # ADR-55 slice 2 bot-collapse fix (2026-06-11). When the recursive
+          # method's only contribution this evaluation was the seeded `bot`
+          # assumption (so `computed` is `bot` even though the body recursed),
+          # the `joined == assumption` check below would trivially converge at
+          # the seed and return `bot` — UNSOUND for a method with a reachable
+          # non-recursive exit (`passthrough` returns `:done`, `pick` returns
+          # `nil`). `bot` means "never returns", which feeds ADR-47
+          # reachability / always-falsey diagnostics, so it must be reserved
+          # for genuinely diverging methods (`spin`).
+          if computed.is_a?(Type::Bot)
+            resolved = resolve_bot_collapse(def_node, context, widened: widened)
+            return resolved unless resolved.nil?
           end
 
-          summaries[plain_signature][:assumption] = joined
+          step = fixpoint_step(summaries, plain_signature, computed, iteration)
+          return step unless step == :continue
         end
+      end
+
+      # One Kleene-iteration step of the fixpoint loop. Joins `computed` into
+      # the running assumption (widening value-pinned constituents on the
+      # final permitted iteration to force convergence) and either returns a
+      # final type — convergence, or the capped `untyped` collapse — or
+      # `:continue` to request another body evaluation, having advanced the
+      # stored assumption. ADR-55 WD2.
+      def fixpoint_step(summaries, plain_signature, computed, iteration)
+        assumption = summaries[plain_signature][:assumption]
+        last_iteration = iteration == RECURSION_FIXPOINT_CAP - 1
+        candidate = last_iteration ? widen_value_pinned(computed) : computed
+        joined = Type::Combinator.union(assumption, candidate)
+
+        # Convergence: the assumption already subsumes the computed return
+        # (joining it back changes nothing).
+        return candidate if joined == assumption
+
+        if last_iteration
+          # Out of iterations and still unstable — collapse to today's
+          # widening behaviour.
+          BudgetTrace.hit(BudgetTrace::RECURSION_FIXPOINT_CAP)
+          summaries[plain_signature][:assumption] = Type::Combinator.untyped
+          return Type::Combinator.untyped
+        end
+
+        summaries[plain_signature][:assumption] = joined
+        :continue
+      end
+
+      # Rebuilds the user-method body scope with every bound positional
+      # parameter widened to its nominal base (`1 | 2 | 3` → `Integer`,
+      # `Constant[:x]` → `Symbol`). Used by the bot-collapse retry in
+      # `fixpoint_user_method_return`: call-site argument narrowing can prune a
+      # recursive method's base case, and widening restores the declared-type
+      # view under which the base case is reachable. Returns `nil` when the
+      # parameter shape is not inferable (mirrors `build_user_method_body_scope`).
+      def widened_user_method_body_scope(def_node, receiver, arg_types)
+        widened_args = arg_types.map { |arg_type| widen_value_pinned(arg_type) }
+        build_user_method_body_scope(def_node, receiver, widened_args)
+      end
+
+      # ADR-55 slice 2 bot-collapse resolution (2026-06-11). Called when a
+      # fixpoint iteration computed `bot` for a recursive body. Two escape
+      # hatches keep `bot` reserved for genuinely diverging methods:
+      #
+      #   1. Re-run the fixpoint ONCE over a parameter-widened body scope
+      #      (`1 | 2 | 3` → `Integer`): call-site argument narrowing can prune
+      #      a base-case *tail* branch (`n <= 0 ? :done : recurse` with a
+      #      positive-only `n`), and widening un-prunes it so the base
+      #      constituent (`:done`) surfaces. `passthrough` recovers here.
+      #
+      #   2. If the (possibly widened) body STILL computes `bot` but contains
+      #      a reachable explicit `return` — whose value the tail-only body
+      #      evaluator never folds into the result (`pick`'s `return nil`) —
+      #      fall to the conservative `Dynamic[top]` floor (the pre-slice-2
+      #      observable) rather than the unsound `bot`.
+      #
+      # Returns the resolved type, or `nil` to let the caller's normal
+      # fixpoint convergence proceed (genuine divergence — `spin`).
+      def resolve_bot_collapse(def_node, context, widened:)
+        unless widened
+          widened_scope = widened_user_method_body_scope(def_node, context.receiver, context.arg_types)
+          return fixpoint_user_method_return(def_node, widened_scope, context, widened: true) unless widened_scope.nil?
+        end
+
+        return Type::Combinator.untyped if body_has_explicit_return?(def_node.body)
+
+        nil
+      end
+
+      # True when `node` contains a reachable explicit `return` statement —
+      # one not nested inside a return barrier (`def` / lambda / block). The
+      # tail-only body evaluator in `infer_user_method_return` never folds an
+      # early-return value into the method result, so a recursive method whose
+      # base case is spelled as `return value` (rather than a tail branch)
+      # looks like it only diverges. This detector is the signal that such a
+      # method has a non-recursive exit, so its bot-collapse must floor to
+      # `Dynamic[top]` rather than `bot` (ADR-55 slice 2, 2026-06-11).
+      RETURN_BARRIER_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
+      private_constant :RETURN_BARRIER_NODES
+
+      def body_has_explicit_return?(node)
+        return false unless node.is_a?(Prism::Node)
+        return false if RETURN_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+        return true if node.is_a?(Prism::ReturnNode)
+
+        node.compact_child_nodes.any? { |child| body_has_explicit_return?(child) }
       end
 
       # Returns the current assumed summary for `plain_signature`, recording
@@ -1738,6 +1839,19 @@ module Rigor
 
         entry[:consulted] = true
         entry[:assumption]
+      end
+
+      # True while a fixpoint iteration is in progress for `type` — i.e.
+      # `type` is the live assumption object of some active summary entry.
+      # The self-call adoption gate uses this so a recursive in-cycle result
+      # (the summary assumption returned by `consult_summary`) is adopted
+      # regardless of pinned-ness, letting the assumption propagate back into
+      # the body across iterations (ADR-55 slice 2 bot-collapse fix).
+      def active_fixpoint_summary?(type)
+        summaries = Thread.current[INFERENCE_SUMMARY_KEY]
+        return false if summaries.nil?
+
+        summaries.any? { |_sig, entry| entry[:assumption].equal?(type) }
       end
 
       # ADR-55 WD1 governing-rule clamp. When the just-evaluated frame

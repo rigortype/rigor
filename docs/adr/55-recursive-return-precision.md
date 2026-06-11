@@ -181,6 +181,49 @@ the slice-2 landing:
   Kleene iterate), so it degrades soundly to `Dynamic[top]` — today's
   behaviour, the load-bearing property being termination.
 
+**Soundness fix — `bot`-collapse (2026-06-11).** The slice-2 landing
+(commit `36c0cfaa`) had a soundness bug: a pass-through recursion with a
+reachable non-recursive exit could be typed `bot` ("never returns")
+instead of its real return type. Two mechanisms combined:
+
+1. *In-cycle summary not adopted.* Once the Kleene assumption grew past
+   the `bot` seed to a value-pinned type (e.g. `Constant[:done]`), the
+   in-cycle self-call result returning that assumption failed
+   `adoptable_self_call_result?` (which only adopts `Bot` or
+   inside-unroll pinned values) and leaked back to `Dynamic[top]`, so the
+   iteration never converged on the precise type — it drifted to
+   `untyped`. Fix: `adoptable_self_call_result?` now also adopts a type
+   that is the live assumption object of an active fixpoint summary
+   (`active_fixpoint_summary?`), letting the assumption propagate back
+   into the body across iterations.
+
+2. *Trivial convergence at the `bot` seed.* When the call-site argument
+   carried a narrow value-set (`some_int : 1 | 2 | 3`), a base-case guard
+   like `n <= 0 ? :done : passthrough(n - 1)` constant-folded to
+   always-false and the `:done` branch was pruned, so the body computed
+   `bot` (recursive branch returns the `bot` seed, base case gone). The
+   convergence check `joined == assumption` then held trivially at the
+   seed (`bot == bot`) and returned `bot` — unsound, and feeds ADR-47
+   reachability / always-falsey diagnostics as a false-positive source.
+   Fix (`resolve_bot_collapse`): when an iteration computes `bot` for a
+   consulted body, re-run the fixpoint **once** over a parameter-widened
+   body scope (`1 | 2 | 3` → `Integer`), which un-prunes the tail base
+   case (`passthrough → :done`). If the widened body *still* computes
+   `bot` but the body contains a reachable explicit `return` — whose
+   value the tail-only body evaluator never folds into the result
+   (`pick`'s `return nil`) — floor to the conservative `Dynamic[top]`
+   (the pre-slice-2 observable) rather than `bot`. A body that genuinely
+   has no non-recursive exit (`spin`) keeps `bot`.
+
+Both Mastodon `app/models` and haml `lib` stay byte-identical to the
+pre-slice-2 (`2ba608a0`) baseline after the fix. New regression asserts
+(`passthrough → :done`, `pick → Dynamic[top]`) land in
+`recursive_fixpoint_summary.rb`; the fixture's Factorial / Builder
+asserts are corrected to note they are RBS-absorption anchors (the
+recursive branch is an `Integer#*` / `String#+` expression whose return
+is fixed by RBS regardless of the in-cycle type), not fixpoint
+discriminators — only a *bare* self-call branch discriminates.
+
 ### WD3 — Cost envelope and gate
 
 Bodies re-evaluate at most 3× and only for methods that actually

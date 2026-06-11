@@ -237,7 +237,7 @@ module Rigor
         # introspection (`attr_reader`, `private`, ...) on
         # user classes without requiring the user to author
         # their own RBS.
-        try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type, call_node)
+        try_user_class_fallback(receiver_type, environment, call_node, context)
       end
 
       # v0.1.3 — discovered-method dispatch tier. `scope` carries
@@ -792,7 +792,7 @@ module Rigor
         nil
       end
 
-      def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type, call_node = nil)
+      def try_user_class_fallback(receiver_type, environment, call_node, context)
         return nil if environment.nil?
 
         fallback_receiver = user_class_fallback_receiver(receiver_type, environment)
@@ -817,14 +817,11 @@ module Rigor
         # self / `self.`-receiver calls (`puts`, `raise`, `require`)
         # keep resolving — those are the fallback's intended targets.
         RbsDispatch.try_dispatch(
-          CallContext.build(
+          context.with(
             receiver: fallback_receiver,
-            method_name: method_name,
-            args: arg_types,
-            environment: environment,
-            block_type: block_type,
             self_type_override: receiver_type,
-            public_only: explicit_non_self_receiver?(call_node)
+            public_only: explicit_non_self_receiver?(call_node),
+            call_node: nil, scope: nil
           )
         )
       end

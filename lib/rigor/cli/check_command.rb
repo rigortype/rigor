@@ -475,6 +475,7 @@ module Rigor
         @err.puts("  hkt-fuel-exhausted hits:   #{counts[Inference::BudgetTrace::HKT_FUEL_EXHAUSTED]}")
         @err.puts("  recursion-unroll-fuel hits: #{counts[Inference::BudgetTrace::RECURSION_UNROLL_FUEL]}")
         @err.puts("  recursion-fixpoint-cap hits: #{counts[Inference::BudgetTrace::RECURSION_FIXPOINT_CAP]}")
+        @err.puts("  block-writeback-cap hits:  #{counts[Inference::BudgetTrace::BLOCK_WRITEBACK_CAP]}")
         write_budget_distributions
       end
 

@@ -7,6 +7,7 @@ require_relative "../type"
 require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
 require_relative "block_parameter_binder"
+require_relative "body_fixpoint"
 require_relative "closure_escape_analyzer"
 require_relative "indexed_narrowing"
 require_relative "method_dispatcher"
@@ -1086,6 +1087,14 @@ module Rigor
         # `self_type` for the def's body.
         evaluate_def_arguments(node)
         post_scope = record_closure_escape_if_any(node)
+        # ADR-56 slice A — non-escaping block captured-local write-back.
+        # A `:non_escaping` block (each / times / upto / map …) that
+        # rebinds an outer local must not leave that local's pre-call
+        # binding unmodified in the continuation scope; the spec MUST in
+        # § "Fact stability and mutation" names captured locals a
+        # first-class invalidation category. (The escaping / unknown path
+        # already widened to Dynamic[top] via `record_closure_escape_if_any`.)
+        post_scope = write_back_block_captures(node, post_scope)
         post_scope = apply_rbs_extended_assertions(node, post_scope)
         post_scope = apply_plugin_assertions(node, post_scope)
         post_scope = apply_rspec_matcher_narrowing(node, post_scope)
@@ -1649,6 +1658,22 @@ module Rigor
         names.reduce(base_scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
       end
 
+      # Names of outer locals the block body can REBIND, across every
+      # local-write form: plain `=` (`LocalVariableWriteNode`), the
+      # operator / `||=` / `&&=` compound forms, and a multi-assign target
+      # (`x, y = ...` → `LocalVariableTargetNode` under `MultiWriteNode`).
+      # Block-introduced names (parameters, numbered params, `;`-locals) and
+      # names not bound in the outer scope are excluded — a write to either
+      # is not a captured rebind of an outer variable.
+      LOCAL_WRITE_NODES = [
+        Prism::LocalVariableWriteNode,
+        Prism::LocalVariableOperatorWriteNode,
+        Prism::LocalVariableOrWriteNode,
+        Prism::LocalVariableAndWriteNode,
+        Prism::LocalVariableTargetNode
+      ].freeze
+      private_constant :LOCAL_WRITE_NODES
+
       def captured_local_writes(block_node, base_scope)
         body = block_node.body
         return [] if body.nil?
@@ -1656,13 +1681,55 @@ module Rigor
         introduced = block_introduced_locals(block_node)
         outer_writes = []
         Source::NodeWalker.each(body) do |descendant|
-          next unless descendant.is_a?(Prism::LocalVariableWriteNode)
+          next unless LOCAL_WRITE_NODES.any? { |klass| descendant.is_a?(klass) }
           next if introduced.include?(descendant.name)
           next unless base_scope.locals.key?(descendant.name)
 
           outer_writes << descendant.name
         end
         outer_writes.uniq
+      end
+
+      # ADR-56 slice A. For a `:non_escaping` block, fold the continuation
+      # binding of every outer local the body can rebind back into
+      # `post_scope`. The binding is a capped fixpoint (cap 3) over the
+      # block body re-evaluated under the running per-name assumption,
+      # joined with the pre-call binding (kept as a constituent so the
+      # 0-iteration path — `[].each { … }` — stays sound), value-pinned-
+      # widened on the final permitted iteration, and floored to
+      # `Dynamic[top]` on non-convergence (matching `drop_captured_narrowing`).
+      #
+      # Fast path: a block writing no outer local leaves `post_scope`
+      # byte-identical (the overwhelming majority of blocks), so this costs
+      # one extra `captured_local_writes` walk and nothing else.
+      def write_back_block_captures(call_node, post_scope)
+        block = call_node.block
+        return post_scope unless block.is_a?(Prism::BlockNode)
+        return post_scope unless classify_closure_escape(call_node) == :non_escaping
+
+        names = captured_local_writes(block, scope)
+        return post_scope if names.empty?
+
+        seed = names.to_h { |name| [name, scope.local(name)] }
+        result = BodyFixpoint.converge(
+          names: names,
+          seed_bindings: seed,
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: ->(bindings) { block_exit_bindings(call_node, block, bindings, names) }
+        )
+
+        result.reduce(post_scope) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # Evaluates `block`'s body once with each written outer local bound to
+      # the supplied `bindings` (block params / `;`-locals re-bound as
+      # usual) and returns the per-name exit binding for `names`. Used as
+      # the `BodyFixpoint` body-evaluator.
+      def block_exit_bindings(call_node, block, bindings, names)
+        entry = build_block_entry_scope(call_node, block)
+        entry = bindings.reduce(entry) { |acc, (name, type)| acc.with_local(name, type) }
+        _type, exit_scope = sub_eval(block, entry)
+        names.to_h { |name| [name, exit_scope.local(name)] }
       end
 
       # Names introduced by the block itself (parameters, numbered

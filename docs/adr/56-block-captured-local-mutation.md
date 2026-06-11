@@ -1,8 +1,9 @@
 # ADR-56 — Block-captured local write-back and loop-body fixpoint (mutation-effect soundness)
 
-Status: **Accepted, 2026-06-11.** Nothing implemented yet; sequenced as
-slice A (block captured-local write-back) then slice B (loop-body
-fixpoint widening). Unlike ADR-55 these are **soundness fixes, not
+Status: **Accepted, 2026-06-11. Slice A implemented 2026-06-11.**
+Sequenced as slice A (block captured-local write-back — **landed**) then
+slice B (loop-body fixpoint widening — remaining). Unlike ADR-55 these
+are **soundness fixes, not
 precision additions** — today's results are *wrong*, not merely wide —
 so the corpus gate's "zero new diagnostics" reading is softened to
 "every new diagnostic is adjudicated" (see WD4).
@@ -80,6 +81,23 @@ constituent throughout. Unwritten locals keep their bindings untouched
 Expected observables: `result` after the `upto` block → `1 | Integer`
 (or `Integer`), never `Constant[1]`; `e` after `[1].each { e = 99 }` →
 `1 | 99`.
+
+**Implemented 2026-06-11.** `StatementEvaluator#write_back_block_captures`
+runs after `record_closure_escape_if_any` in `eval_call`, gated on a
+`:non_escaping` classification. The capped fixpoint lives in the new
+shared `Inference::BodyFixpoint` (cap 3, parameterized over an
+`evaluate_body` callable so slice B reuses it verbatim);
+`captured_local_writes` now collects all five write forms;
+`Type::Combinator.widen_value_pinned` (promoted from `ExpressionTyper`,
+which now delegates) gained `Refined` / `IntegerRange` → nominal-base
+widening so bounded-int accumulators converge. The non-convergence
+collapse counts a new `BudgetTrace::BLOCK_WRITEBACK_CAP`. Gate: `make
+verify` green (no new self-check / plugin-check firings); corpus
+(Mastodon `app/models`, haml `lib`, kramdown `lib`) = **one removal,
+zero new diagnostics** — the removal is a genuine win
+(`form/account_batch.rb`'s `error ||= e`-in-`each` then
+`raise error if error.present?` no longer folds to a wrong always-falsey
+constant); perf neutral (lib self-check ~17.8s vs ~17.5s baseline).
 
 ### WD2 — Slice B: loop-body fixpoint
 

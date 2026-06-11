@@ -52,10 +52,16 @@ module Rigor
       # `untyped` — the in-cycle result widens to `Dynamic[top]` exactly
       # as it does without the fixpoint.
       RECURSION_FIXPOINT_CAP = :recursion_fixpoint_cap
+      # `BodyFixpoint#converge` (ADR-56 slice A — non-escaping block
+      # captured-local write-back) ran its 3-evaluation cap without the
+      # written local's join converging and collapsed that local to
+      # `Dynamic[top]` (the escaping-block floor). Shared by slice B's
+      # loop-body fixpoint.
+      BLOCK_WRITEBACK_CAP = :block_writeback_cap
 
       CATEGORIES = [
         RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL,
-        RECURSION_FIXPOINT_CAP
+        RECURSION_FIXPOINT_CAP, BLOCK_WRITEBACK_CAP
       ].freeze
 
       # Distribution (histogram) categories — read-only observations of

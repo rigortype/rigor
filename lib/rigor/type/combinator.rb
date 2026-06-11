@@ -80,6 +80,35 @@ module Rigor
         Constant.new(value)
       end
 
+      # Widens every value-pinned (`Constant`) constituent of `type` to its
+      # nominal base (`Constant[1]` -> `Nominal["Integer"]`), recursing
+      # through unions and leaving non-pinned constituents untouched.
+      # `Constant[nil]` is preserved (no nominal base of interest). Shared
+      # by the ADR-55 recursive-return fixpoint and the ADR-56 block /
+      # loop-body fixpoint (`BodyFixpoint`) to force convergence on the
+      # final permitted iteration.
+      def widen_value_pinned(type)
+        case type
+        when Constant
+          type.value.nil? ? type : nominal_of(type.value.class.name)
+        when Refined
+          # A refinement (`non-empty-string`) is a value-narrowed nominal;
+          # widen it to its base so an accumulator whose per-pass result is
+          # a bounded refinement converges on the final iteration rather
+          # than flooring to `Dynamic[top]` (ADR-56).
+          widen_value_pinned(type.base)
+        when IntegerRange
+          # `int<1, 6>` is likewise a value-narrowed `Integer` (it erases to
+          # `Integer` in RBS); widen it so a bounded-int accumulator
+          # converges (ADR-56).
+          nominal_of("Integer")
+        when Union
+          union(*type.members.map { |member| widen_value_pinned(member) })
+        else
+          type
+        end
+      end
+
       # `Object#method(:name)` carrier. Stores the bound
       # `(receiver, method_name)` pair so the dispatcher can
       # substitute the original dispatch at `.call` / `.()` /

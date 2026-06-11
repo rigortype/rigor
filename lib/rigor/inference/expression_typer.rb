@@ -1881,17 +1881,7 @@ module Rigor
       # final permitted iteration (ADR-55 WD2) to force convergence — the
       # tower of distinct constant iterates collapses to one nominal type.
       def widen_value_pinned(type)
-        case type
-        when Type::Constant
-          value = type.value
-          return type if value.nil?
-
-          Type::Combinator.nominal_of(value.class.name)
-        when Type::Union
-          Type::Combinator.union(*type.members.map { |member| widen_value_pinned(member) })
-        else
-          type
-        end
+        Type::Combinator.widen_value_pinned(type)
       end
 
       # Consumes one unit from the thread-local unroll-fuel counter and

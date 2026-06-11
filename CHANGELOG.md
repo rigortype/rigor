@@ -14,6 +14,13 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **[inference]** A local variable assigned inside an iteration block (`each` / `times` / `upto` / `map` …) now reflects the block's writes after the loop, instead of keeping its wrong pre-loop value ([ADR-56](docs/adr/56-block-captured-local-mutation.md) slice A).
+  - Previously the engine evaluated the block body but discarded its effects, so `result = 1; 1.upto(6) { result *= i }; result` typed as the constant `1` (the runtime value is `720`), and the same wrong-constant bug affected every accumulator form — `=`, `+=`, `*=`, multi-assign (`a, b = b, a`), and `||=` — for non-escaping blocks. This was a soundness bug: downstream diagnostics (always-truthy / always-falsey / unreachable-clause) silently consumed the wrong constant.
+  - The continuation type is now the pre-loop value joined with the block's writes, computed by a capped iteration: an accumulator widens to its base type (`result` above types `1 | Integer`), a rebind to a distinct constant keeps both (`e = 1; [1].each { e = 99 }` types `1 | 99`), and the pre-loop value is always retained so a block that may run zero times stays sound (`m ||= 5` types `5 | nil`). A local the block only reads, or never touches, is left exactly as before.
+  - A structurally compounding write that cannot stabilize (`a = [a]`) floors to `Dynamic[top]` after the cap, matching the existing escaping-block behaviour. `RIGOR_BUDGET_TRACE` reports a new `block-writeback-cap` counter for how often that floor is hit.
+
 ### Changed
 
 - **[inference]** Recursive methods called with fully constant arguments now fold to a precise constant return instead of widening to the base type ([ADR-55](docs/adr/55-recursive-return-precision.md) slice 1).

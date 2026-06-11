@@ -34,6 +34,33 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       expect(snap[described_class::ANCESTOR_WALK_LIMIT]).to eq(1)
       expect(snap[described_class::HKT_FUEL_EXHAUSTED]).to eq(0)
       expect(snap[described_class::RECURSION_UNROLL_FUEL]).to eq(0)
+      expect(snap[described_class::BLOCK_WRITEBACK_CAP]).to eq(0)
+    end
+
+    # ADR-56 slice A — a compounding captured-local write
+    # (`a = [a]` grows structurally each pass) never converges, so the
+    # block-write-back fixpoint runs to its cap and collapses that local
+    # to `Dynamic[top]`, recording a hit.
+    it "records a block-write-back-cap hit when a compounding captured local floors" do
+      source = <<~RUBY
+        a = 1
+        [1].each { a = [a] }
+      RUBY
+      Rigor::Scope.empty.evaluate(Prism.parse(source).value)
+
+      expect(described_class.snapshot[described_class::BLOCK_WRITEBACK_CAP]).to be >= 1
+    end
+
+    # An accumulator that converges (or widens cleanly on the final
+    # iteration) must NOT record a cap hit.
+    it "records no hit when the captured local converges or widens cleanly" do
+      source = <<~RUBY
+        c = 0
+        3.times { c += 1 }
+      RUBY
+      Rigor::Scope.empty.evaluate(Prism.parse(source).value)
+
+      expect(described_class.snapshot[described_class::BLOCK_WRITEBACK_CAP]).to eq(0)
     end
 
     it "zero-fills every known category in the snapshot" do

@@ -527,6 +527,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     untyped()
     uppercase_string()
     value_of(req:type)
+    widen_value_pinned(req:type)
   ].freeze
 
   # `Rigor::Source::Literals` — the literal Symbol/String extraction

@@ -1045,5 +1045,30 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/block_captured_writeback.rb — ADR-56 slice A captured-local write-back" do
+      let(:harness) { harness_for("block_captured_writeback") }
+
+      # A non-escaping block that rebinds an outer local writes the
+      # continuation binding back (the capped fixpoint): accumulators widen
+      # to a base, a distinct-constant rebind keeps both pinned
+      # constituents (0-iteration soundness), `||=` keeps the pre-call
+      # `nil`, a no-write block keeps its exact constant (fast path), a
+      # compounding shape floors to `Dynamic[top]` at the cap, and an
+      # escaping block is unchanged. Before this slice every accumulator
+      # kept its WRONG pre-call constant — a spec-MUST violation.
+      it "folds written captured locals back, soundly, without touching unwritten ones" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "keeps an unwritten read-only captured local byte-identical (fast path)" do
+        expect(harness.local(:untouched)).to eq(constant(7))
+      end
+
+      it "floors a compounding captured local to Dynamic[top] at the cap" do
+        expect(harness.local(:growing)).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
   end
 end

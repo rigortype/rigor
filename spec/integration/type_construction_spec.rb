@@ -1070,5 +1070,32 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(harness.local(:growing)).to eq(Rigor::Type::Combinator.untyped)
       end
     end
+
+    describe "fixtures/reduce_symbol.rb — Symbol-form reduce / inject return types" do
+      let(:harness) { harness_for("reduce_symbol") }
+
+      # `(1..n).reduce(1, :*)`, `[1,2,3].reduce(:+)`, and friends carry no
+      # block, so the call used to fall to `Enumerable#reduce`'s
+      # `(untyped, Symbol) -> untyped` RBS overload and widen to
+      # `Dynamic[top]`. ReduceFolding dispatches the named operator on the
+      # accumulated element type and recovers the precise carrier
+      # (`Integer` / `String`) — strictly more informative, no diagnostic.
+      it "recovers a precise carrier for every Symbol-operand fold shape" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "types the factorial accumulator `(1..5).reduce(1, :*)` as Integer" do
+        expect(harness.local(:fact)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      end
+
+      it "types the no-seed `[1,2,3].reduce(:+)` as Integer (no manufactured nil)" do
+        expect(harness.local(:sum)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      end
+
+      it "types the String-element fold as String" do
+        expect(harness.local(:joined)).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      end
+    end
   end
 end

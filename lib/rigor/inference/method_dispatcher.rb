@@ -14,6 +14,7 @@ require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/data_folding"
 require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
+require_relative "method_dispatcher/reduce_folding"
 require_relative "method_dispatcher/block_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/shellwords_folding"
@@ -792,7 +793,7 @@ module Rigor
       private_constant :STDLIB_SINGLETON_FOLDERS
 
       PRECISE_TIERS_TAIL = Ractor.make_shareable([
-        KernelDispatch, MethodFolding, BlockFolding
+        KernelDispatch, MethodFolding, ReduceFolding, BlockFolding
       ].freeze)
       private_constant :PRECISE_TIERS_TAIL
 

@@ -14,6 +14,13 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[inference]** The Symbol-operator forms of `reduce` / `inject` now infer a precise return type instead of widening to `Dynamic[top]`.
+  - `(1..5).reduce(1, :*)` and `[1, 2, 3].inject(0, :+)` type as `Integer`, `["a", "b"].reduce(:+)` types as `String`, and so on — the engine dispatches the named operator on the receiver's element type rather than falling to `Enumerable#reduce`'s `(untyped, Symbol) -> untyped` overload.
+  - Both the seeded `(seed, :op)` and bare `(:op)` shapes are covered, for any receiver whose element type the engine can project (`Array[T]`, a literal `Range[Integer]`, `Tuple`, `HashShape`, …). The block forms are unchanged. The precision target is the carrier (`Integer`), not a constant-folded value.
+  - Purely precision-additive: a shape the engine cannot prove (unknown element type, a `Dynamic` receiver, a non-literal operator Symbol, or an operator that does not dispatch on the operand types) keeps today's `Dynamic[top]` result, and no new diagnostic can fire.
+
 ### Fixed
 
 - **[inference]** A local variable assigned inside an iteration block (`each` / `times` / `upto` / `map` …) now reflects the block's writes after the loop, instead of keeping its wrong pre-loop value ([ADR-56](docs/adr/56-block-captured-local-mutation.md) slice A).

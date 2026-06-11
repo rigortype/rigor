@@ -742,6 +742,36 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Array")
     end
 
+    it "Hash.new(0) lifts to Hash[untyped, Integer] (B9 default-arg fold)" do
+      type = scope.type_of(parse_expression("Hash.new(0)"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+      expect(type.type_args[1]).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "a Hash.new(0) read of any key surfaces the default's type" do
+      read = scope.type_of(parse_expression("Hash.new(0)[:missing]"))
+
+      expect(read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "Hash.new (no default) keeps the bare Nominal[Hash] answer" do
+      type = scope.type_of(parse_expression("Hash.new"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+      expect(type.type_args).to(satisfy { |a| a.nil? || a.empty? })
+    end
+
+    it "Hash.new { block } declines (no value type at the :new site)" do
+      type = scope.type_of(parse_expression("Hash.new { |h, k| k }"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+      expect(type.type_args).to(satisfy { |a| a.nil? || a.empty? })
+    end
+
     it "Range.new(1, 5) lifts to Constant[1..5]" do
       type = scope.type_of(parse_expression("Range.new(1, 5)"))
 

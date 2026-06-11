@@ -16,6 +16,7 @@ require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/reduce_folding"
 require_relative "method_dispatcher/block_folding"
+require_relative "method_dispatcher/array_to_h_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/shellwords_folding"
 require_relative "method_dispatcher/math_folding"
@@ -793,7 +794,7 @@ module Rigor
       private_constant :STDLIB_SINGLETON_FOLDERS
 
       PRECISE_TIERS_TAIL = Ractor.make_shareable([
-        KernelDispatch, MethodFolding, ReduceFolding, BlockFolding
+        KernelDispatch, MethodFolding, ReduceFolding, ArrayToHFolding, BlockFolding
       ].freeze)
       private_constant :PRECISE_TIERS_TAIL
 
@@ -953,6 +954,9 @@ module Rigor
         set_lift = set_new_lift(receiver_type.class_name, arg_types)
         return set_lift if set_lift
 
+        hash_lift = hash_new_lift(receiver_type.class_name, arg_types)
+        return hash_lift if hash_lift
+
         regexp_lift = regexp_new_lift(receiver_type.class_name, arg_types)
         return regexp_lift if regexp_lift
 
@@ -1049,6 +1053,33 @@ module Rigor
         return Type::Combinator.constant_of(nil) if type.nil?
 
         type
+      end
+
+      # `Hash.new(default)` — lifts the default value's type into the
+      # Hash's value parameter so a subsequent `h[k]` read surfaces the
+      # default type rather than `Dynamic[top]`. The common counter
+      # idiom `h = Hash.new(0); h[k] += 1` then types the read as
+      # `Integer`. The key parameter is left `untyped` (the default
+      # carrier imposes no key constraint), so reads of any key resolve
+      # through the value parameter. A value-pinned `Constant` default
+      # (`0`) is widened to its nominal (`Integer`): the hash's values
+      # mutate over its lifetime, so pinning the parameter to the
+      # literal would be unsound for the aggregate.
+      #
+      # Only the single-argument default form folds. The zero-arg
+      # (`Hash.new`) and the block form (`Hash.new { |h, k| … }`) keep
+      # the bare `Nominal[Hash]` answer — the block's value type is not
+      # available at this `:new` dispatch site, and conservatively
+      # leaving the read as today's behaviour is precision-additive.
+      def hash_new_lift(class_name, arg_types)
+        return nil unless class_name == "Hash"
+        return nil unless arg_types.size == 1
+
+        default = arg_types.first
+        return nil if default.nil?
+
+        value = Type::Combinator.widen_value_pinned(default)
+        Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, value])
       end
 
       # `Range.new(b, e)` / `Range.new(b, e, excl)` — folds to

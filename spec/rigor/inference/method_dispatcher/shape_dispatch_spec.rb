@@ -1258,4 +1258,71 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
   end
+
+  describe "flatten (B6)" do
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+
+    def array_of(*type_args)
+      Rigor::Type::Combinator.nominal_of("Array", type_args: type_args)
+    end
+
+    describe "Tuple receiver" do
+      it "flattens a tuple-of-tuples into a single Tuple" do
+        recv = tuple(tuple(constant(1), constant(2)), tuple(constant(3), constant(4)))
+        expect(dispatch(receiver: recv, method_name: :flatten))
+          .to eq(tuple(constant(1), constant(2), constant(3), constant(4)))
+      end
+
+      it "flattens deep nesting fully with no depth argument" do
+        recv = tuple(constant(1), tuple(constant(2), tuple(constant(3))))
+        expect(dispatch(receiver: recv, method_name: :flatten))
+          .to eq(tuple(constant(1), constant(2), constant(3)))
+      end
+
+      it "bounds the flatten to a Constant[Integer] depth argument" do
+        recv = tuple(constant(1), tuple(constant(2), tuple(constant(3))))
+        expect(dispatch(receiver: recv, method_name: :flatten, args: [constant(1)]))
+          .to eq(tuple(constant(1), constant(2), tuple(constant(3))))
+      end
+
+      it "treats flatten(0) as an identity copy" do
+        recv = tuple(tuple(constant(1)))
+        expect(dispatch(receiver: recv, method_name: :flatten, args: [constant(0)]))
+          .to eq(tuple(tuple(constant(1))))
+      end
+
+      it "passes non-Tuple elements through unchanged" do
+        recv = tuple(constant(1), array_of(nominal("Integer")))
+        expect(dispatch(receiver: recv, method_name: :flatten))
+          .to eq(tuple(constant(1), array_of(nominal("Integer"))))
+      end
+
+      it "declines on a non-static depth argument" do
+        recv = tuple(tuple(constant(1)))
+        expect(dispatch(receiver: recv, method_name: :flatten, args: [nominal("Integer")])).to be_nil
+      end
+    end
+
+    describe "Array[T] nominal receiver" do
+      it "joins one nesting level: Array[Array[Integer]] → Array[Integer]" do
+        recv = array_of(array_of(nominal("Integer")))
+        expect(dispatch(receiver: recv, method_name: :flatten)).to eq(array_of(nominal("Integer")))
+      end
+
+      it "returns Array[T] unchanged for a non-nested element type" do
+        recv = array_of(nominal("Integer"))
+        expect(dispatch(receiver: recv, method_name: :flatten)).to eq(array_of(nominal("Integer")))
+      end
+
+      it "declines for a bare Array with no type argument" do
+        recv = nominal("Array")
+        expect(dispatch(receiver: recv, method_name: :flatten)).to be_nil
+      end
+
+      it "declines on a non-static depth argument" do
+        recv = array_of(array_of(nominal("Integer")))
+        expect(dispatch(receiver: recv, method_name: :flatten, args: [nominal("Integer")])).to be_nil
+      end
+    end
+  end
 end

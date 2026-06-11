@@ -16,6 +16,13 @@ cycles live in dedicated archives:
 
 ### Added
 
+- **[inference]** `Array#flatten` now recovers the flattened element type instead of widening to `Array[Dynamic[top]]`.
+  - A tuple-of-tuples literal folds exactly: `[[1, 2], [3, 4]].flatten` types as `[1, 2, 3, 4]`, deep nesting flattens fully (`[1, [2, [3]]].flatten` → `[1, 2, 3]`), and a `Constant[Integer]` depth bounds the flatten (`[[1, 2], [3, 4]].flatten(1)`).
+  - An `Array[Array[T]]` nominal receiver joins one nesting level (`Array[Array[Integer]]#flatten` → `Array[Integer]`); a non-nested `Array[T]` flattens to `Array[T]`. Purely precision-additive: a non-static depth argument or a bare `Array` keeps today's answer, and no new diagnostic can fire.
+- **[inference]** `Array#to_h { |x| [k, v] }` now projects the block's pair return into the Hash key/value parameters instead of typing as `Hash[Dynamic[top], Dynamic[top]]`.
+  - `[1, 2, 3].to_h { |x| [x, x * 2] }` types as `Hash[Integer, Integer]`. The fold fires when the block's inferred return type is a 2-element `Tuple`; value-pinned constants in the pair are widened to their nominal (the built hash aggregates many keys). A block whose return is not a recognizable pair keeps today's `Hash[Dynamic[top], Dynamic[top]]` result.
+- **[inference]** `Hash.new(default)` now lifts the default value's type into the Hash's value parameter, so a subsequent read surfaces the default type rather than `Dynamic[top]`.
+  - `h = Hash.new(0); h[:missing]` types as `Integer`, and the common counter idiom `h[k] += 1` reads `Integer` after the increment. The key parameter is left `untyped` (the default imposes no key constraint), and a value-pinned `Constant` default is widened to its nominal (the hash's values mutate over its lifetime). The zero-argument (`Hash.new`) and block (`Hash.new { … }`) forms keep their existing answer — precision-additive, no new diagnostic.
 - **[inference]** The Symbol-operator forms of `reduce` / `inject` now infer a precise return type instead of widening to `Dynamic[top]`.
   - `(1..5).reduce(1, :*)` and `[1, 2, 3].inject(0, :+)` type as `Integer`, `["a", "b"].reduce(:+)` types as `String`, and so on — the engine dispatches the named operator on the receiver's element type rather than falling to `Enumerable#reduce`'s `(untyped, Symbol) -> untyped` overload.
   - Both the seeded `(seed, :op)` and bare `(:op)` shapes are covered, for any receiver whose element type the engine can project (`Array[T]`, a literal `Range[Integer]`, `Tuple`, `HashShape`, …). The block forms are unchanged. The precision target is the carrier (`Integer`), not a constant-folded value.

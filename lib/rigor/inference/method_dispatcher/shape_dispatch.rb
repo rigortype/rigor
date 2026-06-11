@@ -98,7 +98,8 @@ module Rigor
           uniq: :tuple_uniq,
           index: :tuple_find_index,
           find_index: :tuple_find_index,
-          rindex: :tuple_rindex
+          rindex: :tuple_rindex,
+          flatten: :tuple_flatten
         }.freeze
 
         HASH_SHAPE_HANDLERS = {
@@ -228,15 +229,8 @@ module Rigor
           end
 
           def dispatch_nominal_size(nominal, method_name, args)
-            if nominal.class_name == "String" && args.size == 1
-              string_binary = dispatch_string_binary_from_arg(method_name, args.first)
-              return string_binary if string_binary
-            end
-
-            if nominal.class_name == "Integer" && args.size == 1
-              integer_binary = dispatch_integer_binary_from_arg(method_name, args.first)
-              return integer_binary if integer_binary
-            end
+            projection = nominal_projection(nominal, method_name, args)
+            return projection if projection
 
             return nil unless args.empty?
 
@@ -244,6 +238,63 @@ module Rigor
             return nil unless selectors&.include?(method_name)
 
             Type::Combinator.non_negative_int
+          end
+
+          # Arg-/method-driven precision projections for a `Nominal`
+          # receiver, consulted ahead of the no-arg size tier. Each
+          # branch gates on the class name first so unrelated nominals
+          # skip the work. Returns nil when no projection applies.
+          def nominal_projection(nominal, method_name, args)
+            case nominal.class_name
+            when "String"
+              dispatch_string_binary_from_arg(method_name, args.first) if args.size == 1
+            when "Integer"
+              dispatch_integer_binary_from_arg(method_name, args.first) if args.size == 1
+            when "Array"
+              array_nominal_flatten(nominal, args) if method_name == :flatten
+            end
+          end
+
+          # `Array[T]#flatten` (and `flatten(depth)`). When `T` is a
+          # nested `Array[U]` nominal, one flatten level yields the
+          # joined inner element type — `Array[Array[U]]#flatten` →
+          # `Array[U]`. When `T` is non-nested the result is `Array[T]`
+          # unchanged (Ruby returns a copy with the same element type).
+          # Multi-level nesting is handled conservatively: each level
+          # joins its element types, and a `depth` argument that does
+          # not fully resolve the nesting still produces a sound
+          # superset. Declines on an `Array` with no type argument
+          # (the RBS `Array[untyped]` answer is already as precise as
+          # we can be) and on a non-static depth argument.
+          def array_nominal_flatten(nominal, args)
+            element = nominal.type_args&.first
+            return nil if element.nil?
+
+            depth = tuple_flatten_depth(args)
+            return nil if depth == :decline
+
+            flattened = flatten_nominal_element(element, depth)
+            Type::Combinator.nominal_of("Array", type_args: [flattened])
+          end
+
+          # Resolves the element type of a flattened `Array[element]`.
+          # Each `Array[U]` nesting level contributes `U`; the per-level
+          # element types are unioned. `depth < 0` recurses without
+          # bound; `depth == 0` stops (Ruby's `flatten(0)` is a no-op
+          # copy and returns the element unchanged).
+          def flatten_nominal_element(element, depth)
+            return element if depth.zero?
+            return element unless array_nominal?(element)
+
+            inner = element.type_args.first
+            return element if inner.nil?
+
+            flatten_nominal_element(inner, depth - 1)
+          end
+
+          def array_nominal?(type)
+            type.is_a?(Type::Nominal) && type.class_name == "Array" && !type.type_args.nil? &&
+              !type.type_args.empty?
           end
 
           # Arg-type-driven String binary projections for any String-typed
@@ -873,6 +924,50 @@ module Rigor
           # equality).
           def tuple_find_index(tuple, _method_name, args)
             constant_index(tuple, args) { |elements, value| elements.index { |e| e.value == value } }
+          end
+
+          # `tuple.flatten` / `tuple.flatten(depth)` — recursively
+          # flattens nested Tuple elements into a single Tuple. With
+          # no argument the flatten is unbounded (matching Ruby's
+          # `Array#flatten`); a `Constant[Integer]` depth bounds it.
+          # Non-Tuple elements (scalars, `Array[T]` nominals, …) pass
+          # through unchanged at their level. A non-static depth
+          # argument (or a non-Integer one) declines so RBS answers.
+          def tuple_flatten(tuple, _method_name, args)
+            depth = tuple_flatten_depth(args)
+            return nil if depth == :decline
+
+            Type::Combinator.tuple_of(*flatten_elements(tuple.elements, depth))
+          end
+
+          # Returns the requested flatten depth: `-1` for the no-arg
+          # (unbounded) form, the Integer for a `Constant[Integer]`
+          # argument, or `:decline` for any non-static / wrong-arity
+          # argument shape.
+          def tuple_flatten_depth(args)
+            return -1 if args.empty?
+            return :decline unless args.size == 1
+
+            arg = args.first
+            return arg.value if arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
+
+            :decline
+          end
+
+          # Flattens a list of element types to `depth` levels.
+          # `depth < 0` means unbounded. A Tuple element is spliced
+          # in (recursing with `depth - 1`); everything else passes
+          # through at this level.
+          def flatten_elements(elements, depth)
+            return elements if depth.zero?
+
+            elements.flat_map do |element|
+              if element.is_a?(Type::Tuple)
+                flatten_elements(element.elements, depth - 1)
+              else
+                [element]
+              end
+            end
           end
 
           # `rindex(obj)` → the LAST matching index, same decidability gate.

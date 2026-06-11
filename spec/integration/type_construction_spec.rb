@@ -40,6 +40,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/destructured_param.rb — destructured positional params don't crash the binder" do
+    let(:harness) { harness_for("destructured_param") }
+
+    it "produces no internal analyzer error for `def f((a, b))` shapes" do
+      internal = harness.errors.select { |d| d.message.include?("internal analyzer error") }
+      expect(internal).to be_empty
+    end
+  end
+
   describe "fixtures/case_when.rb — Symbol-literal classification" do
     let(:harness) { harness_for("case_when") }
 

@@ -118,7 +118,15 @@ module Rigor
         @class_shells = Set.new
         defs = collect_method_definitions(parse_result.value)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
+          # An analyzer bug typing one def's body must cost only that
+          # def's candidate, never the whole `rigor sig-gen` run. The
+          # `check` path recovers each *file* this way
+          # (worker_session.rb); sig-gen recovers per-def so the rest of
+          # the file's candidates still emit.
+
           classify_def(path, def_node, class_name, kind, scope_index)
+        rescue StandardError
+          nil
         end
         obs_ivar_map = build_observed_ivar_map(parse_result.value)
         candidates_from_defs + collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)

@@ -113,6 +113,35 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
       expect(result).to be_empty
     end
 
+    context "with destructured positional parameters (Prism::MultiTargetNode)" do
+      let(:binder) { described_class.new(environment: env, class_path: nil, singleton: false) }
+
+      it "binds each leaf sub-target to Dynamic[Top] for a simple destructure" do
+        result = binder.bind(def_node("def f((a, b)); a; end"))
+
+        expect(result.keys).to eq(%i[a b])
+        result.each_value { |t| expect(t).to equal(Rigor::Type::Combinator.untyped) }
+      end
+
+      it "binds plain positionals alongside a destructured slot" do
+        result = binder.bind(def_node("def g(x, (y, z)); y; end"))
+
+        expect(result.keys).to eq(%i[x y z])
+      end
+
+      it "recurses into nested destructures and unwraps a splat sub-target" do
+        result = binder.bind(def_node("def h((a, (b, c)), (d, *e, f)); a; end"))
+
+        expect(result.keys).to eq(%i[a b c d e f])
+      end
+
+      it "binds a destructured trailing positional (the erb.rb `location=` shape)" do
+        result = binder.bind(def_node("def location=((filename, lineno)); filename; end"))
+
+        expect(result.keys).to eq(%i[filename lineno])
+      end
+    end
+
     describe "rigor:v1:param: body-side overrides (v0.0.4)" do
       def with_param_demo(rbs_body)
         Dir.mktmpdir do |dir|

@@ -32,6 +32,35 @@ module Rigor
     # `#singleton_method`.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
+    # Leaf-name extraction for a destructured positional parameter
+    # (`Prism::MultiTargetNode`). Stateless; lifted out of
+    # {MethodParameterBinder} so the binder's class length stays in
+    # budget.
+    module Destructure
+      module_function
+
+      # Collect every leaf local name a `MultiTargetNode` binds,
+      # recursing through nested destructures (`((a, b), c)`) and the
+      # splat slot (`(a, *rest)`). Targets without a `#name` (an
+      # index/call write target, vanishingly rare in a parameter
+      # position) are skipped — there is no local to bind.
+      def target_names(multi_target)
+        entries = multi_target.lefts + [multi_target.rest, *multi_target.rights].compact
+        entries.flat_map { |entry| names_for_entry(entry) }
+      end
+
+      def names_for_entry(entry)
+        # A splat sub-target (`*rest` inside the destructure) wraps its
+        # real target in a `SplatNode#expression`; unwrap it.
+        entry = entry.expression if entry.is_a?(Prism::SplatNode) && entry.expression
+        return [] if entry.nil?
+        return target_names(entry) if entry.is_a?(Prism::MultiTargetNode)
+        return [entry.name] if entry.respond_to?(:name) && entry.name
+
+        []
+      end
+    end
+
     class MethodParameterBinder
       # @param environment [Rigor::Environment]
       # @param class_path [String, nil] the qualified name of the class
@@ -112,12 +141,37 @@ module Rigor
 
       def positional_slots(params_node)
         slots = []
-        params_node.requireds.each_with_index { |p, i| slots << ParamSlot.new(:required_positional, p.name, i) }
+        params_node.requireds.each_with_index do |p, i|
+          append_positional_slot(slots, :required_positional, p, i)
+        end
         params_node.optionals.each_with_index { |p, i| slots << ParamSlot.new(:optional_positional, p.name, i) }
         rest = params_node.rest
         slots << ParamSlot.new(:rest_positional, rest.name, nil) if rest.respond_to?(:name) && rest&.name
-        params_node.posts.each_with_index { |p, i| slots << ParamSlot.new(:trailing_positional, p.name, i) }
+        params_node.posts.each_with_index do |p, i|
+          append_positional_slot(slots, :trailing_positional, p, i)
+        end
         slots
+      end
+
+      # A destructured positional parameter — `def f((a, b))` — is a
+      # `Prism::MultiTargetNode` in the `requireds`/`posts` list, not a
+      # `RequiredParameterNode`, so it has no `#name`. Bind each leaf
+      # sub-target local to `Dynamic[Top]` (a `:destructured_positional`
+      # slot with no RBS index) instead of crashing on a blind `.name`.
+      # Binding the names at all is what matters: it keeps the
+      # destructured locals present in the entry scope so the body's
+      # reads of them don't fall through to undefined-local noise. The
+      # element types are not cheaply available from the parameter list
+      # alone (no RBS function param maps onto a destructured slot), so
+      # `Dynamic[Top]` is the sound default.
+      def append_positional_slot(slots, kind, param, index)
+        if param.is_a?(Prism::MultiTargetNode)
+          Destructure.target_names(param).each do |name|
+            slots << ParamSlot.new(:destructured_positional, name, nil)
+          end
+        else
+          slots << ParamSlot.new(kind, param.name, index)
+        end
       end
 
       def keyword_slots(params_node)

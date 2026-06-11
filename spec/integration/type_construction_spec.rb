@@ -1071,6 +1071,33 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/loop_body_fixpoint.rb — ADR-56 slice B loop-body fixpoint" do
+      let(:harness) { harness_for("loop_body_fixpoint") }
+
+      # A `while` / `until` body that rebinds a loop-carried local folds its
+      # continuation binding through the same capped fixpoint slice A uses:
+      # accumulators widen to a base (never the historical unsound
+      # `1 | 2`), a body-first-assignment local degrades to `T | nil` for
+      # the 0-iteration path, and a compounding shape floors to
+      # `Dynamic[top]` at the cap. Before this slice every accumulator kept
+      # its WRONG single-pass constant — a spec-MUST violation.
+      it "folds loop-carried locals back, soundly, across while / until / do-loop shapes" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "leaves a receiver-mutated non-rebound local on the historical widening path" do
+        # `acc.push(m)` widens `acc`'s Tuple — the fixpoint overlays only
+        # rebound locals, so this stays exactly what the single-pass join
+        # produced (Array | empty-tuple), unaffected by slice B.
+        expect(harness.local(:acc)).to be_a(Rigor::Type::Union)
+      end
+
+      it "floors a compounding loop-carried local to Dynamic[top] at the cap" do
+        expect(harness.local(:g)).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
+
     describe "fixtures/reduce_symbol.rb — Symbol-form reduce / inject return types" do
       let(:harness) { harness_for("reduce_symbol") }
 

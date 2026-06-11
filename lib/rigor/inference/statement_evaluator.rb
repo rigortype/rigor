@@ -813,11 +813,106 @@ module Rigor
         _pred_type, post_pred = sub_eval(node.predicate, scope)
         return [Type::Combinator.constant_of(nil), post_pred] if node.statements.nil?
 
+        # The historical single body pass joined with the pre-loop scope.
+        # This continues to carry everything the fixpoint does NOT track:
+        # receiver-mutation widening of non-rebound locals (`buf.push(i)`
+        # widens `buf`'s Tuple), body-introduced locals' nil-injection, and
+        # the loop value itself. The fixpoint then OVERLAYS only the
+        # rebound-local bindings it corrects.
         _body_type, body_scope = sub_eval(node.statements, post_pred)
-        [
-          Type::Combinator.constant_of(nil),
-          join_with_nil_injection(post_pred, body_scope)
-        ]
+        base_scope = join_with_nil_injection(post_pred, body_scope)
+
+        rebound, body_first = loop_body_local_writes(node.statements, post_pred)
+        names = rebound + body_first
+
+        # Fast path: a loop whose body rebinds no local stays byte-identical
+        # to the historical single-pass join — the overwhelming majority of
+        # loops, and any loop whose body only reads / mutates receivers.
+        return [Type::Combinator.constant_of(nil), base_scope] if names.empty?
+
+        # ADR-56 slice B — loop-body fixpoint. The body runs 0..N times and
+        # may compound (`d *= 2`), so the historical single body pass joined
+        # with the pre-loop scope kept stale folded constants
+        # (`d = 1; while …; d *= 2; end` → `1 | 2`, never reaching `4, 8`).
+        # Fold each body-written local's continuation binding through the
+        # same capped fixpoint slice A uses for non-escaping block captures.
+        #
+        # Seed: a pre-existing local seeds with its post-predicate binding;
+        # a local FIRST assigned inside the body seeds with `nil` so the
+        # 0-iteration path (the body may never run) degrades it to
+        # `T | nil`, matching the historical nil-injection treatment.
+        nil_const = Type::Combinator.constant_of(nil)
+        seed = names.to_h do |name|
+          [name, post_pred.local(name) || nil_const]
+        end
+
+        result = BodyFixpoint.converge(
+          names: names,
+          seed_bindings: seed,
+          widen: Type::Combinator.method(:widen_value_pinned),
+          evaluate_body: lambda { |bindings|
+            loop_body_exit_bindings(node, post_pred, bindings, names, body_first)
+          }
+        )
+
+        post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
+        [Type::Combinator.constant_of(nil), post_loop]
+      end
+
+      # Names of locals the loop body can rebind, partitioned into those
+      # already bound in `base_scope` (their pre-loop binding seeds the
+      # fixpoint) and those FIRST assigned inside the body (no pre-state, so
+      # they seed with `nil` for 0-iteration soundness). A loop body
+      # introduces no new binding scope — every write leaks to the
+      # surrounding scope — so unlike a block there is no introduced-name
+      # filter; every local-write form under the body node counts.
+      def loop_body_local_writes(statements, base_scope)
+        pre_existing = []
+        body_first = []
+        Source::NodeWalker.each(statements) do |descendant|
+          next unless LOCAL_WRITE_NODES.any? { |klass| descendant.is_a?(klass) }
+
+          name = descendant.name
+          if base_scope.locals.key?(name)
+            pre_existing << name
+          else
+            body_first << name
+          end
+        end
+        [pre_existing.uniq, body_first.uniq - pre_existing.uniq]
+      end
+
+      # Evaluates the loop body once with each fixpoint-tracked local bound
+      # to the supplied running assumption and returns the per-name exit
+      # binding. Used as the {BodyFixpoint} body-evaluator for `eval_loop`.
+      #
+      # The body runs from `post_pred` overlaid with the assumptions, then
+      # narrowed by the predicate's loop-entry edge: a `while` body only
+      # runs when the predicate is TRUTHY, an `until` body only when it is
+      # FALSEY. Re-applying that narrowing per iteration keeps loop-carried
+      # narrowing sound — without it, an accumulator whose rebind can
+      # introduce `nil` (`prefix = idx ? prefix[0, idx] : nil` under
+      # `while prefix && …`) would re-enter the body with `nil` un-narrowed
+      # and false-fire `possible nil receiver` on the guarded re-read. The
+      # historical single body pass (which seeds these locals from their
+      # never-nil pre-loop binding) did not need this; the fixpoint, which
+      # feeds the widened assumption back in, does.
+      #
+      # A body-FIRST local (no pre-loop binding) is deliberately NOT overlaid
+      # into the body-entry scope: when the body runs it assigns the local
+      # before any use, exactly as the historical single body pass saw it.
+      # Its `nil` seed exists only to model the 0-iteration path and is kept
+      # as a join constituent by {BodyFixpoint#converge}; feeding that `nil`
+      # back into the body re-evaluation would leak it past a condition-form
+      # assignment the engine does not thread into the branch (`if exps.size
+      # > (count = 3)`), false-firing `+`/nil-receiver on the guarded use.
+      def loop_body_exit_bindings(node, post_pred, bindings, names, body_first)
+        overlaid = bindings.except(*body_first)
+        entry = overlaid.reduce(post_pred) { |acc, (name, type)| acc.with_local(name, type) }
+        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, entry)
+        body_entry = node.is_a?(Prism::UntilNode) ? falsey_scope : truthy_scope
+        _type, exit_scope = sub_eval(node.statements, body_entry)
+        names.to_h { |name| [name, exit_scope.local(name)] }
       end
 
       # `for index in collection; body; end`. Unlike `each {}` blocks,

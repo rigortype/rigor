@@ -1,8 +1,8 @@
 # ADR-56 — Block-captured local write-back and loop-body fixpoint (mutation-effect soundness)
 
-Status: **Accepted, 2026-06-11. Slice A implemented 2026-06-11.**
+Status: **Accepted, 2026-06-11. Slices A + B implemented 2026-06-11.**
 Sequenced as slice A (block captured-local write-back — **landed**) then
-slice B (loop-body fixpoint widening — remaining). Unlike ADR-55 these
+slice B (loop-body fixpoint widening — **landed**). Unlike ADR-55 these
 are **soundness fixes, not
 precision additions** — today's results are *wrong*, not merely wide —
 so the corpus gate's "zero new diagnostics" reading is softened to
@@ -109,6 +109,37 @@ non-convergence). `d = 1; while …; d *= 2; end` → `1 | Integer`
 (today's unsound `1 | 2`). Loop-carried narrowing on the predicate is
 recomputed per iteration from the joined scope, so existing break /
 exit-edge behaviour is preserved.
+
+**Implemented 2026-06-11.** `StatementEvaluator#eval_loop` keeps the
+historical single-pass join as the base (it still carries
+receiver-mutation widening of non-rebound locals, body-introduced
+nil-injection, and the loop value) and OVERLAYS a `BodyFixpoint.converge`
+result for the locals the body rebinds. `loop_body_local_writes`
+partitions body-written locals into pre-existing (seed = post-predicate
+binding) and body-first (seed = `nil` for the 0-iteration path);
+`loop_body_exit_bindings` re-applies the predicate's loop-entry edge
+(`while`→truthy, `until`→falsey) per iteration so loop-carried narrowing
+stays sound. A loop whose body rebinds no local stays byte-identical to
+the single-pass join (fast path). Non-convergence (`g = [g]`) floors that
+local to `Dynamic[top]` and counts a `BudgetTrace::BLOCK_WRITEBACK_CAP`
+hit (shared with slice A). **One blind spot surfaced and was fixed
+in-slice**: a body-first local seeded `nil` must NOT be overlaid into the
+body re-evaluation — when the body runs it assigns the local before use,
+and feeding the `nil` back leaks it past a condition-form assignment the
+engine does not thread into the branch (`while …; if x > (count = 3);
+(count + 1)…`), false-firing `+`/nil-receiver; the `nil` is kept only as
+a join constituent for the 0-iteration result. Gate: `make verify` green
+(no new self-check / plugin-check firings — the inherited
+`expression_typer.rb:461-462` self-check firings the per-iteration
+predicate-narrowing already resolves); probes confirm `d = 1; while …; d
+*= 2; end` → `Integer` (was unsound `1 | 2`), `until` parity, body-first
+→ `T?`, no-write loop byte-identical, compounding → `Dynamic[top]`;
+corpus (Mastodon `app/models` 5/5, haml `lib` 13/13 byte-identical;
+kramdown `lib` **two removals** — `converter/html.rb:455`'s
+`item = stack.pop` inside `until stack.empty?` no longer wrongly folds to
+a nil receiver — and five message-rewordings at identical sites
+(`undefined method 'value' for nil` → `possible nil receiver` as the
+receiver types `T | nil` not pure `nil`), zero new genuine firings).
 
 ### WD3 — One mechanism, shared
 

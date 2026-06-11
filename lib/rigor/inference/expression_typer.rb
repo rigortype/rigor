@@ -1359,7 +1359,22 @@ module Rigor
       #   brings (measured: unconditional adoption regressed
       #   `rigor check lib` by 16 diagnostics).
       def adoptable_self_call_result?(type)
-        scope.self_type.nil? || type.is_a?(Type::Bot)
+        scope.self_type.nil? || type.is_a?(Type::Bot) || fully_value_pinned?(type)
+      end
+
+      # True when `type` is a concrete value — a `Type::Constant` or a
+      # `Type::Tuple` whose elements are (recursively) all value-pinned.
+      # ADR-55 slice 1: a value-pinned self-call result is adopted even
+      # inside a class/method body (where WD3 otherwise keeps non-`Bot`
+      # returns as `Dynamic[top]`). A concrete value at a call site is
+      # strictly more precise and can never enable an undefined-method or
+      # argument-type false positive — it is FP-neutral by construction.
+      def fully_value_pinned?(type)
+        case type
+        when Type::Constant then true
+        when Type::Tuple then type.elements.all? { |element| fully_value_pinned?(element) }
+        else false
+        end
       end
 
       def try_user_method_inference(receiver, call_node, arg_types)
@@ -1499,6 +1514,22 @@ module Rigor
       INFERENCE_GUARD_KEY = :__rigor_user_method_inference_stack__
       private_constant :INFERENCE_GUARD_KEY
 
+      INFERENCE_UNROLL_FUEL_KEY = :__rigor_user_method_unroll_fuel__
+      private_constant :INFERENCE_UNROLL_FUEL_KEY
+
+      # Hard, non-configurable caps for the ADR-55 slice 1 constant-arg
+      # unroll. `RECURSION_UNROLL_FUEL` bounds the number of extended
+      # (value-keyed) frames per outermost inference entry;
+      # `RECURSION_VALUE_SIZE_CAP` disqualifies a frame whose pinned
+      # argument values are structurally large. Both are termination
+      # guards (ADR-41 WD4) — not measurement-gated precision budgets —
+      # so they ship default-on with no opt-in.
+      RECURSION_UNROLL_FUEL = 32
+      private_constant :RECURSION_UNROLL_FUEL
+
+      RECURSION_VALUE_SIZE_CAP = 64
+      private_constant :RECURSION_VALUE_SIZE_CAP
+
       def infer_user_method_return(def_node, receiver, arg_types)
         return nil if def_node.body.nil?
 
@@ -1518,8 +1549,21 @@ module Rigor
         # resolving during the main walk. `describe(:short)`
         # keeps non-Nominal receivers (the implicit `Object`
         # carrier for top-level / DSL-block defs) printable.
-        signature = [receiver.describe(:short), def_node.name]
+        plain_signature = [receiver.describe(:short), def_node.name]
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
+
+        # ADR-55 slice 1: when every bound argument is value-pinned,
+        # extend the guard key with a stable descriptor of the argument
+        # *values* so distinct constant frames may recurse (e.g.
+        # `factorial(5)` folds to `Constant[120]`). Distinct constant
+        # frames are bounded by `RECURSION_UNROLL_FUEL` per outermost
+        # entry; exhaustion or value blow-up falls back to the plain
+        # `(receiver, method)` guard — today's behaviour. Non-constant
+        # args never reach this path.
+        signature = plain_signature
+        value_key = constant_argument_value_key(arg_types)
+        signature = [plain_signature, value_key] if value_key && unroll_fuel_remaining(stack).positive?
+
         if stack.include?(signature)
           BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
           return Type::Combinator.untyped
@@ -1531,6 +1575,75 @@ module Rigor
           type
         ensure
           stack.pop
+          # Fuel is per-outermost-entry: clear it once the guard stack
+          # drains back to empty so the next top-level inference starts
+          # with full fuel.
+          Thread.current[INFERENCE_UNROLL_FUEL_KEY] = nil if stack.empty?
+        end
+      end
+
+      # Consumes one unit from the thread-local unroll-fuel counter and
+      # returns the units that were available *before* this consumption
+      # (so a positive return means the extended value-key may be used).
+      # Fuel is per-outermost inference entry: at the top level (empty
+      # guard stack) it seeds to `RECURSION_UNROLL_FUEL`, and the
+      # `ensure` in `infer_user_method_return` clears it once the stack
+      # drains back to empty. On exhaustion (return 0) it records a
+      # `RECURSION_UNROLL_FUEL` hit so the caller keeps the plain
+      # `(receiver, method)` signature — today's behaviour.
+      def unroll_fuel_remaining(stack)
+        remaining = Thread.current[INFERENCE_UNROLL_FUEL_KEY]
+        remaining = RECURSION_UNROLL_FUEL if remaining.nil? || stack.empty?
+        if remaining.positive?
+          Thread.current[INFERENCE_UNROLL_FUEL_KEY] = remaining - 1
+        else
+          BudgetTrace.hit(BudgetTrace::RECURSION_UNROLL_FUEL)
+        end
+        remaining
+      end
+
+      # A stable, hashable descriptor of the argument values when EVERY
+      # element of `arg_types` is value-pinned: a `Type::Constant`, or a
+      # `Type::Tuple` whose elements are (recursively) all value-pinned.
+      # Returns nil when any argument is not value-pinned (the ordinary
+      # type-keyed path) or when any pinned value's structural size
+      # exceeds `RECURSION_VALUE_SIZE_CAP` (value blow-up → fall back).
+      def constant_argument_value_key(arg_types)
+        return nil if arg_types.empty?
+
+        keys = []
+        arg_types.each do |arg|
+          descriptor = pinned_value_descriptor(arg)
+          return nil if descriptor.nil?
+
+          keys << descriptor
+        end
+        return nil if keys.sum { |_, size| size } > RECURSION_VALUE_SIZE_CAP
+
+        keys.map(&:first)
+      end
+
+      # Returns `[descriptor, structural_size]` for a value-pinned type,
+      # or nil for anything else. Strings count by a cheap length proxy
+      # (length > 256 ≈ 64+ nodes) so a long built string disqualifies
+      # the frame without a deep walk; tuples recurse.
+      def pinned_value_descriptor(arg)
+        case arg
+        when Type::Constant
+          value = arg.value
+          size = value.is_a?(String) ? (value.length / 4) + 1 : 1
+          [["c", arg.describe(:short)], size]
+        when Type::Tuple
+          parts = []
+          total = 1
+          arg.elements.each do |element|
+            descriptor = pinned_value_descriptor(element)
+            return nil if descriptor.nil?
+
+            parts << descriptor.first
+            total += descriptor.last
+          end
+          [["t", parts], total]
         end
       end
 

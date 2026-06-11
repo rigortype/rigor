@@ -995,5 +995,26 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/recursive_constant_fold.rb — ADR-55 slice 1 constant-arg unroll" do
+      let(:harness) { harness_for("recursive_constant_fold") }
+
+      # factorial(5) → 120, the string builder → "***", and the
+      # constant-arg mutual recursion all fold; factorial(100) exhausts
+      # the 32-frame fuel and degrades to today's widened `Integer`.
+      it "folds constant-arg recursion and degrades gracefully on fuel exhaustion" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
+
+    describe "fixtures/recursive_dynamic_arg.rb — ADR-55 slice 1 non-constant args unchanged" do
+      let(:harness) { harness_for("recursive_dynamic_arg") }
+
+      it "leaves the non-constant-arg recursion path byte-identical to today" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
   end
 end

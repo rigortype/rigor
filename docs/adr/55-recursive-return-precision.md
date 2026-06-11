@@ -1,10 +1,14 @@
 # ADR-55 — Recursive-method return-type precision (constant-arg bounded unroll + fixpoint return summaries)
 
-Status: **Accepted, 2026-06-11.** Nothing implemented yet; sequenced as
-slice 1 (constant-arg bounded unroll) then slice 2 (fixpoint return
-summaries). Both are precision-additive — no new diagnostic, no
+Status: **Accepted, 2026-06-11. Slice 1 (constant-arg bounded unroll)
+implemented 2026-06-11; slice 2 (fixpoint return summaries) not yet
+implemented.** Both are precision-additive — no new diagnostic, no
 false-positive surface; every exhaustion path degrades to today's
-behaviour.
+behaviour. Slice 1 ships the fuel-bounded value-keyed guard
+(`RECURSION_UNROLL_FUEL = 32`, 64-node value-size cap), the
+`BudgetTrace::RECURSION_UNROLL_FUEL` counter, and the value-pinned
+self-call adoption that lets a folded constant frame surface inside a
+method body (`factorial(5) → Constant[120]`).
 
 Archetype: deliberative. Stakes: mid (engine return-inference core; the
 mechanisms are FP-neutral by construction but touch the recursion

@@ -33,6 +33,7 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       expect(snap[described_class::RECURSION_GUARD]).to eq(2)
       expect(snap[described_class::ANCESTOR_WALK_LIMIT]).to eq(1)
       expect(snap[described_class::HKT_FUEL_EXHAUSTED]).to eq(0)
+      expect(snap[described_class::RECURSION_UNROLL_FUEL]).to eq(0)
     end
 
     it "zero-fills every known category in the snapshot" do
@@ -126,6 +127,34 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       registry.reduce(app, fuel: 3)
 
       expect(described_class.snapshot[described_class::HKT_FUEL_EXHAUSTED]).to be >= 1
+    end
+
+    it "records a recursion-unroll fuel-exhaustion firing (ADR-55 slice 1)" do
+      # factorial(100) unrolls past the 32-frame fuel budget, so the
+      # extended value-key path falls back to the plain guard and the
+      # `RECURSION_UNROLL_FUEL` counter ticks. The run also must not
+      # raise (graceful degradation to today's widened result).
+      source = <<~RUBY
+        class Factorial
+          def of(n)
+            n <= 1 ? 1 : n * of(n - 1)
+          end
+        end
+        Factorial.new.of(100)
+      RUBY
+      result = Prism.parse(source)
+      tree = result.value
+      scope = Rigor::Scope.empty(environment: Rigor::Environment.default)
+      index = Rigor::Inference::ScopeIndexer.index(tree, default_scope: scope)
+      # `CheckRules.diagnose` drives a full per-node walk, exercising the
+      # recursive inference at the call site (and must not raise).
+      expect do
+        Rigor::Analysis::CheckRules.diagnose(
+          path: "fuel", root: tree, scope_index: index, comments: result.comments || []
+        )
+      end.not_to raise_error
+
+      expect(described_class.snapshot[described_class::RECURSION_UNROLL_FUEL]).to be >= 1
     end
   end
 end

@@ -14,6 +14,13 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Changed
+
+- **[inference]** Recursive methods called with fully constant arguments now fold to a precise constant return instead of widening to the base type ([ADR-55](docs/adr/55-recursive-return-precision.md) slice 1).
+  - When every argument of a recursive call is a literal value (a constant, or a tuple of constants), distinct constant frames are allowed to recurse so e.g. `factorial(5)` types as `120` and a `String`-building recursive method returns the built string literal.
+  - A hard, non-configurable budget keeps termination safe: at most 32 unrolled constant frames per call, and frames whose argument values are structurally large are skipped. On exhaustion the result degrades to exactly the previous behaviour (no folding, no error, no hang).
+  - `RIGOR_BUDGET_TRACE` reports a new `recursion-unroll-fuel` counter for how often the fuel budget was hit. Non-constant-argument calls are unaffected.
+
 ## [0.1.18] - 2026-06-11
 
 This cycle makes Rigor a first-class citizen of CI: `rigor check` gains six CI-native output formats (SARIF, GitHub Actions annotations, GitLab Code Quality, Checkstyle/reviewdog, JUnit, TeamCity) and auto-detects the CI environment to surface diagnostics inline in a pull / merge request with no flags, plus copy-paste setup templates and a `rigor-ci-setup` skill. Under the hood it is also a **plugin-contract release**: plugin consultation on the hot paths is now compiled once per run and gated by a key the engine already holds, the `dynamic_return` DSL grows the run-time `receivers:` / `methods:` / `file_methods:` gates the migration needs, and the legacy `flow_contribution_for` hook is **removed** — a sanctioned pre-1.0 break with a migration table below (all bundled plugins are already migrated; the engine-owned single node-rule walk replaces per-plugin AST walks). The cache also slims from ~33 MB to ~2 MB per project.

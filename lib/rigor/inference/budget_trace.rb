@@ -20,6 +20,9 @@ module Rigor
     #   hit the 100-node BFS cap and gave up resolving the self-call.
     # - {HKT_FUEL_EXHAUSTED} — `HktReducer` ran out of its reduction
     #   fuel budget and unwound to `app.bound`.
+    # - {RECURSION_UNROLL_FUEL} — the constant-arg recursion unroll
+    #   (ADR-55 slice 1) exhausted its per-entry fuel and fell back to
+    #   the plain `(receiver, method)` guard (in-cycle call → `Dynamic[top]`).
     #
     # Enabled only when `RIGOR_BUDGET_TRACE` is set (to any non-empty
     # value) in the environment, or via {enable!} in tests. When
@@ -34,8 +37,16 @@ module Rigor
       RECURSION_GUARD = :recursion_guard
       ANCESTOR_WALK_LIMIT = :ancestor_walk_limit
       HKT_FUEL_EXHAUSTED = :hkt_fuel_exhausted
+      # `ExpressionTyper#infer_user_method_return` exhausted its
+      # constant-arg unroll fuel (ADR-55 slice 1) and fell back to the
+      # plain `(receiver, method)` recursion guard — i.e. the in-cycle
+      # call widened to `Dynamic[top]` exactly as it does without the
+      # unroll.
+      RECURSION_UNROLL_FUEL = :recursion_unroll_fuel
 
-      CATEGORIES = [RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED].freeze
+      CATEGORIES = [
+        RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL
+      ].freeze
 
       # Distribution (histogram) categories — read-only observations of
       # a value's size at a site, used to choose budget defaults from an

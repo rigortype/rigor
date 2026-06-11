@@ -267,13 +267,13 @@ and `file:line` grounding in the note):
    Follow-up flagged, not done: cli.rb keeps a few now-transitively-unused
    requires (behaviour-adjacent for embedders, separate slice).
 2. **Phase 2 — [ADR-52](adr/52-compiled-plugin-contribution-dispatch.md)
-   implementation: DONE (the ADR is complete, slices 1–6 landed 2026-06-10/11).**
-   Still open from the re-review: the WD addendum applying the same compiled
-   gate-by-held-key idea to the *built-in* `PRECISE_TIERS` loop (all 14 tiers
-   run on every call — `String#+` pays ~50–70 no-op micro-ops before reaching
-   RbsDispatch; a receiver-class / method-name pre-filter skips the singleton
-   folders that can never match). Same WD6 gate; design-sensitive (the tier
-   order is load-bearing), so it gets its own slice.
+   implementation: DONE (the ADR is complete, slices 1–6 landed 2026-06-10/11).
+   The built-in-tier addendum is also DONE:** the eight stdlib singleton
+   folders now sit behind a frozen class-name → folder table consulted only
+   for `Singleton` receivers (mutually exclusive by construction — each
+   folder's first check is `Singleton[<its one class>]` — so the collapse is
+   observably identical; the table sits where the eight sat in the flat
+   list). Non-singleton calls skip all eight no-op trials.
 3. **Phase 3 — structural, behaviour-preserving, no new ADR. REMAINING.**
    (a) Decompose the ~2000-line `Analysis::Runner` monolith into
    `PoolCoordinator` / `ProjectPrePasses` / `DiagnosticAggregator` (also the

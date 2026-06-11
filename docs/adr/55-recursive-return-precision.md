@@ -1,0 +1,164 @@
+# ADR-55 — Recursive-method return-type precision (constant-arg bounded unroll + fixpoint return summaries)
+
+Status: **Accepted, 2026-06-11.** Nothing implemented yet; sequenced as
+slice 1 (constant-arg bounded unroll) then slice 2 (fixpoint return
+summaries). Both are precision-additive — no new diagnostic, no
+false-positive surface; every exhaustion path degrades to today's
+behaviour.
+
+Archetype: deliberative. Stakes: mid (engine return-inference core; the
+mechanisms are FP-neutral by construction but touch the recursion
+termination machinery, which is non-negotiable per ADR-41 WD4).
+
+## Context
+
+The recursion re-entry guard
+(`ExpressionTyper#infer_user_method_return`, `lib/rigor/inference/expression_typer.rb`
+~L1508) is keyed on `(receiver, method)` only and fires at effective
+depth 1, returning `Type::Combinator.untyped` for the in-cycle call.
+ADR-24 WD5 chose that key deliberately — keying on argument *types* let
+mutual recursion through a `module_function` module recurse unboundedly
+(`SystemStackError`). The consequence for return precision:
+
+```ruby
+def factorial(n)
+  n <= 1 ? 1 : n * factorial(n - 1)
+end
+factorial(5)  # Integer       (the in-cycle factorial(4) is Dynamic[top];
+              #                Integer#* happens to absorb it here)
+factorial(0)  # Constant[1]   (constant-folded condition skips the cycle)
+```
+
+`Integer` survives only because `Integer#*`'s RBS is total over the
+`Dynamic` operand. A recursive method that *builds* its result (a
+renderer returning `String`, a tree walk returning `Array[T]`) gets a
+return joined with `Dynamic[top]` — the recursive contribution is
+unanalyzed, and callers see `untyped` contamination with no signature
+present.
+
+ADR-41 WD5 already split `recursion_depth` into a hard **termination
+floor** (wired, depth 1) and an optional **precision-unroll depth**
+(deferred, demand-driven). This ADR is that demand arriving, plus a
+second mechanism WD5 did not envision: a fixpoint over the recursive
+return itself, which is where the real precision lives. The
+constant-arg outcome (`factorial(5) → Constant[120]`) is explicitly
+**low-value** per the requester; slice 1 earns its place as the safe
+generalization of the guard key and the `BudgetTrace` wiring that
+slice 2 reuses, not as a constant-folding feature.
+
+## Decision
+
+Adopt both mechanisms, in order, under one criterion:
+
+> **A recursive-return precision mechanism is admissible only if its
+> exhaustion path is byte-identical to today's widening** — fuel out,
+> iteration cap hit, value blow-up, non-convergence: every exit returns
+> what the depth-1 guard returns now (`untyped`). Precision is gained
+> strictly inside a hard, non-configurable termination envelope
+> (ADR-41 WD4); no knob may opt into non-termination.
+
+### WD1 — Slice 1: fueled constant-arg unroll
+
+When **every** bound argument of the re-entered call is value-pinned
+(`Constant[…]`, or a `Tuple` of such), the guard key extends to
+`(receiver, method, argument values)` so distinct constant frames may
+recurse. Two hard caps, both counting guards in the ADR-41 WD4 sense:
+
+- **fuel** — total unrolled frames per outermost entry, default 32;
+- **value-size cap** — any frame whose pinned values exceed a small
+  structural size (e.g. 64 nodes) disqualifies the extension.
+
+Exhaustion or disqualification falls back to the plain
+`(receiver, method)` guard — i.e. today's result. Non-constant args
+never take this path. New `BudgetTrace` counter
+(`RECURSION_UNROLL_FUEL`). Default-on: the caps are termination guards,
+not measurement-gated precision budgets (ADR-41 WD3 does not apply).
+
+### WD2 — Slice 2: fixpoint return summaries
+
+Replace the cycle result `untyped` with a **Kleene iteration from
+`bot`**, per `(receiver, method)` signature, alongside the existing
+guard stack:
+
+1. Outermost entry seeds an assumed summary `bot` in a thread-local
+   table keyed like `INFERENCE_GUARD_KEY`.
+2. In-cycle re-entries return the current assumed summary (instead of
+   `untyped`).
+3. After the body evaluates, **only if the guard/summary was consulted**
+   during it: if the computed return is consistent with (subsumed by)
+   the assumption, the fixpoint is reached. Otherwise update the
+   assumption to `join(assumption, computed)` and re-evaluate the body.
+4. Iteration cap 3. On the final permitted iteration the join **widens
+   value-pinned constituents to their nominal base** (`Constant[1]` →
+   `Integer`) to force convergence; if still unstable, the summary
+   collapses to `untyped` — today's behaviour.
+
+For `factorial(x : Integer)`: round 1 assumes `bot` → body yields
+`1 | (x * bot) = Constant[1]`; round 2 yields `1 | Integer = Integer`;
+round 3 confirms. Result `Integer` with no `Dynamic` contribution —
+and a `String`-building renderer now returns `String`, not
+`String | Dynamic[top]`.
+
+`bot` is the correct seed, not a soundness risk: a method that *only*
+recurses genuinely never returns (its summary stays `bot`, the
+always-diverging shape `adoptable_self_call_result?` already treats as
+safe). Mutual recursion remains depth-bounded by the unchanged guard
+stack; summaries make the in-cycle result *more* precise, never deeper.
+
+### WD3 — Cost envelope and gate
+
+Bodies re-evaluate at most 3× and only for methods that actually
+participate in a cycle. The stress corpus is known: haml fired the
+guard 421×, jbuilder 126× (ADR-41 survey). Gate per slice:
+`make verify` + `make bench-perf` neutral-or-better + a corpus
+diagnostics comparison (Mastodon `app/models` and/or Redmine) where the
+diagnostic delta must be **zero or strictly removals** — any new
+diagnostic is a blocker, not a judgement call.
+
+### WD4 — Ordering and interaction
+
+Slice 1 lands first (smaller, independently testable). Once slice 2
+lands, slice 1's fuel-exhaustion path falls back to the fixpoint
+summary rather than straight to `untyped` — the two compose, with the
+summary as the better floor.
+
+## Rejected / deferred alternatives
+
+- **Key the guard on argument *types* for all calls.** Rejected —
+  re-litigates ADR-24 WD5's `SystemStackError`; slice 1 keys on
+  argument *values* only, which fuel bounds.
+- **Error / diagnose on exhaustion now.** Deferred to ADR-41 WD2's
+  `static.*` surface; these slices emit no diagnostic (FP discipline:
+  precision-additive only).
+- **Make fuel / iteration cap user-configurable now.** Deferred —
+  ADR-41 WD4 keeps termination guards hard until a project shows they
+  bind; `RIGOR_BUDGET_TRACE` counters provide the evidence channel.
+- **Memoized cross-call summaries (per arg-type signature cache).**
+  Deferred — a performance refinement, only worth its invalidation
+  complexity if WD3's bench gate shows re-evaluation cost on a real
+  corpus.
+
+## Consequences
+
+- Recursive methods get signature-free return types with no `Dynamic`
+  contamination — the camp-(b) "works on unannotated Ruby" promise
+  (ADR-41 WD1) extended to recursion, which no surveyed camp-(b) tool
+  does for precision (TypeProf widens to `untyped` at depth 5).
+- The wired-guards table in
+  `docs/type-specification/inference-budgets.md` § "Implementation
+  status" must be updated by each slice (the depth-1 row gains the
+  unroll and summary qualifiers); ADR-41 WD5's "precision-unroll:
+  deferred" status flips to "instantiated (ADR-55)".
+- New maintenance surface: the fixpoint loop becomes part of the
+  termination story; its iteration cap is load-bearing and must stay
+  hard.
+
+## Relationship to other ADRs
+
+- **ADR-41** — this is WD5's precision-unroll demand arriving; WD4's
+  hard-termination rule is this ADR's admissibility criterion; the
+  `BudgetTrace` channel is reused.
+- **ADR-24** — WD5's guard-key decision is preserved; slice 1 narrows
+  it only for value-pinned frames under fuel.
+- **ADR-5 / ADR-48** — the precision-additive, zero-FP envelope these
+  slices must stay inside.

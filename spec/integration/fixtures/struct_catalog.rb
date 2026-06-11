@@ -24,20 +24,24 @@ include Rigor::Testing
 #    cannot fold an aliasing copy, a member-dependent hash, or
 #    a member-name-dependent reader through the catalog.
 
-# `Struct.new(...)` builds a fresh anonymous subclass at runtime.
-# The catalog declines (block-dependent), but RBS-tier dispatch
-# on the `Class<Struct>` receiver still resolves the call's
-# return type to `Nominal[Struct]` — useful for narrowing
-# downstream calls back through the catalog.
+# `Struct.new(:a, :b)` builds a fresh anonymous Struct *subclass*
+# (a class object), not a `Struct` instance. The dispatcher's
+# `struct_new_lift` carries it as `Singleton[Struct]` (displayed
+# `singleton(Struct)`) so the chained `.new(...)` dispatches
+# instead of firing a spurious `undefined method 'new' for Struct`
+# (CRuby-stdlib survey C-2 — `lib/rubygems/requirement.rb` et al.).
 klass = Struct.new(:foo, :bar)
-assert_type("Struct", klass)
+assert_type("singleton(Struct)", klass)
 
-# Instantiating the subclass and reading a member widens further
-# — the runtime answer depends on the subclass's member list,
-# which the catalog deliberately does not encode. `:[]` is
-# blocklisted so even a future Constant<Struct> carrier would
-# not fold it. Today the chained `.new(...)` on the anonymous
-# subclass falls through to `Dynamic[top]` because the catalog
-# does not model the per-subclass `Class<Subclass>` shape.
+# Instantiating the anonymous subclass yields a `Struct` instance
+# (`Nominal[Struct]`). Member-reader precision is deliberately NOT
+# modelled (ADR-48 deferred Struct value folding on mutability
+# grounds), so a subsequent member read widens to `Dynamic[top]`.
 inst = Struct.new(:foo).new(1)
-assert_type("Dynamic[top]", inst)
+assert_type("Struct", inst)
+
+# Zero-arg chained construction is also legal — every member
+# defaults to `nil` — and must not fire a wrong-arity diagnostic
+# against the real `Struct.new(*Symbol)` signature.
+zero = Struct.new(:foo, :bar).new
+assert_type("Struct", zero)

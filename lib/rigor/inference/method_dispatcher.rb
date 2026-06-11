@@ -963,10 +963,42 @@ module Rigor
         date_lift = date_new_lift(receiver_type.class_name, arg_types)
         return date_lift if date_lift
 
+        struct_new_lift = struct_new_lift(receiver_type.class_name, arg_types)
+        return struct_new_lift if struct_new_lift
+
         class_new_lift = class_new_lift(receiver_type.class_name, arg_types)
         return class_new_lift if class_new_lift
 
         Type::Combinator.nominal_of(receiver_type.class_name)
+      end
+
+      # `Struct.new(:a, :b)` synthesises an anonymous Struct *subclass*
+      # (a class object), not a Struct *instance* — so the chained
+      # idiom `Struct.new(:a, :b).new(1, 2)` must resolve `.new` again
+      # on a class-like carrier. The constant-bound form
+      # (`S = Struct.new(:a); S.new(1)`) already records `Singleton[S]`
+      # via `ScopeIndexer#record_meta_new_constant?`; this lift gives
+      # the *chained* (anonymous) position the same class-like carrier
+      # so the trailing `.new` dispatches instead of firing a spurious
+      # `undefined method 'new' for Struct`.
+      #
+      # The disambiguation mirrors `ScopeIndexer#struct_new_call?`: a
+      # call whose positionals are all `Constant<Symbol>` literals is a
+      # member-list class definition → `Singleton[Struct]`. The
+      # following `AnonStruct.new(1, 2)` carries non-symbol args, so it
+      # falls through this gate to `Nominal[Struct]` (a fresh instance)
+      # via the `meta_new` tail. ADR-48 deferred full Struct *value*
+      # folding (member-reader precision) on mutability grounds; this is
+      # the narrower `.new`-dispatch-only fix and contributes no member
+      # layout, so `instance.a` stays at its RBS/Dynamic type.
+      def struct_new_lift(class_name, arg_types)
+        return nil unless class_name == "Struct"
+
+        positional = arg_types.grep_v(Type::HashShape)
+        return nil if positional.empty?
+        return nil unless positional.all? { |t| t.is_a?(Type::Constant) && t.value.is_a?(Symbol) }
+
+        Type::Combinator.singleton_of("Struct")
       end
 
       # `Class.new` and `Class.new(Parent)` create a brand-new

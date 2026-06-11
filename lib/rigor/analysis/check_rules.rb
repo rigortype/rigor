@@ -742,7 +742,7 @@ module Rigor
         # by `undefined_method_diagnostic`; it returns nil
         # when the call's receiver / RBS coverage / call shape
         # disqualifies the rule.
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
         def wrong_arity_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
           return nil unless plain_positional_call?(call_node)
@@ -755,6 +755,15 @@ module Rigor
           return nil if class_name.nil?
 
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
+          # `Struct.new(:a, :b).new(...)` chained: the inner
+          # `Struct.new(...)` is an anonymous Struct *subclass* whose
+          # `.new` accepts any positional arity (one slot per member,
+          # all defaulting to nil) — including zero. The receiver types
+          # as `Singleton[Struct]` (so the call-site `.new` dispatches,
+          # per the dispatcher's `struct_new_lift`), but validating that
+          # `.new` against the real `Struct.new(*Symbol)` signature is a
+          # false positive. Skip arity-checking the chained position.
+          return nil if anonymous_struct_new_call?(call_node, class_name, kind)
           return nil if scope.discovered_method?(class_name, call_node.name, kind)
 
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
@@ -772,7 +781,25 @@ module Rigor
 
           build_arity_diagnostic(path, call_node, class_name, min, max, actual)
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+
+        # True for the outer `.new` of a chained `Struct.new(...).new`:
+        # `class_name`/`kind` already pin the receiver to
+        # `Singleton[Struct]`, and the receiver node is itself a
+        # `Struct.new` (or `::Struct.new`) call — the anonymous subclass.
+        def anonymous_struct_new_call?(call_node, class_name, kind)
+          return false unless class_name == "Struct" && kind == :singleton
+          return false unless call_node.name == :new
+
+          receiver = call_node.receiver
+          return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :new
+
+          inner = receiver.receiver
+          return true if inner.is_a?(Prism::ConstantReadNode) && inner.name == :Struct
+
+          # `::Struct.new(...).new` — a top-level constant path.
+          inner.is_a?(Prism::ConstantPathNode) && inner.parent.nil? && inner.name == :Struct
+        end
 
         def plain_positional_call?(call_node)
           arguments = call_node.arguments

@@ -1,4 +1,5 @@
 ---
 locals:
-  inst: Dynamic[top]
-  klass: Struct
+  inst: Struct
+  klass: singleton(Struct)
+  zero: Struct

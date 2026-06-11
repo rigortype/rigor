@@ -759,5 +759,29 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to eq(Rigor::Type::Combinator.nominal_of("Class"))
       end
     end
+
+    describe "Struct.new return-type lift (meta_new — anonymous Struct subclass)" do
+      def singleton(name) = Rigor::Type::Combinator.singleton_of(name)
+      def sym(value) = Rigor::Type::Combinator.constant_of(value)
+
+      it "lifts `Struct.new(:a, :b)` (all symbol members) to Singleton[Struct] so chained `.new` dispatches" do
+        result = dispatch(receiver: singleton("Struct"), method_name: :new, args: [sym(:a), sym(:b)])
+        expect(result).to eq(singleton("Struct"))
+      end
+
+      it "lifts the instance-construction `.new(1, 2)` (non-symbol args) to Nominal[Struct]" do
+        result = dispatch(
+          receiver: singleton("Struct"),
+          method_name: :new,
+          args: [Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(2)]
+        )
+        expect(result).to eq(Rigor::Type::Combinator.nominal_of("Struct"))
+      end
+
+      it "lifts zero-arg `.new` (every member defaults to nil) to Nominal[Struct]" do
+        result = dispatch(receiver: singleton("Struct"), method_name: :new, args: [])
+        expect(result).to eq(Rigor::Type::Combinator.nominal_of("Struct"))
+      end
+    end
   end
 end

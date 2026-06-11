@@ -3460,7 +3460,7 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
-  describe "Plugin#flow_contribution_for return-type override (v0.1.1 / Track 2 slice 7)" do
+  describe "Plugin dynamic_return return-type override (v0.1.1 / Track 2 slice 7)" do
     before { Rigor::Plugin.unregister! }
     after { Rigor::Plugin.unregister! }
 
@@ -3495,11 +3495,11 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(runner.plugin_registry.ids).to eq(["flow-noop"])
     end
 
-    it "isolates a #flow_contribution_for raise — dispatch keeps running, no plugin_loader runtime-error" do
+    it "isolates a dynamic_return raise — dispatch keeps running, no plugin_loader runtime-error" do
       raising = Class.new(Rigor::Plugin::Base) do
         manifest(id: "raising-contributor", version: "0.1.0")
 
-        def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+        dynamic_return methods: [:first] do |_call_node, _scope|
           raise "boom"
         end
       end
@@ -3528,20 +3528,14 @@ RSpec.describe Rigor::Analysis::Runner do
       klass = Class.new(Rigor::Plugin::Base) do
         manifest(id: "self-narrower", version: "0.1.0")
 
-        def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
-          return nil unless call_node.is_a?(Prism::CallNode) && call_node.name == :narrow_self_to_string!
+        dynamic_return methods: [:narrow_self_to_string!] do |_call_node, _scope|
+          Rigor::Type::Combinator.constant_of(nil)
+        end
 
-          fact = Rigor::FlowContribution::Fact.new(
+        type_specifier methods: [:narrow_self_to_string!] do |_call_node, _scope|
+          [Rigor::FlowContribution::Fact.new(
             target_kind: :self, target_name: :self, type: Rigor::Type::Combinator.nominal_of("String")
-          )
-          Rigor::FlowContribution.new(
-            return_type: Rigor::Type::Combinator.constant_of(nil),
-            post_return_facts: [fact],
-            provenance: Rigor::FlowContribution::Provenance.new(
-              source_family: "plugin.self-narrower", plugin_id: "self-narrower",
-              node: call_node, descriptor: nil
-            )
-          )
+          )]
         end
       end
       stub_const("FakeSelfNarrowingPlugin", klass)

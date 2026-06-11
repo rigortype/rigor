@@ -50,7 +50,7 @@ end.freeze
 # each with a fixed argument shape; an override must stay callable with
 # it. The required shape is derived from Base's *own* parameters at run
 # time, so changing Base's signature carries the contract automatically.
-CONTRACT_OVERRIDABLE_HOOKS = %i[init prepare flow_contribution_for diagnostics_for_file].freeze
+CONTRACT_OVERRIDABLE_HOOKS = %i[init prepare diagnostics_for_file].freeze
 
 # Put every plugin's lib on the load path so meta-gem entries resolve
 # regardless of example order (same prelude as the load guard).

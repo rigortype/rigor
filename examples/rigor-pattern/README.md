@@ -113,8 +113,9 @@ through `FlowContribution::Merger`.
 
 ## Future direction — lightweight HKT
 
-As of v0.1.2 the plugin already supplies a return type at the
-call site through `#flow_contribution_for`: on a successful
+The plugin supplies a return type at the call site through
+`dynamic_return` (ADR-52; the former `flow_contribution_for` hook was
+removed ADR-52 WD3): on a successful
 match the runtime `validate` returns the value argument, so
 the plugin contributes the argument's type (typically
 `Constant<String>`) as the call site's return type. Mismatches

@@ -88,7 +88,7 @@ RSpec.describe "examples/rigor-lisp-eval" do
     expect(diags.first.message).to eq("Calculator.run return type inferred as Constant<3>")
   end
 
-  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+  describe "dynamic_return return-type contribution (v0.1.2)" do
     # The plugin narrows `Lisp.eval(literal)` to a precise
     # carrier so downstream call sites resolve against the
     # inferred class — without the contribution, the RBS

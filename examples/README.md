@@ -66,7 +66,7 @@ plugins layered on top of this contract.
 | `config_schema` (`:string` / `:array` / `:hash`) | manifest body | deprecations / lisp-eval / pattern / web |
 | `#init(services)` config plumbing | init hook | lisp-eval / pattern / routes / web |
 | `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all six |
-| `#flow_contribution_for(node, scope)` | return-type contribution | lisp-eval / pattern / units |
+| `dynamic_return(receivers:, methods:) { \|call_node, scope\| }` | return-type contribution (successor to removed `flow_contribution_for`) | lisp-eval / pattern / units |
 | `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | routes |
 | `Plugin::TrustPolicy.allowed_read_roots` (slice 2) | declarative read-root policy | routes |
 | `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | routes |

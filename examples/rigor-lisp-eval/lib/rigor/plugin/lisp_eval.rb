@@ -26,13 +26,12 @@ module Rigor
     #         method_name: "eval"   # default
     #         severity: "info"      # info|warning — severity for the inferred-type note
     #
-    # This plugin only emits diagnostics. It cannot — yet —
-    # replace the analyzer's inferred return type for the call
-    # site (the plugin contribution surface for return-type
-    # narrowing is queued for v0.1.x). The diagnostic that
-    # surfaces on every typed call site is therefore the most
-    # idiomatic v0.1.0 demonstration of plugin-authored
-    # static reasoning over user-defined DSLs.
+    # This plugin emits an `:info` diagnostic AND contributes a
+    # precise return type at the call site via `dynamic_return`
+    # (ADR-52 slice 4 — the former `flow_contribution_for` hook
+    # was removed). The diagnostic serves as a user-facing trace
+    # per the README's "info-diagnostic" pattern; the same
+    # Interpreter walk feeds both channels.
     class LispEval < Rigor::Plugin::Base
       manifest(
         id: "lisp-eval",
@@ -206,7 +205,7 @@ module Rigor
       # spec can drive it directly without spinning up an
       # analyser run.
       # Receiver-matching helper shared by `#eval_call?` and
-      # `#flow_contribution_for` (the AST walk itself is now engine-owned
+      # the `dynamic_return` block (the AST walk itself is engine-owned
       # via `node_rule`, so the traversal that used to live here is gone).
       module Walker
         module_function

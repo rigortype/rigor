@@ -5,7 +5,7 @@ require "rigor/plugin"
 module Rigor
   module Plugin
     # ADR-25 — a pure RBS-bundle plugin. It ships NO analyzer code:
-    # no `diagnostics_for_file`, no `flow_contribution_for`. Its
+    # no `diagnostics_for_file`, no `dynamic_return`. Its
     # whole contribution is the manifest's `signature_paths: ["sig"]`,
     # which declares the bundled ActiveSupport `core_ext` RBS
     # directory. `Plugin::Loader` resolves that directory against

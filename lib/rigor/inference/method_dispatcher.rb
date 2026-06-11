@@ -318,12 +318,12 @@ module Rigor
       end
 
       # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2
-      # slice 7. Walks every loaded plugin's
-      # `#flow_contribution_for(call_node:, scope:)` hook,
-      # collects the non-nil `FlowContribution` bundles, merges
-      # them through `FlowContribution::Merger`, and returns
-      # the merged `return_type` slot (or nil when no plugin
-      # contributed a return type).
+      # slice 7; ADR-52 WD3 — consults each loaded plugin's gated
+      # `dynamic_return` rules, wraps the contributed types as
+      # `FlowContribution` bundles, merges them through
+      # `FlowContribution::Merger`, and returns the merged
+      # `return_type` slot (or nil when no plugin contributed a
+      # return type).
       #
       # Plugins whose hook raises have their contribution
       # silently dropped for this call so the dispatch chain
@@ -680,11 +680,11 @@ module Rigor
         end
       end
 
-      # ADR-37 slice 2 — gathers each plugin's return-type contribution
-      # from BOTH the narrow `dynamic_return` DSL (receiver-gated, wrapped
-      # as a return-only `FlowContribution`) and the legacy
-      # `flow_contribution_for` escape valve, so migrated and unmigrated
-      # plugins compose through the same merger.
+      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's return-type
+      # contribution from the gated `dynamic_return` DSL, wrapped as a
+      # return-only `FlowContribution` for the shared merger. (The legacy
+      # ungated `flow_contribution_for` escape valve was deleted once its
+      # five users migrated.)
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
 
@@ -694,24 +694,21 @@ module Rigor
       #
       # 1. Only the plugins that *structurally* implement a per-call path
       #    are visited — `registry.contribution_index.for_method_dispatch`
-      #    is the registry-ordered subset overriding `flow_contribution_for`
-      #    or declaring a `dynamic_return` (GitLab: 2 of 11). Iterating the
-      #    subset in registry order, and gating each path by membership,
-      #    yields the exact same contributions in the same order as
-      #    visiting every plugin would (a skipped plugin's call returns
-      #    nil/[] anyway). The receiver-class ancestry match still happens
-      #    per dispatch inside `dynamic_return_type`.
+      #    is the registry-ordered subset declaring a `dynamic_return`.
+      #    Iterating the subset in registry order, and gating each path by
+      #    membership, yields the exact same contributions in the same
+      #    order as visiting every plugin would (a skipped plugin's call
+      #    returns nil/[] anyway). The receiver-class ancestry match still
+      #    happens per dispatch inside `dynamic_return_type`.
       # 2. Contributions accumulate lazily — allocate only when one
       #    actually appears, and share a frozen empty array otherwise. The
       #    caller treats the result as read-only (`.empty?` / `Merger.merge`).
       # 3. ADR-52 WD1 — method-name gates compiled at registry build. The
       #    global gate makes the common "no plugin cares about this call"
-      #    case a single Set probe (it only engages when no legacy
-      #    `flow_contribution_for` plugin is loaded — those stay ungated
-      #    until their ADR-52 WD3 migration); the per-plugin gate skips a
-      #    plugin whose `dynamic_return` rules are all `methods:`-gated on
-      #    other names. A pruned consultation could only have returned
-      #    nil, so contribution order and content are unchanged.
+      #    case a single Set probe; the per-plugin gate skips a plugin
+      #    whose `dynamic_return` rules are all `methods:`-gated on other
+      #    names. A pruned consultation could only have returned nil, so
+      #    contribution order and content are unchanged.
       def collect_plugin_contributions(registry, call_node, scope, receiver_type)
         index = registry.contribution_index
         relevant = index.for_method_dispatch
@@ -730,19 +727,15 @@ module Rigor
         collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)
       end
 
-      # The post-gate walk: registry order, flow path before dynamic
-      # path within a plugin — the same order the ungated walk used.
+      # The post-gate walk, in registry order — the same order the
+      # ungated walk used.
       def collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)
         result = nil
         relevant.each do |plugin|
-          if index.flow?(plugin)
-            legacy = plugin.flow_contribution_for(call_node: call_node, scope: scope)
-            (result ||= []) << legacy if legacy.is_a?(FlowContribution)
-          end
-          if index.dynamic_candidate_for?(plugin, name)
-            dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
-            (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
-          end
+          next unless index.dynamic_candidate_for?(plugin, name)
+
+          dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
+          (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
         rescue StandardError
           next
         end

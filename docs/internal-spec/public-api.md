@@ -69,8 +69,7 @@ pins instance and singleton method sets for:
 - `Rigor::Plugin::Base` — the class-level `manifest(**fields)`,
   `producer`, `node_rule`, and `node_file_context` DSLs;
   instance-level `services` / `config` / `manifest`, the override
-  hooks `#init` / `#prepare` / `#diagnostics_for_file` /
-  `#flow_contribution_for`, the engine-owned-walk dispatcher
+  hooks `#init` / `#prepare` / `#diagnostics_for_file`, the engine-owned-walk dispatcher
   `#node_rule_diagnostics`, and the `#diagnostic(node, …)` builder.
   v0.1.0 slice 1 + ADR-37.
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,

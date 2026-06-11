@@ -89,7 +89,7 @@ Slice 2 added the trust surfaces; v0.1.1 (ADR-9) added `fact_store`:
 | --- | --- |
 | `#trust_policy` | The {TrustPolicy} for the run. Constructed by `Analysis::Runner` from the project's `.rigor.yml`. |
 | `#io_boundary_for(plugin_id)` | Returns a fresh per-plugin {IoBoundary}. The contribution merger (slice 3) constructs one per plugin per run and feeds the resulting cache descriptor through the same pipeline as built-in producers. |
-| `#fact_store` | The per-run cross-plugin {Rigor::Plugin::FactStore} (ADR-9 / v0.1.1). Producers publish via `#prepare(services)`; consumers read in `#diagnostics_for_file` / `#flow_contribution_for`. |
+| `#fact_store` | The per-run cross-plugin {Rigor::Plugin::FactStore} (ADR-9 / v0.1.1). Producers publish via `#prepare(services)`; consumers read in `#diagnostics_for_file` / `dynamic_return` blocks. |
 
 ## `.rigor.yml` `plugins_io` section
 

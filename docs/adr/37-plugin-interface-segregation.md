@@ -1,6 +1,6 @@
 # ADR-37 — Plugin interface segregation (narrow extension protocols)
 
-Status: **Accepted, 2026-06-02; Slices 1–3 implemented.** Validated
+Status: **Accepted, 2026-06-02; Slices 1–3 implemented; `flow_contribution_for` REMOVED 2026-06-11 (ADR-52 WD3).** Validated
 against the full bundled-plugin set: every diagnostic-emitting plugin is
 migrated off the `diagnostics_for_file` walker onto `node_rule`
 (`rigor-actionpack`, the last and most complex — 4 phases,
@@ -8,11 +8,14 @@ namespace-qualification-sensitive — landed via the `NodeContext`
 ancestors), the `flow_contribution_for` split (`dynamic_return` /
 `type_specifier`) carries its cleanly-fitting consumers, and the
 machine-readable capability catalogue (`rigor plugins --capabilities`)
-ships. The fat hooks remain as the supported deprecated escape valve.
-**Deferred (non-gating, demand-driven):** the `dynamic_return`
-generalisation that would let the four escape-valve consumers
-(rspec-`let` / sorbet / activerecord / activestorage) migrate off
-`flow_contribution_for`, and the author-helper boilerplate-reduction
+ships. **`flow_contribution_for` was deleted as of ADR-52 WD3
+(2026-06-11)** — all five production users migrated to the
+`dynamic_return` / `type_specifier` DSL (receivers: Array/callable,
+methods: Array/callable, file_methods: callable); the hook now raises
+`ArgumentError` at load time if still defined. See CHANGELOG
+`### Removed` for the full migration table. The `diagnostics_for_file`
+escape valve remains.
+**Deferred (non-gating, demand-driven):** the author-helper boilerplate-reduction
 follow-ons (`Base#suggest`, `config_schema` defaults, `Plugin::Inflector`
 — [boilerplate plan](../design/20260602-plugin-boilerplate-reduction-plan.md)
 Phase 0c–0e). The per-interface test harnesses (`NodeRuleTest` /

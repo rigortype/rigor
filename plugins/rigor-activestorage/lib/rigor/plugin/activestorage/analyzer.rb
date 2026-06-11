@@ -12,7 +12,7 @@ module Rigor
       # attachment mapping the plugin sees.
       #
       # No `:error` diagnostics in this slice — the
-      # `flow_contribution_for` return-type narrowing carries
+      # `dynamic_return` return-type narrowing carries
       # the type-checking value; surfacing unknown attachment
       # names as errors requires a coupled receiver-class
       # narrowing pass that the integration spec doesn't yet
@@ -50,8 +50,8 @@ module Rigor
           return if attachments.nil?
 
           # Only flag when the method matches a known
-          # attachment name (the `flow_contribution_for`
-          # tier provides the narrowing; the diagnostic just
+          # attachment name (the `dynamic_return` rule
+          # provides the narrowing; the diagnostic just
           # confirms the recognition).
           attachment = attachments.find { |a| a[:name] == node.name.to_s }
           return if attachment.nil?

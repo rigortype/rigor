@@ -192,8 +192,8 @@ module Rigor
 
         # ADR-37 slice 2 / ADR-52 WD2 — declares a per-call-site
         # return-type contribution, gated by receiver class, method name,
-        # or both. The narrow successor to the `return_type` slot of
-        # `flow_contribution_for`:
+        # or both. The narrow successor to the `return_type` slot of the
+        # deleted `flow_contribution_for` hook (ADR-52 WD3):
         #
         #   # receiver-gated only:
         #   dynamic_return receivers: ["ActiveRecord::Base"] do |call_node, scope|
@@ -400,7 +400,8 @@ module Rigor
 
         # ADR-37 slice 2 — declares a predicate/assertion narrowing
         # contribution, method-gated. The narrow successor to the
-        # `post_return_facts` slot of `flow_contribution_for`:
+        # `post_return_facts` slot of the deleted `flow_contribution_for`
+        # hook (ADR-52 WD3):
         #
         #   type_specifier methods: [:assert_kind_of] do |call_node, scope|
         #     # return an Array of post-return facts, or nil
@@ -454,22 +455,13 @@ module Rigor
         nil
       end
 
-      # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2
-      # slice 7 — per-call return-type contribution hook. When
-      # the inference engine dispatches a `Prism::CallNode` and
-      # neither the precision tiers nor RBS resolve a result,
-      # `MethodDispatcher` consults each loaded plugin via this
-      # hook ahead of `RbsDispatch`. Plugins that override the
-      # default return a {Rigor::FlowContribution} bundle whose
-      # `return_type` slot pins the call site's result type.
-      #
-      # Default returns nil — plugins that don't refine return
-      # types skip the override. Failures are isolated: a hook
-      # that raises gets its contribution dropped silently for
-      # this call so the rest of the dispatch chain continues.
-      def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
-        nil
-      end
+      # NOTE: (ADR-52 WD3): the legacy ungated per-call hook
+      # `flow_contribution_for` was DELETED here pre-1.0 after its five
+      # production users migrated. Per-call return types are declared via
+      # the gated {.dynamic_return} DSL (static / run-time / per-file
+      # name sets, static / run-time receiver sets); post-return
+      # narrowing facts via {.type_specifier}. See the CHANGELOG
+      # migration note for the idiom-by-idiom mapping.
 
       # ADR-9 slice 3 — per-run preparation hook. The runner
       # invokes `#prepare(services)` on every loaded plugin once
@@ -562,8 +554,7 @@ module Rigor
 
       # ADR-37 slice 2 — the return type contributed by this plugin's
       # {.dynamic_return} rules for a call, or nil. The engine calls this
-      # from `MethodDispatcher` alongside (and ahead of) the legacy
-      # `flow_contribution_for`; a rule fires only when `receiver_type`'s
+      # from `MethodDispatcher`; a rule fires only when `receiver_type`'s
       # class equals or inherits from one of its declared `receivers:`.
       # First non-nil wins (declaration order). Failures isolate to nil.
       def dynamic_return_type(call_node:, scope:, receiver_type:)
@@ -590,8 +581,8 @@ module Rigor
 
       # ADR-37 slice 2 — the post-return narrowing facts contributed by
       # this plugin's {.type_specifier} rules for a call. The engine
-      # calls this from `StatementEvaluator` alongside the legacy
-      # `flow_contribution_for`; a rule fires only when `call_node.name`
+      # calls this from `StatementEvaluator`; a rule fires only when
+      # `call_node.name`
       # is one of its declared `methods:`. Failures isolate to [].
       def type_specifier_facts(call_node:, scope:)
         rules = self.class.type_specifiers

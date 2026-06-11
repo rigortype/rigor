@@ -77,7 +77,7 @@ module Rigor
     # @param plugin_registry [Rigor::Plugin::Registry, nil] v0.1.1
     #   Track 2 slice 7. The per-run plugin registry the
     #   inference engine consults at call sites for plugin
-    #   `#flow_contribution_for` overrides. When nil (the
+    #   `dynamic_return` rules. When nil (the
     #   default), no plugin-level return-type contribution
     #   participates — useful for tests, the `Environment.default`
     #   facade, and analyses that don't load plugins.

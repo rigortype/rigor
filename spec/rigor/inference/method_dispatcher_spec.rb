@@ -201,22 +201,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
-    describe "plugin return-type contribution tier (v0.1.1 / Track 2 slice 7)" do
+    describe "plugin dynamic_return contribution tier (v0.1.1 / Track 2 slice 7)" do
       let(:call_node) { Prism.parse("foo()").value.statements.body.first }
-      let(:contribution) do
-        Rigor::FlowContribution.new(
-          return_type: Rigor::Type::Combinator.constant_of("admin"),
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.flow-contributor", plugin_id: "flow-contributor",
-            node: nil, descriptor: nil
-          )
-        )
-      end
 
-      def make_plugin(plugin_id, contribution)
+      def make_plugin(plugin_id, return_type)
         klass = Class.new(Rigor::Plugin::Base) do
           manifest(id: plugin_id, version: "0.1.0")
-          define_method(:flow_contribution_for) { |**| contribution }
+          dynamic_return methods: [:foo] do |_call_node, _scope|
+            return_type
+          end
         end
         stub_const("FakePluginFor#{plugin_id.tr('-', '_').capitalize}", klass)
         klass
@@ -244,7 +237,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
 
       it "uses the merged plugin return_type when no precise tier resolves the call" do
         services = services_for_test
-        plugin_class = make_plugin("flow-contributor", contribution)
+        plugin_class = make_plugin("flow-contributor", Rigor::Type::Combinator.constant_of("admin"))
         Rigor::Plugin.register(plugin_class)
         plugin = plugin_class.new(services: services, config: {})
         env = env_with([plugin])
@@ -262,7 +255,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
 
       it "skips the plugin tier when call_node or scope is nil (internal callers)" do
         services = services_for_test
-        plugin_class = make_plugin("flow-contributor", contribution)
+        plugin_class = make_plugin("flow-contributor", Rigor::Type::Combinator.constant_of("admin"))
         Rigor::Plugin.register(plugin_class)
         plugin = plugin_class.new(services: services, config: {})
         env = env_with([plugin])
@@ -279,11 +272,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to be_nil
       end
 
-      it "drops a plugin contribution that raises and continues with the rest of the chain" do
+      it "drops a dynamic_return rule block that raises and continues with the rest of the chain" do
         services = services_for_test
         plugin_class = Class.new(Rigor::Plugin::Base) do
           manifest(id: "raising-contributor", version: "0.1.0")
-          def flow_contribution_for(**) = raise("boom")
+          dynamic_return methods: [:foo] do |_call_node, _scope|
+            raise "boom"
+          end
         end
         stub_const("FakeRaisingContributorPluginUnit", plugin_class)
         Rigor::Plugin.register(plugin_class)

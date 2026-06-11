@@ -27,11 +27,11 @@ two plugins agree on what counts as a model because they
 read the same source files.
 
 The per-call return type is contributed through
-`flow_contribution_for` (the supported escape valve for
-method-name-gated dynamic returns); it declines on
-non-`Nominal` receivers, unknown class names, attachment-name
-calls with arguments (setters), and method names that don't
-match a discovered attachment.
+`dynamic_return receivers: -> { attachment_index.all_owner_names }` — a
+run-time receiver callable (ADR-52 slice 3) that the engine resolves
+once per run. The block declines on non-`Nominal` receivers, unknown
+class names, attachment-name calls with arguments (setters), and method
+names that don't match a discovered attachment.
 
 ## Stand-alone vs. with `rigor-activerecord`
 

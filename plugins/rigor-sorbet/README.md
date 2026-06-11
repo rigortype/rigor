@@ -31,9 +31,9 @@ catalog-harvest time: `# typed: ignore` files are skipped
 entirely; every other level (`false` / `true` / `strict` /
 `strong`) is recorded the same way today. Per-call-site
 sigil enforcement (e.g. only firing `T.let` recognition in
-`# typed: true`+ files) needs file-context threading through
-`flow_contribution_for` and lives behind a future plugin-
-contract widening slice.
+`# typed: true`+ files) needs file-context threading through the
+`dynamic_return` block and lives behind a future plugin-contract
+widening slice.
 
 Slice 6 wires `T.absurd(x)` into Rigor's flow-sensitive
 narrowing. The plugin treats every `T.absurd` call as
@@ -194,9 +194,8 @@ Slice 6 implements two parts:
 2. **`plugin.sorbet.absurd-reachable` diagnostic.** When the
    discriminant `x`'s type at the absurd call hasn't been
    narrowed to `bot`, the call is mistakenly reachable. The
-   plugin records the call node during
-   `flow_contribution_for` and surfaces the warning in
-   `diagnostics_for_file`:
+   plugin records the call node during the `dynamic_return` block
+   and surfaces the warning in `diagnostics_for_file`:
 
    ```text
    demo.rb:42:5: warning: `T.absurd` is reachable: the discriminant did not
@@ -401,16 +400,16 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | ------------------------------------------ | -------- |
 | `manifest(...)` + `config_schema`          | declares the optional `paths:` config knob |
 | `Plugin::Base#io_boundary` (`read_file`)   | reads project source AND `sorbet/rbi/**/*.rbi` under the trusted scope |
-| `Plugin::Base#flow_contribution_for`       | contributes the parsed return type at every call site |
+| `Plugin::Base#dynamic_return` / `#type_specifier` | contributes the parsed return type / `T.bind` narrowing facts at every call site (replaced `flow_contribution_for`, removed ADR-52 WD3) |
 | `Plugin::Base#diagnostics_for_file`        | emits `plugin.sorbet.parse-error` for malformed sig blocks |
-| `Scope#type_of` (via `flow_contribution_for`) | resolves instance-side receivers to `Nominal[T]` for catalog lookup |
+| `Scope#type_of` (via `dynamic_return` block) | resolves instance-side receivers to `Nominal[T]` for catalog lookup |
 | `Type::Combinator.{nominal_of,union,intersection,untyped,top,bot,constant_of}` | constructs the Rigor-side carriers from the Sorbet vocabulary |
 
 ## Future direction
 
 Slice 2 of ADR-11 wires the `T.let` / `T.cast` / `T.must` /
-`T.bind` flow assertions through the same `flow_contribution_for`
-substrate as their `%a{rigor:v1:assert:}` analogues. Slice 3
+`T.bind` flow assertions through the same `dynamic_return` /
+`type_specifier` substrate as their `%a{rigor:v1:assert:}` analogues. Slice 3
 broadens the type-vocabulary translator (`T.proc`, `T::Array`,
 `T.class_of`, `T.attached_class`). Slice 4 adds the RBI
 directory walker so `sorbet/rbi/{gems,annotations,dsl,shims}/`

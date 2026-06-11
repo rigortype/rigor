@@ -1421,10 +1421,9 @@ module Rigor
         end
       end
 
-      # ADR-37 slice 2 — gathers each plugin's post-return narrowing from
-      # BOTH the narrow `type_specifier` DSL (method-gated, wrapped as a
-      # facts-only `FlowContribution`) and the legacy
-      # `flow_contribution_for` escape valve, swallowing per-plugin
+      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's post-return
+      # narrowing from the method-gated `type_specifier` DSL, wrapped as
+      # a facts-only `FlowContribution`, swallowing per-plugin
       # exceptions so a buggy plugin can't abort the assertion path.
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
@@ -1432,11 +1431,10 @@ module Rigor
       # Per-dispatch collection of plugin narrowing contributions. Mirrors
       # `MethodDispatcher#collect_plugin_contributions`: visit only the
       # registry-ordered subset of plugins that implement a per-call path
-      # (`for_statement` = overrides `flow_contribution_for` or declares a
-      # `type_specifier`), gate each path by membership AND by the ADR-52
-      # WD1 method-name gates (every `type_specifier` rule is
-      # `methods:`-gated, so when no legacy flow plugin is loaded the
-      # common no-candidate case is a single Set probe; a pruned
+      # (`for_statement` = declares a `type_specifier`), gate each path
+      # by membership AND by the ADR-52 WD1 method-name gates (every
+      # `type_specifier` rule is `methods:`-gated, so the common
+      # no-candidate case is a single Set probe; a pruned
       # consultation could only have returned `[]`), and accumulate
       # lazily (shared frozen empty array otherwise). Same contributions in
       # the same order as visiting every plugin; the caller is read-only.
@@ -1451,20 +1449,15 @@ module Rigor
         collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
       end
 
-      # The post-gate walk: registry order, flow path before
-      # type-specifier path within a plugin — the same order the
+      # The post-gate walk, in registry order — the same order the
       # ungated walk used.
       def collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
         result = nil
         relevant.each do |plugin|
-          if index.flow?(plugin)
-            legacy = plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
-            (result ||= []) << legacy if legacy.is_a?(Rigor::FlowContribution)
-          end
-          if index.type_specifier_candidate_for?(plugin, name)
-            facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
-            (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
-          end
+          next unless index.type_specifier_candidate_for?(plugin, name)
+
+          facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
+          (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
         rescue StandardError
           next
         end

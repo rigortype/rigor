@@ -342,7 +342,7 @@ RSpec.describe "plugins/rigor-rspec" do
   # are bound to their inferred return type. Tests exercise
   # the LetScopeIndex + LetTypeResolver directly with a stub
   # factory_index where applicable; the end-to-end run goes
-  # through `flow_contribution_for` to prove the engine
+  # through `dynamic_return` to prove the engine
   # actually narrows the local.
   describe "let / subject binding (Pillar 2 Slice 2)" do
     describe "LetScopeIndex" do

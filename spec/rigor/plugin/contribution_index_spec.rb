@@ -46,7 +46,7 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
       end
     end
   end
-  let(:flow_class) do
+  let(:legacy_flow_class) do
     Class.new(Rigor::Plugin::Base) do
       manifest(id: "flow", version: "0.0.1")
 
@@ -91,13 +91,11 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
       expect(index.dynamic_candidate_for?(ungated, :each)).to be(true)
     end
 
-    it "keeps every dispatch a candidate while a legacy flow plugin is loaded" do
-      flow = build_plugin(flow_class)
-      gated = build_plugin(gated_dynamic_class)
-      index = described_class.new([flow, gated])
+    it "raises ArgumentError when a Registry is built with a plugin defining flow_contribution_for (removed ADR-52)" do
+      legacy = build_plugin(legacy_flow_class)
 
-      expect(index.dispatch_candidate?(:each)).to be(true)
-      expect(index.statement_candidate?(:each)).to be(true)
+      expect { Rigor::Plugin::Registry.new(plugins: [legacy]) }
+        .to raise_error(ArgumentError, /removed \(ADR-52\)/)
     end
 
     it "gates the statement path on type_specifier method names" do

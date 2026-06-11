@@ -53,6 +53,21 @@ cycles live in dedicated archives:
 
 - **[engine]** `Data.define` member folding now works inside method bodies. The method-entry scope dropped the member-layout table recorded at index time, so a member read like `Point.new(3, 4).x` inside a `def` silently degraded to `Dynamic[top]` instead of folding to `3` ([ADR-48](docs/adr/48-data-struct-value-folding.md)). The restored precision also taught acceptance that a folded member instance is a value of its tagging class, so a declared return such as `AssertEffect?` accepts it without a spurious `def.return-type-mismatch`. The [ADR-53](docs/adr/53-scope-discovery-index-separation.md) Track A extraction then closed the same gap structurally at the second hand-copy site (re-typed user-method bodies, which had also been dropping the method-visibility table): nested body scopes now inherit the whole discovery index by reference, so a table can no longer be lost to a missed per-field copy.
 
+### Removed
+
+- **[plugin-api]** `Plugin::Base#flow_contribution_for` is deleted — a pre-1.0 sanctioned BC break ([ADR-52](docs/adr/52-compiled-plugin-contribution-dispatch.md) WD3, 2026-06-11). A plugin that still defines the hook raises `ArgumentError` at load time pointing at this entry. Migrate to the `dynamic_return` / `type_specifier` DSL:
+
+  | Legacy idiom | Successor |
+  | --- | --- |
+  | `FlowContribution(return_type: T)` for calls on a known receiver class | `dynamic_return receivers: ["MyClass"] do \|call_node, scope\| T end` — add `methods: [...]` to narrow to specific method names |
+  | Receiver set only known after `#prepare` (model index, attachment index) | `receivers: -> { my_index.names }` — callable resolved once per run against the plugin instance |
+  | Gate on bare method names, including a run-time set (e.g. a catalog's keys) | `methods: [:foo, :bar]` or `methods: -> { catalog.keys }` — may omit `receivers:` |
+  | Per-file name sets | `file_methods: ->(path) { names_for(path) }` — memoised per `(rule, path)`; cannot be combined with `methods:` |
+  | `FlowContribution` `post_return_facts` slot | `type_specifier methods: [...] do \|call_node, scope\| facts end` |
+  | `FlowContribution` `exceptional:` slot | Was ignored by the merger (only `return_type` survived). Express unreachability by returning `bot` from the `dynamic_return` block (`Rigor::Type::Combinator.bot`). |
+
+  The `dynamic_return` block returns a bare `Rigor::Type` or `nil` (skip). A rule gated on neither `receivers:` nor `methods:` is rejected at load time (it would fire on every dispatch, the cost `flow_contribution_for` carried).
+
 ## [0.1.17] - 2026-06-06
 
 v0.1.17 focuses on making analysis of real projects markedly faster — most visibly an incremental analysis cache that re-checks only the files an edit affects, an unchanged-project fast path, and a large allocation reduction on big Rails apps. Inspired by the [Elixir v1.20 type system](docs/notes/20260604-elixir-v1.20-type-system-rigor-review.md), control-flow narrowing is strengthened for several methods, so non-empty `Array` guards and `Hash` key-presence checks now refine reads precisely. It also folds `Data.define` value objects to precise member types and adds new clause-reachability and conformance diagnostics. Fixes include a block-parameter binding crash on the `|a, *b, c|` shape and a pathological route-helper re-read.

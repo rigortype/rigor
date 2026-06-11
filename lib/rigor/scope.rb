@@ -155,9 +155,10 @@ module Rigor
     # ADR-11 per-call-site assertion gating prerequisite. The
     # analyzer's per-file boundary stamps the current source
     # file's path onto the seed scope; nested rebuilds carry
-    # the value through so plugin hooks like
-    # `flow_contribution_for` can resolve "which file does
-    # this call site belong to?" without thread-locals.
+    # the value through so plugin rules (`dynamic_return`'s
+    # `file_methods:` gate, sigil checks) can resolve "which
+    # file does this call site belong to?" without
+    # thread-locals.
     def with_source_path(path)
       rebuild(source_path: path)
     end

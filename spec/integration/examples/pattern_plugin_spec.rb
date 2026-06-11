@@ -135,7 +135,7 @@ RSpec.describe "examples/rigor-pattern" do
     end
   end
 
-  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+  describe "dynamic_return return-type contribution (v0.1.2)" do
     # On a successful match the runtime `validate` returns its
     # value argument unchanged, so the plugin contributes the
     # argument's type (typically `Constant<String>`) as the

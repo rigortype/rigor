@@ -129,8 +129,9 @@ on top of the surfaces `rigor-lisp-eval` covered:
 
 ## Future direction — lightweight HKT
 
-As of v0.1.2 the plugin already produces `FlowContribution`
-bundles via `#flow_contribution_for`: dimensional results
+The plugin produces dimensional return types via
+`dynamic_return receivers: ["Distance", ...]` (ADR-52 slice 2;
+the former `flow_contribution_for` hook was removed ADR-52 WD3): dimensional results
 (`Distance / Time -> Speed`, `Distance + Distance -> Distance`,
 `Speed * Time -> Distance`, `.in_<unit>` queries returning
 `Float`) override the demo's `untyped` RBS at every call site,

@@ -76,7 +76,7 @@ the contract does not declare, or a renamed helper) fails the build with
 `call.undefined-method`. A complementary structural spec
 ([`spec/integration/plugin_contract_conformance_spec.rb`](../../spec/integration/plugin_contract_conformance_spec.rb))
 covers the other half: every hook override (`init` / `prepare` /
-`flow_contribution_for` / `diagnostics_for_file`) MUST stay callable with
+`diagnostics_for_file`) MUST stay callable with
 the engine's invocation — a narrowing override that drops a parameter the
 engine supplies fails (param/arity Liskov-compatibility, ADR-5).
 
@@ -248,19 +248,13 @@ the block carries logic and runs through `instance_exec`:
 `rigor plugins --capabilities` catalogue (ADR-37 § "Machine-readable
 capability catalogue") enumerates.
 
-`#flow_contribution_for(call_node:, scope:)` (ADR-9 / ADR-2) is the
-original fat return-type contribution hook, consulted at the same two
-sites **alongside** the narrow DSLs. It returns a
-`Rigor::FlowContribution` (carrying a precise `return_type` and/or
-narrowing facts), or `nil` to decline (the default). It is **the
-deprecated escape valve**, retained for the two contribution shapes the
-narrow DSLs deliberately do not express — a method-gated return type
-(`rigor-rspec`'s `let` / `subject` binding; `rigor-sorbet`'s
-sig-driven returns) and a dynamic per-project receiver set
-(`rigor-activestorage`'s `Attached::One` / `::Many` on discovered model
-classes). New plugins should prefer `dynamic_return` / `type_specifier`;
-`flow_contribution_for` is the documented last resort (the role
-PHPStan's `ExpressionTypeResolverExtension` plays).
+**`#flow_contribution_for` was removed in ADR-52 WD3 (2026-06-11).** A
+plugin that still defines the hook raises `ArgumentError` at load time.
+All five production users migrated to `dynamic_return` / `type_specifier`
+(see CHANGELOG `### Removed` for the full migration table). The
+historical role it played — an ungated per-call fat hook returning a
+`FlowContribution` bundle — is now expressed through the narrow,
+compiled-dispatch DSL forms described above.
 
 #### Machine-readable capability catalogue — `rigor plugins --capabilities` (ADR-37 Slice 3)
 
@@ -474,7 +468,7 @@ Frozen DI container handed to every plugin's `#initialize`,
 | `configuration` | `Rigor::Configuration` (read-only project config). |
 | `cache_store` | `Rigor::Cache::Store` or `nil` (slice 6 wires plugin-side cache producers through this). |
 | `trust_policy` | `Rigor::Plugin::TrustPolicy` (slice 2; see [`plugin-trust.md`](plugin-trust.md)). |
-| `fact_store` | `Rigor::Plugin::FactStore` (ADR-9 / v0.1.1) — the per-run cross-plugin fact store; `#prepare` publishes to it, `#diagnostics_for_file` / `#flow_contribution_for` read from it. |
+| `fact_store` | `Rigor::Plugin::FactStore` (ADR-9 / v0.1.1) — the per-run cross-plugin fact store; `#prepare` publishes to it, `#diagnostics_for_file` / `dynamic_return` blocks read from it. |
 
 A logger service will join this list when the diagnostics
 formatter grows a progress channel.
@@ -604,10 +598,11 @@ following are now in place and are documented in their own specs:
   capability roles, dynamic returns). The standalone
   {Rigor::FlowContribution::Merger}
   ([`flow-contribution-merger.md`](flow-contribution-merger.md))
-  shipped in slice 3; `#flow_contribution_for` on
-  `Rigor::Plugin::Base` (the return-type contribution tier) shipped
-  in slice 4 and was extended by the v0.1.1 cross-plugin work
-  (ADR-9).
+  shipped in slice 3; the return-type contribution tier shipped
+  in slice 4 (originally `#flow_contribution_for`, later split into
+  `dynamic_return` / `type_specifier` per ADR-37, then
+  `flow_contribution_for` was removed ADR-52 WD3) and was extended
+  by the v0.1.1 cross-plugin work (ADR-9).
 - **Plugin diagnostic provenance.** Slice 5 routes plugin-emitted
   diagnostics through `Diagnostic#source_family` with
   `plugin.<id>.<rule>` prefixes.
@@ -632,12 +627,12 @@ following are now in place and are documented in their own specs:
     escape valve; **every bundled diagnostic-emitting plugin is migrated
     onto `node_rule`** — `rigor-actionpack` (4 phases,
     namespace-qualification-sensitive) was the last.
-  - *Slice 2* — `#flow_contribution_for`'s split into the receiver-gated
+  - *Slice 2* — `#flow_contribution_for` split into the receiver-gated
     `dynamic_return` + method-gated `type_specifier` DSLs (documented
-    above), consulted alongside the now-deprecated fat hook; the
-    cleanly-fitting consumers (mangrove / minitest / rspec-matcher) are
-    migrated, the method-gated-return / dynamic-receiver consumers stay
-    on the escape valve by design.
+    above); cleanly-fitting consumers migrated, remaining consumers
+    stayed on the escape valve. **`flow_contribution_for` was then
+    deleted in ADR-52 WD3 (2026-06-11)** — all five escape-valve
+    consumers fully migrated before deletion.
   - *Slice 3* — the `FactProvider` naming + the machine-readable
     `rigor plugins --capabilities` catalogue (per plugin: node_rule node
     types, dynamic_return receivers, type_specifier methods,

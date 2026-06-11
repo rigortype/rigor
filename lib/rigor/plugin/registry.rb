@@ -45,17 +45,14 @@ module Rigor
         freeze
       end
 
-      def flow?(plugin) = @flow.include?(plugin)
       def dynamic?(plugin) = @dynamic.include?(plugin)
       def type_specifier?(plugin) = @type_specifier.include?(plugin)
 
       # O(1) "could any plugin contribute a return type for a call named
-      # `method_name`?" — false only when no plugin overrides the legacy
-      # flow hook AND every `dynamic_return` rule is `methods:`-gated on
-      # other names, in which case the ungated walk would have produced
-      # zero contributions too.
+      # `method_name`?" — false only when every `dynamic_return` rule is
+      # `methods:`-gated on other names, in which case the ungated walk
+      # would have produced zero contributions too.
       def dispatch_candidate?(method_name)
-        return true unless @flow.empty?
         return true if @dynamic_global_gate.nil?
 
         @dynamic_global_gate.include?(method_name)
@@ -64,7 +61,6 @@ module Rigor
       # O(1) statement-path sibling of {#dispatch_candidate?} over the
       # `type_specifier` rules (which are always `methods:`-gated).
       def statement_candidate?(method_name)
-        return true unless @flow.empty?
         return true if @type_specifier_global_gate.nil?
 
         @type_specifier_global_gate.include?(method_name)
@@ -117,15 +113,15 @@ module Rigor
 
       # The categorisation sets + the ordered per-collector subsets.
       def compile_memberships(plugins)
-        @flow = plugins.select { |p| flow_overridden?(p) }.to_set
+        plugins.each { |p| reject_legacy_flow_hook!(p) }
         @dynamic = plugins.reject { |p| p.class.dynamic_returns.empty? }.to_set
         @type_specifier = plugins.reject { |p| p.class.type_specifiers.empty? }.to_set
         compile_collector_subsets(plugins)
       end
 
       def compile_collector_subsets(plugins)
-        @for_method_dispatch = plugins.select { |p| @flow.include?(p) || @dynamic.include?(p) }.freeze
-        @for_statement = plugins.select { |p| @flow.include?(p) || @type_specifier.include?(p) }.freeze
+        @for_method_dispatch = plugins.select { |p| @dynamic.include?(p) }.freeze
+        @for_statement = plugins.select { |p| @type_specifier.include?(p) }.freeze
         @for_file_diagnostics =
           plugins.select { |p| file_diagnostics_overridden?(p) || !p.class.node_rules.empty? }.freeze
       end
@@ -138,10 +134,20 @@ module Rigor
         @type_specifier_global_gate = union_gate(@type_specifier_gates)
       end
 
-      # A plugin contributes via the legacy `flow_contribution_for` slot
-      # only when it overrides the no-op base implementation.
-      def flow_overridden?(plugin)
-        plugin.method(:flow_contribution_for).owner != Rigor::Plugin::Base
+      # ADR-52 WD3 — the legacy ungated `flow_contribution_for` hook was
+      # deleted pre-1.0. A plugin still defining it would silently never
+      # be called, which is the worst failure mode for its author —
+      # surface a loud load-time error with the migration mapping
+      # instead. (The Base default is gone, so any definer wrote it
+      # themselves.)
+      def reject_legacy_flow_hook!(plugin)
+        return unless plugin.respond_to?(:flow_contribution_for)
+
+        raise ArgumentError,
+              "plugin #{(plugin.class.name || plugin.class).inspect} defines `flow_contribution_for`, " \
+              "which was removed (ADR-52). Declare the per-call return type via `dynamic_return` " \
+              "(receivers:/methods:/file_methods: gates, static or callable) and post-return narrowing " \
+              "facts via `type_specifier` — see the CHANGELOG migration note."
       end
 
       # Same `Method#owner` trick for the per-file diagnostics hook —

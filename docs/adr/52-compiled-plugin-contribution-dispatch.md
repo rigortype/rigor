@@ -53,8 +53,21 @@ to the ungated hook by construction. The previously-proposed option A
 (Singleton-typing discovered constants) and option B (AST-keyed gate form) are
 both unnecessary and rejected. Gated on AR's 93-example end-to-end integration
 spec (the suite that caught the reverted `receivers:` attempt) + the GitLab
-corpus. **All five legacy users are now migrated; slice 5b (hook deletion) is
-unblocked.** Slice 6 (single node-rule walk — independent) remains.
+corpus. **All five legacy users migrated; slice 5b (hook deletion) implemented
+2026-06-11**: `Plugin::Base#flow_contribution_for` deleted, both engine
+collectors' legacy branches removed, the `ContributionIndex` flow set +
+legacy-disables-global-gate rule removed, and a **load-time `ArgumentError`**
+raised for any plugin still defining the hook (silently-never-called is the
+worst failure mode for a third-party author) — pointing at the CHANGELOG
+migration note that maps each legacy idiom to its WD2 successor; ADR-2/ADR-37
+status lines, the plugin-author skill, internal-spec, and the READMEs swept.
+**Slice 6 (single node-rule walk) implemented 2026-06-11**: an engine-owned
+`Plugin::NodeRuleWalk` does one `each_with_ancestors` pass per file dispatching
+to every matching `(plugin, rule)` — per-plugin `node_file_context` runs once
+before its rules, `is_a?` node-type matching preserved via a per-concrete-class
+memo, diagnostics bucketed per plugin and emitted in the old plugin-major order
+(byte-identical), isolation envelope reproduced. The WD surface is complete;
+remaining work is demand-driven (node-major re-sort deliberately not taken).
 Archetype: deliberative. Stakes: mid-high (touches the plugin contract and the
 engine's hottest path; precision-neutral by construction — the acceptance gate
 is byte-identical diagnostics).
@@ -321,10 +334,14 @@ methodology — cwd=rigor breaks plugin relative-path discovery); (c) stackprof
    `methods:` gate (no new gate form needed — see the blocker's RESOLVED
    header; 93-example end-to-end spec + GitLab corpus byte-identical). All
    five legacy users migrated.
-5. Delete `flow_contribution_for`; update ADR-2/ADR-37 status lines, the
-   plugin-author skill, `examples/` walkthroughs, CHANGELOG migration note.
-   **Unblocked as of 4b.**
-6. WD4 single-walk node rules (independent of 2–5; may land any time after 1).
+5. **DONE (2026-06-11)** — `flow_contribution_for` deleted (Base hook, both
+   collector branches, ContributionIndex flow set) + a load-time
+   `ArgumentError` for any plugin still defining it; ADR-2/ADR-37 status
+   lines, plugin-author skill, walkthrough READMEs, internal-spec, and the
+   CHANGELOG migration note all updated.
+6. **DONE (2026-06-11)** — WD4 single-walk node rules: engine-owned
+   `Plugin::NodeRuleWalk`, one walk per file, plugin-major order preserved
+   for byte-identical output.
 
 ## Rejected / deferred alternatives
 

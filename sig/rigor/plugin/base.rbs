@@ -41,7 +41,6 @@ class Rigor::Plugin::Base
   # Overridable lifecycle / extension hooks (default no-ops).
   def init: (untyped services) -> nil
   def prepare: (untyped services) -> nil
-  def flow_contribution_for: (call_node: untyped, scope: untyped) -> untyped
   def diagnostics_for_file: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
 
   # Engine-executed dispatch over the declared DSLs.

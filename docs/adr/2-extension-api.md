@@ -381,7 +381,10 @@ Working response: the first public plugin milestone should defer broad expressio
   instantiates its own plugin from the shared registry's
   frozen factory + manifest metadata. Plugins that
   accumulate per-run mutable state in their
-  `flow_contribution_for` / `diagnostics_for_file` hooks
+  `diagnostics_for_file` hooks (`flow_contribution_for`
+  **was removed in ADR-52 WD3, 2026-06-11** — migrate to
+  `dynamic_return` / `type_specifier`; see CHANGELOG
+  `### Removed`)
   (the `rigor-sorbet`
   `@reachable_absurd_nodes` /
   `@reveal_type_calls` /

@@ -848,7 +848,7 @@ RSpec.describe "plugins/rigor-sorbet" do
 
     it "stays silent when the engine determines the entire else branch is dead before typing" do
       # `nil.nil?` is statically `true`, so the engine prunes
-      # the else branch entirely — `flow_contribution_for` is
+      # the else branch entirely — the dynamic_return hook is
       # never called for the `T.absurd` and our recorded set
       # stays empty.
       source = <<~RUBY

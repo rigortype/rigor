@@ -183,7 +183,7 @@ RSpec.describe "examples/rigor-units" do
     end
   end
 
-  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+  describe "dynamic_return return-type contribution (v0.1.2)" do
     # The plugin's MethodTable resolves `Distance / Time -> Speed`,
     # `Distance + Distance -> Distance`, `Speed * Time -> Distance`,
     # etc. The demo's RBS annotates these methods as `untyped`,

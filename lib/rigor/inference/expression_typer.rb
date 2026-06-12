@@ -1542,6 +1542,49 @@ module Rigor
       INFERENCE_SUMMARY_KEY = :__rigor_user_method_return_summary__
       private_constant :INFERENCE_SUMMARY_KEY
 
+      # ADR-57 follow-up — run-scoped memo for resolved user-method
+      # return types. The ADR-57 gate-open made every resolved in-body
+      # self-call adopt the callee's inferred return, which re-types the
+      # callee body once per call site. With a project-wide discovery
+      # index, file N re-types callees defined in files 1..N-1, so
+      # whole-`lib` cost grows superlinearly in files-per-process (the
+      # 2026-06-12 Rails survey's whole-`lib` scaling wall).
+      #
+      # `infer_user_method_return` is a pure function of
+      # `(def_node, receiver, arg_types)` PLUS the frozen project
+      # discovery index: `build_user_method_body_scope` binds the args
+      # to the params in a FRESH `Scope` seeded from an empty fact /
+      # narrowing store and inherits `scope.discovery` whole by
+      # reference — the caller's narrowing state never enters. (This is
+      # what makes a signature-keyed return memo sound where the
+      # ADR-52 WD5 per-call-NODE contribution cache was not: that cache
+      # keyed scope-sensitive results on the node; this memo keys a
+      # scope-INSENSITIVE result on its real inputs.)
+      #
+      # Two dimensions are call-site-varying and so live IN the key:
+      # the receiver carrier (`describe(:short)`) and the argument-type
+      # signature (`describe(:short)` of each arg) — value-pinned args
+      # change folds (`factorial(5)` vs `factorial(6)`), so a coarser
+      # key would serve a stale fold. The third unsafe dimension —
+      # the ADR-55 recursion machinery (unroll fuel / fixpoint Kleene
+      # assumption / WD1 clamp) producing a TRANSIENT result rather
+      # than a final return — is excluded structurally: the memo is
+      # consulted and populated ONLY when the incoming guard stack is
+      # empty (a genuine top-of-stack entry, whose result is final and
+      # cannot be an in-progress assumption or a clamped value). Frames
+      # entered with a non-empty stack bypass the memo entirely and
+      # compute as before.
+      #
+      # Keyed by the identity of the frozen discovery `def_nodes`
+      # table (a new analysis generation lands in a fresh bucket,
+      # mirroring `class_graph_buckets`) then by the identity of the
+      # `def_node` and the `[receiver, *args]` descriptor tuple.
+      # `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store
+      # lives on `Thread.current`; fork-pool workers are separate
+      # processes, so it never crosses a project boundary.
+      RETURN_MEMO_KEY = :__rigor_user_method_return_memo__
+      private_constant :RETURN_MEMO_KEY
+
       # Per-inference recursion context threaded through the guard /
       # fixpoint helpers (ADR-55 slice 2). Bundles the call descriptor
       # (`receiver`, `arg_types`, `plain_signature`), the thread-local
@@ -1593,7 +1636,39 @@ module Rigor
         # carrier for top-level / DSL-block defs) printable.
         plain_signature = [receiver.describe(:short), def_node.name]
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
+        summaries = (Thread.current[INFERENCE_SUMMARY_KEY] ||= {})
 
+        # ADR-57 follow-up — return memo. The memo is consulted and
+        # populated only when the result for this frame is FINAL — i.e.
+        # no ADR-55 recursion machinery is in flight that could make the
+        # body fold to a transient Kleene assumption / clamped value
+        # (see `memoisable_return?` + RETURN_MEMO_KEY). Outside those
+        # windows the inferred return is a pure function of `(def_node,
+        # receiver, arg_types)` and the frozen discovery index, so it is
+        # safe to share across call sites and depths — catching the
+        # dominant whole-`lib` cost: a deep chain of non-recursive
+        # private helpers re-typed once per caller. The computation
+        # itself lives in `compute_user_method_return`.
+        unless memoisable_return?(stack, summaries, plain_signature)
+          return compute_user_method_return(def_node, body_scope, stack, summaries,
+                                            receiver, arg_types, plain_signature)
+        end
+
+        memo = return_memo_bucket
+        memo_key = [def_node.object_id, receiver.describe(:short),
+                    arg_types.map { |type| type.describe(:short) }]
+        return memo[memo_key] if memo.key?(memo_key)
+
+        memo[memo_key] = compute_user_method_return(def_node, body_scope, stack, summaries,
+                                                    receiver, arg_types, plain_signature)
+      end
+
+      # The ADR-55 recursion-guard + value-unroll + fixpoint body of
+      # user-method return inference, factored out so
+      # `infer_user_method_return` is a thin memo wrapper (the memo is
+      # the ADR-57 follow-up; this is unchanged from pre-memo behaviour).
+      def compute_user_method_return(def_node, body_scope, stack, summaries,
+                                     receiver, arg_types, plain_signature)
         # ADR-55 slice 1: when every bound argument is value-pinned,
         # extend the guard key with a stable descriptor of the argument
         # *values* so distinct constant frames may recurse (e.g.
@@ -1606,8 +1681,6 @@ module Rigor
         value_key = constant_argument_value_key(arg_types)
         extended = value_key && unroll_fuel_remaining(stack).positive?
         signature = [plain_signature, value_key] if extended
-
-        summaries = (Thread.current[INFERENCE_SUMMARY_KEY] ||= {})
 
         if stack.include?(signature)
           BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
@@ -1639,6 +1712,29 @@ module Rigor
           summaries: summaries, would_have_been_guarded: would_have_been_guarded
         )
         evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
+      end
+
+      # True when `infer_user_method_return`'s result for this frame is a
+      # final return (safe to memoise), not a transient ADR-55 value. See
+      # RETURN_MEMO_KEY: no fixpoint summary in flight, no constant-arg
+      # unroll begun, and this plain signature not itself mid-recursion.
+      def memoisable_return?(stack, summaries, plain_signature)
+        # Read the unroll fuel WITHOUT the decrement side effect of
+        # `unroll_fuel_remaining`: a constant-arg unroll has begun iff the
+        # thread-local is set and the stack is non-empty (the `ensure` in
+        # `evaluate_guarded_user_method_body` clears it at stack-empty).
+        unroll_idle = stack.empty? || Thread.current[INFERENCE_UNROLL_FUEL_KEY].nil?
+        summaries.empty? && unroll_idle &&
+          stack.none? { |frame| plain_part(frame) == plain_signature }
+      end
+
+      # Run-scoped return-memo bucket for the current discovery
+      # generation. Keyed by the identity of the frozen `def_nodes`
+      # table so a new analysis generation (or any scope that swaps the
+      # index) transparently lands in a fresh bucket. See RETURN_MEMO_KEY.
+      def return_memo_bucket
+        store = (Thread.current[RETURN_MEMO_KEY] ||= {}.compare_by_identity)
+        store[scope.discovered_def_nodes] ||= {}
       end
 
       # Pushes the recursion-guard frame, evaluates the body (the outermost

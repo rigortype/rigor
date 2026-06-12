@@ -57,17 +57,24 @@ source:
 
 ```ruby
 # fact.rb
-def factorial(n)                         #=> Integer
-  (1..n).inject(1) { |acc, i| acc * i }  #=> Integer
-end                                      #=> :factorial
+def factorial(n)       #=> Integer
+  result = 1           #=> 1
+  i = 1                #=> 1
+  while i <= n         #=> bool
+    result *= i        #=> Integer
+    i += 1             #=> Integer
+  end                  #=> nil
+  result               #=> Integer
+end                    #=> :factorial
 
-answer = factorial(5)                    #=> Integer
+answer = factorial(5)  #=> Integer
 ```
 
-No signature on `factorial`, yet the range, the block, and the
-accumulator all type cleanly. The same machinery tracks hash shapes
-through your params, string values through builder chains, and `nil`
-through guard clauses in everyday application code. (Output is
+No signature on `factorial`, yet every line types cleanly: the
+accumulators start as the literal `1` and converge to `Integer`
+through the loop. The same machinery tracks hash shapes through your
+params, string values through builder chains, and `nil` through guard
+clauses in everyday application code. (Output is
 syntax-highlighted — through [`bat`](https://github.com/sharkdp/bat)
 when installed.)
 

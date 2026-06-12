@@ -82,6 +82,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-06-10 | [プラグインアーキテクチャ構造監査 — per-call 消費経路の最適化余地](20260610-plugin-architecture-perf-audit.md) |
 | 2026-06-10 | [lib/rigor 内部アーキテクチャ再検討 — 正式リリース前の構造監査](20260610-lib-rigor-architecture-rereview.md) |
 | 2026-06-10 | [キャッシュ機構監査 — ディスク使用量と warm-run ロードコスト](20260610-cache-disk-runtime-audit.md) |
+| 2026-06-13 | [プラグインインターフェイス最終レビュー — v1.0 凍結前の BC-break 機会監査](20260613-plugin-interface-bc-review.md) |
 
 ## Process & meta
 

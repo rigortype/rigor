@@ -40,8 +40,7 @@ module Rigor
       # legacy single-collector `#collect` walk as the oracle, compared
       # against this walk by the permanent `rule_walk_equivalence_spec`
       # and, over whole corpora, by `RIGOR_SHADOW_RULE_WALK=1`
-      # (see `CheckRules.flow_collector_results` /
-      # `CheckRules.run_node_collectors`).
+      # (see `CheckRules.run_node_collectors`).
       module RuleWalk
         LOOP_OR_BLOCK_NODE_CLASSES = [
           Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode

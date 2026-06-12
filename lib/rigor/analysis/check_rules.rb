@@ -12,6 +12,7 @@ require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
 require_relative "check_rules/ivar_write_collector"
+require_relative "check_rules/main_pass_collector"
 require_relative "check_rules/self_closedness_scanner"
 
 module Rigor
@@ -164,41 +165,36 @@ module Rigor
       # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
       # @return [Array<Rigor::Analysis::Diagnostic>]
       def diagnose(path:, root:, scope_index:, self_call_misses: [], comments: [], disabled_rules: [])
-        diagnostics = []
-        Source::NodeWalker.each(root) do |node|
-          case node
-          when Prism::CallNode
-            diagnostics.concat(call_node_diagnostics(path, node, scope_index))
-          when Prism::DefNode
-            return_diagnostic = return_type_mismatch_diagnostic(path, node, scope_index)
-            diagnostics << return_diagnostic if return_diagnostic
-            override_vis = override_visibility_diagnostic(path, node, scope_index)
-            diagnostics << override_vis if override_vis
-            override_return = override_return_widened_diagnostic(path, node, scope_index)
-            diagnostics << override_return if override_return
-            override_param = override_param_narrowed_diagnostic(path, node, scope_index)
-            diagnostics << override_param if override_param
-          when Prism::IfNode, Prism::UnlessNode
-            unreachable = unreachable_branch_diagnostic(path, node, scope_index)
-            diagnostics << unreachable if unreachable
-          end
-        end
+        collectors = run_node_collectors(path, root, scope_index)
+        diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
-        diagnostics.concat(node_collector_diagnostics(path, root, scope_index))
+        diagnostics.concat(always_truthy_condition_diagnostics(path, collectors[:always_truthy].results))
+        diagnostics.concat(unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results))
+        diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
+        diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
-      # Builds the diagnostics from the {RuleWalk}-hosted collectors, run
-      # in one shared traversal (ADR-53 Track B). Each collector's results
-      # feed its diagnostic builder.
-      def node_collector_diagnostics(path, root, scope_index)
-        collectors = run_node_collectors(root, scope_index)
-        [
-          always_truthy_condition_diagnostics(path, collectors[:always_truthy].results),
-          unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results),
-          ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results),
-          dead_assignment_diagnostics(path, collectors[:dead_assignments].results)
-        ].reduce(:concat)
+      # The verbatim per-node dispatch of the former inline main pass
+      # (`diagnose`'s `Source::NodeWalker.each` `case`), now invoked by
+      # {MainPassCollector} on the shared {RuleWalk}. Returns the
+      # diagnostics for one node, in the same emission order as before.
+      def main_pass_node_diagnostics(path, node, scope_index)
+        case node
+        when Prism::CallNode
+          call_node_diagnostics(path, node, scope_index)
+        when Prism::DefNode
+          [
+            return_type_mismatch_diagnostic(path, node, scope_index),
+            override_visibility_diagnostic(path, node, scope_index),
+            override_return_widened_diagnostic(path, node, scope_index),
+            override_param_narrowed_diagnostic(path, node, scope_index)
+          ].compact
+        when Prism::IfNode, Prism::UnlessNode
+          [unreachable_branch_diagnostic(path, node, scope_index)].compact
+        else
+          []
+        end
       end
 
       # ADR-53 Track B — the {RuleWalk}-hosted built-in collectors all ride
@@ -210,28 +206,61 @@ module Rigor
       # single-collector `#collect` walk also runs as the oracle and any
       # divergence aborts the run — the corpus-scale half of the
       # equivalence harness (the curated half is `rule_walk_equivalence_spec`).
-      def run_node_collectors(root, scope_index)
+      def run_node_collectors(path, root, scope_index)
         collectors = {
+          main_pass: MainPassCollector.new(->(node) { main_pass_node_diagnostics(path, node, scope_index) }),
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
           ivar_writes: IvarWriteCollector.new(scope_index),
           dead_assignments: DeadAssignmentCollector.new(scope_index)
         }
         RuleWalk.run(root, collectors.values)
-        shadow_verify_node_collectors(root, scope_index, collectors) if ENV["RIGOR_SHADOW_RULE_WALK"]
+        shadow_verify_node_collectors(path, root, scope_index, collectors) if ENV["RIGOR_SHADOW_RULE_WALK"]
         collectors
       end
 
-      def shadow_verify_node_collectors(root, scope_index, collectors)
+      def shadow_verify_node_collectors(path, root, scope_index, collectors)
         divergences = collectors.filter_map do |role, collector|
-          legacy = collector.class.new(scope_index).collect(root)
-          next if legacy == collector.results
+          legacy = oracle_results(role, collector, path, root, scope_index)
+          next if comparable(legacy) == comparable(collector.results)
 
           "#{role} legacy=#{legacy.size} walk=#{collector.results.size}"
         end
         return if divergences.empty?
 
         raise "RIGOR_SHADOW_RULE_WALK divergence: #{divergences.join('; ')}"
+      end
+
+      # Normalises a collector's result for value comparison. The fact
+      # collectors return `Data` / Hash structures that already compare by
+      # value; the main pass returns {Diagnostic} objects (plain objects
+      # with identity `==`), so serialise those to hashes first.
+      def comparable(results)
+        return results.map(&:to_h) if results.is_a?(Array) && results.first.is_a?(Diagnostic)
+
+        results
+      end
+
+      # The oracle each hosted collector's walk result is checked against.
+      # The fact collectors re-run their legacy single-collector `#collect`
+      # walk; the main pass re-runs the former inline `Source::NodeWalker`
+      # `case` (`main_pass_oracle`) since its diagnostics are the result.
+      def oracle_results(role, collector, path, root, scope_index)
+        return main_pass_oracle(path, root, scope_index) if role == :main_pass
+
+        collector.class.new(scope_index).collect(root)
+      end
+
+      # The former inline main pass, kept as the shadow oracle: walks the
+      # tree with `Source::NodeWalker.each` and accumulates the same
+      # per-node diagnostics in the same order {MainPassCollector} now
+      # produces them on the shared walk.
+      def main_pass_oracle(path, root, scope_index)
+        diagnostics = []
+        Source::NodeWalker.each(root) do |node|
+          diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index))
+        end
+        diagnostics
       end
 
       def call_node_diagnostics(path, node, scope_index)

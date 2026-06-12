@@ -10,7 +10,7 @@ require "spec_helper"
 # integration fixture corpus, and requires identical per-collector
 # results. A collector may only migrate onto the walk while this oracle
 # comparison holds; the corpus-scale companion is the
-# `RIGOR_SHADOW_RULE_WALK=1` mode in `CheckRules.flow_collector_results`.
+# `RIGOR_SHADOW_RULE_WALK=1` mode in `CheckRules.run_node_collectors`.
 module RuleWalkEquivalenceCases
   # Curated shapes: each exercises a distinct part of the traversal
   # contract. Firing shapes are present for BOTH collectors so the
@@ -270,6 +270,45 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
 
         expect(walk_results(root, scope_index)).to eq(legacy_results(root, scope_index))
       end
+    end
+  end
+
+  # ADR-53 B3c — the stateless main pass rides the same {RuleWalk}; its
+  # `#results` are the per-node diagnostics, so its oracle is the former
+  # inline `Source::NodeWalker.each` `case` (`CheckRules.main_pass_oracle`).
+  # Equivalence is order-sensitive byte equality (the text formatter emits
+  # `result.diagnostics` in array order, unsorted), so we compare the full
+  # serialised diagnostic list.
+  describe "main pass on the shared walk vs the inline oracle" do
+    def main_pass_walk(path, root, scope_index)
+      node_diagnostics = ->(node) { Rigor::Analysis::CheckRules.main_pass_node_diagnostics(path, node, scope_index) }
+      collector = Rigor::Analysis::CheckRules::MainPassCollector.new(node_diagnostics)
+      described_class.run(root, [collector])
+      collector.results.map(&:to_h)
+    end
+
+    def main_pass_oracle(path, root, scope_index)
+      Rigor::Analysis::CheckRules.main_pass_oracle(path, root, scope_index).map(&:to_h)
+    end
+
+    RuleWalkEquivalenceCases::FIXTURE_FILES.each do |path|
+      it "matches the inline oracle on fixtures/#{File.basename(path)}" do
+        root, scope_index = parse_and_index(File.read(path))
+        skip "fixture does not parse standalone" if root.nil?
+
+        rel = "fixtures/#{File.basename(path)}"
+        expect(main_pass_walk(rel, root, scope_index)).to eq(main_pass_oracle(rel, root, scope_index))
+      end
+    end
+
+    it "fires the main pass somewhere in the fixture corpus (non-vacuity)" do
+      total = RuleWalkEquivalenceCases::FIXTURE_FILES.sum do |path|
+        root, scope_index = parse_and_index(File.read(path))
+        next 0 if root.nil?
+
+        main_pass_oracle("f", root, scope_index).size
+      end
+      expect(total).to be_positive
     end
   end
 end

@@ -1,7 +1,8 @@
 # ADR-53 — Scope discovery-index separation + check-rule walk consolidation
 
 Status: **Accepted — Track A complete (slices A1 + A2 landed 2026-06-10/11);
-Track B not started, 2026-06-11.** Archetype: deliberative. Stakes: high
+Track B slices B1–B3 landed (B1 + B2 2026-06-11, B3 2026-06-13), B4
+remaining.** Archetype: deliberative. Stakes: high
 (state-carrier restructure in the inference engine + traversal changes under
 correctness-critical rules; every slice gates on byte-identical diagnostics).
 A1 (`031f161e`): `Scope::DiscoveryIndex` extracted, readers delegated,
@@ -12,10 +13,25 @@ later-added tables (`data_member_layouts` in `build_fresh_body_scope`,
 `build_user_method_body_scope`). A2 (`063823e4`): the 14 per-table writers
 deleted, the three seeding sites collapsed onto `with_discovery`. Gates held:
 suite + steep green, self-check and Mastodon (146) / Redmine (12) corpus
-diagnostics byte-identical, bench-perf wall flat. **Remaining: Track B**
-(B1 shadow-run equivalence harness → B2 flow-collector merge → B3 full
-rule-walk consolidation → B4 convergence with ADR-52 WD4's
-`Plugin::NodeRuleWalk`, which has since landed and is the natural host).
+diagnostics byte-identical, bench-perf wall flat. Track B B1+B2
+(`6858872c`): the shadow-run equivalence harness + the two flow collectors
+on one `CheckRules::RuleWalk`. Track B B3 (`b85c51c6` IvarWrite +
+`4f1745aa` DeadAssignment + `963a2947` main pass): `RuleWalk` generalised
+to thread the union context (`in_loop_or_block` + qualified class/module
+prefix + `inside_def`) in one immutable per-node `Context`; a collector
+declares `NODE_CLASSES`, optional `RULE_WALK_GATES` (the walk-owned
+suppressions reproducing each legacy walk's traversal prune), and
+`#visit(node, context)`, with its gather/filter logic transplanted
+verbatim. The five built-in per-file walks (two flow + IvarWrite +
+DeadAssignment + the main `NodeWalker.each` pass) now ride ONE traversal.
+Each slice gated byte-identical (diagnostics) on the self-check tree,
+plugins/examples, Mastodon `app/models`, kramdown `lib`, and haml `lib`
+with `RIGOR_SHADOW_RULE_WALK=1` active and silent (it caught a real
+identity-`==` mismatch on the main pass's first run, before any drift);
+`rule_walk_equivalence_spec` hosts all five collectors (174 examples);
+bench-perf neutral. **Remaining: Track B B4** — convergence with ADR-52
+WD4's `Plugin::NodeRuleWalk` (since landed; the natural host) into one
+walk per file total.
 
 Grounding:
 [`docs/notes/20260610-lib-rigor-architecture-rereview.md`](../notes/20260610-lib-rigor-architecture-rereview.md)

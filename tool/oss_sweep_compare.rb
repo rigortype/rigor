@@ -5,7 +5,7 @@
 # Exits 0 (pass) or 1 (regression).
 #
 # Usage:
-#   ruby scripts/oss_sweep_compare.rb \
+#   ruby tool/oss_sweep_compare.rb \
 #     --diagnostics-json PATH \
 #     --coverage-json PATH \
 #     --thresholds-json PATH \

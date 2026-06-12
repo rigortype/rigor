@@ -159,7 +159,7 @@ coverage:
 # `bench/` data directory — keeping the file's no-`.PHONY` convention and
 # its `check-*` / `test-*` hyphenated-target family.
 bench-perf:
-	bundle exec ruby scripts/bench.rb --target lib
+	bundle exec ruby tool/bench.rb --target lib
 
 # `verify` chains the spec suite, the gated pool-runner spec (its
 # own rspec process — see `test-ractor-pool`), rubocop, `rigor check

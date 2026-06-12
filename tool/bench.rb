@@ -9,11 +9,11 @@
 #
 # First run (baseline uncalibrated): writes a SUGGESTED baseline to a
 # `.updated.json` sibling and passes — the same calibrate-on-first-run
-# pattern as scripts/oss_sweep_compare.rb. The committed baseline is never
+# pattern as tool/oss_sweep_compare.rb. The committed baseline is never
 # overwritten implicitly; commit a CI-measured baseline to activate the gate.
 #
 # Usage:
-#   ruby scripts/bench.rb [--target PATH ...] \
+#   ruby tool/bench.rb [--target PATH ...] \
 #     [--baseline PATH] [--thresholds PATH] [--write-baseline PATH]
 
 require "json"

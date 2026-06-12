@@ -121,7 +121,7 @@ jobs:
       - name: Compare against thresholds
         id: compare
         run: |
-          bundle exec ruby scripts/oss_sweep_compare.rb \
+          bundle exec ruby tool/oss_sweep_compare.rb \
             --diagnostics-json /tmp/mastodon-diagnostics.json \
             --coverage-json    /tmp/mastodon-coverage.json \
             --thresholds-json  data/oss-sweep/mastodon-thresholds.json \

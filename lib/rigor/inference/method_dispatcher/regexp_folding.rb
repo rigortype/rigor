@@ -38,8 +38,79 @@ module Rigor
           return nil unless SingletonFolding.receiver?(receiver, "Regexp")
           return fold_escape(args) if REGEXP_ESCAPE_METHODS.include?(method_name)
           return fold_new(args) if method_name == :new
+          return fold_last_match(context) if method_name == :last_match
 
           nil
+        end
+
+        # `Regexp.last_match` reads the same match-data slot the perlish
+        # `$~` global tracks. On a proven-match edge — the truthy branch
+        # of `if str =~ /re/`, the surviving path of `unless /re/ =~ s;
+        # raise; end`, a `case`/`when` regex arm — the flow engine has
+        # already narrowed `$~` to a non-nil `MatchData` (see
+        # `Narrowing#regex_match_predicate_scopes`). Upstream RBS types
+        # `Regexp.last_match` as `() -> MatchData?` / `(int) -> String?`,
+        # so without this consult the call drops back to the nilable
+        # return even where the surrounding flow has *proven* the match
+        # succeeded — re-introducing the `possible nil receiver` the `$~`
+        # narrowing exists to remove the moment the code reaches for the
+        # match through the method rather than the global.
+        #
+        # Mirrors the global's narrowing exactly, so it rides the same
+        # `Scope#forget_match_globals` invalidation (an intervening call
+        # that can re-run a match clears `$~`, and this consult clears
+        # with it):
+        #
+        # * 0-arg  -> `MatchData` (the narrowed `$~`)
+        # * `(N)`  -> `String` when capture group N is unconditional on
+        #             every successful match (the same set the `$N`
+        #             globals narrow), else `String?` (an optional /
+        #             alternation-reachable group is nil at runtime even
+        #             on a successful match).
+        # * `(:name)` / `(0)` and other forms defer to RBS.
+        #
+        # Declines (returns nil -> RBS) whenever `$~` is NOT proven
+        # non-nil: no match edge established it, or a falsey edge bound it
+        # to `Constant[nil]`. Narrowing only on the proven edge keeps the
+        # bare `m = Regexp.last_match; m[...]` (no preceding match) firing
+        # exactly as today — this never invents a match.
+        def fold_last_match(context)
+          scope = context.scope
+          return nil if scope.nil?
+
+          match_data = scope.global(:$~)
+          return nil unless proven_match?(match_data)
+
+          args = context.args
+          return Type::Combinator.nominal_of("MatchData") if args.empty?
+          return nil unless args.size == 1
+
+          fold_last_match_group(args.first, scope)
+        end
+
+        # Narrowed `$~` is a non-nil `Nominal[MatchData]`. A bare
+        # `MatchData?` / `nil` / Dynamic binding is NOT a proven match.
+        def proven_match?(match_data)
+          match_data.is_a?(Type::Nominal) && match_data.class_name == "MatchData"
+        end
+
+        # `Regexp.last_match(N)` for a value-pinned positive Integer N.
+        # Track the matching `$N` global the predicate edge already
+        # narrowed: present (`String`) means the group is unconditional,
+        # absent means it is optional / alternation-reachable (nil at
+        # runtime on a success), so we surface `String?`. A non-constant
+        # or non-positive index defers to RBS.
+        def fold_last_match_group(arg, scope)
+          return nil unless arg.is_a?(Type::Constant)
+
+          index = arg.value
+          return nil unless index.is_a?(Integer) && index.positive?
+
+          string_t = Type::Combinator.nominal_of("String")
+          group_global = scope.global(:"$#{index}")
+          return string_t if group_global.is_a?(Type::Nominal) && group_global.class_name == "String"
+
+          Type::Combinator.union(string_t, Type::Combinator.constant_of(nil))
         end
 
         # `Regexp.escape(str)` / `.quote(str)` — one String arg.

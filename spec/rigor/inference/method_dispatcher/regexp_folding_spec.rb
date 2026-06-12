@@ -116,4 +116,65 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
       expect(fold(:new, c("(unclosed"))).to be_nil
     end
   end
+
+  describe "last_match (proven-match-edge narrowing)" do
+    def match_data_t = Rigor::Type::Combinator.nominal_of("MatchData")
+    def string_t     = Rigor::Type::Combinator.nominal_of("String")
+    def nil_t        = Rigor::Type::Combinator.constant_of(nil)
+
+    # A scope on the truthy match edge: `$~` narrowed to MatchData and
+    # the numbered globals narrowed as
+    # `Narrowing#regex_match_predicate_scopes` leaves them. `$1` present
+    # (String) means capture group 1 is unconditional.
+    def proven_scope(extra = {})
+      defaults = { :$~ => match_data_t, :$1 => string_t }
+      defaults.merge(extra).reduce(Rigor::Scope.empty) do |s, (name, type)|
+        type.nil? ? s : s.with_global(name, type)
+      end
+    end
+
+    def fold_in(scope, method_name, *arg_types)
+      described_class.try_dispatch(cc(
+                                     receiver: regexp_singleton,
+                                     method_name: method_name,
+                                     args: arg_types,
+                                     scope: scope
+                                   ))
+    end
+
+    it "narrows the zero-arg form to MatchData on a proven-match edge" do
+      expect(fold_in(proven_scope, :last_match)).to eq(match_data_t)
+    end
+
+    it "narrows last_match(N) to String when group N is unconditional ($N present)" do
+      expect(fold_in(proven_scope, :last_match, c(1))).to eq(string_t)
+    end
+
+    it "surfaces String? for last_match(N) when group N is optional ($N absent)" do
+      scope = proven_scope(:$1 => nil) # only $~ narrowed, $1 not present
+      expect(fold_in(scope, :last_match, c(2))).to eq(Rigor::Type::Combinator.union(string_t, nil_t))
+    end
+
+    it "declines (defers to RBS) when no match edge narrowed $~" do
+      expect(fold_in(Rigor::Scope.empty, :last_match)).to be_nil
+    end
+
+    it "declines when $~ is bound to nil (falsey match edge)" do
+      scope = Rigor::Scope.empty.with_global(:$~, nil_t)
+      expect(fold_in(scope, :last_match)).to be_nil
+    end
+
+    it "declines when the index argument is non-constant" do
+      expect(fold_in(proven_scope, :last_match, string_t)).to be_nil
+    end
+
+    it "declines a named-capture symbol or zero index, deferring to RBS" do
+      expect(fold_in(proven_scope, :last_match, c(:k))).to be_nil
+      expect(fold_in(proven_scope, :last_match, c(0))).to be_nil
+    end
+
+    it "declines when no scope is threaded through the context" do
+      expect(fold(:last_match)).to be_nil
+    end
+  end
 end

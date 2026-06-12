@@ -1544,10 +1544,47 @@ module Rigor
             arg_type = scope.type_of(arg)
             next if arg_type.is_a?(Type::Dynamic) || arg_type.is_a?(Type::Top)
 
-            result = Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual)
-            return { node: arg, name: param.name, expected: param_type, actual: arg_type } if result.no?
+            next unless argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
+
+            return { node: arg, name: param.name, expected: param_type, actual: arg_type }
           end
           nil
+        end
+
+        # The parameter rejects the argument AND the rejection is not a
+        # withheld declaration-sourced-nil case.
+        def argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
+          return false unless Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no?
+
+          # ADR-58 (N2 extension) — the same declaration-sourced-nil-is-not-
+          # diagnostic-fuel criterion that governs `possible-nil-receiver`
+          # applies here. When the only reason the argument is rejected is a
+          # *declaration-sourced* nil constituent (the class-ivar index seed
+          # of a ctor `@x = nil` / a non-definitely-assigned ivar read), and
+          # the argument type with that nil removed WOULD be accepted, the
+          # working program's cross-method invariant is assumed and we do not
+          # fire. Flow-live nil (a method-local `@x = nil` write, a failed-
+          # guard narrowing) drops the provenance mark upstream and still
+          # fires. The argument's type is unchanged — only the firing
+          # decision is gated.
+          !declaration_sourced_nil_only_mismatch?(arg, arg_type, param_type, scope)
+        end
+
+        # True when `arg` is a declaration-sourced ivar read whose rejection is
+        # caused solely by its nil constituent: stripping nil from the argument
+        # type yields a type the parameter accepts (gradual mode). Mirrors the
+        # `possible-nil-receiver` WD1 gate, keyed on the ivar provenance mark
+        # rather than a local copy.
+        def declaration_sourced_nil_only_mismatch?(arg, arg_type, param_type, scope)
+          return false unless arg.is_a?(Prism::InstanceVariableReadNode)
+          return false unless scope.declaration_sourced?(:ivar, arg.name)
+          return false unless arg_type.is_a?(Type::Union)
+          return false unless union_contains_nil?(arg_type)
+
+          non_nil = Type::Combinator.union(*arg_type.members.reject { |m| nil_member?(m) })
+          return false if non_nil.is_a?(Type::Bot)
+
+          Inference::Acceptance.accepts(param_type, non_nil, mode: :gradual).yes?
         end
 
         def argument_check_eligible?(function)

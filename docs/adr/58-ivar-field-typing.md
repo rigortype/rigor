@@ -137,6 +137,35 @@ binding-provenance subset ships now because it is sound, FP-clean, and
 removes the canonical rotation-copy class without touching any other
 diagnostic.
 
+**Addendum, 2026-06-13 — WD1 criterion extended to
+`argument-type-mismatch` (N2).** The 2026-06-13 app/network corpora
+survey
+([`docs/notes/20260613-app-network-corpora-survey.md`](../notes/20260613-app-network-corpora-survey.md),
+N2 row) found the same declaration-sourced-nil-is-not-fuel gap on a
+second diagnostic: a ctor-seeded ivar read as a comparison *argument*
+(`@lines = lines` (untyped param) then `while n < @lines` →
+`got Dynamic[top]?`; `@length = 0; … while k <= @length` → `got 0?`).
+The bare `Dynamic[top]` / `Integer` operand is gradual-consistent with
+`Numeric`; the rejecting constituent is the read-site nil a
+non-definitely-assigned ivar seed contributes. `argument_type_diagnostic`
+now reuses WD1's provenance bit (`Scope#declaration_sourced?(:ivar, …)`)
+at the firing decision: when the rejecting argument is a
+declaration-sourced ivar read whose type *with the nil constituent
+removed* would be accepted (gradual mode), the rule declines. This
+changes only the firing decision — the argument's type is unchanged, so
+downstream narrowing / joins / other rules are unaffected — and is gated
+on provenance exactly as WD1, so flow-live nil (a method-local `@x = nil`
+write that drops the mark) and a genuinely-wrong argument type (a
+non-nil constituent the parameter still rejects) keep firing. Gate
+(`--no-cache`): textbringer `floating_window` loses its 5 `< @lines` /
+`> @lines` firings, concurrent-ruby's priority queue loses its 2
+`<= @length` firings, all adjudicated declaration-provenance; Mastodon
+`app/models` / kramdown `lib` byte-identical; self-check + `check-plugins`
+zero new firings; `make verify` + `make bench-perf` clean. The
+complementary suppress-on-any-`Dynamic`-union shortcut stays rejected for
+the same reason WD1 records — provenance, not carrier shape, is the
+stable rule.
+
 ### WD2 — Slice 2: homogeneous-write field reads (precision)
 
 With WD1 in force, precision no longer manufactures FPs: when every

@@ -1371,6 +1371,69 @@ RSpec.describe Rigor::Analysis::Runner do
           arg_errors = result.diagnostics.select { |d| d.message.start_with?("argument type mismatch") }
           expect(arg_errors).to be_empty
         end
+
+        # ADR-58 (N2 extension, 2026-06-13 app/network survey) — the
+        # declaration-sourced-nil-is-not-diagnostic-fuel criterion that
+        # governs `possible-nil-receiver` extends to `argument-type-mismatch`.
+        # A declaration-sourced ivar (the class-ivar index seed of a ctor
+        # `@x = 0` / `@x = nil`, read in a sibling method) types `T | nil`; the
+        # rejecting constituent is the seed nil, and the program's invariant is
+        # that the ivar is set by then. Stripping the nil yields an accepted
+        # type, so the rule withholds. Flow-live nil and genuinely-wrong types
+        # keep firing.
+        context "when the rejecting argument is a declaration-sourced ivar nil (ADR-58 N2)" do
+          def arg_mismatch_diags(result)
+            result.diagnostics.select { |d| d.message.start_with?("argument type mismatch") }
+          end
+
+          it "does not fire on `@length` (ctor-seeded Integer ivar) used in `k <= @length`" do
+            # `@length = 0` in the ctor seeds the class-ivar index, so a read in
+            # a sibling method types `0 | nil`. `Integer#<=` expects Numeric;
+            # `0` is gradual-consistent, the seed `nil` is what rejects.
+            # (concurrent-ruby ruby_non_concurrent_priority_queue shape.)
+            result = analyze(<<~RUBY)
+              class PQ
+                def initialize; @length = 0; end
+                def push; @length += 1; end
+                def covers?
+                  k = 1
+                  k <= @length
+                end
+              end
+            RUBY
+            expect(arg_mismatch_diags(result)).to be_empty
+          end
+
+          it "STILL fires on a flow-live nil argument (method-local @x = nil drops the mark)" do
+            result = analyze(<<~RUBY)
+              class PQ
+                def initialize; @length = 0; end
+                def covers?
+                  k = 1
+                  @length = nil
+                  k <= @length
+                end
+              end
+            RUBY
+            expect(arg_mismatch_diags(result)).not_to be_empty
+          end
+
+          it "STILL fires on a genuinely-wrong argument type regardless of provenance" do
+            # `@name` is a ctor-seeded String ivar — declaration-sourced — but
+            # passing a String where Numeric is required is a real mismatch with
+            # no nil constituent to strip, so it must still fire.
+            result = analyze(<<~RUBY)
+              class PQ
+                def initialize; @name = "q"; end
+                def covers?
+                  k = 1
+                  k <= @name
+                end
+              end
+            RUBY
+            expect(arg_mismatch_diags(result)).not_to be_empty
+          end
+        end
       end
 
       describe "dump_type / assert_type rules (Slice 7 phase 19)" do

@@ -200,6 +200,15 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 
 </details>
 
+<details lang="ar" dir="rtl"><summary>[ar] العربية</summary>
+
+```
+قم بتثبيت Rigor في هذا المشروع باتباع التعليمات الموجودة في:
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+</details>
+
 </details>
 
 > **Install channels** —

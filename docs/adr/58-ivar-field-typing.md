@@ -2,7 +2,11 @@
 
 Status: **Accepted, 2026-06-12.** WD1 partially implemented (binding-
 provenance subset, 2026-06-12; method-return-transit residual queued as
-WD1b — see WD1 status). WD2/WD3 not yet implemented. Archetype:
+WD1b — see WD1 status). WD2 resolved as already-realized
+(2026-06-12 — the flow-insensitive write-union already produces
+`join(writes) | nil`; corpus yield ~zero, bounded by untyped-param /
+recursive-return Dynamic sources per the WD2 status). WD3 not yet
+implemented. Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -142,6 +146,67 @@ chains (`current.next.value` after a guard) type precisely and
 M1/M2's coverage floor, 35–48 % dyntop on container code).
 Attr-writer/unknown writes keep today's Dynamic. Reuses the
 dead-transient-nil-write elision already landed (77a4bd0a).
+
+**Status, 2026-06-12 — already realized by the flow-insensitive
+write-union; no new code.** The chosen write universe is exactly the one
+the slice names — **the recorded direct `@x = expr` writes**
+(`build_class_ivar_index`), and the engine *already* delivers WD2's
+promised read type from it. The class-ivar index unions every write
+rvalue via `Type::Combinator.union` and seeds that union verbatim
+(`class_ivars_for` → `seed_instance_ivars`, no widening on the path), so:
+
+- a homogeneous concrete-write field reads its precise type today —
+  verified by `type-of`: `@pt = Pt.new` reads `Pt?`; a self-referential
+  `@nxt = Node.new` (or `@nxt = r` where `r = @next`) reads `Node?`;
+  kanwei `Heap::Node#@left = self` / `@right = self` reads
+  `Containers::Heap::Node` (probed in the live index). The self-class /
+  forward-declared `.new` resolves because the pre-pass scope is seeded
+  with the discovered-class table (`merged_classes`) before the ivar
+  walk, and `resolve_constant_name` consults it;
+- heterogeneous *concrete* writes keep their precise union, not Dynamic
+  (`@v = A.new` / `@v = B.new` reads `A | B | nil`);
+- the accessor read then drops the optional under the existing
+  return-FP-discipline (`x.nxt` on a `Node` receiver reads `Node`, no
+  `nil`), so `current.next.value` after a guard types precisely and a
+  clean `node = node.next` loop is `Node`-typed at the seed and re-entry;
+- **unknown/untyped writes keep today's Dynamic** exactly as the ADR
+  requires — and *that constraint is what bounds the corpus yield.*
+
+**Chosen universe and why no broader one.** A **setter-call-site**
+universe (`obj.next = expr` recorded as a write) was investigated and
+**declined**: on the algorithm corpora the node fields are written *only*
+via untyped params (`def initialize(v, l = nil, r = nil); self.left = l`)
+and recursive same-class-method returns (`node.left =
+self.insertUtil(node.left, value)`), whose rvalues are themselves
+`Dynamic` — so setter sites would add zero precision while widening the
+FP surface through receiver-class misresolution. The honest measured
+yield of *any* sound homogeneity universe on these corpora is therefore
+**~zero on coverage**: kanwei `lib/` stays at `precise_ratio 0.3579`
+(64 % dyntop) because its floor is **untyped-param node fields (M3,
+explicitly excused as gradual-typing) and recursive-return Dynamic**, not
+an ivar-read typing gap WD2 could close. The `Heap::Node` self-write
+fields already type `Heap::Node`; the `RubyRBTreeMap::Node` fields are
+`Dynamic` precisely because every write source is a param or an
+ivar-read rvalue.
+
+**Diagnostic delta: zero (no code change).** Self-check, algorithm
+corpora, ruby/lib, Mastodon/haml/kramdown are byte-identical (verified by
+construction — the engine behaviour is unchanged). WD1's
+declaration-sourced provenance is orthogonal to the carrier and continues
+to suppress the rotation-copy firings; WD1's probe fixtures
+(`class P; @right = P.new; r = @right; r.key`) pass unchanged and are
+themselves the demonstration that the homogeneous `P?` read is already
+produced.
+
+**WD1b re-scope, confirmed.** Now that accessor returns drop the nil
+(`x.parent` on a `Node` reads `Node`), the dominant DSAR/RBTree residual
+does **not** change character under WD2: `uncle = self.uncle(x)` fires on
+`Dynamic | nil` where the nil is the same-class callee's *explicit*
+`return nil` (flow-live), and the receiver chain `node.parent.parent` is
+`Dynamic` from param-sourced `@parent` (M3). Both are WD1b
+(nil-constituent provenance through return adoption) / M3 (param
+inference) frontiers, not WD2 ivar precision. Typing the ivar read
+`Node | nil` would leave these firings intact.
 
 ### WD3 — Slice 3: ctor definite assignment through same-class calls
 

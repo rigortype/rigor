@@ -251,7 +251,50 @@ module Rigor
             when "Integer"
               dispatch_integer_binary_from_arg(method_name, args.first) if args.size == 1
             when "Array"
-              array_nominal_flatten(nominal, args) if method_name == :flatten
+              case method_name
+              when :flatten then array_nominal_flatten(nominal, args)
+              when :compact then array_nominal_compact(nominal, args)
+              end
+            end
+          end
+
+          # `Array[T]#compact` — `compact` removes every `nil` element,
+          # so the result element type is `T` with its `nil` constituent
+          # stripped (`Array[Node?]#compact` → `Array[Node]`). Mirrors
+          # the `Tuple#compact` constant fold for the generic element
+          # case. Declines when the receiver carries no type argument
+          # (the RBS `Array[untyped]` answer is already maximal) or when
+          # `T` has no `nil` constituent to remove (the result equals the
+          # receiver, so the RBS tier's answer is already precise).
+          def array_nominal_compact(nominal, args)
+            return nil unless args.empty?
+
+            element = nominal.type_args&.first
+            return nil if element.nil?
+
+            stripped = strip_nil_constituent(element)
+            return nil if stripped.equal?(element)
+
+            Type::Combinator.nominal_of("Array", type_args: [stripped])
+          end
+
+          # Removes the `nil` constituent from a (possibly union) type,
+          # returning the same object when there is nothing to remove so
+          # callers can detect the no-op cheaply. Kept local to the
+          # dispatch tier to avoid a dependency on the narrowing module.
+          def strip_nil_constituent(type)
+            case type
+            when Type::Constant
+              type.value.nil? ? Type::Combinator.bot : type
+            when Type::Nominal
+              type.class_name == "NilClass" ? Type::Combinator.bot : type
+            when Type::Union
+              kept = type.members.map { |m| strip_nil_constituent(m) }
+              return type if kept.zip(type.members).all? { |k, m| k.equal?(m) }
+
+              Type::Combinator.union(*kept)
+            else
+              type
             end
           end
 

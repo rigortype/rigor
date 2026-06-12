@@ -1325,4 +1325,38 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
   end
+
+  describe "compact (T2)" do
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+
+    def array_of(*type_args)
+      Rigor::Type::Combinator.nominal_of("Array", type_args: type_args)
+    end
+
+    it "strips the nil constituent: Array[Node?] → Array[Node]" do
+      nilable = Rigor::Type::Combinator.union(nominal("Node"), nominal("NilClass"))
+      recv = array_of(nilable)
+      expect(dispatch(receiver: recv, method_name: :compact)).to eq(array_of(nominal("Node")))
+    end
+
+    it "strips a Constant[nil] constituent" do
+      nilable = Rigor::Type::Combinator.union(constant(1), constant(nil))
+      recv = array_of(nilable)
+      expect(dispatch(receiver: recv, method_name: :compact)).to eq(array_of(constant(1)))
+    end
+
+    it "declines (returns nil) for an Array[T] with no nil constituent" do
+      recv = array_of(nominal("Integer"))
+      expect(dispatch(receiver: recv, method_name: :compact)).to be_nil
+    end
+
+    it "declines for a bare Array with no type argument" do
+      expect(dispatch(receiver: nominal("Array"), method_name: :compact)).to be_nil
+    end
+
+    it "declines when an argument is supplied" do
+      recv = array_of(Rigor::Type::Combinator.union(nominal("Node"), nominal("NilClass")))
+      expect(dispatch(receiver: recv, method_name: :compact, args: [constant(1)])).to be_nil
+    end
+  end
 end

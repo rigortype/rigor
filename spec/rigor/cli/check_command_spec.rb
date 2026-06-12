@@ -56,6 +56,35 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(payload.fetch("diagnostics").map { |d| d["rule"] }).to include("call.undefined-method")
   end
 
+  it "seeds parallel-assignment ivar writes so a cross-method read is not always-falsey (N1)" do
+    # `old, @cb = @cb, block` records the `@cb` target into the
+    # class-ivar union; before N1 the collector dropped it and `@cb`
+    # seeded pure `Constant[nil]`, folding `if @cb` always-falsey.
+    File.write("channel.rb", <<~RUBY)
+      class Channel
+        def initialize
+          @cb = nil
+        end
+
+        def on_data(&block)
+          old, @cb = @cb, block
+          old
+        end
+
+        def fire
+          @cb.call if @cb
+        end
+      end
+    RUBY
+
+    status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "channel.rb"])
+
+    payload = JSON.parse(out)
+    messages = payload.fetch("diagnostics").map { |d| d["message"] }
+    expect(messages).not_to include(a_string_including("always falsey"))
+    expect(status).to eq(0)
+  end
+
   it "raises an InvalidArgument for an unsupported --format" do
     File.write("clean.rb", "x = 1\n")
 

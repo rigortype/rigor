@@ -624,6 +624,21 @@ module Rigor
           record_ivar_write(node, scope, class_name, accumulator,
                             guarded: guarded_ivars.include?(node.name))
         end
+
+        # N1 — parallel / multiple assignment (`old, @cb = @cb, block`,
+        # `@i, @o, @e, @thr = Open3.popen3(cmd)`). A direct
+        # `InstanceVariableWriteNode` is the only write form this
+        # collector handled, so an ivar appearing as a `MultiWriteNode`
+        # target was silently dropped from the class-ivar union — leaving
+        # it to seed as pure `nil` (from a sibling `@cb = nil` ctor write,
+        # or absent entirely) and false-fire `if @cb` always-falsey /
+        # `@thr.alive?` undefined-for-nil. Record each ivar target with
+        # its tuple-position RHS type where the RHS is array/tuple-shaped,
+        # else the unanalyzable floor (the same `Dynamic[top]` a single
+        # write to an unknown RHS records — an unanalyzable multi-write
+        # means unknown, not nil).
+        record_multi_write_ivars(node, scope, class_name, accumulator)
+
         record_ivar_mutator_call(node, class_name, mutated_ivars) if mutated_ivars && node.is_a?(Prism::CallNode)
 
         # Don't recurse into nested defs, classes, or modules; their
@@ -1108,10 +1123,104 @@ module Rigor
         return if guarded && falsey_constant?(rvalue_type)
 
         rvalue_type = Type::Combinator.union(rvalue_type, Type::Combinator.constant_of(nil)) if guarded
+        accumulate_ivar_type(accumulator, class_name, node.name, rvalue_type)
+      end
+
+      # Unions `type` into the class-ivar accumulator for `(class_name,
+      # ivar_name)`. Shared by the single-write and multi-write
+      # (parallel-assignment) collectors.
+      def accumulate_ivar_type(accumulator, class_name, ivar_name, type)
         accumulator[class_name] ||= {}
-        existing = accumulator[class_name][node.name]
-        accumulator[class_name][node.name] =
-          existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+        existing = accumulator[class_name][ivar_name]
+        accumulator[class_name][ivar_name] =
+          existing ? Type::Combinator.union(existing, type) : type
+      end
+
+      # N1 — records each `InstanceVariableTargetNode` of a
+      # `MultiWriteNode` (parallel / multiple assignment) into the
+      # class-ivar union, with the best cheap per-slot type. When the RHS
+      # is array/tuple-shaped (`Type::Tuple`) the ivar at position `i`
+      # records the type of element `i`; otherwise — an unanalyzable RHS
+      # such as `Open3.popen3(cmd)` typing to `Dynamic[top]` — every ivar
+      # slot records that unanalyzable floor (NOT `nil`: a multi-write we
+      # cannot decompose means the value is *unknown*, and `Dynamic[top]`
+      # is the sound union constituent, mirroring what a single write to
+      # an unknown RHS records). Nested targets (`(@a, @b), @c = …`)
+      # recurse with the slot's type as the new RHS type.
+      def record_multi_write_ivars(node, scope, class_name, accumulator)
+        return unless node.is_a?(Prism::MultiWriteNode)
+
+        rhs_type = scope.type_of(node.value)
+        record_multi_target_ivars(node, rhs_type, class_name, accumulator)
+      end
+
+      # Walks a `MultiWriteNode` / `MultiTargetNode` target tree against
+      # `rhs_type`, recording ivar targets per slot. Mirrors
+      # `MultiTargetBinder`'s tuple decomposition but for ivar (rather
+      # than local-variable) targets.
+      def record_multi_target_ivars(node, rhs_type, class_name, accumulator)
+        lefts = node.lefts || []
+        rest = node.rest
+        rights = node.rights || []
+        fronts, rest_type, backs =
+          decompose_multi_write_rhs(rhs_type, lefts.size, rights.size, rest_present: !rest.nil?)
+
+        lefts.each_with_index { |t, i| record_multi_ivar_target(t, fronts[i], class_name, accumulator) }
+        record_multi_ivar_rest(rest, rest_type, class_name, accumulator) if rest
+        rights.each_with_index { |t, i| record_multi_ivar_target(t, backs[i], class_name, accumulator) }
+      end
+
+      def decompose_multi_write_rhs(rhs_type, front_count, back_count, rest_present:)
+        if rhs_type.is_a?(Type::Tuple)
+          elements = rhs_type.elements
+          fronts = Array.new(front_count) { |i| multi_write_slot_type(elements, i) }
+          if rest_present
+            middle_end = [elements.size - back_count, front_count].max
+            backs = Array.new(back_count) { |i| multi_write_slot_type(elements, middle_end + i) }
+            [fronts, Type::Combinator.untyped, backs]
+          else
+            backs = Array.new(back_count) { |i| multi_write_slot_type(elements, front_count + i) }
+            [fronts, nil, backs]
+          end
+        else
+          # Unanalyzable / non-tuple RHS: every slot is the unknown floor.
+          floor = Type::Combinator.untyped
+          [Array.new(front_count) { floor }, rest_present ? floor : nil, Array.new(back_count) { floor }]
+        end
+      end
+
+      # The per-slot type for index `i` of a tuple RHS. A missing slot
+      # (over-destructure) is `nil` at runtime; a present slot keeps its
+      # type. Unlike the local-variable binder we do NOT soften an
+      # optional slot here — a class-ivar seed deliberately preserves a
+      # genuine `T | nil`, and any spurious nil is removed by the
+      # flow-side narrowing, not by dropping it at collection time.
+      def multi_write_slot_type(elements, index)
+        element = elements[index]
+        return Type::Combinator.constant_of(nil) if element.nil?
+
+        element
+      end
+
+      def record_multi_ivar_target(target, type, class_name, accumulator)
+        case target
+        when Prism::InstanceVariableTargetNode
+          accumulate_ivar_type(accumulator, class_name, target.name, type)
+        when Prism::MultiTargetNode
+          record_multi_target_ivars(target, type, class_name, accumulator)
+        end
+      end
+
+      def record_multi_ivar_rest(splat_node, _type, class_name, accumulator)
+        return unless splat_node.is_a?(Prism::SplatNode)
+
+        expression = splat_node.expression
+        return unless expression.is_a?(Prism::InstanceVariableTargetNode)
+
+        # A splat collects the middle slots into an Array; the precise
+        # element type is not worth recovering here. Record the
+        # unanalyzable floor (an Array of unknown), never nil.
+        accumulate_ivar_type(accumulator, class_name, expression.name, Type::Combinator.untyped)
       end
 
       def falsey_constant?(type)

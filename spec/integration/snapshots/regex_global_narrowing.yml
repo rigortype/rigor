@@ -1,3 +1,7 @@
 ---
 locals:
+  lm1: String?
+  lm1_uncond: String?
+  lm2: String?
+  lm2_opt: String?
   s: '"abc123"'

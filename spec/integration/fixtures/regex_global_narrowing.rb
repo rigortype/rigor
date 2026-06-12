@@ -38,4 +38,26 @@ case s
 when /(p)(q)?/
   assert_type("String?", $2)
 end
+
+# Regexp.last_match(N) mirrors $N narrowing on a proven-match edge.
+# Both groups unconditional: last_match(N) -> String.
+# Assign to locals before assert_type so the implicit-self call
+# does not trigger forget_match_globals between the two checks.
+if /([a-z]+)(\d+)/ =~ s
+  lm1 = Regexp.last_match(1)
+  lm2 = Regexp.last_match(2)
+  assert_type("String", lm1)
+  assert_type("String", lm2)
+end
+# Optional group: last_match(N) -> String?.
+if /([a-z]+)(\d+)?/ =~ s
+  lm1_uncond = Regexp.last_match(1)
+  lm2_opt    = Regexp.last_match(2)
+  assert_type("String", lm1_uncond)
+  assert_type("String?", lm2_opt)
+end
+# Optional group via alternation: last_match(N) -> String?.
+assert_type("String?", Regexp.last_match(1)) if /(a)|(b)/ =~ s
+# Off-edge (no proven match): last_match(N) defers to RBS -> String?.
+assert_type("String?", Regexp.last_match(1))
 # rubocop:enable Style/PerlBackrefs

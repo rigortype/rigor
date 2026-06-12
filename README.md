@@ -27,17 +27,14 @@ step-by-step.
    want RBS in `sig/`, [`rigor sig-gen`](https://rigor.typedduck.fail/reference/adr/14-rbs-sig-generation/)
    emits it from inference results so the written form starts in sync
    with reality.
-2. **Your specs are typed code too.** Rigor analyses `spec/` with the
-   same flow engine as `lib/`, and the `rigor-rspec` plugin teaches it
-   the DSL: `expect(x).to be_a(T)` / `eq(literal)` assertions narrow
-   `x` for the rest of the example; `subject` / `let` bindings carry
-   the SUT's inferred type into downstream `it` bodies; factory
-   definitions in `spec/factories/` feed attribute shapes into
-   `rigor-activerecord` and `rigor-factorybot`'s cross-plugin
-   channels. Implementation types flow into your specs — assertions
-   never flow back as implementation signatures (a test witnesses one
-   input, not a contract; see
-   [ADR-59](https://rigor.typedduck.fail/reference/adr/59-spec-assertions-are-not-signatures/)).
+2. **A false positive is the worst bug.** Your program works; a
+   static analyzer that argues otherwise is the thing that is wrong.
+   Rigor fires a diagnostic only when the receiver type is statically
+   known and the evidence is conclusive — never on a value it merely
+   failed to prove things about — and every precision change is gated
+   on real OSS codebases (Mastodon, Redmine, GitLab FOSS) before it
+   ships. You should never have to write defensive code, or a
+   suppression comment, to calm the analyzer down.
 3. **Programmable inference beyond unions.** A plain union
    (`Integer | nil`) is not the type story Ruby needs. Rigor reasons
    about *what values an expression actually produces* — literal values,

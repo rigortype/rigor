@@ -210,6 +210,22 @@ does **not** change character under WD2: `uncle = self.uncle(x)` fires on
 inference) frontiers, not WD2 ivar precision. Typing the ivar read
 `Node | nil` would leave these firings intact.
 
+**WD1b adjudication and demand-gating (2026-06-12, main-agent
+decision).** The WD1b residual class is re-adjudicated as
+**genuine-conservative, not artifact**: the firing nil is the callee's
+own explicit `return nil` — a value the method really returns at
+runtime (an RBTree node's uncle genuinely can be absent), consumed
+unguarded under a tree-shape invariant. That is exactly the
+`find_by → T?` shape the WD1 status already ruled must keep firing;
+suppressing it would require distinguishing "user same-class callee"
+from "foreign library" by origin alone, which is not a soundness-
+or invariant-relevant distinction — the two are the same diagnostic.
+WD1b therefore moves from "queued" to **demand-gated**: it proceeds
+only if a corpus shows a same-class-return shape that is *provably*
+invariant-protected in a way flow could credit (at which point the fix
+is a narrowing rule, not provenance suppression). The remaining
+algorithm-corpora firings stand as earned conservatism.
+
 ### WD3 — Slice 3: ctor definite assignment through same-class calls
 
 The stdlib C2 cluster (ipaddr `@mask_addr`) needs one more step: the

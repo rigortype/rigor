@@ -96,10 +96,14 @@ assert_type("bot", Diverge.new.spin(some_int))
 # Module-singleton call resolution (ADR-57 follow-up) now resolves the
 # `Parity.even?` singleton call against the module's `module_function`
 # body instead of leaving it `Dynamic[top]`. The cross-signature
-# fixpoint still does not fold to a precise `bool`: it yields the same
-# imprecise one-sided `false` the engine already produces for the
-# instance-method form `Parity.new.even?(some_int)` — a pre-existing
-# mutual-recursion fixpoint limitation independent of this slice.
+# fixpoint cannot converge the entangled `even?`/`odd?` pair (each
+# signature's Kleene iterate is conditioned on the other's unfinished
+# assumption), so it degrades to the sound `Dynamic[top]` floor — NOT
+# the one-sided `Constant[false]` it used to fold (the 2026-06-12
+# mutual-recursion soundness fix: a fixpoint whose evaluation consulted
+# an ancestor signature's in-flight summary returns `untyped`). Folding
+# to a precise `bool` would need a joint fixpoint over the
+# strongly-connected signature group — future work.
 module Parity
   module_function
 
@@ -112,4 +116,17 @@ module Parity
   end
 end
 
-assert_type("false", Parity.even?(some_int))
+assert_type("Dynamic[top]", Parity.even?(some_int))
+
+# Instance-method form of the same mutual pair — same sound degradation.
+class ParityCheck
+  def even?(n)
+    n == 0 ? true : odd?(n - 1)
+  end
+
+  def odd?(n)
+    n == 0 ? false : even?(n - 1)
+  end
+end
+
+assert_type("Dynamic[top]", ParityCheck.new.even?(some_int))

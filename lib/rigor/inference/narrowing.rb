@@ -1064,7 +1064,8 @@ module Rigor
         end
 
         def simple_dispatch_name?(name)
-          %i[nil? ! is_a? kind_of? instance_of? == != === =~ key? has_key? empty? any? none?].include?(name)
+          %i[nil? ! is_a? kind_of? instance_of? == != === =~ key? has_key? empty? any? none?
+             respond_to?].include?(name)
         end
 
         def dispatch_call_simple(node, scope, name)
@@ -1077,7 +1078,60 @@ module Rigor
           when :=~ then analyse_regex_match_predicate(node, scope)
           when :key?, :has_key? then analyse_key_presence_predicate(node, scope)
           when :empty?, :any?, :none? then analyse_array_emptiness_predicate(node, scope, name)
+          when :respond_to? then analyse_respond_to_predicate(node, scope)
           end
+        end
+
+        # T3 (template-corpora survey) — `recv.respond_to?(sym)` truthy
+        # edge narrows `recv` non-nil. `nil.respond_to?(m)` is `false`
+        # for every method `m` that `NilClass` does not define, so a
+        # truthy `respond_to?` proves the receiver was not `nil` UNLESS
+        # the queried symbol is one of `NilClass`'s own methods (`:to_s`,
+        # `:inspect`, `:nil?`, …) — `nil` DOES respond to those, so the
+        # truthy edge admits a nil receiver and we narrow nothing.
+        #
+        # Conservative floor: narrow only on a literal `Symbol`/`String`
+        # argument resolved against the RBS environment; a non-literal
+        # symbol, a missing argument, or a symbol that IS in `NilClass`'s
+        # method set declines. The falsey edge is always the no-op
+        # ("does not respond" proves little about the receiver's type).
+        # Narrowing-only: it removes the `nil` constituent and never
+        # promotes a non-nil type.
+        def analyse_respond_to_predicate(node, scope)
+          return nil if node.block
+          return nil if node.arguments.nil? || node.arguments.arguments.size != 1
+
+          sym = static_hash_key(node.arguments.arguments.first)
+          return nil if sym.nil?
+          return nil if nilclass_method?(sym, scope)
+
+          reader, writer = emptiness_receiver_accessors(node.receiver)
+          return nil if reader.nil?
+
+          current = scope.public_send(reader, node.receiver.name)
+          return nil if current.nil?
+
+          non_nil = narrow_non_nil(current)
+          return nil if non_nil.equal?(current)
+
+          [scope.public_send(writer, node.receiver.name, non_nil), scope]
+        end
+
+        # True when `nil` responds to `sym` — i.e. `NilClass` (own,
+        # inherited Kernel/BasicObject) defines an instance method named
+        # `sym`. Resolved against the RBS environment; when the lookup
+        # is unavailable the answer is conservatively `true` (decline to
+        # narrow) so an unknown environment never manufactures a false
+        # non-nil narrowing.
+        def nilclass_method?(sym, scope)
+          name = sym.respond_to?(:to_sym) ? sym.to_sym : sym
+          return true unless name.is_a?(Symbol)
+
+          !Rigor::Reflection.instance_method_definition(
+            "NilClass", name, environment: scope.environment
+          ).nil?
+        rescue StandardError
+          true
         end
 
         # ADR-47 §4-4 (Elixir `tuple_size`/non-empty analogue) — a bare

@@ -401,6 +401,41 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey).to eq(scope)
     end
 
+    # T3 — `recv.respond_to?(sym)` truthy edge non-nil narrowing.
+    describe "respond_to? non-nil narrowing (T3)" do
+      it "drops nil on the truthy edge for a symbol not in NilClass's set" do
+        bound = scope.with_local(:v, union_int_nil)
+        pred = parse_predicate("v.respond_to?(:count)", locals: %i[v])
+        truthy, falsey = described_class.predicate_scopes(pred, bound)
+        expect(truthy.local(:v)).to eq(integer_nominal)
+        # Falsey edge is the conservative no-op.
+        expect(falsey.local(:v)).to eq(union_int_nil)
+      end
+
+      it "does NOT narrow when the symbol is a NilClass method (nil responds)" do
+        bound = scope.with_local(:v, union_int_nil)
+        pred = parse_predicate("v.respond_to?(:to_s)", locals: %i[v])
+        truthy, falsey = described_class.predicate_scopes(pred, bound)
+        expect(truthy.local(:v)).to eq(union_int_nil)
+        expect(falsey.local(:v)).to eq(union_int_nil)
+      end
+
+      it "declines on a non-literal symbol argument" do
+        bound = scope.with_local(:v, union_int_nil).with_local(:m, integer_nominal)
+        pred = parse_predicate("v.respond_to?(m)", locals: %i[v m])
+        truthy, falsey = described_class.predicate_scopes(pred, bound)
+        expect(truthy.local(:v)).to eq(union_int_nil)
+        expect(falsey.local(:v)).to eq(union_int_nil)
+      end
+
+      it "narrows the same way for an ivar receiver" do
+        bound = scope.with_ivar(:@v, union_int_nil)
+        pred = parse_predicate("@v.respond_to?(:count)")
+        truthy, = described_class.predicate_scopes(pred, bound)
+        expect(truthy.ivar(:@v)).to eq(integer_nominal)
+      end
+    end
+
     # `if x = expr` — `StatementEvaluator#eval_local_write`
     # binds `x` in `post_pred` before narrowing runs, so the
     # write narrows the bound local on truthy/falsey edges the

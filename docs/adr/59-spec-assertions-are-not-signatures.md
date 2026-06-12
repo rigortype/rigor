@@ -91,7 +91,12 @@ discriminating criterion:
   spec→implementation inference. Reword to state the shipped direction
   (assertions narrow spec bodies; implementation types flow into
   specs; factories feed the plugin channel) in the same change as this
-  ADR.
+  ADR. *Follow-up (same day, `62bec417`)*: the reworded commitment read
+  as a plugin feature tour, not a design commitment, so the slot was
+  re-filled with the false-positive discipline pillar; the rspec /
+  factorybot capabilities stay documented in the plugin catalogue, and
+  the ROADMAP's "Pillar 2" mentions carry `<del>`/`<ins>` retraction
+  markers pointing here.
 
 ## Rejected / deferred alternatives
 

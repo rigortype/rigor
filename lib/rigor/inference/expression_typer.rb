@@ -987,10 +987,25 @@ module Rigor
         Type::Combinator.nominal_of(Regexp)
       end
 
+      # A range endpoint folds to a static value when it is a literal
+      # (`IntegerNode` / `StringNode`) or when its *evaluated* type is a
+      # `Constant<v>` carrying a range-able value (Integer / Float /
+      # String — matching the literal-path value kinds). The evaluated
+      # arm lets `(1..n)` fold to `Constant<Range>` when per-call body
+      # inference has pinned `n` to a constant (fact2 chain). A `nil`
+      # node is a beginless/endless boundary: keep today's static-nil
+      # behaviour (which yields `Constant<Range>` only when the *other*
+      # end is also static, preserving today's beginless/endless path).
       def static_range_endpoint(node)
         return [true, nil] if node.nil?
         return [true, node.value] if node.is_a?(Prism::IntegerNode)
         return [true, node.unescaped] if node.is_a?(Prism::StringNode) && node.respond_to?(:unescaped)
+
+        type = type_of(node)
+        if type.is_a?(Type::Constant)
+          value = type.value
+          return [true, value] if value.is_a?(Integer) || value.is_a?(Float) || value.is_a?(String)
+        end
 
         [false, nil]
       end

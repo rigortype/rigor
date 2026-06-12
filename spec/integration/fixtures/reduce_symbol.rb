@@ -5,30 +5,30 @@ include Rigor::Testing
 # instead of widening to `Dynamic[top]` through the
 # `Enumerable#reduce: (untyped, Symbol) -> untyped` RBS overload.
 
-# 2-arg seed form over a constant Range[Integer] — the classic
-# factorial accumulator. `:*` on Integer returns Integer; the
-# precision target is the `Integer` carrier, not a constant-folded
-# value.
-fact = (1..5).reduce(1, :*)
-assert_type("Integer", fact)
-
-# 2-arg seed form over a Range whose end is a non-literal Integer
-# (`rand` returns Integer). The Range still carries an Integer
-# element type, so the fold resolves to `Integer`.
+# 2-arg seed form over a Range whose bound is a NON-constant Integer
+# (`rand` returns Integer). The Range carries an Integer element type
+# but never folds to a `Constant[Range]`, so the constant-reduce tier
+# declines and the symbol-form carrier tier answers `Integer` — the
+# precision target here is the carrier, not a constant value. (The
+# fully-constant `(1..5).reduce(1, :*) → 120` shape lives in
+# `constant_reduce_fold.rb`.)
+lower = rand(3)
 upper = rand(10)
-ranged = (1..upper).reduce(1, :*)
+ranged = (lower..upper).reduce(1, :*)
 assert_type("Integer", ranged)
 
-# 1-arg no-seed form over a literal Integer collection. RBS models
-# this overload as `() { (E, E) -> E } -> E` (no nil), so the
-# result is `Integer` without a manufactured nil.
-sum = [1, 2, 3].reduce(:+)
+# 1-arg no-seed form over an Integer collection built from non-constant
+# elements. RBS models this overload as `() { (E, E) -> E } -> E` (no
+# nil), so the result is `Integer` without a manufactured nil.
+xs = [rand(10), rand(10), rand(10)]
+sum = xs.reduce(:+)
 assert_type("Integer", sum)
 
 # `inject` alias, 2-arg seed form.
-sum2 = [1, 2, 3].inject(0, :+)
+sum2 = xs.inject(0, :+)
 assert_type("Integer", sum2)
 
 # String element type with `:+` concatenation.
-joined = %w[a b].reduce(:+)
+strs = [rand.to_s, rand.to_s]
+joined = strs.reduce(:+)
 assert_type("String", joined)

@@ -1320,12 +1320,34 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to eq(Rigor::Type::Combinator.constant_of("a".."z"))
     end
 
-    it "types Float RangeNode as Range[Float]" do
+    it "types static Float RangeNode as Constant<Range>" do
       type = scope.type_of(parse_expression("(1.5..2.5)"))
 
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1.5..2.5))
+    end
+
+    it "types exclusive static integer RangeNode as Constant<Range>" do
+      type = scope.type_of(parse_expression("(1...5)"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1...5))
+    end
+
+    it "folds a RangeNode whose bounds TYPE as Constant into Constant<Range>" do
+      # `n` is pinned to a constant by an enclosing binding; the bound is
+      # a LocalVariableReadNode, not a literal IntegerNode, so the fold
+      # has to consult the evaluated bound type (fact2 chain).
+      type = scope.with_local(:n, Rigor::Type::Combinator.constant_of(5))
+                  .type_of(parse_expression("(1..n)", scopes: [[:n]]))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1..5))
+    end
+
+    it "keeps a RangeNode with a non-constant bound as Range[T]" do
+      type = scope.with_local(:m, Rigor::Type::Combinator.nominal_of("Integer"))
+                  .type_of(parse_expression("(1..m)", scopes: [[:m]]))
+
       expect(type.class_name).to eq("Range")
-      expect(type.type_args.size).to eq(1)
-      expect(type.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Float"))
+      expect(type.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
     end
 
     it "types non-interpolated RegularExpressionNode as Constant<Regexp> (v0.0.7)" do

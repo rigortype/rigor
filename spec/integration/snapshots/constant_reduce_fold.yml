@@ -11,3 +11,4 @@ locals:
   m: Integer
   nominal: Integer
   ranged: Dynamic[top]
+  ranged_base: Dynamic[top]

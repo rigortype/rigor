@@ -1,8 +1,10 @@
 ---
 locals:
-  fact: '120'
   joined: String
+  lower: Integer
   ranged: Integer
-  sum: '6'
-  sum2: '6'
+  strs: "[String, String]"
+  sum: Integer
+  sum2: Integer
   upper: Integer
+  xs: "[Integer, Integer, Integer]"

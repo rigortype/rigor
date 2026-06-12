@@ -55,6 +55,22 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/constant_reduce_fold.rb — constant reduce/inject folding" do
+    let(:harness) { harness_for("constant_reduce_fold") }
+
+    # Folds a fully-constant `reduce`/`inject` to its exact value. The
+    # fact2 chain (Range-literal bound-type folding → ReduceFolding's
+    # constant tier → ADR-57 per-call adoption) makes
+    # `def range_fact(n) = (1..n).reduce(1, :*); range_fact(5)` fold to
+    # `120` / `range_fact(0)` to `1` — the bound `(1..n)` types as
+    # `Constant[Range]` once `n` is pinned, even though the bound is a
+    # variable read rather than a literal IntegerNode.
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/destructured_param.rb — destructured positional params don't crash the binder" do
     let(:harness) { harness_for("destructured_param") }
 
@@ -1189,11 +1205,11 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
 
-      it "types the factorial accumulator `(1..5).reduce(1, :*)` as Integer" do
-        expect(harness.local(:fact)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      it "types a non-constant-bound range fold `(lower..upper).reduce(1, :*)` as Integer" do
+        expect(harness.local(:ranged)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
       end
 
-      it "types the no-seed `[1,2,3].reduce(:+)` as Integer (no manufactured nil)" do
+      it "types the no-seed `xs.reduce(:+)` over a non-constant array as Integer (no manufactured nil)" do
         expect(harness.local(:sum)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
       end
 

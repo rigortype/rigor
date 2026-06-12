@@ -34,14 +34,18 @@ assert_type("1", empty2)
 fact3 = [1, 2, 3].reduce(:+)
 assert_type("6", fact3)
 
-# A non-recursive def body is checked once with its parameter widened
-# to `Dynamic[top]` (no per-call constant specialization for the
-# non-recursive case), so `(1..n).reduce(1, :*)` surfaces the carrier
-# `Integer`, not a value. This documents the boundary of the fold:
-# the receiver must be constant AT the fold site.
+# A `def` body whose range bound is the parameter: ADR-57 unconditional
+# adoption surfaces the per-call `Constant[n]` at the body, and the
+# Range literal now folds `(1..n)` to `Constant[Range]` when both bounds
+# TYPE as constants (not just literal nodes) — so `(1..n).reduce(1, :*)`
+# folds to the exact value through ReduceFolding's constant tier. This
+# completes the fact2 chain: bound-type folding feeds the constant
+# reduce, which feeds per-call adoption at the call site.
 def range_fact(n) = (1..n).reduce(1, :*)
 ranged = range_fact(5)
-assert_type("Integer", ranged)
+assert_type("120", ranged)
+ranged_base = range_fact(0)
+assert_type("1", ranged_base)
 
 # Empty seeded range folds to the seed.
 empty_seed = (1..0).reduce(1, :*)

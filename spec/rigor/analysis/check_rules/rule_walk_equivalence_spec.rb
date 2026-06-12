@@ -160,7 +160,7 @@ module RuleWalkEquivalenceCases
         end
       end
     RUBY
-    "ivar writes inside a nested def are not double-collected" => <<~RUBY
+    "ivar writes inside a nested def are not double-collected" => <<~RUBY,
       class Holder
         def outer
           @x = 1
@@ -169,6 +169,37 @@ module RuleWalkEquivalenceCases
           end
           @x = "after"
         end
+      end
+    RUBY
+    "dead assignments across nested defs, underscore, trailing write, reads" => <<~RUBY,
+      def with_dead
+        dead = 1
+        live = 2
+        _ignored = 3
+        puts live
+
+        def nested
+          inner_dead = 9
+          inner_live = 10
+          inner_live
+        end
+
+        trailing = 4
+      end
+
+      def all_read
+        a = 1
+        b = a + 1
+        b
+      end
+    RUBY
+    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY
+      def or_write_reads
+        x = 1
+        x ||= 2
+        captured = 5
+        [1].each { captured }
+        x
       end
     RUBY
   }.freeze
@@ -180,7 +211,8 @@ module RuleWalkEquivalenceCases
   HOSTED_COLLECTOR_CLASSES = [
     Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
     Rigor::Analysis::CheckRules::UnreachableClauseCollector,
-    Rigor::Analysis::CheckRules::IvarWriteCollector
+    Rigor::Analysis::CheckRules::IvarWriteCollector,
+    Rigor::Analysis::CheckRules::DeadAssignmentCollector
   ].freeze
 end
 

@@ -36,6 +36,15 @@ module Rigor
       #   implicit return treats `def foo; x = 1; end` as
       #   returning `1`, so the trailing write is intentional.
       class DeadAssignmentCollector
+        # ADR-53 Track B — the node classes the shared {RuleWalk}
+        # dispatches to this collector. The legacy walk visits EVERY
+        # `DefNode` (it descends into all of them, nested defs included,
+        # processing each separately — `gather_*` barrier at nested defs
+        # so an outer def never sees an inner def's locals), so the
+        # collector needs no context gate: it fires at every `def` the
+        # shared full DFS reaches, exactly like the legacy walk.
+        NODE_CLASSES = [Prism::DefNode].freeze
+
         # Returns `Array<{def_class:, def_name:, write_node:}>`
         # — one entry per dead-assignment write. Empty when
         # the tree has no qualifying writes.
@@ -44,8 +53,24 @@ module Rigor
           @results = []
         end
 
+        # Legacy single-collector walk — kept as the oracle the ADR-53
+        # Track B equivalence harness compares {RuleWalk} against; deleted
+        # when Track B completes.
         def collect(root)
           walk_for_def_nodes(root)
+          @results.freeze
+        end
+
+        # {RuleWalk} entry point: the legacy walk's per-`def` logic,
+        # invoked at every `def` under the shared traversal contract. The
+        # `context` is unused — this collector processes all defs.
+        def visit(def_node, _context = nil)
+          collect_def_assignments(def_node)
+        end
+
+        # The accumulated result, frozen the same way `#collect` returns
+        # it — used by {RuleWalk}-driven callers after the walk completes.
+        def results
           @results.freeze
         end
 

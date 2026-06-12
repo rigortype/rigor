@@ -185,7 +185,6 @@ module Rigor
         end
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
         diagnostics.concat(node_collector_diagnostics(path, root, scope_index))
-        diagnostics.concat(dead_assignment_diagnostics(path, root, scope_index))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
@@ -197,7 +196,8 @@ module Rigor
         [
           always_truthy_condition_diagnostics(path, collectors[:always_truthy].results),
           unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results),
-          ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results)
+          ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results),
+          dead_assignment_diagnostics(path, collectors[:dead_assignments].results)
         ].reduce(:concat)
       end
 
@@ -214,7 +214,8 @@ module Rigor
         collectors = {
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
-          ivar_writes: IvarWriteCollector.new(scope_index)
+          ivar_writes: IvarWriteCollector.new(scope_index),
+          dead_assignments: DeadAssignmentCollector.new(scope_index)
         }
         RuleWalk.run(root, collectors.values)
         shadow_verify_node_collectors(root, scope_index, collectors) if ENV["RIGOR_SHADOW_RULE_WALK"]
@@ -281,8 +282,8 @@ module Rigor
       # read in the same body. The
       # `Analysis::CheckRules::DeadAssignmentCollector` describes
       # the conservative envelope.
-      def dead_assignment_diagnostics(path, root, scope_index)
-        DeadAssignmentCollector.new(scope_index).collect(root).map do |result|
+      def dead_assignment_diagnostics(path, dead_assignments)
+        dead_assignments.map do |result|
           build_dead_assignment_diagnostic(path, result[:write_node], result[:def_node])
         end
       end

@@ -712,7 +712,21 @@ module Rigor
         polarity = constant_value_polarity(left_type)
         return short_circuit_for(node, left_type, polarity) if polarity
 
-        Type::Combinator.union(left_type, type_of(node.right))
+        # The left operand only flows through on the edge that short-
+        # circuits: `a || b` yields `a` solely when `a` is truthy, so its
+        # falsey constituents (`nil` / `false`) can never be the value of
+        # the OrNode (they hand off to `b`); `a && b` yields `a` solely
+        # when `a` is falsey. Narrow the surviving left edge before the
+        # union so `s || full` (with `s : String?`) types `String |
+        # <full>` rather than re-admitting the stripped `nil`. Mirrors
+        # `StatementEvaluator#eval_and_or`'s `skipped_type`.
+        surviving_left =
+          if node.is_a?(Prism::AndNode)
+            Narrowing.narrow_falsey(left_type)
+          else
+            Narrowing.narrow_truthy(left_type)
+          end
+        Type::Combinator.union(surviving_left, type_of(node.right))
       end
 
       def short_circuit_for(node, left_type, polarity)

@@ -1148,6 +1148,46 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to be_a(Rigor::Type::Union)
     end
 
+    it "strips the left operand's nil on the OrNode short-circuit edge" do
+      # `s || 7` yields `s` only when `s` is truthy, so a `String?` left
+      # can never contribute `nil` to the value of the `||` — the falsey
+      # constituent hands off to the right operand. Mirrors the scope-side
+      # `StatementEvaluator#eval_and_or`; before this fix `type_of_and_or`
+      # unioned the raw (un-narrowed) left type, re-admitting the stripped
+      # `nil` and leaking it back into the enclosing method's return type.
+      nullable_string = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("String"),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+      bound = scope.with_local(:s, nullable_string)
+      type = bound.type_of(parse_expression("s || 7", scopes: [[:s]]))
+
+      expect(type).to eq(
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of("String"),
+          Rigor::Type::Combinator.constant_of(7)
+        )
+      )
+    end
+
+    it "strips the left operand's truthy constituents on the AndNode short-circuit edge" do
+      # `s && 7` yields `s` only when `s` is falsey, so a `String?` left
+      # contributes only its `nil` (the `String` part hands off to `7`).
+      nullable_string = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("String"),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+      bound = scope.with_local(:s, nullable_string)
+      type = bound.type_of(parse_expression("s && 7", scopes: [[:s]]))
+
+      expect(type).to eq(
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.constant_of(nil),
+          Rigor::Type::Combinator.constant_of(7)
+        )
+      )
+    end
+
     it "types CaseNode as the union of every when body and the else clause" do
       source = "case x; when 1; :a; when 2; :b; else; :c; end"
       type = scope.type_of(parse_expression(source))

@@ -50,26 +50,27 @@ but **`for "hello-world"`** — Rigor traced the value through the
 method call and the `downcase.gsub` chain, with no annotations
 anywhere.
 
-Ask it what it knows at any position:
-
-```ruby
-# fact.rb
-def factorial(n)
-  n <= 1 ? 1 : n * factorial(n - 1)
-end
-
-answer = factorial(5)
-```
+Ask it what it sees, line by line:
 
 ```shell-session
-$ rigor type-of fact.rb:6:1
-type:    120
+$ rigor annotate fact.rb
+# fact.rb
+def factorial(n)                     #=> 1 | Dynamic[top]
+  n <= 1 ? 1 : n * factorial(n - 1)  #=> 1 | Dynamic[top]
+end                                  #=> :factorial
+
+answer = factorial(5)                #=> 120
 ```
 
 A recursive call with a known argument folds all the way down to its
-value. The point is not arithmetic — the same machinery tracks hash
-shapes through your params, string values through builder chains, and
-`nil` through guard clauses in everyday application code.
+value — and where Rigor *cannot* know (the unconstrained `n`), it says
+so honestly with `Dynamic` instead of guessing. The point is not
+arithmetic: the same machinery tracks hash shapes through your params,
+string values through builder chains, and `nil` through guard clauses
+in everyday application code. (Output is syntax-highlighted, through
+[`bat`](https://github.com/sharkdp/bat) when installed; `rigor
+type-of FILE:LINE:COL` answers for a single position — it is what the
+editor integration uses for hover.)
 
 ## Get started in one prompt
 
@@ -110,7 +111,8 @@ and [CI guide](https://rigor.typedduck.fail/reference/manual/11-ci/).
 ```sh
 rigor check lib                 # find bugs (caches under .rigor/ — gitignore it)
 rigor init                      # drop a starter .rigor.yml
-rigor type-of lib/foo.rb:10:5   # inferred type at FILE:LINE:COL
+rigor annotate lib/foo.rb       # reprint a file with inferred types in the margin
+rigor type-of lib/foo.rb:10:5   # inferred type at one FILE:LINE:COL
 rigor triage lib                # summarise diagnostics: distribution, hotspots
 rigor sig-gen --diff lib/foo.rb # emit RBS from inference (--write to save)
 ```

@@ -421,7 +421,18 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
-          receiver_type = scope.type_of(call_node.receiver)
+          # N3 — a safe-navigation call (`recv&.m`) never dispatches on the
+          # nil edge of its receiver: at runtime it short-circuits to nil.
+          # A receiver that types as exactly `nil` yields nil with no call at
+          # all, so it is silent (no dead-code diagnostic — `&.` is the
+          # nil-skip operator by design, and frightening working
+          # `@x = nil; @x&.m` code would breach FP discipline). A nil-bearing
+          # *union* receiver is left to flow through unchanged: a `T | nil`
+          # union has no single concrete class, so the rule already bails
+          # below — preserving that keeps `&.` from newly firing on the
+          # non-nil constituent (which, for a cross-file project def, would
+          # be a working-code false positive).
+          receiver_type = safe_navigation_receiver(call_node, scope)
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
 
@@ -919,6 +930,21 @@ module Rigor
 
         def union_contains_nil?(union)
           union.members.any? { |member| nil_member?(member) }
+        end
+
+        # The receiver type the `call.undefined-method` existence check
+        # should reason about. For a safe-navigation call whose receiver
+        # types as exactly `nil`, this is `Type::Bot` — the call is
+        # statically skipped at runtime, and `concrete_class_name(Bot)` is
+        # nil so the rule bails (silent). Every other receiver (including a
+        # `T | nil` union, which already has no single concrete class) flows
+        # through unchanged.
+        def safe_navigation_receiver(call_node, scope)
+          receiver_type = scope.type_of(call_node.receiver)
+          return receiver_type unless call_node.safe_navigation?
+          return receiver_type unless nil_member?(receiver_type)
+
+          Type::Combinator.bot
         end
 
         def nil_member?(member)

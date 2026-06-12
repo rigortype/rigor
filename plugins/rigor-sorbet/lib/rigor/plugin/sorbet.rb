@@ -329,7 +329,32 @@ module Rigor
           chain_lookup(singleton_target, method_name, anchor_kind: :singleton, mixin_kind: :extend)
         elsif receiver
           instance_chain_lookup(receiver, method_name, scope)
+        else
+          implicit_self_lookup(method_name, scope)
         end
+      end
+
+      # ADR-11 slice 2 (deferred from slice 1) — implicit-self calls.
+      # A receiver-less call inside a method body resolves against the
+      # engine's own `scope.self_type`: `Nominal[Foo]` inside an
+      # instance method (instance-side lookup), `Singleton[Foo]` inside
+      # a `def self.x` body (singleton-side lookup, `extend` mixins).
+      # Without this, an enforced sig on a sibling method was invisible
+      # to in-class calls — the engine's body-inference tiers then
+      # re-typed the sibling's body, overriding an explicit
+      # `T.untyped` opt-out (the dispatcher's plugin tier had already
+      # run and declined). Anything else (toplevel / Dynamic / DSL
+      # self) contributes nothing and the dispatcher continues.
+      def implicit_self_lookup(method_name, scope)
+        self_type = scope&.self_type
+        case self_type
+        when Rigor::Type::Singleton
+          chain_lookup(self_type.class_name, method_name, anchor_kind: :singleton, mixin_kind: :extend)
+        when Rigor::Type::Nominal
+          chain_lookup(self_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include)
+        end
+      rescue StandardError
+        nil
       end
 
       def instance_chain_lookup(receiver_node, method_name, scope)

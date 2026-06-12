@@ -276,18 +276,6 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "translates `T.untyped` to Dynamic so call-site method-existence is silenced" do
-      # A `T.untyped` return whose body Rigor cannot fold to a concrete
-      # type stays `Dynamic[top]`, so a call on the result is silenced.
-      # The body here dispatches an unknown method (genuinely
-      # `Dynamic[top]`), which is the realistic `T.untyped` case — a
-      # method whose return Rigor cannot otherwise type. (A `def self.x`
-      # with a *foldable* body — `= 1` — now resolves through the
-      # engine's own module-singleton call resolution (ADR-57 follow-up)
-      # to the precise body type, exactly as the instance-side ancestor
-      # walk has always resolved `def x; 1; end`; the sorbet sig no longer
-      # overrides a foldable body. Whether an explicit `T.untyped`
-      # annotation should *suppress* engine body-inference outright is a
-      # broader sorbet-integration question, tracked separately.)
       source = <<~RUBY
         #{SIG_STUB}
         class Mystery
@@ -300,6 +288,103 @@ RSpec.describe "plugins/rigor-sorbet" do
 
       result = run_plugin(source: source)
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    # An enforced `sig { returns(T.untyped) }` is the author's explicit
+    # opt-out of return typing. The plugin's `dynamic_return` tier sits
+    # ahead of the engine's body-inference tiers in `MethodDispatcher`,
+    # so the contributed `Dynamic[top]` wins even when the body would
+    # fold to a precise value (`def thing; 1; end` → `Constant[1]`) —
+    # per the false-positive discipline, the opt-out outranks the
+    # foldable body's precision. The sigil gate still applies: in a
+    # sigil-less / `# typed: false` file Sorbet itself ignores the sig,
+    # so the engine's fold stands there (see the contrast example).
+    describe "`T.untyped` opt-out over a foldable body" do
+      it "suppresses engine body-folding for an instance method (explicit receiver)" do
+        source = <<~RUBY
+          # typed: true
+          #{SIG_STUB}
+          class Mystery
+            extend T::Sig
+            sig { returns(T.untyped) }
+            def thing; 1; end
+          end
+          Mystery.new.thing.anything_at_all
+        RUBY
+
+        result = run_plugin(source: source)
+        expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      end
+
+      it "suppresses engine body-folding for a singleton method (explicit receiver)" do
+        source = <<~RUBY
+          # typed: true
+          #{SIG_STUB}
+          class Mystery
+            extend T::Sig
+            sig { returns(T.untyped) }
+            def self.thing; 1; end
+          end
+          Mystery.thing.anything_at_all
+        RUBY
+
+        result = run_plugin(source: source)
+        expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      end
+
+      it "suppresses engine body-folding for an implicit-self call in an instance method" do
+        source = <<~RUBY
+          # typed: true
+          #{SIG_STUB}
+          class Mystery
+            extend T::Sig
+            sig { returns(T.untyped) }
+            def thing; 1; end
+            def use
+              thing.anything_at_all
+            end
+          end
+          Mystery.new.use
+        RUBY
+
+        result = run_plugin(source: source)
+        expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      end
+
+      it "suppresses engine body-folding for an implicit-self call in a singleton method" do
+        source = <<~RUBY
+          # typed: true
+          #{SIG_STUB}
+          class Mystery
+            extend T::Sig
+            sig { returns(T.untyped) }
+            def self.thing; 1; end
+            def self.use
+              thing.anything_at_all
+            end
+          end
+          Mystery.use
+        RUBY
+
+        result = run_plugin(source: source)
+        expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      end
+
+      it "lets the engine's fold stand in a sigil-less file (Sorbet would not enforce the sig)" do
+        source = <<~RUBY
+          #{SIG_STUB}
+          class Mystery
+            extend T::Sig
+            sig { returns(T.untyped) }
+            def thing; 1; end
+          end
+          Mystery.new.thing.anything_at_all
+        RUBY
+
+        result = run_plugin(source: source)
+        offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+        expect(offenders.map(&:message)).to include(a_string_matching(/anything_at_all/))
+      end
     end
   end
 

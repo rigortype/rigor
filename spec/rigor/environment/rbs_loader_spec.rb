@@ -173,6 +173,32 @@ RSpec.describe Rigor::Environment::RbsLoader do
         expect(loader.instance_method(class_name: "Numeric", method_name: name)).not_to be_nil
       end
     end
+
+    # `Pathname#expand_path` delegates to `File.expand_path` at runtime, which
+    # accepts any `to_path`-bearing object as its `dir` base.  The upstream RBS
+    # sig only allows `String`, causing false positives when a `Pathname` is
+    # passed as the base (the Bundler pattern).  See data/core_overlay/pathname.rbs.
+    context "with the pathname stdlib library loaded" do
+      # Pathname is a stdlib library (not core), so we need a loader that
+      # opts in to it.
+      let(:pathname_loader) { described_class.new(libraries: ["pathname"]) }
+
+      it "resolves Pathname#expand_path with the widened overlay signature" do
+        method = pathname_loader.instance_method(class_name: "Pathname", method_name: :expand_path)
+        expect(method).not_to be_nil, "expected overlay to declare Pathname#expand_path"
+        expect(method.method_types).not_to be_empty
+        # The overlay widens the optional `dir` parameter to accept Pathname
+        # in addition to String; verify at least one overload carries a parameter.
+        param_types = method.method_types.flat_map { |mt| mt.type.required_positionals + mt.type.optional_positionals }
+        expect(param_types).not_to be_empty
+      end
+
+      it "leaves the upstream Pathname#expand_path return type as Pathname" do
+        method = pathname_loader.instance_method(class_name: "Pathname", method_name: :expand_path)
+        return_types = method.method_types.map { |mt| mt.type.return_type.to_s }
+        expect(return_types).to all(eq("::Pathname"))
+      end
+    end
   end
 
   describe "#instance_definition" do

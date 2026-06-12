@@ -1,0 +1,25 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Pathname#expand_path ---
+#
+# Upstream `ruby/rbs` declares `Pathname#expand_path` as:
+#
+#   def expand_path: (?String dir) -> Pathname
+#
+# But `Pathname#expand_path` delegates to `File.expand_path`, whose `dir`
+# parameter is typed as `path` (= `string | _ToPath`). Passing a `Pathname`
+# as the base directory is the idiomatic Bundler pattern:
+#
+#   Pathname.new(path).expand_path(Bundler.root)   # root → Pathname
+#
+# With the ADR-57 self-call adoption gate now resolving `Bundler.root` to
+# `Pathname`, all five call sites in bundler.rb / bundler/source/git.rb fire
+# `argument type mismatch at parameter 'dir'`.  The upstream sig is simply
+# under-typed: the runtime accepts any `to_path`-bearing object.
+#
+# The overlay widens `dir` to `String | Pathname`, matching the runtime
+# delegation and the `File.expand_path` `path` alias used elsewhere in RBS.
+class Pathname
+  def expand_path: (?String | Pathname dir) -> Pathname
+                 | ...
+end

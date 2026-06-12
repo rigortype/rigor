@@ -538,10 +538,31 @@ module Rigor
         else_result = eval_case_else(node.else_clause, falsey_scope)
 
         all_results = [*branch_results, else_result]
+        branch_nodes = [*node.conditions, node.else_clause]
         [
           Type::Combinator.union(*all_results.map(&:first)),
-          reduce_scopes_with_nil_injection(all_results.map(&:last))
+          join_case_branch_scopes(all_results, branch_nodes)
         ]
+      end
+
+      # Joins the post-scopes of every `when`/`in`/`else` branch, dropping
+      # the scope of any branch that terminates (raises / returns / throws /
+      # types to `Bot`) before the merge — control never falls through such
+      # a branch, so its half-bound locals must not nil-inject the names a
+      # live sibling branch assigned. Mirrors the `branch_terminates?` rule
+      # `eval_if`/`eval_unless` already apply to the if/else merge: e.g.
+      # `case x; when 1 then v="a"; when 2 then v="b"; else raise; end`
+      # keeps `v: "a" | "b"` instead of `... | nil`. When every branch
+      # terminates the merge is itself unreachable; fall back to the full
+      # join so the continuation scope stays well-formed.
+      def join_case_branch_scopes(results, nodes)
+        live = []
+        results.each_with_index do |(type, branch_scope), i|
+          live << branch_scope unless branch_terminates?(nodes[i], type)
+        end
+
+        live = results.map(&:last) if live.empty?
+        reduce_scopes_with_nil_injection(live)
       end
 
       def eval_case_when_branches(subject, conditions, entry_scope)

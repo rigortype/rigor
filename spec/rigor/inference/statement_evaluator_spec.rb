@@ -151,6 +151,38 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:x).members.map(&:value)).to contain_exactly(1, 2, nil)
       expect(post.local(:y).members.map(&:value)).to contain_exactly(9, nil)
     end
+
+    it "drops a terminating else from the join so names bound in every when stay non-nil" do
+      _, post = evaluate(<<~RUBY)
+        case kind
+        when 1 then x = "a"
+        when 2 then x = "b"
+        else raise ArgumentError
+        end
+      RUBY
+      expect(post.local(:x).members.map(&:value)).to contain_exactly("a", "b")
+    end
+
+    it "drops a terminating when from the join" do
+      _, post = evaluate(<<~RUBY)
+        case kind
+        when 1 then raise ArgumentError
+        when 2 then x = "b"
+        else x = "c"
+        end
+      RUBY
+      expect(post.local(:x).members.map(&:value)).to contain_exactly("b", "c")
+    end
+
+    it "still nil-injects when a live else omits the name" do
+      _, post = evaluate(<<~RUBY)
+        case kind
+        when 1 then x = "a"
+        else 0
+        end
+      RUBY
+      expect(post.local(:x).members.map(&:value)).to contain_exactly("a", nil)
+    end
   end
 
   describe "begin/rescue/ensure" do

@@ -56,8 +56,12 @@ module Rigor
         Result = Data.define(:clause, :body, :subject_name, :condition_source, :kind, :keyword)
 
         # ADR-53 Track B — the node classes the shared {RuleWalk}
-        # dispatches to this collector (outside loop / block bodies).
+        # dispatches to this collector, and the context gate under which
+        # the walk suppresses it (loop / block bodies — see the envelope
+        # above). The legacy walk's `!in_loop_or_block` guard is now the
+        # walk's `:loop_or_block` gate, applied before `#visit`.
         NODE_CLASSES = [Prism::CaseNode, Prism::CaseMatchNode].freeze
+        RULE_WALK_GATES = [:loop_or_block].freeze
 
         def initialize(scope_index)
           @scope_index = scope_index
@@ -74,8 +78,10 @@ module Rigor
         end
 
         # {RuleWalk} entry point: the per-node logic of the legacy walk,
-        # invoked under the same traversal contract.
-        def visit(node)
+        # invoked under the same traversal contract. The `context` is
+        # unused — the loop / block suppression this collector relied on
+        # is the walk's `:loop_or_block` gate now.
+        def visit(node, _context = nil)
           collect_case(node)
         end
 

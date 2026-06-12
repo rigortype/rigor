@@ -107,7 +107,7 @@ module RuleWalkEquivalenceCases
         puts "defensive"
       end
     RUBY
-    "if nested in case body, case nested in if body" => <<~RUBY
+    "if nested in case body, case nested in if body" => <<~RUBY,
       x = 1
       case x
       when Integer
@@ -122,9 +122,66 @@ module RuleWalkEquivalenceCases
         end
       end
     RUBY
+    "ivar writes across nested classes and a barrier def" => <<~RUBY,
+      class Outer
+        def set_a
+          @a = 1
+          @a = "two"
+        end
+
+        class Inner
+          def set_b
+            @b = :sym
+          end
+        end
+
+        def with_nested_def
+          @c = 1
+          define = lambda { @c = "shadowed-by-block-not-recorded" }
+          define
+        end
+      end
+    RUBY
+    "ivar writes skipped in singleton + top-level defs, suppressed in loop/block" => <<~RUBY,
+      @top = 1
+      @top = "x"
+
+      class Skips
+        def self.singleton_write
+          @s = 1
+          @s = "two"
+        end
+
+        def loop_write
+          [1, 2].each do
+            @looped = 1
+            @looped = "two"
+          end
+        end
+      end
+    RUBY
+    "ivar writes inside a nested def are not double-collected" => <<~RUBY
+      class Holder
+        def outer
+          @x = 1
+          def inner
+            @x = "nested-def-ivar"
+          end
+          @x = "after"
+        end
+      end
+    RUBY
   }.freeze
 
   FIXTURE_FILES = Dir[File.expand_path("../../../integration/fixtures/*.rb", __dir__)].freeze
+
+  # Every {RuleWalk}-hosted collector, in the order it is added to the
+  # shared walk. Each keeps its legacy `#collect` walk as the oracle.
+  HOSTED_COLLECTOR_CLASSES = [
+    Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
+    Rigor::Analysis::CheckRules::UnreachableClauseCollector,
+    Rigor::Analysis::CheckRules::IvarWriteCollector
+  ].freeze
 end
 
 RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
@@ -137,17 +194,13 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
   end
 
   def legacy_results(root, scope_index)
-    [
-      Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector.new(scope_index).collect(root),
-      Rigor::Analysis::CheckRules::UnreachableClauseCollector.new(scope_index).collect(root)
-    ]
+    RuleWalkEquivalenceCases::HOSTED_COLLECTOR_CLASSES.map { |klass| klass.new(scope_index).collect(root) }
   end
 
   def walk_results(root, scope_index)
-    always = Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector.new(scope_index)
-    clauses = Rigor::Analysis::CheckRules::UnreachableClauseCollector.new(scope_index)
-    described_class.run(root, [always, clauses])
-    [always.results, clauses.results]
+    collectors = RuleWalkEquivalenceCases::HOSTED_COLLECTOR_CLASSES.map { |klass| klass.new(scope_index) }
+    described_class.run(root, collectors)
+    collectors.map(&:results)
   end
 
   describe "curated traversal shapes" do
@@ -160,14 +213,16 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
       end
     end
 
-    it "is not vacuous: the curated set fires both collectors" do
-      totals = [0, 0]
+    it "is not vacuous: the curated set fires every hosted collector" do
+      totals = Array.new(RuleWalkEquivalenceCases::HOSTED_COLLECTOR_CLASSES.size, 0)
       RuleWalkEquivalenceCases::CURATED.each_value do |source|
         root, scope_index = parse_and_index(source)
+        # Array collectors (flow) count entries; the IvarWrite Hash counts
+        # the classes that carry recorded writes — both are positive only
+        # when the collector actually fired.
         legacy_results(root, scope_index).each_with_index { |results, i| totals[i] += results.size }
       end
-      expect(totals[0]).to be_positive # always-truthy results
-      expect(totals[1]).to be_positive # unreachable-clause results
+      expect(totals).to all(be_positive)
     end
   end
 

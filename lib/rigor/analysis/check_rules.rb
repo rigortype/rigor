@@ -184,38 +184,53 @@ module Rigor
           end
         end
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
-        always_truthy_results, unreachable_clause_results = flow_collector_results(root, scope_index)
-        diagnostics.concat(always_truthy_condition_diagnostics(path, always_truthy_results))
-        diagnostics.concat(unreachable_clause_diagnostics(path, unreachable_clause_results))
-        diagnostics.concat(ivar_write_mismatch_diagnostics(path, root, scope_index))
+        diagnostics.concat(node_collector_diagnostics(path, root, scope_index))
         diagnostics.concat(dead_assignment_diagnostics(path, root, scope_index))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
-      # ADR-53 Track B (slice B2) — both flow collectors ride one
-      # {RuleWalk} traversal instead of walking the file once each.
-      # Under `RIGOR_SHADOW_RULE_WALK=1` the legacy per-collector walks
-      # also run as the oracle and any divergence aborts the run — the
-      # corpus-scale half of the equivalence harness (the curated half
-      # is `rule_walk_equivalence_spec`).
-      def flow_collector_results(root, scope_index)
-        always_truthy = AlwaysTruthyConditionCollector.new(scope_index)
-        unreachable_clauses = UnreachableClauseCollector.new(scope_index)
-        RuleWalk.run(root, [always_truthy, unreachable_clauses])
-        if ENV["RIGOR_SHADOW_RULE_WALK"]
-          shadow_verify_flow_collectors(root, scope_index, always_truthy.results, unreachable_clauses.results)
-        end
-        [always_truthy.results, unreachable_clauses.results]
+      # Builds the diagnostics from the {RuleWalk}-hosted collectors, run
+      # in one shared traversal (ADR-53 Track B). Each collector's results
+      # feed its diagnostic builder.
+      def node_collector_diagnostics(path, root, scope_index)
+        collectors = run_node_collectors(root, scope_index)
+        [
+          always_truthy_condition_diagnostics(path, collectors[:always_truthy].results),
+          unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results),
+          ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results)
+        ].reduce(:concat)
       end
 
-      def shadow_verify_flow_collectors(root, scope_index, always_truthy_results, unreachable_clause_results)
-        legacy_always = AlwaysTruthyConditionCollector.new(scope_index).collect(root)
-        legacy_clauses = UnreachableClauseCollector.new(scope_index).collect(root)
-        return if legacy_always == always_truthy_results && legacy_clauses == unreachable_clause_results
+      # ADR-53 Track B — the {RuleWalk}-hosted built-in collectors all ride
+      # one traversal of the file instead of one walk each. Returns the
+      # populated collectors keyed by role so the caller can build the
+      # diagnostics from each collector's `results`.
+      #
+      # Under `RIGOR_SHADOW_RULE_WALK=1` each hosted collector's legacy
+      # single-collector `#collect` walk also runs as the oracle and any
+      # divergence aborts the run — the corpus-scale half of the
+      # equivalence harness (the curated half is `rule_walk_equivalence_spec`).
+      def run_node_collectors(root, scope_index)
+        collectors = {
+          always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
+          unreachable_clauses: UnreachableClauseCollector.new(scope_index),
+          ivar_writes: IvarWriteCollector.new(scope_index)
+        }
+        RuleWalk.run(root, collectors.values)
+        shadow_verify_node_collectors(root, scope_index, collectors) if ENV["RIGOR_SHADOW_RULE_WALK"]
+        collectors
+      end
 
-        raise "RIGOR_SHADOW_RULE_WALK divergence: always-truthy legacy=#{legacy_always.size} " \
-              "walk=#{always_truthy_results.size}; unreachable-clause legacy=#{legacy_clauses.size} " \
-              "walk=#{unreachable_clause_results.size}"
+      def shadow_verify_node_collectors(root, scope_index, collectors)
+        divergences = collectors.filter_map do |role, collector|
+          legacy = collector.class.new(scope_index).collect(root)
+          next if legacy == collector.results
+
+          "#{role} legacy=#{legacy.size} walk=#{collector.results.size}"
+        end
+        return if divergences.empty?
+
+        raise "RIGOR_SHADOW_RULE_WALK divergence: #{divergences.join('; ')}"
       end
 
       def call_node_diagnostics(path, node, scope_index)
@@ -252,8 +267,8 @@ module Rigor
       #   Class-level ivars (`@x = 1` outside any def, in the
       #   class body) are also skipped — they're a separate
       #   surface (`Module#@var`) the engine doesn't yet model.
-      def ivar_write_mismatch_diagnostics(path, root, scope_index)
-        IvarWriteCollector.new(scope_index).collect(root).flat_map do |class_name, writes_by_ivar|
+      def ivar_write_mismatch_diagnostics(path, ivar_writes)
+        ivar_writes.flat_map do |class_name, writes_by_ivar|
           writes_by_ivar.flat_map do |ivar_name, writes|
             ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
           end

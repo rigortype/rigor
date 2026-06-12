@@ -88,8 +88,21 @@ proposes plugins matched to your stack (Rails, Sinatra, dry-rb, …),
 lets you pick an adoption mode — **baseline** (acknowledge existing
 diagnostics, work them down incrementally) or **strict**
 (zero-diagnostic gate from day one) — and commits a ready-to-use
-configuration. Non-English prompts (16 languages) are in the
-[Rails quickstart](https://rigor.typedduck.fail/reference/manual/14-rails-quickstart/).
+configuration.
+
+**This works in your language.** The prompt is plain natural
+language, so you can write it — and run the whole setup conversation
+— in your mother tongue. In Japanese, for example:
+
+```
+次の手順に従って、このプロジェクトに Rigor をインストールしてください:
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+Ready-made prompts — 日本語, 简体中文, 繁體中文, 한국어, Español,
+Português, Français, Deutsch, Italiano, Tiếng Việt, ภาษาไทย,
+Bahasa Indonesia, Polski, Українська, Русский, Română, Türkçe — are in
+the [installation guide](https://rigor.typedduck.fail/reference/manual/01-installation/#set-up-in-your-language).
 
 **Manual install** — Rigor is a tool, not a library: install it
 independently, **not** in your project's `Gemfile`. It runs on Ruby

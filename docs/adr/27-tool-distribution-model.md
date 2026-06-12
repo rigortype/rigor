@@ -339,8 +339,14 @@ themselves develop inside a container.
 
 - The single-binary channel (WD5) is unresolved — `tebako` viability
   on Ruby 4.0 versus a homegrown packaging is an open spike.
-- The CI-template timing risk (WD3) — whether `ruby/setup-ruby`
-  publishes a prebuilt Ruby 4.0 — must be verified at slice 3.
+- The CI-template timing risk (WD3) — **resolved 2026-06-13.**
+  `ruby/setup-ruby` ships prebuilt Ruby 4.0.x binaries for
+  ubuntu-latest (verified via `ruby-builder-versions.json`: versions
+  `4.0.0` through `4.0.5` are listed; setup-ruby resolves `"4.0"` to
+  `4.0.5` and loads it from `/opt/hostedtoolcache/Ruby/4.0.5/x64/bin`
+  in ~0.30 s, confirmed against Rigor's own CI run 27444146655 on
+  2026-06-12). The Nix-with-cache bridge mentioned in WD3 is not
+  needed; `ruby/setup-ruby` is the primary fast path.
 - A `setup-rigor` composite action is deferred (WD3); revisit on
   demand, or if the single binary (WD5) changes its value calculus.
 

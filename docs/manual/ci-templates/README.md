@@ -6,6 +6,11 @@ Each runs Rigor in its **own isolated job** on Ruby 4.0 (see
 required) and surfaces diagnostics inline on the pull / merge request via a
 CI-native output format ([ADR-51](../../adr/51-ci-diagnostic-output-formats.md)).
 
+`ruby/setup-ruby` provides **prebuilt** Ruby 4.0.x binaries for
+`ubuntu-latest` — setup is fast (~0.3 s), not a compile-from-source
+wait. Verified 2026-06-13: `setup-ruby` resolves `ruby-version: "4.0"`
+to Ruby 4.0.5 from the runner tool cache.
+
 | File | Copy it to | What it does |
 | --- | --- | --- |
 | [`github-actions-annotations.yml`](github-actions-annotations.yml) | `.github/workflows/rigor.yml` | **The default.** Workflow commands → inline PR annotations. No upload step, no permissions, works on every repo. |

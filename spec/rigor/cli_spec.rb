@@ -1528,9 +1528,9 @@ RSpec.describe Rigor::CLI do
 
       expect(err).to eq("")
       expect(status).to eq(0)
-      expect(out).to include("a = 1").and include("#=> dump_type: 1")
-      expect(out).to include("#=> dump_type: 2")
-      expect(out).to include("#=> dump_type: 3")
+      expect(out).to include("a = 1").and include("#=> 1")
+      expect(out).to include("#=> 2")
+      expect(out).to include("#=> 3")
     end
 
     it "reports the last expression of a multi-statement line" do
@@ -1538,8 +1538,8 @@ RSpec.describe Rigor::CLI do
 
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
-      expect(out).to include("1; 2; 3").and include("#=> dump_type: 3")
-      expect(out).not_to include("dump_type: 1")
+      expect(out).to include("1; 2; 3").and include("#=> 3")
+      expect(out).not_to include("#=> 1")
     end
 
     it "folds an `if` whose condition is statically falsey" do
@@ -1548,10 +1548,10 @@ RSpec.describe Rigor::CLI do
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
       lines = out.lines
-      expect(lines[0]).to include("#=> dump_type: nil")
-      expect(lines[1]).to include("#=> dump_type: :then")
-      expect(lines[2]).not_to include("dump_type") # the bare `else`
-      expect(lines[4]).to include("end").and include("#=> dump_type: :else")
+      expect(lines[0]).to include("#=> nil")
+      expect(lines[1]).to include("#=> :then")
+      expect(lines[2]).not_to include("#=>") # the bare `else`
+      expect(lines[4]).to include("end").and include("#=> :else")
     end
 
     it "unions both branches of a single-line ternary on a maybe predicate" do
@@ -1559,7 +1559,7 @@ RSpec.describe Rigor::CLI do
 
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
-      expect(out.lines[0]).to include("#=> dump_type: 2 | 3")
+      expect(out.lines[0]).to include("#=> 2 | 3")
     end
 
     it "unions both branches of a single-line `if`/`else` on a maybe predicate" do
@@ -1567,7 +1567,7 @@ RSpec.describe Rigor::CLI do
 
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
-      expect(out.lines[0]).to include("#=> dump_type: :else | :then")
+      expect(out.lines[0]).to include("#=> :else | :then")
     end
 
     it "annotates a `def` header line with the method's inferred return type" do
@@ -1576,7 +1576,7 @@ RSpec.describe Rigor::CLI do
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
       lines = out.lines
-      expect(lines[0]).to include("def greet(name)").and include("#=> dump_type: String")
+      expect(lines[0]).to include("def greet(name)").and include("#=> String")
       # The default annotation for the parameter (`Dynamic[top]`)
       # is replaced by the return-type override on the header line.
       expect(lines[0]).not_to include("Dynamic")
@@ -1587,7 +1587,7 @@ RSpec.describe Rigor::CLI do
 
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
-      expect(out.lines[0]).to include("def f(x)").and include("#=> dump_type: :even | :odd")
+      expect(out.lines[0]).to include("def f(x)").and include("#=> :even | :odd")
     end
 
     it "omits the annotation on a `def` whose return type cannot be inferred (empty body)" do
@@ -1596,7 +1596,7 @@ RSpec.describe Rigor::CLI do
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
       expect(out.lines[0]).to include("def empty")
-      expect(out.lines[0]).not_to include("dump_type")
+      expect(out.lines[0]).not_to include("#=>")
     end
 
     it "reads UTF-8 source even when `Encoding.default_external` is US-ASCII" do
@@ -1616,7 +1616,7 @@ RSpec.describe Rigor::CLI do
 
       expect(err).to eq("")
       expect(status).to eq(0)
-      expect(out).to include("こんにちは").and include("#=> dump_type: 1")
+      expect(out).to include("こんにちは").and include("#=> 1")
     end
 
     it "is idempotent — re-annotating does not stack comments" do
@@ -1627,7 +1627,101 @@ RSpec.describe Rigor::CLI do
       _status, second, _err = run_cli("annotate", "--no-color", path)
 
       expect(second).to eq(first)
-      expect(second.scan("#=> dump_type:").size).to eq(1)
+      expect(second.scan("#=>").size).to eq(1)
+    end
+
+    it "strips a pre-v0.2.0 `#=> dump_type:` annotation when re-annotating" do
+      path = write_fixture("a.rb", "a = 1  #=> dump_type: 1\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out).not_to include("dump_type")
+      expect(out.lines[0]).to include("a = 1").and include("#=> 1")
+    end
+
+    it "owns the `#=>` marker — a hand-written annotation is replaced, xmpfilter-style" do
+      path = write_fixture("a.rb", "a = 1 #=> stale\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out).not_to include("stale")
+      expect(out.lines[0]).to include("#=> 1")
+    end
+
+    it "leaves a `#=>` inside a string literal alone" do
+      path = write_fixture("a.rb", %(s = "#=> not an annotation"\n))
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out.lines[0]).to include(%("#=> not an annotation"))
+    end
+
+    describe "bat integration (https://github.com/sharkdp/bat)" do
+      # Runs annotate with PATH pointing at `dir` (optionally
+      # holding a fake `bat`), with colour forced on.
+      def run_annotate_with_path(dir, *argv)
+        original = ENV.fetch("PATH", "")
+        ENV["PATH"] = dir
+        out = StringIO.new
+        err = StringIO.new
+        status = described_class.start(["annotate", "--color", *argv], out: out, err: err)
+        [status, out.string, err.string]
+      ensure
+        ENV["PATH"] = original
+      end
+
+      def write_fake_bat(dir)
+        path = File.join(dir, "bat")
+        # `/bin/cat` because the test replaces PATH wholesale, so a
+        # bare `cat` would not resolve inside the fake script.
+        File.write(path, "#!/bin/sh\necho BATMARK\n/bin/cat\n")
+        File.chmod(0o755, path)
+        path
+      end
+
+      it "pipes through bat when colour is on and bat is on PATH" do
+        fixture = write_fixture("a.rb", "1\n")
+        write_fake_bat(tmpdir)
+
+        status, out, err = run_annotate_with_path(tmpdir, fixture)
+
+        expect(err).to eq("")
+        expect(status).to eq(0)
+        expect(out).to include("BATMARK").and include("#=> 1")
+      end
+
+      it "skips bat under --no-bat and falls back to the built-in colorizer" do
+        fixture = write_fixture("a.rb", "1\n")
+        write_fake_bat(tmpdir)
+
+        _status, out, _err = run_annotate_with_path(tmpdir, "--no-bat", fixture)
+
+        expect(out).not_to include("BATMARK")
+        expect(out).to include("\e[")
+      end
+
+      it "warns and falls back when --bat is forced but bat is absent" do
+        fixture = write_fixture("a.rb", "1\n")
+
+        status, out, err = run_annotate_with_path(tmpdir, "--bat", fixture)
+
+        expect(status).to eq(0)
+        expect(err).to include("no `bat` executable found")
+        expect(out).to include("\e[")
+      end
+
+      it "falls back to the built-in colorizer when bat fails mid-run" do
+        fixture = write_fixture("a.rb", "1\n")
+        path = File.join(tmpdir, "bat")
+        File.write(path, "#!/bin/sh\nexit 1\n")
+        File.chmod(0o755, path)
+
+        status, out, err = run_annotate_with_path(tmpdir, fixture)
+
+        expect(err).to eq("")
+        expect(status).to eq(0)
+        expect(out).to include("\e[")
+      end
     end
 
     it "emits ANSI colour escapes when --color is forced" do

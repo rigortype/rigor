@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "English"
 require "optionparser"
 require "prism"
 
@@ -20,18 +21,33 @@ module Rigor
     # (so `1; 2; 3` reports `3`), or, for a line that no statement
     # closes, the widest expression ending there (so the `if nil`
     # header reports its condition). It infers that expression's
-    # type and appends a `#=> dump_type: <type>` comment.
+    # type and appends a `#=> <type>` comment (the xmpfilter /
+    # seeing_is_believing convention).
     #
     # The annotated source is re-parsed with Prism — a sanity gate,
     # since the appended text is always a comment — and printed to
-    # stdout with IRB-style syntax highlighting via
+    # stdout. When colour is enabled and `bat`
+    # (https://github.com/sharkdp/bat) is on PATH it is used for
+    # highlighting; otherwise IRB-style highlighting via
     # {PrismColorizer}.
     class AnnotateCommand < Command
       USAGE = "Usage: rigor annotate [options] FILE"
 
-      # Appended ` #=> dump_type: <type>` suffix. Matched and
-      # stripped before re-annotating so re-running is idempotent.
-      ANNOTATION_PATTERN = /\s*#=>\s*dump_type:.*\z/
+      # Trailing `#=> …` annotation comment. Matched and stripped
+      # before re-annotating so re-running is idempotent — this
+      # follows xmpfilter's convention of owning the `#=>` marker,
+      # and also absorbs the pre-v0.2.0 `#=> dump_type: <type>`
+      # spelling. The leading `\s` requirement keeps a `#=>` inside
+      # a string literal (no preceding whitespace ambiguity aside)
+      # from matching mid-expression.
+      ANNOTATION_PATTERN = /\s+#=>(?:\s.*)?\z/
+
+      # Arguments for highlighting through `bat`: the annotated
+      # text arrives on stdin, so the language must be explicit;
+      # `--style=plain` drops the grid/header chrome so the output
+      # matches the PrismColorizer fallback line-for-line; paging
+      # stays off because the CLI may itself sit in a pipeline.
+      BAT_ARGS = %w[--language=ruby --style=plain --paging=never --color=always].freeze
 
       # @return [Integer] CLI exit status.
       def run
@@ -54,7 +70,7 @@ module Rigor
       def parse_options
         # Default: colour a tty, unless `NO_COLOR` opts out. An
         # explicit `--color` / `--no-color` overrides both.
-        options = { config: nil, color: @out.tty? && !no_color_env? }
+        options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil }
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
@@ -62,6 +78,10 @@ module Rigor
           opts.on("--[no-]color",
                   "Force or disable ANSI colour (default: auto-detect a tty; honours NO_COLOR)") do |value|
             options[:color] = value
+          end
+          opts.on("--[no-]bat",
+                  "Force or disable highlighting through bat (default: when colour is on and bat is found)") do |value|
+            options[:bat] = value
           end
         end
         parser.parse!(@argv)
@@ -96,7 +116,7 @@ module Rigor
         )
         line_types = LineTypeCollector.new(scope_index).collect(parse_result.value)
 
-        @out.puts(render(annotate(source, line_types), color: options.fetch(:color)))
+        @out.puts(render(annotate(source, line_types), color: options.fetch(:color), bat: options.fetch(:bat)))
         0
       end
 
@@ -118,8 +138,8 @@ module Rigor
         true
       end
 
-      # Appends ` #=> dump_type: <type>` to every line a type was
-      # inferred for, aligning the comment column.
+      # Appends ` #=> <type>` to every line a type was inferred
+      # for, aligning the comment column.
       def annotate(source, line_types)
         lines = source.lines
         column = annotation_column(lines, line_types)
@@ -130,7 +150,7 @@ module Rigor
           code = line.chomp.sub(ANNOTATION_PATTERN, "")
           next "#{code}#{eol}" if type.nil?
 
-          "#{code.ljust(column)}  #=> dump_type: #{type.describe(:short)}#{eol}"
+          "#{code.ljust(column)}  #=> #{type.describe(:short)}#{eol}"
         end.join
       end
 
@@ -143,11 +163,46 @@ module Rigor
         widths.max || 0
       end
 
-      def render(annotated, color:)
+      def render(annotated, color:, bat: nil)
         return annotated unless color
         return annotated unless Prism.parse(annotated).success?
 
-        PrismColorizer.colorize(annotated)
+        rendered = render_with_bat(annotated, forced: bat) unless bat == false
+        rendered || PrismColorizer.colorize(annotated)
+      end
+
+      # Pipes the annotated source through `bat` and returns its
+      # highlighted output, or nil when bat is unavailable or
+      # fails (broken install, killed mid-write) — the caller
+      # falls back to {PrismColorizer}. An explicit `--bat` with
+      # no bat on PATH warns instead of failing silently.
+      def render_with_bat(annotated, forced: nil)
+        executable = bat_executable
+        if executable.nil?
+          @err.puts("annotate: --bat requested but no `bat` executable found on PATH") if forced
+          return nil
+        end
+
+        output = IO.popen([executable, *BAT_ARGS], "r+") do |io|
+          io.write(annotated)
+          io.close_write
+          io.read
+        end
+        return nil unless $CHILD_STATUS&.success?
+
+        output.empty? ? nil : output
+      rescue SystemCallError, IOError
+        nil
+      end
+
+      def bat_executable
+        ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).each do |dir|
+          next if dir.empty?
+
+          candidate = File.join(dir, "bat")
+          return candidate if File.file?(candidate) && File.executable?(candidate)
+        end
+        nil
       end
     end
 

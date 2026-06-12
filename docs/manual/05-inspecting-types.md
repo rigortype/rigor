@@ -45,18 +45,23 @@ project's own test sources.
 
 `rigor annotate FILE` reprints a whole file with every line
 tagged by the type of the expression it evaluates to, as a
-trailing `#=> dump_type:` comment:
+trailing `#=>` comment (the xmpfilter / seeing_is_believing
+convention):
 
 ```ruby
-two = 1 + 1   #=> dump_type: 2
-name = gets   #=> dump_type: String | nil
+two = 1 + 1   #=> 2
+name = gets   #=> String | nil
 ```
 
 It is the fastest way to survey a file. The annotation is
-idempotent — re-running replaces the previous comment rather
-than stacking it. Output is syntax-highlighted for a tty;
-`--no-color` (and the `NO_COLOR` environment variable) disable
-the colour.
+idempotent — re-running replaces the previous `#=>` comment
+(including hand-written ones, and the pre-v0.2.0
+`#=> dump_type:` spelling) rather than stacking it. Output is
+syntax-highlighted for a tty — through
+[`bat`](https://github.com/sharkdp/bat) when it is found on
+`PATH` (`--no-bat` opts out), otherwise via the built-in
+colorizer; `--no-color` (and the `NO_COLOR` environment
+variable) disable the colour.
 
 ## `rigor type-of` — one position
 

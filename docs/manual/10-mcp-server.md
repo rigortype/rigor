@@ -312,7 +312,7 @@ deciding which rules and files to focus on.
 ### rigor_annotate
 
 Return the given Ruby source file with each line's last-expression
-type appended as a `#=> dump_type:` comment. `def` header lines show
+type appended as a `#=>` comment. `def` header lines show
 the method's inferred return type.
 
 **Input:**
@@ -326,7 +326,7 @@ the method's inferred return type.
 
 ```ruby
 module Rigor
-  VERSION = "0.1.15"  #=> dump_type: "0.1.15"
+  VERSION = "0.1.15"  #=> "0.1.15"
 end
 ```
 

@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Changed
+
+- **[cli]** `rigor annotate` output drops the `dump_type:` label — annotations now read `two = 1 + 1  #=> 2`, the xmpfilter / seeing_is_believing convention. Re-annotating owns the `#=>` marker: a previous run's comment, a hand-written `#=> …` note, and the old `#=> dump_type:` spelling are all replaced in place (a `#=>` inside a string literal is left alone). When colour is enabled and [`bat`](https://github.com/sharkdp/bat) is found on `PATH`, highlighting is delegated to bat (`--language=ruby --style=plain`); the new `--[no-]bat` flag forces or disables the integration, and a missing or failing bat falls back to the built-in colorizer. The MCP `rigor_annotate` tool inherits the new format.
+
 ### Added
 
 - **[inference]** A `Const = Class.new(Super)` exception/class constant defined in one file now resolves correctly when referenced from a sibling file under the same namespace — including in a `rescue Const => e` head — instead of falling through to a same-named core class. `Liquid::SyntaxError = Class.new(Error)` (where `Liquid::Error` carries `attr_accessor :line_number`) referenced cross-file as `rescue SyntaxError => e; e.line_number = 1` previously resolved to core `::SyntaxError` (no `line_number=`) and fired four undefined-method false positives on running code; the constant is now recorded in the cross-file discovery table typed as `Singleton[Super]` — mirroring the single-file answer that already worked — so the rescued exception types as the project class's superclass chain. The superclass is resolved lexically against the enclosing namespace (`Class.new(Error)` inside `module M` → `M::Error` when discovered, else the literal name for a core/RBS superclass); a bare `Class.new` types as the constant itself, and the block form is left to the existing meta-new machinery. Genuine `rescue` of a core class (`rescue TypeError => e`) is unaffected. False-positive-removing on liquid (four undefined-method errors gone); the Mastodon `app/models` / kramdown `lib` corpora stay byte-identical.

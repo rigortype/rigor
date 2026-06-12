@@ -72,16 +72,19 @@ Exit `1` if the file exists and `--force` was not given.
 ## `rigor annotate`
 
 Reprint a file with every line tagged by the type of the
-expression it evaluates to, as a trailing `#=> dump_type:`
-comment. See [Inspecting inferred types](05-inspecting-types.md).
+expression it evaluates to, as a trailing `#=>` comment. See
+[Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor annotate [--[no-]color] [--config=PATH] FILE
+rigor annotate [--[no-]color] [--[no-]bat] [--config=PATH] FILE
 ```
 
 `FILE` is required. Colour is auto-detected for a tty and
-honours `NO_COLOR`; `--color` / `--no-color` override.
-Exit `1` on a parse error or a missing file.
+honours `NO_COLOR`; `--color` / `--no-color` override. When
+colour is on and [`bat`](https://github.com/sharkdp/bat) is on
+`PATH`, highlighting goes through bat (`--no-bat` opts out;
+`--bat` warns if bat is missing and falls back to the built-in
+colorizer). Exit `1` on a parse error or a missing file.
 
 ## `rigor type-of`
 

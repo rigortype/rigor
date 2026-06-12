@@ -134,3 +134,199 @@ Soundness-first ordering is moot this round — no unsound fold survived.
 So the order is: **crash (C-1) → FP-on-ubiquitous-idiom (C-2 Struct) →
 high-radius FP mechanisms (C1 globals, C2 ivar, C5 loop-rebind) →
 Dynamic-precision (C4) → needs-RBS / boundary (C6/C8/C9)**.
+
+## Residual adjudication (post-fix wave 1) — 2026-06-12
+
+Re-run after the three wave-1 fixes landed (`e88651c4`
+MultiTargetNode destructure crash, `fd4ebd50` chained `Struct.new(:a).new`,
+`0cfa4f55` regex match-data global narrowing on proven-match edges). Same
+command, same READ-ONLY tree. **Wall 333s, 495 diagnostics, 308 errors**
+(313 → 308). The crash and the `Struct.new` artifact are both gone from
+the diagnostic stream; the count barely moved because **C1 did not have
+the FP surface the original survey attributed to it** — see below.
+
+### Bucket table (308 errors)
+
+| Rule | ALL | pure-stdlib | vendored |
+| --- | --- | --- | --- |
+| `call.possible-nil-receiver` | 179 | 95 | 84 |
+| `call.undefined-method` | 79 | 49 | 30 |
+| `call.argument-type-mismatch` | 37 | 35 | 2 |
+| `call.wrong-arity` | 13 | 9 | 4 |
+| **total errors** | **308** | **188** | **120** |
+
+Warnings (185) unchanged in shape: `flow.always-truthy-condition` 84,
+`def.return-type-mismatch` 47, `call.unresolved-toplevel` 23, the rest
+override-conformance. (vendored = `lib/bundler/vendor/**` + `lib/rubygems/**`.)
+
+possible-nil by receiver source (95 pure sites, hand-classified from source):
+
+| Receiver source | ~count | Dominant files |
+| --- | --- | --- |
+| Hash/Array `[]`/`pop`/`delete` lookup result (C3) | ~40 | open3 `opts` (12), resolv `config_hash` (12) |
+| local nil-union from `case`/`begin`-rescue join | ~20 | resolv, prism/translation/parser, time, ipaddr |
+| method-return-chain `T?` then bare call | ~18 | open-uri, uri/generic, net/* |
+| ivar nil-union (C2) | ~8 | net/protocol, uri |
+| `&.`-guarded then bare-read in `&&` rhs | ~4 | uri/generic |
+| **regex global (`$1`,`$~`,…)** | **1** | erb/compiler (and even that is `comment[…]`, a local — *not* `$1`) |
+| other | ~4 | — |
+
+### Step 2 — why C1 narrowing yielded almost nothing
+
+**The C1 premise was a measurement artifact in the original survey.** The
+survey attributed ~180 possible-nil errors to "regex globals typed
+nil-union." That is false on this engine:
+
+- An **unseeded** match-data global read (`$1`, `$~`, `$&`) types as
+  `Dynamic[top]`, **not** `String | nil` (`ExpressionTyper#type_of_global_variable_read`
+  → `scope.global(name) || dynamic_top`). The only writers of `@globals`
+  are explicit `$x = …` assignment, `program_globals` seeding (which only
+  collects `GlobalVariableWriteNode` targets — *not* the perlish match
+  globals), and the narrowing edges themselves. **No call writes the
+  match-data globals as a side effect**, so a bare `str =~ re; $1.foo`
+  reads `$1` as `Dynamic` → `possible-nil` never fires on it. The
+  `scope.rb` `forget_match_globals` comment ("falls back to the default
+  `String | nil`") is *inaccurate* — it falls back to `Dynamic[top]`.
+
+- Sampled the residual possible-nil sites across erb, time, ipaddr,
+  resolv, uri, optparse, mkmf, open3, net/* — and **exactly one of 95**
+  touches a `$N`, and there the nil receiver is a *local* (`comment`), not
+  the global. The corpus has essentially zero "regex-global possible-nil"
+  FPs for C1 to remove. C1 is therefore **precision-additive on a shape
+  the corpus does not exercise as an FP** — correct work, mismeasured radius.
+
+- The `0cfa4f55` invalidation gate (`forget_match_globals` after any
+  match-capable / implicit-self call, with `match_capable_call?` returning
+  true for `=~ match [] split index === …` and *every* receiver-less call)
+  *is* as aggressive as hypothesized — e.g. in time.rb `if /…/ =~ s; ($1
+  == '-' ? …) * ($2.to_i …)` the `$1 == '-'` (`==` ∈ MATCH_CAPABLE) clobbers
+  every global before `$2.to_i`. **But the clobber is harmless**: the
+  forgotten global reverts to `Dynamic[top]`, which fires no diagnostic.
+  So the over-aggressive gate costs precision (Dynamic, not String), never
+  an FP. Quantified clobber-on-real-bodies: the `== / [] / split` family
+  appears between guard and read in the majority of the multi-statement
+  date-parser bodies (time.rb, resolv.rb), but with zero FP consequence.
+
+C1 shape breakdown (the (a)/(b)/(c)/(d) classification asked for, applied
+to the *would-be* regex-global sites — all of which currently read Dynamic):
+
+- (a) engine-gap shapes that *would* matter if globals were seeded
+  `String | nil`: the dominant missing narrowing is **`.match` /
+  `str.match(re)` is not a narrowing predicate** — only `=~` is in
+  `simple_dispatch_name?`; `String#match` / `Regexp#match` set `$~` at
+  runtime but neither narrows the globals nor the returned MatchData. Also
+  missing: `if md = re.match(s)` narrows `md` (local-write truthy) but not
+  the globals, and `scan(re){ … $1 }` block bodies get no edge. These are
+  real gaps but **demand-gated to near-zero** because the globals are
+  Dynamic, so closing them yields precision not FP-reduction.
+- (b) cross-method (match in one method, `$1` read in another): not
+  observed as an FP for the same Dynamic reason.
+- (c) optional/alternation groups correctly stay nilable in the walker
+  (`unconditional_capture_groups`) — verified, no over-promotion.
+- (d) the real possible-nil driver is **not** globals at all (see Step 3).
+
+**Verdict on C1: keep the landed narrowing (it is sound and additive), but
+drop it from the FP-attack ranking — its FP radius on real code is ~0.**
+The 180-error figure in the original Instrument-1 row conflated "regex
+parsers carry nil-unions" (true, but the nil is in *locals/ivars/lookup
+results*, not the globals) with "the globals are nil-typed" (false).
+
+### Step 3 — the real possible-nil drivers (next-slice material)
+
+Sampled and root-caused the two largest *repeatable* clusters plus the
+non-regex mechanisms:
+
+1. **`case … when … else raise` exhaustion not credited (NEW dominant
+   gap).** `eval_case` joins `[*branch_results, else_result]` via
+   `reduce_scopes_with_nil_injection`; when the `else` clause *terminates*
+   (`raise`/`return`/`throw`) the join still folds in the else/no-match
+   scope, where a local assigned only inside the `when` branches is
+   un-bound → nil-injected. Minimal repro (`/tmp/probe3.rb`): `case info;
+   when nil then h={…}; when String then h={…}; when Hash then h=info.dup;
+   else raise; end; h.include?(:a)` → **`possible nil receiver`** (FP).
+   Control: `else h = {}` (assigns) is clean; no-else is correctly nilable.
+   This is the resolv `config_hash` cluster (**12 sites**) verbatim, and
+   recurs elsewhere. Engine fix is the exact `branch_terminates?` pattern
+   already used in `eval_if`/`eval_unless`: in `eval_case`
+   (`statement_evaluator.rb:535`) drop the else_result scope from the join
+   when the else clause terminates. **FP-safe, low difficulty, ~12+ sites.**
+
+2. **`opts = (cond ? cmd.pop.dup : {})` — `Array#pop` nil leaks through
+   `.dup` into a both-branches-Hash join.** open3 `opts` cluster (**12
+   sites**, `[]=`/`delete`). `if Hash === cmd.last; opts = cmd.pop.dup;
+   else opts = {}; end` → `opts : Hash | nil` because `cmd.pop` is `T?` and
+   `.dup` preserves nil; the `Hash === cmd.last` guard does not narrow the
+   *separate* `cmd.pop` call. Genuine-conservative at the type level (pop
+   *can* be nil) but the guard makes it unreachable. Fix needs either
+   `x === y` ⟹ aliasing-narrow of the receiver's element, or
+   special-casing `Array#pop` under a proven-non-empty guard — **higher
+   difficulty, aliasing-sensitive, medium FP risk.** Deprioritize.
+
+3. **`&.`-guarded receiver not known-non-nil in the `&&` rhs.** uri/generic
+   `v&.start_with?('[') && v.end_with?(']')` — the `&&` right operand
+   executes only when `v&.start_with?` was truthy, which implies `v`
+   non-nil, but `v.end_with?` still sees `v : String | nil`. ~4 sites.
+   Engine-fixable in `analyse_and` (the left operand's `&.`-safe-nav
+   truthy edge should narrow the receiver non-nil for the right operand),
+   **FP-safe, low-medium difficulty, small radius.**
+
+4. **`until idx = expr; …; end; idx.foo` loop-exit non-nil.** net/protocol
+   `until idx = @rbuf.index(term); …; end; rbuf_consume(idx + …)`. The
+   loop exits precisely when `idx` is truthy, so post-loop `idx` is
+   non-nil; the engine keeps the loop-body nil-union. Note: the *isolated*
+   probe (`/tmp/probe2.rb`) passes — reproduces only in the full method
+   context, so it is entangled with the per-iteration scope join, not a
+   standalone narrowing miss. Medium difficulty, FP-safe, ~3–4 sites.
+
+Non-regex bucket verdicts (Step 3 of the brief):
+
+- **C2 ivar state-join (`argument-type-mismatch ^` on ipaddr, 6 sites;
+  uri/ldap `def.return-type-mismatch`).** Multi-writer ivar
+  (`@mask_addr`) joins to `Dynamic[top] | Integer | nil`; `Integer#^`
+  rejects. Engine-fixable by tightening ivar declared-type inference so
+  homogeneous writes don't collapse to Dynamic; **medium difficulty**, the
+  uri/ldap return-mismatches (47-wide `def.return-type-mismatch` bucket)
+  ride the same mechanism, so the radius is larger than the 6 `^` sites.
+  Some genuinely-heterogeneous writers (specification `@new_platform`)
+  must stay flagged — fix must preserve those.
+- **C6 no-RBS strict sigs (Resolv LOC::Size/Coord/Alt, DNS Requester;
+  ~10 of the 37 arg-mismatch).** Inferred param types reject valid args on
+  a library that ships no RBS. **Not an engine bug** — author RBS or
+  improve inference precision on no-RBS libs. Leave.
+- **`call.undefined-method` (49 pure).** Long tail by receiver class:
+  `String` (6, incl. the `untaint` genuine catch C9), Gem::* / Bundler::*
+  (project-internal classes Rigor types partially → inherited-method
+  resolution gaps, ADR-43 territory), URI/OpenURI (mixin/`method_missing`
+  delegation). Mostly **needs-RBS / genuine-conservative**, not a single
+  mechanism; no concentrated engine slice here.
+- **C5 always-truthy `$extmk` (mkmf, 18 of 45 pure always-truthy).** Not a
+  loop-rebind — it is **program-global constant-fold over-eagerness**: a
+  top-level `$extmk = nil`/truthy seed makes `if $extmk` always-truthy
+  inside every method body, ignoring external/late reassignment.
+  **FP-risky to "fix"** (the seed IS the only visible value); the right
+  move is to NOT constant-fold a mutable program-global's truthiness
+  inside method bodies (widen `$global` reads in method scope to the
+  union of all seen writes incl. an unknown-write floor). Medium, must be
+  FP-validated against Mastodon/haml. Lower priority.
+
+### Ranked next-slice list
+
+| # | Slice | Mechanism / rigor anchor | Expected yield | FP risk |
+| --- | --- | --- | --- | --- |
+| 1 | **`case`/`else`-terminates exhaustion** | drop terminating `else` scope from the join in `eval_case` (`lib/rigor/inference/statement_evaluator.rb:535`), reusing `branch_terminates?` as in `eval_if` | ~12 resolv + scattered = **~15 errors** | **low** (mirror of shipped if-guard logic) |
+| 2 | **C2 ivar homogeneous-write declared-type** | tighten ivar write-join so same-typed multi-writer ivars don't collapse to `Dynamic[top]` (ivar declared-type inference; `class_ivars_for` seed + write-join) | ipaddr `^` (6) + a slice of the 47 uri/ldap `def.return-type-mismatch` = **~15–25** | medium (must keep genuinely-heterogeneous writers flagged) |
+| 3 | **`&.`-truthy narrows `&&` rhs receiver** | in `analyse_and` (`narrowing.rb`), the left `recv&.pred` truthy edge narrows `recv` non-nil for the right operand | uri/generic = **~4** | low (narrowing-only) |
+| 4 | **`until/while x = expr` loop-exit non-nil** | post-loop scope narrows the loop-condition assignment-target non-nil on the truthy-exit edge (`eval_loop` join) | net/protocol etc. = **~4** | low–medium (entangled with loop-scope join; probe in full-method context) |
+| 5 | **`.match` as a narrowing predicate (C1 follow-up)** | add `String#match`/`Regexp#match`/`if md = re.match(s)` global+local narrowing to `simple_dispatch_name?` / `analyse_call` | **precision only** (globals read Dynamic → ~0 FP today) | low — but **demand-gated; not FP-reducing on this corpus** |
+| 6 | **program-global truthiness widening (C5 `$extmk`)** | stop constant-folding a mutable program-global's truthiness inside method bodies (`flow.always-truthy` on `if $g`) | mkmf 18 + scattered = **~25 warnings** | medium–high (FP-validate vs Mastodon/haml first) |
+
+**Not engine work:** C6 (Resolv no-RBS), the open3 `cmd.pop.dup` cluster
+(genuine `Array#pop` nilability; aliasing fix is high-cost/medium-risk —
+explicitly *not* slated), the `undefined-method` long tail (needs-RBS /
+ADR-43 inherited-resolution), C9 `untaint` (genuine catch).
+
+**Headline correction for the campaign:** C1 (regex globals) was the
+top-ranked FP mechanism in the original survey but has **~0 FP radius** on
+real stdlib — match-data globals read `Dynamic`, never `nil`. The actual
+dominant, cleanly-fixable possible-nil mechanism is **`case/else-raise`
+exhaustion** (slice 1), which the original survey did not isolate.

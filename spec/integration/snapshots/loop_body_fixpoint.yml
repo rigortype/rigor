@@ -4,15 +4,15 @@ locals:
   acc: Array[Integer]
   b: Integer
   c: Integer
-  counter: Integer
+  counter: int<2, max>
   d: Integer
   fresh: Integer?
   g: Dynamic[top]
-  i: Integer
-  j: Integer
-  k: Integer
-  m: Integer
-  "n": Integer
+  i: int<3, max>
+  j: int<3, max>
+  k: int<3, max>
+  m: int<3, max>
+  "n": int<5, max>
   p: Integer
-  q: Integer
+  q: int<3, max>
   total: Integer

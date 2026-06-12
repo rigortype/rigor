@@ -215,6 +215,38 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "loop-exit predicate-assignment narrowing" do
+    it "narrows an `until x = expr` target non-nil after the loop" do
+      _, post = evaluate(<<~RUBY)
+        until line = (rand < 0.5 ? "x" : nil)
+          nil
+        end
+        line
+      RUBY
+      expect(post.local(:line)).to eq(Rigor::Type::Combinator.constant_of("x"))
+    end
+
+    it "narrows a `while x = expr` target to nil after the loop" do
+      _, post = evaluate(<<~RUBY)
+        while value = (rand < 0.5 ? "y" : nil)
+          nil
+        end
+        value
+      RUBY
+      expect(post.local(:value)).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
+    it "leaves the target nilable when the body can break" do
+      _, post = evaluate(<<~RUBY)
+        until line = (rand < 0.5 ? "x" : nil)
+          break
+        end
+        line
+      RUBY
+      expect(post.local(:line).members.map(&:value)).to contain_exactly("x", nil)
+    end
+  end
+
   describe "begin/rescue/ensure" do
     it "joins the body and rescue-chain scopes" do
       _, post = evaluate(<<~RUBY)

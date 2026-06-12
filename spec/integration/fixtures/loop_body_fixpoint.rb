@@ -20,7 +20,10 @@ while i < 3
   i += 1
 end
 assert_type("Integer", d)
-assert_type("Integer", i)
+# Item 4 — the `while i < 3` loop exits precisely on its falsey edge,
+# so the post-loop counter carries the exit refinement `int<3, max>`
+# (`i >= 3`), a strict precision gain over the bare `Integer`.
+assert_type("int<3, max>", i)
 
 # --- `+=` accumulator. ---
 total = 0

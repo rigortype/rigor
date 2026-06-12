@@ -863,7 +863,7 @@ module Rigor
       # common case where no `break VALUE` is observed.
       def eval_loop(node)
         _pred_type, post_pred = sub_eval(node.predicate, scope)
-        return [Type::Combinator.constant_of(nil), post_pred] if node.statements.nil?
+        return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, post_pred)] if node.statements.nil?
 
         # The historical single body pass joined with the pre-loop scope.
         # This continues to carry everything the fixpoint does NOT track:
@@ -881,7 +881,10 @@ module Rigor
         # fixpoint, but still needs the slice-C content writeback (a loop may
         # content-mutate a collection without rebinding any local — `acc <<
         # x`), so apply it to the single-pass join before returning.
-        return [Type::Combinator.constant_of(nil), loop_content_writeback(node.statements, base_scope)] if names.empty?
+        if names.empty?
+          fast = loop_content_writeback(node.statements, base_scope)
+          return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, fast)]
+        end
 
         # ADR-56 slice B — loop-body fixpoint. The body runs 0..N times and
         # may compound (`d *= 2`), so the historical single body pass joined
@@ -904,7 +907,44 @@ module Rigor
         # collection. Pre-state is read from `post_loop` so a local both
         # rebound and content-mutated composes.
         post_loop = loop_content_writeback(node.statements, post_loop)
+        post_loop = narrow_loop_exit_edge(node, post_loop)
         [Type::Combinator.constant_of(nil), post_loop]
+      end
+
+      # Item 4 — loop-exit predicate narrowing. A `while pred` / `until pred`
+      # loop exits PRECISELY on the predicate's exit edge: `while` exits when
+      # `pred` is falsey, `until` when `pred` is truthy. So after the loop the
+      # predicate-assignment target carries the exit polarity — `until line =
+      # io.gets; …; end; line.foo` reads `line` non-nil because the loop ran
+      # until `gets` returned a truthy (non-nil) line. Apply the exit edge of
+      # `Narrowing.predicate_scopes` to the continuation scope.
+      #
+      # Guarded against `break`: a `break` exits the loop WITHOUT the predicate
+      # ever going false (`while line = gets; break if done; end` can leave
+      # `line` truthy on a `while`, or exit before the `until` predicate fires),
+      # so the exit-edge proof does not hold and the loop is left un-narrowed.
+      # `break` inside a NESTED loop/block does not target this loop, but a
+      # nested-loop `break` is rare in predicate-assignment loops and the
+      # conservative bail only costs precision, never soundness.
+      def narrow_loop_exit_edge(node, post_loop)
+        return post_loop if loop_body_breaks?(node.statements)
+
+        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_loop)
+        node.is_a?(Prism::UntilNode) ? truthy_scope : falsey_scope
+      end
+
+      # True when the loop body can `break` out of THIS loop. Conservatively
+      # treats any `BreakNode` under the body as a break for this loop (a
+      # break inside a nested loop/block actually targets the inner construct,
+      # but bailing is precision-only).
+      def loop_body_breaks?(statements)
+        return false if statements.nil?
+
+        found = false
+        Source::NodeWalker.each(statements) do |descendant|
+          found = true if descendant.is_a?(Prism::BreakNode)
+        end
+        found
       end
 
       # Joins loop-body content mutations into the continuation collection

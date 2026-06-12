@@ -1,6 +1,7 @@
 # ADR-57 — Opening the implicit-self call return-adoption gate (ADR-24 WD3 revisit)
 
-Status: **Accepted — gate opened 2026-06-12 (slices 1–3).** The
+Status: **Accepted — gate opened 2026-06-12 (slices 1–3); overridable-
+method adoption gate added 2026-06-13 (see Addendum).** The
 adjudication arc completed: every gate-open firing class was classified
 and the artifacts fixed at their root (slices 1–3), the residual reduced
 to genuine-or-win, and the gate opened permanently per WD2.
@@ -221,6 +222,55 @@ Tier order (each its own corpus-gated slice):
 If ADR-50's bleeding-edge overlay ships first, the opened gate is a
 natural first `bleeding_edge:` feature; otherwise it lands as a normal
 engine-precision change under the WD2 criterion.
+
+## Addendum — overridable-method adoption gate (2026-06-13)
+
+The opened gate over-reaches on the **template-method** (mixin /
+base-class) pattern. When a base module or class defines a method that
+returns a literal as a *default* — `module Graph; def directed? = false;
+end` — and a concrete subclass / includer overrides it
+(`DirectedAdjacencyGraph#directed? = true`), an implicit-self
+`directed?` inside the base module's own methods adopts the base body's
+`Constant[false]`. The value is correct for a *bare* `Graph` receiver,
+but it is unsound as a **flow constant**: a downstream `unless directed?`
+folds to always-true, ignoring that the actual receiver may be the
+overriding subclass. This is the
+[2026-06-13 app/network-corpora survey](../notes/20260613-app-network-corpora-survey.md)
+N5 row — the **entire** `rgl` warning set (13 `flow.always-truthy-
+condition` false positives across `adjacency` / `base` / `dot` /
+`transitivity` / …, all the `directed?` template fold).
+
+**Refinement.** Before a resolved self-call adopts a *flow-constant-
+foldable* return (a `Constant`, or a `Tuple` of such — the only shapes
+that can drive an `always-truthy-condition` fold), the gate checks
+whether the callee's **owner** (the ancestor whose own `def` table holds
+the body, tracked through the ancestor-resolution walk) has a discovered
+project type that **redefines** the same method under the same kind
+(instance vs singleton) AND is **related** to the owner — a transitive
+discovered subclass of an owner class, or a class/module that
+includes/prepends (extends, for singleton kind) an owner module. A
+same-name reopen of the owner itself (monkey-patch) is not an override.
+On a hit the return degrades to `Dynamic[top]`, killing the flow
+constant; this deliberately re-opens a `Dynamic` source **only for
+genuinely-overridden methods**. A method with no discovered override
+folds exactly as before — the survey's standing risk warning is that
+over-conservatism must not re-open `Dynamic` for final methods, so the
+gate is scoped to the proven-overridden case and to the constant-return
+shape that alone produces the FP.
+
+The predicate consults the existing discovery tables only
+(`discovered_def_nodes` / `discovered_singleton_def_nodes` for
+redefiners via a per-generation inverted `method_name → [owners]` index,
+and the same `superclass_of` / `includes_of` ancestor walk the
+method-resolution path uses for the relation check), composes with the
+ADR-57-follow-up return memo (the gate runs on the adopted *result*,
+after the memo, so a memoised return is still gated — the memo key is
+unchanged and stays sound), and is memoised per `(owner, method, kind)`
+per generation. Restricting the relation walk to constant-shaped returns
+keeps the `make bench-perf` allocation envelope within band. The
+`rigor check lib` self-check, the plugin self-check, and the Mastodon
+`app/models` / kramdown `lib` / haml `lib` corpora are byte-identical;
+`rgl` loses all 13 warnings.
 
 ## Rejected / deferred alternatives
 

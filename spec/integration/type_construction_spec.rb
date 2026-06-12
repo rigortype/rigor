@@ -1108,6 +1108,28 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/overridable_method_no_fold.rb — ADR-57 N5 overridable-method adoption gate" do
+      let(:harness) { harness_for("overridable_method_no_fold") }
+
+      # An implicit-self call to a method whose owner has a discovered
+      # subclass / includer redefining it degrades the adopted return to
+      # `Dynamic[top]` (template-method default is not a flow constant),
+      # while a method with no discovered override keeps folding to its
+      # base literal. The fixture's `assert_type`s pin both halves.
+      it "degrades the overridden self-call return but preserves the final-method fold" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      # No always-truthy/falsey FP fires on the `directed?`-style template
+      # method: the guard read is `Dynamic[top]`, which the flow-constant
+      # rule never fires on (rgl's entire warning set).
+      it "fires no flow.always-truthy-condition on the overridden template read" do
+        flow_constants = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+        expect(flow_constants).to be_empty
+      end
+    end
+
     describe "fixtures/escaping_content_capture.rb — ADR-57 slice 2 escaping-block content widening" do
       let(:harness) { harness_for("escaping_content_capture") }
 

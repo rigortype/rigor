@@ -1443,10 +1443,13 @@ module Rigor
       def try_user_method_inference(receiver, call_node, arg_types)
         return nil unless receiver.is_a?(Type::Nominal)
 
-        def_node = resolve_user_def_through_ancestors(receiver.class_name, call_node.name)
+        def_node, owner = resolve_user_def_with_owner(receiver.class_name, call_node.name)
         return nil if def_node.nil?
 
-        infer_user_method_return(def_node, receiver, arg_types)
+        result = infer_user_method_return(def_node, receiver, arg_types)
+        return result if result.nil?
+
+        degrade_if_overridable(result, owner, call_node.name, :instance)
       rescue StandardError
         nil
       end
@@ -1471,7 +1474,10 @@ module Rigor
         def_node = scope.singleton_def_for(receiver.class_name, call_node.name)
         return nil if def_node.nil?
 
-        infer_user_method_return(def_node, receiver, arg_types)
+        result = infer_user_method_return(def_node, receiver, arg_types)
+        return result if result.nil?
+
+        degrade_if_overridable(result, receiver.class_name, call_node.name, :singleton)
       rescue StandardError
         nil
       end
@@ -1520,15 +1526,27 @@ module Rigor
       end
 
       def resolve_user_def_through_ancestors(class_name, method_name)
+        resolve_user_def_with_owner(class_name, method_name).first
+      end
+
+      # ADR-57 N5 follow-up — resolves the method's def node AND the
+      # ancestor that owns it (the class/module whose own `def` table
+      # holds the body, which may differ from `class_name` when the
+      # method is inherited from a superclass or included module). The
+      # owner is what the overridable-method adoption gate keys on. Both
+      # are cached together (the walk is identical to the def-only path it
+      # replaced) and returned as a `[def_node, owner]` pair; `owner` is
+      # nil exactly when `def_node` is nil.
+      def resolve_user_def_with_owner(class_name, method_name)
         cache = class_graph_buckets[:user_def]
         table = (cache[class_name.to_s] ||= {})
         key = method_name.to_sym
         return table[key] if table.key?(key)
 
-        table[key] = compute_user_def_through_ancestors(class_name, method_name)
+        table[key] = compute_user_def_with_owner(class_name, method_name)
       end
 
-      def compute_user_def_through_ancestors(class_name, method_name)
+      def compute_user_def_with_owner(class_name, method_name)
         queue = [class_name.to_s]
         seen = {}
         visited = 0
@@ -1540,15 +1558,15 @@ module Rigor
           visited += 1
           if visited > ANCESTOR_WALK_LIMIT
             BudgetTrace.hit(BudgetTrace::ANCESTOR_WALK_LIMIT)
-            return nil
+            return [nil, nil]
           end
 
           found = scope.user_def_for(current, method_name)
-          return found if found
+          return [found, current] if found
 
           enqueue_ancestors(current, queue)
         end
-        nil
+        [nil, nil]
       end
 
       # Pushes `current`'s direct ancestors onto the BFS queue:
@@ -1597,6 +1615,144 @@ module Rigor
         scope.discovered_superclasses.key?(name) ||
           scope.discovered_def_nodes.key?(name) ||
           scope.discovered_includes.key?(name)
+      end
+
+      # ADR-57 N5 — overridable-method adoption gate. A self-call resolved
+      # to a project `def` whose owner has a discovered subclass / includer
+      # that REDEFINES the same method (same instance-vs-singleton kind) is
+      # a template-method site: the base body's literal return is the
+      # *default*, not the value every receiver sees, so adopting it as a
+      # flow constant is unsound (rgl `module Graph; def directed?; false`
+      # folds `unless directed?` always-true, ignoring `DirectedAdjacencyGraph`
+      # overriding it to `true` — the entire rgl warning set, per the
+      # 2026-06-13 app/network survey N5 row). On such a hit the precise
+      # return degrades to `Dynamic[top]`, deliberately re-opening a Dynamic
+      # source ONLY for genuinely-overridden methods. A method with no
+      # discovered override folds exactly as before — over-conservatism must
+      # not re-open Dynamic for final methods.
+      #
+      # The gate only inspects a *flow-constant-foldable* result (a
+      # `Constant`, or a `Tuple` of such): only a value-pinned return can
+      # mislead a downstream `if`/`unless`/`case` into an
+      # `always-truthy-condition` fold, which is exactly the unsoundness the
+      # gate exists to remove. A `Nominal` / `Dynamic` / union return cannot
+      # produce a flow constant, so adopting it from an overridden method is
+      # harmless and is left untouched — this keeps the override-relation
+      # walk off the hot path for the overwhelming majority of self-calls
+      # (whose return is not a bare constant).
+      def degrade_if_overridable(result, owner, method_name, kind)
+        return result if owner.nil?
+        return result unless fully_value_pinned?(result)
+        return result unless overridden_in_project?(owner.to_s, method_name, kind)
+
+        dynamic_top
+      end
+
+      OVERRIDE_GATE_CACHE_KEY = :__rigor_overridable_method_gate__
+      private_constant :OVERRIDE_GATE_CACHE_KEY
+
+      # Run-scoped memo for {#overridden_in_project?}, keyed (like
+      # `class_graph_buckets`) by the identity of the frozen discovery
+      # trio so a new analysis generation lands in a fresh bucket, then
+      # nested `kind → owner → method_name`. The predicate is a pure
+      # function of those tables. Nesting avoids allocating a composite
+      # cache key on the hot path (the gate runs on every adopted self-call
+      # return), so a steady-state hit is three identity hash reads + two
+      # string/symbol hash reads with zero allocation.
+      def override_gate_buckets
+        store = (Thread.current[OVERRIDE_GATE_CACHE_KEY] ||= {}.compare_by_identity)
+        by_def = (store[scope.discovered_def_nodes] ||= {}.compare_by_identity)
+        by_super = (by_def[scope.discovered_superclasses] ||= {}.compare_by_identity)
+        by_super[scope.discovered_includes] ||= { instance: {}, singleton: {} }
+      end
+
+      # True when some discovered project class/module — distinct from
+      # `owner` — redefines `(method_name, kind)` AND is related to `owner`
+      # (a transitive discovered subclass of an owner class, or a
+      # class/module that includes/prepends — extends, for singleton kind —
+      # an owner module). A same-name reopen of `owner` itself is NOT an
+      # override (monkey-patch reopen shares the owner identity). Memoized
+      # per `(owner, method_name, kind)`.
+      def overridden_in_project?(owner, method_name, kind)
+        by_owner = (override_gate_buckets[kind][owner] ||= {})
+        return by_owner[method_name] if by_owner.key?(method_name)
+
+        by_owner[method_name] = compute_overridden_in_project?(owner, method_name, kind)
+      end
+
+      def compute_overridden_in_project?(owner, method_name, kind)
+        redefiners_of(method_name, kind).any? do |candidate|
+          next false if candidate == owner
+
+          related_to_owner?(candidate, owner)
+        end
+      end
+
+      # Every discovered project class/module whose OWN def table redefines
+      # `(method_name, kind)`. Instance kind reads `discovered_def_nodes`,
+      # singleton kind reads `discovered_singleton_def_nodes` — both are
+      # genuine project `def` bodies (not RBS / accessor synthesis), so a
+      # name's presence is a real redefinition. Served from a per-generation
+      # inverted index (`method_name → [owner names]`) built once per def
+      # table, so the lookup is a single hash read rather than a full-table
+      # scan on every `(method_name, kind)` first-miss — the gate runs on
+      # every adopted self-call return, so the full-table `filter_map` it
+      # replaced was the dominant added allocation on a large `lib`.
+      def redefiners_of(method_name, kind)
+        method_definers_index(kind)[method_name] || EMPTY_REDEFINERS
+      end
+
+      EMPTY_REDEFINERS = [].freeze
+      private_constant :EMPTY_REDEFINERS
+
+      METHOD_DEFINERS_INDEX_KEY = :__rigor_method_definers_index__
+      private_constant :METHOD_DEFINERS_INDEX_KEY
+
+      # Per-generation `method_name (Symbol) → [owner names]` inverted index
+      # over the instance / singleton def tables, memoised by the identity
+      # of the def table it inverts (a new analysis generation lands in a
+      # fresh bucket). The toplevel sentinel is excluded — a toplevel `def`
+      # has no class ancestry and so can never be an override.
+      def method_definers_index(kind)
+        table = kind == :singleton ? scope.discovered_singleton_def_nodes : scope.discovered_def_nodes
+        store = (Thread.current[METHOD_DEFINERS_INDEX_KEY] ||= {}.compare_by_identity)
+        store[table] ||= build_method_definers_index(table)
+      end
+
+      def build_method_definers_index(table)
+        index = {}
+        table.each do |class_name, methods|
+          next if class_name == Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
+
+          methods.each_key { |method_name| (index[method_name] ||= []) << class_name }
+        end
+        index
+      end
+
+      # True when `candidate`'s transitive ancestor chain (superclasses +
+      # included/prepended modules) reaches `owner` — i.e. `candidate` is a
+      # subclass of an owner class or an includer of an owner module. Reuses
+      # the same BFS resolver the method-resolution ancestor walk uses, so
+      # name resolution (lexical nesting, RBS-known-ancestor pruning) is
+      # identical.
+      def related_to_owner?(candidate, owner)
+        queue = []
+        enqueue_ancestors(candidate, queue)
+        seen = {}
+        visited = 0
+        until queue.empty?
+          current = queue.shift
+          next if current.nil? || seen[current]
+
+          return true if current == owner
+
+          seen[current] = true
+          visited += 1
+          return false if visited > ANCESTOR_WALK_LIMIT
+
+          enqueue_ancestors(current, queue)
+        end
+        false
       end
 
       INFERENCE_GUARD_KEY = :__rigor_user_method_inference_stack__

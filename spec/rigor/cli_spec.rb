@@ -1570,6 +1570,41 @@ RSpec.describe Rigor::CLI do
       expect(out.lines[0]).to include("#=> :else | :then")
     end
 
+    it "annotates `while`-loop body lines with the converged post-fixpoint types" do
+      source = <<~RUBY
+        def factorial(n)
+          result = 1
+          i = 1
+          while i <= n
+            result *= i
+            i += 1
+          end
+          result
+        end
+      RUBY
+      path = write_fixture("a.rb", source)
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      lines = out.lines
+      # The loop body must reflect the converged (widened) bindings —
+      # never the cap-N intermediate constants of the ADR-56 fixpoint
+      # (`1 | 2`), nor the RHS literal of the operator-write (`1`).
+      expect(lines[4]).to include("result *= i").and include("#=> Integer")
+      expect(lines[5]).to include("i += 1").and include("#=> Integer")
+      expect(lines[0]).to include("#=> Integer")
+    end
+
+    it "annotates a `for` loop's `end` line as nil, not Dynamic[top]" do
+      path = write_fixture("a.rb", "for i in 1..3\n  puts i\nend\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      lines = out.lines
+      expect(lines[2]).to include("end").and include("#=> nil")
+      expect(out).not_to include("Dynamic")
+    end
+
     it "annotates a `def` header line with the method's inferred return type" do
       path = write_fixture("a.rb", "def greet(name)\n  \"Hello, \" + name\nend\n")
 

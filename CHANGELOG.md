@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **[cli]** `rigor annotate` no longer shows stale first-iteration constants on `while` / `until` loop-body lines. The per-line scope index recorded the loop-body fixpoint's *intermediate* assumption (the last of the capped re-evaluations), so `result *= i` inside `while i <= n` annotated `1 | 2 | 3` and `i += 1` annotated `1` — values the line never settles on — while the `def` header and post-loop reads were already correct. Annotate's indexing pass now re-records fixpoint-tracked loop bodies once from the CONVERGED (post-writeback) bindings, so loop-body lines read the joined widened type (`Integer`). Per-line probing also routes through the flow evaluator instead of the bare expression typer, so an operator-write line (`i += 1`) annotates the dispatch result on the variable's binding rather than echoing the right-hand literal. A `for` loop's `end` line now annotates `nil` (matching the engine's loop-expression policy when no `break VALUE` is observed) instead of `Dynamic[top]`. Display-path only: the converged re-record is off for `rigor check`, whose diagnostics are unchanged.
+
 ### Changed
 
 - **[cli]** `rigor annotate` output drops the `dump_type:` label — annotations now read `two = 1 + 1  #=> 2`, the xmpfilter / seeing_is_believing convention. Re-annotating owns the `#=>` marker: a previous run's comment, a hand-written `#=> …` note, and the old `#=> dump_type:` spelling are all replaced in place (a `#=>` inside a string literal is left alone). When colour is enabled and [`bat`](https://github.com/sharkdp/bat) is found on `PATH`, highlighting is delegated to bat (`--language=ruby --style=plain`); the new `--[no-]bat` flag forces or disables the integration, and a missing or failing bat falls back to the built-in colorizer. The MCP `rigor_annotate` tool inherits the new format.

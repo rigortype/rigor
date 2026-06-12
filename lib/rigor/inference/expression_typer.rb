@@ -199,7 +199,11 @@ module Rigor
         Prism::ForwardingArgumentsNode => :type_of_non_value,
         Prism::WhileNode => :type_of_loop,
         Prism::UntilNode => :type_of_loop,
-        Prism::ForNode => :type_of_dynamic_top,
+        # `for` matches `eval_for`'s statement-path policy: the loop
+        # expression types `Constant[nil]` (no `break VALUE` observed),
+        # same as `while` / `until` — annotating a `for`'s `end` line as
+        # `Dynamic[top]` was a display artifact of the old mapping.
+        Prism::ForNode => :type_of_loop,
         Prism::DefinedNode => :type_of_defined,
         Prism::NumberedReferenceReadNode => :type_of_numbered_reference,
         Prism::BackReferenceReadNode => :type_of_back_reference,

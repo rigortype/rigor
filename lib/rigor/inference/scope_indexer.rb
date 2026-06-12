@@ -49,9 +49,14 @@ module Rigor
       # @param default_scope [Rigor::Scope] the scope used for the root,
       #   and the fallback returned for any Prism node not contained in
       #   `root`'s subtree.
+      # @param converged_loop_recording [Boolean] display-path flag —
+      #   when true the evaluator re-records fixpoint-tracked loop
+      #   bodies from their CONVERGED bindings so per-line probes
+      #   (`rigor annotate`) reflect the post-writeback state, not the
+      #   cap-N intermediate constants. Off for the check path.
       # @return [Hash{Prism::Node => Rigor::Scope}] identity-comparing
       #   table whose default value is `default_scope`.
-      def index(root, default_scope:) # rubocop:disable Metrics/AbcSize
+      def index(root, default_scope:, converged_loop_recording: false) # rubocop:disable Metrics/AbcSize
         # Slice A-declarations. Build the declaration overrides
         # first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through
@@ -146,7 +151,8 @@ module Rigor
         # entry is the one that reflects all flow-derived
         # rebinds, so it MUST overwrite the first.
         on_enter = ->(node, scope) { table[node] = scope }
-        StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter).evaluate(root)
+        StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter,
+                               converged_loop_recording: converged_loop_recording).evaluate(root)
 
         propagate(root, table, seeded_scope)
         table

@@ -134,11 +134,21 @@ module Rigor
       #   by {#eval_def} to look up the method's RBS signature. Each
       #   `ClassNode`/`ModuleNode` entry pushes a frame; `SingletonClassNode`
       #   over `self` flips the innermost frame to singleton mode.
-      def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze)
+      # @param converged_loop_recording [Boolean] when true (and an
+      #   `on_enter` recorder is installed), {#eval_loop} re-evaluates a
+      #   fixpoint-tracked loop body ONE extra time from the CONVERGED
+      #   bindings so the last-visit-wins per-node scope index reflects
+      #   the post-writeback state instead of the cap-N intermediate
+      #   assumption (`result *= i` annotating `1 | 2` rather than
+      #   `Integer`). Display-path only — `rigor check` leaves it off,
+      #   keeping its diagnostics and wall-clock unchanged.
+      def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze,
+                     converged_loop_recording: false)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
         @class_context = class_context.freeze
+        @converged_loop_recording = converged_loop_recording
       end
 
       # Runs `block` with a fresh return sink installed, then yields the
@@ -917,6 +927,13 @@ module Rigor
         # 0-iteration path (the body may never run) degrades it to
         # `T | nil`, matching the historical nil-injection treatment.
         result = loop_rebind_fixpoint(node, post_pred, names, body_first)
+        # Display-path re-record: the fixpoint's body re-evaluations fire
+        # `on_enter` with the cap-N INTERMEDIATE assumptions, so the
+        # last-visit-wins scope index would annotate loop-body lines with
+        # stale pre-convergence constants. One extra pass from the
+        # converged bindings (result discarded) re-records the body's
+        # entry scopes post-writeback.
+        record_converged_loop_body(node, post_pred, result, names, body_first)
         post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
         # ADR-56 slice C — loop-body receiver-content element-type join. A
         # loop that content-mutates a collection (`acc << n`) keeps only the
@@ -988,6 +1005,19 @@ module Rigor
           joined = join_content_for_local(name, calls, acc, post_loop)
           joined.nil? ? acc : acc.with_local(name, joined)
         end
+      end
+
+      # Re-evaluates the loop body once from the converged fixpoint
+      # bindings, solely for the `on_enter` side effect of re-recording
+      # the body's per-node entry scopes. Gated behind the
+      # display-path-only `converged_loop_recording` flag so the check
+      # path neither pays the extra body evaluation nor risks any
+      # diagnostic drift.
+      def record_converged_loop_body(node, post_pred, bindings, names, body_first)
+        return unless @converged_loop_recording && @on_enter
+
+        loop_body_exit_bindings(node, post_pred, bindings, names, body_first)
+        nil
       end
 
       # Runs the slice-B loop-body rebind fixpoint, returning the per-name
@@ -2906,7 +2936,8 @@ module Rigor
           scope: with_scope,
           tracer: tracer,
           on_enter: @on_enter,
-          class_context: class_context
+          class_context: class_context,
+          converged_loop_recording: @converged_loop_recording
         ).evaluate(node)
       end
 

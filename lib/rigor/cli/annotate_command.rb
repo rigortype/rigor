@@ -9,6 +9,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/statement_evaluator"
 require_relative "prism_colorizer"
 require_relative "command"
 
@@ -111,8 +112,13 @@ module Rigor
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 
+        # `converged_loop_recording` re-records fixpoint-tracked loop
+        # bodies from their converged (post-writeback) bindings, so a
+        # loop-body line annotates the joined widened type (`Integer`)
+        # rather than a stale first-iterations constant (`1 | 2`).
         scope_index = Inference::ScopeIndexer.index(
-          parse_result.value, default_scope: base_scope(configuration)
+          parse_result.value, default_scope: base_scope(configuration),
+                              converged_loop_recording: true
         )
         line_types = LineTypeCollector.new(scope_index).collect(parse_result.value)
 
@@ -286,8 +292,13 @@ module Rigor
         node.compact_child_nodes.each { |child| walk(child, &block) }
       end
 
+      # Types the node through the flow evaluator (not the bare
+      # expression typer) under its recorded entry scope, so flow-only
+      # forms type as the engine sees them — `i += 1` dispatches `+` on
+      # `i`'s binding (`Integer`, post-fixpoint) instead of echoing the
+      # RHS literal's `1`.
       def type_of(node)
-        @scope_index[node].type_of(node)
+        Inference::StatementEvaluator.new(scope: @scope_index[node]).evaluate(node).first
       rescue StandardError
         nil
       end

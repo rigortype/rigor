@@ -399,7 +399,23 @@ module Rigor
           end
         body_scope = default_scope.with_self_type(self_type)
 
-        gather_ivar_writes(def_node.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
+        # C2 — transient `@x = nil` dead-write elimination. When a
+        # method body opens with an unconditional `@x = nil`
+        # (defensive init) and then *definitely* reassigns `@x` to a
+        # non-nil value on every completing path (a later
+        # unconditional statement-level write, OR an `if/else` whose
+        # both branches write `@x`), the opening nil is dead — it can
+        # never be observed at method exit. Recording it anyway folds
+        # a spurious `nil` constituent into the flow-insensitive
+        # class-ivar union, which then poisons reads in OTHER methods
+        # (e.g. ipaddr `IN4MASK ^ @mask_addr` rejects the resulting
+        # `Integer | nil`). The set holds the `object_id`s of the
+        # transient write nodes to skip; soundness is post-domination
+        # at the top statement level, so dropping the nil never hides
+        # a real runtime-nil read.
+        dead_writes = dead_transient_nil_writes(def_node.body)
+        gather_ivar_writes(def_node.body, body_scope, class_name, accumulator,
+                           EMPTY_GUARDED_IVARS, mutated_ivars, dead_writes)
 
         # B2.3 — collect per-method evidence for the read-before-
         # write nil contribution. The accumulator-level decision
@@ -589,10 +605,11 @@ module Rigor
       private_constant :EMPTY_GUARDED_IVARS
 
       def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS,
-                             mutated_ivars = nil)
+                             mutated_ivars = nil, dead_writes = nil)
         return unless node.is_a?(Prism::Node)
 
-        if node.is_a?(Prism::InstanceVariableWriteNode)
+        if node.is_a?(Prism::InstanceVariableWriteNode) &&
+           !(dead_writes && dead_writes.include?(node.object_id))
           record_ivar_write(node, scope, class_name, accumulator,
                             guarded: guarded_ivars.include?(node.name))
         end
@@ -603,12 +620,13 @@ module Rigor
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
         if node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
-          walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars, mutated_ivars)
+          walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars,
+                                       mutated_ivars, dead_writes)
           return
         end
 
         node.compact_child_nodes.each do |c|
-          gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars)
+          gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes)
         end
       end
 
@@ -646,16 +664,22 @@ module Rigor
       # reads of `@x` would then surface a nil-receiver FP. The
       # ELSE branch is left ungarded so those reads continue to type
       # as they did before this fix.
-      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars, mutated_ivars = nil)
+      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars,
+                                       mutated_ivars = nil, dead_writes = nil)
         then_guards = then_body_guarded_ivars(node)
         then_guarded = then_guards.empty? ? guarded_ivars : (guarded_ivars | then_guards)
 
-        gather_ivar_writes(node.predicate, scope, class_name, accumulator, guarded_ivars, mutated_ivars)
+        gather_ivar_writes(node.predicate, scope, class_name, accumulator, guarded_ivars,
+                           mutated_ivars, dead_writes)
         if node.statements
-          gather_ivar_writes(node.statements, scope, class_name, accumulator, then_guarded, mutated_ivars)
+          gather_ivar_writes(node.statements, scope, class_name, accumulator, then_guarded,
+                             mutated_ivars, dead_writes)
         end
         branch = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
-        gather_ivar_writes(branch, scope, class_name, accumulator, guarded_ivars, mutated_ivars) if branch
+        return unless branch
+
+        gather_ivar_writes(branch, scope, class_name, accumulator, guarded_ivars,
+                           mutated_ivars, dead_writes)
       end
 
       # Returns the set of ivar names that, in the THEN body of this
@@ -721,6 +745,107 @@ module Rigor
           collect_nil_test_ivars(node.left, names)
           collect_nil_test_ivars(node.right, names)
         end
+      end
+
+      # C2 — returns a Set of `object_id`s for transient `@x = nil`
+      # writes that a later statement in the same method body
+      # *definitely* overwrites with a non-nil value on every
+      # completing path. Such a nil can never be the ivar's value at
+      # method exit, so it must not contribute a `nil` constituent to
+      # the (flow-insensitive) class-ivar union.
+      #
+      # Scope is deliberately narrow and post-domination-sound:
+      #   - only the top-level statement sequence of the body is
+      #     considered (no writes hidden inside loops / rescue / nested
+      #     conditionals count as the "definite" overwrite, except the
+      #     one structured `if/else` form below);
+      #   - the killing statement is either an unconditional
+      #     statement-level `@x = <non-nil>`, OR an `if/else` (with a
+      #     real `else`) where BOTH branches' final top-level write to
+      #     `@x` is non-nil. Both shapes overwrite `@x` on every path;
+      #   - only `@x = nil` literal writes are ever marked dead — a
+      #     non-nil transient is left untouched (it is already
+      #     precision-additive in the union).
+      def dead_transient_nil_writes(body)
+        statements = top_level_statements(body)
+        return nil if statements.length < 2
+
+        dead = nil
+        pending_nil = {} # ivar name => transient nil write node
+
+        statements.each do |stmt|
+          definite_non_nil_targets(stmt).each do |ivar_name|
+            node = pending_nil.delete(ivar_name)
+            next if node.nil?
+
+            (dead ||= Set.new) << node.object_id
+          end
+
+          if stmt.is_a?(Prism::InstanceVariableWriteNode) && nil_literal_value?(stmt.value)
+            pending_nil[stmt.name] = stmt
+          end
+        end
+
+        dead
+      end
+
+      def top_level_statements(body)
+        return [] if body.nil?
+        return body.body if body.is_a?(Prism::StatementsNode)
+
+        [body]
+      end
+
+      def nil_literal_value?(node)
+        node.is_a?(Prism::NilNode)
+      end
+
+      # The set of ivar names this single top-level statement
+      # unconditionally reassigns to a NON-nil value (overwriting any
+      # prior value on every completing path through the statement).
+      def definite_non_nil_targets(stmt)
+        case stmt
+        when Prism::InstanceVariableWriteNode
+          nil_literal_value?(stmt.value) ? [] : [stmt.name]
+        when Prism::IfNode
+          if_else_both_write_targets(stmt)
+        else
+          []
+        end
+      end
+
+      # For `if P; ...; else; ...; end` (a real `else`, not `elsif`
+      # chains without one and not a modifier-`if`), returns the ivar
+      # names whose FINAL top-level write is non-nil in BOTH the then
+      # and else branches — those are overwritten on every path.
+      def if_else_both_write_targets(node)
+        return [] unless node.is_a?(Prism::IfNode)
+
+        else_clause = node.subsequent
+        return [] unless else_clause.is_a?(Prism::ElseNode)
+
+        then_writes = final_non_nil_branch_writes(node.statements)
+        else_writes = final_non_nil_branch_writes(else_clause.statements)
+        (then_writes & else_writes).to_a
+      end
+
+      # Walks a branch's top-level statements and returns the set of
+      # ivar names whose LAST top-level write in the branch is non-nil
+      # (a later non-nil write supersedes an earlier nil within the
+      # branch). A branch whose last write to `@x` is nil does NOT
+      # qualify.
+      def final_non_nil_branch_writes(statements_node)
+        non_nil = Set.new
+        top_level_statements(statements_node).each do |stmt|
+          next unless stmt.is_a?(Prism::InstanceVariableWriteNode)
+
+          if nil_literal_value?(stmt.value)
+            non_nil.delete(stmt.name)
+          else
+            non_nil << stmt.name
+          end
+        end
+        non_nil
       end
 
       def record_ivar_write(node, scope, class_name, accumulator, guarded: false)

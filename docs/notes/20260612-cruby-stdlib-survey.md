@@ -325,6 +325,42 @@ Non-regex bucket verdicts (Step 3 of the brief):
 explicitly *not* slated), the `undefined-method` long tail (needs-RBS /
 ADR-43 inherited-resolution), C9 `untaint` (genuine catch).
 
+### C2 slice landed (transient-nil subset) + deferred remainder
+
+Implemented the **FP-safe subset** of slice 2 (transient `@x = nil`
+dead-write elimination, `ScopeIndexer#dead_transient_nil_writes`): an
+opening defensive `@x = nil` no longer contributes its `nil` to the
+flow-insensitive class-ivar union when a later **statement-level**
+unconditional write — or an `if`/`else` whose *both* branches' final
+write to `@x` is non-nil — provably overwrites it on every completing
+path. Post-domination-sound at the top statement level; corpora
+byte-identical (mastodon app/models, haml, kramdown), self-check
+firing-free, +4 unit specs. **Isolated `ruby/lib` FP radius measured at
+ZERO** (289 errors with my change alone == base 289): the literal-write
+idiom the subset recognizes does not occur in the real stdlib cluster —
+ipaddr writes `@mask_addr` indirectly (`mask!`) and uri/ldap writes are
+param-sourced (see deferred). The subset is therefore precision-additive
+groundwork on a sound but currently-unexercised shape; it is kept because
+it is the FP-safe floor the deferred definite-assignment pass builds on,
+not because it moves this corpus.
+
+**Deferred (needs an ADR — intraprocedural definite-assignment over
+ivars):** the canonical **ipaddr `@mask_addr`** cluster (6 `^`
+arg-mismatches) is *not* covered by the subset and remains. Its
+`initialize` opens `@mask_addr = nil` and reassigns on every path, but the
+then-branch of the trailing `if prefixlen; mask!(prefixlen); else;
+@mask_addr = …; end` writes the ivar **indirectly via a same-class method
+call** (`mask!`), not a direct `@mask_addr = `. Crediting that as a
+definite overwrite requires a cross-method write-effect summary (does
+`mask!` unconditionally write `@mask_addr` non-nil?) folded into a real
+intraprocedural definite-assignment pass — a deeper design than the
+literal-write subset, and the source of the residual `Dynamic[top]`
+constituent (`@mask_addr = m.to_i` where `m.to_i` returns `@addr`, itself
+a multi-writer ivar) is a second, orthogonal Dynamic-chain that the
+nil-drop does not address. uri/ldap `@dn`-style return-mismatches are
+param-sourced (`@dn = val`) → genuinely `Dynamic`, also out of subset
+scope. Queue both behind an ivar definite-assignment ADR.
+
 **Headline correction for the campaign:** C1 (regex globals) was the
 top-ranked FP mechanism in the original survey but has **~0 FP radius** on
 real stdlib — match-data globals read `Dynamic`, never `nil`. The actual

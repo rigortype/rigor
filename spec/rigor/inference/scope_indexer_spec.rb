@@ -837,6 +837,81 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(type).not_to be_nil
       end
 
+      describe "transient `@x = nil` dead-write elimination (C2)" do
+        it "drops the transient nil when a later unconditional write overwrites it" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize
+                @m = nil
+                @m = 7
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          type = idx[program].class_ivars_for("C")[:@m]
+          values = if type.is_a?(Rigor::Type::Union)
+                     type.members.grep(Rigor::Type::Constant).map(&:value)
+                   else
+                     [type.respond_to?(:value) ? type.value : nil]
+                   end
+          expect(values).not_to include(nil)
+          expect(values).to include(7)
+        end
+
+        it "drops the transient nil when both branches of a following if/else write non-nil" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize(p)
+                @m = nil
+                if p
+                  @m = 1
+                else
+                  @m = 2
+                end
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          type = idx[program].class_ivars_for("C")[:@m]
+          values = type.members.grep(Rigor::Type::Constant).map(&:value)
+          expect(values).to contain_exactly(1, 2)
+        end
+
+        it "KEEPS the transient nil when the following if/else has no else" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize(p)
+                @m = nil
+                @m = 1 if p
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          type = idx[program].class_ivars_for("C")[:@m]
+          values = type.members.grep(Rigor::Type::Constant).map(&:value)
+          expect(values).to include(nil)
+        end
+
+        it "KEEPS the transient nil when only one branch writes non-nil" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize(p)
+                @m = nil
+                if p
+                  @m = 1
+                else
+                  do_something
+                end
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          type = idx[program].class_ivars_for("C")[:@m]
+          values = type.members.grep(Rigor::Type::Constant).map(&:value)
+          expect(values).to include(nil)
+        end
+      end
+
       describe "read-before-write nil contribution (B2.3)" do
         it "adds nil to the seed on read-before-write, no init / class-body write" do
           program = parse(<<~RUBY)

@@ -210,8 +210,15 @@ module Rigor
         mutated_ivars = {}
         read_before_write = {}
         init_writes = {}
+        # WD3 — per-class summary of `{class_name => {method_name =>
+        # Set<ivar names definitely assigned non-nil on every
+        # completing path>}}`, consulted by `dead_transient_nil_writes`
+        # so a ctor that reassigns `@x` indirectly through an
+        # unconditional same-class method call (`mask!`) credits the
+        # overwrite. Built once per program here, memoised by class.
+        method_assign_effects = build_method_assign_effects(root)
         walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
-                         read_before_write, init_writes)
+                         read_before_write, init_writes, method_assign_effects)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         accumulator.transform_values(&:freeze).freeze
@@ -334,8 +341,8 @@ module Rigor
         end
       end
 
-      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars, # rubocop:disable Metrics/CyclomaticComplexity
-                           read_before_write = nil, init_writes = nil)
+      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars, # rubocop:disable Metrics/CyclomaticComplexity,Metrics/ParameterLists
+                           read_before_write = nil, init_writes = nil, method_assign_effects = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -361,13 +368,13 @@ module Rigor
               # read.
               collect_class_body_ivar_writes(node.body, child_prefix.join("::"), init_writes) if init_writes
               walk_class_ivars(node.body, child_prefix, default_scope, accumulator,
-                               mutated_ivars, read_before_write, init_writes)
+                               mutated_ivars, read_before_write, init_writes, method_assign_effects)
             end
             return
           end
         when Prism::DefNode
           collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator,
-                                  mutated_ivars, read_before_write, init_writes)
+                                  mutated_ivars, read_before_write, init_writes, method_assign_effects)
           return
         when Prism::CallNode
           if init_writes && !qualified_prefix.empty? &&
@@ -380,12 +387,12 @@ module Rigor
 
         node.compact_child_nodes.each do |child|
           walk_class_ivars(child, qualified_prefix, default_scope, accumulator,
-                           mutated_ivars, read_before_write, init_writes)
+                           mutated_ivars, read_before_write, init_writes, method_assign_effects)
         end
       end
 
-      def collect_def_ivar_writes(def_node, qualified_prefix, default_scope, accumulator, mutated_ivars,
-                                  read_before_write = nil, init_writes = nil)
+      def collect_def_ivar_writes(def_node, qualified_prefix, default_scope, accumulator, mutated_ivars, # rubocop:disable Metrics/ParameterLists
+                                  read_before_write = nil, init_writes = nil, method_assign_effects = nil)
         return if def_node.body.nil? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
@@ -413,7 +420,7 @@ module Rigor
         # transient write nodes to skip; soundness is post-domination
         # at the top statement level, so dropping the nil never hides
         # a real runtime-nil read.
-        dead_writes = dead_transient_nil_writes(def_node.body)
+        dead_writes = dead_transient_nil_writes(def_node.body, class_name, method_assign_effects)
         gather_ivar_writes(def_node.body, body_scope, class_name, accumulator,
                            EMPTY_GUARDED_IVARS, mutated_ivars, dead_writes)
 
@@ -766,23 +773,152 @@ module Rigor
       #   - only `@x = nil` literal writes are ever marked dead — a
       #     non-nil transient is left untouched (it is already
       #     precision-additive in the union).
-      def dead_transient_nil_writes(body)
+      # WD3 — ADR-41-style hard cap on how deep the same-class-call
+      # definite-assignment crediting recurses (the ctor calls
+      # `mask!`, which could itself call another same-class helper).
+      # Cycle-guarded independently; the cap bounds even acyclic
+      # chains.
+      SAME_CLASS_CALL_DEPTH_CAP = 3
+      private_constant :SAME_CLASS_CALL_DEPTH_CAP
+
+      # WD3 — builds the per-class definite-assignment summary
+      # `{class_name => {method_name => Set<ivar names assigned
+      # non-nil on every completing path>}}`. Used so a ctor's
+      # `dead_transient_nil_writes` can credit an indirect overwrite
+      # through an unconditionally-called same-class method (ipaddr's
+      # `initialize` reassigns `@mask_addr` via `mask!`).
+      #
+      # Each method's set is computed by the same suffix
+      # definite-assignment analysis used for the ctor seed, run from
+      # the method body's first statement for every ivar the method
+      # writes anywhere. Same-class calls inside a method are credited
+      # transitively (depth-capped, cycle-guarded) so the resulting
+      # FLAT table is correct at depth 0 for the ctor lookup.
+      def build_method_assign_effects(root)
+        defs = collect_class_method_defs(root)
+        effects = {}
+        memo = {}.compare_by_identity
+        defs.each do |class_name, methods|
+          methods.each do |method_name, def_node|
+            assigns = method_definite_assigns(class_name, method_name, def_node, defs, effects, memo, 0)
+            (effects[class_name] ||= {})[method_name] = assigns unless assigns.empty?
+          end
+        end
+        effects.freeze
+      end
+
+      # Collects `{class_name => {method_name => DefNode}}` for every
+      # instance-method def in the program. Singleton defs (`def
+      # self.x`) are excluded — the ctor-call crediting only follows
+      # instance-method calls on `self`. Last def wins on redefinition.
+      def collect_class_method_defs(root, prefix = [], acc = {})
+        return acc unless root.is_a?(Prism::Node)
+
+        case root
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(root.constant_path)
+          if name && root.body
+            child = prefix + [name]
+            collect_class_method_defs(root.body, child, acc)
+          end
+          return acc
+        when Prism::DefNode
+          (acc[prefix.join("::")] ||= {})[root.name] = root unless prefix.empty? || root.receiver
+          return acc
+        end
+
+        root.compact_child_nodes.each { |c| collect_class_method_defs(c, prefix, acc) }
+        acc
+      end
+
+      # Computes the definite-assignment set for one method, memoised
+      # per def node. The `memo` cycle-guards: a method re-entered
+      # while its own summary is in progress contributes nothing
+      # (sound under-approximation), so mutual recursion terminates.
+      def method_definite_assigns(class_name, _method_name, def_node, defs, effects, memo, depth)
+        return Set.new if def_node.body.nil?
+        return memo[def_node] if memo.key?(def_node)
+        return Set.new if depth >= SAME_CLASS_CALL_DEPTH_CAP
+
+        memo[def_node] = Set.new # in-progress sentinel (cycle guard)
+        statements = top_level_statements(def_node.body)
+        candidates = ivar_write_targets(def_node.body)
+        # A transient `@x = nil` opener whose own method reassigns it
+        # later must still count `@x` as assigned for callers, so the
+        # crediting is computed at the BUILD-time depth.
+        resolver = MethodEffectResolver.new(self, class_name, defs, effects, memo, depth)
+        assigns = Set.new
+        candidates.each do |ivar|
+          assigns << ivar if suffix_definitely_assigns_with_resolver?(statements, 0, ivar, class_name, resolver, depth)
+        end
+        memo[def_node] = assigns
+      end
+
+      # Every ivar this body assigns a non-nil value to ANYWHERE (the
+      # candidate set for the method's definite-assignment scan).
+      def ivar_write_targets(node, acc = Set.new)
+        return acc unless node.is_a?(Prism::Node)
+
+        acc << node.name if node.is_a?(Prism::InstanceVariableWriteNode) && !nil_literal_value?(node.value)
+        node.compact_child_nodes.each { |c| ivar_write_targets(c, acc) }
+        acc
+      end
+
+      # Build-time variant of `suffix_definitely_assigns?` that resolves
+      # same-class calls through the lazy `resolver` (which recurses
+      # into `method_definite_assigns` for not-yet-computed callees)
+      # rather than the finished flat table.
+      def suffix_definitely_assigns_with_resolver?(statements, from, target, class_name, resolver, depth)
+        statements[from..].each do |stmt|
+          outcome = statement_assignment_outcome(stmt, target, class_name, resolver, depth, nil)
+          return true if outcome == :assigned
+          return false if outcome == :terminates_unassigned
+        end
+        false
+      end
+
+      # Adapts `effects.dig(class, method)` for build-time crediting:
+      # when the callee summary is not yet in the flat table, compute
+      # it on demand (depth+1) via `method_definite_assigns`.
+      class MethodEffectResolver
+        def initialize(indexer, class_name, defs, effects, memo, depth)
+          @indexer = indexer
+          @class_name = class_name
+          @defs = defs
+          @effects = effects
+          @memo = memo
+          @depth = depth
+        end
+
+        def dig(class_name, method_name)
+          existing = @effects.dig(class_name, method_name)
+          return existing if existing
+
+          def_node = @defs.dig(class_name, method_name)
+          return nil if def_node.nil?
+
+          @indexer.send(:method_definite_assigns, class_name, method_name, def_node, @defs, @effects, @memo,
+                        @depth + 1)
+        end
+      end
+
+      def dead_transient_nil_writes(body, class_name = nil, method_assign_effects = nil)
         statements = top_level_statements(body)
         return nil if statements.length < 2
 
         dead = nil
-        pending_nil = {} # ivar name => transient nil write node
 
-        statements.each do |stmt|
-          definite_non_nil_targets(stmt).each do |ivar_name|
-            node = pending_nil.delete(ivar_name)
-            next if node.nil?
+        statements.each_with_index do |stmt, i|
+          next unless stmt.is_a?(Prism::InstanceVariableWriteNode) && nil_literal_value?(stmt.value)
 
-            (dead ||= Set.new) << node.object_id
-          end
-
-          if stmt.is_a?(Prism::InstanceVariableWriteNode) && nil_literal_value?(stmt.value)
-            pending_nil[stmt.name] = stmt
+          # The opening `@x = nil` is dead when every completing path
+          # of the SUFFIX after it (normal end OR early `return`,
+          # never a `raise`-terminated path) definitely reassigns
+          # `@x` non-nil. The suffix analysis credits an
+          # unconditionally-called same-class method's own definite
+          # assignments via `method_assign_effects`.
+          if suffix_definitely_assigns?(statements, i + 1, stmt.name, class_name, method_assign_effects)
+            (dead ||= Set.new) << stmt.object_id
           end
         end
 
@@ -800,52 +936,148 @@ module Rigor
         node.is_a?(Prism::NilNode)
       end
 
-      # The set of ivar names this single top-level statement
-      # unconditionally reassigns to a NON-nil value (overwriting any
-      # prior value on every completing path through the statement).
-      def definite_non_nil_targets(stmt)
+      # True when, starting from `statements[from]`, EVERY path that
+      # completes the method (falls off the end OR hits an early
+      # `return`) definitely assigns `target` a non-nil value first.
+      # Paths terminated by `raise` are not completing paths and are
+      # ignored (they never observe the ivar at method exit). A path
+      # that can fall through `statements` without assigning fails.
+      def suffix_definitely_assigns?(statements, from, target, class_name, effects)
+        statements[from..].each do |stmt|
+          outcome = statement_assignment_outcome(stmt, target, class_name, effects, 0, nil)
+          # The statement assigned on every continuing path -> the
+          # suffix is satisfied no matter what follows.
+          return true if outcome == :assigned
+          # The statement terminates control here (return/raise) and
+          # the value it carried did not assign on every path -> some
+          # completing path reached exit without the assignment.
+          return false if outcome == :terminates_unassigned
+          # Otherwise (:falls_through_unassigned) keep scanning the
+          # remaining statements.
+        end
+        # Fell off the end with no definite assignment.
+        false
+      end
+
+      # Classifies a single statement's effect on `target`:
+      #   :assigned                 — every path through the statement
+      #                               that continues OR returns assigns
+      #                               `target` non-nil (suffix is done);
+      #   :terminates_unassigned    — the statement ends the method
+      #                               (return/raise) on some path
+      #                               without a definite assignment, so
+      #                               a completing path escaped;
+      #   :falls_through_unassigned — control may continue past it
+      #                               without the assignment (keep
+      #                               scanning the suffix).
+      def statement_assignment_outcome(stmt, target, class_name, effects, depth, visiting)
         case stmt
         when Prism::InstanceVariableWriteNode
-          nil_literal_value?(stmt.value) ? [] : [stmt.name]
-        when Prism::IfNode
-          if_else_both_write_targets(stmt)
-        else
-          []
-        end
-      end
+          return :falls_through_unassigned if stmt.name != target
 
-      # For `if P; ...; else; ...; end` (a real `else`, not `elsif`
-      # chains without one and not a modifier-`if`), returns the ivar
-      # names whose FINAL top-level write is non-nil in BOTH the then
-      # and else branches — those are overwritten on every path.
-      def if_else_both_write_targets(node)
-        return [] unless node.is_a?(Prism::IfNode)
-
-        else_clause = node.subsequent
-        return [] unless else_clause.is_a?(Prism::ElseNode)
-
-        then_writes = final_non_nil_branch_writes(node.statements)
-        else_writes = final_non_nil_branch_writes(else_clause.statements)
-        (then_writes & else_writes).to_a
-      end
-
-      # Walks a branch's top-level statements and returns the set of
-      # ivar names whose LAST top-level write in the branch is non-nil
-      # (a later non-nil write supersedes an earlier nil within the
-      # branch). A branch whose last write to `@x` is nil does NOT
-      # qualify.
-      def final_non_nil_branch_writes(statements_node)
-        non_nil = Set.new
-        top_level_statements(statements_node).each do |stmt|
-          next unless stmt.is_a?(Prism::InstanceVariableWriteNode)
-
-          if nil_literal_value?(stmt.value)
-            non_nil.delete(stmt.name)
+          nil_literal_value?(stmt.value) ? :falls_through_unassigned : :assigned
+        when Prism::CallNode
+          if unconditional_call_assigns?(stmt, target, class_name, effects, depth, visiting)
+            :assigned
           else
-            non_nil << stmt.name
+            :falls_through_unassigned
           end
+        when Prism::IfNode, Prism::UnlessNode
+          conditional_assignment_outcome(stmt, target, class_name, effects, depth, visiting)
+        when Prism::CaseNode
+          case_assignment_outcome(stmt, target, class_name, effects, depth, visiting)
+        when Prism::ReturnNode
+          :terminates_unassigned
+        else
+          # Any other statement — including a bare `raise`/`fail`,
+          # which terminates without a completing path that observes
+          # the seed nil — is neutral: control either continues or the
+          # path never reaches method exit. Keep scanning the suffix.
+          :falls_through_unassigned
         end
-        non_nil
+      end
+
+      # True when a branch body (a StatementsNode / single node)
+      # definitely assigns `target` non-nil on every path that
+      # completes the method through it, OR terminates every path by
+      # raise (vacuously safe — no completing path observes the seed
+      # nil). Returns false if any path can complete/return without the
+      # assignment.
+      def branch_definitely_assigns?(branch, target, class_name, effects, depth, visiting)
+        stmts = top_level_statements(branch)
+        return false if stmts.empty?
+
+        stmts.each do |stmt|
+          outcome = statement_assignment_outcome(stmt, target, class_name, effects, depth, visiting)
+          return true if outcome == :assigned
+          return false if outcome == :terminates_unassigned
+        end
+        # Reached the end of the branch without a definite assignment;
+        # safe only if the branch's last statement always raises (no
+        # completing path falls out of it).
+        always_raises?(stmts.last)
+      end
+
+      # `if`/`unless` is a definite assignment of `target` only when
+      # BOTH the then and else arms definitely assign (or raise-out).
+      # A missing else arm means the fall-through path skips the
+      # assignment -> not definite. Modifier-form `if`/`unless` (no
+      # else, single predicate'd statement) likewise.
+      def conditional_assignment_outcome(node, target, class_name, effects, depth, visiting)
+        else_branch = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
+        return :falls_through_unassigned unless else_branch.is_a?(Prism::ElseNode)
+        return :falls_through_unassigned unless node.statements
+
+        then_ok = branch_definitely_assigns?(node.statements, target, class_name, effects, depth, visiting)
+        else_ok = branch_definitely_assigns?(else_branch.statements, target, class_name, effects, depth, visiting)
+        then_ok && else_ok ? :assigned : :falls_through_unassigned
+      end
+
+      # `case` is a definite assignment only when there is a real
+      # `else` clause AND every `when`/`in` body plus the else body
+      # definitely assigns (or raises-out). A missing else lets an
+      # unmatched subject fall through unassigned.
+      def case_assignment_outcome(node, target, class_name, effects, depth, visiting)
+        else_clause = node.else_clause
+        return :falls_through_unassigned unless else_clause.is_a?(Prism::ElseNode)
+
+        branches = node.conditions.map { |c| c.respond_to?(:statements) ? c.statements : nil }
+        branches << else_clause.statements
+        all_ok = branches.all? do |b|
+          branch_definitely_assigns?(b, target, class_name, effects, depth, visiting)
+        end
+        all_ok ? :assigned : :falls_through_unassigned
+      end
+
+      # True when `node` (a single statement or its last statement) is
+      # an unconditional `raise`/`fail` call that always terminates the
+      # path — used to treat raise-terminated branches as
+      # non-completing (they never observe the seed nil).
+      def always_raises?(node)
+        node = top_level_statements(node).last if node.is_a?(Prism::StatementsNode)
+        return false unless node.is_a?(Prism::CallNode)
+        return false unless node.receiver.nil?
+
+        %i[raise fail].include?(node.name)
+      end
+
+      # True when `call` is an unconditional, statement-level,
+      # implicit-self (or `self.`) call to a SAME-CLASS method whose
+      # definite-assignment summary includes `target`. Calls through a
+      # block, on another receiver, or to an unresolved name contribute
+      # nothing (the seed nil stays).
+      def unconditional_call_assigns?(call, target, class_name, effects, depth, _visiting)
+        return false if effects.nil? || class_name.nil?
+        return false if depth >= SAME_CLASS_CALL_DEPTH_CAP
+        return false unless call.is_a?(Prism::CallNode)
+        return false unless call.block.nil?
+        # Implicit self (`mask!(x)`) or explicit `self.mask!(x)` only.
+        return false unless call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode)
+
+        assigns = effects.dig(class_name, call.name)
+        return false if assigns.nil?
+
+        assigns.include?(target)
       end
 
       def record_ivar_write(node, scope, class_name, accumulator, guarded: false)

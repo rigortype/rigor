@@ -912,6 +912,125 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         end
       end
 
+      describe "ctor definite assignment through same-class calls (WD3)" do
+        def ivar_values(program, klass, ivar)
+          idx = described_class.index(program, default_scope: default_scope)
+          type = idx[program].class_ivars_for(klass)[ivar]
+          members = type.is_a?(Rigor::Type::Union) ? type.members : [type]
+          members.grep(Rigor::Type::Constant).map(&:value)
+        end
+
+        it "drops the seed nil when an unconditional same-class call assigns the ivar" do
+          program = parse(<<~RUBY)
+            class A
+              def initialize
+                @a = nil
+                setup
+              end
+              def setup
+                @a = 1
+              end
+            end
+          RUBY
+          expect(ivar_values(program, "A", :@a)).not_to include(nil)
+        end
+
+        it "drops the seed nil for the ipaddr shape (then=call, else=direct write)" do
+          program = parse(<<~RUBY)
+            class F
+              def initialize(p)
+                @m = nil
+                if p
+                  mask!(p)
+                else
+                  @m = 5
+                end
+              end
+              def mask!(x)
+                @m = x
+              end
+            end
+          RUBY
+          expect(ivar_values(program, "F", :@m)).not_to include(nil)
+        end
+
+        it "drops the seed nil when the callee assigns on both arms of an if/else and raises otherwise" do
+          program = parse(<<~RUBY)
+            class C
+              def initialize
+                @a = nil
+                setup
+              end
+              def setup
+                if cond
+                  @a = 1
+                else
+                  raise "x"
+                end
+              end
+            end
+          RUBY
+          expect(ivar_values(program, "C", :@a)).not_to include(nil)
+        end
+
+        it "KEEPS the seed nil when the same-class call is conditional" do
+          program = parse(<<~RUBY)
+            class B
+              def initialize(c)
+                @a = nil
+                setup if c
+              end
+              def setup
+                @a = 1
+              end
+            end
+          RUBY
+          expect(ivar_values(program, "B", :@a)).to include(nil)
+        end
+
+        it "KEEPS the seed nil when the same-class call runs through a block" do
+          program = parse(<<~RUBY)
+            class E
+              def initialize
+                @a = nil
+                3.times { setup }
+              end
+              def setup
+                @a = 1
+              end
+            end
+          RUBY
+          expect(ivar_values(program, "E", :@a)).to include(nil)
+        end
+
+        it "KEEPS the seed nil when the callee only assigns on one branch" do
+          program = parse(<<~RUBY)
+            class D
+              def initialize
+                @a = nil
+                setup
+              end
+              def setup
+                @a = 1 if cond
+              end
+            end
+          RUBY
+          expect(ivar_values(program, "D", :@a)).to include(nil)
+        end
+
+        it "KEEPS the seed nil when the call target is an unresolved (non-same-class) method" do
+          program = parse(<<~RUBY)
+            class G
+              def initialize
+                @a = nil
+                helper.setup
+              end
+            end
+          RUBY
+          expect(ivar_values(program, "G", :@a)).to include(nil)
+        end
+      end
+
       describe "read-before-write nil contribution (B2.3)" do
         it "adds nil to the seed on read-before-write, no init / class-body write" do
           program = parse(<<~RUBY)

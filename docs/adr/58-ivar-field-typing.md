@@ -5,8 +5,10 @@ provenance subset, 2026-06-12; method-return-transit residual queued as
 WD1b — see WD1 status). WD2 resolved as already-realized
 (2026-06-12 — the flow-insensitive write-union already produces
 `join(writes) | nil`; corpus yield ~zero, bounded by untyped-param /
-recursive-return Dynamic sources per the WD2 status). WD3 not yet
-implemented. Archetype:
+recursive-return Dynamic sources per the WD2 status). WD3 implemented
+(2026-06-12 — ctor definite assignment credited through unconditional
+same-class calls; closes the ipaddr `@mask_addr` 6-site cluster, see
+WD3 status). Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -216,6 +218,41 @@ per-class scan of ctor-reachable same-class calls (depth-capped,
 ADR-41-style) marks fields definitely assigned on every ctor path;
 those drop the seed nil entirely (it is not merely non-firing — it is
 absent). Smallest slice that closes ipaddr's 6 sites + uri/ldap.
+
+**Status, 2026-06-12 — implemented.** Extends the 77a4bd0a
+dead-transient-nil elision from a top-statement-level post-domination
+check into a recursive definite-assignment analysis
+(`suffix_definitely_assigns?` over the ctor body suffix, handling
+nested `if/else`, `case/when`+`else`, early `return`, and `raise`-
+terminated non-completing branches) that may now credit an
+**unconditional, statement-level, implicit-`self`/`self.`** same-class
+method call as the overwrite. The crediting consults a once-per-program
+flat summary `{class => {method => Set<ivars definitely assigned non-nil
+on every completing path>}}` (`build_method_assign_effects`), itself
+computed by the same suffix analysis and transitively crediting nested
+same-class calls under an ADR-41-style hard cap
+(`SAME_CLASS_CALL_DEPTH_CAP = 3`) with a per-def cycle guard. Soundness:
+conditional calls, calls through a block/loop, calls on a non-`self`
+receiver, and unresolved (non-same-class) names contribute nothing — the
+seed nil stays. Singleton (`def self.x`) defs are excluded from the
+summary; per-class index, so a subclass ctor that does not call `super`
+is out of scope as today.
+
+Measured `ruby/lib` delta (`--no-cache`, baseline worktree vs new): the
+six predicted ipaddr `@mask_addr` `^` `call.argument-type-mismatch`
+firings (`lib/ipaddr.rb` lines 463, 466, 513, 515, 558, 560 — the
+`IN4MASK ^ @mask_addr` / `IN6MASK ^ @mask_addr` family) are **removed**,
+**zero new** anywhere; total 451 → 445. The residual displayed type at
+those reads is now `Dynamic[top] | Integer` (the orthogonal multi-writer
+Dynamic chain the ADR noted remains; only the rejecting `nil` is gone,
+and `Dynamic` gradually matches `Integer`). uri/ldap `@dn`-style
+return-mismatches stay untouched — genuinely param-sourced `Dynamic`,
+out of scope as the ADR predicted. Mastodon `app/models`, haml `lib`,
+kramdown `lib`, and the four algorithm corpora
+(algorithms / ADSR / DSAR / TheAlgorithms) are byte-identical; full
+spec suite + self-check + `check-plugins` clean; +7 unit specs (the
+indirect-assign / ipaddr-shape / raise-arm wins and the conditional /
+block / one-branch / unresolved-call counter-probes).
 
 ### WD4 — Gate
 

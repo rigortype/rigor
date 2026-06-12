@@ -27,14 +27,17 @@ step-by-step.
    want RBS in `sig/`, [`rigor sig-gen`](https://rigor.typedduck.fail/reference/adr/14-rbs-sig-generation/)
    emits it from inference results so the written form starts in sync
    with reality.
-2. **Your specs are types.** Do you really need to write type
-   annotations? Your `spec/` is already type information. RSpec
-   `expect(x).to be_a(T)` / `eq(literal)` assertions contribute
-   narrowing facts from that point forward; `subject` / `let` bindings
-   propagate the SUT's type into downstream `it` bodies; factory
-   definitions in `spec/factories/` feed attribute shapes back into
-   `rigor-activerecord` and `rigor-factorybot`'s cross-plugin channels.
-   The test suite you already have becomes a live type oracle.
+2. **Your specs are typed code too.** Rigor analyses `spec/` with the
+   same flow engine as `lib/`, and the `rigor-rspec` plugin teaches it
+   the DSL: `expect(x).to be_a(T)` / `eq(literal)` assertions narrow
+   `x` for the rest of the example; `subject` / `let` bindings carry
+   the SUT's inferred type into downstream `it` bodies; factory
+   definitions in `spec/factories/` feed attribute shapes into
+   `rigor-activerecord` and `rigor-factorybot`'s cross-plugin
+   channels. Implementation types flow into your specs — assertions
+   never flow back as implementation signatures (a test witnesses one
+   input, not a contract; see
+   [ADR-59](https://rigor.typedduck.fail/reference/adr/59-spec-assertions-are-not-signatures/)).
 3. **Programmable inference beyond unions.** A plain union
    (`Integer | nil`) is not the type story Ruby needs. Rigor reasons
    about *what values an expression actually produces* — literal values,

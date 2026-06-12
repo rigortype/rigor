@@ -6,20 +6,6 @@ Rigor reads `attr_*`, `Data.define`, and `Struct.new`
 declarations. It is more reference than narrative: read it
 through once, then jump back to the section you need.
 
-> **In this chapter**
-> [Instance-side and class-side `self`](#instance-side-and-class-side-self) ·
-> [Constants](#constants) ·
-> [`attr_*`](#attr_reader-attr_writer-attr_accessor) ·
-> [Instance variables across methods](#instance-variables-across-methods) ·
-> [`Data.define`](#datadefine) ·
-> [`Struct.new`](#structnew) ·
-> [Inheritance](#inheritance-and-method-resolution) ·
-> [`class` / `singleton(C)` types](#class-and-singletonc-types) ·
-> [Custom `===`](#custom-case_eq-) ·
-> [Alias classes](#constant-decl-alias-classes) ·
-> [Modules](#modules) ·
-> [`protected` / `private`](#protected-and-private)
-
 ## Instance-side and class-side `self`
 
 Inside an instance method body, `self` is a `Nominal[T]` of

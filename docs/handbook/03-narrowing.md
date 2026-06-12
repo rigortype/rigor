@@ -11,21 +11,6 @@ edge, the variable's carrier is sharpened to whatever the
 predicate proved. If the predicate is unrecognised, both
 edges share the entry scope unchanged.
 
-> **In this chapter**
-> [Truthiness](#truthiness-narrowing) ·
-> [`nil?`](#nil-and-the-inverse) ·
-> [`is_a?` / `kind_of?` / `instance_of?`](#is_a-kind_of-instance_of) ·
-> [Literal equality](#equality-with-literal-values) ·
-> [`case` / `when`](#case--when) ·
-> [Boolean composition](#boolean-composition) ·
-> [Integer comparisons](#integer-comparisons) ·
-> [Predicate methods](#predicate-methods-on-refinements) ·
-> [Named-capture regex](#named-capture-regex-narrowing) ·
-> [Negation and `unless`](#negation-and-unless) ·
-> [Local rebinding](#local-rebinding-flips-the-narrowing) ·
-> [What's not narrowed yet](#whats-not-narrowed-yet) ·
-> [Reading a narrowing trace](#reading-a-narrowing-trace)
-
 ## Truthiness narrowing
 
 The simplest form. `if x` separates "x is truthy" from "x is

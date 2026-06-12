@@ -14,15 +14,6 @@ design + capability matrix lives in
 (v2). Packaging rationale is in
 [`docs/adr/19-language-server-packaging.md`](../adr/19-language-server-packaging.md).
 
-> **In this chapter**
-> [Features](#features-at-a-glance) ·
-> [Prerequisites](#prerequisites) ·
-> [CLI](#cli) ·
-> Editor wiring — [Neovim](#neovim--nvim-lspconfig) · [VS Code](#vs-code--generic-lsp-client) · [Helix](#helix) · [Emacs / Eglot](#emacs--eglot) · [Emacs / lsp-mode](#emacs--lsp-mode) ·
-> [Troubleshooting](#troubleshooting) ·
-> [Performance](#performance-expectations) ·
-> [Status & roadmap](#status--roadmap)
-
 ## Features at a glance
 
 | LSP method | Behaviour |

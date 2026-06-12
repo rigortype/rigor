@@ -11,19 +11,6 @@ rigor <command> [options] [arguments]
 the installed version. An unknown command, or a malformed
 option, exits `64` — the conventional "usage error" code.
 
-> **Commands**
-> [check](#rigor-check) · [init](#rigor-init) ·
-> [annotate](#rigor-annotate) · [type-of](#rigor-type-of) ·
-> [trace](#rigor-trace) ·
-> [type-scan](#rigor-type-scan) · [explain](#rigor-explain) ·
-> [diff](#rigor-diff) · [sig-gen](#rigor-sig-gen) ·
-> [lsp](#rigor-lsp) · [baseline](#rigor-baseline) ·
-> [triage](#rigor-triage) · [coverage](#rigor-coverage) ·
-> [mcp](#rigor-mcp) · [plugins](#rigor-plugins) ·
-> [plugin](#rigor-plugin) · [playground](#rigor-playground) ·
-> [skill](#rigor-skill) · [lsp vs mcp](#rigor-lsp-vs-rigor-mcp) ·
-> [exit codes](#exit-codes)
-
 ## `rigor check`
 
 Analyse Ruby source for type errors and report diagnostics.

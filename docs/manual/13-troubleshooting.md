@@ -5,16 +5,6 @@ see [Editor integration](09-editor-integration.md); for "why
 did this diagnostic (not) fire", see
 [handbook chapter 8](../handbook/08-understanding-errors.md).
 
-> **Jump to a symptom**
-> [command not found](#rigor-command-not-found) ·
-> [check analyses nothing](#rigor-check-analyses-nothing) ·
-> [everything is `untyped`](#everything-is-untyped--dynamictop) ·
-> [too many diagnostics](#too-many-diagnostics-to-act-on) ·
-> [a diagnostic is wrong](#a-diagnostic-is-wrong-a-false-positive) ·
-> [a result looks stale](#a-result-looks-stale) ·
-> [the run is slow](#the-run-is-slow) ·
-> [reporting a bug](#reporting-a-bug)
-
 ## `rigor: command not found`
 
 Rigor is installed but not on your `PATH`. With a version

@@ -13,13 +13,6 @@ ready-to-install gems for real frameworks live in
 whether you need a plugin; go to `examples/` once you want to
 write one, or `plugins/` to install an existing one.
 
-> **In this chapter**
-> [When you reach for a plugin](#when-you-reach-for-a-plugin) ·
-> [Should you write one?](#should-you-write-one) — read this first ·
-> [What a plugin can do today](#what-a-plugin-can-do-today) ·
-> [Macro / DSL expansion substrate](#macro--dsl-expansion-substrate-adr-16) ·
-> [What's next](#whats-next)
-
 ## When you reach for a plugin
 
 The classic case is a domain-specific evaluator:

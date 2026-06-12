@@ -6,19 +6,6 @@ operating on them. This is also the page to come back to as a
 glossary — the table below is the whole carrier zoo at a
 glance.
 
-> **In this chapter**
-> [Why "type" is too coarse](#why-type-is-too-coarse-a-word) ·
-> [Seeing carriers (`rigor annotate`)](#seeing-carriers-yourself--rigor-annotate) ·
-> [Nominal](#nominal-types--the-familiar-starting-point) ·
-> [Constant](#constants--single-ruby-values) ·
-> [Integer ranges](#integer-ranges--bounded-intervals) ·
-> [Refinements](#refinements--values-restricted-by-a-predicate) ·
-> [Difference](#difference--a-base-minus-a-single-value) ·
-> [`Dynamic[Top]`](#dynamictop--the-gradual-carrier) ·
-> [Tuples & hash shapes](#tuples-and-hash-shapes--heterogeneous-structures) ·
-> [Unions](#unions--one-of-these) ·
-> [Worked example](#a-worked-example)
-
 ## Why "type" is too coarse a word
 
 A vanilla static checker answers "what *class* is this

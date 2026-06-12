@@ -12,15 +12,6 @@ By the end of this chapter you will be able to:
 It is the only chapter you must read top to bottom. The rest
 of the handbook is reference you can dip into later.
 
-> **In this chapter**
-> [Installing Rigor](#installing-rigor) ·
-> [What `rigor check` looks at](#what-does-rigor-check-look-at) ·
-> [The smallest working session](#the-smallest-working-session) ·
-> [Reading a diagnostic](#reading-a-diagnostic) ·
-> [The "no annotations" stance](#the-no-annotations-stance) ·
-> [When inference is not enough](#when-inference-is-not-enough) ·
-> [The config file](#the-config-file)
-
 ## Installing Rigor
 
 Rigor is a tool, not a library — like a linter or a compiler, it

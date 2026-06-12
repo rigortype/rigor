@@ -21,22 +21,6 @@ languages the single biggest one is the direction of the
 default: you annotate first and the compiler infers locally;
 Rigor infers first and asks for annotations only at the edges.
 
-> **In this appendix**
-> [Five-second pitch](#the-five-second-pitch) ·
-> [Type vocabulary mapping](#type-vocabulary-mapping) ·
-> [Nominal-first vs inference-first](#nominal-first-vs-inference-first) ·
-> [Narrowing](#narrowing--instanceof-is-pattern-switch) ·
-> [Records ↔ Data.define](#records--datadefine) ·
-> [Nullability](#nullability) ·
-> [Generics & variance](#generics-and-variance) ·
-> [Sealed types & exhaustiveness](#sealed-types-and-exhaustiveness) ·
-> [Refinement carriers](#refinement-carriers--the-part-neither-language-has) ·
-> [Severity & strict mode](#severity-suppression-and-strict-mode) ·
-> [Where Java and C# differ](#where-java-and-c-differ) ·
-> [What Java/C# have, Rigor doesn't](#what-java--c-have-and-rigor-does-not) ·
-> [What Rigor has, Java/C# don't](#what-rigor-has-and-java--c-do-not) ·
-> [Migration vignette](#a-migration-vignette)
-
 ## The five-second pitch
 
 | Question | Java / C# | Rigor |

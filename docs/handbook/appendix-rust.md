@@ -18,21 +18,6 @@ There is no borrow checker, no ownership, and no "it does not
 compile" — the Ruby ran, and Rigor tells you where it can prove
 a type goes wrong.
 
-> **In this appendix**
-> [Five-second pitch](#the-five-second-pitch) ·
-> [Type vocabulary mapping](#type-vocabulary-mapping) ·
-> [Option and Result](#option-and-result) ·
-> [Narrowing ↔ match / if let](#narrowing--match--if-let) ·
-> [Sum types & exhaustiveness](#sum-types-and-exhaustiveness) ·
-> [Structs ↔ Data.define](#structs--datadefine) ·
-> [Traits ↔ RBS interfaces](#traits--rbs-interfaces) ·
-> [Refinements vs the newtype pattern](#refinements-vs-the-newtype-pattern) ·
-> [Generics](#generics) ·
-> [Severity & strict mode](#severity-suppression-and-strict-mode) ·
-> [What Rust has, Rigor doesn't](#what-rust-has-and-rigor-does-not) ·
-> [What Rigor has, Rust doesn't](#what-rigor-has-and-rust-does-not) ·
-> [Migration vignette](#a-migration-vignette)
-
 ## The five-second pitch
 
 | Question | Rust | Rigor |

@@ -16,20 +16,6 @@ This appendix is for users who already think in TypeProf terms
 and want to know which Rigor concept matches which TypeProf
 concept.
 
-> **In this appendix**
-> [Five-second pitch](#the-five-second-pitch) ·
-> [Both infer without annotations](#both-infer-without-annotations--that-is-the-common-ground) ·
-> [Type vocabulary](#type-vocabulary--typeprof-output-vs-rigor-carriers) ·
-> [Analysis model](#analysis-model--the-largest-conceptual-difference) ·
-> [RBS generation vs `sig-gen`](#rbs-generation--typeprof-cli-vs-rigor-sig-gen) ·
-> [Tests as inference fuel](#tests-as-inference-fuel--the-bidirectional-question) ·
-> [Diagnostics: side effect vs product](#diagnostics--a-side-effect-vs-the-main-product) ·
-> [Invocation](#invocation) ·
-> [What TypeProf has, Rigor doesn't](#what-typeprof-has-and-rigor-does-not) ·
-> [What Rigor has, TypeProf doesn't](#what-rigor-has-and-typeprof-does-not) ·
-> [Coexistence pattern](#a-coexistence-pattern) ·
-> [Migration vignette](#a-migration-vignette)
-
 ## The five-second pitch
 
 | Question | TypeProf | Rigor |

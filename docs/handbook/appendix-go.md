@@ -16,22 +16,6 @@ everywhere. Rigor adds the things Go leaves out (unions,
 refinements, literal types, nil-narrowing) and drops the things
 Go needs as a compiled language (the build gate itself).
 
-> **In this appendix**
-> [Five-second pitch](#the-five-second-pitch) ·
-> [Type vocabulary mapping](#type-vocabulary-mapping) ·
-> [Structural interfaces — the part you already know](#structural-interfaces--the-part-you-already-know) ·
-> [Narrowing ↔ type switch / assertion](#narrowing--type-switch--assertion) ·
-> [Errors as values vs raising](#errors-as-values-vs-raising) ·
-> [nil, zero values, and absence](#nil-zero-values-and-absence) ·
-> [Structs ↔ Data.define](#structs--datadefine) ·
-> [Sum types Go doesn't have](#sum-types-go-doesnt-have) ·
-> [Refinements & defined types](#refinements-and-defined-types) ·
-> [Generics](#generics) ·
-> [Severity & strict mode](#severity-suppression-and-strict-mode) ·
-> [What Go has, Rigor doesn't](#what-go-has-and-rigor-does-not) ·
-> [What Rigor has, Go doesn't](#what-rigor-has-and-go-does-not) ·
-> [Migration vignette](#a-migration-vignette)
-
 ## The five-second pitch
 
 | Question | Go | Rigor |

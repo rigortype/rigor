@@ -14,18 +14,6 @@ classification model, the three output modes, and the
 [ADR-5](../adr/5-robustness-principle.md)'s asymmetric
 "strict on returns, lenient on parameters" rule.
 
-> **In this chapter**
-> [When to reach for it](#when-to-reach-for-it) ·
-> [A first run](#a-first-run) ·
-> [Output modes](#the-three-output-modes) ·
-> [Classification model](#the-classification-model) ·
-> [Method shapes covered](#what-method-shapes-the-generator-covers) ·
-> [`--params` policy & ADR-5](#the---params-policy-and-adr-5) ·
-> [RSpec-aware observations](#rspec-aware-observations) ·
-> [What `--write` does](#safety-what---write-will-and-will-not-do) ·
-> [Putting it together](#putting-it-together) ·
-> [Limits today](#limits-today)
-
 ## When to reach for it
 
 - You inherited a Ruby project with zero RBS coverage and

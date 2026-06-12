@@ -23,16 +23,6 @@ This appendix untangles the two so you reach for the right one.
 > qualify it on first use — **"structural interface"** or **"RBS
 > interface"** — and so should you when writing about it.
 
-> **In this appendix**
-> [Two things called "protocol"](#two-things-called-protocol) ·
-> [Structural typing: RBS interfaces](#structural-typing-rbs-interfaces) ·
-> [Object shapes and capability roles](#object-shapes-and-capability-roles) ·
-> [The word vs the semantics, across languages](#the-word-vs-the-semantics-across-languages) ·
-> [Protocol contracts (ADR-28)](#protocol-contracts-adr-28) ·
-> [Interface vs protocol contract](#interface-vs-protocol-contract) ·
-> [Which one do I want?](#which-one-do-i-want) ·
-> [What's next](#whats-next)
-
 ## Two things called "protocol"
 
 | You mean… | The Rigor word | What it is | Lives where |

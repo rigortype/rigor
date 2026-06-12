@@ -33,16 +33,6 @@ looks like and which stdlib methods are wired out of the box.
 Everything after "Authoring your own overlay" is for the rare
 case where you want to model a recursive sum type of your own.
 
-> **In this chapter**
-> [Five-second pitch](#the-five-second-pitch) ·
-> [What's bundled today](#whats-bundled-today) ·
-> [Call-site discrimination](#two-kinds-of-call-site-discrimination) ·
-> [Authoring your own overlay](#authoring-your-own-overlay) ·
-> [The body grammar](#the-body-grammar) ·
-> [Reduction semantics](#reduction-semantics--lazy-tying-the-knot) ·
-> [What it doesn't do yet](#what-it-doesnt-do-yet) ·
-> [Where to look in the code](#where-to-look-in-the-code)
-
 ## The five-second pitch
 
 | Concept | Rigor spelling | Where you see it |

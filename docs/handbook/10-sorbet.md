@@ -12,18 +12,6 @@ project. If you have never used Sorbet, you can skip it; the
 core handbook material in chapters 1–9 covers Rigor's native
 RBS-based path.
 
-> **In this chapter**
-> [What gets translated](#what-gets-translated) ·
-> [Sorbet type vocabulary](#the-sorbet-type-vocabulary) ·
-> [Inline assertions (`T.let` / `T.must` / …)](#inline-type-assertions) ·
-> [RBI files](#rbi-files) ·
-> [`# typed:` sigils](#sorbet--typed-sigils) ·
-> [Tapioca DSL mixins](#tapioca-dsl--the-mixin-pattern) ·
-> [`T.absurd` exhaustiveness](#tabsurd-exhaustiveness) ·
-> [Tier ordering on conflict](#tier-ordering--what-wins-on-conflict) ·
-> [Migration patterns](#migration-patterns) ·
-> [What it doesn't replace](#what-the-plugin-doesnt-replace)
-
 ## What gets translated
 
 Given a method preceded by a `sig` block:

@@ -6,16 +6,6 @@ calls over a newline-delimited stdio stream, so AI coding assistants —
 Claude Code, Cursor, Cline, VS Code Copilot Chat, and any other
 MCP-aware agent — can call Rigor directly during a session.
 
-> **In this chapter**
-> [MCP vs LSP](#mcp-vs-lsp--choosing-the-right-integration) ·
-> [Tools at a glance](#tools-at-a-glance) ·
-> [Prerequisites](#prerequisites) ·
-> [CLI](#cli) ·
-> Client wiring — [Claude Desktop](#claude-desktop) · [Claude Code](#claude-code-cli) · [Cursor](#cursor) · [Cline](#cline-vs-code-extension) · [generic](#generic--custom-mcp-client) ·
-> Tool reference — [`rigor_check`](#rigor_check) · [`rigor_type_of`](#rigor_type_of) · [`rigor_triage`](#rigor_triage) · [`rigor_annotate`](#rigor_annotate) · [`rigor_sig_gen`](#rigor_sig_gen) · [`rigor_explain`](#rigor_explain) · [`rigor_coverage`](#rigor_coverage) ·
-> [Troubleshooting](#troubleshooting) ·
-> [Status and roadmap](#status-and-roadmap)
-
 ## MCP vs LSP — choosing the right integration
 
 Both `rigor lsp` and `rigor mcp` expose the same underlying engine.

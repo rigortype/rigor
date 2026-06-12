@@ -8,21 +8,6 @@ type-stub files (`.pyi` / `.rbs`) — but they make different
 choices about where annotations live and how aggressive
 inference is.
 
-> **In this appendix**
-> [Five-second pitch](#the-five-second-pitch) ·
-> [Type vocabulary mapping](#type-vocabulary-mapping) ·
-> [Refinement carriers](#refinement-carriers-vs-python-annotation-idioms) ·
-> [Narrowing](#narrowing--the-part-that-feels-familiar) ·
-> [Stubs ↔ RBS](#stubs--rbs) ·
-> [Severity & strict mode](#severity-suppression-and-strict-mode) ·
-> [Pyright vs Rigor](#pyright-vs-rigor) ·
-> ["No annotations needed"](#no-annotations-needed--true-here-too) ·
-> [Generics](#generics) ·
-> [Protocols ↔ RBS interfaces](#protocols--rbs-interfaces) ·
-> [What mypy/Pyright have, Rigor doesn't](#what-mypy--pyright-have-and-rigor-does-not) ·
-> [What Rigor has, mypy/Pyright don't](#what-rigor-has-and-mypy--pyright-do-not) ·
-> [Migration vignette](#a-migration-vignette)
-
 ## The five-second pitch
 
 | Question | mypy / Pyright | Rigor |

@@ -20,20 +20,6 @@ diverge — Elixir is functional, immutable, and process-oriented;
 Rigor analyses an object-oriented, mutable language — and where
 they line up better than you would guess.
 
-> **In this appendix**
-> [Five-second pitch](#the-five-second-pitch) ·
-> [Type vocabulary mapping](#type-vocabulary-mapping) ·
-> [Pattern matching & guards ↔ narrowing](#pattern-matching--guards--narrowing) ·
-> [Set-theoretic types & gradual `dynamic()`](#set-theoretic-types--gradual-dynamic) ·
-> [Tagged tuples ↔ case/in](#tagged-tuples--casein) ·
-> [Atoms ↔ symbols](#atoms--symbols) ·
-> [Protocols & behaviours](#protocols--behaviours) ·
-> [Refinements ↔ guards](#refinements--guards) ·
-> [Severity & strict mode](#severity-suppression-and-strict-mode) ·
-> [What Elixir has, Rigor doesn't](#what-elixir-has-and-rigor-does-not) ·
-> [What Rigor has, Elixir doesn't](#what-rigor-has-and-elixir-does-not) ·
-> [Migration vignette](#a-migration-vignette)
-
 ## The five-second pitch
 
 | Question | Elixir | Rigor |

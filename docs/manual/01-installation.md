@@ -220,14 +220,6 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 
 </details>
 
-> **Install channels** —
-> [mise (recommended)](#recommended--a-runtime-version-manager) ·
-> [asdf](#asdf) ·
-> [gem install](#simple-alternative--gem-install) ·
-> [Nix](#nix) ·
-> [dev container](#developing-inside-a-container) ·
-> [CI](#continuous-integration)
-
 ## Recommended — a runtime version manager
 
 [`mise`](https://mise.jdx.dev/) is a runtime / tool version manager

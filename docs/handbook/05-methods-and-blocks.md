@@ -6,19 +6,6 @@ type, and the block parameters when a block is attached.
 Several sections double as the reference for a call-site
 diagnostic, so the rule IDs appear in the headings.
 
-> **In this chapter**
-> [Method dispatch tiers](#method-dispatch--what-rigor-sees-at-a-call-site) ·
-> [Argument types (`call.argument-type-mismatch`)](#argument-typing--callargument-type-mismatch) ·
-> [Arity (`call.wrong-arity`)](#arity--callwrong-arity) ·
-> [Undefined methods (`call.undefined-method`)](#callundefined-method) ·
-> [Nil receivers (`call.possible-nil-receiver`)](#callpossible-nil-receiver) ·
-> [Return-type inference](#return-type-inference-for-in-source-methods) ·
-> [Return mismatch (`def.return-type-mismatch`)](#defreturn-type-mismatch) ·
-> [Block parameters](#block-parameters) ·
-> [Numbered params and `it`](#numbered-parameters-and-it) ·
-> [Block-locals](#block-local-declarations-do-i-x) ·
-> [Closure escape](#closure-escape-and-captured-locals)
-
 ## Method dispatch — what Rigor sees at a call site
 
 When Rigor encounters `receiver.method(args, &block)`, it

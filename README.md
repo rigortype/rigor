@@ -102,7 +102,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 Ready-made prompts — 日本語, 简体中文, 繁體中文, 한국어, Español,
 Português, Français, Deutsch, Italiano, Tiếng Việt, ภาษาไทย,
 Bahasa Indonesia, Polski, Українська, Русский, Română, Türkçe,
-العربية — are in
+العربية, فارسی — are in
 the [installation guide](https://rigor.typedduck.fail/reference/manual/01-installation/#set-up-in-your-language).
 
 **Manual install** — Rigor is a tool, not a library: install it

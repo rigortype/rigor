@@ -209,6 +209,15 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 
 </details>
 
+<details lang="fa" dir="rtl"><summary>[fa] فارسی</summary>
+
+```
+Rigor را با دنبال کردن دستورالعمل‌های موجود در این آدرس در این پروژه نصب کنید:
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+</details>
+
 </details>
 
 > **Install channels** —

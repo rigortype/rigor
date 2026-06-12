@@ -185,6 +185,36 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "safe-navigation truthy narrowing" do
+    it "narrows a safe-nav receiver non-nil in the `&&` right operand" do
+      type, _post = evaluate(<<~RUBY)
+        v = rand < 0.5 ? "[x]" : nil
+        if v&.start_with?("[") && v.end_with?("]")
+          v
+        end
+      RUBY
+      # The then-branch sees `v` narrowed to non-nil (`"[x]"`); the
+      # if-as-a-whole unions in the falsey `nil`. The discriminator is
+      # that the then-branch value is NOT nilable — without the safe-nav
+      # narrowing `v.end_with?` would have fired possible-nil and `v`
+      # inside would stay `"[x]" | nil`.
+      expect(type.members.map(&:value)).to contain_exactly("[x]", nil)
+    end
+
+    it "narrows a bare safe-nav truthy edge" do
+      type, _post = evaluate(<<~RUBY)
+        v = rand < 0.5 ? "[x]" : nil
+        if v&.length
+          v.upcase
+        end
+      RUBY
+      # `v.upcase` runs on a non-nil receiver and constant-folds to
+      # `"[X]"`; the falsey branch unions `nil`. Without the safe-nav
+      # narrowing `v` would stay nilable and `upcase` could not fold.
+      expect(type.members.map(&:value)).to contain_exactly("[X]", nil)
+    end
+  end
+
   describe "begin/rescue/ensure" do
     it "joins the body and rescue-chain scopes" do
       _, post = evaluate(<<~RUBY)

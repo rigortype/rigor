@@ -968,11 +968,23 @@ module Rigor
 
           unless node.receiver.nil?
             shape_result = dispatch_call(node, scope, node.name)
-            return shape_result if shape_result
+            return apply_safe_nav_non_nil(node, scope, shape_result) if shape_result
 
             # v0.1.1 Track 1 slice 4 — String predicate flow facts.
             string_predicate_result = analyse_string_predicate(node, scope)
-            return string_predicate_result if string_predicate_result
+            return apply_safe_nav_non_nil(node, scope, string_predicate_result) if string_predicate_result
+
+            # A safe-navigation call (`v&.foo`) whose result is truthy
+            # proves the receiver was non-nil — `&.` returns `nil` when
+            # the receiver is nil, so a truthy outcome can only come from
+            # a non-nil receiver. Narrow the receiver on the truthy edge
+            # even when the call itself carries no other flow fact, so
+            # `v&.start_with?('[') && v.end_with?(']')` sees `v` non-nil
+            # in the `&&` right operand. The falsey edge is the
+            # conservative no-op (falsey could mean nil receiver OR a
+            # falsey method result).
+            safe_nav_result = analyse_safe_nav_receiver(node, scope)
+            return safe_nav_result if safe_nav_result
           end
 
           # Slice 7 phase 15 — RBS::Extended predicate
@@ -2499,6 +2511,51 @@ module Rigor
               scope.with_ivar(receiver.name, narrow_non_nil(current))
             ]
           end
+        end
+
+        # Narrows a safe-navigation call's receiver (`v&.foo`) to its
+        # non-nil fragment on the truthy edge, returning `[truthy, falsey]`
+        # or nil when nothing applies (not safe-nav, opaque receiver, or
+        # already non-nil). Used standalone for a bare `v&.foo` truthy
+        # edge and as a post-pass over the existing predicate edges.
+        def analyse_safe_nav_receiver(node, scope)
+          return nil unless node.safe_navigation?
+
+          receiver = node.receiver
+          reader, writer =
+            case receiver
+            when Prism::LocalVariableReadNode then %i[local with_local]
+            when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
+            else return nil
+            end
+
+          current = scope.public_send(reader, receiver.name)
+          return nil if current.nil?
+
+          non_nil = narrow_non_nil(current)
+          return nil if non_nil.equal?(current)
+
+          [scope.public_send(writer, receiver.name, non_nil), scope]
+        end
+
+        # Layers the safe-nav non-nil truthy narrowing over the edges an
+        # existing predicate path already produced, so a safe-nav string
+        # predicate (`v&.start_with?(x)`) keeps its relational fact AND
+        # proves `v` non-nil on the truthy edge. Re-runs the predicate's
+        # narrowing under the non-nil truthy scope so the fact is attached
+        # to the narrowed binding. No-op for non-safe-nav calls.
+        def apply_safe_nav_non_nil(node, scope, edges)
+          return edges unless node.safe_navigation? && edges
+
+          truthy, falsey = edges
+          safe = analyse_safe_nav_receiver(node, scope)
+          return edges unless safe
+
+          receiver = node.receiver
+          reader = receiver.is_a?(Prism::InstanceVariableReadNode) ? :ivar : :local
+          non_nil = safe.first.public_send(reader, receiver.name)
+          writer = receiver.is_a?(Prism::InstanceVariableReadNode) ? :with_ivar : :with_local
+          [truthy.public_send(writer, receiver.name, non_nil), falsey]
         end
 
         # `a && b` short-circuits: the truthy edge is the truthy edge

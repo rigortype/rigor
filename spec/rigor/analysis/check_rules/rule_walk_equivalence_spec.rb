@@ -235,6 +235,19 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
     collectors.map(&:results)
   end
 
+  # ADR-53 B4 — drive the SAME collectors through the converged
+  # {Plugin::NodeRuleWalk} traversal (with no plugins, so only the
+  # built-in {CollectorDriver} runs) instead of the standalone
+  # `RuleWalk.run`. Asserts the convergence preserves per-collector
+  # results byte-for-byte against the legacy oracle.
+  def converged_walk_results(root, scope_index)
+    collectors = RuleWalkEquivalenceCases::HOSTED_COLLECTOR_CLASSES.map { |klass| klass.new(scope_index) }
+    driver = described_class::CollectorDriver.new(collectors)
+    walk = Rigor::Plugin::NodeRuleWalk.new([])
+    walk.diagnostics_for_file(path: "(spec)", scope: Rigor::Scope.empty, root: root, collector_driver: driver)
+    collectors.map(&:results)
+  end
+
   describe "curated traversal shapes" do
     RuleWalkEquivalenceCases::CURATED.each do |name, source|
       it "matches the legacy collectors on: #{name}" do
@@ -242,6 +255,13 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
         raise "curated source failed to parse: #{name}" if root.nil?
 
         expect(walk_results(root, scope_index)).to eq(legacy_results(root, scope_index))
+      end
+
+      it "the converged plugin-walk matches the legacy collectors on: #{name}" do
+        root, scope_index = parse_and_index(source)
+        raise "curated source failed to parse: #{name}" if root.nil?
+
+        expect(converged_walk_results(root, scope_index)).to eq(legacy_results(root, scope_index))
       end
     end
 
@@ -268,7 +288,9 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
         root, scope_index = parse_and_index(File.read(path))
         skip "fixture does not parse standalone" if root.nil?
 
-        expect(walk_results(root, scope_index)).to eq(legacy_results(root, scope_index))
+        legacy = legacy_results(root, scope_index)
+        expect(walk_results(root, scope_index)).to eq(legacy)
+        expect(converged_walk_results(root, scope_index)).to eq(legacy)
       end
     end
   end
@@ -287,6 +309,21 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
       collector.results.map(&:to_h)
     end
 
+    # ADR-53 B4 — drive the main pass through the converged
+    # {Plugin::NodeRuleWalk} traversal (no plugins, so only the built-in
+    # {CollectorDriver} runs). The main pass is a {RuleWalk}-hosted
+    # collector like the others, so the converged walk must reproduce the
+    # inline oracle byte-for-byte too — this is the converged-walk
+    # coverage for the fifth (main-pass) collector.
+    def main_pass_converged_walk(path, root, scope_index)
+      node_diagnostics = ->(node) { Rigor::Analysis::CheckRules.main_pass_node_diagnostics(path, node, scope_index) }
+      collector = Rigor::Analysis::CheckRules::MainPassCollector.new(node_diagnostics)
+      driver = described_class::CollectorDriver.new([collector])
+      walk = Rigor::Plugin::NodeRuleWalk.new([])
+      walk.diagnostics_for_file(path: "(spec)", scope: Rigor::Scope.empty, root: root, collector_driver: driver)
+      collector.results.map(&:to_h)
+    end
+
     def main_pass_oracle(path, root, scope_index)
       Rigor::Analysis::CheckRules.main_pass_oracle(path, root, scope_index).map(&:to_h)
     end
@@ -297,7 +334,9 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
         skip "fixture does not parse standalone" if root.nil?
 
         rel = "fixtures/#{File.basename(path)}"
-        expect(main_pass_walk(rel, root, scope_index)).to eq(main_pass_oracle(rel, root, scope_index))
+        oracle = main_pass_oracle(rel, root, scope_index)
+        expect(main_pass_walk(rel, root, scope_index)).to eq(oracle)
+        expect(main_pass_converged_walk(rel, root, scope_index)).to eq(oracle)
       end
     end
 

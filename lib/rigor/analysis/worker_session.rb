@@ -175,14 +175,18 @@ module Rigor
 
         scope = seed_project_scope(Scope.empty(environment: @environment, source_path: path))
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
+        # ADR-53 B4 — built-in collectors + plugin node rules share one walk.
+        node_collectors = CheckRules.build_node_collectors(path, index)
+        node_results = node_rule_results_by_plugin(path, parse_result.value, scope, node_collectors, index)
         diagnostics = CheckRules.diagnose(
           path: path,
           root: parse_result.value,
           scope_index: index,
           comments: parse_result.comments,
-          disabled_rules: @configuration.disabled_rules
+          disabled_rules: @configuration.disabled_rules,
+          node_collectors: node_collectors
         )
-        diagnostics += plugin_emitted_diagnostics(path, parse_result.value, scope)
+        diagnostics += plugin_emitted_diagnostics(path, parse_result.value, scope, node_results)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [analyzer_error(path, e.message)]
@@ -294,24 +298,30 @@ module Rigor
         )
       end
 
-      def plugin_emitted_diagnostics(path, root, scope)
+      def plugin_emitted_diagnostics(path, root, scope, node_results)
         return [] if @plugin_registry.empty?
-
-        # ADR-52 WD4 — single engine-owned node-rule walk per file; the
-        # results are bucketed per plugin (registry order) so emission
-        # stays plugin-major and byte-identical with the per-plugin walk.
-        node_results = node_rule_results_by_plugin(path, root, scope)
 
         @plugin_registry.plugins.flat_map do |plugin|
           collect_plugin_diagnostics(plugin, path, root, scope, node_results[plugin])
         end
       end
 
-      def node_rule_results_by_plugin(path, root, scope)
+      # ADR-52 WD4 + ADR-53 B4 — single engine-owned walk per file drives
+      # both the plugin node rules (bucketed per plugin in registry order,
+      # plugin-major emission) and the built-in node collectors
+      # (`node_collectors`, populated in place). Runs even with no node-rule
+      # plugins so the collectors still get driven (converged path).
+      def node_rule_results_by_plugin(path, root, scope, node_collectors, scope_index)
         walk = @plugin_registry.node_rule_walk
-        return {}.compare_by_identity if walk.empty?
+        driver = node_collectors && CheckRules.node_collector_driver(node_collectors)
+        return {}.compare_by_identity if walk.empty? && driver.nil?
 
-        results = walk.diagnostics_for_file(path: path, scope: scope, root: root)
+        results = walk.diagnostics_for_file(
+          path: path, scope: scope, root: root, collector_driver: driver
+        )
+        if ENV["RIGOR_SHADOW_RULE_WALK"]
+          CheckRules.shadow_verify_converged_collectors(path, root, scope_index, node_collectors)
+        end
         results.each_with_object({}.compare_by_identity) do |result, by_plugin|
           by_plugin[result.plugin] = result
         end

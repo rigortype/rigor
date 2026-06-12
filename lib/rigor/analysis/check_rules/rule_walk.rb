@@ -75,6 +75,42 @@ module Rigor
           inside_def: :inside_def
         }.freeze
 
+        # A per-node driver over a fixed collector set: holds the compiled
+        # `node_class => [[collector, gates], …]` hook table and applies
+        # the dispatch + context-descent that {RuleWalk.run} performs, but
+        # one node at a time. This lets a foreign traversal (the converged
+        # {Plugin::NodeRuleWalk}, ADR-53 B4) drive the built-in collectors
+        # from inside its own single walk: it calls {#visit} on each node
+        # with that node's {Context}, and derives a child's context with
+        # {#descend}. The dispatch / gate / descend logic is identical to
+        # the standalone {RuleWalk.run} walk — only the traversal driving
+        # it differs, keeping diagnostics byte-identical (ADR-53 WD4).
+        class CollectorDriver
+          def initialize(collectors)
+            @hooks = RuleWalk.build_hooks(collectors)
+            freeze
+          end
+
+          # Dispatch `node` (under its own `context`) to every matching,
+          # un-gated collector. Mirrors {RuleWalk.dispatch}.
+          def visit(node, context)
+            matched = @hooks[node.class]
+            return if matched.nil?
+
+            matched.each do |collector, gates|
+              next if gates.any? { |predicate| context.public_send(predicate) }
+
+              collector.visit(node, context)
+            end
+          end
+
+          # The context the children of `node` descend under. Mirrors
+          # {RuleWalk.descend}.
+          def descend(node, context)
+            RuleWalk.descend(node, context)
+          end
+        end
+
         class << self
           # Walks `root` once, dispatching each visited node to every
           # collector whose `NODE_CLASSES` covers the node's class and
@@ -86,8 +122,6 @@ module Rigor
             collectors
           end
 
-          private
-
           def build_hooks(collectors)
             hooks = {}
             collectors.each do |collector|
@@ -98,6 +132,27 @@ module Rigor
             end
             hooks
           end
+
+          # Computes the context the children of `node` descend under from
+          # the node's own context. `in_loop_or_block` latches on once a
+          # loop / block is entered; `qualified_prefix` extends only on a
+          # nameable class / module (an unnamed one descends with the same
+          # prefix, matching IvarWrite's fall-through); `inside_def`
+          # latches on once a `DefNode` is entered.
+          def descend(node, context)
+            in_loop_or_block = context.in_loop_or_block ||
+                               LOOP_OR_BLOCK_NODE_CLASSES.any? { |klass| node.is_a?(klass) }
+            inside_def = context.inside_def || node.is_a?(Prism::DefNode)
+            qualified_prefix = extend_prefix(node, context.qualified_prefix)
+
+            Context.new(
+              in_loop_or_block: in_loop_or_block,
+              qualified_prefix: qualified_prefix,
+              inside_def: inside_def
+            )
+          end
+
+          private
 
           def collector_gates(collector)
             klass = collector.class
@@ -123,25 +178,6 @@ module Rigor
 
               collector.visit(node, context)
             end
-          end
-
-          # Computes the context the children of `node` descend under from
-          # the node's own context. `in_loop_or_block` latches on once a
-          # loop / block is entered; `qualified_prefix` extends only on a
-          # nameable class / module (an unnamed one descends with the same
-          # prefix, matching IvarWrite's fall-through); `inside_def`
-          # latches on once a `DefNode` is entered.
-          def descend(node, context)
-            in_loop_or_block = context.in_loop_or_block ||
-                               LOOP_OR_BLOCK_NODE_CLASSES.any? { |klass| node.is_a?(klass) }
-            inside_def = context.inside_def || node.is_a?(Prism::DefNode)
-            qualified_prefix = extend_prefix(node, context.qualified_prefix)
-
-            Context.new(
-              in_loop_or_block: in_loop_or_block,
-              qualified_prefix: qualified_prefix,
-              inside_def: inside_def
-            )
           end
 
           def extend_prefix(node, prefix)

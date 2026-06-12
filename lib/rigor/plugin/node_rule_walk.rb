@@ -2,6 +2,7 @@
 
 require_relative "node_context"
 require_relative "../source/node_walker"
+require_relative "../analysis/check_rules/rule_walk"
 
 module Rigor
   module Plugin
@@ -64,30 +65,74 @@ module Rigor
       # Walk `root` once, dispatching every node to each matching
       # `(plugin, rule)`. Returns an Array of {Result} in plugin
       # (registry) order. `root` nil yields one empty Result per plugin.
-      def diagnostics_for_file(path:, scope:, root:)
+      #
+      # ADR-53 B4 — when `collector_driver` is given (an
+      # {Analysis::CheckRules::RuleWalk::CollectorDriver}), the SAME
+      # single traversal also drives the built-in {CheckRules} node
+      # collectors: each visited node is dispatched both to the plugin
+      # rules (this walk's original job) and to the built-in collectors
+      # (the `CollectorDriver`), so a file is walked once for both
+      # instead of once each. The two dispatch models coexist: plugin
+      # rules keep `is_a?` matching via the per-class memo and receive a
+      # lazily-built {NodeContext} (ancestors); built-in collectors keep
+      # exact-node-class dispatch and receive the immutable
+      # {RuleWalk::Context} threaded through the descent. Order is
+      # preserved because each side accumulates into its own bucket
+      # (per-plugin {Result}s / per-collector `results`) and the two are
+      # assembled separately by their respective diagnostic builders.
+      # A raising plugin rule isolates only that plugin (per-{State}
+      # rescue) and never aborts built-in collection, nor vice versa
+      # (the collectors' `visit` is the verbatim legacy gather logic,
+      # which does not raise on the corpora).
+      def diagnostics_for_file(path:, scope:, root:, collector_driver: nil)
         return @entries.map { |plugin, _| Result.new(plugin, [], nil) } if root.nil?
 
         states = @entries.map { |plugin, rules| State.new(plugin, rules, scope, root) }
-        walk(path, scope, root, states)
+        walk(path, scope, root, states, collector_driver)
         states.map(&:result)
       end
 
       private
 
-      def walk(path, scope, root, states)
-        Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
-          context = nil
-          states.each do |state|
-            next if state.failed?
+      def walk(path, scope, root, states, collector_driver)
+        context = collector_driver ? Analysis::CheckRules::RuleWalk::Context.root : nil
+        walk_node(root, [], context, path, scope, states, collector_driver)
+      end
 
-            matched = state.rules_for(node)
-            next if matched.empty?
+      # The single converged DFS pre-order traversal. Threads both the
+      # live `ancestors` stack (for plugin {NodeContext}) and the
+      # immutable built-in {RuleWalk::Context} (for the collectors),
+      # derived together as the walk descends — the cheap-ancestors
+      # option from the ADR-53 B4 design note. Identical pre-order over
+      # `compact_child_nodes` to both the legacy
+      # `Source::NodeWalker.each_with_ancestors` and `RuleWalk.walk`, so
+      # every node is visited in the same order each side saw before.
+      def walk_node(node, ancestors, context, path, scope, states, collector_driver)
+        return unless node.is_a?(Prism::Node)
 
-            # One frozen NodeContext per node, built lazily and shared
-            # across every plugin that matches this node.
-            context ||= NodeContext.new(ancestors)
-            state.run_rules(matched, node, scope, path, context)
-          end
+        dispatch_plugins(node, ancestors, path, scope, states)
+        collector_driver&.visit(node, context)
+
+        child_context = collector_driver&.descend(node, context)
+        ancestors.push(node)
+        node.compact_child_nodes.each do |child|
+          walk_node(child, ancestors, child_context, path, scope, states, collector_driver)
+        end
+        ancestors.pop
+      end
+
+      def dispatch_plugins(node, ancestors, path, scope, states)
+        node_context = nil
+        states.each do |state|
+          next if state.failed?
+
+          matched = state.rules_for(node)
+          next if matched.empty?
+
+          # One frozen NodeContext per node, built lazily and shared
+          # across every plugin that matches this node.
+          node_context ||= NodeContext.new(ancestors)
+          state.run_rules(matched, node, scope, path, node_context)
         end
       end
 

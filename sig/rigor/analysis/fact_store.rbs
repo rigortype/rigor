@@ -2,6 +2,9 @@ module Rigor
   module Analysis
     module CheckRules
       def self?.diagnose: (path: String, root: untyped, scope_index: Hash[untyped, Scope]) -> Array[Diagnostic]
+      def self?.build_node_collectors: (String path, untyped scope_index) -> Hash[Symbol, untyped]
+      def self?.node_collector_driver: (Hash[Symbol, untyped] collectors) -> untyped
+      def self?.shadow_verify_converged_collectors: (String path, untyped root, untyped scope_index, Hash[Symbol, untyped]? collectors) -> void
     end
 
     class FactStore

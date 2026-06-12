@@ -164,8 +164,17 @@ module Rigor
       # @param root [Prism::Node]
       # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
       # @return [Array<Rigor::Analysis::Diagnostic>]
-      def diagnose(path:, root:, scope_index:, self_call_misses: [], comments: [], disabled_rules: [])
-        collectors = run_node_collectors(path, root, scope_index)
+      #
+      # ADR-53 B4 — when `node_collectors` is supplied, the converged
+      # {Plugin::NodeRuleWalk} traversal has already populated the built-in
+      # collectors (including the main pass) in one shared walk with the
+      # plugin node-rules, so they are consumed as-is. When it is nil (a
+      # direct caller with no plugin walk, e.g. a unit test), the standalone
+      # {RuleWalk} walk runs here instead, so `diagnose` stays correct
+      # without the converged path.
+      def diagnose(path:, root:, scope_index:, self_call_misses: [], comments: [], disabled_rules: [],
+                   node_collectors: nil)
+        collectors = node_collectors || run_node_collectors(path, root, scope_index)
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
         diagnostics.concat(always_truthy_condition_diagnostics(path, collectors[:always_truthy].results))
@@ -197,23 +206,45 @@ module Rigor
         end
       end
 
-      # ADR-53 Track B — the {RuleWalk}-hosted built-in collectors all ride
-      # one traversal of the file instead of one walk each. Returns the
-      # populated collectors keyed by role so the caller can build the
-      # diagnostics from each collector's `results`.
-      #
-      # Under `RIGOR_SHADOW_RULE_WALK=1` each hosted collector's legacy
-      # single-collector `#collect` walk also runs as the oracle and any
-      # divergence aborts the run — the corpus-scale half of the
-      # equivalence harness (the curated half is `rule_walk_equivalence_spec`).
-      def run_node_collectors(path, root, scope_index)
-        collectors = {
+      # Constructs the fresh, unpopulated built-in collector set keyed by
+      # role, including the main pass. Split out so the converged walk
+      # (ADR-53 B4) can build the collectors, drive them via a
+      # {RuleWalk::CollectorDriver} inside the single {Plugin::NodeRuleWalk}
+      # traversal, and hand the populated set back to {.diagnose} as
+      # `node_collectors:`. The main pass needs `path` because its per-node
+      # diagnostics carry it (ADR-53 B3c hosts it on the same walk).
+      def build_node_collectors(path, scope_index)
+        {
           main_pass: MainPassCollector.new(->(node) { main_pass_node_diagnostics(path, node, scope_index) }),
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
           ivar_writes: IvarWriteCollector.new(scope_index),
           dead_assignments: DeadAssignmentCollector.new(scope_index)
         }
+      end
+
+      # A {RuleWalk::CollectorDriver} over a built-in collector set, for a
+      # foreign traversal to drive (ADR-53 B4). The driver visits each node
+      # and derives child contexts exactly as the standalone {RuleWalk}
+      # walk would.
+      def node_collector_driver(collectors)
+        RuleWalk::CollectorDriver.new(collectors.values)
+      end
+
+      # ADR-53 Track B — the {RuleWalk}-hosted built-in collectors (the main
+      # pass and the four fact collectors) all ride one traversal of the
+      # file instead of one walk each. Returns the populated collectors
+      # keyed by role so the caller can build the diagnostics from each
+      # collector's `results`. Used on the standalone path (no converged
+      # plugin walk); the converged path populates the same collector set
+      # via {.node_collector_driver} instead.
+      #
+      # Under `RIGOR_SHADOW_RULE_WALK=1` each hosted collector's legacy
+      # single-collector `#collect` walk also runs as the oracle and any
+      # divergence aborts the run — the corpus-scale half of the
+      # equivalence harness (the curated half is `rule_walk_equivalence_spec`).
+      def run_node_collectors(path, root, scope_index)
+        collectors = build_node_collectors(path, scope_index)
         RuleWalk.run(root, collectors.values)
         shadow_verify_node_collectors(path, root, scope_index, collectors) if ENV["RIGOR_SHADOW_RULE_WALK"]
         collectors
@@ -261,6 +292,21 @@ module Rigor
           diagnostics.concat(main_pass_node_diagnostics(path, node, scope_index))
         end
         diagnostics
+      end
+
+      # ADR-53 B4 — corpus-scale oracle for the CONVERGED walk: the
+      # collectors (including the main pass, ADR-53 B3c) were populated by
+      # the {Plugin::NodeRuleWalk} traversal, not by `RuleWalk.run`, so
+      # re-run each collector's legacy oracle (the fact collectors'
+      # `#collect` walk, the main pass's inline `Source::NodeWalker` `case`)
+      # and assert the converged walk produced byte-identical results. Same
+      # divergence contract as {.shadow_verify_node_collectors}; nil
+      # collectors (caller without built-in collection) is a no-op. `path`
+      # is threaded because the main pass's oracle carries it.
+      def shadow_verify_converged_collectors(path, root, scope_index, collectors)
+        return if collectors.nil?
+
+        shadow_verify_node_collectors(path, root, scope_index, collectors)
       end
 
       def call_node_diagnostics(path, node, scope_index)

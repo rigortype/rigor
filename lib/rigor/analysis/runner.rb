@@ -640,28 +640,42 @@ module Rigor
       # `#diagnostics_for_file` or declared a `node_rule` are visited
       # (`contribution_index.for_file_diagnostics`); a skipped plugin's
       # two hooks could only have returned `[]`.
-      def plugin_emitted_diagnostics(path, root, scope)
+      def plugin_emitted_diagnostics(path, root, scope, node_results)
         return [] if @plugin_registry.empty?
-
-        # ADR-52 WD4 — one engine-owned AST walk per file dispatches each
-        # node to every matching (plugin, rule); the per-plugin results
-        # are bucketed in registry order so emission stays plugin-major
-        # (byte-identical with the old per-plugin walk).
-        node_results = node_rule_results_by_plugin(path, root, scope)
 
         @plugin_registry.contribution_index.for_file_diagnostics.flat_map do |plugin|
           collect_plugin_diagnostics(plugin, path, root, scope, node_results[plugin])
         end
       end
 
-      def node_rule_results_by_plugin(path, root, scope)
+      # ADR-52 WD4 + ADR-53 B4 — one engine-owned AST walk per file
+      # dispatches each node to every matching (plugin, rule) AND drives
+      # the built-in node collectors (`node_collectors`), so the file is
+      # walked once for both. The per-plugin results are bucketed in
+      # registry order so plugin emission stays plugin-major
+      # (byte-identical with the old per-plugin walk); the collectors are
+      # populated in place for `diagnose` to consume.
+      #
+      # When no plugin declares a node rule, the walk still runs to drive
+      # the collectors (the converged path replaces the standalone
+      # `RuleWalk.run`); `node_collectors` nil means a caller that does
+      # not need built-in collection from this walk.
+      def node_rule_results_by_plugin(path, root, scope, node_collectors, scope_index)
         walk = @plugin_registry.node_rule_walk
-        return {}.compare_by_identity if walk.empty?
+        driver = node_collectors && CheckRules.node_collector_driver(node_collectors)
+        return {}.compare_by_identity if walk.empty? && driver.nil?
 
-        results = walk.diagnostics_for_file(path: path, scope: scope, root: root)
+        results = walk.diagnostics_for_file(
+          path: path, scope: scope, root: root, collector_driver: driver
+        )
+        CheckRules.shadow_verify_converged_collectors(path, root, scope_index, node_collectors) if shadow_rule_walk?
         results.each_with_object({}.compare_by_identity) do |result, by_plugin|
           by_plugin[result.plugin] = result
         end
+      end
+
+      def shadow_rule_walk?
+        ENV.fetch("RIGOR_SHADOW_RULE_WALK", nil)
       end
 
       def collect_plugin_diagnostics(plugin, path, root, scope, node_result)
@@ -868,15 +882,8 @@ module Rigor
         self_call_record = with_self_call_recording(path) do
           index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         end
-        diagnostics = CheckRules.diagnose(
-          path: path,
-          root: parse_result.value,
-          scope_index: index,
-          self_call_misses: self_call_record ? self_call_record.calls : [],
-          comments: parse_result.comments,
-          disabled_rules: @configuration.disabled_rules
-        )
-        diagnostics += plugin_emitted_diagnostics(path, parse_result.value, scope)
+        self_call_misses = self_call_record ? self_call_record.calls : []
+        diagnostics = rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [
@@ -898,6 +905,28 @@ module Rigor
             severity: :error
           )
         ]
+      end
+
+      # ADR-53 B4 — the built-in node collectors and the plugin node rules
+      # share ONE traversal of the file. The collectors are built here (they
+      # need the completed `index`) and populated by the converged plugin
+      # walk; `node_results` carries the per-plugin node-rule output. Both
+      # the built-in `diagnose` output and the plugin diagnostics are then
+      # built from that single walk's results.
+      def rule_and_plugin_diagnostics(path, parse_result, scope, index, self_call_misses)
+        root = parse_result.value
+        node_collectors = CheckRules.build_node_collectors(path, index)
+        node_results = node_rule_results_by_plugin(path, root, scope, node_collectors, index)
+        diagnostics = CheckRules.diagnose(
+          path: path,
+          root: root,
+          scope_index: index,
+          self_call_misses: self_call_misses,
+          comments: parse_result.comments,
+          disabled_rules: @configuration.disabled_rules,
+          node_collectors: node_collectors
+        )
+        diagnostics + plugin_emitted_diagnostics(path, root, scope, node_results)
       end
 
       # ADR-24 slice 4a — runs `block` (the typing pass) with the self-call

@@ -1,0 +1,13 @@
+---
+locals:
+  big: Integer
+  empty2: Dynamic[top]
+  empty_seed: '1'
+  fact1: '120'
+  fact3: '6'
+  float_sum: '4.0'
+  folded2: Dynamic[top]
+  huge: Integer
+  m: Integer
+  nominal: Integer
+  ranged: Dynamic[top]

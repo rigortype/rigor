@@ -1,8 +1,8 @@
 ---
 locals:
-  fact: Integer
+  fact: '120'
   joined: String
   ranged: Integer
-  sum: Integer
-  sum2: Integer
+  sum: '6'
+  sum2: '6'
   upper: Integer

@@ -276,14 +276,26 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "translates `T.untyped` to Dynamic so call-site method-existence is silenced" do
+      # A `T.untyped` return whose body Rigor cannot fold to a concrete
+      # type stays `Dynamic[top]`, so a call on the result is silenced.
+      # The body here dispatches an unknown method (genuinely
+      # `Dynamic[top]`), which is the realistic `T.untyped` case — a
+      # method whose return Rigor cannot otherwise type. (A `def self.x`
+      # with a *foldable* body — `= 1` — now resolves through the
+      # engine's own module-singleton call resolution (ADR-57 follow-up)
+      # to the precise body type, exactly as the instance-side ancestor
+      # walk has always resolved `def x; 1; end`; the sorbet sig no longer
+      # overrides a foldable body. Whether an explicit `T.untyped`
+      # annotation should *suppress* engine body-inference outright is a
+      # broader sorbet-integration question, tracked separately.)
       source = <<~RUBY
         #{SIG_STUB}
         class Mystery
           extend T::Sig
-          sig { returns(T.untyped) }
-          def self.thing; 1; end
+          sig { params(x: T.untyped).returns(T.untyped) }
+          def self.thing(x); x; end
         end
-        Mystery.thing.anything_at_all
+        Mystery.thing(some_value).anything_at_all
       RUBY
 
       result = run_plugin(source: source)

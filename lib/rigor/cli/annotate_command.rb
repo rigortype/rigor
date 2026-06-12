@@ -264,9 +264,28 @@ module Rigor
         widest_per_line(program).each do |line, node|
           next if by_line.key?(line)
 
-          type = type_of(node)
+          type = node.is_a?(Prism::BlockParametersNode) ? block_params_type(node) : type_of(node)
           by_line[line] = type unless type.nil?
         end
+      end
+
+      # A `do |i|` header line's widest node is its BlockParametersNode —
+      # not an expression, so evaluating it would only echo the
+      # `Dynamic[top]` fallback. Annotate the line with the parameters'
+      # inferred bindings instead (the single param's type, or a tuple
+      # for multi-param blocks); decline (nil) when any param has no
+      # plain name or no recorded binding, leaving the line bare.
+      def block_params_type(params_node)
+        inner = params_node.parameters
+        return nil if inner.nil? || inner.requireds.empty?
+
+        scope = @scope_index[params_node]
+        types = inner.requireds.map do |param|
+          return nil unless param.respond_to?(:name)
+
+          scope.local(param.name) or return nil
+        end
+        types.size == 1 ? types.first : Type::Combinator.tuple_of(*types)
       end
 
       def widest_per_line(program)

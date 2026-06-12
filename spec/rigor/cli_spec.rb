@@ -1595,6 +1595,30 @@ RSpec.describe Rigor::CLI do
       expect(lines[0]).to include("#=> Integer")
     end
 
+    it "annotates a block-header `do |i|` line with the parameter's binding, not Dynamic[top]" do
+      source = <<~RUBY
+        r = 1
+        1.upto(5) do |i|
+          r *= i
+        end
+        h = { x: 1 }
+        h.each do |k, v|
+          k
+        end
+      RUBY
+      path = write_fixture("a.rb", source)
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      lines = out.lines
+      # The header line's widest node is the BlockParametersNode — a
+      # non-expression whose evaluation falls back to `Dynamic[top]`.
+      # The annotation must instead show the bound parameter type(s).
+      expect(lines[1]).to include("1.upto(5) do |i|").and include("#=> int<1, 5>")
+      expect(lines[5]).to include("each do |k, v|").and include("#=> [:x, 1]")
+      expect(out).not_to include("Dynamic")
+    end
+
     it "annotates a `for` loop's `end` line as nil, not Dynamic[top]" do
       path = write_fixture("a.rb", "for i in 1..3\n  puts i\nend\n")
 

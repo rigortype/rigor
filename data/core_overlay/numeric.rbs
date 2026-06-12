@@ -1,0 +1,33 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# This directory holds Rigor-owned reopenings of Ruby core classes that
+# add methods upstream `ruby/rbs` does not declare on a class but which
+# every concrete value of that class answers at runtime. It is loaded
+# LAST into the RBS environment (after core + stdlib + vendored gem
+# sigs), so an upstream declaration always wins on conflict — these
+# entries only fill genuine holes.
+#
+# Provenance: hand-authored against the documented CRuby behaviour, not
+# extracted. Keep each addition justified by an observed false positive.
+#
+# --- Numeric coercion methods ---
+#
+# `ruby/rbs`'s `Numeric` declares only `to_c` and `to_int`; the three
+# value-coercion selectors `to_f` / `to_i` / `to_r` are declared solely
+# on the concrete subclasses (`Integer`, `Float`, `Rational`, `Complex`).
+# But Rigor routinely *widens* an arithmetic chain to the abstract
+# `Numeric` nominal — `Complex#abs -> Numeric`, or an overload join over
+# `Integer | Float` — and the instant a widened value is asked for
+# `.to_f`, dispatch misses and `call.undefined-method` fires on plain,
+# correct arithmetic (observed four times across actionview's
+# `date_helper`: `(distance_in_minutes.to_f / 60.0)`).
+#
+# Every concrete `Numeric` responds to all three, so the widening must
+# not strip the capability. Returns mirror the concrete subclass
+# signatures. `to_int` is already upstream and intentionally not
+# duplicated here.
+class Numeric
+  def to_f: () -> Float
+  def to_i: () -> Integer
+  def to_r: () -> Rational
+end

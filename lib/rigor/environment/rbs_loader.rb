@@ -88,6 +88,15 @@ module Rigor
           vendored_gem_sig_paths.each do |path|
             rbs_loader.add(path: path) if path.directory?
           end
+          # Rigor-owned core overlay — loaded LAST so an upstream
+          # declaration always wins on conflict; these reopenings only
+          # fill genuine holes (e.g. `Numeric#to_f`/`to_i`/`to_r`, which
+          # upstream RBS declares on the concrete subclasses but not on
+          # the abstract `Numeric` that Rigor's arithmetic-chain widening
+          # produces).
+          core_overlay_sig_paths.each do |path|
+            rbs_loader.add(path: path) if path.directory?
+          end
           env = RBS::Environment.from_loader(rbs_loader)
           add_virtual_rbs(env, virtual_rbs)
           synthesize_missing_namespaces(env)
@@ -297,6 +306,22 @@ module Rigor
           __dir__
         ).freeze
         private_constant :VENDORED_GEM_SIGS_ROOT
+
+        # Rigor-owned core-overlay RBS (`data/core_overlay/`). Reopens
+        # Ruby core classes to add methods upstream `ruby/rbs` omits but
+        # which every concrete value answers at runtime — loaded last so
+        # upstream always wins on conflict. Public so the cache descriptor
+        # can digest these files into the env-blob key.
+        CORE_OVERLAY_SIGS_ROOT = File.expand_path(
+          "../../../data/core_overlay",
+          __dir__
+        ).freeze
+
+        def core_overlay_sig_paths
+          return [] unless File.directory?(CORE_OVERLAY_SIGS_ROOT)
+
+          [Pathname(CORE_OVERLAY_SIGS_ROOT)]
+        end
 
         def vendored_gem_sig_paths
           return [] unless File.directory?(VENDORED_GEM_SIGS_ROOT)

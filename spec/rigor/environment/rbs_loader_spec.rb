@@ -150,6 +150,31 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "core overlay (data/core_overlay/)" do
+    # `Numeric#to_f`/`to_i`/`to_r` are not declared on the abstract
+    # `Numeric` by upstream `ruby/rbs` (only on the concrete subclasses),
+    # but Rigor widens arithmetic chains to `Numeric`, so the overlay
+    # reopens the class to supply them. See data/core_overlay/numeric.rbs.
+    it "exposes a non-empty overlay sig path set" do
+      expect(described_class.core_overlay_sig_paths).not_to be_empty
+      expect(described_class.core_overlay_sig_paths).to all(be_a(Pathname))
+    end
+
+    it "resolves Numeric#to_f / #to_i / #to_r added by the overlay" do
+      %i[to_f to_i to_r].each do |name|
+        method = loader.instance_method(class_name: "Numeric", method_name: name)
+        expect(method).not_to be_nil, "expected overlay to declare Numeric##{name}"
+        expect(method.method_types).not_to be_empty
+      end
+    end
+
+    it "leaves the upstream Numeric#to_c / #to_int declarations intact" do
+      %i[to_c to_int].each do |name|
+        expect(loader.instance_method(class_name: "Numeric", method_name: name)).not_to be_nil
+      end
+    end
+  end
+
   describe "#instance_definition" do
     it "memoizes per-class definitions" do
       first = loader.instance_definition("Integer")

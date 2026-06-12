@@ -22,6 +22,7 @@ module Rigor
     attr_reader :environment, :locals, :fact_store, :self_type,
                 :ivars, :cvars, :globals,
                 :indexed_narrowings, :method_chain_narrowings,
+                :declaration_sourced,
                 :source_path, :discovery
 
     # ADR-53 Track A — the seed-time discovery tables live on the
@@ -86,8 +87,19 @@ module Rigor
     EMPTY_VAR_BINDINGS = {}.freeze
     EMPTY_INDEXED_NARROWINGS = {}.freeze
     EMPTY_CHAIN_NARROWINGS = {}.freeze
+    # ADR-58 WD1 — the set of variable references whose binding's `nil`
+    # constituent is *declaration-sourced*: it arrives only via the
+    # class-ivar index seed (a ctor `@x = nil` written in another method),
+    # never through a method-local write, narrowing, or parameter. Members
+    # are frozen `[kind, name]` pairs (`[:ivar, :@x]`, `[:local, :r]`).
+    # `possible-nil-receiver` consults this set and declines to fire when the
+    # receiver's optionality is purely declaration-sourced — the working
+    # program's cross-method invariant is assumed per the robustness
+    # principle. Any flow-live touch (write / narrowing) drops the mark, so
+    # the diagnostic keeps firing exactly as before on flow-observed nil.
+    EMPTY_DECLARATION_SOURCED = Set.new.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
-                     :EMPTY_CHAIN_NARROWINGS
+                     :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -106,6 +118,7 @@ module Rigor
       discovery: DiscoveryIndex::EMPTY,
       indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
       method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
+      declaration_sourced: EMPTY_DECLARATION_SOURCED,
       source_path: nil
     )
       @environment = environment
@@ -118,6 +131,7 @@ module Rigor
       @discovery = discovery
       @indexed_narrowings = indexed_narrowings
       @method_chain_narrowings = method_chain_narrowings
+      @declaration_sourced = declaration_sourced
       @source_path = source_path
       freeze
     end
@@ -141,9 +155,15 @@ module Rigor
       # narrowing keyed on `(local, :x, :last)` no longer holds.
       new_indexed_narrowings = drop_indexed_narrowings_for(:local, name)
       new_chain_narrowings = drop_chain_narrowings_for(:local, name)
+      # ADR-58 WD1 — rebinding a local is a flow-live touch: any prior
+      # declaration-sourced mark on `name` no longer holds (the new value
+      # may carry a method-local nil). `with_declaration_sourced_local`
+      # re-establishes the mark afterward when the RHS is a pure copy of a
+      # declaration-sourced ivar read; the default is to drop it.
       rebuild(locals: new_locals, fact_store: new_fact_store,
               indexed_narrowings: new_indexed_narrowings,
-              method_chain_narrowings: new_chain_narrowings)
+              method_chain_narrowings: new_chain_narrowings,
+              declaration_sourced: drop_declaration_sourced_for(:local, name))
     end
 
     def with_fact(fact)
@@ -201,9 +221,46 @@ module Rigor
     def with_ivar(name, type)
       new_indexed_narrowings = drop_indexed_narrowings_for(:ivar, name)
       new_chain_narrowings = drop_chain_narrowings_for(:ivar, name)
+      # ADR-58 WD1 — a method-local ivar write or narrowing is flow-live:
+      # drop any declaration-sourced mark so subsequent reads of `@name`
+      # observe flow-live provenance and fire as before. The seed path uses
+      # `seed_declaration_sourced_ivar` to (re-)establish the mark.
       rebuild(ivars: @ivars.merge(name.to_sym => type).freeze,
               indexed_narrowings: new_indexed_narrowings,
-              method_chain_narrowings: new_chain_narrowings)
+              method_chain_narrowings: new_chain_narrowings,
+              declaration_sourced: drop_declaration_sourced_for(:ivar, name))
+    end
+
+    # ADR-58 WD1 — used by the method-entry seed to mark an ivar whose only
+    # provenance is the class-ivar index. Unlike `with_ivar` this binds the
+    # type AND records the declaration-sourced mark in one transition.
+    def seed_declaration_sourced_ivar(name, type)
+      rebuild(ivars: @ivars.merge(name.to_sym => type).freeze,
+              declaration_sourced: add_declaration_sourced(:ivar, name))
+    end
+
+    # ADR-58 WD1 — a local assignment `r = @right` whose RHS is a pure read
+    # of a declaration-sourced ivar inherits the mark, so the survey's exact
+    # rotation/traversal shape (`r = @right; r.key`) does not fire. Binds the
+    # type and stamps the local's mark in one transition (the plain
+    # `with_local` would have dropped it).
+    def with_declaration_sourced_local(name, type)
+      written = with_local(name, type)
+      written.with_local_declaration_mark(name)
+    end
+
+    # ADR-58 WD1 — re-stamp the local mark on a scope produced by
+    # `with_local` (which always drops it). Public so the sibling
+    # `with_declaration_sourced_local` can call it across the new
+    # post-write receiver without reaching into a private method.
+    def with_local_declaration_mark(name)
+      rebuild(declaration_sourced: add_declaration_sourced(:local, name))
+    end
+
+    # ADR-58 WD1 — true when `(kind, name)`'s binding optionality is purely
+    # declaration-sourced (no flow-live write/narrowing has touched it).
+    def declaration_sourced?(kind, name)
+      @declaration_sourced.include?([kind.to_sym, name.to_sym])
     end
 
     def with_cvar(name, type)
@@ -582,7 +639,8 @@ module Rigor
         @cvars == other.cvars &&
         @globals == other.globals &&
         @indexed_narrowings == other.indexed_narrowings &&
-        @method_chain_narrowings == other.method_chain_narrowings
+        @method_chain_narrowings == other.method_chain_narrowings &&
+        @declaration_sourced == other.declaration_sourced
     end
     alias eql? ==
 
@@ -598,6 +656,7 @@ module Rigor
       discovery: @discovery,
       indexed_narrowings: @indexed_narrowings,
       method_chain_narrowings: @method_chain_narrowings,
+      declaration_sourced: @declaration_sourced,
       source_path: @source_path
     )
       self.class.new(
@@ -607,6 +666,7 @@ module Rigor
         discovery: discovery,
         indexed_narrowings: indexed_narrowings,
         method_chain_narrowings: method_chain_narrowings,
+        declaration_sourced: declaration_sourced,
         source_path: source_path
       )
     end
@@ -639,8 +699,20 @@ module Rigor
         discovery: @discovery,
         indexed_narrowings: join_bindings(@indexed_narrowings, other.indexed_narrowings),
         method_chain_narrowings: join_bindings(@method_chain_narrowings, other.method_chain_narrowings),
+        # ADR-58 WD1 — a ref is declaration-sourced after a join only when
+        # BOTH branches agree it is. If either path made the binding
+        # flow-live (a method-local nil write / failed-guard narrowing), the
+        # merge is flow-live and `possible-nil-receiver` fires as before.
+        declaration_sourced: join_declaration_sourced(other),
         source_path: source_path
       )
+    end
+
+    def join_declaration_sourced(other)
+      return @declaration_sourced if @declaration_sourced.equal?(other.declaration_sourced)
+      return EMPTY_DECLARATION_SOURCED if @declaration_sourced.empty? || other.declaration_sourced.empty?
+
+      (@declaration_sourced & other.declaration_sourced).freeze
     end
 
     def indexed_key(receiver_kind, receiver_name, key)
@@ -668,6 +740,25 @@ module Rigor
         k.receiver_kind == sym_kind && k.receiver_name == sym_name
       end
       filtered.size == @indexed_narrowings.size ? @indexed_narrowings : filtered.freeze
+    end
+
+    # ADR-58 WD1 — set/clear the declaration-sourced provenance mark.
+    def add_declaration_sourced(kind, name)
+      ref = [kind.to_sym, name.to_sym]
+      return @declaration_sourced if @declaration_sourced.include?(ref)
+
+      (@declaration_sourced.dup << ref).freeze
+    end
+
+    def drop_declaration_sourced_for(kind, name)
+      return @declaration_sourced if @declaration_sourced.empty?
+
+      ref = [kind.to_sym, name.to_sym]
+      return @declaration_sourced unless @declaration_sourced.include?(ref)
+
+      dropped = @declaration_sourced.dup
+      dropped.delete(ref)
+      dropped.freeze
     end
 
     def drop_chain_narrowings_for(receiver_kind, receiver_name)

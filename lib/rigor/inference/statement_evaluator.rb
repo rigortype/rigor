@@ -210,7 +210,26 @@ module Rigor
       # default branch in {#evaluate}.
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
+        # ADR-58 WD1 — `r = @right` where `@right`'s optionality is purely
+        # declaration-sourced makes `r` declaration-sourced too (the survey's
+        # exact rotation/traversal shape `r = @right; r.key`). The mark is
+        # computed on the RHS *value*'s provenance — a pure ivar read of a
+        # currently declaration-sourced ivar — so it survives the local copy.
+        # Any other RHS (a call result, a method-local-nil-bearing value)
+        # leaves the local flow-live and the diagnostic fires as before.
+        if declaration_sourced_ivar_read?(node.value, post_rhs)
+          return [rhs_type, post_rhs.with_declaration_sourced_local(node.name, rhs_type)]
+        end
+
         [rhs_type, post_rhs.with_local(node.name, rhs_type)]
+      end
+
+      # True when `value_node` is a bare instance-variable read whose binding
+      # in `scope_at_read` is currently marked declaration-sourced.
+      def declaration_sourced_ivar_read?(value_node, scope_at_read)
+        return false unless value_node.is_a?(Prism::InstanceVariableReadNode)
+
+        scope_at_read.declaration_sourced?(:ivar, value_node.name)
       end
 
       # Slice 7 phase 1 — instance/class/global variable
@@ -2653,7 +2672,14 @@ module Rigor
         seeded = scope.class_ivars_for(path)
         return body_scope if seeded.empty?
 
-        seeded.reduce(body_scope) { |acc, (name, type)| acc.with_ivar(name, type) }
+        # ADR-58 WD1 — the class-ivar index unions every `@x = …` write across
+        # the class flow-insensitively, so a ctor `@x = nil` seed makes a read
+        # in a *different* method type `T | nil`. That `nil` is
+        # declaration-sourced, not flow-live, so `seed_declaration_sourced_ivar`
+        # marks each seeded ivar: `possible-nil-receiver` then declines to fire
+        # on the cross-method invariant unless a method-local write or
+        # narrowing makes the nil flow-live (which drops the mark).
+        seeded.reduce(body_scope) { |acc, (name, type)| acc.seed_declaration_sourced_ivar(name, type) }
       end
 
       # Cvars are visible from BOTH instance and singleton method

@@ -1,6 +1,8 @@
 # ADR-58 — Instance-variable field typing: declaration-sourced nil policy, homogeneous-write reads, ctor definite assignment
 
-Status: **Accepted, 2026-06-12.** Slices not yet implemented. Archetype:
+Status: **Accepted, 2026-06-12.** WD1 partially implemented (binding-
+provenance subset, 2026-06-12; method-return-transit residual queued as
+WD1b — see WD1 status). WD2/WD3 not yet implemented. Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -73,6 +75,61 @@ Local writes, parameter nils, and guard-derived nils keep firing
 exactly as today. Gate: the 109 algorithm-corpora firings disappear;
 Mastodon / haml / kramdown / ruby-lib deltas are zero-or-removals;
 self-check clean.
+
+**Status, 2026-06-12 — partially implemented (binding-provenance
+subset; gate NOT fully met).** Landed the binding-provenance bit exactly
+as sketched: a `Scope#declaration_sourced` set of `[kind, name]` refs,
+seeded by `seed_instance_ivars` (the class-ivar index entry that carries
+a ctor `@x = nil`), dropped by any flow-live `with_ivar`/`with_local`
+touch (method-local write or narrowing), intersected at joins, and
+propagated to a local across a *pure* ivar-read copy
+(`r = @right; r.key`) via `eval_local_write`. `possible-nil-receiver`
+consults `scope.declaration_sourced?(:local, …)` and declines.
+
+Measured removals (`--no-cache`, baseline vs new, correct
+"possible nil receiver" message count):
+
+| Corpus | before | after | Δ |
+| --- | --- | --- | --- |
+| algorithms (kanwei `lib/`) | 32 | 5 | −27 |
+| ADSR | 13 | 11 | −2 |
+| DSAR | 71 | 71 | 0 |
+| Ruby (TheAlgorithms) | 0 | 0 | 0 |
+| ruby/lib (CRuby stdlib) | 138 | 138 | 0 |
+| mastodon `app/models` | 5 | 5 | 0 |
+| haml `lib` | 3 | 3 | 0 |
+| kramdown `lib` | 8 | 8 | 0 |
+
+All deltas are pure removals; **zero new firings** anywhere (every
+corpus's total diagnostic count drops by exactly its possible-nil drop).
+Adjudicated sample of the 29 removals — all the canonical
+direct-copy/seeded-read rotation shape (`r = @right; r.key`,
+`node = @next; node.value`), i.e. declaration-sourced.
+
+**Why the gate is not fully met — the dominant firing shape is broader
+than the binding sketch.** The binding bit only survives a *direct*
+ivar→local copy. The DSAR/ruby-lib bulk (and the algorithms residual 5)
+arrive by **method-return transit**: `parent = x.parent`,
+`uncle = self.uncle(x)` where the same-class callee has an explicit
+`return nil` (RBTree), or array round-trips (`stk.push(self.root); … temp
+= stk.pop; temp.value`). Their receiver is still `Dynamic[top] | nil`
+whose nil traces to the class-ivar index, but the nil rode a method
+return / collection element, not a local binding — so the
+binding-attached bit cannot reach it. Probed and confirmed via
+`type-of`: DSAR `uncle` reads `Dynamic[top]?`, its nil is `uncle`'s own
+`return nil`.
+
+Suppressing those FP-safely needs provenance to ride the **type's nil
+constituent** through self-call return adoption (ADR-57) and collection
+round-trips, while *not* over-reaching into genuinely foreign library
+returns (`ActiveRecord::find_by → T?`, mastodon's 5). That is a larger,
+FP-risky change than the binding sketch and the rejected
+"any-Dynamic-union" shortcut would swallow the foreign-return nils
+wholesale. **Queued as WD1b (nil-constituent provenance through return
+adoption)**, gated by the same zero-new-firing protocol; the
+binding-provenance subset ships now because it is sound, FP-clean, and
+removes the canonical rotation-copy class without touching any other
+diagnostic.
 
 ### WD2 — Slice 2: homogeneous-write field reads (precision)
 

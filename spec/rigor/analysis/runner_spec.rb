@@ -1775,6 +1775,90 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # ADR-58 WD1 — declaration-sourced ivar optionality (the ctor
+      # `@x = nil` seed unioned in via the class-ivar index) is not
+      # diagnostic fuel for `possible-nil-receiver`. The 109-FP class on
+      # idiomatic data-structure Ruby: a node field read whose nil arrives
+      # only from a sibling-method ctor seed, guarded by an unprovable
+      # cross-method invariant. Flow-live nil (a method-local write or a
+      # failed-guard narrowing) keeps firing exactly as before.
+      context "when the ivar nil is declaration-sourced (ADR-58 WD1)" do
+        def nil_receiver_diags(result)
+          result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+        end
+
+        it "does not fire on a local copy of a declaration-sourced ivar read (r = @right; r.key)" do
+          result = analyze(<<~RUBY)
+            class P
+              attr_accessor :right, :key
+              def initialize; @right = nil; @key = nil; end
+              def link; @right = P.new; end
+              def rotate
+                r = @right
+                r.key
+              end
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+
+        it "does not fire on a declaration-sourced ivar read assigned to a local then chained" do
+          result = analyze(<<~RUBY)
+            class P
+              attr_accessor :nxt, :value
+              def initialize; @nxt = nil; @value = nil; end
+              def link; @nxt = P.new; @value = P.new; end
+              def head
+                current = @nxt
+                current.value
+              end
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+
+        it "STILL fires on flow-live nil after a method-local write drops the mark" do
+          result = analyze(<<~RUBY)
+            class P
+              attr_accessor :right, :key
+              def initialize; @right = nil; end
+              def link; @right = P.new; end
+              def live(cond)
+                r = @right
+                r = nil if cond
+                r.key
+              end
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).not_to be_empty
+        end
+
+        it "STILL fires on a method-local nil-bearing union assigned to a local" do
+          result = analyze(<<~RUBY)
+            def m(flag)
+              x = if flag then "s" else nil end
+              x.upcase
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).not_to be_empty
+        end
+
+        it "leaves a guarded traversal loop clean (unchanged)" do
+          result = analyze(<<~RUBY)
+            class P
+              attr_accessor :nxt
+              def initialize; @nxt = nil; end
+              def link; @nxt = P.new; end
+              def walk
+                current = @nxt
+                current = current.nxt until current.nil?
+              end
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+      end
+
       # Flow-folding gap G1 — closed via the
       # `Rigor::Inference::MutationWidening` hook in `eval_call`.
       # The pre-fix shape used to fold `arms.size == 1` to

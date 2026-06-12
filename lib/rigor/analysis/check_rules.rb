@@ -891,6 +891,17 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
+          # ADR-58 WD1 — a receiver whose `nil` constituent is purely
+          # declaration-sourced (the class-ivar index seed of a ctor
+          # `@x = nil` written in another method, possibly copied into a
+          # local via `r = @right`) does not fire by default: the working
+          # program's cross-method invariant is assumed per the robustness
+          # principle. The nil stays in the displayed type; only its use as
+          # diagnostic fuel is withheld. Any flow-live touch (method-local
+          # nil write, failed-guard narrowing) drops the mark upstream, so
+          # flow-observed nil keeps firing exactly as before.
+          return nil if scope.declaration_sourced?(:local, call_node.receiver.name)
+
           receiver_type = scope.type_of(call_node.receiver)
           return nil unless receiver_type.is_a?(Type::Union)
 

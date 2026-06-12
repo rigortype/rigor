@@ -57,6 +57,52 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  describe "declaration-sourced provenance (ADR-58 WD1)" do
+    let(:type) { Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("P"), Rigor::Type::Combinator.constant_of(nil)) }
+
+    it "marks a seeded ivar declaration-sourced" do
+      seeded = scope.seed_declaration_sourced_ivar(:@right, type)
+      expect(seeded.declaration_sourced?(:ivar, :@right)).to be(true)
+    end
+
+    it "drops the mark on a method-local ivar write" do
+      seeded = scope.seed_declaration_sourced_ivar(:@right, type)
+      written = seeded.with_ivar(:@right, type)
+      expect(written.declaration_sourced?(:ivar, :@right)).to be(false)
+    end
+
+    it "propagates the mark to a local copy of a declaration-sourced ivar" do
+      seeded = scope.seed_declaration_sourced_ivar(:@right, type)
+      copied = seeded.with_declaration_sourced_local(:r, type)
+      expect(copied.declaration_sourced?(:local, :r)).to be(true)
+    end
+
+    it "drops a local's mark when the local is rebound" do
+      copied = scope.with_declaration_sourced_local(:r, type)
+      rebound = copied.with_local(:r, Rigor::Type::Combinator.constant_of(nil))
+      expect(rebound.declaration_sourced?(:local, :r)).to be(false)
+    end
+
+    it "keeps the mark only when both join branches agree (intersection)" do
+      live = scope # no mark
+      seeded = scope.seed_declaration_sourced_ivar(:@right, type)
+      joined = seeded.join(live)
+      expect(joined.declaration_sourced?(:ivar, :@right)).to be(false)
+    end
+
+    it "keeps the mark when both branches carry it" do
+      a = scope.seed_declaration_sourced_ivar(:@right, type)
+      b = scope.seed_declaration_sourced_ivar(:@right, type)
+      expect(a.join(b).declaration_sourced?(:ivar, :@right)).to be(true)
+    end
+
+    it "participates in structural equality" do
+      a = scope.seed_declaration_sourced_ivar(:@right, type)
+      b = scope.with_ivar(:@right, type)
+      expect(a).not_to eq(b)
+    end
+  end
+
   describe "#forget_match_globals" do
     it "drops narrowed regex match-data globals so reads fall back to the default" do
       md = Rigor::Type::Combinator.nominal_of("MatchData")

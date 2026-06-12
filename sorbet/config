@@ -1,5 +1,0 @@
---dir
-.
---ignore=tmp/
---ignore=vendor/
---parser=prism

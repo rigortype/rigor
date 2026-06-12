@@ -1,6 +1,12 @@
 ---
 locals:
   big: Integer
+  block_big: Integer
+  block_fact: '120'
+  block_huge: Integer
+  block_nominal: 1 | Integer
+  block_sum: '6'
+  chained: Dynamic[top]
   empty2: Dynamic[top]
   empty_seed: '1'
   fact1: '120'
@@ -9,6 +15,9 @@ locals:
   folded2: Dynamic[top]
   huge: Integer
   m: Integer
+  mm: Integer
   nominal: Integer
   ranged: Dynamic[top]
   ranged_base: Dynamic[top]
+  side_total: '6'
+  sink: Array[1 | 2 | 3]

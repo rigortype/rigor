@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "../ast"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
+require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "fallback"
 require_relative "flow_tracer"
@@ -1241,6 +1242,9 @@ module Rigor
         # `Array[union]`.
         per_element = try_per_element_block_fold(node, receiver)
         return per_element if per_element
+
+        inject_fold = try_block_inject_fold(node, receiver, arg_types)
+        return inject_fold if inject_fold
 
         hash_transform = try_hash_shape_block_fold(node, receiver)
         return hash_transform if hash_transform
@@ -2478,6 +2482,200 @@ module Rigor
         return nil if cardinality <= 0 || cardinality > PER_ELEMENT_RANGE_LIMIT
 
         value.to_a.map { |v| Type::Combinator.constant_of(v) }
+      end
+
+      INJECT_METHODS = Set[:inject, :reduce].freeze
+      private_constant :INJECT_METHODS
+
+      # Cap on the element count for the Part 2 constant-threading
+      # fold — mirrors `ReduceFolding::CONSTANT_FOLD_ELEMENT_CAP`. The
+      # size is checked BEFORE enumeration so `(1..1_000_000)` declines
+      # without materialising.
+      INJECT_CONSTANT_ELEMENT_CAP = 64
+      private_constant :INJECT_CONSTANT_ELEMENT_CAP
+
+      # Magnitude cap on a folded Integer accumulator — mirrors
+      # `ReduceFolding`'s bit cap so factorial-style blow-up declines
+      # to the Part 1 nominal result rather than parking a heavy
+      # bignum literal in the type graph.
+      INJECT_CONSTANT_BIT_CAP = 256
+      private_constant :INJECT_CONSTANT_BIT_CAP
+
+      # Block-form `inject` / `reduce` return-type fold.
+      #
+      # Part 1 (soundness): the accumulator of a block-form fold must
+      # reach a fixpoint over an unknown number of iterations — the
+      # RBS tier's generic `(S) { (S, E) -> S } -> S` binds `S` from a
+      # SINGLE block pass (acc=seed, elem=element-join), so
+      # `(1..5).inject(1) { |a, i| a * i }` types `int<1, 5>` while the
+      # runtime is 120 (out of range — unsound). We iterate the
+      # accumulator type to a capped fixpoint (ADR-55/56 `BodyFixpoint`)
+      # so the multiply converges to `Integer`, never a value-bounded
+      # interval the runtime escapes.
+      #
+      # Part 2 (precision): when the receiver is a fully-constant
+      # finite collection (`Constant[Range]` / `Tuple` of `Constant`),
+      # the seed is `Constant` (or the no-seed first element), and the
+      # block body folds to a `Constant` on EVERY iteration with the
+      # running accumulator + element bound, thread the accumulator
+      # through per-element block evaluation and return the final
+      # `Constant` (`(1..5).inject(1) { |a, i| a * i } -> 120`).
+      #
+      # The two are layered: Part 2 is attempted first (a constant
+      # answer is strictly tighter); on any decline it falls through to
+      # the Part 1 sound nominal fixpoint, and on a Part 1 decline to
+      # the RBS tier. Captured-local write-back (ADR-56) runs at the
+      # statement level independent of this return-type computation, so
+      # a block that both accumulates and mutates captured state keeps
+      # its write-back regardless of which arm answers here.
+      #
+      # @return [Rigor::Type, nil]
+      def try_block_inject_fold(call_node, receiver, arg_types)
+        return nil unless INJECT_METHODS.include?(call_node.name)
+
+        block = call_node.block
+        return nil unless block.is_a?(Prism::BlockNode)
+
+        seed, has_seed = inject_seed(arg_types)
+        return nil if arg_types.size > (has_seed ? 1 : 0)
+
+        constant = try_constant_inject_fold(receiver, block, seed, has_seed)
+        return constant if constant
+
+        try_nominal_inject_fixpoint(receiver, block, seed, has_seed)
+      end
+
+      # Splits the positional args into the optional seed. A Symbol
+      # final arg (`inject(seed, :*)`) is the no-block Symbol form and
+      # never reaches here (the block guard already failed for it).
+      #
+      # @return [Array(Rigor::Type, nil), Boolean] `[seed, has_seed]`
+      def inject_seed(arg_types)
+        case arg_types.size
+        when 0 then [nil, false]
+        else [arg_types.first, true]
+        end
+      end
+
+      # Part 2 — thread the accumulator through per-element block
+      # evaluation over a fully-constant finite receiver. Declines
+      # (nil) on a non-constant receiver / seed, a size or magnitude
+      # cap, or any per-step result that is not a foldable `Constant`.
+      def try_constant_inject_fold(receiver, block, seed, has_seed)
+        members = inject_constant_members(receiver)
+        return nil if members.nil?
+
+        acc, rest = inject_constant_start(members, seed, has_seed)
+        return nil if acc.nil?
+
+        rest.each do |element_value|
+          acc = inject_constant_step(block, acc, element_value)
+          return nil if acc.nil?
+        end
+        acc
+      end
+
+      # Extracts the receiver's foldable constant values, size-capped
+      # before enumeration, or nil to decline.
+      def inject_constant_members(receiver)
+        case receiver
+        when Type::Constant then inject_constant_range_members(receiver.value)
+        when Type::Tuple then inject_constant_tuple_members(receiver.elements)
+        end
+      end
+
+      def inject_constant_range_members(value)
+        return nil unless value.is_a?(Range)
+
+        first = value.begin
+        last = value.end
+        return nil unless inject_foldable?(first) && inject_foldable?(last)
+
+        size = value.size
+        return nil unless size.is_a?(Integer)
+        return nil if size > INJECT_CONSTANT_ELEMENT_CAP
+
+        value.to_a
+      rescue StandardError
+        nil
+      end
+
+      def inject_constant_tuple_members(elements)
+        return nil if elements.size > INJECT_CONSTANT_ELEMENT_CAP
+        return nil unless elements.all? { |e| e.is_a?(Type::Constant) && inject_foldable?(e.value) }
+
+        elements.map(&:value)
+      end
+
+      # Seeds the constant accumulator: with a seed the memo starts at
+      # the (foldable) seed value and every member is folded; without a
+      # seed the first member seeds the memo and the rest are folded.
+      # The accumulator is carried as a `Constant` type (so the block
+      # body sees a value-pinned param).
+      #
+      # @return [Array(Rigor::Type::Constant, nil), Array] `[acc, rest]`
+      def inject_constant_start(members, seed, has_seed)
+        if has_seed
+          return [nil, []] unless seed.is_a?(Type::Constant) && inject_foldable?(seed.value)
+
+          [seed, members]
+        else
+          return [nil, []] if members.empty?
+
+          [Type::Combinator.constant_of(members.first), members[1..]]
+        end
+      end
+
+      # Evaluates the block body once with the running constant
+      # accumulator + the next constant element bound to the block
+      # params, returning the result when it is a foldable `Constant`
+      # within the magnitude cap, else nil to decline the whole fold.
+      def inject_constant_step(block, acc, element_value)
+        element = Type::Combinator.constant_of(element_value)
+        result = type_block_body_with_param(block, [acc, element])
+        return nil unless result.is_a?(Type::Constant)
+        return nil unless inject_foldable?(result.value)
+        return nil if inject_magnitude_too_large?(result.value)
+
+        result
+      end
+
+      INJECT_FOLDABLE_CLASSES = [Integer, Float, Rational].freeze
+      private_constant :INJECT_FOLDABLE_CLASSES
+
+      def inject_foldable?(value)
+        INJECT_FOLDABLE_CLASSES.any? { |klass| value.is_a?(klass) }
+      end
+
+      def inject_magnitude_too_large?(value)
+        value.is_a?(Integer) && value.bit_length > INJECT_CONSTANT_BIT_CAP
+      end
+
+      # Part 1 — the sound nominal accumulator fixpoint. Iterates
+      # `acc = join(acc, block(acc, element))` to a capped fixpoint with
+      # final `Constant -> Nominal` widening (ADR-55/56 `BodyFixpoint`),
+      # seeding `acc` from the seed type (or the element type for the
+      # no-seed form) and binding the element-join to the element param.
+      # Declines (nil) when the element type is unknown so the RBS tier
+      # owns the call.
+      def try_nominal_inject_fixpoint(receiver, block, seed, has_seed)
+        element = MethodDispatcher::IteratorDispatch.element_type_of(receiver)
+        return nil if element.nil?
+
+        seed_acc = has_seed ? seed : element
+        return nil if seed_acc.nil?
+
+        converged = BodyFixpoint.converge(
+          names: [:__inject_acc__],
+          seed_bindings: { __inject_acc__: seed_acc },
+          widen: method(:widen_value_pinned),
+          evaluate_body: lambda do |bindings|
+            acc = bindings[:__inject_acc__]
+            result = type_block_body_with_param(block, [acc, element])
+            result.nil? ? {} : { __inject_acc__: result }
+          end
+        )
+        converged[:__inject_acc__] || seed_acc
       end
 
       # `index(value)` and `find_index(value)` carry a positional

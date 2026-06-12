@@ -44,6 +44,7 @@ module Rigor
     def in_source_constants = @discovery.in_source_constants
     def discovered_methods = @discovery.discovered_methods
     def discovered_def_nodes = @discovery.discovered_def_nodes
+    def discovered_singleton_def_nodes = @discovery.discovered_singleton_def_nodes
     def discovered_def_sources = @discovery.discovered_def_sources
     def discovered_method_visibilities = @discovery.discovered_method_visibilities
     def discovered_superclasses = @discovery.discovered_superclasses
@@ -359,6 +360,22 @@ module Rigor
     # has no RBS sig.
     def user_def_for(class_name, method_name)
       table = @discovery.discovered_def_nodes[class_name.to_s]
+      node = table && table[method_name.to_sym]
+      record_cross_file_method(class_name, method_name, node) if Analysis::DependencyRecorder.active?
+      node
+    end
+
+    # Module-singleton call resolution (ADR-57 follow-up) — companion of
+    # {#user_def_for} for SINGLETON-side defs (`def self.x`, `def Foo.x`,
+    # `class << self` bodies, and `module_function` defs). Returns the
+    # `Prism::DefNode` for `class_name.method_name` invoked on the
+    # module/class constant itself, or nil. The `discovered_def_nodes`
+    # table is deliberately instance-side only (its ancestor walk binds
+    # `self` as `Nominal`), so singleton bodies live in a parallel table
+    # the `ScopeIndexer` populates alongside it. Records the same
+    # cross-file dependency edge as the instance path (ADR-46).
+    def singleton_def_for(class_name, method_name)
+      table = @discovery.discovered_singleton_def_nodes[class_name.to_s]
       node = table && table[method_name.to_sym]
       record_cross_file_method(class_name, method_name, node) if Analysis::DependencyRecorder.active?
       node

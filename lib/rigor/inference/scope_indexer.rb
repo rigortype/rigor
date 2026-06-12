@@ -164,6 +164,9 @@ module Rigor
         def_nodes = default_scope.discovered_def_nodes.merge(
           build_discovered_def_nodes(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        singleton_def_nodes = default_scope.discovered_singleton_def_nodes.merge(
+          build_discovered_singleton_def_nodes(root)
+        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
         superclasses = default_scope.discovered_superclasses.merge(
           build_discovered_superclasses(root)
         )
@@ -185,6 +188,7 @@ module Rigor
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
             discovered_def_nodes: def_nodes,
+            discovered_singleton_def_nodes: singleton_def_nodes,
             discovered_superclasses: superclasses,
             discovered_includes: includes,
             discovered_method_visibilities: method_visibilities,
@@ -1532,6 +1536,149 @@ module Rigor
         accumulator[class_name][def_node.name] = def_node
       end
 
+      # Module-singleton call resolution (ADR-57 follow-up) — the
+      # SINGLETON-side mirror of `build_discovered_def_nodes`. Records the
+      # `Prism::DefNode` for every singleton-side method (`def self.x`,
+      # `def Foo.x`, a `class << self` body, and a `module_function`
+      # method) keyed by qualified class/module name → method → node, so
+      # `ExpressionTyper` can re-type the body when a `Singleton[Foo]`
+      # receiver dispatches `Foo.x`. The instance-side table is kept
+      # singleton-free on purpose (its ancestor walk binds `self` as
+      # `Nominal`), so the two never overlap except for `module_function`
+      # defs, which are genuinely callable on both sides and so appear in
+      # both tables. Top-level singleton defs (`def self.x` outside any
+      # class — `self` is `main`) are not recorded; they have no constant
+      # receiver to dispatch through.
+      def build_discovered_singleton_def_nodes(root)
+        accumulator = {}
+        walk_singleton_def_nodes(root, [], false, accumulator)
+        accumulator.transform_values(&:freeze).freeze
+      end
+
+      # Walks every node, entering class/module/singleton-class bodies via
+      # {#walk_singleton_body} so a bare `module_function` toggle threads
+      # correctly across the body's *sibling* statements (a child-by-child
+      # recursion would reset it). At the top level / inside an arbitrary
+      # node there is no `module_function` state to carry, so descent is a
+      # plain per-child walk.
+      def walk_singleton_def_nodes(node, qualified_prefix, in_singleton_class, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            walk_singleton_body(node.body, qualified_prefix + [name], false, accumulator) if node.body
+            return
+          end
+        when Prism::SingletonClassNode
+          if node.body
+            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            if singleton_prefix
+              walk_singleton_body(node.body, singleton_prefix, true, accumulator)
+              return
+            end
+          end
+        when Prism::ConstantWriteNode
+          if meta_new_block_body(node)
+            child_prefix = qualified_prefix + [node.name.to_s]
+            walk_singleton_body(meta_new_block_body(node), child_prefix, false, accumulator)
+            return
+          end
+        when Prism::DefNode
+          record_singleton_def_node(node, qualified_prefix, in_singleton_class, false, accumulator)
+          return
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_singleton_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
+        end
+      end
+
+      # Walks a class/module/singleton-class body's direct statements in
+      # source order, threading the bare-`module_function` toggle: once a
+      # bare `module_function` is seen, every subsequent `def` in the body
+      # registers as a singleton method. Nested classes/modules/defs and
+      # `module_function :a, :b` named forms recurse / record through the
+      # general walker so the toggle stays scoped to its own body.
+      def walk_singleton_body(body, qualified_prefix, in_singleton_class, accumulator)
+        module_function_on = false
+        statements_of(body).each do |stmt|
+          if stmt.is_a?(Prism::CallNode) && module_function_toggle?(stmt)
+            if bare_module_function?(stmt)
+              module_function_on = true
+            else
+              record_module_function_names(stmt, qualified_prefix, body, accumulator)
+            end
+            next
+          end
+          if stmt.is_a?(Prism::DefNode)
+            record_singleton_def_node(stmt, qualified_prefix, in_singleton_class, module_function_on, accumulator)
+            next
+          end
+          walk_singleton_def_nodes(stmt, qualified_prefix, in_singleton_class, accumulator)
+        end
+      end
+
+      # Direct statement children of a class/module body node (a
+      # `Prism::StatementsNode`, a `Prism::BeginNode` wrapping one, or a
+      # lone statement). Returns an empty list for an empty body.
+      def statements_of(body)
+        case body
+        when Prism::StatementsNode then body.body
+        when Prism::BeginNode then statements_of(body.statements)
+        when nil then []
+        else [body]
+        end
+      end
+
+      def record_singleton_def_node(def_node, qualified_prefix, in_singleton_class, module_function_on, accumulator)
+        singleton = def_singleton?(def_node, qualified_prefix, in_singleton_class) || module_function_on
+        return unless singleton
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        (accumulator[class_name] ||= {})[def_node.name] = def_node
+      end
+
+      # A bare `module_function` (no arguments) flips every following `def`
+      # in the module body to module-function (instance + singleton) mode.
+      def module_function_toggle?(node)
+        node.name == :module_function && node.receiver.nil?
+      end
+
+      def bare_module_function?(node)
+        node.arguments.nil? || node.arguments.arguments.empty?
+      end
+
+      # `module_function :a, :b` retro-marks named siblings (defined
+      # earlier OR later in the same body) as module-functions. Resolves
+      # each symbol-literal argument against the body's own `def`s and
+      # registers the matching `DefNode` on the module's singleton side.
+      # Non-symbol arguments and names with no matching `def` are skipped
+      # (a miss degrades to today's `Dynamic`, never a false resolution).
+      def record_module_function_names(node, qualified_prefix, body, accumulator)
+        return if qualified_prefix.empty?
+
+        defs_by_name = statements_of(body).each_with_object({}) do |stmt, acc|
+          acc[stmt.name] = stmt if stmt.is_a?(Prism::DefNode) && stmt.receiver.nil?
+        end
+        class_name = qualified_prefix.join("::")
+        node.arguments&.arguments&.each do |arg|
+          name = symbol_argument_name(arg)
+          def_node = name && defs_by_name[name]
+          (accumulator[class_name] ||= {})[name] = def_node if def_node
+        end
+      end
+
+      # The Symbol value of a `:name` / `"name"` literal argument, or nil.
+      def symbol_argument_name(arg)
+        case arg
+        when Prism::SymbolNode then arg.unescaped.to_sym
+        when Prism::StringNode then arg.unescaped.to_sym
+        end
+      end
+
       # ADR-24 slice 2 — per-class table mapping a fully
       # qualified user class to its superclass name AS WRITTEN
       # at the `class Foo < Bar` declaration. Only constant
@@ -1992,8 +2139,8 @@ module Rigor
       # @return [Hash{Symbol => Hash}]
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
-        acc = { def_nodes: {}, def_sources: {}, superclasses: {}, includes: {}, method_visibilities: {}, methods: {},
-                class_sources: {}, data_member_layouts: {} }
+        acc = { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, superclasses: {}, includes: {},
+                method_visibilities: {}, methods: {}, class_sources: {}, data_member_layouts: {} }
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
@@ -2012,7 +2159,7 @@ module Rigor
         # intact while still letting `attr_reader :x` in one file
         # suppress a false undefined-method for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
-        %i[def_nodes def_sources includes method_visibilities methods class_sources].each do |key|
+        %i[def_nodes singleton_def_nodes def_sources includes method_visibilities methods class_sources].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
@@ -2035,6 +2182,9 @@ module Rigor
       # visibility declared in a sibling file.
       def accumulate_project_index(acc, path, root)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, root)
+        build_discovered_singleton_def_nodes(root).each do |class_name, methods|
+          (acc[:singleton_def_nodes][class_name] ||= {}).merge!(methods)
+        end
         superclasses = build_discovered_superclasses(root)
         includes = build_discovered_includes(root)
         acc[:superclasses].merge!(superclasses)

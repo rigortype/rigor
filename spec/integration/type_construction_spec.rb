@@ -40,6 +40,21 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/module_singleton_call.rb — module/class singleton-method call resolution" do
+    let(:harness) { harness_for("module_singleton_call") }
+
+    # Module-singleton call resolution (ADR-57 follow-up): a `def self.x` /
+    # `module_function` call on a module/class constant re-types the body
+    # with the call's args bound (constant args fold; a singleton helper
+    # called via implicit self resolves against the same singleton table),
+    # while a foreign / RBS-known singleton (`Math.sqrt`) stays
+    # catalog-typed. The fixture's `assert_type(...)` lines self-check.
+    it "resolves singleton-method calls (def self / module_function / implicit-self helper)" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/destructured_param.rb — destructured positional params don't crash the binder" do
     let(:harness) { harness_for("destructured_param") }
 

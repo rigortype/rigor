@@ -276,7 +276,14 @@ module Rigor
         class_name, kind = discovered_method_lookup(receiver_type)
         return nil if class_name.nil?
         return nil unless scope.discovered_method?(class_name, method_name, kind)
+        # Decline when a re-typable body is recorded for the method, so the
+        # downstream `ExpressionTyper` inference tier can fold a precise
+        # return instead of collapsing to `Dynamic[top]` here — instance
+        # bodies via `user_def_for`, singleton bodies (`def self.x` /
+        # `module_function`) via `singleton_def_for` (module-singleton
+        # call resolution, ADR-57 follow-up).
         return nil if kind == :instance && scope.user_def_for(class_name, method_name)
+        return nil if kind == :singleton && scope.singleton_def_for(class_name, method_name)
 
         Type::Combinator.untyped
       end

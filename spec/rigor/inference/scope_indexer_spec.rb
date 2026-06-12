@@ -206,6 +206,55 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(scope.discovered_method?("Row", :to_pair, :instance)).to be(true)
     end
 
+    # Module-singleton call resolution (ADR-57 follow-up) — singleton-side
+    # def-node table that `ExpressionTyper#try_singleton_method_inference`
+    # re-types against a `Singleton[X]` receiver.
+    it "records `def self.x` / `def Foo.x` / `class << self` singleton def-nodes" do
+      program = parse(<<~RUBY)
+        module Util
+          def self.triple(x) = x * 3
+        end
+        class Calc
+          def self.double(x) = x * 2
+          def instance_only = 1
+        end
+        module Meta
+          class << self
+            def helper(y) = y
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.singleton_def_for("Util", :triple)).to be_a(Prism::DefNode)
+      expect(scope.singleton_def_for("Calc", :double)).to be_a(Prism::DefNode)
+      expect(scope.singleton_def_for("Meta", :helper)).to be_a(Prism::DefNode)
+      # Instance defs stay out of the singleton table.
+      expect(scope.singleton_def_for("Calc", :instance_only)).to be_nil
+      # ...and instance lookups don't see singleton defs.
+      expect(scope.user_def_for("Util", :triple)).to be_nil
+    end
+
+    it "records `module_function` methods as singleton def-nodes (bare and named forms)" do
+      program = parse(<<~RUBY)
+        module Bare
+          module_function
+
+          def quad(x) = x * 4
+        end
+        module Named
+          def half(x) = x / 2
+          module_function :half
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.singleton_def_for("Bare", :quad)).to be_a(Prism::DefNode)
+      expect(scope.singleton_def_for("Named", :half)).to be_a(Prism::DefNode)
+    end
+
     it "registers `class X < Data.define(...)` synthesized member readers" do
       program = parse(<<~RUBY)
         class Money < Data.define(:amount, :currency)

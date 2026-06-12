@@ -1231,6 +1231,16 @@ module Rigor
         user_inference = try_user_method_inference(receiver, node, arg_types)
         return user_inference if user_inference
 
+        # Module-singleton call resolution (ADR-57 follow-up) — when the
+        # receiver is `Singleton[Foo]` (a module/class constant or a
+        # singleton-method `self`) and `Foo` declares a user-side
+        # `def self.x` / `module_function` body, re-type that body
+        # with the call args bound. Sits after the RBS dispatch tier, so
+        # foreign / RBS-known singletons (`Math.sqrt`) keep their catalog
+        # answer; only project-defined singleton methods reach here.
+        singleton_inference = try_singleton_method_inference(receiver, node, arg_types)
+        return singleton_inference if singleton_inference
+
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and
         # no positive rule resolves the call, the result inherits the
         # dynamic origin. Per the value-lattice algebra, this is a
@@ -1404,6 +1414,31 @@ module Rigor
         nil
       end
 
+      # Module-singleton call resolution (ADR-57 follow-up) — resolves
+      # `Foo.<name>` on a `Singleton[Foo]` receiver against `Foo`'s
+      # user-side singleton defs (`def self.x`, `def Foo.x`, a
+      # `class << self` body, or a `module_function` method) and re-types
+      # the body with the call's argument types bound. The body scope's
+      # `self_type` is the SAME `Singleton[Foo]` carrier, so an
+      # implicit-self call inside (`def self.via; helper(x); end`)
+      # re-enters this tier and resolves against the same singleton table
+      # — the symmetric counterpart of the instance-side ancestor walk.
+      #
+      # Resolution is OWN-class only: the singleton-ancestry chain
+      # (`extend`ed modules, inherited class-method dispatch) is not
+      # walked at this slice. A miss degrades to today's `Dynamic[top]`,
+      # never a false resolution (ADR-57 follow-up § module-singleton).
+      def try_singleton_method_inference(receiver, call_node, arg_types)
+        return nil unless receiver.is_a?(Type::Singleton)
+
+        def_node = scope.singleton_def_for(receiver.class_name, call_node.name)
+        return nil if def_node.nil?
+
+        infer_user_method_return(def_node, receiver, arg_types)
+      rescue StandardError
+        nil
+      end
+
       # ADR-24 slice 2 — resolves `method_name` against
       # `class_name`'s own `def`s, then walks the user-class
       # ancestor chain: included / prepended modules (transitive)
@@ -1542,6 +1577,16 @@ module Rigor
       INFERENCE_SUMMARY_KEY = :__rigor_user_method_return_summary__
       private_constant :INFERENCE_SUMMARY_KEY
 
+      # Monotonic per-thread counter, bumped once each time `consult_summary`
+      # actually reads an in-flight fixpoint assumption (ADR-55 slice 2). A
+      # method return computed across an interval in which this counter does
+      # NOT move depended on no transient Kleene iterate, so it is FINAL and
+      # safe to memoise — even when the `summaries` table is non-empty because
+      # some unrelated outermost frame merely *seeded* (but never consulted)
+      # its own entry. See `infer_user_method_return`'s post-hoc memo gate.
+      SUMMARY_CONSULT_COUNTER_KEY = :__rigor_user_method_summary_consults__
+      private_constant :SUMMARY_CONSULT_COUNTER_KEY
+
       # ADR-57 follow-up — run-scoped memo for resolved user-method
       # return types. The ADR-57 gate-open made every resolved in-body
       # self-call adopt the callee's inferred return, which re-types the
@@ -1638,18 +1683,28 @@ module Rigor
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
         summaries = (Thread.current[INFERENCE_SUMMARY_KEY] ||= {})
 
-        # ADR-57 follow-up — return memo. The memo is consulted and
-        # populated only when the result for this frame is FINAL — i.e.
-        # no ADR-55 recursion machinery is in flight that could make the
-        # body fold to a transient Kleene assumption / clamped value
-        # (see `memoisable_return?` + RETURN_MEMO_KEY). Outside those
-        # windows the inferred return is a pure function of `(def_node,
-        # receiver, arg_types)` and the frozen discovery index, so it is
-        # safe to share across call sites and depths — catching the
-        # dominant whole-`lib` cost: a deep chain of non-recursive
-        # private helpers re-typed once per caller. The computation
-        # itself lives in `compute_user_method_return`.
-        unless memoisable_return?(stack, summaries, plain_signature)
+        # ADR-57 follow-up — return memo. The inferred return is a pure
+        # function of `(def_node, receiver, arg_types)` and the frozen
+        # discovery index whenever the computation does NOT depend on a
+        # transient ADR-55 Kleene assumption (an in-flight fixpoint summary).
+        # Two structural preconditions decide whether THIS frame's result is
+        # even a memo candidate, both stable across the body walk: the
+        # signature must not already be on the recursion guard stack (else we
+        # are inside its own cycle) and no constant-arg unroll may be in
+        # flight (its value-keyed frames are transient). When both hold we
+        # consult the memo, and on a miss we compute, then store the result
+        # only if no fixpoint summary was *consulted* during the computation
+        # (the post-hoc consult-counter check) — which is sound regardless of
+        # whether the `summaries` table holds inert *seeded-but-unconsulted*
+        # entries left by unrelated outermost frames. This is the fix for the
+        # whole-`lib` scaling wall: a deep DAG of non-recursive private
+        # readers (ActiveStorage `video_analyzer.rb`) seeded a summary on its
+        # first outermost method and thereafter the old `summaries.empty?`
+        # gate disabled the memo for every nested call, re-walking the shared
+        # sub-readers combinatorially (~932k body evaluations for ~20 tiny
+        # methods). The computation itself lives in
+        # `compute_user_method_return`.
+        unless memo_candidate?(stack, plain_signature)
           return compute_user_method_return(def_node, body_scope, stack, summaries,
                                             receiver, arg_types, plain_signature)
         end
@@ -1659,8 +1714,17 @@ module Rigor
                     arg_types.map { |type| type.describe(:short) }]
         return memo[memo_key] if memo.key?(memo_key)
 
-        memo[memo_key] = compute_user_method_return(def_node, body_scope, stack, summaries,
-                                                    receiver, arg_types, plain_signature)
+        consults_before = Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
+        result = compute_user_method_return(def_node, body_scope, stack, summaries,
+                                            receiver, arg_types, plain_signature)
+        consults_after = Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
+
+        # Store only a FINAL result. If a fixpoint summary was consulted
+        # during the computation, `result` embeds a transient Kleene iterate
+        # whose value depends on the iteration in flight, so it must not be
+        # shared across call sites.
+        memo[memo_key] = result if consults_after == consults_before
+        result
       end
 
       # The ADR-55 recursion-guard + value-unroll + fixpoint body of
@@ -1714,17 +1778,26 @@ module Rigor
         evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
       end
 
-      # True when `infer_user_method_return`'s result for this frame is a
-      # final return (safe to memoise), not a transient ADR-55 value. See
-      # RETURN_MEMO_KEY: no fixpoint summary in flight, no constant-arg
-      # unroll begun, and this plain signature not itself mid-recursion.
-      def memoisable_return?(stack, summaries, plain_signature)
+      # True when this frame's result is a candidate for the return memo:
+      # the structural preconditions, both stable across the body walk, that
+      # are necessary (but not sufficient) for a FINAL result. Sufficiency is
+      # decided post-hoc in `infer_user_method_return` by the consult-counter
+      # check (no transient fixpoint summary was read during the compute) —
+      # so unlike the prior `memoisable_return?` this deliberately does NOT
+      # require an empty `summaries` table: inert seeded-but-unconsulted
+      # entries left by unrelated outermost frames do not contaminate a
+      # result, and gating on them disabled the memo for an entire non-
+      # recursive DAG (the scaling wall). The two preconditions: no constant-
+      # arg unroll in flight (its value-keyed frames are transient) and this
+      # plain signature not itself on the recursion guard stack (else we are
+      # inside its own cycle, returning a Kleene iterate).
+      def memo_candidate?(stack, plain_signature)
         # Read the unroll fuel WITHOUT the decrement side effect of
         # `unroll_fuel_remaining`: a constant-arg unroll has begun iff the
         # thread-local is set and the stack is non-empty (the `ensure` in
         # `evaluate_guarded_user_method_body` clears it at stack-empty).
         unroll_idle = stack.empty? || Thread.current[INFERENCE_UNROLL_FUEL_KEY].nil?
-        summaries.empty? && unroll_idle &&
+        unroll_idle &&
           stack.none? { |frame| plain_part(frame) == plain_signature }
       end
 
@@ -1928,6 +2001,7 @@ module Rigor
         return Type::Combinator.untyped if entry.nil?
 
         entry[:consulted] = true
+        (Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] ||= []) << entry[:depth]
         entry[:assumption]
       end
 

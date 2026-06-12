@@ -184,6 +184,38 @@ Tier order (each its own corpus-gated slice):
    the CHANGELOG.
 4. **Module-singleton resolution** (`def self.x` via module constant
    receiver) as an independent slice — same adjudication protocol.
+   **LANDED 2026-06-12.** A call on a module/class constant to a
+   user-side singleton method (`def self.x` / `def Foo.x` / `class <<
+   self` / `module_function`) now re-types the callee's body against the
+   `Singleton[X]` receiver, mirroring the instance-side ancestor walk: a
+   new `discovered_singleton_def_nodes` index (the singleton companion of
+   `discovered_def_nodes`, populated by `ScopeIndexer` and seeded per-file
+   + cross-file), a `Scope#singleton_def_for` accessor, a
+   `MethodDispatcher#try_discovered_method` decline so the precise
+   inference tier runs instead of the `untyped` short-circuit, and an
+   `ExpressionTyper#try_singleton_method_inference` tier whose body scope
+   carries the same `Singleton[X]` self-type (so an implicit-self call to
+   another singleton helper resolves against the same table). The ADR-55
+   recursion machinery and the return memo apply unchanged (both key on
+   the receiver carrier, which a `Singleton` satisfies). Own-class only;
+   the singleton-ancestry chain (`extend` / inherited class methods) is a
+   future slice. Self-check + plugin self-check firing-free; Mastodon
+   `app/models` / haml `lib` / kramdown `lib` byte-identical. The CRuby
+   `references/ruby/lib` survey surfaced +16 firings, all the precision-
+   reveals-latent-strictness class the gate-open protocol predicted (a
+   now-resolved singleton return more precise than the consuming RBS sig
+   — e.g. `Bundler.root → Pathname` hitting `Pathname#expand_path`'s
+   String-only `dir` param, and now-nilable singleton returns surfacing
+   genuine nil-safety gaps in rubygems' `setup_command`); these are
+   read-only vendored corpus signal, not a `make verify` gate. One
+   pre-existing engine defect surfaced through the new entry door (NOT
+   introduced by it — reproducible on plain instance methods): the
+   mutual-recursion fixpoint folds two-method recursion (`even?`/`odd?`)
+   to an unsound one-sided constant; tracked separately. The
+   `recursive_fixpoint_summary` fixture's `Parity.even?` assertion was
+   updated from `Dynamic[top]` (the old non-resolution) to the now-
+   resolved (imprecise but instance-parity) value, with a comment
+   flagging the underlying fixpoint limitation.
 
 If ADR-50's bleeding-edge overlay ships first, the opened gate is a
 natural first `bleeding_edge:` feature; otherwise it lands as a normal

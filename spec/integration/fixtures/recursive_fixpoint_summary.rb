@@ -92,9 +92,14 @@ end
 assert_type("bot", Diverge.new.spin(some_int))
 
 # Mutual recursion (the ADR-24 WD5 `module_function` shape) terminates
-# — no `SystemStackError`. The cross-signature summary does not fold to
-# a precise `bool` here, so it degrades soundly to `Dynamic[top]`
-# (today's behaviour); the load-bearing property is termination.
+# — no `SystemStackError`; termination is the load-bearing property.
+# Module-singleton call resolution (ADR-57 follow-up) now resolves the
+# `Parity.even?` singleton call against the module's `module_function`
+# body instead of leaving it `Dynamic[top]`. The cross-signature
+# fixpoint still does not fold to a precise `bool`: it yields the same
+# imprecise one-sided `false` the engine already produces for the
+# instance-method form `Parity.new.even?(some_int)` — a pre-existing
+# mutual-recursion fixpoint limitation independent of this slice.
 module Parity
   module_function
 
@@ -107,4 +112,4 @@ module Parity
   end
 end
 
-assert_type("Dynamic[top]", Parity.even?(some_int))
+assert_type("false", Parity.even?(some_int))

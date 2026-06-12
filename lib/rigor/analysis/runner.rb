@@ -155,6 +155,7 @@ module Rigor
         @cached_plugin_prepare_diagnostics = [].freeze
         @project_discovered_classes = {}.freeze
         @project_discovered_def_nodes = {}.freeze
+        @project_discovered_singleton_def_nodes = {}.freeze
         @project_discovered_def_sources = {}.freeze
         @project_discovered_superclasses = {}.freeze
         @project_discovered_includes = {}.freeze
@@ -466,6 +467,9 @@ module Rigor
         @pre_eval_diagnostics_from_scanner = result.pre_eval_diagnostics_from_scanner
         @project_discovered_classes = result.discovered_classes if result.discovered_classes
         @project_discovered_def_nodes = result.discovered_def_nodes if result.discovered_def_nodes
+        if result.discovered_singleton_def_nodes
+          @project_discovered_singleton_def_nodes = result.discovered_singleton_def_nodes
+        end
         @project_discovered_def_sources = result.discovered_def_sources if result.discovered_def_sources
         @project_discovered_superclasses = result.discovered_superclasses if result.discovered_superclasses
         @project_discovered_includes = result.discovered_includes if result.discovered_includes
@@ -807,6 +811,9 @@ module Rigor
         tables = {}
         tables[:discovered_classes] = @project_discovered_classes unless @project_discovered_classes.empty?
         tables[:discovered_def_nodes] = @project_discovered_def_nodes unless @project_discovered_def_nodes.empty?
+        unless @project_discovered_singleton_def_nodes.empty?
+          tables[:discovered_singleton_def_nodes] = @project_discovered_singleton_def_nodes
+        end
         tables[:discovered_def_sources] = @project_discovered_def_sources unless @project_discovered_def_sources.empty?
         unless @project_discovered_superclasses.empty?
           tables[:discovered_superclasses] = @project_discovered_superclasses

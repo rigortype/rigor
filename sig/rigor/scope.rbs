@@ -22,6 +22,7 @@ module Rigor
     def in_source_constants: () -> Hash[String, Type::t]
     def discovered_methods: () -> Hash[String, Hash[Symbol, Symbol]]
     def discovered_def_nodes: () -> Hash[String, Hash[Symbol, untyped]]
+    def discovered_singleton_def_nodes: () -> Hash[String, Hash[Symbol, untyped]]
     def discovered_def_sources: () -> Hash[String, Hash[Symbol, String]]
     def discovered_method_visibilities: () -> Hash[String, Hash[Symbol, Symbol]]
     def discovered_superclasses: () -> Hash[String, String]
@@ -38,6 +39,7 @@ module Rigor
       attr_reader in_source_constants: Hash[String, Type::t]
       attr_reader discovered_methods: Hash[String, Hash[Symbol, Symbol]]
       attr_reader discovered_def_nodes: Hash[String, Hash[Symbol, untyped]]
+      attr_reader discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]]
       attr_reader discovered_def_sources: Hash[String, Hash[Symbol, String]]
       attr_reader discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]]
       attr_reader discovered_superclasses: Hash[String, String]
@@ -47,7 +49,7 @@ module Rigor
 
       EMPTY: DiscoveryIndex
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?data_member_layouts: Hash[String, Array[Symbol]]) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?data_member_layouts: Hash[String, Array[Symbol]]) -> DiscoveryIndex
     end
 
     class IndexedKey
@@ -85,6 +87,7 @@ module Rigor
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
+    def singleton_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def top_level_def_for: (String | Symbol method_name) -> untyped?
     def toplevel?: () -> bool

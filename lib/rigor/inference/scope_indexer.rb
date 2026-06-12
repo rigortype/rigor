@@ -2258,9 +2258,61 @@ module Rigor
         when Prism::ModuleNode
           name = qualified_name_for(node.constant_path)
           return collect_class_decls(node.body, qualified_prefix + [name], accumulator) if name && node.body
+        when Prism::ConstantWriteNode
+          record_class_new_constant_decl(node, qualified_prefix, accumulator)
         end
 
         node.compact_child_nodes.each { |child| collect_class_decls(child, qualified_prefix, accumulator) }
+      end
+
+      # T1 (template-corpora survey) — record a `Const = Class.new(Super)`
+      # (and the bare `Class.new` / `Module.new`) class-creating constant
+      # in the cross-file discovery table so a reference to `Const` from
+      # ANOTHER file under the same namespace resolves to the project
+      # class instead of falling through to a core same-named class
+      # (`Liquid::SyntaxError = Class.new(Error)` referenced in a sibling
+      # file's `rescue SyntaxError => e`, which otherwise resolved to core
+      # `::SyntaxError`). Mirrors the single-file `in_source_constants`
+      # answer, which types `Class.new(Super)` as `Singleton[Super]` (the
+      # constructed class answers method lookups through Super's chain).
+      # The superclass name is resolved lexically against the enclosing
+      # prefix; a bare `Class.new` with no superclass (or `Module.new`)
+      # types as `Singleton[Const]` itself. The block form is left to the
+      # existing `meta_new_block_body` machinery — only the plain
+      # `Class.new(Super)` constant (the namespaced-sibling-error idiom)
+      # is added here.
+      def record_class_new_constant_decl(node, qualified_prefix, accumulator)
+        rvalue = node.value
+        return unless class_new_call?(rvalue) || module_new_call?(rvalue)
+        return if rvalue.block # block form: handled by meta_new_block_body walks
+
+        full = (qualified_prefix + [node.name.to_s]).join("::")
+        super_name = class_new_superclass_name(rvalue, qualified_prefix, accumulator)
+        accumulator[full] = Type::Combinator.singleton_of(super_name || full)
+      end
+
+      # Lexically-qualified name of a `Class.new(Super)` superclass
+      # argument, or nil when there is no positional superclass (a bare
+      # `Class.new` / `Module.new`). When the unqualified super name is a
+      # class already discovered under an enclosing-prefix segment, the
+      # qualified form is returned (so `Class.new(Error)` inside `module M`
+      # resolves to `M::Error`); otherwise the literal name is returned
+      # (covering a core / RBS-known superclass spelled bare).
+      def class_new_superclass_name(call_node, qualified_prefix, accumulator)
+        arg = call_node.arguments&.arguments&.first
+        return nil if arg.nil?
+
+        raw = qualified_name_for(arg)
+        return nil if raw.nil?
+
+        prefix = qualified_prefix.dup
+        until prefix.empty?
+          candidate = (prefix + [raw]).join("::")
+          return candidate if accumulator.key?(candidate)
+
+          prefix.pop
+        end
+        raw
       end
 
       # Walks the program once for `Prism::ModuleNode` and

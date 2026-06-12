@@ -1360,5 +1360,149 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(constant_member).not_to be_nil
       end
     end
+
+    describe "parallel / multiple-assignment ivar targets (N1)" do
+      it "records an array-literal RHS ivar slot at its tuple position" do
+        program = parse(<<~RUBY)
+          class F
+            def lit
+              @a, @b = 1, "s"
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        a = outer.class_ivars_for("F")[:@a]
+        b = outer.class_ivars_for("F")[:@b]
+        expect(a).to be_a(Rigor::Type::Constant)
+        expect(a.value).to eq(1)
+        expect(b).to be_a(Rigor::Type::Constant)
+        expect(b.value).to eq("s")
+      end
+
+      it "records the unknown floor (Dynamic, NOT nil) for an unanalyzable multi-write RHS" do
+        program = parse(<<~RUBY)
+          class B
+            def start(cmd)
+              @i, @o, @e, @thr = Open3.popen3(cmd)
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("B")[:@thr]
+        # An unanalyzable parallel assignment means *unknown*, not nil —
+        # the sound floor is Dynamic[top]. A pure-nil seed here is the N1
+        # bug (it false-fires `@thr.alive?` undefined-for-nil).
+        expect(type).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "records the only-write ivar so it is not absent from the union" do
+        program = parse(<<~RUBY)
+          class E
+            def s(x, y)
+              @p, @q = x, y
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        expect(outer.class_ivars_for("E")).to have_key(:@p)
+        expect(outer.class_ivars_for("E")).to have_key(:@q)
+      end
+
+      it "recurses into a nested destructure target" do
+        program = parse(<<~RUBY)
+          class C
+            def nest(x)
+              (@a, @b), @c = x
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        %i[@a @b @c].each do |name|
+          expect(outer.class_ivars_for("C")).to have_key(name)
+        end
+      end
+
+      it "unions a multi-write slot with an existing single-write seed" do
+        program = parse(<<~RUBY)
+          class G
+            def init
+              @x = 1
+            end
+
+            def swap(y)
+              old, @x = @x, y
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("G")[:@x]
+        # `@x` is written by both a single write (Constant[1]) and a
+        # multi-write (Dynamic from `y`) — the union carries both.
+        expect(type).to be_a(Rigor::Type::Union)
+      end
+    end
+  end
+
+  # T1 — cross-file `Const = Class.new(Super)` discovery so a rescue /
+  # const reference in a sibling file resolves to the project class.
+  describe ".discovered_classes_for_paths with Class.new constants" do
+    def with_files(files)
+      Dir.mktmpdir do |dir|
+        paths = files.map do |name, source|
+          path = File.join(dir, name)
+          File.write(path, source)
+          path
+        end
+        yield described_class.discovered_classes_for_paths(paths)
+      end
+    end
+
+    it "types a Const = Class.new(Super) as Singleton[Super] under the namespace" do
+      files = {
+        "a.rb" => <<~RUBY
+          module M
+            class Error < ::StandardError; end
+            SyntaxError = Class.new(Error)
+          end
+        RUBY
+      }
+      with_files(files) do |discovered|
+        expect(discovered["M::SyntaxError"]).to eq(Rigor::Type::Combinator.singleton_of("M::Error"))
+      end
+    end
+
+    it "resolves the superclass across two files in the same namespace" do
+      files = {
+        "a.rb" => "module M\n  class Error < ::StandardError; end\n  SyntaxError = Class.new(Error)\nend\n",
+        "b.rb" => "module M\n  class Other; end\nend\n"
+      }
+      with_files(files) do |discovered|
+        expect(discovered["M::SyntaxError"]).to eq(Rigor::Type::Combinator.singleton_of("M::Error"))
+      end
+    end
+
+    it "types a bare Class.new as Singleton[Const] itself" do
+      with_files({ "a.rb" => "module M\n  Anon = Class.new\nend\n" }) do |discovered|
+        expect(discovered["M::Anon"]).to eq(Rigor::Type::Combinator.singleton_of("M::Anon"))
+      end
+    end
+
+    it "keeps a literal superclass name when it is not a discovered class" do
+      with_files({ "a.rb" => "module M\n  MyErr = Class.new(RuntimeError)\nend\n" }) do |discovered|
+        expect(discovered["M::MyErr"]).to eq(Rigor::Type::Combinator.singleton_of("RuntimeError"))
+      end
+    end
+
+    it "leaves the block form to the existing meta-new machinery (no flat record)" do
+      with_files({ "a.rb" => "module M\n  Blk = Class.new(Object) do\n    def x; end\n  end\nend\n" }) do |discovered|
+        # block form is not flat-recorded here; it does not type as Singleton[Object]
+        expect(discovered["M::Blk"]).not_to eq(Rigor::Type::Combinator.singleton_of("Object"))
+      end
+    end
   end
 end

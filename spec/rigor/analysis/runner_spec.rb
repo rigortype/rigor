@@ -7,6 +7,38 @@ require "rigor/analysis/runner"
 # non-Ruby content; the helper assumes a writable tmpdir of
 # `.rb` files. Everything else uses `analyze`.
 RSpec.describe Rigor::Analysis::Runner do
+  # T1 — a `rescue SyntaxError => e` in one file resolves to the
+  # project's `M::SyntaxError = Class.new(Error)` defined in a sibling
+  # file (not core `::SyntaxError`), so a call on the rescued exception
+  # that the project class supports does not fire undefined-method.
+  it "resolves a cross-file rescue Const to the same-namespace Class.new class" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "a.rb"), <<~RUBY)
+        module M
+          class Error < ::StandardError
+            attr_accessor :line_number
+          end
+          SyntaxError = Class.new(Error)
+        end
+      RUBY
+      File.write(File.join(dir, "b.rb"), <<~RUBY)
+        module M
+          def self.go
+            raise SyntaxError
+          rescue SyntaxError => e
+            e.line_number = 1
+          end
+        end
+      RUBY
+      configuration = Rigor::Configuration.new("paths" => [dir])
+      Dir.chdir(dir) do
+        result = described_class.new(configuration: configuration, cache_store: nil).run
+        offenders = result.diagnostics.select { |d| d.message.include?("line_number=") }
+        expect(offenders).to be_empty
+      end
+    end
+  end
+
   it "emits a diagnostic for a non-existent path instead of silently passing" do
     Dir.mktmpdir do |dir|
       missing = File.join(dir, "ghost.rb")

@@ -50,27 +50,26 @@ but **`for "hello-world"`** — Rigor traced the value through the
 method call and the `downcase.gsub` chain, with no annotations
 anywhere.
 
-Ask it what it sees, line by line:
+To see what Rigor sees, run `rigor annotate fact.rb` — it reprints
+the file with the inferred type of every line in the margin. The
+`#=>` comments below are **added by `annotate`**, not part of the
+source:
 
-```shell-session
-$ rigor annotate fact.rb
+```ruby
 # fact.rb
-def factorial(n)                     #=> 1 | Dynamic[top]
-  n <= 1 ? 1 : n * factorial(n - 1)  #=> 1 | Dynamic[top]
-end                                  #=> :factorial
+def factorial(n)                         #=> Integer
+  (1..n).inject(1) { |acc, i| acc * i }  #=> Integer
+end                                      #=> :factorial
 
-answer = factorial(5)                #=> 120
+answer = factorial(5)                    #=> Integer
 ```
 
-A recursive call with a known argument folds all the way down to its
-value — and where Rigor *cannot* know (the unconstrained `n`), it says
-so honestly with `Dynamic` instead of guessing. The point is not
-arithmetic: the same machinery tracks hash shapes through your params,
-string values through builder chains, and `nil` through guard clauses
-in everyday application code. (Output is syntax-highlighted, through
-[`bat`](https://github.com/sharkdp/bat) when installed; `rigor
-type-of FILE:LINE:COL` answers for a single position — it is what the
-editor integration uses for hover.)
+No signature on `factorial`, yet the range, the block, and the
+accumulator all type cleanly. The same machinery tracks hash shapes
+through your params, string values through builder chains, and `nil`
+through guard clauses in everyday application code. (Output is
+syntax-highlighted — through [`bat`](https://github.com/sharkdp/bat)
+when installed.)
 
 ## Get started in one prompt
 
@@ -112,7 +111,6 @@ and [CI guide](https://rigor.typedduck.fail/reference/manual/11-ci/).
 rigor check lib                 # find bugs (caches under .rigor/ — gitignore it)
 rigor init                      # drop a starter .rigor.yml
 rigor annotate lib/foo.rb       # reprint a file with inferred types in the margin
-rigor type-of lib/foo.rb:10:5   # inferred type at one FILE:LINE:COL
 rigor triage lib                # summarise diagnostics: distribution, hotspots
 rigor sig-gen --diff lib/foo.rb # emit RBS from inference (--write to save)
 ```

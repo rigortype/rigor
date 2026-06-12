@@ -70,8 +70,12 @@ RSpec.describe Rigor::Cache::RbsConstantTable do
       descriptor = Rigor::Cache::RbsDescriptor.build(loader)
       expect(descriptor.files).not_to be_empty
       expect(descriptor.files.map(&:comparator).uniq).to eq([:digest])
+      # Bundled signature roots: the vendored gem stubs plus the core
+      # overlay (data/core_overlay, e.g. numeric.rbs) — both ship with
+      # rigor and participate in the same digest-based invalidation.
       vendored_root = Rigor::Environment::RbsLoader.vendored_gem_sig_paths.first.to_s
-      expect(descriptor.files.map(&:path)).to all(start_with(vendored_root.split("/")[0..-2].join("/")))
+      data_root = vendored_root.split("/")[0..-3].join("/")
+      expect(descriptor.files.map(&:path)).to all(start_with(data_root))
     end
 
     it "produces a configs entry capturing the libraries list" do

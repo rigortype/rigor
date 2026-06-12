@@ -210,12 +210,13 @@ Tier order (each its own corpus-gated slice):
    read-only vendored corpus signal, not a `make verify` gate. One
    pre-existing engine defect surfaced through the new entry door (NOT
    introduced by it — reproducible on plain instance methods): the
-   mutual-recursion fixpoint folds two-method recursion (`even?`/`odd?`)
-   to an unsound one-sided constant; tracked separately. The
-   `recursive_fixpoint_summary` fixture's `Parity.even?` assertion was
-   updated from `Dynamic[top]` (the old non-resolution) to the now-
-   resolved (imprecise but instance-parity) value, with a comment
-   flagging the underlying fixpoint limitation.
+   ADR-55 mutual-recursion fixpoint folded two-method recursion
+   (`even?`/`odd?`) to an unsound one-sided constant. That defect was
+   fixed in the same session (the entangled-fixpoint degradation to the
+   `untyped` floor), so the now-resolved `Parity.even?` singleton call in
+   the `recursive_fixpoint_summary` fixture types the sound `Dynamic[top]`
+   — the slice exercises (and the follow-up corrects) the path rather than
+   blessing the unsound fold.
 
 If ADR-50's bleeding-edge overlay ships first, the opened gate is a
 natural first `bleeding_edge:` feature; otherwise it lands as a normal

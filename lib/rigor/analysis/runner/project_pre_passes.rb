@@ -65,7 +65,7 @@ module Rigor
         # results bundled in {Result} in the order the downstream `#run`
         # body expects. Extracted so `#prepare_project_scan` and the
         # prebuilt-less `#run` path share one implementation.
-        def run(expansion:) # rubocop:disable Metrics/MethodLength
+        def run(expansion:) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
           plugin_registry = load_plugins
           dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
           # ADR-18 slice 3 — plugin prepare MUST run before the

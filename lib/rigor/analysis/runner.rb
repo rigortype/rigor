@@ -458,7 +458,7 @@ module Rigor
       # discovery tables at their frozen-empty constructor defaults
       # (the bundle carries `nil` for them, matching the original
       # adopt path that never touched them).
-      def apply_pre_passes_result(result)
+      def apply_pre_passes_result(result) # rubocop:disable Metrics/AbcSize
         @plugin_registry = result.plugin_registry
         @dependency_source_index = result.dependency_source_index
         @cached_plugin_prepare_diagnostics = result.cached_plugin_prepare_diagnostics

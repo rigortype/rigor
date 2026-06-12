@@ -1587,6 +1587,23 @@ module Rigor
       SUMMARY_CONSULT_COUNTER_KEY = :__rigor_user_method_summary_consults__
       private_constant :SUMMARY_CONSULT_COUNTER_KEY
 
+      # Per-thread append-only log of the seed depths of every in-flight
+      # summary `consult_summary` read (ADR-55 slice 2 mutual-recursion
+      # soundness fix, 2026-06-12). Each fixpoint owner records the guard
+      # stack size at seed time on its entry (`depth:`); a consult appends
+      # the consulted entry's depth here. A fixpoint whose body evaluation
+      # logged a depth SHALLOWER than its own seed depth read an ancestor
+      # signature's transient Kleene iterate -- cross-signature mutual
+      # recursion (`even?`/`odd?`) -- so its computed return is entangled
+      # with a not-yet-converged foreign assumption and must degrade to
+      # `untyped` rather than fold one branch's seed into a "final"
+      # constant. Own-signature consults log depth == own depth, and a
+      # nested fixpoint that completes within the evaluation logs depths
+      # > own depth; neither is foreign. Cleared with the summary table
+      # when the guard stack drains to empty.
+      SUMMARY_CONSULT_DEPTHS_KEY = :__rigor_user_method_summary_consult_depths__
+      private_constant :SUMMARY_CONSULT_DEPTHS_KEY
+
       # ADR-57 follow-up — run-scoped memo for resolved user-method
       # return types. The ADR-57 gate-open made every resolved in-body
       # self-call adopt the callee's inferred return, which re-types the
@@ -1660,7 +1677,7 @@ module Rigor
       RECURSION_VALUE_SIZE_CAP = 64
       private_constant :RECURSION_VALUE_SIZE_CAP
 
-      def infer_user_method_return(def_node, receiver, arg_types)
+      def infer_user_method_return(def_node, receiver, arg_types) # rubocop:disable Metrics/AbcSize
         return nil if def_node.body.nil?
 
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types)
@@ -1832,6 +1849,7 @@ module Rigor
           if stack.empty?
             Thread.current[INFERENCE_UNROLL_FUEL_KEY] = nil
             Thread.current[INFERENCE_SUMMARY_KEY] = nil
+            Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] = nil
           end
         end
       end
@@ -1870,13 +1888,28 @@ module Rigor
       def fixpoint_user_method_return(def_node, body_scope, context, widened: false)
         plain_signature = context.plain_signature
         summaries = context.summaries
-        summaries[plain_signature] = { assumption: Type::Combinator.bot, consulted: false }
+        depth = seed_fixpoint_summary(summaries, plain_signature)
+        consult_depths = (Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] ||= [])
         computed = nil
 
         RECURSION_FIXPOINT_CAP.times do |iteration|
           summaries[plain_signature][:consulted] = false
+          consult_mark = consult_depths.size
           type, = evaluate_body_with_returns(body_scope, def_node.body)
           computed = clamp_unroll_result(type, context.would_have_been_guarded)
+
+          # Cross-signature mutual recursion (ADR-55 soundness fix,
+          # 2026-06-12): the evaluation consulted an ANCESTOR signature's
+          # in-flight summary (seed depth shallower than this frame's), so
+          # `computed` embeds a transient foreign Kleene iterate -- e.g.
+          # `odd?` folding `even?`'s seeded `bot` into `Constant[false]`.
+          # The per-signature iteration below cannot converge such an
+          # entangled pair (each side's iterate is conditioned on the
+          # other's unfinished assumption), so degrade this frame to the
+          # sound `untyped` floor instead of surfacing a one-sided value.
+          if consult_depths[consult_mark..].any? { |d| d < depth }
+            return degrade_entangled_fixpoint(summaries, plain_signature)
+          end
 
           # The summary was never consulted — the method did not recurse on
           # this evaluation, so there is no fixpoint to chase. Return the
@@ -1901,6 +1934,29 @@ module Rigor
           step = fixpoint_step(summaries, plain_signature, computed, iteration)
           return step unless step == :continue
         end
+      end
+
+      # Seeds the thread-local summary entry for a fixpoint owner: the `bot`
+      # Kleene seed plus the guard-stack depth at seed time (the frame for
+      # this signature is already pushed), which `consult_summary` logs so
+      # nested fixpoints can detect a foreign in-flight (ancestor) consult.
+      # Returns the seed depth. ADR-55 slice 2.
+      def seed_fixpoint_summary(summaries, plain_signature)
+        depth = (Thread.current[INFERENCE_GUARD_KEY] || []).size
+        summaries[plain_signature] = {
+          assumption: Type::Combinator.bot, consulted: false, depth: depth
+        }
+        depth
+      end
+
+      # Degrades an entangled mutual-recursion fixpoint to the sound
+      # `untyped` floor (ADR-55 mutual-recursion soundness fix, 2026-06-12),
+      # parking `untyped` in the assumption so any consumer that still reads
+      # this signature's summary sees the floor, not the stale `bot` seed.
+      def degrade_entangled_fixpoint(summaries, plain_signature)
+        BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+        summaries[plain_signature][:assumption] = Type::Combinator.untyped
+        Type::Combinator.untyped
       end
 
       # One Kleene-iteration step of the fixpoint loop. Joins `computed` into

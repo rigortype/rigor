@@ -1673,10 +1673,7 @@ module Rigor
 
       # The Symbol value of a `:name` / `"name"` literal argument, or nil.
       def symbol_argument_name(arg)
-        case arg
-        when Prism::SymbolNode then arg.unescaped.to_sym
-        when Prism::StringNode then arg.unescaped.to_sym
-        end
+        arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
       end
 
       # ADR-24 slice 2 — per-class table mapping a fully

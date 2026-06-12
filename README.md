@@ -30,17 +30,19 @@ and conditions that can only ever be truthy.
 A realistic typo, caught with the receiver's *computed value* in the
 message:
 
-```sh
-$ cat demo.rb
+```ruby
+# demo.rb
 def slug(title)
   title.downcase.gsub(/\s+/, "-")
 end
 
 s = slug("Hello World")
 s.lenght
+```
 
+```shell-session
 $ rigor check demo.rb
-demo.rb:6:3: error: undefined method `lenght' for "hello-world"
+demo.rb:7:3: error: undefined method `lenght' for "hello-world"
 ```
 
 Note what the error says: not ``undefined method `lenght' for String``
@@ -50,15 +52,17 @@ anywhere.
 
 Ask it what it knows at any position:
 
-```sh
-$ cat fact.rb
+```ruby
+# fact.rb
 def factorial(n)
   n <= 1 ? 1 : n * factorial(n - 1)
 end
 
 answer = factorial(5)
+```
 
-$ rigor type-of fact.rb:5:1
+```shell-session
+$ rigor type-of fact.rb:6:1
 type:    120
 ```
 

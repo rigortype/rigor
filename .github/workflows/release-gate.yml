@@ -7,13 +7,16 @@ name: Release gate
 # Mastodon; data-driven, so Redmine / GitLab are a threshold-file
 # addition away).
 #
-# ADVISORY during the v0.2.0 release-engineering trial (ADR-50): every
-# job here reports but does NOT block — none is wired into branch
-# protection as a required check, and the perf / sweep stages run
-# continue-on-error so a not-yet-calibrated baseline cannot fail a
-# release. Harden to required once the baselines (bench/baseline.json,
-# data/oss-sweep/*-thresholds.json) are calibrated against CI numbers —
-# the trial-then-freeze spine of ADR-50.
+# ADR-50 WD6 hardening status:
+#   perf-bench   — HARD gate: bench/baseline.json is now calibrated
+#                  (Linux CI, run 27444722315). A regression past the
+#                  tolerance band in bench/thresholds.yml fails the job.
+#                  An uncalibrated baseline always passes (future resets /
+#                  first-time forks remain green without extra config).
+#   gem-build    — advisory (continue-on-error); not yet required check.
+#   oss-sweep    — advisory; not yet required check.
+# Wire perf-bench into branch protection as a required check once the
+# trial confirms the Linux wall-time band is stable.
 #
 # The base gate (test / lint / self-check warm+cold / diff) also runs on
 # release/** via ci.yml's push trigger; this workflow is the *extra*
@@ -34,7 +37,7 @@ concurrency:
 jobs:
   # ── Perf-regression benchmark (ADR-50 WD4) ──────────────────────
   perf-bench:
-    name: Perf benchmark (advisory)
+    name: Perf benchmark
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -48,11 +51,10 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
-      # Advisory: a regression past the band (once calibrated) prints FAIL
-      # but does not fail the release during the trial. The uncalibrated
-      # committed baseline always passes and emits a suggestion.
+      # Hard gate when bench/baseline.json is calibrated (exits 1 on
+      # regression). An uncalibrated baseline always exits 0 and emits a
+      # suggestion — future resets or first-time forks stay green.
       - name: Run make bench-perf
-        continue-on-error: true
         run: make bench-perf
 
       - name: Upload suggested baseline (for calibration)
@@ -99,9 +101,9 @@ jobs:
     name: OSS corpus sweep (advisory)
     uses: ./.github/workflows/oss-sweep.yml
 
-  # ── Advisory summary (never fails) ──────────────────────────────
+  # ── Gate summary ─────────────────────────────────────────────────
   release-gate-summary:
-    name: Release gate (advisory summary)
+    name: Release gate summary
     needs: [perf-bench, gem-build, oss-sweep]
     if: always()
     runs-on: ubuntu-latest
@@ -112,9 +114,12 @@ jobs:
           GEM: ${{ needs.gem-build.result }}
           SWEEP: ${{ needs.oss-sweep.result }}
         run: |
-          echo "Release gate is ADVISORY during the v0.2.0 trial (ADR-50)."
-          echo "  perf-bench: $PERF"
-          echo "  gem-build:  $GEM"
-          echo "  oss-sweep:  $SWEEP"
-          echo "Review the results above; this gate is not yet a required check."
-          echo "Harden to required once the baselines are calibrated (ADR-50 WD6)."
+          echo "Release gate status (ADR-50 WD6):"
+          echo "  perf-bench: $PERF  (HARD gate — calibrated baseline)"
+          echo "  gem-build:  $GEM  (advisory)"
+          echo "  oss-sweep:  $SWEEP  (advisory)"
+          if [ "$PERF" = "failure" ]; then
+            echo "FAILED: perf regression past tolerance band — see bench/thresholds.yml."
+            exit 1
+          fi
+          echo "Gate passed."

@@ -1,5 +1,14 @@
 {
-  "calibrated": false,
-  "note": "Uncalibrated placeholder. Run `make bench-perf` on the CI Linux runner (or take the release-gate perf artifact), then commit its per-target metrics here as { \"calibrated\": true, \"targets\": { ... } } to activate the gate. The first run always passes and emits a suggested baseline (bench/baseline.updated.json).",
-  "targets": {}
+  "calibrated": true,
+  "calibrated_at": "2026-06-12T21:42:46Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), master @ run 27444722315",
+  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here.",
+  "targets": {
+    "lib": {
+      "wall_s": 13.75,
+      "allocations": 16045321,
+      "peak_rss_kb": 206352,
+      "diagnostics": 1
+    }
+  }
 }

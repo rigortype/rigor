@@ -18,7 +18,15 @@ module Rigor
     Summary = Data.define(:total, :error, :warning, :info)
     RuleCount = Data.define(:rule, :count)
     Hotspot = Data.define(:file, :count, :by_rule)
-    Report = Data.define(:summary, :distribution, :hotspots, :hints)
+    # A (receiver-class, method) dispatch target the diagnostics
+    # cluster on, built from the structured `Diagnostic#receiver_type`
+    # / `#method_name` fields — never from message-string parsing.
+    # `receiver` is nil for method-only diagnostics (a toplevel call,
+    # a `def`-side return / override finding that has no call
+    # receiver); `files` is the distinct-file count (a systemic vs.
+    # localised signal); `rules` is the per-rule breakdown.
+    Selector = Data.define(:receiver, :method_name, :count, :files, :rules)
+    Report = Data.define(:summary, :distribution, :selectors, :hotspots, :hints)
 
     module_function
 
@@ -30,6 +38,7 @@ module Rigor
       Report.new(
         summary: build_summary(diagnostics),
         distribution: build_distribution(diagnostics),
+        selectors: build_selectors(diagnostics),
         hotspots: build_hotspots(diagnostics, top),
         hints: hints ? Catalogue.recognise(diagnostics) : []
       )
@@ -57,6 +66,61 @@ module Rigor
                  .sort_by { |row| [-row.count, row.rule] }
     end
 
+    # The class/method aggregation axis (ADR-23 follow-up). Groups
+    # every diagnostic that carries a `method_name` by its
+    # `(receiver_type, method_name)` pair so a consumer can answer
+    # "which method / class concentrates the diagnostics?" with a
+    # `jq` query over the JSON instead of parsing message text.
+    # Method-only diagnostics (nil `receiver_type`) keep a null
+    # `receiver` and still group by method. The full list is
+    # returned uncapped — the JSON is the agent-facing surface; the
+    # text renderer caps its own rows.
+    def build_selectors(diagnostics)
+      diagnostics.select(&:method_name)
+                 .group_by { |d| [normalize_receiver(d.receiver_type) || d.receiver_type, d.method_name.to_s] }
+                 .map { |(receiver, method), group| selector_for(receiver, method, group) }
+                 .sort_by { |s| [-s.count, s.receiver.to_s, s.method_name] }
+    end
+
+    # Folds a receiver token — a `Diagnostic#receiver_type` display
+    # string or a message-parsed token — to the class the diagnostics
+    # should bucket under, so the selector axis does not fragment one
+    # method across every distinct literal receiver. String / integer
+    # / float / symbol literals collapse to their class; `singleton(C)`
+    # and a bare `C` fold to `C`; a generic `C[...]` keeps the
+    # `Array[String]` element form (the AR-relation heuristic keys on
+    # it). Returns nil for a token it cannot reduce to a class (a
+    # union display, an inferred shape) — the caller keeps the raw
+    # string then, never losing the row. Shared with {Catalogue}.
+    def normalize_receiver(token)
+      return nil if token.nil?
+
+      t = token.to_s.strip
+      return "Integer" if t.match?(/\A-?\d+\z/)
+      return "Float"   if t.match?(/\A-?\d+\.\d+\z/)
+      return "String"  if t.start_with?('"', "'")
+      return "Symbol"  if t.start_with?(":")
+
+      singleton = t[/\Asingleton\(([\w:]+)\)\z/, 1]
+      return singleton if singleton
+      return t if t.start_with?("Array[")
+
+      nominal = t[/\A([\w:]+)\[/, 1]
+      return nominal if nominal
+      return t if t.match?(/\A[\w:]+\z/)
+
+      nil
+    end
+
+    def selector_for(receiver, method, group)
+      rules = group.group_by { |d| rule_key(d) }
+                   .transform_values(&:size)
+                   .sort_by { |rule, count| [-count, rule] }
+                   .to_h
+      Selector.new(receiver: receiver, method_name: method, count: group.size,
+                   files: group.map(&:path).uniq.size, rules: rules)
+    end
+
     def build_hotspots(diagnostics, top)
       diagnostics.group_by(&:path)
                  .map { |path, group| hotspot_for(path, group) }
@@ -79,6 +143,10 @@ module Rigor
           "warning" => report.summary.warning, "info" => report.summary.info
         },
         "distribution" => report.distribution.map { |r| { "rule" => r.rule, "count" => r.count } },
+        "selectors" => report.selectors.map do |s|
+          { "receiver" => s.receiver, "method" => s.method_name, "count" => s.count,
+            "files" => s.files, "rules" => s.rules }
+        end,
         "hotspots" => report.hotspots.map do |h|
           { "file" => h.file, "count" => h.count, "by_rule" => h.by_rule }
         end,

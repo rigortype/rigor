@@ -132,6 +132,12 @@ module Rigor
         "#{source_family}.#{rule}"
       end
 
+      # `--format json` serialisation. The structured `receiver_type`
+      # / `method_name` / `project_definition_site` fields are emitted
+      # only when populated, so a consumer (`jq`, `rigor triage`, an AI
+      # agent) can group a `rigor check --format json` stream by the
+      # called class / method without parsing the human-readable
+      # `message` — the message wording is presentation, not contract.
       def to_h
         base = {
           "path" => path,
@@ -142,6 +148,8 @@ module Rigor
           "source_family" => source_family.to_s,
           "message" => message
         }
+        base["receiver_type"] = receiver_type if receiver_type
+        base["method_name"] = method_name if method_name
         base["project_definition_site"] = project_definition_site if project_definition_site
         base
       end

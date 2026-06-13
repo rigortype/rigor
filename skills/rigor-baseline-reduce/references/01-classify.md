@@ -28,6 +28,33 @@ signal — each hint has an `id`:
 | `project-monkey-patch` | A DSL / monkey-patch Rigor can't see. | Escalate — a `pre_eval:` entry or a plugin clears the whole cluster. |
 | `activerecord-relation-misinference` | Likely an engine gap. | Treat sites as candidate false positives (Phase 2). |
 
+### `rigor triage --format json` `.selectors` — the by-(class, method) axis
+
+Beside `hints`, the triage JSON carries a `selectors` array: one row
+per dispatch target the diagnostics cluster on, built from the
+structured `receiver_type` / `method_name` fields (never message
+parsing). Each row is `{receiver, method, count, files, rules}`. Use
+it to pick *which sites within a rule* to sample first — and to tell a
+systemic cause from a scatter of real bugs — with `jq`, not eyeballing
+the stream:
+
+```sh
+# the dispatch targets responsible for the most diagnostics
+rigor triage --format json | jq -r '.selectors[:15][] | "\(.count)\t\(.files)f\t\(.receiver)#\(.method)"'
+# one method, one receiver, spread across many files → systemic
+# (a plugin / pre_eval clears it) rather than N independent bugs
+rigor triage --format json | jq '.selectors[] | select(.files >= 4)'
+# narrow to a rule you are about to work, ranked by concentration
+rigor triage --format json \
+  | jq '[.selectors[] | select(.rules["call.possible-nil-receiver"])] | sort_by(-.count)'
+```
+
+Read it as: **high `count` × high `files` = a systemic selector**
+(escalate as a decision — one fix clears the cluster); **low `count` =
+a candidate genuine bug** to sample directly in Phase 2. The `receiver`
+is a normalised class (`"hi".squish` and `name.squish` both bucket
+under `String#squish`), so a single idiom does not scatter across rows.
+
 ### `rigor baseline dump --format json` — the bucket list
 
 ```sh

@@ -33,8 +33,21 @@ RSpec.describe Rigor::CLI::TriageCommand do
     status, out, = run(["code.rb", "--format", "json"])
     expect(status).to eq(0)
     parsed = JSON.parse(out)
-    expect(parsed.keys).to contain_exactly("summary", "distribution", "hotspots", "hints")
+    expect(parsed.keys).to contain_exactly("summary", "distribution", "selectors", "hotspots", "hints")
     expect(parsed["summary"]["total"]).to be >= 1
+  end
+
+  it "exposes the class/method selector built from structured fields (no message parsing)" do
+    _, out, = run(["code.rb", "--format", "json"])
+    selector = JSON.parse(out)["selectors"].find { |s| s["method"] == "no_such_method" }
+    expect(selector).to include("receiver" => "String", "method" => "no_such_method")
+    expect(selector["rules"]).to include("call.undefined-method")
+  end
+
+  it "prints only the selectors section under --selectors-only" do
+    _, out, = run(["code.rb", "--selectors-only"])
+    expect(out).to include("Selectors — by class / method")
+    expect(out).not_to include("Diagnostic distribution")
   end
 
   it "prints only the hints section under --hints-only" do

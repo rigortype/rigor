@@ -21,7 +21,7 @@ module Rigor
     # command, not a gate (`rigor check` remains the gate).
     class TriageCommand < Command
       USAGE = "Usage: rigor triage [options] [paths]"
-      DEFAULT_SECTIONS = %i[distribution hotspots hints].freeze
+      DEFAULT_SECTIONS = %i[distribution selectors hotspots hints].freeze
 
       # @return [Integer] CLI exit status (always 0).
       def run
@@ -46,8 +46,11 @@ module Rigor
           opts.on("--format=FORMAT", "Output format: text (default) or json") { |v| options[:format] = v }
           opts.on("--top=N", Integer, "Hotspot-file count (default 10)") { |v| options[:top] = v }
           opts.on("--hints-only", "Print only the heuristic-hints section") { options[:sections] = %i[hints] }
-          opts.on("--no-hints", "Print distribution + hotspots only") do
-            options[:sections] = %i[distribution hotspots]
+          opts.on("--no-hints", "Print distribution + selectors + hotspots only") do
+            options[:sections] = %i[distribution selectors hotspots]
+          end
+          opts.on("--selectors-only", "Print only the class/method selectors section") do
+            options[:sections] = %i[selectors]
           end
         end.parse!(@argv)
         validate!(options)

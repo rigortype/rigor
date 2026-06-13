@@ -103,6 +103,19 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       )
       expect([diagnostic.receiver_type, diagnostic.method_name]).to eq(%w[Integer days])
     end
+
+    it "serialises receiver_type / method_name to_h when present (jq-groupable, no message parse)" do
+      diagnostic = described_class.new(
+        path: "f.rb", line: 1, column: 1, message: "undefined method `days' for Integer",
+        rule: "call.undefined-method", receiver_type: "Integer", method_name: "days"
+      )
+      expect(diagnostic.to_h).to include("receiver_type" => "Integer", "method_name" => "days")
+    end
+
+    it "omits receiver_type / method_name from to_h when nil" do
+      diagnostic = described_class.new(path: "f.rb", line: 1, column: 1, message: "x")
+      expect(diagnostic.to_h.keys).not_to include("receiver_type", "method_name")
+    end
   end
 
   describe "project_definition_site field (ADR-17)" do

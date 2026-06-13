@@ -164,11 +164,53 @@ RSpec.describe Rigor::Triage do
     end
   end
 
+  describe ".analyze — selectors (class/method axis)" do
+    it "groups by the structured (receiver_type, method_name) pair, not the message" do
+      diags = [
+        diag(rule: "call.undefined-method", receiver_type: "String", method_name: "squish",
+             message: "(opaque)", path: "a.rb"),
+        diag(rule: "call.undefined-method", receiver_type: "String", method_name: "squish",
+             message: "(opaque)", path: "b.rb"),
+        diag(rule: "call.argument-type-mismatch", receiver_type: "String", method_name: "squish",
+             message: "(opaque)", path: "a.rb")
+      ]
+      sel = described_class.analyze(diags).selectors.first
+      expect([sel.receiver, sel.method_name, sel.count, sel.files]).to eq(["String", "squish", 3, 2])
+      expect(sel.rules).to eq("call.undefined-method" => 2, "call.argument-type-mismatch" => 1)
+    end
+
+    it "keeps a null receiver for method-only diagnostics and still groups by method" do
+      diags = [diag(rule: "def.return-type-mismatch", method_name: "build", message: "x"),
+               diag(rule: "def.return-type-mismatch", method_name: "build", message: "x")]
+      sel = described_class.analyze(diags).selectors.first
+      expect([sel.receiver, sel.method_name, sel.count]).to eq([nil, "build", 2])
+    end
+
+    it "ignores diagnostics with no method_name (flow / ivar rules carry no selector)" do
+      expect(described_class.analyze([diag(rule: "flow.dead-assignment", method_name: nil)]).selectors).to be_empty
+    end
+
+    it "sorts selectors by descending count" do
+      diags = [diag(method_name: "a")] + ([diag(method_name: "b")] * 3)
+      expect(described_class.analyze(diags).selectors.map(&:method_name)).to eq(%w[b a])
+    end
+  end
+
   describe ".report_to_h" do
     it "serialises the report to a JSON-ready Hash" do
       h = described_class.report_to_h(described_class.analyze([udm("days", "5")] * 3))
-      expect(h.keys).to contain_exactly("summary", "distribution", "hotspots", "hints")
+      expect(h.keys).to contain_exactly("summary", "distribution", "selectors", "hotspots", "hints")
       expect(h["hints"].first["id"]).to eq("activesupport-core-ext")
+    end
+
+    it "serialises each selector with receiver / method / count / files / rules" do
+      diags = [diag(rule: "call.undefined-method", receiver_type: "Integer",
+                    method_name: "days", message: "x")] * 2
+      h = described_class.report_to_h(described_class.analyze(diags))
+      expect(h["selectors"].first).to eq(
+        "receiver" => "Integer", "method" => "days", "count" => 2, "files" => 1,
+        "rules" => { "call.undefined-method" => 2 }
+      )
     end
   end
 end

@@ -10,10 +10,11 @@ module Rigor
     # triage` text report or as `--format json`.
     class TriageRenderer
       BAR_WIDTH = 24
+      SELECTOR_ROWS = 15 # text-output cap; `--format json` carries the full list
 
       def initialize(report, sections:)
         @report = report
-        @sections = sections # subset of %i[distribution hotspots hints]
+        @sections = sections # subset of %i[distribution selectors hotspots hints]
       end
 
       def json
@@ -23,6 +24,7 @@ module Rigor
       def text
         blocks = []
         blocks << distribution_block if @sections.include?(:distribution)
+        blocks << selectors_block    if @sections.include?(:selectors)
         blocks << hotspots_block     if @sections.include?(:hotspots)
         blocks << hints_block        if @sections.include?(:hints)
         "#{blocks.join("\n\n")}\n"
@@ -38,6 +40,18 @@ module Rigor
         @report.distribution.each do |row|
           lines << format("  %<rule>-32s %<count>5d  %<bar>s",
                           rule: row.rule, count: row.count, bar: bar(row.count, max))
+        end
+        lines.join("\n")
+      end
+
+      def selectors_block
+        return "Selectors — by class / method\n  (none)" if @report.selectors.empty?
+
+        lines = ["Selectors — by class / method (top #{SELECTOR_ROWS}; full list in --format json)"]
+        @report.selectors.first(SELECTOR_ROWS).each do |sel|
+          label = sel.receiver ? "#{sel.receiver}##{sel.method_name}" : sel.method_name
+          lines << format("  %<label>-44s %<count>5d  %<files>3d file(s)",
+                          label: label, count: sel.count, files: sel.files)
         end
         lines.join("\n")
       end

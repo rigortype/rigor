@@ -1203,7 +1203,8 @@ module Rigor
             rule: RULE_NIL_RECEIVER,
             path: path,
             message: "possible nil receiver: `#{call_node.name}' is undefined on NilClass",
-            severity: :error
+            severity: :error,
+            method_name: call_node.name.to_s
           )
         end
 
@@ -1391,7 +1392,9 @@ module Rigor
             rule: RULE_VISIBILITY_MISMATCH,
             path: path,
             message: "private method `#{call_node.name}' called on #{receiver_type.class_name} receiver",
-            severity: :error
+            severity: :error,
+            receiver_type: receiver_type.class_name,
+            method_name: call_node.name.to_s
           )
         end
 
@@ -1663,7 +1666,9 @@ module Rigor
             rule: RULE_ARGUMENT_TYPE,
             path: path,
             message: message,
-            severity: :error
+            severity: :error,
+            receiver_type: class_name,
+            method_name: call_node.name.to_s
           )
         end
 
@@ -1676,7 +1681,9 @@ module Rigor
             rule: RULE_WRONG_ARITY,
             path: path,
             message: message,
-            severity: :error
+            severity: :error,
+            receiver_type: class_name,
+            method_name: call_node.name.to_s
           )
         end
 
@@ -1849,7 +1856,8 @@ module Rigor
             path: path,
             message: "return-type mismatch on `#{def_node.name}': " \
                      "declared #{declared.describe(:short)}, inferred #{inferred.describe(:short)}",
-            severity: severity
+            severity: severity,
+            method_name: def_node.name.to_s
           )
         end
 
@@ -2001,7 +2009,8 @@ module Rigor
             message: "visibility of `#{def_node.name}' reduced from #{parent_visibility} to " \
                      "#{override_visibility} (overrides #{parent_class}##{def_node.name}); " \
                      "breaks substitutability",
-            severity: :warning
+            severity: :warning,
+            method_name: def_node.name.to_s
           )
         end
 
@@ -2094,7 +2103,8 @@ module Rigor
             message: "return type of `#{def_node.name}' widened from #{parent_return.describe(:short)} " \
                      "to #{override_return.describe(:short)} (overrides #{parent_class}##{def_node.name}); " \
                      "breaks substitutability",
-            severity: :warning
+            severity: :warning,
+            method_name: def_node.name.to_s
           )
         end
 
@@ -2198,7 +2208,8 @@ module Rigor
             message: "parameter #{index + 1} of `#{def_node.name}' narrowed from " \
                      "#{parent_param.describe(:short)} to #{override_param.describe(:short)} " \
                      "(overrides #{parent_class}##{def_node.name}); breaks substitutability",
-            severity: :warning
+            severity: :warning,
+            method_name: def_node.name.to_s
           )
         end
       end

@@ -304,26 +304,11 @@ module Rigor
         m && [m[1], m[2]]
       end
 
-      # Normalises a message receiver token to a class name.
-      # Integer / string / symbol literals fold to their class;
-      # `Foo[...]` keeps the `Array[...]` form (H4 needs it);
-      # `singleton(Foo)` and bare `Foo` fold to `Foo`.
+      # Normalises a message receiver token to a class name. The fold
+      # logic is shared with the selector axis — see
+      # {Triage.normalize_receiver}.
       def receiver_class(token)
-        t = token.strip
-        return "Integer" if t.match?(/\A-?\d+\z/)
-        return "Float"   if t.match?(/\A-?\d+\.\d+\z/)
-        return "String"  if t.start_with?('"', "'")
-        return "Symbol"  if t.start_with?(":")
-
-        singleton = t[/\Asingleton\(([\w:]+)\)\z/, 1]
-        return singleton if singleton
-        return t if t.start_with?("Array[")
-
-        nominal = t[/\A([\w:]+)\[/, 1]
-        return nominal if nominal
-        return t if t.match?(/\A[\w:]+\z/)
-
-        nil
+        Triage.normalize_receiver(token)
       end
 
       def activesupport?(receiver, method)

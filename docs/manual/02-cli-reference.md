@@ -205,17 +205,36 @@ rigor baseline <generate|regenerate|dump|drift|prune> [options]
 
 ## `rigor triage`
 
-Summarise a diagnostic stream — rule distribution, per-file
-hotspots, and heuristic "why" hints — instead of dumping the
-raw list. See [Baselines](06-baseline.md).
+Summarise a diagnostic stream — rule distribution, **class/method
+selectors**, per-file hotspots, and heuristic "why" hints — instead
+of dumping the raw list. See [Baselines](06-baseline.md).
 
 ```sh
 rigor triage [paths]
 ```
 
-`--top=N` sets the hotspot count (default 10); `--hints-only`
-and `--no-hints` select which sections print. `triage` is
-advisory and always exits `0` — it never gates a build.
+`--top=N` sets the hotspot count (default 10); `--hints-only`,
+`--selectors-only`, and `--no-hints` select which sections print.
+`triage` is advisory and always exits `0` — it never gates a build.
+
+The **`selectors`** section is the by-(class, method) axis: it
+aggregates the structured `receiver_type` / `method_name` fields the
+diagnostics carry into `{receiver, method, count, files, rules}`
+rows, so you can ask "which method concentrates the diagnostics?"
+without parsing message text. Under `--format json` the full list is
+emitted, keyed on a normalised receiver class (literals fold to their
+class), ready for a `jq` query:
+
+```sh
+# methods with diagnostics spread across ≥ 3 files (systemic clusters)
+rigor triage --format json | jq '.selectors[] | select(.files >= 3)'
+# everything Rigor flagged on String receivers, by method
+rigor triage --format json | jq '[.selectors[] | select(.receiver == "String")]'
+```
+
+The same `receiver_type` / `method_name` fields ride on each
+diagnostic of `rigor check --format json`, for per-site (rather than
+aggregated) grouping.
 
 ## `rigor coverage`
 

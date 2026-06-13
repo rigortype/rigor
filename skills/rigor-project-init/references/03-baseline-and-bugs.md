@@ -23,6 +23,8 @@ The JSON shape:
 {
   "summary":      { "total": 489, "error": 480, "warning": 9, "info": 0 },
   "distribution": [ { "rule": "call.undefined-method", "count": 437 } ],
+  "selectors":    [ { "receiver": "String", "method": "squish", "count": 31,
+                      "files": 12, "rules": { "call.undefined-method": 31 } } ],
   "hotspots":     [ { "file": "app/models/status.rb", "count": 42,
                       "by_rule": { "call.undefined-method": 40 } } ],
   "hints": [
@@ -32,11 +34,26 @@ The JSON shape:
 }
 ```
 
-Use the three sections like this:
+Use the sections like this:
 
 - **`summary` / `distribution`** — the scale, and which rules
   dominate. Decides nothing on its own; feeds the mode sanity-check
   (>100 errors → acknowledge mode is the right default).
+- **`selectors`** — the by-(class, method) axis. Each row is a
+  dispatch target (`String#squish`) with its `count`, the `files` it
+  spans, and the `rules` that fired. Read it with `jq` to find the
+  *shape* of the problem before touching code — these are structured
+  fields, never parse the `message`:
+  ```sh
+  # the 10 methods responsible for the most diagnostics
+  rigor triage --format json | jq -r '.selectors[:10][] | "\(.count)\t\(.receiver)#\(.method)"'
+  # methods missing on the same receiver across many files = one config
+  # gap (an unloaded core-ext / unseen monkey-patch), not many bugs
+  rigor triage --format json | jq '.selectors[] | select(.files >= 5)'
+  ```
+  A high `count` + high `files` selector is almost always a *systemic
+  cause* (a plugin / `pre_eval:` fix clears it in bulk); a low `count`
+  selector is a candidate genuine bug.
 - **`hotspots`** — files carrying the most diagnostics. A single hot
   file is often one structural cause, not many bugs.
 - **`hints`** — the heuristic catalogue. Each hint names a *likely

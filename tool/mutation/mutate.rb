@@ -29,7 +29,13 @@
 #   nix --extra-experimental-features 'nix-command flakes' develop -c \
 #     bundle exec ruby tool/mutation/mutate.rb lib/rigor/<some_file>.rb
 #
-# Flags: --config PATH  --limit N  --seed N  --operators a,b  --dry-run  --verbose
+# By default a type-aware filter (Phase 1.5) keeps only mutations whose
+# anchor — the call receiver whose contract the mutation could violate — types
+# to a concrete, non-Dynamic type. That focuses the run on sites where Rigor
+# actually holds a contract; `--no-type-filter` disables it (A/B the filter).
+#
+# Flags: --config PATH  --limit N  --seed N  --operators a,b
+#        --no-type-filter  --dry-run  --verbose
 
 require "optparse"
 require "prism"
@@ -40,8 +46,11 @@ require "rigor/language_server" # ProjectContext lives here (editor-mode session
 
 module RigorMutation
   # One concrete edit: replace source bytes [start, stop) with `replacement`.
+  # `anchor` is the Prism node whose inferred type decides type-relevance —
+  # the call receiver whose contract the mutation could violate, or nil when
+  # there is no concrete receiver (implicit-self call, literal outside a call).
   Mutation = Struct.new(
-    :operator, :expected_rule, :start, :stop, :replacement, :line, :label,
+    :operator, :expected_rule, :start, :stop, :replacement, :line, :label, :anchor,
     keyword_init: true
   ) do
     def apply(source)
@@ -67,14 +76,32 @@ module RigorMutation
       @source = source
       @operators = operators
       @parse = Prism.parse(source)
+      @anchor_for = {} # literal node -> its enclosing call's receiver node (or nil)
     end
 
     def mutations
       return [] unless @parse.success?
 
+      index_literal_anchors(@parse.value)
       out = []
       walk(@parse.value) { |node| collect(node, out) }
       out
+    end
+
+    # Phase 1.5 — keep only mutations whose anchor types to a concrete,
+    # non-Dynamic type, i.e. a site where Rigor actually holds a contract the
+    # mutation could violate. Drops implicit-self calls and literals outside a
+    # typed call (no contract → guaranteed survival → noise). FP-safe
+    # direction: an unresolved/probe-failed type KEEPS the mutation, so the
+    # filter never hides a kill it is unsure about — it only removes
+    # provably-Dynamic sites. Returns [kept, dropped_count]. Builds the scope
+    # index from THIS mutator's parse so anchor node identity matches the keys.
+    def filter_by_type(mutations, environment:, path:)
+      base = Rigor::Scope.empty(environment: environment, source_path: path)
+      index = Rigor::Inference::ScopeIndexer.index(@parse.value, default_scope: base)
+      cache = {}
+      kept = mutations.select { |mut| concrete_anchor?(mut.anchor, index, cache) }
+      [kept, mutations.size - kept.size]
     end
 
     private
@@ -97,18 +124,56 @@ module RigorMutation
       end
     end
 
+    # Record, for each literal that is a direct call argument, the receiver of
+    # the enclosing call — the anchor whose param contract a literal mutation
+    # could violate. Literals elsewhere get a nil anchor (filtered out under
+    # the type filter).
+    def index_literal_anchors(node)
+      return if node.nil?
+
+      if node.is_a?(Prism::CallNode) && node.arguments
+        node.arguments.arguments.each { |arg| @anchor_for[arg] = node.receiver if literal?(arg) }
+      end
+      node.compact_child_nodes.each { |child| index_literal_anchors(child) }
+    end
+
+    def literal?(node)
+      node.is_a?(Prism::IntegerNode) || node.is_a?(Prism::FloatNode) || node.is_a?(Prism::StringNode)
+    end
+
+    # Is `anchor` a site where Rigor holds a concrete (non-Dynamic) type?
+    def concrete_anchor?(anchor, index, cache)
+      return false if anchor.nil?
+      return cache[anchor] if cache.key?(anchor)
+
+      cache[anchor] = concrete_type_at?(anchor, index)
+    end
+
+    def concrete_type_at?(anchor, index)
+      scope = index[anchor]
+      return true if scope.nil? # unresolved scope → keep (FP-safe)
+
+      type = scope.type_of(anchor)
+      return true if type.nil?
+
+      !(type.is_a?(Rigor::Type::Dynamic) || type.is_a?(Rigor::Type::Top))
+    rescue StandardError
+      true # never let a probe failure hide a candidate
+    end
+
     # Mutate a literal: drop it to nil (possible-nil channel) and swap its
     # type (type-mismatch channel). String literals are only touched when the
     # node is a real quoted string, so we never corrupt `%w[...]` words.
     def literal_mutations(node, out, numeric:)
       return if !numeric && !QUOTES.include?(node.opening_loc&.slice)
 
+      anchor = @anchor_for[node]
       loc = node.location
-      add(out, :nil_inject, "flow.possible-nil", loc.start_offset, loc.end_offset,
-          "nil", loc.start_line, "literal → nil  (#{snippet(loc)})")
+      add(out, :nil_inject, "call.argument-type-mismatch", loc.start_offset, loc.end_offset,
+          "nil", loc.start_line, "literal → nil  (#{snippet(loc)})", anchor)
       swap = numeric ? '"rigor_mutant"' : "0"
-      add(out, :type_swap, "call.type-mismatch", loc.start_offset, loc.end_offset,
-          swap, loc.start_line, "literal type swap  (#{snippet(loc)} → #{swap})")
+      add(out, :type_swap, "call.argument-type-mismatch", loc.start_offset, loc.end_offset,
+          swap, loc.start_line, "literal type swap  (#{snippet(loc)} → #{swap})", anchor)
     end
 
     def call_mutations(node, out)
@@ -120,13 +185,15 @@ module RigorMutation
     # typed receiver trips call.undefined-method. We leave `def` signatures
     # untouched on purpose: the prebuilt ProjectScan still carries the file's
     # original declarations, so mutating only bodies/call-sites keeps it valid.
+    # Anchor is the explicit receiver (nil ⇒ implicit self ⇒ filtered out, as
+    # call.self-undefined-method ships `:off`).
     def rename_call(node, out)
       name = node.name.to_s
       mloc = node.message_loc
       return unless mloc && IDENT.match?(name)
 
       add(out, :undefined_method, "call.undefined-method", mloc.start_offset, mloc.end_offset,
-          "#{name}__rigor_absent", mloc.start_line, "call ##{name} → missing method")
+          "#{name}__rigor_absent", mloc.start_line, "call ##{name} → missing method", node.receiver)
     end
 
     # Append a trailing argument inside explicit `(...)` parens to trip an
@@ -138,15 +205,15 @@ module RigorMutation
 
       args = node.arguments&.arguments
       insertion = args && !args.empty? ? ", nil" : "nil"
-      add(out, :arity_extra, "call.argument-count", close.start_offset, close.start_offset,
-          insertion, node.location.start_line, "call ##{node.name} +1 arg")
+      add(out, :arity_extra, "call.wrong-arity", close.start_offset, close.start_offset,
+          insertion, node.location.start_line, "call ##{node.name} +1 arg", node.receiver)
     end
 
-    def add(out, operator, rule, start, stop, replacement, line, label)
+    def add(out, operator, rule, start, stop, replacement, line, label, anchor)
       return unless @operators.include?(operator)
 
       out << Mutation.new(operator: operator, expected_rule: rule, start: start, stop: stop,
-                          replacement: replacement, line: line, label: label)
+                          replacement: replacement, line: line, label: label, anchor: anchor)
     end
 
     def snippet(loc)
@@ -158,25 +225,37 @@ module RigorMutation
   # Drives the warm loop: build env + scan once, analyse the baseline, then
   # each mutant, and judge kills by diagnostic-set difference.
   class Harness
-    def initialize(target:, config_path:, limit:, seed:, operators:, verbose:)
+    def initialize(target:, config_path:, limit:, seed:, operators:, verbose:, type_filter:)
       @target = target
       @config_path = config_path
       @limit = limit
       @seed = seed
       @operators = operators
       @verbose = verbose
+      @type_filter = type_filter
     end
 
     def run
-      source = File.read(@target)
-      mutations = select(Mutator.new(source, operators: @operators).mutations)
-      abort("no mutations generated for #{@target}") if mutations.empty?
+      # Force UTF-8: the Flake shell's default external encoding can be
+      # US-ASCII, which makes byte-splicing a file with non-ASCII content raise
+      # Encoding::CompatibilityError.
+      source = File.read(@target, encoding: Encoding::UTF_8)
+      mutator = Mutator.new(source, operators: @operators)
+      raw = mutator.mutations
+      abort("no mutations generated for #{@target}") if raw.empty?
 
       config = Rigor::Configuration.load(@config_path)
       ctx = build_context(config)
+
+      dropped = 0
+      raw, dropped = mutator.filter_by_type(raw, environment: ctx.environment, path: @target) if @type_filter
+      mutations = select(raw)
+      abort("no type-relevant mutations for #{@target} (try --no-type-filter)") if mutations.empty?
+
       baseline = signatures(analyse(config, ctx, source).diagnostics)
       puts "baseline diagnostics on #{@target}: #{baseline.size}"
-      puts "mutations: #{mutations.size} (seed=#{@seed}, ops=#{@operators.join(',')})\n\n"
+      note = @type_filter ? "  (type-filter dropped #{dropped} non-concrete-anchor sites)" : "  (type-filter off)"
+      puts "mutations: #{mutations.size}#{note} (seed=#{@seed}, ops=#{@operators.join(',')})\n\n"
 
       records = mutations.map { |mut| evaluate(config, ctx, source, mut, baseline) }
       report(records)
@@ -225,6 +304,9 @@ module RigorMutation
       status = new_diags.empty? ? :survived : :killed
       { mut: mut, status: status, ms: elapsed, new_rules: new_diags.map(&:rule).uniq,
         expected_hit: new_diags.any? { |d| d.rule == mut.expected_rule } }
+    rescue StandardError => e
+      # A harness-level failure on one mutant must not abort the whole run.
+      { mut: mut, status: :invalid, ms: 0.0, new_rules: [], error: "#{e.class}: #{e.message}" }
     end
 
     def signatures(diags)
@@ -294,7 +376,8 @@ module RigorMutation
 
   class CLI
     def self.run(argv)
-      options = { config: nil, limit: nil, seed: 1, operators: Mutator::OPERATORS, dry_run: false, verbose: false }
+      options = { config: nil, limit: nil, seed: 1, operators: Mutator::OPERATORS,
+                  dry_run: false, verbose: false, type_filter: true }
       parser = OptionParser.new do |o|
         o.banner = "usage: bundle exec ruby tool/mutation/mutate.rb <target.rb> [options]"
         o.on("--config PATH", "Rigor config file (default: auto-discover)") { |v| options[:config] = v }
@@ -303,7 +386,10 @@ module RigorMutation
         o.on("--operators LIST", "comma list: #{Mutator::OPERATORS.join(',')}") do |v|
           options[:operators] = v.split(",").map(&:strip).map(&:to_sym)
         end
-        o.on("--dry-run", "list mutations, don't analyse") { options[:dry_run] = true }
+        o.on("--no-type-filter", "keep every mutation, even on Dynamic sites (A/B the filter)") do
+          options[:type_filter] = false
+        end
+        o.on("--dry-run", "list mutations, don't analyse (pre-filter)") { options[:dry_run] = true }
         o.on("--verbose", "also list killed mutants + the rule that fired") { options[:verbose] = true }
         o.on("-h", "--help") do
           puts o
@@ -321,13 +407,14 @@ module RigorMutation
       else
         Harness.new(
           target: target, config_path: options[:config], limit: options[:limit],
-          seed: options[:seed], operators: options[:operators], verbose: options[:verbose]
+          seed: options[:seed], operators: options[:operators], verbose: options[:verbose],
+          type_filter: options[:type_filter]
         ).run
       end
     end
 
     def self.dry_run(target, options)
-      source = File.read(target)
+      source = File.read(target, encoding: Encoding::UTF_8)
       muts = Mutator.new(source, operators: options[:operators]).mutations
       muts = muts.sample(options[:limit], random: Random.new(options[:seed])) if options[:limit]
       muts.each { |m| puts format("L%-4d %-16s %s", m.line, m.operator, m.label) }

@@ -14,19 +14,30 @@ nix --extra-experimental-features 'nix-command flakes' develop -c \
 ```
 
 Flags: `--config PATH` `--limit N` `--seed N` `--operators nil_inject,...`
-`--dry-run` `--verbose`.
+`--no-type-filter` `--dry-run` `--verbose`.
 
 ## How it works
 
 - **Mutator** walks the Prism AST and records byte-range splices — no unparser
   needed, since Rigor re-parses the spliced source. Operators (all targeted at
   a diagnostic rule family):
-  - `nil_inject` — literal → `nil` (→ `flow.possible-nil`)
-  - `type_swap` — integer↔string literal (→ `call.type-mismatch`)
+  - `nil_inject` — a call-argument literal → `nil` (→ `call.argument-type-mismatch`)
+  - `type_swap` — integer↔string call-argument literal (→ `call.argument-type-mismatch`)
   - `undefined_method` — rename a *call site* to a missing method (→ `call.undefined-method`)
-  - `arity_extra` — append a trailing arg inside `(...)` (→ `call.argument-count`)
+  - `arity_extra` — append a trailing arg inside `(...)` (→ `call.wrong-arity`)
   - Only *call sites and bodies* are mutated, never `def` signatures, so the
     reused ProjectScan's declarations stay valid.
+- **Type-aware filter (Phase 1.5, default on).** Each mutation carries an
+  *anchor* — the call receiver whose contract it could violate (a literal's
+  anchor is its enclosing call's receiver). Before running, the harness builds
+  one `ScopeIndexer` index over the original parse and probes each anchor with
+  `Scope#type_of`; a mutation is kept only if its anchor types to a concrete,
+  non-`Dynamic`/`Top` type. Implicit-self calls and literals outside a typed
+  call (nil anchor) are dropped — Rigor has no contract there to bite, so they
+  would survive as noise. The probe is FP-safe: an unresolved/failed type
+  *keeps* the mutation. `--no-type-filter` disables it to A/B the effect.
+  (This is why the harness is in-process Prism-native, not `mutant`: only an
+  in-process tool can ask the engine for its own types.)
 - **Warm loop** (the "editor mode + cache" path): the RBS environment and the
   whole-project ProjectScan are built once via `LanguageServer::ProjectContext`,
   then every mutant reuses them through `Runner.new(environment:, prebuilt:)` +
@@ -37,29 +48,26 @@ Flags: `--config PATH` `--limit N` `--seed N` `--operators nil_inject,...`
 - **Kill** = a diagnostic in the mutant run whose `(rule, path, line, column,
   message)` signature is not in the clean baseline set.
 
-## Reading the output — raw kill-rate is noise
+## Reading the output — filter the noise, then read survivors
 
 A type checker only sees a subset of bugs. Most mutations are *type-invariant*
-(equivalent mutants) and survival is **correct** — this is Rigor's false-positive
-discipline working as intended. Two real prototype runs:
+(equivalent mutants) and survival is **correct** — Rigor's false-positive
+discipline working as intended. So the raw, unfiltered kill-rate is meaningless;
+the **type filter** is what makes the number mean something. Measured A/B:
 
-- `lib/rigor/trinary.rb`: renamed calls on **typed** receivers fire
-  `call.undefined-method`; the *same* method survives where the receiver is
-  `Dynamic`. Teeth appear exactly where type knowledge exists.
-- `lib/rigor/cli/ci_detector.rb`: **0% kill** — its string literals are plumbing
-  into `ENV[...]` / `case`-`when`, never entering a typed contract. Nothing for a
-  type checker to bite. 0% is right, not 44 blind spots.
+| file | `--no-type-filter` | default (filtered) |
+| --- | --- | --- |
+| `lib/rigor/trinary.rb` | 43% kill, 33 survivors (noise) | **100% kill, 0 survivors** |
+| `lib/rigor/cli/ci_detector.rb` | 0% kill, 44 survivors | **83% kill, 1 real survivor** (`#new`) |
 
-So the signal is **the per-site survivor list at sites where Rigor has a type**,
-not the aggregate percentage.
+`ci_detector.rb`'s 107 dropped sites are string literals plumbing into
+`ENV[...]` / `case`-`when` — never entering a typed contract. After filtering,
+the survivors are **actionable false-negative candidates at sites Rigor can
+actually see**, not Dynamic-receiver noise.
 
 ## Next steps (staged)
 
-1. **Type-aware site filtering** — query the engine's `type_of` at each
-   candidate site and only emit a mutation where the receiver / consuming
-   context is non-`Dynamic`. Converts "0% on plumbing" into a kill-rate over
-   sites Rigor can actually see. (Requires the engine in-process — the reason
-   this is Prism-native, not `mutant`.)
+1. ~~**Type-aware site filtering**~~ — **done (Phase 1.5).** See above.
 2. **Closure-aware kills** — a return-type mutation surfaces at a *caller*; use
    the ADR-46 dependents index to define where a legitimate kill may appear.
 3. **Broad fuzz mode** — same warm loop, aggressive random mutation, watching

@@ -185,6 +185,24 @@ into a fourth `severity_profile` value — still stands: it would conflate
 loudness with the discipline-set and lose both the granularity and the
 explicit diff.)
 
+**Foundation landed (v0.1.19).** The WD2 *surface* is wired end-to-end
+while the overlay is intentionally empty (no discipline is yet queued for
+a major): `Rigor::BleedingEdge` is the maintained `Feature` registry
+(stable id + summary + a `severity_overrides` map); `.rigor.yml`
+`bleeding_edge:` accepts `true` / a feature-id list / `{ all:, except: }`,
+normalised and exposed on `Configuration`; `rigor show-bleedingedge`
+prints the overlay + what the project adopts (`--format text|json`); and
+`Configuration::SeverityProfile.resolve` gained a
+`bleeding_edge_overrides:` map composed *below* the user's own
+`severity_overrides:` (exact or family) and *above* the profile table.
+With the registry empty the composed map is `{}`, so resolution stays
+bit-for-bit unchanged — the first queued discipline lands as a single
+`FEATURES` entry with no further engine plumbing. **Not yet shipped
+(next slice):** the `--bleeding-edge[=ids]` CLI flag on `rigor check`
+(the config key is the primary opt-in; the CLI mirror needs the active
+selection threaded to the two `resolve` call sites) and the dedicated
+bleeding-edge CHANGELOG section (no entries to carry yet).
+
 ### WD3 — What counts as a breaking diagnostic change (the discipline test)
 
 The line between "allowed minor strengthening" and "BC-breaking new

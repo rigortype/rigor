@@ -241,6 +241,50 @@ RSpec.describe Rigor::Configuration do
       end.to raise_error(ArgumentError, /must be one of/)
     end
 
+    # ADR-50 § WD2 — the `bleeding_edge:` overlay selector.
+    describe "bleeding_edge:" do
+      def config_with(value)
+        described_class.new(Rigor::Configuration::DEFAULTS.merge("bleeding_edge" => value))
+      end
+
+      it "defaults to adopting nothing, with an empty severity map" do
+        Dir.mktmpdir do |dir|
+          configuration = described_class.load(File.join(dir, "missing.yml"))
+          expect(configuration.bleeding_edge).to eq("mode" => "none")
+          expect(configuration.bleeding_edge_severity_overrides).to eq({})
+        end
+      end
+
+      it "normalizes each accepted form" do
+        expect(config_with(false).bleeding_edge).to eq("mode" => "none")
+        expect(config_with(true).bleeding_edge).to eq("mode" => "all")
+        expect(config_with(%w[a b]).bleeding_edge).to eq("mode" => "list", "ids" => %w[a b])
+        expect(config_with("all" => true, "except" => ["a"]).bleeding_edge)
+          .to eq("mode" => "all", "except" => ["a"])
+        expect(config_with("all" => false).bleeding_edge).to eq("mode" => "none")
+      end
+
+      it "round-trips through #to_h in the user-facing form" do
+        expect(config_with(false).to_h["bleeding_edge"]).to be(false)
+        expect(config_with(true).to_h["bleeding_edge"]).to be(true)
+        expect(config_with(%w[a b]).to_h["bleeding_edge"]).to eq(%w[a b])
+        expect(config_with("all" => true, "except" => ["a"]).to_h["bleeding_edge"])
+          .to eq("all" => true, "except" => ["a"])
+      end
+
+      it "rejects a value that is not a boolean, list, or hash" do
+        expect { config_with(42) }.to raise_error(ArgumentError, /bleeding_edge must be/)
+      end
+
+      it "reads the selector from the YAML file" do
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, ".rigor.yml")
+          File.write(path, "bleeding_edge:\n  - some-feature\n")
+          expect(described_class.load(path).bleeding_edge).to eq("mode" => "list", "ids" => ["some-feature"])
+        end
+      end
+    end
+
     it "exposes an empty Configuration::Dependencies by default (ADR-10 slice 1)" do
       Dir.mktmpdir do |dir|
         configuration = described_class.load(File.join(dir, "missing.yml"))

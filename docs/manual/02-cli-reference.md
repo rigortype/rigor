@@ -348,6 +348,31 @@ rigor skill <list|print|path> [name]
 | `print <name>` | Print the `SKILL.md` body to stdout, with a header pointing at the skill's `references/` directory. |
 | `path <name>` | Print the single-line absolute `SKILL.md` path, suitable as input to a file-reading tool. |
 
+## `rigor show-bleedingedge`
+
+Print the **bleeding-edge overlay** — the Rigor-maintained set of
+the next major's queued diagnostic disciplines ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
+§ WD2) — and report which of them the project's
+[`bleeding_edge:`](03-configuration.md) configuration adopts. Read-only:
+it loads `.rigor.yml` to resolve the active selection but runs no
+analysis.
+
+```sh
+rigor show-bleedingedge [--config PATH] [--format text|json]
+```
+
+| Flag | Purpose |
+| --- | --- |
+| `--config PATH` | Use this `.rigor.yml` instead of auto-discovery. |
+| `--format text\|json` | Output format. Default `text`. |
+
+The overlay is **empty in this release** — the mechanism is wired and
+ready, but no discipline has been queued for a major yet, so the command
+currently reports an empty set. When a feature is queued it appears here
+with its stable id, the severity it would impose, and whether your config
+adopts it. See [`docs/compatibility.md`](../compatibility.md) for how
+bleeding-edge fits the stability model.
+
 ## Exit codes
 
 | Code | Meaning |

@@ -38,7 +38,8 @@ module Rigor
       "plugins" => :run_plugins,
       "plugin" => :run_plugin,
       "playground" => :run_playground,
-      "skill" => :run_skill
+      "skill" => :run_skill,
+      "show-bleedingedge" => :run_show_bleedingedge
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -289,6 +290,12 @@ module Rigor
       CLI::PluginCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_show_bleedingedge
+      require_relative "cli/show_bleedingedge_command"
+
+      CLI::ShowBleedingedgeCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def help
       <<~HELP
         Usage: rigor <command> [options]
@@ -311,6 +318,7 @@ module Rigor
           plugin     Browse bundled plugin source as worked examples (list/path/print/root)
           playground Start the browser playground (requires rigor-playground gem)
           skill      List or print bundled Agent Skills (rigor-project-init, ...)
+          show-bleedingedge  Show the bleeding-edge overlay + what your config adopts (ADR-50)
           version    Print the Rigor version
           help       Print this help
       HELP

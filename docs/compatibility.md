@@ -53,9 +53,10 @@ Two principles draw the line between what binds and what stays free
    those keep working across an upgrade even as firings change. A change
    that would force the user to **comply with a new authoring discipline
    they were not previously held to** is treated as breaking and lands
-   off-by-default behind the planned `bleeding_edge:` opt-in until a
-   major turns it on (ADR-50 § WD2/WD3; the opt-in itself is not yet
-   implemented — tracked as the next ADR-50 slice).
+   off-by-default behind the `bleeding_edge:` opt-in until a major turns
+   it on (ADR-50 § WD2/WD3). The opt-in mechanism is wired
+   (`bleeding_edge:` config + the `rigor show-bleedingedge` inspector);
+   the overlay it draws from is empty today, so nothing is gated yet.
 
 ## The enumerated public surface
 
@@ -128,10 +129,13 @@ Summarised from ADR-50 (the authority for all of these):
   backport keeps its line's Ruby pin. Post-1.0, the `1.x` branch becomes
   the default development line (PHPStan's model).
 - **New disciplines** (a rule that demands an authoring change of
-  previously-idiomatic code) land off-by-default behind the planned
+  previously-idiomatic code) land off-by-default behind the
   `bleeding_edge:` opt-in and turn on only at a major (ADR-50 § WD2/WD3/WD7).
-  That opt-in (`bleeding_edge:` config + `rigor show-bleedingedge`) is
-  the next ADR-50 implementation slice and is not yet shipped.
+  The opt-in foundation is shipped — `bleeding_edge:` config (`true` /
+  feature-id list / `{ all:, except: }`) + the `rigor show-bleedingedge`
+  inspector, composed into severity resolution below your own
+  `severity_overrides:`. The overlay it draws from is empty today; the
+  first queued discipline lands as a single feature entry.
 
 ## See also
 

@@ -130,13 +130,25 @@ module Rigor
       #   Keys are canonical rule ids; values are
       #   {VALID_SEVERITIES} symbols. Family-wildcard keys
       #   (`call`) match every rule under that prefix.
+      # @param bleeding_edge_overrides [Hash{String => Symbol}] the
+      #   severity map imposed by the active ADR-50 § WD2 bleeding-edge
+      #   features ({Rigor::BleedingEdge.severity_overrides_for}).
+      #   Consulted *below* the user's own `overrides` (so an explicit
+      #   `severity_overrides:` entry, exact or family wildcard, always
+      #   wins) and *above* the profile table. Exact rule ids only — the
+      #   overlay never carries family wildcards. Empty while the
+      #   overlay is unpopulated, so the default leaves resolution
+      #   bit-for-bit unchanged.
       # @return [Symbol] the resolved severity. Returns `:off` to
       #   mean "drop the diagnostic entirely".
-      def resolve(rule:, authored_severity:, profile: DEFAULT_PROFILE, overrides: {})
+      def resolve(rule:, authored_severity:, profile: DEFAULT_PROFILE, overrides: {}, bleeding_edge_overrides: {})
         return authored_severity if rule.nil?
 
         override = overrides[rule] || family_override(rule, overrides)
         return override.to_sym if override
+
+        bleeding = bleeding_edge_overrides[rule]
+        return bleeding.to_sym if bleeding
 
         profile_table = PROFILES[profile] || PROFILES.fetch(DEFAULT_PROFILE)
         profile_table.fetch(rule, authored_severity)

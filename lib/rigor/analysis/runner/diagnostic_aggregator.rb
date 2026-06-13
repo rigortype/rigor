@@ -529,7 +529,8 @@ module Rigor
             rule: diagnostic.rule,
             authored_severity: diagnostic.severity,
             profile: @configuration.severity_profile,
-            overrides: @configuration.severity_overrides
+            overrides: @configuration.severity_overrides,
+            bleeding_edge_overrides: @configuration.bleeding_edge_severity_overrides
           )
           return nil if resolved == :off
           return diagnostic if resolved == diagnostic.severity

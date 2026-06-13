@@ -964,7 +964,8 @@ module Rigor
           else
             Configuration::SeverityProfile.resolve(
               rule: rule, authored_severity: :warning,
-              profile: @configuration.severity_profile, overrides: @configuration.severity_overrides
+              profile: @configuration.severity_profile, overrides: @configuration.severity_overrides,
+              bleeding_edge_overrides: @configuration.bleeding_edge_severity_overrides
             ) != :off
           end
       end

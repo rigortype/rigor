@@ -76,5 +76,45 @@ RSpec.describe Rigor::Configuration::SeverityProfile do
         described_class.resolve(rule: "dump.type", authored_severity: :error, profile: :nonsense)
       ).to eq(:info)
     end
+
+    # ADR-50 § WD2 — the bleeding-edge overlay composes below the user's
+    # own overrides and above the profile table. Defaults to {} so the
+    # shipped (empty) overlay leaves resolution bit-for-bit unchanged.
+    describe "bleeding_edge_overrides:" do
+      it "defaults to an empty map, leaving resolution unchanged" do
+        expect(
+          described_class.resolve(rule: "dump.type", authored_severity: :error, profile: :balanced)
+        ).to eq(:info)
+      end
+
+      it "applies above the profile table when no user override exists" do
+        expect(
+          described_class.resolve(
+            rule: "dump.type", authored_severity: :error, profile: :balanced,
+            bleeding_edge_overrides: { "dump.type" => :error }
+          )
+        ).to eq(:error)
+      end
+
+      it "yields to an explicit per-rule user override" do
+        expect(
+          described_class.resolve(
+            rule: "dump.type", authored_severity: :error, profile: :balanced,
+            overrides: { "dump.type" => :warning },
+            bleeding_edge_overrides: { "dump.type" => :error }
+          )
+        ).to eq(:warning)
+      end
+
+      it "yields to a user family-wildcard override" do
+        expect(
+          described_class.resolve(
+            rule: "dump.type", authored_severity: :error, profile: :balanced,
+            overrides: { "dump" => :off },
+            bleeding_edge_overrides: { "dump.type" => :error }
+          )
+        ).to eq(:off)
+      end
+    end
   end
 end

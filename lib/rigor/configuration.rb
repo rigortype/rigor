@@ -2,6 +2,7 @@
 
 require "yaml"
 
+require_relative "bleeding_edge"
 require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
 
@@ -87,6 +88,15 @@ module Rigor
       },
       "severity_profile" => "balanced",
       "severity_overrides" => {},
+      # ADR-50 § WD2 — bleeding-edge overlay opt-in. Selects which of
+      # the *next major's* queued changes ({Rigor::BleedingEdge}) this
+      # project adopts early. Orthogonal to `severity_profile:`. Accepts
+      # `false` (default — adopt none), `true` (adopt the whole
+      # overlay), a list of feature ids (adopt only those), or
+      # `{ all: true, except: [ids] }` (adopt all but the named). The
+      # overlay is empty today, so every form is currently a no-op; it
+      # becomes live when the first discipline is queued for a major.
+      "bleeding_edge" => false,
       "dependencies" => {
         "source_inference" => [],
         "budget_per_gem" => Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM
@@ -181,6 +191,7 @@ module Rigor
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides,
+                :bleeding_edge, :bleeding_edge_severity_overrides,
                 :dependencies, :parallel_workers,
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
                 :rbs_collection_lockfile, :rbs_collection_auto_detect,
@@ -355,6 +366,10 @@ module Rigor
       @severity_overrides = coerce_severity_overrides(
         data.fetch("severity_overrides", DEFAULTS.fetch("severity_overrides"))
       )
+      @bleeding_edge = coerce_bleeding_edge(
+        data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge"))
+      )
+      @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
       @dependencies = Dependencies.from_h(
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
@@ -383,7 +398,7 @@ module Rigor
     end
     # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
-    def to_h # rubocop:disable Metrics/MethodLength
+    def to_h # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       {
         "target_ruby" => target_ruby,
         "paths" => paths,
@@ -405,6 +420,7 @@ module Rigor
         },
         "severity_profile" => severity_profile.to_s,
         "severity_overrides" => severity_overrides.to_h { |k, v| [k, v.to_s] },
+        "bleeding_edge" => bleeding_edge_to_h,
         "dependencies" => dependencies.to_h,
         "parallel" => {
           "workers" => parallel_workers
@@ -565,6 +581,46 @@ module Rigor
 
         [k.to_s, sym]
       end.freeze
+    end
+
+    # ADR-50 § WD2 — normalizes the `bleeding_edge:` selector to a
+    # canonical `{ "mode" => … }` hash (interpreted by
+    # {Rigor::BleedingEdge}). Validates *shape* only; membership against
+    # the overlay is intentionally NOT checked here (an unknown id stays
+    # inert, like an unknown `severity_overrides:` rule). Deep-frozen so
+    # the Configuration stays `Ractor.shareable?`.
+    def coerce_bleeding_edge(value)
+      case value
+      when nil, false then { "mode" => "none" }
+      when true then { "mode" => "all" }
+      when Array then { "mode" => "list", "ids" => value.map(&:to_s).freeze }
+      when Hash then coerce_bleeding_edge_hash(value)
+      else
+        raise ArgumentError,
+              "bleeding_edge must be true, false, a list of feature ids, " \
+              "or { all: true, except: [...] }, got #{value.inspect}"
+      end.freeze
+    end
+
+    def coerce_bleeding_edge_hash(value)
+      hash = value.to_h { |k, v| [k.to_s, v] }
+      if hash.fetch("all", false) == true
+        { "mode" => "all", "except" => Array(hash["except"]).map(&:to_s).freeze }
+      else
+        { "mode" => "none" }
+      end
+    end
+
+    # Renders the normalized selector back into the user-facing
+    # `bleeding_edge:` form for `#to_h` round-trips.
+    def bleeding_edge_to_h
+      case bleeding_edge["mode"]
+      when "all"
+        except = bleeding_edge["except"] || []
+        except.empty? || { "all" => true, "except" => except }
+      when "list" then bleeding_edge["ids"] || []
+      else false
+      end
     end
   end
 end

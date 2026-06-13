@@ -252,6 +252,19 @@ rigor coverage [paths]
 exits `1` when the precision ratio falls below `RATIO`
 (`0.0`–`1.0`), making it a CI gate.
 
+`--protection` switches to **type-protection coverage**: instead
+of "how precise are my types", it reports "if I introduce a bug,
+would Rigor catch it". Each dispatch site (a call with an
+explicit receiver) is *protected* when the receiver types to a
+concrete class — a site where Rigor's call rules can catch a
+wrong method or argument — and *unprotected* when the receiver is
+`Dynamic`. The report leads with the protected ratio, then a
+ranked "add a type here" list (the methods most often called on
+an untyped receiver), then the least-protected files;
+`--threshold` and `--format=json` work the same. It is a sound
+upper bound on real protection — a concrete receiver is necessary
+but not sufficient for a diagnostic to fire.
+
 ## `rigor mcp`
 
 Run the Rigor MCP (Model Context Protocol) server over stdio,

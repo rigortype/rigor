@@ -1,9 +1,10 @@
 # ADR-63 — User-facing type-protection coverage
 
-Status: **Accepted — Tier 1 (static proxy) is the v1; Tier 2 (mutation effectiveness) is
-designed here and phased as a follow-up.** Extends `rigor coverage` with a *protection*
-dimension: not "how precise are my types" but "if I introduce a bug, would Rigor catch
-it" — the user-facing surfacing of the ADR-62 teeth work.
+Status: **Accepted — Tier 1 (static proxy) IMPLEMENTED 2026-06-14 (`rigor coverage
+--protection`); Tier 2 (mutation effectiveness) is designed here and phased as a
+follow-up.** Extends `rigor coverage` with a *protection* dimension: not "how precise are
+my types" but "if I introduce a bug, would Rigor catch it" — the user-facing surfacing of
+the ADR-62 teeth work.
 
 Grounding: [ADR-62](62-mutation-testing-teeth-measurement.md) (the internal teeth
 methodology this productizes) and

@@ -6,9 +6,12 @@ require "prism"
 require_relative "../configuration"
 require_relative "../environment"
 require_relative "../inference/precision_scanner"
+require_relative "../inference/protection_scanner"
 require_relative "../scope"
 require_relative "coverage_report"
 require_relative "coverage_renderer"
+require_relative "protection_report"
+require_relative "protection_renderer"
 require_relative "command"
 
 module Rigor
@@ -36,6 +39,8 @@ module Rigor
         return CLI::EXIT_USAGE if paths.nil?
         return usage_error if paths.empty?
 
+        return run_protection(paths, options) if options[:protection]
+
         report = scan_paths(paths, options)
         CoverageRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_exit(report, options)
@@ -44,19 +49,48 @@ module Rigor
       private
 
       def parse_options
-        options = { format: "text", threshold: nil, config: nil }
+        options = { format: "text", threshold: nil, config: nil, protection: false }
 
         OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--format=FORMAT", "Output format: text or json") { |v| options[:format] = v }
           opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
           opts.on(
+            "--protection",
+            "Report type-protection coverage (ADR-63 Tier 1) instead of type precision"
+          ) { options[:protection] = true }
+          opts.on(
             "--threshold=RATIO", Float,
-            "Exit 1 when precision ratio is below RATIO (0.0–1.0)"
+            "Exit 1 when the precision (or, with --protection, protection) ratio is below RATIO (0.0–1.0)"
           ) { |v| options[:threshold] = v }
         end.parse!(@argv)
 
         options
+      end
+
+      def run_protection(paths, options)
+        report = scan_protection(paths, options)
+        ProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
+        determine_protection_exit(report, options)
+      end
+
+      def scan_protection(paths, options)
+        configuration = Configuration.load(options.fetch(:config))
+        scope = Scope.empty(environment: project_environment(configuration))
+        scanner = Inference::ProtectionScanner.new(scope: scope)
+        accumulator = ProtectionAccumulator.new
+
+        paths.each { |path| scan_one(path, scanner, accumulator, configuration) }
+        accumulator.to_report
+      end
+
+      def determine_protection_exit(report, options)
+        return 1 unless report.parse_errors.empty?
+
+        threshold = options[:threshold]
+        return 0 if threshold.nil?
+
+        report.ratio < threshold ? 1 : 0
       end
 
       def usage_error

@@ -14,6 +14,15 @@ contract lives in `docs/manual/`.) The drift spec
 catches accidental signature changes so every change stays deliberate
 and reviewable.
 
+This document is the **plugin-author view** of the pinned namespaces.
+The project-wide compatibility commitment — the full public surface
+(CLI, `.rigor.yml` keys, diagnostic vocabulary, baseline + cache
+formats, `RBS::Extended` grammar) and the trial-then-freeze trajectory
+it binds on — lives in [`docs/compatibility.md`](../compatibility.md)
+(the [ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
+WD1 surface document); this file is the namespace-level detail under
+that umbrella.
+
 ## Why this boundary exists
 
 ADR-2 commits Rigor to a plugin architecture that lets gem authors

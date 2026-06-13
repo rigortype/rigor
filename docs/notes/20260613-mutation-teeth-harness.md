@@ -129,9 +129,10 @@ engine gaps** (→ the backlog).
    places — no FP); 5-example loader spec; the Mutex survivor cluster now kills. A general
    win beyond the cluster.
 4. Self-dogfood `Type::*` method RBS; `argument-type-mismatch` adjudication. *(pending)*
-5. **ADR** — fold the methodology + decisions (build-our-own, type-aware filter as the
-   meaning-maker, sweep-as-backlog, the FP-safe union teeth rule) into an ADR once the
-   backlog is worked down.
+5. **ADR — LANDED: [ADR-62](../adr/62-mutation-testing-teeth-measurement.md).** Folds the
+   methodology + decisions (build-our-own, type-aware filter as the meaning-maker,
+   sweep-as-backlog, adjudicate-don't-assume) and the landed/deferred items into a
+   decision record. This note remains the living tracker; the ADR is the rationale.
 
 ## Loop demonstrated
 

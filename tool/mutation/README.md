@@ -9,12 +9,32 @@ candidate false-negative.
 This is **not** a CLI command and is off the ADR-50 frozen-contract surface.
 
 ```sh
+# single file — full per-mutant breakdown
 nix --extra-experimental-features 'nix-command flakes' develop -c \
   bundle exec ruby tool/mutation/mutate.rb lib/rigor/<file>.rb --verbose
+
+# corpus sweep — one warm session over many files, survivors clustered into a
+# ranked false-negative backlog (text, or --json for an agent / jq)
+nix --extra-experimental-features 'nix-command flakes' develop -c \
+  bundle exec ruby tool/mutation/mutate.rb sweep lib/rigor plugins/*/lib --per-file 40
 ```
 
-Flags: `--config PATH` `--limit N` `--seed N` `--operators nil_inject,...`
+Flags (single): `--config` `--limit N` `--seed N` `--operators a,b`
 `--no-type-filter` `--dry-run` `--verbose`.
+Flags (sweep): `--per-file N` (mutants/file, default 40) `--top N` (clusters
+shown, default 25) `--json` `--seed` `--operators` `--no-type-filter`.
+
+## Sweep mode — the false-negative backlog
+
+`sweep <paths…>` builds the warm session once and runs every `.rb` under the
+given files/dirs/globs, then groups the survivors by **(operator, receiver
+type)**. Each cluster is a candidate systematic blind spot — "mutating
+*operator* on a *receiver* never fires" — ranked by count, with the top method
+names and example sites. Read clusters, don't chase the aggregate %: some are
+*correct* non-firings (a variadic `Data.define` can't have a wrong arity; a
+union with a `Dynamic` arm is gradually valid), which point at filter/operator
+refinements; the rest are real engine gaps to triage. `--json` emits the same
+clusters as structured data (ADR-61 flavour) so an agent can act on them.
 
 ## How it works
 

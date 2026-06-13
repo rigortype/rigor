@@ -37,6 +37,7 @@
 # Flags: --config PATH  --limit N  --seed N  --operators a,b
 #        --no-type-filter  --dry-run  --verbose
 
+require "json"
 require "optparse"
 require "prism"
 
@@ -49,8 +50,11 @@ module RigorMutation
   # `anchor` is the Prism node whose inferred type decides type-relevance —
   # the call receiver whose contract the mutation could violate, or nil when
   # there is no concrete receiver (implicit-self call, literal outside a call).
+  # `anchor_type` (the rendered receiver type) and `method_name` are filled in
+  # for clustering survivors in a sweep; both may stay nil.
   Mutation = Struct.new(
     :operator, :expected_rule, :start, :stop, :replacement, :line, :label, :anchor,
+    :anchor_type, :method_name,
     keyword_init: true
   ) do
     def apply(source)
@@ -100,7 +104,11 @@ module RigorMutation
       base = Rigor::Scope.empty(environment: environment, source_path: path)
       index = Rigor::Inference::ScopeIndexer.index(@parse.value, default_scope: base)
       cache = {}
-      kept = mutations.select { |mut| concrete_anchor?(mut.anchor, index, cache) }
+      kept = mutations.select do |mut|
+        keep, type = anchor_decision(mut.anchor, index, cache)
+        mut.anchor_type = type if keep
+        keep
+      end
       [kept, mutations.size - kept.size]
     end
 
@@ -132,7 +140,9 @@ module RigorMutation
       return if node.nil?
 
       if node.is_a?(Prism::CallNode) && node.arguments
-        node.arguments.arguments.each { |arg| @anchor_for[arg] = node.receiver if literal?(arg) }
+        node.arguments.arguments.each do |arg|
+          @anchor_for[arg] = [node.receiver, node.name.to_s] if literal?(arg)
+        end
       end
       node.compact_child_nodes.each { |child| index_literal_anchors(child) }
     end
@@ -141,24 +151,33 @@ module RigorMutation
       node.is_a?(Prism::IntegerNode) || node.is_a?(Prism::FloatNode) || node.is_a?(Prism::StringNode)
     end
 
-    # Is `anchor` a site where Rigor holds a concrete (non-Dynamic) type?
-    def concrete_anchor?(anchor, index, cache)
-      return false if anchor.nil?
+    # Returns [keep?, rendered_type]. Keep when `anchor` is a site where Rigor
+    # holds a concrete (non-Dynamic/Top) type. FP-safe: an unresolved or
+    # probe-failed type keeps the mutation (with a nil rendered type).
+    def anchor_decision(anchor, index, cache)
+      return [false, nil] if anchor.nil?
       return cache[anchor] if cache.key?(anchor)
 
-      cache[anchor] = concrete_type_at?(anchor, index)
+      cache[anchor] = compute_anchor_decision(anchor, index)
     end
 
-    def concrete_type_at?(anchor, index)
+    def compute_anchor_decision(anchor, index)
       scope = index[anchor]
-      return true if scope.nil? # unresolved scope → keep (FP-safe)
+      return [true, nil] if scope.nil? # unresolved scope → keep (FP-safe)
 
       type = scope.type_of(anchor)
-      return true if type.nil?
+      return [true, nil] if type.nil?
 
-      !(type.is_a?(Rigor::Type::Dynamic) || type.is_a?(Rigor::Type::Top))
+      concrete = !(type.is_a?(Rigor::Type::Dynamic) || type.is_a?(Rigor::Type::Top))
+      [concrete, concrete ? render_type(type) : nil]
     rescue StandardError
-      true # never let a probe failure hide a candidate
+      [true, nil] # never let a probe failure hide a candidate
+    end
+
+    def render_type(type)
+      type.respond_to?(:describe) ? type.describe(:short) : type.to_s
+    rescue StandardError
+      type.class.name
     end
 
     # Mutate a literal: drop it to nil (possible-nil channel) and swap its
@@ -167,13 +186,13 @@ module RigorMutation
     def literal_mutations(node, out, numeric:)
       return if !numeric && !QUOTES.include?(node.opening_loc&.slice)
 
-      anchor = @anchor_for[node]
+      anchor, method = @anchor_for[node]
       loc = node.location
       add(out, :nil_inject, "call.argument-type-mismatch", loc.start_offset, loc.end_offset,
-          "nil", loc.start_line, "literal → nil  (#{snippet(loc)})", anchor)
+          "nil", loc.start_line, "literal → nil  (#{snippet(loc)})", anchor, method)
       swap = numeric ? '"rigor_mutant"' : "0"
       add(out, :type_swap, "call.argument-type-mismatch", loc.start_offset, loc.end_offset,
-          swap, loc.start_line, "literal type swap  (#{snippet(loc)} → #{swap})", anchor)
+          swap, loc.start_line, "literal type swap  (#{snippet(loc)} → #{swap})", anchor, method)
     end
 
     def call_mutations(node, out)
@@ -193,7 +212,7 @@ module RigorMutation
       return unless mloc && IDENT.match?(name)
 
       add(out, :undefined_method, "call.undefined-method", mloc.start_offset, mloc.end_offset,
-          "#{name}__rigor_absent", mloc.start_line, "call ##{name} → missing method", node.receiver)
+          "#{name}__rigor_absent", mloc.start_line, "call ##{name} → missing method", node.receiver, name)
     end
 
     # Append a trailing argument inside explicit `(...)` parens to trip an
@@ -206,14 +225,15 @@ module RigorMutation
       args = node.arguments&.arguments
       insertion = args && !args.empty? ? ", nil" : "nil"
       add(out, :arity_extra, "call.wrong-arity", close.start_offset, close.start_offset,
-          insertion, node.location.start_line, "call ##{node.name} +1 arg", node.receiver)
+          insertion, node.location.start_line, "call ##{node.name} +1 arg", node.receiver, node.name.to_s)
     end
 
-    def add(out, operator, rule, start, stop, replacement, line, label, anchor)
+    def add(out, operator, rule, start, stop, replacement, line, label, anchor, method_name) # rubocop:disable Metrics/ParameterLists
       return unless @operators.include?(operator)
 
       out << Mutation.new(operator: operator, expected_rule: rule, start: start, stop: stop,
-                          replacement: replacement, line: line, label: label, anchor: anchor)
+                          replacement: replacement, line: line, label: label, anchor: anchor,
+                          method_name: method_name)
     end
 
     def snippet(loc)
@@ -222,8 +242,155 @@ module RigorMutation
     end
   end
 
-  # Drives the warm loop: build env + scan once, analyse the baseline, then
-  # each mutant, and judge kills by diagnostic-set difference.
+  # Builds the warm session once: config + ProjectContext (RBS environment +
+  # whole-project ProjectScan memoised). Progress goes to stderr so a sweep's
+  # `--json` stdout stays clean.
+  module Session
+    module_function
+
+    def build(config_path)
+      config = Rigor::Configuration.load(config_path)
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      ctx = Rigor::LanguageServer::ProjectContext.new(configuration: config)
+      ctx.environment
+      ctx.project_scan
+      elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t) * 1000).round(1)
+      warn "cold setup (env + project scan): #{elapsed} ms"
+      [config, ctx]
+    end
+  end
+
+  # Analyses one file's mutants against its clean baseline over the shared warm
+  # session. Reused by the single-file Harness and the multi-file Sweep.
+  class Analyzer
+    Result = Struct.new(:path, :records, :baseline_size, :dropped, keyword_init: true)
+
+    def initialize(config:, ctx:, operators:, type_filter:)
+      @config = config
+      @ctx = ctx
+      @operators = operators
+      @type_filter = type_filter
+    end
+
+    # @return [Result, nil] nil when the file yields no (type-relevant) mutants.
+    def run_file(path, seed:, limit:)
+      # Force UTF-8: the Flake shell's default external encoding can be
+      # US-ASCII, making byte-splicing a non-ASCII file raise an encoding error.
+      source = File.read(path, encoding: Encoding::UTF_8)
+      mutator = Mutator.new(source, operators: @operators)
+      raw = mutator.mutations
+      return nil if raw.empty?
+
+      dropped = 0
+      raw, dropped = mutator.filter_by_type(raw, environment: @ctx.environment, path: path) if @type_filter
+      muts = sample(raw, seed, limit)
+      return nil if muts.empty?
+
+      baseline = signatures(analyse(source, path).diagnostics)
+      records = muts.map { |mut| evaluate(source, path, mut, baseline) }
+      Result.new(path: path, records: records, baseline_size: baseline.size, dropped: dropped)
+    end
+
+    private
+
+    def sample(mutations, seed, limit)
+      shuffled = mutations.shuffle(random: Random.new(seed))
+      limit ? shuffled.first(limit) : shuffled
+    end
+
+    # cache_store: nil + prebuilt: scan ⇒ the run cache is bypassed and the
+    # mutant is always re-analysed against the in-memory bytes.
+    def analyse(mutant_source, path)
+      runner = Rigor::Analysis::Runner.new(
+        configuration: @config, environment: @ctx.environment, prebuilt: @ctx.project_scan,
+        cache_store: nil, collect_stats: false
+      )
+      runner.run_source(source: mutant_source, path: path)
+    end
+
+    def evaluate(source, path, mut, baseline)
+      mutant_source = mut.apply(source)
+      return record(mut, :invalid, 0.0, []) unless Prism.parse(mutant_source).success?
+
+      t = clock
+      diags = analyse(mutant_source, path).diagnostics
+      elapsed = ms(clock - t)
+      new_diags = diags.reject { |d| baseline.include?(sig(d)) }
+      status = new_diags.empty? ? :survived : :killed
+      record(mut, status, elapsed, new_diags.map(&:rule).uniq,
+             expected_hit: new_diags.any? { |d| d.rule == mut.expected_rule })
+    rescue StandardError => e
+      # A harness-level failure on one mutant must not abort the run.
+      record(mut, :invalid, 0.0, [], error: "#{e.class}: #{e.message}")
+    end
+
+    def record(mut, status, elapsed, new_rules, expected_hit: false, error: nil)
+      { mut: mut, status: status, ms: elapsed, new_rules: new_rules, expected_hit: expected_hit, error: error }
+    end
+
+    def signatures(diags) = diags.map { |d| sig(d) }.to_set
+    def sig(diag) = [diag.rule, diag.path, diag.line, diag.column, diag.message]
+    def clock = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    def ms(seconds) = (seconds * 1000).round(1)
+  end
+
+  # Shared text formatting for a set of per-mutant records.
+  module Report
+    module_function
+
+    def survivors(records, verbose:, with_path: false)
+      live = records.select { |r| r[:status] == :survived }
+      return if live.empty? && !verbose
+
+      puts "── survivors (no new diagnostic) ───────────────────────"
+      live.each { |r| puts "  #{site(r, with_path)} #{format('%-16s', r[:mut].operator)} #{r[:mut].label}" }
+      if verbose
+        puts "── killed ──────────────────────────────────────────────"
+        records.select { |r| r[:status] == :killed }.each do |r|
+          mark = r[:expected_hit] ? "✓expected" : "≠other"
+          puts "  #{site(r,
+                         with_path)} #{format('%-16s',
+                                              r[:mut].operator)} #{format('%-9s',
+                                                                          mark)} [#{r[:new_rules].join(',')}] #{r[:mut].label}"
+        end
+      end
+      puts
+    end
+
+    def per_operator(records)
+      puts "── per-operator ────────────────────────────────────────"
+      records.group_by { |r| r[:mut].operator }.sort_by { |op, _| op.to_s }.each do |op, rs|
+        puts format("  %-16s killed %-4d survived %-4d invalid %-4d  expected-rule-hit %d",
+                    op, count(rs, :killed), count(rs, :survived), count(rs, :invalid),
+                    rs.count { |r| r[:expected_hit] })
+      end
+    end
+
+    def summary(records)
+      killed = count(records, :killed)
+      survived = count(records, :survived)
+      total = killed + survived
+      timings = records.select { |r| r[:status] != :invalid }.map { |r| r[:ms] }.sort
+      puts "\n── summary ──────────────────────────────────────────────"
+      puts "analysed mutants : #{total}   (invalid/skipped: #{count(records, :invalid)})"
+      puts "killed           : #{killed}"
+      puts "survived         : #{survived}  ← false-negative candidates"
+      puts "teeth (kill %)   : #{total.zero? ? 'n/a' : "#{(100.0 * killed / total).round(1)}%"}"
+      return if timings.empty?
+
+      puts "per-mutant ms    : median #{timings[timings.size / 2]}  p90 #{timings[(timings.size * 0.9).floor]}  max #{timings.last}"
+    end
+
+    def count(records, status) = records.count { |r| r[:status] == status }
+
+    def site(record, with_path)
+      return format("L%-4d", record[:mut].line) unless with_path
+
+      format("%-44s", "#{record[:path]}:#{record[:mut].line}")
+    end
+  end
+
+  # Single-file run with a full per-mutant breakdown.
   class Harness
     def initialize(target:, config_path:, limit:, seed:, operators:, verbose:, type_filter:)
       @target = target
@@ -236,181 +403,182 @@ module RigorMutation
     end
 
     def run
-      # Force UTF-8: the Flake shell's default external encoding can be
-      # US-ASCII, which makes byte-splicing a file with non-ASCII content raise
-      # Encoding::CompatibilityError.
-      source = File.read(@target, encoding: Encoding::UTF_8)
-      mutator = Mutator.new(source, operators: @operators)
-      raw = mutator.mutations
-      abort("no mutations generated for #{@target}") if raw.empty?
+      config, ctx = Session.build(@config_path)
+      result = Analyzer.new(config: config, ctx: ctx, operators: @operators, type_filter: @type_filter)
+                       .run_file(@target, seed: @seed, limit: @limit)
+      abort("no type-relevant mutations for #{@target} (try --no-type-filter)") if result.nil?
 
-      config = Rigor::Configuration.load(@config_path)
-      ctx = build_context(config)
+      note = @type_filter ? "  (type-filter dropped #{result.dropped} non-concrete-anchor sites)" : "  (type-filter off)"
+      puts "baseline diagnostics on #{@target}: #{result.baseline_size}"
+      puts "mutations: #{result.records.size}#{note} (seed=#{@seed}, ops=#{@operators.join(',')})\n\n"
+      Report.survivors(result.records, verbose: @verbose)
+      Report.per_operator(result.records)
+      Report.summary(result.records)
+    end
+  end
 
-      dropped = 0
-      raw, dropped = mutator.filter_by_type(raw, environment: ctx.environment, path: @target) if @type_filter
-      mutations = select(raw)
-      abort("no type-relevant mutations for #{@target} (try --no-type-filter)") if mutations.empty?
+  # Corpus sweep: one warm session, every file's survivors aggregated and
+  # clustered into a ranked false-negative backlog for the engine.
+  class Sweep
+    def initialize(paths:, config_path:, per_file:, seed:, operators:, type_filter:, json:, top:)
+      @paths = paths
+      @config_path = config_path
+      @per_file = per_file
+      @seed = seed
+      @operators = operators
+      @type_filter = type_filter
+      @json = json
+      @top = top
+    end
 
-      baseline = signatures(analyse(config, ctx, source).diagnostics)
-      puts "baseline diagnostics on #{@target}: #{baseline.size}"
-      note = @type_filter ? "  (type-filter dropped #{dropped} non-concrete-anchor sites)" : "  (type-filter off)"
-      puts "mutations: #{mutations.size}#{note} (seed=#{@seed}, ops=#{@operators.join(',')})\n\n"
+    def run
+      files = expand(@paths)
+      abort("no .rb files under: #{@paths.join(' ')}") if files.empty?
+      config, ctx = Session.build(@config_path)
+      analyzer = Analyzer.new(config: config, ctx: ctx, operators: @operators, type_filter: @type_filter)
 
-      records = mutations.map { |mut| evaluate(config, ctx, source, mut, baseline) }
-      report(records)
+      records = []
+      files.each_with_index do |path, i|
+        warn format("[%d/%d] %s", i + 1, files.size, path)
+        result = analyzer.run_file(path, seed: @seed, limit: @per_file)
+        records.concat(result.records.map { |r| r.merge(path: result.path) }) if result
+      end
+      @json ? emit_json(records, files.size) : emit_text(records, files.size)
     end
 
     private
 
-    def select(mutations)
-      shuffled = mutations.shuffle(random: Random.new(@seed))
-      @limit ? shuffled.first(@limit) : shuffled
-    end
-
-    # The expensive part, paid once. ProjectContext memoises both the RBS
-    # environment and the whole-project ProjectScan.
-    def build_context(config)
-      t = clock
-      ctx = Rigor::LanguageServer::ProjectContext.new(configuration: config)
-      ctx.environment
-      ctx.project_scan
-      puts "cold setup (env + project scan): #{ms(clock - t)} ms"
-      ctx
-    end
-
-    # One analysis of `mutant_source` overlaid at @target. cache_store: nil +
-    # prebuilt: scan ⇒ the run cache is bypassed and the mutant is always
-    # re-analysed against the in-memory bytes.
-    def analyse(config, ctx, mutant_source)
-      runner = Rigor::Analysis::Runner.new(
-        configuration: config,
-        environment: ctx.environment,
-        prebuilt: ctx.project_scan,
-        cache_store: nil,
-        collect_stats: false
-      )
-      runner.run_source(source: mutant_source, path: @target)
-    end
-
-    def evaluate(config, ctx, source, mut, baseline)
-      mutant_source = mut.apply(source)
-      return { mut: mut, status: :invalid, ms: 0.0, new_rules: [] } unless Prism.parse(mutant_source).success?
-
-      t = clock
-      diags = analyse(config, ctx, mutant_source).diagnostics
-      elapsed = ms(clock - t)
-      new_diags = diags.reject { |d| baseline.include?(sig(d)) }
-      status = new_diags.empty? ? :survived : :killed
-      { mut: mut, status: status, ms: elapsed, new_rules: new_diags.map(&:rule).uniq,
-        expected_hit: new_diags.any? { |d| d.rule == mut.expected_rule } }
-    rescue StandardError => e
-      # A harness-level failure on one mutant must not abort the whole run.
-      { mut: mut, status: :invalid, ms: 0.0, new_rules: [], error: "#{e.class}: #{e.message}" }
-    end
-
-    def signatures(diags)
-      diags.map { |d| sig(d) }.to_set
-    end
-
-    def sig(diag)
-      [diag.rule, diag.path, diag.line, diag.column, diag.message]
-    end
-
-    def report(records)
-      run_records = records.reject { |r| r[:status] == :invalid }
-      timings = run_records.map { |r| r[:ms] }.sort
-
-      print_survivors(records)
-      print_per_operator(records)
-
-      killed = run_records.count { |r| r[:status] == :killed }
-      survived = run_records.count { |r| r[:status] == :survived }
-      invalid = records.count { |r| r[:status] == :invalid }
-      total = killed + survived
-
-      puts "\n── summary ──────────────────────────────────────────────"
-      puts "analysed mutants : #{total}   (invalid/skipped: #{invalid})"
-      puts "killed           : #{killed}"
-      puts "survived         : #{survived}  ← false-negative candidates"
-      puts "targeted kill %  : #{total.zero? ? 'n/a' : "#{(100.0 * killed / total).round(1)}%"}"
-      return if timings.empty?
-
-      puts "per-mutant ms    : median #{timings[timings.size / 2]}  p90 #{timings[(timings.size * 0.9).floor]}  max #{timings.last}"
-    end
-
-    def print_survivors(records)
-      survivors = records.select { |r| r[:status] == :survived }
-      return if survivors.empty? && !@verbose
-
-      puts "── survivors (no new diagnostic) ───────────────────────"
-      survivors.each do |r|
-        puts format("  L%-4d %-16s %s", r[:mut].line, r[:mut].operator, r[:mut].label)
-      end
-      if @verbose
-        puts "── killed ──────────────────────────────────────────────"
-        records.select { |r| r[:status] == :killed }.each do |r|
-          mark = r[:expected_hit] ? "✓expected" : "≠other"
-          puts format("  L%-4d %-16s %-9s [%s] %s", r[:mut].line, r[:mut].operator, mark,
-                      r[:new_rules].join(","), r[:mut].label)
+    def expand(paths)
+      paths.flat_map do |p|
+        if File.directory?(p) then Dir.glob(File.join(p, "**", "*.rb"))
+        elsif File.file?(p) then [p]
+        else Dir.glob(p).select { |f| f.end_with?(".rb") }
         end
-      end
-      puts
+      end.uniq.sort
     end
 
-    def print_per_operator(records)
-      puts "── per-operator ────────────────────────────────────────"
-      records.group_by { |r| r[:mut].operator }.sort_by { |op, _| op.to_s }.each do |op, rs|
-        killed = rs.count { |r| r[:status] == :killed }
-        survived = rs.count { |r| r[:status] == :survived }
-        invalid = rs.count { |r| r[:status] == :invalid }
-        expected = rs.count { |r| r[:expected_hit] }
-        puts format("  %-16s killed %-3d survived %-3d invalid %-3d  expected-rule-hit %d",
-                    op, killed, survived, invalid, expected)
-      end
+    # Cluster survivors by (operator, receiver type). A cluster is a systematic
+    # blind spot: "mutating <operator> on a <receiver> never fires".
+    def clusters(records)
+      records.select { |r| r[:status] == :survived }
+             .group_by { |r| [r[:mut].operator, cluster_type(r[:mut].anchor_type)] }
+             .map { |(op, type), rs| cluster(op, type, rs) }
+             .sort_by { |c| -c[:count] }
     end
 
-    def clock = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    def ms(seconds) = (seconds * 1000).round(1)
+    def cluster(operator, receiver, rs)
+      methods = rs.map { |r| r[:mut].method_name }.compact.tally.sort_by { |_, c| -c }.first(5).map(&:first)
+      { operator: operator, receiver: receiver, count: rs.size, methods: methods,
+        examples: rs.first(3).map { |r| "#{r[:path]}:#{r[:mut].line}" } }
+    end
+
+    def cluster_type(type)
+      return "(unresolved)" if type.nil?
+
+      type.to_s.gsub(/"[^"]*"/, '"…"').gsub(/\b\d+\b/, "N")
+    end
+
+    def emit_text(records, file_count)
+      warn "" # separate progress from the report
+      puts "swept #{file_count} files, #{records.size} mutants analysed\n\n"
+      Report.per_operator(records)
+      Report.summary(records)
+      print_clusters(clusters(records))
+    end
+
+    def print_clusters(clusters)
+      puts "\n── survivor clusters (false-negative backlog, ranked) ───"
+      if clusters.empty?
+        puts "  none — every type-relevant mutant was killed"
+        return
+      end
+      clusters.first(@top).each do |c|
+        puts format("  %-4d %-16s recv=%s", c[:count], c[:operator], c[:receiver])
+        puts "       methods: #{c[:methods].join(', ')}" unless c[:methods].empty?
+        puts "       e.g. #{c[:examples].join('  ')}"
+      end
+      puts "  (#{clusters.size - @top} more clusters)" if clusters.size > @top
+    end
+
+    def emit_json(records, file_count)
+      killed = Report.count(records, :killed)
+      survived = Report.count(records, :survived)
+      total = killed + survived
+      payload = {
+        "files" => file_count,
+        "analysed" => total,
+        "killed" => killed,
+        "survived" => survived,
+        "teeth_pct" => total.zero? ? nil : (100.0 * killed / total).round(1),
+        "clusters" => clusters(records)
+      }
+      puts JSON.pretty_generate(payload)
+    end
   end
 
   class CLI
     def self.run(argv)
-      options = { config: nil, limit: nil, seed: 1, operators: Mutator::OPERATORS,
-                  dry_run: false, verbose: false, type_filter: true }
-      parser = OptionParser.new do |o|
-        o.banner = "usage: bundle exec ruby tool/mutation/mutate.rb <target.rb> [options]"
+      sweep = argv.first == "sweep" && argv.shift
+      options = defaults
+      parse(argv, options, sweep: !!sweep)
+      sweep ? run_sweep(argv, options) : run_single(argv, options)
+    end
+
+    def self.defaults
+      { config: nil, limit: nil, per_file: 40, top: 25, seed: 1,
+        operators: Mutator::OPERATORS, dry_run: false, verbose: false, type_filter: true, json: false }
+    end
+
+    def self.parse(argv, options, sweep:) # rubocop:disable Metrics/AbcSize
+      OptionParser.new do |o|
+        o.banner = if sweep
+                     "usage: bundle exec ruby tool/mutation/mutate.rb sweep <paths...> [options]"
+                   else
+                     "usage: bundle exec ruby tool/mutation/mutate.rb <target.rb> [options]"
+                   end
         o.on("--config PATH", "Rigor config file (default: auto-discover)") { |v| options[:config] = v }
-        o.on("--limit N", Integer, "sample at most N mutants") { |v| options[:limit] = v }
+        o.on("--limit N", Integer, "single mode: sample at most N mutants") { |v| options[:limit] = v }
+        o.on("--per-file N", Integer, "sweep mode: sample at most N mutants/file (default 40)") do |v|
+          options[:per_file] = v
+        end
+        o.on("--top N", Integer, "sweep mode: show the top N survivor clusters (default 25)") { |v| options[:top] = v }
         o.on("--seed N", Integer, "RNG seed for sampling (default 1)") { |v| options[:seed] = v }
         o.on("--operators LIST", "comma list: #{Mutator::OPERATORS.join(',')}") do |v|
           options[:operators] = v.split(",").map(&:strip).map(&:to_sym)
         end
-        o.on("--no-type-filter", "keep every mutation, even on Dynamic sites (A/B the filter)") do
-          options[:type_filter] = false
-        end
-        o.on("--dry-run", "list mutations, don't analyse (pre-filter)") { options[:dry_run] = true }
-        o.on("--verbose", "also list killed mutants + the rule that fired") { options[:verbose] = true }
+        o.on("--no-type-filter", "keep every mutation, even on Dynamic sites") { options[:type_filter] = false }
+        o.on("--json", "sweep mode: emit the clustered backlog as JSON") { options[:json] = true }
+        o.on("--dry-run", "single mode: list mutations, don't analyse") { options[:dry_run] = true }
+        o.on("--verbose", "single mode: also list killed mutants + the rule") { options[:verbose] = true }
         o.on("-h", "--help") do
           puts o
           exit
         end
-      end
-      parser.parse!(argv)
+      end.parse!(argv)
+    end
 
+    def self.run_single(argv, options)
       target = argv.shift
-      abort(parser.to_s) unless target
+      abort("usage: mutate.rb <target.rb> [options]  |  mutate.rb sweep <paths...>") unless target
       abort("not a file: #{target}") unless File.file?(target)
 
-      if options[:dry_run]
-        dry_run(target, options)
-      else
-        Harness.new(
-          target: target, config_path: options[:config], limit: options[:limit],
-          seed: options[:seed], operators: options[:operators], verbose: options[:verbose],
-          type_filter: options[:type_filter]
-        ).run
-      end
+      return dry_run(target, options) if options[:dry_run]
+
+      Harness.new(
+        target: target, config_path: options[:config], limit: options[:limit],
+        seed: options[:seed], operators: options[:operators], verbose: options[:verbose],
+        type_filter: options[:type_filter]
+      ).run
+    end
+
+    def self.run_sweep(argv, options)
+      abort("sweep needs at least one path/dir/glob") if argv.empty?
+
+      Sweep.new(
+        paths: argv, config_path: options[:config], per_file: options[:per_file],
+        seed: options[:seed], operators: options[:operators], type_filter: options[:type_filter],
+        json: options[:json], top: options[:top]
+      ).run
     end
 
     def self.dry_run(target, options)

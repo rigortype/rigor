@@ -55,8 +55,8 @@ Load each reference when you reach its phase. The phases assume prior context, s
 
 | Module | Read | Covers | Output of this module |
 | --- | --- | --- | --- |
-| 1 | [`references/01-requirements-and-templates.md`](references/01-requirements-and-templates.md) | **Phases 1–2.** Five-question scope check (trigger surface / look at / prove / diagnostic / config). Picks ADR-16 macro-substrate tier (A/B/C/D, declarative) or a `node_rule` template from six worked examples. | Five Q&A answers + one template name from the table. |
-| 2 | [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) | **Phases 3–5.** Directory tree, gemspec, plugin class skeleton, per-template `node_rule` patterns (engine owns the walk; `node_file_context` / `NodeContext` for two-pass / lexical context), calling the target library directly instead of reimplementing it (ADR-39: `Plugin::Inflector`, `Base.suggest`, the `plugins_isolation:` strategy), IoBoundary + cache producer rule (read BEFORE `cache_for`), demo project with `tmp/`-anchored cache + per-demo `.gitignore`. | Working plugin directory + runnable `demo/` whose `rigor check` diagnostic stream matches expectations. |
+| 1 | [`references/01-requirements-and-templates.md`](references/01-requirements-and-templates.md) | **Phases 1–2.** Five-question scope check (trigger surface / look at / prove / diagnostic / config). Picks ADR-16 macro-substrate tier (A/B/C, declarative) or a `node_rule` template from six worked examples. | Five Q&A answers + one template name from the table. |
+| 2 | [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) | **Phases 3–5.** Directory tree, gemspec, plugin class skeleton, per-template `node_rule` patterns (engine owns the walk; `node_file_context` / `NodeContext` for two-pass / lexical context), calling the target library directly instead of reimplementing it (ADR-39: `Plugin::Inflector`, `Base.suggest`, the `plugins_isolation:` strategy), IoBoundary + cache producer rule (ADR-60 WD3 record-and-validate: read inside the block, declare `watch:` for directory globs; `producer_value` / `producer_error` for the lazy-load + error surface), demo project with `tmp/`-anchored cache + per-demo `.gitignore`. | Working plugin directory + runnable `demo/` whose `rigor check` diagnostic stream matches expectations. |
 | 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phases 6–10.** RSpec integration helpers, README sections, CHANGELOG `[Unreleased]` entry, `make verify` expectations, commit subject convention. | Passing integration spec + README + CHANGELOG entry + one green `make verify` + one commit. |
 | 4 | [`references/04-appendix.md`](references/04-appendix.md) | **Side material.** Common pitfalls (top 10), real-Rails alignment for `rigor-rails-*` plugins, post-ADR-9 `services.fact_store` cross-plugin pattern, reading list, closing checklist. | Reference-only — no fixed output. Consult per the surface the plugin touches. |
 
@@ -69,7 +69,8 @@ ADR-16 substrate (declarative, no walker):
   Tier A  → plugins/rigor-sinatra/        (block-as-method)
   Tier B  → plugins/rigor-devise/         (trait registry)
   Tier C  → plugins/rigor-dry-struct/     (heredoc template)
-  Tier D  → contract only as of v0.1.x
+  (Tier D external_files was removed pre-1.0 by ADR-60 WD1;
+   it returns demand-gated with its engine integration.)
 
 Node-rule templates (engine owns the walk, ADR-37):
   Q1=A/B Q2=A Q3=A Q5=C        → examples/rigor-deprecations/  (~80 lines; config-driven)
@@ -110,7 +111,7 @@ If the request shifts mid-flow (e.g. user later says "and also error when the va
 ## Troubleshooting (most common at landing time)
 
 - **`make verify` fails on the new spec** — the spec doesn't `Rigor::Plugin.unregister!` in `before` + `after`. See [`references/04-appendix.md`](references/04-appendix.md) § Common pitfalls #2.
-- **Cache key never invalidates** — `io_boundary.read_file` was called AFTER `cache_for` instead of before. See [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) Phase 4.5.
+- **A newly-added file isn't picked up by a glob producer** — the producer reads files in-block (captured by ADR-60 WD3 record-and-validate) but did not declare `watch:`, so a *new* file the prior run never read reads as fresh. Add `watch: -> { [[@search_paths, "**/*.rb"]] }`. See [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) Phase 4.5.
 - **Diagnostics don't appear in the demo output** — `source_family:` was passed to the `Diagnostic` constructor. Don't — the runner overwrites it. See pitfall #7.
 - **`Prism::CallNode#name == "foo"` always false** — `node.name` returns a `Symbol`. Use `== :foo`. See pitfall #4.
 - **Plugin's `lib/` not on load path in tests** — spec needs `$LOAD_PATH.unshift(...)` before `require "rigor-<id>"`. See pitfall #10.

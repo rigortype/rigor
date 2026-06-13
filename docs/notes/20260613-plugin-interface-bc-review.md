@@ -195,9 +195,27 @@ byte-identical + `make verify`（`check-plugins` 込み）+ `make bench-perf` �
 
 ## Follow-up
 
-- Tier 1 (a)(b)(c) を 1 本の ADR（「凍結前プラグイン契約最終整理」）として起票し、
-  ADR-50 WD1 の凍結列挙と同じチェンジセットで突合する。(c) は単独 ADR に切り出す
-  選択肢もある（キャッシュ意味論の変更で stakes が一段高い）。
-- Tier 2-1/2-2 のヘルパー追加 + 2-3 の文書化は ADR 不要、通常スライスで。
+**実装済み 2026-06-13** — 本レビューの提言は [ADR-60](../adr/60-pre-freeze-plugin-contract-consolidation.md)
+として起票し、全 WD を着地させた:
+
+- **WD1 (Tier 1-a)**: `external_files:` フィールド + `Macro::ExternalFile` 撤去
+  (rigor-rbs-inline の手書き Manifest 再構築が唯一の実利用者で、これも移行)。
+- **WD2 (Tier 1-b)**: `BlockAsMethod` `verbs:`→`method_names:`、
+  `NestedClassTemplate` `name_arg_position:`→`symbol_arg_position:`(エイリアス無し)。
+- **WD3 (Tier 1-c)**: `cache_for` を record-and-validate(`fetch_or_validate` +
+  ブロック実行後の依存記述子捕捉)へ。`producer watch:` + `Cache::Descriptor::GlobEntry`
+  新設。bundled 全 11 producer プラグインを移行し、prime-before-cache_for と
+  手動 `glob_descriptor` 合成を全廃、`glob_descriptor` は私有化。
+- **WD4 (Tier 2)**: `read_fact` / `producer_value` + `producer_error` /
+  `diagnostics_for` を `Plugin::Base` に追加し、12 の `*_or_nil` メモ・7 の
+  fact 読み出し・~23 の violation マッピングを移行。
+- **WD5 (Tier 2-3)**: 両 `rigor-plugin-author` SKILL を更新
+  (rename・record-and-validate・ヘルパー・`type_specifier`/`TypeNodeResolver`・
+  fact 公開 2 流儀・エラー処理ガイダンス)。
+
+Tier 3 の keep-verdict(`dynamic_return`/`type_specifier` 分離、
+`diagnostics_for_file`、`config_schema` 二重文法)は ADR-60 に rejected-alternative
+として記録。`make verify`(self-check + check-plugins 込み)全 green。
+
 - 本ノートの採用頻度・ボイラープレート実測値は v0.2.0 の external-author SKILL
   設計の入力にもなる。

@@ -38,7 +38,7 @@ ADR-7 § "Slice 6" pins three implementation choices:
 
 ## Public surface (drift-pinned)
 
-### `Rigor::Plugin::Base.producer(id, serialize: nil, deserialize: nil, &block)`
+### `Rigor::Plugin::Base.producer(id, watch: nil, serialize: nil, deserialize: nil, &block)`
 
 Class-level DSL that registers a producer. The block is the
 producer body; it runs through `instance_exec` so `self`
@@ -48,8 +48,24 @@ receives the call-site `params` Hash as its sole argument;
 `params` mixes into the cache key per
 `Cache::Descriptor#cache_key_for` (v0.0.8).
 
-`serialize:` / `deserialize:` are forwarded verbatim to
-`Cache::Store#fetch_or_compute`. Default round-trip is
+`watch:` (ADR-60 WD3) declares the glob coverage of a
+discovery-style producer — the directories whose file
+*additions* / *removals* must invalidate the cached value even
+when the producer block read its inputs by globbing (so an
+in-block read can't see a file that wasn't there). It is either
+a static `Array` of `[roots, pattern, …]` tuples (`roots` a
+`String` or `Array<String>`; one or more glob-pattern suffixes
+per tuple), or a `Proc` run through `instance_exec` on the
+plugin instance at `cache_for` time (NOT at class-definition
+time — search roots are typically computed in `#init` from
+config) returning that Array. Each evaluated `(root, pattern)`
+becomes a `Cache::Descriptor::GlobEntry` row in the producer's
+dependency descriptor — one entry digests the whole glob, so a
+content change, an addition, or a removal all invalidate.
+
+`serialize:` / `deserialize:` apply to the producer's return
+**value** (the cache layer wraps them around the stored
+`[value, dependency_descriptor]` pair). Default round-trip is
 `Marshal.dump` / `Marshal.load` per the v0.0.9 callable
 surface; producers whose return values are not Marshal-clean
 (RBS-native objects with `RBS::Location` members, raw `IO`,
@@ -64,37 +80,31 @@ registration and producer tables stay flat.
 
 Memoised per-plugin `Rigor::Plugin::IoBoundary` (slice 2). The
 boundary's accumulated entries feed cache invalidation for
-`cache_for` round-trips: reads through `io_boundary` that happen
-**before** `cache_for` is called are folded into the descriptor.
-`#read_file(path)` records a `:digest` `FileEntry`; `#open_url(url)`
-records a `ConfigEntry` keyed `"url:#{url}"` whose `value_hash` is the
-response body's SHA-256, so a changed remote payload invalidates the
-slice the same way a changed file does. See "Invalidation contract"
-below.
+`cache_for` round-trips: under ADR-60 WD3 record-and-validate the
+boundary snapshot is taken **after** the producer block runs, so
+every read the block performs (including reads it discovers
+mid-computation) is captured — there is no "read before
+`cache_for`" ordering requirement. `#read_file(path)` records a
+`:digest` `FileEntry`; `#open_url(url)` records a `ConfigEntry`
+keyed `"url:#{url}"` whose `value_hash` is the response body's
+SHA-256. A `ConfigEntry` (URL read) in the dependency descriptor
+makes the entry never-fresh — a producer that fetched a URL
+recomputes every run, which is sound (a remote document has no
+cheap local re-validation). See "Invalidation contract" below.
 
-### `Rigor::Plugin::Base#glob_descriptor(roots, *patterns)`
-
-Discovery-glob helper that returns a `Cache::Descriptor` whose `files:`
-slot carries one `:digest` `FileEntry` per file found under `roots`
-matching any of `patterns` (joined `File.join(root, pattern)`; multiple
-patterns union). Pass the result as `cache_for`'s `descriptor:` so a
-producer that scans a *set* of discovered files (every factory, every
-`app/policies/**/*.rb`) invalidates on any file's content change,
-addition, or removal — the case the `IoBoundary` alone misses because
-the producer has not read the files yet on a cold call. `roots` are
-relative to the project root or absolute. The helper pays one SHA-256
-read per matched file at call time; for discovery globs in the 10–100
-file range this is negligible against the producer's parse-and-walk on
-a miss. This is the supported alternative to a hand-rolled
-discovery-digest descriptor (which `rigor-factorybot` previously
-re-invented before migrating onto the helper).
+`Plugin::Base#glob_descriptor(roots, *patterns)` became **private**
+in ADR-60 WD3 (it is the building block `watch:` is implemented on);
+plugin code declares `watch:` instead of composing descriptors by
+hand.
 
 ### `Rigor::Plugin::Base#cache_for(producer_id, params: {}, descriptor: nil)`
 
 Returns a callable that performs the cache round-trip for the
-named producer. The callable, when called, returns the cached
-value (on hit) or runs the producer block (on miss) and writes
-the result.
+named producer through `Cache::Store#fetch_or_validate` (the
+ADR-45 record-and-validate path). The callable, when called,
+returns the cached value when the recorded dependencies are
+still fresh, or runs the producer block and records a fresh
+entry otherwise.
 
 When `services.cache_store` is `nil` (e.g. CLI `--no-cache`),
 the callable bypasses the cache and runs the producer block
@@ -107,70 +117,81 @@ on a plugin with `manifest.id = "rails"` lives at
 `<root>/plugin.rails.schema_table/<2-prefix>/<62-suffix>.entry`.
 
 The optional `descriptor:` kwarg supplies extra
-`Cache::Descriptor` rows the plugin author wants to compose
-into the auto-built descriptor — typically gem-version
-`GemEntry`, configuration-file `FileEntry` digests, or
-`ConfigEntry` rows for external state the {IoBoundary} cannot
+`Cache::Descriptor` rows for **identity** inputs that belong in
+the cache *key* — typically gem-version `GemEntry` pins or
+`ConfigEntry` rows for external state the `IoBoundary` cannot
 capture itself. The passed descriptor flows through
-`Cache::Descriptor.compose` with the auto-built one
-(`PluginEntry` template + boundary reads); per-slot conflicts
-raise `Cache::Descriptor::Conflict` so divergent inputs
-surface rather than silently shadowing.
+`Cache::Descriptor.compose` with the auto-built `PluginEntry`
+template; per-slot conflicts raise `Cache::Descriptor::Conflict`
+so divergent inputs surface rather than silently shadowing. The
+`IoBoundary` read history does NOT enter the key — it is recorded
+post-compute into the dependency descriptor.
 
 ## Cache descriptor composition (6-B)
 
-`Plugin::Base#cache_for` auto-assembles the descriptor from:
+`Plugin::Base#cache_for` keys the entry on the stable identity
+inputs and records the read dependencies separately:
 
-- The plugin's **`PluginEntry` template**: `(id, version,
-  config_hash)`. `config_hash` is the SHA-256 of the
-  canonicalised plugin config (sorted keys, recursive Symbol
-  → String) so two instances of the same plugin with
-  different `config:` values land in different cache slices.
-- The plugin's **`IoBoundary#cache_descriptor`**: every
-  `:digest` `FileEntry` the boundary recorded by the time
-  `cache_for` is called.
-- The user's **`params:`** hash (mixed into the cache key
-  through `Descriptor#cache_key_for`).
+- **Key descriptor** — the plugin's **`PluginEntry` template**
+  `(id, version, config_hash)` (where `config_hash` is the
+  SHA-256 of the canonicalised plugin config — sorted keys,
+  recursive Symbol → String — so two instances with different
+  `config:` land in different slices), composed with the
+  optional `descriptor:` identity extras, plus the user's
+  **`params:`** hash (mixed through `Descriptor#cache_key_for`).
+- **Dependency descriptor** (recorded after the block runs, then
+  re-validated by re-digest on the next run via
+  `Descriptor#fresh?`) — the `IoBoundary`'s post-compute
+  `FileEntry` / `ConfigEntry` reads plus the evaluated `watch:`
+  `GlobEntry` rows.
 
-Plugin authors do not construct descriptors manually. Custom
-descriptor extensions (extra `FileEntry` / `GemEntry` /
-`ConfigEntry` rows beyond the boundary's reads) ride a future
-API; slice 6 ships only the auto-built path.
+Plugin authors do not construct descriptors manually: in-block
+reads are captured automatically, and `watch:` declares glob
+coverage.
 
 ## Invalidation contract
 
-The IoBoundary integration only reflects reads that happen
-**before** `cache_for` is called. The recommended pattern is:
+Under ADR-60 WD3 the dependency descriptor is recorded **after**
+the producer block runs, so a producer reads its inputs inside
+the block and `watch:` covers a directory glob's additions /
+removals:
 
 ```ruby
 class MyRailsPlugin < Rigor::Plugin::Base
   manifest(id: "rails", version: "0.1.0")
 
+  # Single named file: the in-block read is captured; no watch: needed.
   producer :schema_table do |params|
     schema = io_boundary.read_file(params.fetch(:schema_path))
     parse_schema(schema, params.fetch(:table))
   end
 
+  # Directory glob: watch: covers additions/removals. The Proc is
+  # instance_exec'd at cache_for time, so #init-derived roots are in scope.
+  producer :model_index, watch: -> { [[@model_search_paths, "**/*.rb"]] } do |_params|
+    ModelDiscoverer.new(io_boundary: io_boundary, search_paths: @model_search_paths).discover
+  end
+
   def schema_for(table)
-    schema_path = "db/schema.rb"
-    io_boundary.read_file(schema_path)             # populate boundary BEFORE cache_for
-    cache_for(:schema_table, params: { schema_path: schema_path, table: table }).call
+    producer_value(:schema_table, params: { schema_path: "db/schema.rb", table: table })
   end
 end
 ```
 
-The pre-`cache_for` `read_file` records a `:digest` `FileEntry`
-that lands in the descriptor; if the file changes between
-runs, the digest changes, the cache key changes, and
-`cache_for` falls through to the producer. The producer body
-re-reads the file at the same path; on a cache miss the
-boundary is re-populated and the post-fact digest is written
-into the new entry.
+The producer's in-block `read_file` records a `:digest`
+`FileEntry` into the dependency descriptor; if the file changes
+between runs, the recorded digest no longer matches, the entry
+is not fresh, and `cache_for` recomputes. A `watch:` glob digests
+every matching file, so adding or removing a file under the glob
+also invalidates. `producer_value(id, params:)` (ADR-60 WD4)
+runs the round-trip with a nil-inclusive memo and a
+`StandardError` rescue (`producer_error(id)` surfaces the failure);
+a plugin that needs distinct per-failure messages keeps a bespoke
+`rescue` ladder around `cache_for(id).call`.
 
-Plugin authors who want richer invalidation (gem versions,
-external configuration files, sibling plugin state) compose
-those into the params hash today; a future extension may add
-explicit descriptor parameters to `cache_for`.
+Identity inputs (gem versions, sibling-plugin config, external
+state the boundary can't read) compose into the **key** via the
+`descriptor:` kwarg; a key change is a cache miss.
 
 ## Cache-id sandbox (6-C)
 

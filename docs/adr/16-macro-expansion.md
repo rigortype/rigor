@@ -2,6 +2,8 @@
 
 Status: **Accepted — floor + precision promotion landed (slices 1–7 + 6a/6b), slice 5b + ADR-13 resolver-chain wiring for utility-type returns deferred to demand**, 2026-05-15.
 
+> **Naming note (2026-06-13):** [ADR-60 WD2](60-pre-freeze-plugin-contract-consolidation.md) renamed two manifest value-object keywords this ADR's examples still show under their original spelling — `Macro::BlockAsMethod` `verbs:` → `method_names:`, and `Macro::NestedClassTemplate` `name_arg_position:` → `symbol_arg_position:`. The current binding shapes are in [`macro-substrate.md`](../internal-spec/macro-substrate.md); the old keywords now raise `ArgumentError`.
+
 Triggered by the per-library survey
 [`docs/notes/20260515-macro-expansion-library-survey.md`](../notes/20260515-macro-expansion-library-survey.md)
 covering Rails (`ActiveSupport::Concern`, ActiveStorage attached macros),

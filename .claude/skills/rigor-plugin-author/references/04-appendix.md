@@ -22,9 +22,9 @@ When authoring a Rails-side plugin (`rigor-rails-routes`, `rigor-actionpack`, `r
 - **Integration specs may exec real Rails to verify alignment.** Compare the plugin's parsed output against `rails routes -E` / `db:schema:dump` / similar real-Rails commands run against a small sample app in a tmpdir. The Rails sample app is a TEST-time tool, not a demo-time fixture.
 - **The roadmap lives in [`docs/design/20260508-rails-plugins-roadmap.md`](../../../../docs/design/20260508-rails-plugins-roadmap.md).** Tier 1 plugins are unblocked on the current API. Tier 2 needs the cross-plugin API ([ADR-9](../../../../docs/adr/9-cross-plugin-api.md)) and lands after that ships.
 
-## Cross-plugin facts (post-ADR-9)
+## Cross-plugin facts (ADR-9)
 
-Once ADR-9's slices land, plugins that consume facts another plugin produces use `services.fact_store`:
+Plugins that consume facts another plugin produces use `services.fact_store` (publish) + `read_fact` (consume):
 
 ```ruby
 # Producer side (e.g. rigor-activerecord):
@@ -46,17 +46,19 @@ class Actionpack < Plugin::Base
   )
 
   node_rule Prism::CallNode do |node, _scope, path|
-    ar_index = services.fact_store.read(plugin_id: "activerecord", name: :model_index)
+    ar_index = read_fact(plugin_id: "activerecord", name: :model_index)
     next [] if ar_index.nil?
     # ... use ar_index, positioned with diagnostic(node, …)
   end
 end
 ```
 
-Until ADR-9 ships, plugins that need cross-plugin data either:
+Read facts through `Plugin::Base#read_fact(plugin_id:, name:)` (ADR-60 WD4): it wraps `services.fact_store.read` with a nil-inclusive per-instance memo, so you never hand-roll the `@x` + `@x_resolved` flag pair to distinguish "fact not published" from "not yet read". A consumed fact that no loaded producer published reads as `nil` — degrade gracefully (the rule falls silent).
 
-- **Duplicate the read** — read `db/schema.rb` independently even though `rigor-activerecord` already does. Acceptable as an interim measure; flag in the plugin's README that it will consolidate once ADR-9 ships.
-- **Block on ADR-9** — defer the plugin until cross-plugin facts are available. Recommended for Tier 2 plugins per the roadmap.
+**Two publishing styles, pick by cost:**
+
+- **`prepare` + `fact_store.publish`** (shown above) — for a light, uncached scan run once per run. Used by `rigor-dry-types` / `rigor-graphql` / `rigor-mangrove`.
+- **A `producer` whose value other plugins read** — for a cached, IoBoundary-backed discovery. `rigor-activerecord` publishes its `producer :model_index` value in `prepare`; consumers `read_fact` it. Reach for this when the producing scan is expensive enough to want the record-and-validate cache.
 
 ---
 
@@ -72,7 +74,7 @@ When in doubt, read these in order:
 6. **[`docs/internal-spec/plugin-cache-producers.md`](../../../../docs/internal-spec/plugin-cache-producers.md)** — slice-6 normative surface (`producer` DSL, `cache_for`).
 7. **[`docs/adr/2-extension-api.md`](../../../../docs/adr/2-extension-api.md)** — binding design document. Read end-to-end before authoring a plugin that pushes the surface in a non-obvious direction.
 8. **`spec/rigor/public_api_drift_spec.rb`** — pins every public namespace plugins touch. If the plugin needs a method not in the drift snapshots, the method is internal — do not depend on it.
-9. **`spec/rigor/plugin/cache_producer_spec.rb`** — the "invalidates when files read via io_boundary BEFORE cache_for change between calls" example is the canonical reference for the slice-6 read-then-cache pattern.
+9. **`spec/rigor/plugin/cache_producer_spec.rb`** — the "recomputes when a file read INSIDE the producer block changes between sessions" + "recomputes when a `watch:`-globbed file is ADDED" examples are the canonical references for the ADR-60 WD3 record-and-validate cache pattern.
 
 ## Closing checklist
 

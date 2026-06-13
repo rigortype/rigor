@@ -2,6 +2,8 @@
 
 Status: **Accepted, 2026-05-30; Slice A implemented.**
 
+> **Naming note (2026-06-13):** [ADR-60 WD2](60-pre-freeze-plugin-contract-consolidation.md) renamed `Macro::NestedClassTemplate`'s `name_arg_position:` keyword (shown below) to `symbol_arg_position:`, matching its sibling value objects; the old keyword now raises `ArgumentError`. Binding shape: [`macro-substrate.md`](../internal-spec/macro-substrate.md).
+
 Records the decision to extend the [ADR-16](16-macro-expansion.md)
 macro-expansion substrate with a new tier that mints **nested
 subclasses** (not just methods) from a class-level DSL block, motivated

@@ -37,12 +37,15 @@ rows the rule positions with `diagnostic` (the bundled plugins follow
 this `Analyzer.violations_for` split, which also makes the logic
 unit-testable without running the whole engine).
 
-> The legacy `diagnostics_for_file(path:, scope:, root:)` hook — where
-> you hand-rolled a `def walk` / `compact_child_nodes.each` recursion
-> over `root` yourself — is the **deprecated whole-file escape valve**.
-> Use it only for a genuinely file-scoped result (a single load-error
-> row, or a check that needs the whole parsed file at once). New
-> node-scoped checks use `node_rule`.
+> `diagnostics_for_file(path:, scope:, root:)` is the **file-rule**
+> surface — use it for a genuinely file-scoped result (a single
+> load-error row, a cross-file aggregation, or a check that needs the
+> whole parsed file at once). It is not deprecated; it is the right tool
+> when a check isn't per-node. Per-node checks use `node_rule` (you don't
+> hand-roll a `def walk` / `compact_child_nodes.each` recursion — the
+> engine owns the walk). Map a violation array to diagnostics with
+> `diagnostics_for(violations, path:, node:)` rather than a hand-rolled
+> `.map { diagnostic(...) }`.
 
 ### Recognising call sites
 
@@ -59,7 +62,9 @@ re-deriving the `unescaped.to_sym` shape.
   validate references): declare `node_file_context { |root, scope| … }`.
   It runs once per file before the walk and its return value is threaded
   to every rule as `file_context`. (A *cross-file* collect belongs in
-  `#prepare` + `services.fact_store` instead — see
+  `#prepare` + `services.fact_store.publish`; the consuming plugin reads
+  it with `read_fact(plugin_id:, name:)` — the nil-inclusive memo means
+  you never hand-roll an `@x_resolved` flag. See
   [`01-plan-and-scaffold.md`](01-plan-and-scaffold.md).)
 - **Where the node sits**: `context` (a `Rigor::Plugin::NodeContext`)
   carries the lexical ancestor chain — `context.enclosing_def`,
@@ -213,16 +218,16 @@ plugin is confident; a wrong contribution propagates downstream.
 `rigor plugins --capabilities` catalogue enumerates — run it to see
 exactly what each loaded plugin contributes.
 
-> **The deprecated escape valve.** The original fat hook,
-> `flow_contribution_for(call_node:, scope:)`, returns a single
-> `Rigor::FlowContribution` and is still consulted alongside the narrow
-> DSLs. It is retained only for the two shapes the narrow DSLs do not
-> express: a **method-gated return type** (an RSpec `let(:x) { … }`
-> binding, a Sorbet `sig`-driven return — keyed on the method, not a
-> fixed receiver class) and a **dynamic per-project receiver set**
-> (ActiveStorage's `Attached::One` on discovered model classes). If your
-> plugin needs one of those, use `flow_contribution_for`; otherwise
-> prefer `dynamic_return` / `type_specifier`. These return-type surfaces
+> **The removed fat hook.** The original `flow_contribution_for(call_node:,
+> scope:)` was **deleted pre-1.0 in ADR-52 WD3** — defining it now raises
+> `ArgumentError` at load time. The two shapes it used to cover are
+> expressed by `dynamic_return`'s callable gates: a **method-gated return
+> type** (an RSpec `let(:x) { … }` binding, a Sorbet `sig`-driven return —
+> keyed on the method, not a fixed receiver class) uses
+> `dynamic_return methods: -> { [...] }` or `file_methods: ->(path) { [...] }`;
+> a **dynamic per-project receiver set** (ActiveStorage's `Attached::One`
+> on discovered model classes) uses `dynamic_return receivers: -> { [...] }`,
+> the callable resolved once after `#prepare`. These return-type surfaces
 > are the most contract-sensitive part of the API — implement one only
 > if the plugin genuinely needs to sharpen call-site types; a
 > diagnostics-only plugin skips them entirely.

@@ -138,36 +138,36 @@ These bundled plugins are all migrated onto `node_rule` — read one as a worked
 
 ## Phase 4.5 — IoBoundary + cache producer (rigor-routes only)
 
-If [Phase 1](01-requirements.md) Q2=E (external file), the plugin uses slice 2 + slice 6. The exact pattern is documented in `cache_producer_spec.rb` — but it is a TRAP if you get it wrong. The rule is:
+If [Phase 1](01-requirements.md) Q2=E (external file), the plugin uses slice 2 + slice 6. Since ADR-60 WD3 (`cache_for` is record-and-validate) the old "read BEFORE `cache_for`" trap is gone: the producer reads its inputs *inside* the block, and `cache_for` captures those reads into the dependency descriptor *after* the block runs. For a producer that globs a directory, declare `watch:` so a file *addition* invalidates too (an in-block read can't see a file that wasn't read). Use `producer_value` / `producer_error` for the lazy-load + error surface:
 
 ```ruby
+# Single named file — the in-block read is captured; no watch: needed.
 producer :route_table do |_params|
   contents = io_boundary.read_file(@routes_file)
   RouteTable.parse(contents)
 end
 
-node_rule Prism::CallNode do |node, _scope, path|
-  table = route_table  # see below
-  next [] if table.nil?
-  # ... per-call check against `table`, positioned with `diagnostic(node, …)`
+# Directory glob — watch: covers additions/removals. The Proc is
+# instance_exec'd at cache_for time, so #init-derived roots are in scope.
+producer :model_index, watch: -> { [[@model_search_paths, "**/*.rb"]] } do |_params|
+  ModelDiscoverer.new(io_boundary: io_boundary, search_paths: @model_search_paths).discover
 end
 
-private
+node_rule Prism::CallNode do |node, _scope, path|
+  table = producer_value(:route_table)   # lazy-load + memo + StandardError rescue
+  next [] if table.nil?
+  diagnostics_for(Analyzer.violations_for(call_node: node, table: table), path: path, node: node)
+end
 
-def route_table
-  return @table if @table
+# diagnostics_for_file surfaces the load error if one was rescued:
+def diagnostics_for_file(path:, scope:, root:)
+  return [load_error_diagnostic(path)] if producer_value(:route_table).nil? && producer_error(:route_table)
 
-  # CRITICAL: read the file BEFORE cache_for so the IoBoundary's
-  # FileEntry digest is captured in the descriptor at cache_for time.
-  # If you read AFTER, the cache key has no file digest and never
-  # invalidates.
-  io_boundary.read_file(@routes_file)
-  @table = cache_for(:route_table, params: {}).call
-rescue Plugin::AccessDeniedError, Errno::ENOENT, Psych::SyntaxError => e
-  @load_error = "rigor-#{manifest.id}: #{e.message}"
-  nil
+  []
 end
 ```
+
+`producer_value(id)` runs the producer once and memoises the result (nil included); `producer_error(id)` returns the `StandardError` it rescued (nil on success). A plugin that needs *distinct* per-failure messages (AccessDenied vs ENOENT vs parse error) keeps a bespoke `rescue` ladder around `cache_for(id).call` and branches on `producer_error(id).class` — see `rigor-rails-routes` / `rigor-activerecord`. `glob_descriptor` is private since WD3; use `watch:`.
 
 Demo `.rigor.yml` may need `plugins_io.allowed_paths:` if the plugin reads from outside the project root + signature paths.
 

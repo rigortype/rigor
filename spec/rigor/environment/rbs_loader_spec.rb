@@ -68,6 +68,34 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "class-alias resolution (`class Mutex = Thread::Mutex`)" do
+    # An RBS class alias lives only in `class_alias_decls`, so `class_known?`
+    # reports it but the definition builder (which only knows `class_decls`)
+    # could not enumerate its methods. The loader now normalises the alias to
+    # its canonical target before building, so dispatch and the
+    # `call.undefined-method` existence check both work on `Mutex`.
+    it "reports the alias as known" do
+      expect(loader.class_known?("Mutex")).to be(true)
+    end
+
+    it "builds the instance definition by resolving the alias target" do
+      expect(loader.instance_definition("Mutex")).not_to be_nil
+      expect(loader.instance_method_names("Mutex")).to include(:synchronize, :lock, :unlock)
+    end
+
+    it "resolves an instance method through the alias" do
+      expect(loader.instance_method(class_name: "Mutex", method_name: :synchronize)).not_to be_nil
+    end
+
+    it "resolves the singleton (class-side) definition through the alias" do
+      expect(loader.singleton_method(class_name: "Mutex", method_name: :new)).not_to be_nil
+    end
+
+    it "leaves a non-alias class unchanged" do
+      expect(loader.instance_method_names("Integer")).to include(:+, :to_s)
+    end
+  end
+
   describe "#class_known?" do
     it "is true for core classes (Integer, String, Array)" do
       expect(loader.class_known?("Integer")).to be(true)

@@ -1034,6 +1034,8 @@ module Rigor
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
         return nil if env.nil?
+
+        rbs_name = canonical_module_name(rbs_name)
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_instance(rbs_name)
@@ -1045,11 +1047,30 @@ module Rigor
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
         return nil if env.nil?
+
+        rbs_name = canonical_module_name(rbs_name)
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_singleton(rbs_name)
       rescue ::RBS::BaseError
         nil
+      end
+
+      # Resolve an RBS class/module ALIAS to its canonical declared name.
+      # `class Mutex = Thread::Mutex` lives only in `class_alias_decls`, so
+      # `class_known?` reports it (it checks that table) but the definition
+      # builder — which only knows `class_decls` — could not enumerate its
+      # methods, leaving alias classes (`Mutex`, and any `X = Y`) with no
+      # resolvable method surface. Normalising via the env (RBS's own alias
+      # resolution) before the `class_decls` guard fixes dispatch AND the
+      # `call.undefined-method` existence check on them. A non-alias name, or
+      # one that does not normalise, is returned unchanged.
+      def canonical_module_name(rbs_name)
+        return rbs_name unless env.class_alias_decls.key?(rbs_name)
+
+        env.normalize_module_name?(rbs_name) || rbs_name
+      rescue ::RBS::BaseError
+        rbs_name
       end
 
       # Memoised on `@state` (the per-loader store also holding `:env` /

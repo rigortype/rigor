@@ -100,11 +100,34 @@ engine gaps** (→ the backlog).
      was *intentional*; this adds teeth only where soundness is total (`A | B` responds to
      `m` iff both do). `make verify` clean (no new firing across lib 286 + plugins 141);
      4-example regression spec; the `String | Symbol` survivor cluster now kills.
-   - **Slice 2 (nilable unions, `String?`): pending** — deferred because the nil arm
-     interacts with `possible-nil-receiver`, safe-navigation, and ADR-58
-     declaration-sourced nil.
-3. **Mutex / Thread core-class coverage** — investigate why `Mutex#synchronize` /
-   `Mutex.new` don't resolve; import via the builtin pipeline. *(pending)*
+   - **Slice 2 (nilable unions, `String?`): ADJUDICATED — DEFERRED (conflicts with the
+     deliberate N3 silence).** Investigation found that
+     `spec/rigor/analysis/check_rules/safe_navigation_undefined_method_spec.rb` (lines
+     65–94, the N3 decision from `20260613-app-network-corpora-survey.md`) *deliberately*
+     asserts that a `T | nil` receiver stays silent for `call.undefined-method` even when
+     the method is absent on `T` — for both `y&.m` and plain `y.m` — explicitly to avoid a
+     working-code false positive on a **cross-file project def**. That FP class is real and
+     is *not* fully eliminated by `method_present_anywhere?`: a project class that is
+     RBS-known but whose method is defined cross-file (a reopened class / an
+     association/scope the dispatcher does not apply per-file) would resolve as "absent"
+     and fire. So firing on nilable unions is not a quiet teeth fix — it overrides a
+     deliberate, FP-motivated design decision. **Recorded as an open ADR question**: can
+     the N3 silence be *narrowed* to fire only when every non-nil arm is a fully-known
+     core/stdlib class (where the cross-file-def FP cannot arise)? That needs a corpus FP
+     study before any change. This is the adjudication discipline working — not every
+     survivor is a bug; some are intentional silence.
+3. **Mutex / Thread core-class coverage — LANDED (RBS class-alias resolution).**
+   Root cause was *not* a missing import: `Mutex` is an RBS **class alias**
+   (`class Mutex = Thread::Mutex`, `references/rbs/core/thread.rbs:1822`). It lives only
+   in `env.class_alias_decls`, so `RbsLoader#class_known?` reported it but
+   `build_instance_definition` / `build_singleton_definition` (guarding on `class_decls`)
+   could not enumerate its methods — leaving every alias class with no resolvable method
+   surface (dispatch widened to `Dynamic`, undefined-method never fired). Fix:
+   `canonical_module_name` normalises an alias to its target via
+   `env.normalize_module_name?` before the guard, so dispatch *and* the existence check
+   work on `Mutex` and any `X = Y`. `make verify` clean (lib uses `Mutex` in several
+   places — no FP); 5-example loader spec; the Mutex survivor cluster now kills. A general
+   win beyond the cluster.
 4. Self-dogfood `Type::*` method RBS; `argument-type-mismatch` adjudication. *(pending)*
 5. **ADR** — fold the methodology + decisions (build-our-own, type-aware filter as the
    meaning-maker, sweep-as-backlog, the FP-safe union teeth rule) into an ADR once the

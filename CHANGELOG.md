@@ -16,6 +16,7 @@ cycles live in dedicated archives:
 
 ### Added
 
+- **[inference]** RBS class aliases (`class Mutex = Thread::Mutex`) now resolve to their target's method surface. Previously a receiver typed as an alias (`Mutex`, and any `X = Y`) was reported "known" but had no enumerable methods, so dispatch on it widened to `Dynamic[top]` and `call.undefined-method` never fired. The loader now normalises an alias to its canonical declared name before building the definition, so `Mutex#synchronize` resolves its return type and a genuinely missing method on `Mutex` is now reported.
 - **[inference]** `call.undefined-method` now fires on a *union* receiver when the method is absent on every arm: `x = flag ? "s" : :sym; x.no_such` reports the call as undefined, since `String | Symbol` responds to a method only if both `String` and `Symbol` do. The scalar existence check previously bailed on any union (no single concrete class). Conservative by construction — any arm that is `Dynamic`, an unknown / unbuildable class, a source-declared or open ([ADR-26](docs/adr/26-activerecord-relation-typing.md)) receiver, or `nil`-bearing suppresses the diagnostic, so only a definitely-undefined call fires. Nil-bearing unions stay deferred to the `possible-nil-receiver` rule.
 
 ## [0.1.19] - 2026-06-13

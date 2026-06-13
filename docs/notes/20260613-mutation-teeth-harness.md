@@ -147,7 +147,8 @@ engine gaps** (→ the backlog).
    The *residual* `non-negative-int` survivors are **correct silence**: they are arguments to
    `==` (`lines.size == 1`), exempt via `UNIVERSAL_EQUALITY_METHODS` (Ruby's `==` returns
    false on type mismatch, never raises). A harness de-noise (skip literal mutations whose
-   enclosing call is a universal-equality method) is a follow-up, mirroring the arity guard.
+   enclosing call is a universal-equality method — `UNIVERSAL_EQUALITY` in `mutate.rb`)
+   **LANDED**, mirroring the arity guard; those residual survivors are gone.
    The `Type::*` self-dogfood sub-item remains the ADR-24 deferred area (the
    `call.self-undefined-method` rule ships `:off`). *(argument-channel core: resolved)*
 6. **ADR — LANDED: [ADR-62](../adr/62-mutation-testing-teeth-measurement.md).** Folds the

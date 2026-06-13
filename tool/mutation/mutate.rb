@@ -71,6 +71,11 @@ module RigorMutation
   class Mutator
     IDENT = /\A[a-z_][A-Za-z0-9_]*\z/
     QUOTES = ['"', "'"].freeze
+    # Mutating an argument to a universal-equality method is always an
+    # equivalent mutant: Ruby's `==` / `<=>` family returns false / nil on a
+    # type mismatch rather than raising, so the engine exempts them
+    # (`UNIVERSAL_EQUALITY_METHODS`). Skip them to keep the survivor backlog clean.
+    UNIVERSAL_EQUALITY = %w[== != eql? equal? <=>].freeze
 
     # Every operator the harness knows. Each maps to the diagnostic rule
     # family it is *engineered* to trip when the mutated value/call sits in a
@@ -209,6 +214,8 @@ module RigorMutation
       return if !numeric && !QUOTES.include?(node.opening_loc&.slice)
 
       anchor, method = @anchor_for[node]
+      return if UNIVERSAL_EQUALITY.include?(method)
+
       loc = node.location
       add(out, :nil_inject, "call.argument-type-mismatch", loc.start_offset, loc.end_offset,
           "nil", loc.start_line, "literal → nil  (#{snippet(loc)})", anchor, method)

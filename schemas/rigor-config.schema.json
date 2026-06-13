@@ -112,6 +112,21 @@
         "enum": ["error", "warning", "info", "off"]
       }
     },
+    "bleeding_edge": {
+      "description": "ADR-50 § WD2 — adopt the next major's queued diagnostic disciplines early. `false` (default) adopts none; `true` adopts the whole overlay; a list of feature ids adopts only those; `{ all: true, except: [ids] }` adopts all but the named. Orthogonal to `severity_profile:`. Inspect with `rigor show-bleedingedge`. The overlay is empty in this release, so every form is currently a no-op.",
+      "oneOf": [
+        { "type": "boolean" },
+        { "type": "array", "items": { "type": "string" } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "all": { "type": "boolean" },
+            "except": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
     "dependencies": {
       "description": "Opt-in extensions to Rigor's outer inference boundary. Per ADR-10, `source_inference[]` lists gems whose Ruby implementation Rigor MAY walk when a signature contract is missing (or, in `mode: full`, alongside RBS). Inferred returns crossing the gem boundary are wrapped in `Dynamic[T]` with `dynamic.dependency-source.*` provenance — never published as ground-truth types and never round-tripped out as authored RBS. Omitted / empty = the existing RBS-or-`Dynamic[top]` boundary.",
       "type": "object",

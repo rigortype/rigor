@@ -136,7 +136,20 @@ engine gaps** (→ the backlog).
    mutants over all of `lib/rigor`, zero crashes / hangs** — the analyzer is robust against
    arbitrary type-visible mutation of its own tree. A clean result is itself the
    deliverable (robustness evidence).
-5. Self-dogfood `Type::*` method RBS; `argument-type-mismatch` adjudication. *(pending)*
+5. **`argument-type-mismatch` cluster — ADJUDICATED + partly LANDED (refined-receiver
+   dispatch).** The cluster was mixed. Its real part was not an `argument-type-mismatch`
+   weakness at all but a *receiver-resolution* gap: a refinement receiver
+   (`non-negative-int` = `Type::IntegerRange`; `non-empty-string` = `Type::Refined`) had no
+   `concrete_class_name`, so **all three** call rules (undefined-method / wrong-arity /
+   argument-type-mismatch) bailed. Fix: `concrete_class_name` resolves `Type::IntegerRange`
+   → `"Integer"` and `Type::Refined` → its base, so e.g. `n >= nil` on an `arr.select{}.size`
+   now fires. `make verify` clean (refined receivers are everywhere in lib); 3-example spec.
+   The *residual* `non-negative-int` survivors are **correct silence**: they are arguments to
+   `==` (`lines.size == 1`), exempt via `UNIVERSAL_EQUALITY_METHODS` (Ruby's `==` returns
+   false on type mismatch, never raises). A harness de-noise (skip literal mutations whose
+   enclosing call is a universal-equality method) is a follow-up, mirroring the arity guard.
+   The `Type::*` self-dogfood sub-item remains the ADR-24 deferred area (the
+   `call.self-undefined-method` rule ships `:off`). *(argument-channel core: resolved)*
 6. **ADR — LANDED: [ADR-62](../adr/62-mutation-testing-teeth-measurement.md).** Folds the
    methodology + decisions (build-our-own, type-aware filter as the meaning-maker,
    sweep-as-backlog, adjudicate-don't-assume) and the landed/deferred items into a

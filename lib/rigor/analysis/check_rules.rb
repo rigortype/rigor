@@ -708,6 +708,16 @@ module Rigor
           when Type::Tuple then "Array"
           when Type::HashShape then "Hash"
           when Type::Constant then constant_class_name(type.value)
+          # A refinement IS its base class for method dispatch — its method
+          # surface is the base's. Resolve to the base so the call rules
+          # (undefined-method / wrong-arity / argument-type-mismatch) reason
+          # about it instead of bailing. `Type::Refined` carries string-family
+          # refinements (`non-empty-string`, `lowercase-string`, …) over an
+          # explicit `.base`; `Type::IntegerRange` carries the bounded-int
+          # refinements (`non-negative-int`, `positive-int`, `int<1,5>`), every
+          # one an Integer.
+          when Type::Refined then concrete_class_name(type.base)
+          when Type::IntegerRange then "Integer"
           end
         end
 

@@ -3,7 +3,7 @@ class Rigor::Plugin::Manifest::Consumption
 end
 
 class Rigor::Plugin::Manifest
-  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?external_files: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: untyped, ?source_rbs_synthesizer: untyped, ?additional_initializers: untyped) -> void
+  def initialize: (id: untyped, version: untyped, ?description: untyped, ?config_schema: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: untyped, ?source_rbs_synthesizer: untyped, ?additional_initializers: untyped) -> void
 
   # Public attribute readers (the full `attr_reader` surface). Plugins
   # read `manifest.id` / `manifest.protocol_contracts` etc.; declaring
@@ -25,7 +25,6 @@ class Rigor::Plugin::Manifest
   def heredoc_templates: () -> untyped
   def nested_class_templates: () -> untyped
   def trait_registries: () -> untyped
-  def external_files: () -> untyped
   def hkt_registrations: () -> untyped
   def hkt_definitions: () -> untyped
   def signature_paths: () -> untyped

@@ -228,4 +228,207 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       expect(second.fetch_contents).to eq("v2")
     end
   end
+
+  describe ".producer watch: validation (ADR-60 WD3)" do
+    it "accepts nil, an Array, and a Proc" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "alpha", version: "0.1.0")
+          producer(:a) { |_p| 1 }
+          producer(:b, watch: [["app/models", "**/*.rb"]]) { |_p| 2 }
+          producer(:c, watch: -> { [["app/models", "**/*.rb"]] }) { |_p| 3 }
+        end
+      end.not_to raise_error
+    end
+
+    it "rejects a non-nil, non-Array, non-callable watch:" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "alpha", version: "0.1.0")
+          producer(:bad, watch: "app/models") { |_p| 1 }
+        end
+      end.to raise_error(ArgumentError, /watch: must be nil, an Array/)
+    end
+  end
+
+  # ADR-60 WD3 — `cache_for` rides `Cache::Store#fetch_or_validate`:
+  # the entry is keyed on the stable identity inputs, and the
+  # dependency descriptor (boundary reads + `watch:` globs) is
+  # recorded AFTER the producer block runs. Each "session" below
+  # uses a FRESH `Cache::Store` (empty in-process memo) and a fresh
+  # plugin instance — the faithful simulation of a second
+  # `rigor check` process reading the same on-disk cache, per the
+  # established `pundit_plugin_spec` cross-process pattern.
+  describe "#cache_for record-and-validate (ADR-60 WD3)" do
+    let(:cache_root) { File.join(tmpdir, ".rigor", "cache") }
+
+    def services_with_fresh_store
+      Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection,
+        type: Rigor::Type::Combinator,
+        configuration: configuration,
+        cache_store: Rigor::Cache::Store.new(root: cache_root),
+        trust_policy: trust_policy
+      )
+    end
+
+    it "recomputes when a file read INSIDE the producer block changes between sessions" do
+      file = File.join(tmpdir, "data.txt")
+      File.write(file, "v1")
+
+      # The structural hazard being fixed: the block performs the
+      # read, nothing primes the boundary beforehand. Under the old
+      # `fetch_or_compute` call-time snapshot this read was
+      # invisible to the descriptor and session 2 served stale "v1".
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      target = file
+      klass.producer(:contents) { |_params| io_boundary.read_file(target) }
+
+      first = klass.new(services: services_with_fresh_store)
+      expect(first.cache_for(:contents, params: {}).call).to eq("v1")
+
+      File.write(file, "v2")
+      second = klass.new(services: services_with_fresh_store)
+      expect(second.cache_for(:contents, params: {}).call).to eq("v2")
+    end
+
+    it "hits across sessions while the in-block-read file is unchanged" do
+      file = File.join(tmpdir, "data.txt")
+      File.write(file, "stable")
+
+      calls = 0
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      target = file
+      klass.producer(:contents) do |_params|
+        calls += 1
+        io_boundary.read_file(target)
+      end
+
+      expect(klass.new(services: services_with_fresh_store).cache_for(:contents, params: {}).call).to eq("stable")
+      expect(klass.new(services: services_with_fresh_store).cache_for(:contents, params: {}).call).to eq("stable")
+      expect(calls).to eq(1)
+    end
+
+    it "recomputes when a watch:-globbed file is ADDED between sessions (Proc form, instance state)" do
+      models = File.join(tmpdir, "app", "models")
+      FileUtils.mkdir_p(models)
+      File.write(File.join(models, "a.rb"), "class A; end")
+
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+        attr_reader :search_root
+
+        def init(_services)
+          # `watch:` Procs run at cache_for time, so init-derived
+          # roots like this one are visible to them.
+          @search_root = config.fetch("root")
+        end
+
+        producer :model_count, watch: -> { [[search_root, "**/*.rb"]] } do |_params|
+          Dir.glob(File.join(search_root, "**/*.rb")).size
+        end
+      end
+
+      run_session = lambda do
+        plugin = klass.new(services: services_with_fresh_store, config: { "root" => models })
+        plugin.init(plugin.services)
+        plugin.cache_for(:model_count, params: {}).call
+      end
+
+      expect(run_session.call).to eq(1)
+
+      File.write(File.join(models, "b.rb"), "class B; end")
+      expect(run_session.call).to eq(2)
+
+      File.unlink(File.join(models, "b.rb"))
+      expect(run_session.call).to eq(1)
+    end
+
+    it "recomputes when a watch:-globbed file CHANGES between sessions (static Array form)" do
+      conf = File.join(tmpdir, "config")
+      FileUtils.mkdir_p(conf)
+      File.write(File.join(conf, "routes.rb"), "get '/a'")
+
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      root = conf
+      klass.producer(:routes, watch: [[root, "**/*.rb"]]) do |_params|
+        File.read(File.join(root, "routes.rb"))
+      end
+
+      expect(klass.new(services: services_with_fresh_store).cache_for(:routes, params: {}).call).to eq("get '/a'")
+
+      File.write(File.join(conf, "routes.rb"), "get '/b'")
+      expect(klass.new(services: services_with_fresh_store).cache_for(:routes, params: {}).call).to eq("get '/b'")
+    end
+
+    it "round-trips a custom serialize/deserialize pair over the producer's value" do
+      ser = ->(value) { value.to_s.b }
+      des = ->(bytes) { bytes.to_s } # rubocop:disable Style/SymbolProc
+      calls = 0
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      klass.producer(:greeting, serialize: ser, deserialize: des) do |_params|
+        calls += 1
+        "hello"
+      end
+
+      expect(klass.new(services: services_with_fresh_store).cache_for(:greeting, params: {}).call).to eq("hello")
+      expect(klass.new(services: services_with_fresh_store).cache_for(:greeting, params: {}).call).to eq("hello")
+      expect(calls).to eq(1)
+    end
+
+    it "treats a producer that fetched a URL as never-fresh (recomputes every session, never stale)" do
+      http_client = Class.new do
+        def get(_url, timeout:, max_bytes:) # rubocop:disable Lint/UnusedMethodArgument
+          "remote-body"
+        end
+      end.new
+      policy = Rigor::Plugin::TrustPolicy.new(
+        allowed_read_roots: [tmpdir],
+        network_policy: :allowlist,
+        allowed_url_hosts: ["example.com"]
+      )
+      boundary = Rigor::Plugin::IoBoundary.new(policy: policy, plugin_id: "alpha", http_client: http_client)
+
+      calls = 0
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      klass.producer(:remote) do |_params|
+        calls += 1
+        io_boundary.open_url("https://example.com/doc")
+      end
+
+      2.times do
+        plugin = klass.new(services: services_with_fresh_store)
+        plugin.instance_variable_set(:@io_boundary, boundary)
+        expect(plugin.cache_for(:remote, params: {}).call).to eq("remote-body")
+      end
+      # ConfigEntry rows in the dependency descriptor make fresh?
+      # false by design — sound (never stale), recompute every run.
+      expect(calls).to eq(2)
+    end
+
+    it "reads a store dir containing unreadable foreign entries as silent misses" do
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      klass.producer(:value) { |_p| 7 }
+
+      # Simulate an old-format / corrupt entry already on disk.
+      stale_dir = File.join(cache_root, "plugin.alpha.value", "ab")
+      FileUtils.mkdir_p(stale_dir)
+      File.binwrite(File.join(stale_dir, "cdef.entry"), "OLDFORMAT-not-a-rigor-entry")
+
+      plugin = klass.new(services: services_with_fresh_store)
+      expect(plugin.cache_for(:value, params: {}).call).to eq(7)
+    end
+  end
 end

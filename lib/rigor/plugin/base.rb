@@ -74,22 +74,58 @@ module Rigor
         # argument; the same params Hash mixes into the cache
         # key per `Cache::Descriptor#cache_key_for`.
         #
-        # `serialize:` / `deserialize:` are forwarded verbatim to
-        # `Cache::Store#fetch_or_compute`. Default round-trip is
-        # `Marshal.dump` / `Marshal.load` per the v0.0.9 callable
-        # surface; producers whose return values are not Marshal-
-        # clean must supply their own pair.
+        # `serialize:` / `deserialize:` apply to the producer's
+        # return VALUE (the cache layer wraps them around the
+        # record-and-validate entry pair itself). Default
+        # round-trip is `Marshal.dump` / `Marshal.load` per the
+        # v0.0.9 callable surface; producers whose return values
+        # are not Marshal-clean must supply their own pair.
+        #
+        # `watch:` (ADR-60 WD3) declares the glob coverage of a
+        # discovery-style producer — the files whose addition /
+        # removal / edit must invalidate the cached value even
+        # when the producer block never read them individually
+        # (e.g. it globbed a directory itself). It is either
+        #
+        # - a static Array of `[roots, pattern, ...]` tuples
+        #   (`roots` a String or Array of Strings; one or more
+        #   glob-pattern suffixes per tuple — the same shape
+        #   {#glob_descriptor} takes), or
+        # - a Proc, run through `instance_exec` on the plugin
+        #   instance at `cache_for` invocation time (NEVER at
+        #   class-definition time — search roots are typically
+        #   computed in `#init` from config), returning the same
+        #   tuple Array.
+        #
+        # The evaluated tuples become {Cache::Descriptor::GlobEntry}
+        # rows in the dependency descriptor recorded after the
+        # block runs; `Descriptor#fresh?` re-globs + re-digests on
+        # the next run.
         #
         # Producer ids are auto-prefixed `plugin.<manifest.id>.`
         # at the cache layer (slice 6-C) so plugin-side ids cannot
         # collide with built-in producers.
-        def producer(id, serialize: nil, deserialize: nil, &block)
+        def producer(id, watch: nil, serialize: nil, deserialize: nil, &block)
           raise ArgumentError, "Plugin::Base.producer requires a block body" if block.nil?
 
+          validate_producer_watch!(watch)
           @producers ||= {}
-          @producers[id.to_sym] = { block: block, serialize: serialize, deserialize: deserialize }.freeze
+          @producers[id.to_sym] = {
+            block: block, watch: watch, serialize: serialize, deserialize: deserialize
+          }.freeze
           id.to_sym
         end
+
+        # ADR-60 WD3 — `watch:` is nil (no glob coverage), a static
+        # tuple Array, or a Proc evaluated per `cache_for` call.
+        def validate_producer_watch!(watch)
+          return if watch.nil? || watch.is_a?(Array) || watch.respond_to?(:call)
+
+          raise ArgumentError,
+                "Plugin::Base.producer watch: must be nil, an Array of [roots, pattern, ...] tuples, " \
+                "or a Proc returning one, got #{watch.inspect}"
+        end
+        private :validate_producer_watch!
 
         # Frozen snapshot of the producer table. Inherited
         # producers from a superclass are intentionally NOT
@@ -695,32 +731,38 @@ module Rigor
         @io_boundary ||= services.io_boundary_for(manifest.id)
       end
 
-      # ADR-7 § "Slice 6-A" — returns a callable that performs
-      # a `Cache::Store#fetch_or_compute` round-trip for the
-      # named producer. The descriptor (per ADR-7 § "Slice
-      # 6-B") is auto-assembled from the plugin's
-      # `PluginEntry` template (id, version, config_hash) and
-      # the {IoBoundary} read history. The producer id is
-      # auto-prefixed `plugin.<manifest.id>.` per ADR-7 §
-      # "Slice 6-C" so plugin caches stay sandboxed from
-      # built-in producers.
+      # ADR-7 § "Slice 6-A" / ADR-60 WD3 — returns a callable that
+      # performs a `Cache::Store#fetch_or_validate` round-trip for
+      # the named producer (the ADR-45 record-and-validate path).
+      # The entry is KEYED on the stable identity inputs — the
+      # plugin's `PluginEntry` template (id, version, config_hash)
+      # composed with the optional `descriptor:` extras — and
+      # stores, beside the value, a DEPENDENCY descriptor recorded
+      # AFTER the producer block ran: the {IoBoundary}'s
+      # post-compute read history plus the evaluated `watch:`
+      # {Cache::Descriptor::GlobEntry} rows. In-block reads are
+      # therefore always captured (the structural stale-cache
+      # hazard `fetch_or_compute`'s call-time snapshot carried);
+      # the next run re-validates the recorded dependencies by
+      # re-digest (`Descriptor#fresh?`) and recomputes when any
+      # changed. The producer id is auto-prefixed
+      # `plugin.<manifest.id>.` per ADR-7 § "Slice 6-C" so plugin
+      # caches stay sandboxed from built-in producers.
       #
       # When `services.cache_store` is `nil` (e.g. CLI
       # `--no-cache`), the callable bypasses the cache and
       # runs the producer block every time — same semantics
       # as the v0.0.9 cache surface for built-in producers.
       #
-      # `descriptor:` (optional, ADR-7 § "Slice 6" follow-up)
-      # supplies extra `Cache::Descriptor` rows the plugin
-      # author wants to compose into the auto-built descriptor
-      # — typically gem-version `GemEntry`, configuration-file
-      # `FileEntry` digests, or `ConfigEntry` rows for external
-      # state the {IoBoundary} cannot capture itself. The
-      # passed descriptor composes via `Cache::Descriptor.compose`
-      # with the auto-built one (PluginEntry template + boundary
-      # reads); per-slot conflicts raise
-      # `Cache::Descriptor::Conflict` to make divergent inputs
-      # visible rather than silently shadowing.
+      # `descriptor:` (optional) supplies extra `Cache::Descriptor`
+      # rows for IDENTITY inputs — gem-version `GemEntry` pins,
+      # `ConfigEntry` rows for external state — that compose into
+      # the cache KEY via `Cache::Descriptor.compose`; per-slot
+      # conflicts raise `Cache::Descriptor::Conflict` to make
+      # divergent inputs visible rather than silently shadowing.
+      # A key change is a miss, so the invalidation effect of the
+      # legacy `glob_descriptor`-as-`descriptor:` idiom is
+      # preserved unchanged.
       def cache_for(producer_id, params: {}, descriptor: nil)
         producer = self.class.producers[producer_id.to_sym]
         unless producer
@@ -733,16 +775,18 @@ module Rigor
         return compute unless store
 
         prefixed_id = "plugin.#{manifest.id}.#{producer_id}"
-        composed_descriptor = compose_cache_descriptor(descriptor)
+        key_descriptor = compose_key_descriptor(descriptor)
         lambda do
-          store.fetch_or_compute(
+          store.fetch_or_validate(
             producer_id: prefixed_id,
+            key_descriptor: key_descriptor,
             params: params,
-            descriptor: composed_descriptor,
-            serialize: producer[:serialize],
-            deserialize: producer[:deserialize],
-            &compute
-          )
+            serialize: pair_serializer(producer[:serialize]),
+            deserialize: pair_deserializer(producer[:deserialize])
+          ) do
+            value = compute.call
+            [value, producer_dependency_descriptor(producer)]
+          end
         end
       end
 
@@ -923,17 +967,6 @@ module Rigor
         matched.uniq.sort.select { |path| File.file?(path) }
       end
 
-      # ADR-7 § "Slice 6-B" — composes the per-call cache
-      # descriptor from (1) the plugin's PluginEntry template
-      # and (2) the IoBoundary's accumulated FileEntry rows.
-      def build_plugin_cache_descriptor
-        boundary_descriptor = io_boundary.cache_descriptor
-        Cache::Descriptor.new(
-          plugins: [plugin_entry],
-          files: boundary_descriptor.files
-        )
-      end
-
       public
 
       # ADR-32 WD5 — the `Cache::Descriptor::PluginEntry`
@@ -962,18 +995,88 @@ module Rigor
 
       private
 
-      # ADR-7 § "Slice 6" follow-up — composes the auto-built
-      # cache descriptor with an optional plugin-author-supplied
-      # extension. Extra `GemEntry` / `FileEntry` / `ConfigEntry`
-      # rows the plugin needs (gem-version pins, external
-      # configuration files, sibling-plugin state) flow through
-      # `Cache::Descriptor.compose`; the union behaviour matches
-      # built-in producers (`RbsConstantTable`, `RbsEnvironment`).
-      def compose_cache_descriptor(extra)
-        auto_built = build_plugin_cache_descriptor
+      # ADR-60 WD3 — the cache KEY descriptor: the plugin's
+      # PluginEntry template composed with an optional
+      # plugin-author-supplied extension carrying IDENTITY inputs
+      # (gem-version pins, `ConfigEntry` rows, configuration-file
+      # digests). The IoBoundary read history deliberately does NOT
+      # enter the key — it is recorded post-compute into the
+      # dependency descriptor instead (see
+      # {#producer_dependency_descriptor}).
+      def compose_key_descriptor(extra)
+        auto_built = Cache::Descriptor.new(plugins: [plugin_entry])
         return auto_built if extra.nil?
 
         Cache::Descriptor.compose(auto_built, extra)
+      end
+
+      # ADR-60 WD3 — the dependency descriptor stored beside the
+      # producer's value, built AFTER the block ran so every
+      # in-block `io_boundary` read is captured, plus the evaluated
+      # `watch:` glob rows.
+      #
+      # The boundary snapshot may carry `ConfigEntry` rows (URL
+      # fetches, see {IoBoundary#open_url}). `Descriptor#fresh?`
+      # refuses any non-file/glob slot, so including them makes the
+      # entry permanently stale → the producer recomputes EVERY run.
+      # That is deliberate: it is sound (never stale) and
+      # URL-reading producers are rare; a remote document has no
+      # cheap local re-validation anyway.
+      def producer_dependency_descriptor(producer)
+        boundary = io_boundary.cache_descriptor
+        Cache::Descriptor.new(
+          files: boundary.files,
+          configs: boundary.configs,
+          globs: watch_glob_entries(producer[:watch])
+        )
+      end
+
+      # ADR-60 WD3 — evaluates a producer's `watch:` declaration
+      # into {Cache::Descriptor::GlobEntry} rows. A Proc is
+      # `instance_exec`'d on this plugin instance (so `#init`-built
+      # search roots are in scope); the result — like the static
+      # form — is an Array of `[roots, pattern, ...]` tuples, one
+      # GlobEntry per (root, pattern) pair. Roots are expanded to
+      # absolute paths (matching {#glob_descriptor}) so freshness
+      # re-validation does not depend on the validating process's
+      # working directory.
+      def watch_glob_entries(watch)
+        return [] if watch.nil?
+
+        tuples = watch.respond_to?(:call) ? instance_exec(&watch) : watch
+        Array(tuples).flat_map do |tuple|
+          roots, *patterns = Array(tuple)
+          Array(roots).flat_map do |root|
+            absolute = File.expand_path(root.to_s)
+            patterns.map { |pattern| Cache::Descriptor::GlobEntry.compute(root: absolute, pattern: pattern.to_s) }
+          end
+        end.uniq
+      end
+
+      # ADR-60 WD3 — `fetch_or_validate` stores a
+      # `[value, dependency_descriptor]` pair, but the producer's
+      # declared `serialize:`/`deserialize:` contract covers the
+      # VALUE alone. These wrappers apply the custom callable to the
+      # value half and Marshal the descriptor half, so a producer
+      # with a non-Marshal-clean value keeps working unchanged. A
+      # nil callable returns nil — the store's default whole-pair
+      # Marshal round-trip applies.
+      def pair_serializer(serialize)
+        return nil if serialize.nil?
+
+        lambda do |pair|
+          value, dependency_descriptor = pair
+          Marshal.dump([serialize.call(value).b, Marshal.dump(dependency_descriptor)]).b
+        end
+      end
+
+      def pair_deserializer(deserialize)
+        return nil if deserialize.nil?
+
+        lambda do |bytes|
+          value_bytes, descriptor_bytes = Marshal.load(bytes) # rubocop:disable Security/MarshalLoad
+          [deserialize.call(value_bytes), Marshal.load(descriptor_bytes)] # rubocop:disable Security/MarshalLoad
+        end
       end
 
       def digest_config(config)

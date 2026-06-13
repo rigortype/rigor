@@ -390,6 +390,8 @@ quad (`current_user`, `user_signed_in?`, `authenticate_user!`,
 
 ### Tier D — External-Ruby-file inclusion under declared `self`
 
+> **Status (2026-06-13):** the `external_files:` manifest field was removed by [ADR-60 WD1](60-pre-freeze-plugin-contract-consolidation.md) (never wired to an engine consumer); the tier returns demand-gated together with its scanner in one change.
+
 Plugin declares: files matching a glob are evaluated as if their body
 were pasted at a declared call site, with `self` typed as a declared
 class. The substrate adds the file's AST to analysis with the bound

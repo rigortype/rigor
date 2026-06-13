@@ -4,9 +4,9 @@ module Rigor
   module Plugin
     module Macro
       # ADR-16 Tier A declaration: "the block passed to a
-      # class-level DSL call of one of `verbs` runs as an instance
-      # method on `receiver_constraint`'s subclass tree, with
-      # `self` typed accordingly."
+      # class-level DSL call of one of `method_names` runs as an
+      # instance method on `receiver_constraint`'s subclass tree,
+      # with `self` typed accordingly."
       #
       # Authored on a plugin manifest:
       #
@@ -16,7 +16,7 @@ module Rigor
       #     block_as_methods: [
       #       Rigor::Plugin::Macro::BlockAsMethod.new(
       #         receiver_constraint: "Sinatra::Base",
-      #         verbs: %i[get post put delete head options patch link unlink]
+      #         method_names: %i[get post put delete head options patch link unlink]
       #       )
       #     ]
       #   )
@@ -41,9 +41,10 @@ module Rigor
       #   for the entry to fire. For Sinatra modular-style this is
       #   `"Sinatra::Base"`; the substrate's class-context match
       #   accepts every subclass.
-      # - `verbs` — Array of Symbol method names. A call shape
+      # - `method_names` — Array of Symbol method names. A call shape
       #   `<receiver_subclass>.get('/path') { ... }` matches when
-      #   `:get` is in this list.
+      #   `:get` is in this list. (Named `verbs:` before ADR-60 WD2
+      #   normalised the macro value-object vocabulary.)
       # - `self_type` — Symbol selecting the kind of `self`-binding
       #   the substrate applies inside the block. Slice 1a accepts
       #   only `:receiver_instance` (the block runs as an instance
@@ -53,22 +54,22 @@ module Rigor
       # ## Ractor-shareability
       #
       # All fields are frozen at construction (ADR-15 Phase 1).
-      # `verbs` is dup-frozen so the caller's mutable array does
-      # not leak into the value. `Ractor.shareable?` returns true
-      # after `#initialize`.
+      # `method_names` is dup-frozen so the caller's mutable array
+      # does not leak into the value. `Ractor.shareable?` returns
+      # true after `#initialize`.
       class BlockAsMethod
         SELF_TYPE_RECEIVER_INSTANCE = :receiver_instance
         VALID_SELF_TYPES = [SELF_TYPE_RECEIVER_INSTANCE].freeze
 
-        attr_reader :receiver_constraint, :verbs, :self_type
+        attr_reader :receiver_constraint, :method_names, :self_type
 
-        def initialize(receiver_constraint:, verbs:, self_type: SELF_TYPE_RECEIVER_INSTANCE)
+        def initialize(receiver_constraint:, method_names:, self_type: SELF_TYPE_RECEIVER_INSTANCE)
           validate_receiver_constraint!(receiver_constraint)
-          validate_verbs!(verbs)
+          validate_method_names!(method_names)
           validate_self_type!(self_type)
 
           @receiver_constraint = receiver_constraint.dup.freeze
-          @verbs = verbs.map(&:to_sym).freeze
+          @method_names = method_names.map(&:to_sym).freeze
           @self_type = self_type
           freeze
         end
@@ -76,7 +77,7 @@ module Rigor
         def to_h
           {
             "receiver_constraint" => receiver_constraint,
-            "verbs" => verbs.map(&:to_s),
+            "method_names" => method_names.map(&:to_s),
             "self_type" => self_type.to_s
           }
         end
@@ -84,13 +85,13 @@ module Rigor
         def ==(other)
           other.is_a?(BlockAsMethod) &&
             receiver_constraint == other.receiver_constraint &&
-            verbs == other.verbs &&
+            method_names == other.method_names &&
             self_type == other.self_type
         end
         alias eql? ==
 
         def hash
-          [receiver_constraint, verbs, self_type].hash
+          [receiver_constraint, method_names, self_type].hash
         end
 
         private
@@ -103,17 +104,17 @@ module Rigor
                 "got #{value.inspect}"
         end
 
-        def validate_verbs!(verbs)
-          unless verbs.is_a?(Array) && !verbs.empty?
+        def validate_method_names!(method_names)
+          unless method_names.is_a?(Array) && !method_names.empty?
             raise ArgumentError,
-                  "Plugin::Macro::BlockAsMethod#verbs must be a non-empty Array, got #{verbs.inspect}"
+                  "Plugin::Macro::BlockAsMethod#method_names must be a non-empty Array, got #{method_names.inspect}"
           end
 
-          verbs.each do |v|
+          method_names.each do |v|
             next if v.is_a?(Symbol) || (v.is_a?(String) && !v.empty?)
 
             raise ArgumentError,
-                  "Plugin::Macro::BlockAsMethod#verbs entries must be Symbol/non-empty String, " \
+                  "Plugin::Macro::BlockAsMethod#method_names entries must be Symbol/non-empty String, " \
                   "got #{v.inspect}"
           end
         end

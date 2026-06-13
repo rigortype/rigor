@@ -33,7 +33,7 @@ module Rigor
       #         receiver_constraint: "Mangrove::Enum", # `extend`-ed marker module
       #         block_method: :variants,               # the enclosing DSL block
       #         variant_method: :variant,              # each declaration call
-      #         name_arg_position: 0,                  # constant arg → nested class
+      #         symbol_arg_position: 0,                  # constant arg → nested class
       #         inner_arg_position: 1,                 # type arg → `#inner` return
       #         inner_reader: :inner                   # the payload reader name
       #       )
@@ -48,8 +48,10 @@ module Rigor
       #   (`:variants`).
       # - `variant_method` — Symbol naming each declaration call
       #   inside the block (`:variant`).
-      # - `name_arg_position` — Integer (default 0): the argument
+      # - `symbol_arg_position` — Integer (default 0): the argument
       #   index whose literal **constant** names the nested subclass.
+      #   (Named `name_arg_position:` before ADR-60 WD2 normalised
+      #   the macro value-object vocabulary.)
       # - `inner_arg_position` — Integer (default 1): the argument
       #   index whose type expression becomes the `#inner` reader's
       #   return type. Slice A resolves a constant type argument
@@ -69,21 +71,21 @@ module Rigor
       # `Environment#class_ordering`.
       class NestedClassTemplate
         attr_reader :receiver_constraint, :block_method, :variant_method,
-                    :name_arg_position, :inner_arg_position, :inner_reader
+                    :symbol_arg_position, :inner_arg_position, :inner_reader
 
         def initialize(receiver_constraint:, block_method: :variants, variant_method: :variant,
-                       name_arg_position: 0, inner_arg_position: 1, inner_reader: :inner)
+                       symbol_arg_position: 0, inner_arg_position: 1, inner_reader: :inner)
           validate_constraint!(receiver_constraint)
           validate_method!(block_method, "block_method")
           validate_method!(variant_method, "variant_method")
-          validate_position!(name_arg_position, "name_arg_position")
+          validate_position!(symbol_arg_position, "symbol_arg_position")
           validate_position!(inner_arg_position, "inner_arg_position")
           validate_method!(inner_reader, "inner_reader")
 
           @receiver_constraint = receiver_constraint.dup.freeze
           @block_method = block_method.to_sym
           @variant_method = variant_method.to_sym
-          @name_arg_position = name_arg_position
+          @symbol_arg_position = symbol_arg_position
           @inner_arg_position = inner_arg_position
           @inner_reader = inner_reader.to_sym
           freeze
@@ -94,7 +96,7 @@ module Rigor
             "receiver_constraint" => receiver_constraint,
             "block_method" => block_method.to_s,
             "variant_method" => variant_method.to_s,
-            "name_arg_position" => name_arg_position,
+            "symbol_arg_position" => symbol_arg_position,
             "inner_arg_position" => inner_arg_position,
             "inner_reader" => inner_reader.to_s
           }

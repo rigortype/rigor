@@ -147,7 +147,6 @@ module Rigor
           block_as_methods: base.block_as_methods,
           heredoc_templates: base.heredoc_templates,
           trait_registries: base.trait_registries,
-          external_files: base.external_files,
           hkt_registrations: base.hkt_registrations,
           hkt_definitions: base.hkt_definitions,
           signature_paths: base.signature_paths,

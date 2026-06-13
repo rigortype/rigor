@@ -74,7 +74,7 @@ module Rigor
         block_as_methods: [
           Rigor::Plugin::Macro::BlockAsMethod.new(
             receiver_constraint: "Sinatra::Base",
-            verbs: %i[get post put delete head options patch link unlink]
+            method_names: %i[get post put delete head options patch link unlink]
           )
         ]
       )

@@ -99,7 +99,7 @@ module Rigor
             receiver_constraint: "Mangrove::Enum",
             block_method: :variants,
             variant_method: :variant,
-            name_arg_position: 0,
+            symbol_arg_position: 0,
             inner_arg_position: 1,
             inner_reader: :inner
           )

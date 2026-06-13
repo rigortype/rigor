@@ -209,7 +209,6 @@ module Rigor
         parts << "block_as_methods=#{row[:block_as_methods]}" if row[:block_as_methods].positive?
         parts << "heredoc_templates=#{row[:heredoc_templates]}" if row[:heredoc_templates].positive?
         parts << "trait_registries=#{row[:trait_registries]}" if row[:trait_registries].positive?
-        parts << "external_files=#{row[:external_files]}" if row[:external_files].positive?
         return [] if parts.empty?
 
         ["        macro substrate: #{parts.join(', ')}"]
@@ -233,7 +232,6 @@ module Rigor
           "block_as_methods" => row[:block_as_methods],
           "heredoc_templates" => row[:heredoc_templates],
           "trait_registries" => row[:trait_registries],
-          "external_files" => row[:external_files],
           "type_node_resolvers" => row[:type_node_resolvers],
           "hkt_registrations" => row[:hkt_registrations],
           "hkt_definitions" => row[:hkt_definitions],

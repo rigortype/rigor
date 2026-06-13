@@ -35,7 +35,7 @@ RSpec.describe "ADR-16 Tier A — block-as-method engine hook" do
         block_as_methods: [
           Rigor::Plugin::Macro::BlockAsMethod.new(
             receiver_constraint: "Sinatra::Base",
-            verbs: %i[get post]
+            method_names: %i[get post]
           )
         ]
       )
@@ -134,7 +134,7 @@ RSpec.describe "ADR-16 Tier A — block-as-method engine hook" do
     # narrowing rules at the helper level; here we drive the engine
     # through the same paths to confirm the wiring respects them.
 
-    it "leaves verbs outside the manifest's `verbs:` list alone (Tier A does not fire)" do
+    it "leaves verbs outside the manifest's `method_names:` list alone (Tier A does not fire)" do
       source = <<~RUBY
         class MyApp < Sinatra::Base
           delete "/x" do

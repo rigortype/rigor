@@ -13,8 +13,8 @@ module Rigor
     # ([`Rigor::Cache::Store`](store.rb), v0.0.8 slice 2) consumes
     # descriptors but does not extend them.
     #
-    # The descriptor has four slots (`files`, `gems`, `plugins`,
-    # `configs`); every slot is an array of typed entries; an empty
+    # The descriptor has six slots (`files`, `gems`, `plugins`,
+    # `configs`, `dependencies`, `globs`); every slot is an array of typed entries; an empty
     # array means "no dependency in this slot". Composition unions
     # by key per slot; conflicts on the comparison fields raise
     # {Conflict}.
@@ -32,7 +32,12 @@ module Rigor
       # references but never declares, so the marshalled RBS env
       # cached by an older Rigor (which would leave those signatures
       # inert) MUST be rebuilt for the synthesis to take effect.
-      SCHEMA_VERSION = 3
+      # v4: ADR-60 WD3 added the `globs` slot ({GlobEntry}) for the
+      # record-and-validate plugin-producer cache; the new slot
+      # changes `#to_canonical_hash` (and is Marshal-dumped inside
+      # `fetch_or_validate` entry pairs), so entries written by an
+      # older Rigor must read as misses.
+      SCHEMA_VERSION = 4
 
       # Per-slot entry value objects. Constructors validate enums /
       # required fields and freeze the resulting struct so no caller
@@ -160,6 +165,62 @@ module Rigor
         end
       end
 
+      # ADR-60 WD3 — one glob's-worth of watched files, digested as a
+      # single value so the entry covers content change, addition,
+      # AND removal in one row: the digest is the SHA-256 over the
+      # sorted `"<path>\0<sha256-of-content>\n"` rows of every file
+      # matching `File.join(root, pattern)`. A new file adds a row, a
+      # deleted file drops one, an edit changes one — all three move
+      # the digest. {Descriptor#fresh?} re-runs the same computation
+      # and compares.
+      class GlobEntry
+        include Rigor::ValueSemantics
+
+        attr_reader :root, :pattern, :value
+
+        value_fields :root, :pattern, :value
+
+        def initialize(root:, pattern:, value:)
+          @root = root.to_s.dup.freeze
+          @pattern = pattern.to_s.dup.freeze
+          @value = value.to_s.dup.freeze
+          freeze
+        end
+
+        # Builds the entry for the glob's CURRENT filesystem state.
+        def self.compute(root:, pattern:)
+          new(root: root, pattern: pattern, value: digest_for(root: root, pattern: pattern))
+        end
+
+        # The digest the entry's `value` carries. Per-file read
+        # failures (a file vanishing between the glob and the
+        # digest) are treated as the file being absent — same
+        # race posture as {Descriptor#file_entry_fresh?}.
+        def self.digest_for(root:, pattern:)
+          # Dir.glob returns sorted entries by default (sort: true),
+          # so the row order — and therefore the digest — is stable.
+          rows = Dir.glob(File.join(root, pattern)).filter_map do |path|
+            next nil unless File.file?(path)
+
+            "#{path}\0#{Digest::SHA256.file(path).hexdigest}\n"
+          rescue StandardError
+            nil
+          end
+          Digest::SHA256.hexdigest(rows.join)
+        end
+
+        # Composition key — {.compose} unions per (root, pattern)
+        # slot; two contributions for the same slot must agree on
+        # the digest or {Conflict} is raised.
+        def slot_key
+          "#{root}\0#{pattern}"
+        end
+
+        def to_h
+          { "root" => root, "pattern" => pattern, "value" => value }
+        end
+      end
+
       # Raised when {.compose} encounters incompatible entries
       # under the same key (file digest mismatch, gem-locked
       # disagreement, …). Callers handle the exception by
@@ -167,14 +228,15 @@ module Rigor
       # contribution silently.
       class Conflict < StandardError; end
 
-      attr_reader :files, :gems, :plugins, :configs, :dependencies
+      attr_reader :files, :gems, :plugins, :configs, :dependencies, :globs
 
-      def initialize(files: [], gems: [], plugins: [], configs: [], dependencies: [])
+      def initialize(files: [], gems: [], plugins: [], configs: [], dependencies: [], globs: [])
         @files = files.dup.freeze
         @gems = gems.dup.freeze
         @plugins = plugins.dup.freeze
         @configs = configs.dup.freeze
         @dependencies = dependencies.dup.freeze
+        @globs = globs.dup.freeze
         freeze
       end
 
@@ -185,11 +247,15 @@ module Rigor
       # `files` are checked — non-file inputs (config / gems / version)
       # belong in the cache *key*, not the validated dependency set — so
       # a descriptor carrying any non-file slot is never considered fresh
-      # (it was built wrong for this use).
+      # (it was built wrong for this use). ADR-60 WD3 adds `globs`
+      # alongside `files` as a re-validatable slot: a {GlobEntry} is
+      # fresh when re-globbing + re-digesting reproduces its recorded
+      # value.
       def fresh?
         return false unless gems.empty? && plugins.empty? && configs.empty? && dependencies.empty?
 
-        files.all? { |entry| file_entry_fresh?(entry) }
+        files.all? { |entry| file_entry_fresh?(entry) } &&
+          globs.all? { |entry| glob_entry_fresh?(entry) }
       end
 
       # File-comparator strictness ordering. `:digest` is strictest
@@ -212,7 +278,9 @@ module Rigor
         plugins = compose_by_key(descriptors.flat_map(&:plugins), :id)
         configs = compose_by_key(descriptors.flat_map(&:configs), :key)
         dependencies = compose_by_key(descriptors.flat_map(&:dependencies), :gem_name)
-        new(files: files, gems: gems, plugins: plugins, configs: configs, dependencies: dependencies)
+        globs = compose_by_key(descriptors.flat_map(&:globs), :slot_key)
+        new(files: files, gems: gems, plugins: plugins, configs: configs,
+            dependencies: dependencies, globs: globs)
       end
 
       # @param producer_id [String]
@@ -241,6 +309,7 @@ module Rigor
           "dependencies" => sort_entries(dependencies, "gem_name").map(&:to_h),
           "files" => sort_entries(files, "path").map(&:to_h),
           "gems" => sort_entries(gems, "name").map(&:to_h),
+          "globs" => globs.sort_by { |e| [e.root, e.pattern] }.map(&:to_h),
           "plugins" => sort_entries(plugins, "id").map(&:to_h)
         }
       end
@@ -287,6 +356,15 @@ module Rigor
         else
           false
         end
+      rescue StandardError
+        false
+      end
+
+      # ADR-60 WD3 — re-runs the entry's glob + digest and compares
+      # against the recorded value. Any failure reads as stale
+      # (recompute), never a crash.
+      def glob_entry_fresh?(entry)
+        GlobEntry.digest_for(root: entry.root, pattern: entry.pattern) == entry.value
       rescue StandardError
         false
       end

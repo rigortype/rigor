@@ -19,11 +19,15 @@ dispatcher's synthetic-method tier and `Environment#synthetic_method_index`
 dispatcher tier ordering + the `Environment` query surface); the
 floor/ceiling delivery policy and the per-tier rationale are in the ADRs.
 
-All five classes live under the `Rigor::Plugin::Macro` namespace
+All four classes live under the `Rigor::Plugin::Macro` namespace
 (`lib/rigor/plugin/macro/`) and are declared through the corresponding
 `Manifest` slots documented in [`plugin.md`](plugin.md#rigorpluginmanifest):
 `block_as_methods:`, `heredoc_templates:`, `trait_registries:`,
-`external_files:`, `nested_class_templates:`.
+`nested_class_templates:`. (The Tier D `ExternalFile` value object and its
+`external_files:` slot were removed by
+[ADR-60 WD1](../adr/60-pre-freeze-plugin-contract-consolidation.md) — the
+field had no engine consumer; it returns demand-gated together with its
+scanner.)
 
 ## Common value-object contract
 
@@ -48,14 +52,14 @@ rules (consistent with the rest of the plugin-contract carriers):
   status_ below): the declaration round-trips and is exposed on the
   matching `Manifest` reader, and is forward-compatible when the engine
   slice lands.
-- **`receiver_constraint` matching.** Where a tier carries a
-  `receiver_constraint` (all but `ExternalFile`), the entry fires when
-  the call's lexical receiver class **equals or inherits from** that
-  fully-qualified name, matched through `Environment#class_ordering`.
+- **`receiver_constraint` matching.** Every tier carries a
+  `receiver_constraint`; the entry fires when the call's lexical
+  receiver class **equals or inherits from** that fully-qualified name,
+  matched through `Environment#class_ordering`.
 
 ## Tier A — `BlockAsMethod` (`block_as_methods:`)
 
-"The block passed to a class-level DSL call of one of `verbs` runs as an
+"The block passed to a class-level DSL call of one of `method_names` runs as an
 instance method on `receiver_constraint`'s subclass tree, with `self`
 typed accordingly." Canonical target: Sinatra's `get '/path' { ... }`
 (the block literally becomes the route method body).
@@ -63,7 +67,7 @@ typed accordingly." Canonical target: Sinatra's `get '/path' { ... }`
 | Field | Type | Notes |
 | --- | --- | --- |
 | `receiver_constraint` | non-empty `String` | FQ class name the call's lexical receiver must be or inherit from. |
-| `verbs` | non-empty `Array<Symbol>` | DSL method names (coerced from `Symbol`/non-empty `String`) whose block runs as an instance method. |
+| `method_names` | non-empty `Array<Symbol>` | DSL method names (coerced from `Symbol`/non-empty `String`) whose block runs as an instance method. |
 | `self_type` | `Symbol` | The `self`-binding kind inside the block. Default and only currently-valid value: `:receiver_instance`. `:receiver_singleton` / `:dsl_recorder` are reserved names, not yet accepted. |
 
 ## Tier C — `HeredocTemplate` (`heredoc_templates:`)
@@ -138,27 +142,6 @@ floor: the synthesised methods replay the included modules' authored RBS
 return types (ADR-5 robustness — the substrate does not fabricate
 precision it was not given).
 
-## Tier D — `ExternalFile` (`external_files:`)
-
-"Files matching `glob` are analysed as if their body were pasted at a
-call site whose `self` is an instance of `receiver_type` (and whose
-`@ivar` facts come from `bound_ivars`)." Motivating cases: Redmine's
-`WebhookPayload#instance_eval(File.read(path), …)`; tDiary's plugin
-loader.
-
-| Field | Type | Notes |
-| --- | --- | --- |
-| `glob` | non-empty `String` | File pattern, interpreted relative to the project root (the directory holding `.rigor.yml`). |
-| `receiver_type` | non-empty `String` | The class name `self` binds to inside the loaded file. |
-| `bound_ivars` | `Hash<String, String>` | Each key MUST start with `@`; each value is a non-empty type-name String. Pre-bound as ivar facts in the file-entry scope. |
-
-> **Declaration-only (engine integration deferred).** Tier D ships the
-> value class + manifest slot only; the engine integration that adds
-> matched files to the analysis set, narrows the file-entry `self_type`,
-> and pre-binds `bound_ivars` is queued for ADR-16 slice 5b, gated on
-> demonstrated demand. A declared entry round-trips and is exposed on
-> `Manifest#external_files` but the substrate does not yet act on it.
-
 ## Nested-class tier — `NestedClassTemplate` (`nested_class_templates:`, ADR-36)
 
 Where Tier C synthesises *methods*, this tier synthesises *nested
@@ -172,7 +155,7 @@ carrying `#inner : <Type>`.
 | `receiver_constraint` | non-empty `String` | FQ module name the enclosing class must `extend` for the block to be recognised (e.g. `"Mangrove::Enum"`). |
 | `block_method` | `Symbol` | The enclosing DSL block. Default `:variants`. |
 | `variant_method` | `Symbol` | Each declaration call inside the block. Default `:variant`. |
-| `name_arg_position` | `Integer >= 0` | Default `0`. The argument index whose literal constant names the nested subclass. |
+| `symbol_arg_position` | `Integer >= 0` | Default `0`. The argument index whose literal constant names the nested subclass. |
 | `inner_arg_position` | `Integer >= 0` | Default `1`. The argument index whose type expression becomes the `#inner` reader's return type. A constant type argument resolves; a non-constant inner shape degrades to `Dynamic[Top]`. |
 | `inner_reader` | `Symbol` | The payload reader synthesised on each variant subclass. Default `:inner`. |
 
@@ -186,7 +169,6 @@ The `sealed`-parent fact + `is_a?` cross-variant exhaustive narrowing
 | A | `BlockAsMethod` | `block_as_methods:` | Live (worked consumer: `rigor-sinatra`). |
 | B | `TraitRegistry` | `trait_registries:` | Live (worked consumer: `rigor-devise`). |
 | C | `HeredocTemplate` (+ `Emit` / `ReturnsFromArg`) | `heredoc_templates:` | Live (worked consumers: `rigor-dry-struct` / `rigor-dry-types`); `returns_from_arg` per-call-site lookup is the ADR-18 layer. |
-| D | `ExternalFile` | `external_files:` | Declaration-only — engine integration deferred to ADR-16 slice 5b. |
 | nested-class | `NestedClassTemplate` | `nested_class_templates:` | Live, Slice A (worked consumer: `rigor-mangrove`); sealed-parent exhaustiveness deferred. |
 
 Per [ADR-16 WD13](../adr/16-macro-expansion.md), substrate-produced output
@@ -202,7 +184,7 @@ The public-API drift spec
 ([`spec/rigor/public_api_drift_spec.rb`](../../spec/rigor/public_api_drift_spec.rb))
 pins the instance method sets of `BlockAsMethod`, `HeredocTemplate`,
 `HeredocTemplate::Emit`, `HeredocTemplate::ReturnsFromArg`, `TraitRegistry`,
-`ExternalFile`, and `NestedClassTemplate` — **every shipped value object on
+and `NestedClassTemplate` — **every shipped value object on
 the public manifest surface now carries the same accidental-change guard.**
 The two formerly-unpinned objects (`NestedClassTemplate` per ADR-36 and
 `HeredocTemplate::ReturnsFromArg` per ADR-18) were pinned via the

@@ -30,7 +30,7 @@ module Rigor
     # - every manifest-declared extension surface
     #   (`open_receivers:` / `owns_receivers:` / `produces:` /
     #   `consumes:` / `block_as_methods:` / `heredoc_templates:` /
-    #   `trait_registries:` / `external_files:` /
+    #   `trait_registries:` /
     #   `type_node_resolvers:` / `hkt_registrations:` /
     #   `hkt_definitions:` / `protocol_contracts:` /
     #   `source_rbs_synthesizer:`);
@@ -233,7 +233,6 @@ module Rigor
           block_as_methods: manifest.block_as_methods.size,
           heredoc_templates: manifest.heredoc_templates.size,
           trait_registries: manifest.trait_registries.size,
-          external_files: manifest.external_files.size,
           type_node_resolvers: manifest.type_node_resolvers.size,
           hkt_registrations: manifest.hkt_registrations.size,
           hkt_definitions: manifest.hkt_definitions.size,
@@ -257,7 +256,6 @@ module Rigor
           block_as_methods: 0,
           heredoc_templates: 0,
           trait_registries: 0,
-          external_files: 0,
           type_node_resolvers: 0,
           hkt_registrations: 0,
           hkt_definitions: 0,
@@ -337,7 +335,7 @@ module Rigor
             signature_paths: [],
             open_receivers: [], owns_receivers: [], produces: [], consumes: [],
             block_as_methods: 0, heredoc_templates: 0, trait_registries: 0,
-            external_files: 0, type_node_resolvers: 0,
+            type_node_resolvers: 0,
             hkt_registrations: 0, hkt_definitions: 0,
             protocol_contracts: 0, source_rbs_synthesizer: false,
             node_rule_types: [], dynamic_return_receivers: [], type_specifier_methods: [],

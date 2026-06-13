@@ -14,7 +14,7 @@ class Rigor::Plugin::Base
   # the no-arg `manifest` reads the cached value back.
   def self.manifest: (**untyped fields) -> Rigor::Plugin::Manifest
 
-  def self.producer: (untyped id, ?serialize: untyped, ?deserialize: untyped) { (untyped params) -> untyped } -> Symbol
+  def self.producer: (untyped id, ?watch: untyped, ?serialize: untyped, ?deserialize: untyped) { (untyped params) -> untyped } -> Symbol
   def self.producers: () -> Hash[Symbol, untyped]
 
   def self.node_rule: (untyped node_type) { (*untyped) -> untyped } -> untyped

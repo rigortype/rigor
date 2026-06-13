@@ -87,7 +87,7 @@ top-level key (e.g. a rejected `signature_gems:`).
 - The manifest already carries every other plugin contribution
   declaration — `config_schema`, `produces` / `consumes`,
   `owns_receivers`, `type_node_resolvers`, `block_as_methods`,
-  `heredoc_templates`, `trait_registries`, `external_files`,
+  `heredoc_templates`, `trait_registries`,
   `hkt_registrations`. RBS contribution belongs in the same place;
   it is a property of the plugin, declared once by its author, not
   per-project configuration.

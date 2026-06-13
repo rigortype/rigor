@@ -14,7 +14,7 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
         block_as_methods: [
           Rigor::Plugin::Macro::BlockAsMethod.new(
             receiver_constraint: "Sinatra::Base",
-            verbs: %i[get post]
+            method_names: %i[get post]
           )
         ]
       )
@@ -75,7 +75,7 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
       expect(result).to eq(Rigor::Type::Nominal.new("Sinatra::Base"))
     end
 
-    it "returns nil when the verb is not in the entry's verbs list" do
+    it "returns nil when the verb is not in the entry's method_names list" do
       call = Prism.parse("delete '/foo' do; end").value.statements.body.first
       receiver_type = Rigor::Type::Singleton.new("MyApp")
       result = described_class.narrow_self_type_for(
@@ -155,7 +155,7 @@ RSpec.describe Rigor::Inference::MacroBlockSelfType do
           block_as_methods: [
             Rigor::Plugin::Macro::BlockAsMethod.new(
               receiver_constraint: "Sinatra::Base",
-              verbs: %i[get]
+              method_names: %i[get]
             )
           ]
         )

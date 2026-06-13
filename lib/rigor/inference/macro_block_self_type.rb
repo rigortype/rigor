@@ -17,7 +17,7 @@ module Rigor
     #   `MyApp.get(...)` call);
     # - the underlying class `X` equals or inherits from the
     #   entry's `receiver_constraint`;
-    # - the call's method name is in the entry's `verbs`.
+    # - the call's method name is in the entry's `method_names`.
     #
     # On a match the helper returns the **instance** type of
     # the receiver class (`Nominal[X]`) — the narrowed
@@ -55,7 +55,7 @@ module Rigor
         # replaces the per-call plugins × block_as_methods linear scan.
         # Entries arrive in (plugin registration, declaration) order, so
         # the first ancestry match below is the same entry the previous
-        # walk returned; the verb membership the old `matches?` checked
+        # walk returned; the method-name membership the old `matches?` checked
         # is guaranteed by the table key.
         entries = registry.contribution_index.block_entries_for(call_node.name)
         entries.each do |entry|

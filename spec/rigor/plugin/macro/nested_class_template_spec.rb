@@ -8,7 +8,7 @@ RSpec.describe Rigor::Plugin::Macro::NestedClassTemplate do
       receiver_constraint: "Mangrove::Enum",
       block_method: :variants,
       variant_method: :variant,
-      name_arg_position: 0,
+      symbol_arg_position: 0,
       inner_arg_position: 1,
       inner_reader: :inner
     )
@@ -20,7 +20,7 @@ RSpec.describe Rigor::Plugin::Macro::NestedClassTemplate do
       expect(t.receiver_constraint).to eq("Mangrove::Enum")
       expect(t.block_method).to eq(:variants)
       expect(t.variant_method).to eq(:variant)
-      expect(t.name_arg_position).to eq(0)
+      expect(t.symbol_arg_position).to eq(0)
       expect(t.inner_arg_position).to eq(1)
       expect(t.inner_reader).to eq(:inner)
     end
@@ -29,7 +29,7 @@ RSpec.describe Rigor::Plugin::Macro::NestedClassTemplate do
       t = described_class.new(receiver_constraint: "My::Enum")
       expect(t.block_method).to eq(:variants)
       expect(t.variant_method).to eq(:variant)
-      expect(t.name_arg_position).to eq(0)
+      expect(t.symbol_arg_position).to eq(0)
       expect(t.inner_arg_position).to eq(1)
       expect(t.inner_reader).to eq(:inner)
     end
@@ -56,8 +56,8 @@ RSpec.describe Rigor::Plugin::Macro::NestedClassTemplate do
 
     it "rejects a negative arg position" do
       expect do
-        described_class.new(receiver_constraint: "My::Enum", name_arg_position: -1)
-      end.to raise_error(ArgumentError, /name_arg_position/)
+        described_class.new(receiver_constraint: "My::Enum", symbol_arg_position: -1)
+      end.to raise_error(ArgumentError, /symbol_arg_position/)
     end
 
     it "rejects a non-Symbol/String variant_method" do
@@ -72,7 +72,7 @@ RSpec.describe Rigor::Plugin::Macro::NestedClassTemplate do
       expect(enum_template).to eq(
         described_class.new(
           receiver_constraint: "Mangrove::Enum", block_method: :variants,
-          variant_method: :variant, name_arg_position: 0, inner_arg_position: 1, inner_reader: :inner
+          variant_method: :variant, symbol_arg_position: 0, inner_arg_position: 1, inner_reader: :inner
         )
       )
     end
@@ -86,7 +86,7 @@ RSpec.describe Rigor::Plugin::Macro::NestedClassTemplate do
         "receiver_constraint" => "Mangrove::Enum",
         "block_method" => "variants",
         "variant_method" => "variant",
-        "name_arg_position" => 0,
+        "symbol_arg_position" => 0,
         "inner_arg_position" => 1,
         "inner_reader" => "inner"
       )

@@ -156,8 +156,9 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
 
   describe "#block_entries_for" do
     it "returns the matching entries in (plugin, declaration) order, and a shared empty array otherwise" do
-      entry_a = Rigor::Plugin::Macro::BlockAsMethod.new(receiver_constraint: "Sinatra::Base", verbs: %i[get post])
-      entry_b = Rigor::Plugin::Macro::BlockAsMethod.new(receiver_constraint: "Grape::API", verbs: [:get])
+      entry_a = Rigor::Plugin::Macro::BlockAsMethod.new(receiver_constraint: "Sinatra::Base",
+                                                        method_names: %i[get post])
+      entry_b = Rigor::Plugin::Macro::BlockAsMethod.new(receiver_constraint: "Grape::API", method_names: [:get])
       klass_a = Class.new(Rigor::Plugin::Base) { manifest(id: "a", version: "0.0.1", block_as_methods: [entry_a]) }
       klass_b = Class.new(Rigor::Plugin::Base) { manifest(id: "b", version: "0.0.1", block_as_methods: [entry_b]) }
 

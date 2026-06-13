@@ -228,7 +228,7 @@ module Rigor
         return unless call.is_a?(Prism::CallNode) && call.receiver.nil? && call.name == template.variant_method
 
         args = call.arguments&.arguments || []
-        variant_const = const_name_string(args[template.name_arg_position])
+        variant_const = const_name_string(args[template.symbol_arg_position])
         return if variant_const.nil?
 
         yield variant_const, args[template.inner_arg_position]

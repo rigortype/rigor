@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "fileutils"
+require "tmpdir"
 
 RSpec.describe Rigor::Cache::Descriptor do
   describe "construction" do
@@ -215,8 +217,9 @@ RSpec.describe Rigor::Cache::Descriptor do
       expect(bytes).to include('"dependencies":[]')
       expect(bytes).to include('"files":[')
       expect(bytes).to include('"gems":[')
+      expect(bytes).to include('"globs":[]')
       expect(bytes).to include('"plugins":[]')
-      slot_order = %w[configs dependencies files gems plugins].map { |s| bytes.index(%("#{s}")) }
+      slot_order = %w[configs dependencies files gems globs plugins].map { |s| bytes.index(%("#{s}")) }
       expect(slot_order).to eq(slot_order.sort)
     end
 
@@ -267,6 +270,147 @@ RSpec.describe Rigor::Cache::Descriptor do
       a = d.cache_key_for(producer_id: "p", params: { a: 1, b: 2 })
       b = d.cache_key_for(producer_id: "p", params: { b: 2, a: 1 })
       expect(a).to eq(b)
+    end
+
+    it "differs when a glob entry changes (ADR-60 WD3)" do
+      a = described_class.new(
+        globs: [described_class::GlobEntry.new(root: "/p", pattern: "**/*.rb", value: "v1")]
+      )
+      b = described_class.new(
+        globs: [described_class::GlobEntry.new(root: "/p", pattern: "**/*.rb", value: "v2")]
+      )
+      expect(a.cache_key_for(producer_id: "p", params: {}))
+        .not_to eq(b.cache_key_for(producer_id: "p", params: {}))
+    end
+  end
+
+  describe "GlobEntry (ADR-60 WD3)" do
+    around do |example|
+      Dir.mktmpdir("rigor-glob-entry-spec-") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    attr_reader :dir
+
+    def compute
+      described_class::GlobEntry.compute(root: dir, pattern: "**/*.rb")
+    end
+
+    it "digests the matched files into one stable value" do
+      File.write(File.join(dir, "a.rb"), "A")
+      entry = compute
+      expect(entry.root).to eq(dir)
+      expect(entry.pattern).to eq("**/*.rb")
+      expect(entry.value).to eq(compute.value)
+    end
+
+    it "changes its value on content change, addition, AND removal" do
+      File.write(File.join(dir, "a.rb"), "A")
+      base = compute.value
+
+      File.write(File.join(dir, "a.rb"), "A2")
+      edited = compute.value
+      expect(edited).not_to eq(base)
+
+      File.write(File.join(dir, "b.rb"), "B")
+      added = compute.value
+      expect(added).not_to eq(edited)
+
+      File.unlink(File.join(dir, "b.rb"))
+      expect(compute.value).to eq(edited)
+    end
+
+    it "ignores non-matching and non-file paths" do
+      File.write(File.join(dir, "a.txt"), "not matched")
+      FileUtils.mkdir_p(File.join(dir, "sub.rb")) # a directory matching the glob
+      empty = described_class::GlobEntry.digest_for(root: dir, pattern: "**/*.rb")
+      expect(compute.value).to eq(empty)
+    end
+
+    it "is value-equal across construction sites" do
+      a = described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v")
+      b = described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v")
+      expect(a).to eq(b)
+    end
+  end
+
+  describe "#fresh? with globs (ADR-60 WD3)" do
+    around do |example|
+      Dir.mktmpdir("rigor-glob-fresh-spec-") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    attr_reader :dir
+
+    def descriptor_for_current_state
+      described_class.new(
+        globs: [described_class::GlobEntry.compute(root: dir, pattern: "**/*.rb")]
+      )
+    end
+
+    it "is fresh while the globbed files are unchanged" do
+      File.write(File.join(dir, "a.rb"), "A")
+      expect(descriptor_for_current_state.fresh?).to be(true)
+    end
+
+    it "goes stale on content change" do
+      File.write(File.join(dir, "a.rb"), "A")
+      d = descriptor_for_current_state
+      File.write(File.join(dir, "a.rb"), "A2")
+      expect(d.fresh?).to be(false)
+    end
+
+    it "goes stale on file addition" do
+      File.write(File.join(dir, "a.rb"), "A")
+      d = descriptor_for_current_state
+      File.write(File.join(dir, "b.rb"), "B")
+      expect(d.fresh?).to be(false)
+    end
+
+    it "goes stale on file removal" do
+      File.write(File.join(dir, "a.rb"), "A")
+      File.write(File.join(dir, "b.rb"), "B")
+      d = descriptor_for_current_state
+      File.unlink(File.join(dir, "b.rb"))
+      expect(d.fresh?).to be(false)
+    end
+
+    it "still refuses non-file/glob slots" do
+      d = described_class.new(
+        globs: [described_class::GlobEntry.compute(root: dir, pattern: "**/*.rb")],
+        configs: [described_class::ConfigEntry.new(key: "url:https://x", value_hash: "h")]
+      )
+      expect(d.fresh?).to be(false)
+    end
+  end
+
+  describe ".compose with globs (ADR-60 WD3)" do
+    it "unions glob entries per (root, pattern) slot" do
+      a = described_class.new(
+        globs: [described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v")]
+      )
+      b = described_class.new(
+        globs: [
+          described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v"),
+          described_class::GlobEntry.new(root: "/q", pattern: "*.yml", value: "w")
+        ]
+      )
+      composed = described_class.compose(a, b)
+      expect(composed.globs.size).to eq(2)
+    end
+
+    it "raises Conflict when the same slot disagrees on the digest" do
+      a = described_class.new(
+        globs: [described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v1")]
+      )
+      b = described_class.new(
+        globs: [described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v2")]
+      )
+      expect { described_class.compose(a, b) }.to raise_error(described_class::Conflict)
     end
   end
 end

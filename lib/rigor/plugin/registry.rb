@@ -7,7 +7,7 @@ module Rigor
     # ADR-52 WD1 — the compiled contribution table. Categorises a loaded
     # plugin set by which per-call contribution paths each plugin
     # actually implements, AND compiles the declarative gates (method
-    # names, `block_as_methods` verbs, `owns_receivers`) into frozen
+    # names, `block_as_methods` method names, `owns_receivers`) into frozen
     # lookup structures, so the engine's hot sites discover "no plugin
     # cares about this call" in O(1) instead of O(plugins × rules) — a
     # top hotspot on plugin-heavy projects (GitLab's 11 plugins, of
@@ -16,7 +16,7 @@ module Rigor
     #
     # Ordering contract: the gates only PRUNE consultations that could
     # not fire (every pruned rule would have failed its own `methods:` /
-    # `verbs:` check); the engine still iterates the plugin subsets in
+    # `method_names:` check); the engine still iterates the plugin subsets in
     # registry order and each plugin's rules in declaration order, so
     # the surviving contributions arrive in exactly the order the
     # ungated walk produced — diagnostics stay byte-identical. The
@@ -36,7 +36,7 @@ module Rigor
       def initialize(plugins)
         compile_memberships(plugins)
         compile_gates
-        @block_entries_by_verb = build_block_entries(plugins)
+        @block_entries_by_method_name = build_block_entries(plugins)
         @owns_receivers = plugins.flat_map { |p| manifest_for(p)&.owns_receivers || [] }.uniq.freeze
         # Per-run ancestry verdict memo, keyed by environment identity
         # then class name. Mutable inside the frozen index — sound
@@ -88,11 +88,12 @@ module Rigor
         gate.nil? || gate.include?(method_name)
       end
 
-      # The `Macro::BlockAsMethod` entries whose `verbs` include `verb`,
-      # in (plugin registration, manifest declaration) order — the same
-      # first-match order the previous plugins × entries walk visited.
-      def block_entries_for(verb)
-        @block_entries_by_verb.fetch(verb, EMPTY_BLOCK_ENTRIES)
+      # The `Macro::BlockAsMethod` entries whose `method_names` include
+      # `method_name`, in (plugin registration, manifest declaration)
+      # order — the same first-match order the previous plugins ×
+      # entries walk visited.
+      def block_entries_for(method_name)
+        @block_entries_by_method_name.fetch(method_name, EMPTY_BLOCK_ENTRIES)
       end
 
       # True when `class_name` equals or inherits from any plugin's
@@ -188,15 +189,15 @@ module Rigor
         gates.values.reduce(Set.new) { |acc, names| acc.merge(names) }.freeze
       end
 
-      # `verb Symbol → [BlockAsMethod entries]`, insertion-ordered by
-      # (plugin, declaration). Verbs are Symbol-normalised by
+      # `method-name Symbol → [BlockAsMethod entries]`, insertion-ordered
+      # by (plugin, declaration). Method names are Symbol-normalised by
       # `Macro::BlockAsMethod#initialize`.
       def build_block_entries(plugins)
         table = {}
         plugins.each do |plugin|
           entries = manifest_for(plugin)&.block_as_methods || []
           entries.each do |entry|
-            entry.verbs.each { |verb| (table[verb] ||= []) << entry }
+            entry.method_names.each { |name| (table[name] ||= []) << entry }
           end
         end
         table.each_value(&:freeze)

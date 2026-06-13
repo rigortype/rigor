@@ -181,7 +181,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     node_file_context_block()
     node_rule(req:node_type,block:block)
     node_rules()
-    producer(req:id,key:serialize,key:deserialize,block:block)
+    producer(req:id,key:watch,key:serialize,key:deserialize,block:block)
     producers()
     suggest(req:name,req:candidates)
     type_specifier(keyreq:methods,block:block)
@@ -197,7 +197,6 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     consumes()
     description()
     eql?(req:other)
-    external_files()
     hash()
     heredoc_templates()
     hkt_definitions()
@@ -260,10 +259,10 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     ==(req:other)
     eql?(req:other)
     hash()
+    method_names()
     receiver_constraint()
     self_type()
     to_h()
-    verbs()
   ].freeze
 
   PLUGIN_MACRO_HEREDOC_TEMPLATE_INSTANCE = %w[
@@ -311,16 +310,6 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     to_h()
   ].freeze
 
-  PLUGIN_MACRO_EXTERNAL_FILE_INSTANCE = %w[
-    ==(req:other)
-    bound_ivars()
-    eql?(req:other)
-    glob()
-    hash()
-    receiver_type()
-    to_h()
-  ].freeze
-
   PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE = %w[
     ==(req:other)
     block_method()
@@ -328,8 +317,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     hash()
     inner_arg_position()
     inner_reader()
-    name_arg_position()
     receiver_constraint()
+    symbol_arg_position()
     to_h()
     variant_method()
   ].freeze
@@ -849,14 +838,6 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-16 slice-3a value-class surface" do
       expect(instance_signatures(Rigor::Plugin::Macro::TraitRegistry)).to eq(
         PublicApiDriftSnapshots::PLUGIN_MACRO_TRAIT_REGISTRY_INSTANCE
-      )
-    end
-  end
-
-  describe "Rigor::Plugin::Macro::ExternalFile" do
-    it "exposes the expected ADR-16 slice-5a value-class surface" do
-      expect(instance_signatures(Rigor::Plugin::Macro::ExternalFile)).to eq(
-        PublicApiDriftSnapshots::PLUGIN_MACRO_EXTERNAL_FILE_INSTANCE
       )
     end
   end

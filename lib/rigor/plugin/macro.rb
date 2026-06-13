@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "macro/block_as_method"
-require_relative "macro/external_file"
 require_relative "macro/heredoc_template"
 require_relative "macro/nested_class_template"
 require_relative "macro/trait_registry"
@@ -11,8 +10,8 @@ module Rigor
     # Substrate declarations for the macro / DSL expansion tiers
     # introduced by ADR-16. Plugin authors declare entries under
     # `Plugin::Manifest` slots (`block_as_methods:`,
-    # `trait_registries:`, `heredoc_macros:`,
-    # `external_file_inclusions:`) and the substrate consumes them
+    # `trait_registries:`, `heredoc_templates:`,
+    # `nested_class_templates:`) and the substrate consumes them
     # to recognise the call shapes a library exposes to its users.
     #
     # Slice 1a (this file's first delivery) ships the Tier A value

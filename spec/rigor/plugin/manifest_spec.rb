@@ -461,7 +461,7 @@ RSpec.describe Rigor::Plugin::Manifest do
     let(:sinatra_entry) do
       Rigor::Plugin::Macro::BlockAsMethod.new(
         receiver_constraint: "Sinatra::Base",
-        verbs: %i[get post put delete]
+        method_names: %i[get post put delete]
       )
     end
 
@@ -500,7 +500,7 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["block_as_methods"]).to eq(
         [{
           "receiver_constraint" => "Sinatra::Base",
-          "verbs" => %w[get post put delete],
+          "method_names" => %w[get post put delete],
           "self_type" => "receiver_instance"
         }]
       )
@@ -632,64 +632,6 @@ RSpec.describe Rigor::Plugin::Manifest do
     it "treats two manifests with equal trait_registries as equal" do
       a = described_class.new(id: "devise", version: "0.1.0", trait_registries: [devise_entry])
       b = described_class.new(id: "devise", version: "0.1.0", trait_registries: [devise_entry])
-      expect(a).to eq(b)
-      expect(a.hash).to eq(b.hash)
-    end
-  end
-
-  describe "external_files (ADR-16 slice 5a)" do
-    let(:webhook_entry) do
-      Rigor::Plugin::Macro::ExternalFile.new(
-        glob: "config/webhooks/*.rb",
-        receiver_type: "Redmine::WebhookPayload",
-        bound_ivars: { "@event" => "Symbol" }
-      )
-    end
-
-    it "defaults to an empty Array" do
-      m = described_class.new(id: "redmine-webhooks", version: "0.1.0")
-      expect(m.external_files).to eq([])
-      expect(m.external_files).to be_frozen
-    end
-
-    it "stores ExternalFile entries in declaration order" do
-      m = described_class.new(
-        id: "redmine-webhooks", version: "0.1.0",
-        external_files: [webhook_entry]
-      )
-      expect(m.external_files).to eq([webhook_entry])
-      expect(m.external_files).to be_frozen
-    end
-
-    it "rejects a non-Array external_files argument" do
-      expect do
-        described_class.new(id: "redmine-webhooks", version: "0.1.0", external_files: webhook_entry)
-      end.to raise_error(ArgumentError, /external_files must be an Array/)
-    end
-
-    it "rejects entries that are not ExternalFile instances" do
-      expect do
-        described_class.new(id: "redmine-webhooks", version: "0.1.0", external_files: ["not-an-entry"])
-      end.to raise_error(ArgumentError, /ExternalFile instances/)
-    end
-
-    it "serialises entries as stable Hashes through #to_h" do
-      m = described_class.new(
-        id: "redmine-webhooks", version: "0.1.0",
-        external_files: [webhook_entry]
-      )
-      expect(m.to_h["external_files"]).to eq(
-        [{
-          "glob" => "config/webhooks/*.rb",
-          "receiver_type" => "Redmine::WebhookPayload",
-          "bound_ivars" => { "@event" => "Symbol" }
-        }]
-      )
-    end
-
-    it "treats two manifests with equal external_files as equal" do
-      a = described_class.new(id: "redmine-webhooks", version: "0.1.0", external_files: [webhook_entry])
-      b = described_class.new(id: "redmine-webhooks", version: "0.1.0", external_files: [webhook_entry])
       expect(a).to eq(b)
       expect(a.hash).to eq(b.hash)
     end

@@ -64,7 +64,7 @@ RSpec.describe "rigor-sinatra integration" do
     entry = manifest.block_as_methods.first
     expect(entry).to be_a(Rigor::Plugin::Macro::BlockAsMethod)
     expect(entry.receiver_constraint).to eq("Sinatra::Base")
-    expect(entry.verbs).to eq(%i[get post put delete head options patch link unlink])
+    expect(entry.method_names).to eq(%i[get post put delete head options patch link unlink])
     expect(entry.self_type).to eq(:receiver_instance)
   end
 

@@ -43,7 +43,7 @@ module Rigor
 
       attr_reader :id, :version, :description, :config_schema, :config_defaults, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
-                  :heredoc_templates, :nested_class_templates, :trait_registries, :external_files,
+                  :heredoc_templates, :nested_class_templates, :trait_registries,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
                   :source_rbs_synthesizer, :additional_initializers
 
@@ -52,7 +52,7 @@ module Rigor
         description: nil, config_schema: {},
         produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
-        trait_registries: [], external_files: [],
+        trait_registries: [],
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
         source_rbs_synthesizer: nil, additional_initializers: []
       )
@@ -67,7 +67,6 @@ module Rigor
         validate_heredoc_templates!(heredoc_templates)
         validate_nested_class_templates!(nested_class_templates)
         validate_trait_registries!(trait_registries)
-        validate_external_files!(external_files)
         validate_hkt_registrations!(hkt_registrations)
         validate_hkt_definitions!(hkt_definitions)
         validate_signature_paths!(signature_paths)
@@ -77,7 +76,7 @@ module Rigor
 
         assign_fields(id, version, description, config_schema, produces, consumes, owns_receivers,
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
-                      external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
+                      hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                       source_rbs_synthesizer)
         assign_nested_class_templates(nested_class_templates)
         assign_additional_initializers(additional_initializers)
@@ -89,7 +88,7 @@ module Rigor
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, config_schema, produces, consumes, owns_receivers,
                         open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
-                        external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
+                        hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                         source_rbs_synthesizer)
         @id = id.dup.freeze
         @version = version.dup.freeze
@@ -104,7 +103,6 @@ module Rigor
         @block_as_methods = block_as_methods.dup.freeze
         @heredoc_templates = heredoc_templates.dup.freeze
         @trait_registries = trait_registries.dup.freeze
-        @external_files = external_files.dup.freeze
         @hkt_registrations = hkt_registrations.dup.freeze
         @hkt_definitions = hkt_definitions.dup.freeze
         @signature_paths = signature_paths.map { |p| p.to_s.dup.freeze }.freeze
@@ -170,7 +168,6 @@ module Rigor
           "heredoc_templates" => heredoc_templates.map(&:to_h),
           "nested_class_templates" => nested_class_templates.map(&:to_h),
           "trait_registries" => trait_registries.map(&:to_h),
-          "external_files" => external_files.map(&:to_h),
           "hkt_registrations" => hkt_registrations.map(&:to_h),
           "hkt_definitions" => hkt_definitions.map { |d| { "uri" => d.uri, "params" => d.params } },
           "signature_paths" => signature_paths,
@@ -387,23 +384,6 @@ module Rigor
         raise ArgumentError,
               "plugin manifest trait_registries must be an Array of " \
               "Rigor::Plugin::Macro::TraitRegistry instances, got #{entries.inspect}"
-      end
-
-      # ADR-16 slice 5a — `external_files:` declares the Tier D
-      # substrate entries (external-Ruby-file inclusion under a
-      # declared `self`). Slice 5a carries the declarations on
-      # the manifest; the engine integration that walks the
-      # matched files + narrows their entry scope is **queued for
-      # slice 5b**, gated on demonstrated demand from concrete
-      # plugin targets (Redmine webhook payloads, tDiary plugin
-      # loader, etc.). Plugin authors MAY declare entries today;
-      # the substrate does not yet act on them.
-      def validate_external_files!(entries)
-        return if entries.is_a?(Array) && entries.all?(Macro::ExternalFile)
-
-        raise ArgumentError,
-              "plugin manifest external_files must be an Array of " \
-              "Rigor::Plugin::Macro::ExternalFile instances, got #{entries.inspect}"
       end
 
       # ADR-20 slice 6 — `hkt_registrations:` declares the

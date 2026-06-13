@@ -525,7 +525,11 @@ module Rigor
           # be a working-code false positive).
           receiver_type = safe_navigation_receiver(call_node, scope)
           class_name = concrete_class_name(receiver_type)
-          return nil if class_name.nil?
+          # A union receiver has no single concrete class. The scalar path
+          # below cannot reason about it, but the call is still definitely
+          # undefined when EVERY arm lacks the method — see
+          # `union_undefined_method_diagnostic`.
+          return union_undefined_method_diagnostic(path, call_node, receiver_type, scope) if class_name.nil?
 
           # ADR-26 — a plugin may declare a class "open": one
           # known to respond beyond its RBS-declared method
@@ -1072,6 +1076,49 @@ module Rigor
           return false if definition.nil?
 
           !definition.methods[method_name.to_sym].nil?
+        end
+
+        # Teeth on a *union* receiver. The scalar `undefined_method_diagnostic`
+        # bails when the receiver has no single concrete class; here we fire
+        # when EVERY non-nil arm is a fully-known, bounded, instance class on
+        # which the method is absent — the call is then undefined regardless of
+        # which arm the value takes at runtime (`A | B` responds to `m` only if
+        # both `A` and `B` do). FP-safe by construction: `method_present_anywhere?`
+        # returns "present" for any Dynamic / unknown / unbuildable /
+        # source-declared arm, so the `any?` short-circuits and we never fire on
+        # uncertainty; `union_arm_blocks_undefined_fire?` additionally bails on
+        # any open (ADR-26) / synthesized / singleton / module-mixin arm. This is
+        # no more aggressive than the scalar rule — it just applies the same
+        # certainty test to each arm.
+        #
+        # Nil-bearing unions are deferred: their nil arm interacts with the
+        # `possible-nil-receiver` rule, safe-navigation, and ADR-58
+        # declaration-sourced nil. Slice 1 handles pure non-nil unions
+        # (e.g. `String | Symbol`).
+        def union_undefined_method_diagnostic(path, call_node, receiver_type, scope)
+          return nil unless receiver_type.is_a?(Type::Union)
+          return nil if call_node.safe_navigation?
+
+          members = receiver_type.members
+          return nil if members.any? { |member| nil_member?(member) }
+          return nil if members.any? { |member| union_arm_blocks_undefined_fire?(member, scope) }
+          return nil if members.any? { |member| method_present_anywhere?(member, call_node.name, scope) }
+
+          build_undefined_method_diagnostic(path, call_node, receiver_type)
+        end
+
+        # An arm that makes a sound "undefined on every arm" verdict
+        # impossible: a non-class surface (Dynamic / Top / Bot), a singleton
+        # (slice 1 reasons about instance arms only), an unbounded receiver
+        # (ADR-26 open class or a synthesized stub), or a module mixin whose
+        # Object-inherited methods the per-arm lookup would miss.
+        def union_arm_blocks_undefined_fire?(member, scope)
+          class_name = concrete_class_name(member)
+          return true if class_name.nil?
+          return true if member.is_a?(Type::Singleton)
+          return true if unbounded_receiver_surface?(class_name, scope)
+
+          module_mixin_receiver?(member, scope)
         end
 
         # Slice 7 phase 19 — PHPStan-style `dump_type(value)`.

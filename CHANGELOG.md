@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[inference]** `call.undefined-method` now fires on a *union* receiver when the method is absent on every arm: `x = flag ? "s" : :sym; x.no_such` reports the call as undefined, since `String | Symbol` responds to a method only if both `String` and `Symbol` do. The scalar existence check previously bailed on any union (no single concrete class). Conservative by construction — any arm that is `Dynamic`, an unknown / unbuildable class, a source-declared or open ([ADR-26](docs/adr/26-activerecord-relation-typing.md)) receiver, or `nil`-bearing suppresses the diagnostic, so only a definitely-undefined call fires. Nil-bearing unions stay deferred to the `possible-nil-receiver` rule.
+
 ## [0.1.19] - 2026-06-13
 
 v0.1.19 is a precision-and-trust release for procedural Ruby. Its headline is that method-call results now flow through user-defined helper methods instead of widening to an opaque type ([ADR-57](docs/adr/57-self-call-return-adoption.md)), backed by recursive-return ([ADR-55](docs/adr/55-recursive-return-precision.md)) and block/loop captured-mutation ([ADR-56](docs/adr/56-block-captured-local-mutation.md)) precision, plus a large batch of false-positive removals on real-world data-structure, parsing, and networking code ([ADR-58](docs/adr/58-ivar-field-typing.md)). A run-scoped return memo removes a superlinear whole-`lib` slowdown the new inference would otherwise cost. It also lands the pre-1.0 plugin-contract consolidation ([ADR-60](docs/adr/60-pre-freeze-plugin-contract-consolidation.md), with breaking changes), agent-friendly structured diagnostic fields ([ADR-61](docs/adr/61-agent-friendly-diagnostic-statistics.md)), and the foundation of the bleeding-edge opt-in ([ADR-50](docs/adr/50-release-engineering-and-stability-strategy.md)).

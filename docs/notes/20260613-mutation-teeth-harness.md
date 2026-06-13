@@ -116,6 +116,22 @@ engine gaps** (→ the backlog).
      core/stdlib class (where the cross-file-def FP cannot arise)? That needs a corpus FP
      study before any change. This is the adjudication discipline working — not every
      survivor is a bug; some are intentional silence.
+
+     **Corpus FP study (2026-06-14) — DONE; verdict: the narrowing is REJECTED, N3 silence
+     KEPT.** A bundled-arm-narrowed candidate (`Class`/`Module` excluded, plain calls only)
+     was run across 13 projects (ActiveSupport-heavy liquid/mail/herb/slim/strap +
+     plain kramdown/net-ssh/parser/oj/faraday/haml/hamlit/tdiary-core). Result: **zero
+     genuine nilable-union firings** — ~0 real-world teeth gain. The self-check meanwhile
+     surfaced a real **loss-of-specificity FP** (`plugin_class : Class` holds a `Plugin`
+     subclass with `.manifest`), exactly N3's concern. ~0 benefit + demonstrated
+     FP-proneness + the cost of overriding a deliberate decision ⇒ not worth it. **Two
+     guards harvested and KEPT on the shipped slice-1**, however: (a) a generic-metaclass
+     guard (`Class`/`Module` arms can't have singleton methods enumerated), and (b) a
+     **distinct-class guard** — slice-1 fires only on a genuinely multi-class union, not a
+     same-class shape join (`Hash[K1,V1] | Hash[K2,V2]`), which **fixed a real external
+     slice-1 FP** the study found on mail (`compose_codepoints` mistyped `Hash | Hash` for
+     an `Array`, flagging `.pack`). So the rejected feature still produced two FP
+     hardenings of shipped code. `make verify` clean; union spec now 5 examples.
 3. **Mutex / Thread core-class coverage — LANDED (RBS class-alias resolution).**
    Root cause was *not* a missing import: `Mutex` is an RBS **class alias**
    (`class Mutex = Thread::Mutex`, `references/rbs/core/thread.rbs:1822`). It lives only

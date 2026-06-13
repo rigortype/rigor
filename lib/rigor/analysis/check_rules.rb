@@ -1110,8 +1110,22 @@ module Rigor
           return nil if call_node.safe_navigation?
 
           members = receiver_type.members
+          # Nil-bearing unions (`T | nil`) stay silent — the deliberate N3
+          # decision (`safe_navigation_undefined_method_spec.rb`). A corpus FP
+          # study of a bundled-arm-narrowed candidate (12 projects incl.
+          # ActiveSupport-heavy) found ~zero real firings yet a demonstrated
+          # loss-of-specificity false positive, so the silence is kept. See
+          # ADR-62 and `docs/notes/20260613-mutation-teeth-harness.md`.
           return nil if members.any? { |member| nil_member?(member) }
           return nil if members.any? { |member| union_arm_blocks_undefined_fire?(member, scope) }
+          # Only a genuinely multi-class union ("the value is an A or a B") gains
+          # from this rule. A union whose arms all resolve to ONE class
+          # (`Hash[K1, V1] | Hash[K2, V2]`) is a shape-join artifact — checking
+          # method existence there is the scalar rule's job, and when the join is
+          # a misinference it is a false positive (a corpus probe caught mail's
+          # `compose_codepoints` typed `Hash | Hash` for an `Array`, flagging
+          # `.pack`). Require at least two distinct arm classes.
+          return nil if members.map { |member| concrete_class_name(member) }.uniq.size < 2
           return nil if members.any? { |member| method_present_anywhere?(member, call_node.name, scope) }
 
           build_undefined_method_diagnostic(path, call_node, receiver_type)
@@ -1119,13 +1133,21 @@ module Rigor
 
         # An arm that makes a sound "undefined on every arm" verdict
         # impossible: a non-class surface (Dynamic / Top / Bot), a singleton
-        # (slice 1 reasons about instance arms only), an unbounded receiver
-        # (ADR-26 open class or a synthesized stub), or a module mixin whose
-        # Object-inherited methods the per-arm lookup would miss.
+        # (slice 1 reasons about instance arms only), the generic metaclass
+        # `Class` / `Module` (a value typed as one is *some* class/module object
+        # whose singleton methods cannot be enumerated from the metaclass — e.g.
+        # `plugin_class : Class` really holds a `Plugin` subclass with
+        # `.manifest`), an unbounded receiver (ADR-26 open class or a synthesized
+        # stub), or a module mixin whose Object-inherited methods the per-arm
+        # lookup would miss.
+        METACLASS_ARMS = %w[Class Module].to_set.freeze
+        private_constant :METACLASS_ARMS
+
         def union_arm_blocks_undefined_fire?(member, scope)
           class_name = concrete_class_name(member)
           return true if class_name.nil?
           return true if member.is_a?(Type::Singleton)
+          return true if METACLASS_ARMS.include?(class_name)
           return true if unbounded_receiver_surface?(class_name, scope)
 
           module_mixin_receiver?(member, scope)

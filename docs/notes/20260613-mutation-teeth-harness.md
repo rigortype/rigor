@@ -128,8 +128,16 @@ engine gaps** (→ the backlog).
    work on `Mutex` and any `X = Y`. `make verify` clean (lib uses `Mutex` in several
    places — no FP); 5-example loader spec; the Mutex survivor cluster now kills. A general
    win beyond the cluster.
-4. Self-dogfood `Type::*` method RBS; `argument-type-mismatch` adjudication. *(pending)*
-5. **ADR — LANDED: [ADR-62](../adr/62-mutation-testing-teeth-measurement.md).** Folds the
+4. **Broad-fuzz mode — LANDED (the `両方を段階的に` robustness half).** `mutate.rb fuzz
+   <paths…>` runs the warm loop with aggressive un-filtered mutation (every operator, every
+   site) and reports mutants that crash the analyzer (`internal analyzer error:` — its own
+   rescue), hang (per-mutant timeout), or — with `--repeat` — return non-deterministic
+   diagnostics (which would break the cache's byte-identical contract). First run: **2,706
+   mutants over all of `lib/rigor`, zero crashes / hangs** — the analyzer is robust against
+   arbitrary type-visible mutation of its own tree. A clean result is itself the
+   deliverable (robustness evidence).
+5. Self-dogfood `Type::*` method RBS; `argument-type-mismatch` adjudication. *(pending)*
+6. **ADR — LANDED: [ADR-62](../adr/62-mutation-testing-teeth-measurement.md).** Folds the
    methodology + decisions (build-our-own, type-aware filter as the meaning-maker,
    sweep-as-backlog, adjudicate-don't-assume) and the landed/deferred items into a
    decision record. This note remains the living tracker; the ADR is the rationale.

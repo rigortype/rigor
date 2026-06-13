@@ -85,16 +85,29 @@ the **type filter** is what makes the number mean something. Measured A/B:
 the survivors are **actionable false-negative candidates at sites Rigor can
 actually see**, not Dynamic-receiver noise.
 
+## Fuzz mode — robustness, not teeth
+
+`fuzz <paths…>` is the soundness/robustness sibling: not "does Rigor bite" but
+"can Rigor be broken". It runs the warm loop with **aggressive, un-filtered**
+mutation (every operator including `arity_extra`, every site) and reports a
+mutant that makes the analyzer **crash** (a rescued `internal analyzer error:`
+diagnostic), **hang** (per-mutant `--timeout`, default 10 s), or — with
+`--repeat` — return **non-deterministic** diagnostics across two identical runs
+(which would break the cache's byte-identical contract, ADR-45/54). A clean run
+finds nothing; a finding is a bug. First run was clean (2,706 `lib/rigor`
+mutants, zero crashes/hangs).
+
+```sh
+nix … develop -c bundle exec ruby tool/mutation/mutate.rb fuzz lib/rigor --per-file 10
+```
+
 ## Next steps (staged)
 
-1. ~~**Type-aware site filtering**~~ — **done (Phase 1.5).** See above.
-2. **Closure-aware kills** — a return-type mutation surfaces at a *caller*; use
+1. ~~**Type-aware site filtering**~~ — **done (Phase 1.5).**
+2. ~~**Broad fuzz mode**~~ — **done.** See above.
+3. **Closure-aware kills** — a return-type mutation surfaces at a *caller*; use
    the ADR-46 dependents index to define where a legitimate kill may appear.
-3. **Broad fuzz mode** — same warm loop, aggressive random mutation, watching
-   for `internal analyzer error:` (crash), per-mutant timeout (hang), and
-   *soundness contradictions* (a mutant that removes/flips a baseline diagnostic
-   instead of only adding one). Crash detection is nearly free: the Runner
-   already rescues `StandardError` into a single `internal analyzer error:`
-   diagnostic.
-4. Optionally a `make mutate` target and a per-rule fixture corpus where kill is
+4. **`arity_extra` fixed-arity guard** — resolve the callee signature so the
+   operator only fires on fixed-arity methods, making it default-worthy again.
+5. Optionally a `make mutate` target and a per-rule fixture corpus where kill is
    *expected*, tracked as a teeth-regression gate.

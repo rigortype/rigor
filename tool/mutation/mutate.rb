@@ -40,6 +40,7 @@
 require "json"
 require "optparse"
 require "prism"
+require "timeout"
 
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "rigor"
@@ -440,6 +441,20 @@ module RigorMutation
 
   # Corpus sweep: one warm session, every file's survivors aggregated and
   # clustered into a ranked false-negative backlog for the engine.
+  # Expand file / directory / glob arguments to a sorted, unique `.rb` list.
+  module Paths
+    module_function
+
+    def expand(paths)
+      paths.flat_map do |p|
+        if File.directory?(p) then Dir.glob(File.join(p, "**", "*.rb"))
+        elsif File.file?(p) then [p]
+        else Dir.glob(p).select { |f| f.end_with?(".rb") }
+        end
+      end.uniq.sort
+    end
+  end
+
   class Sweep
     def initialize(paths:, config_path:, per_file:, seed:, operators:, type_filter:, json:, top:)
       @paths = paths
@@ -453,7 +468,7 @@ module RigorMutation
     end
 
     def run
-      files = expand(@paths)
+      files = Paths.expand(@paths)
       abort("no .rb files under: #{@paths.join(' ')}") if files.empty?
       config, ctx = Session.build(@config_path)
       analyzer = Analyzer.new(config: config, ctx: ctx, operators: @operators, type_filter: @type_filter)
@@ -468,15 +483,6 @@ module RigorMutation
     end
 
     private
-
-    def expand(paths)
-      paths.flat_map do |p|
-        if File.directory?(p) then Dir.glob(File.join(p, "**", "*.rb"))
-        elsif File.file?(p) then [p]
-        else Dir.glob(p).select { |f| f.end_with?(".rb") }
-        end
-      end.uniq.sort
-    end
 
     # Cluster survivors by (operator, receiver type). A cluster is a systematic
     # blind spot: "mutating <operator> on a <receiver> never fires".
@@ -537,25 +543,141 @@ module RigorMutation
     end
   end
 
+  # Broad-fuzz mode — the soundness / robustness sibling of the teeth sweep.
+  # Not "does Rigor bite" but "can Rigor be broken": stress the analyzer with
+  # aggressive, un-filtered mutation (every operator, every site) and report
+  # mutants that make it CRASH (a rescued `internal analyzer error:`
+  # diagnostic), HANG (per-mutant timeout), or — with `--repeat` — return
+  # NON-DETERMINISTIC diagnostics (which would break the cache's byte-identical
+  # contract, ADR-45/54). A clean run finds nothing; a finding is a bug.
+  class Fuzz
+    CRASH_PREFIX = "internal analyzer error:"
+
+    def initialize(paths:, config_path:, per_file:, seed:, timeout:, repeat:)
+      @paths = paths
+      @config_path = config_path
+      @per_file = per_file
+      @seed = seed
+      @timeout = timeout
+      @repeat = repeat
+    end
+
+    def run
+      files = Paths.expand(@paths)
+      abort("no .rb files under: #{@paths.join(' ')}") if files.empty?
+      config, ctx = Session.build(@config_path)
+
+      findings = []
+      analysed = 0
+      files.each_with_index do |path, i|
+        warn format("[%d/%d] %s", i + 1, files.size, path)
+        source = File.read(path, encoding: Encoding::UTF_8)
+        sample(Mutator.new(source, operators: Mutator::ALL_OPERATORS).mutations).each do |mut|
+          analysed += 1
+          findings.concat(fuzz_one(config, ctx, source, path, mut))
+        end
+      end
+      report(findings, files.size, analysed)
+    end
+
+    private
+
+    def sample(mutations)
+      shuffled = mutations.shuffle(random: Random.new(@seed))
+      @per_file ? shuffled.first(@per_file) : shuffled
+    end
+
+    def fuzz_one(config, ctx, source, path, mut)
+      mutant = mut.apply(source)
+      return [] unless Prism.parse(mutant).success?
+
+      diags = Timeout.timeout(@timeout) { analyse(config, ctx, mutant, path).diagnostics }
+      crashes = diags.select { |d| d.message.to_s.start_with?(CRASH_PREFIX) }
+      return crashes.map { |d| finding(:crash, path, mut, d.message) } unless crashes.empty?
+      return [] unless @repeat
+
+      again = Timeout.timeout(@timeout) { analyse(config, ctx, mutant, path).diagnostics }
+      return [] if same_diagnostics?(diags, again)
+
+      [finding(:nondeterministic, path, mut, "diagnostics differ across two identical runs")]
+    rescue Timeout::Error
+      [finding(:hang, path, mut, "exceeded #{@timeout}s")]
+    rescue StandardError => e
+      [finding(:harness_error, path, mut, "#{e.class}: #{e.message}")]
+    end
+
+    def analyse(config, ctx, mutant_source, path)
+      Rigor::Analysis::Runner.new(
+        configuration: config, environment: ctx.environment, prebuilt: ctx.project_scan,
+        cache_store: nil, collect_stats: false
+      ).run_source(source: mutant_source, path: path)
+    end
+
+    def same_diagnostics?(left, right)
+      key = ->(diags) { diags.map { |d| [d.rule, d.line, d.column, d.message] }.sort }
+      key.call(left) == key.call(right)
+    end
+
+    def finding(kind, path, mut, detail)
+      { kind: kind, path: path, line: mut.line, operator: mut.operator, label: mut.label, detail: detail }
+    end
+
+    def report(findings, file_count, analysed)
+      warn ""
+      flags = "seed=#{@seed}, timeout=#{@timeout}s#{', repeat' if @repeat}"
+      puts "fuzzed #{file_count} files, #{analysed} mutants (#{flags})\n\n"
+      if findings.empty?
+        puts "no robustness defects — no crash / hang#{' / nondeterminism' if @repeat} found"
+        return
+      end
+
+      findings.group_by { |f| f[:kind] }.each { |kind, group| print_kind(kind, group) }
+    end
+
+    def print_kind(kind, group)
+      puts "── #{kind} (#{group.size}) ──────────────────────────────"
+      if kind == :crash
+        group.group_by { |f| crash_class(f[:detail]) }.sort_by { |_, g| -g.size }.each do |klass, g|
+          puts format("  %-4d %s", g.size, klass)
+          g.first(3).each { |f| puts "       #{f[:path]}:#{f[:line]}  #{f[:operator]}  #{f[:label]}" }
+        end
+      else
+        group.first(20).each { |f| puts "  #{f[:path]}:#{f[:line]}  #{f[:operator]}  #{f[:detail]}" }
+        puts "  (#{group.size - 20} more)" if group.size > 20
+      end
+    end
+
+    # "internal analyzer error: SomeError: msg" → "SomeError"
+    def crash_class(message)
+      message.to_s.sub(CRASH_PREFIX, "").strip.split(":").first&.strip || "?"
+    end
+  end
+
   class CLI
+    MODES = %w[sweep fuzz].freeze
+
     def self.run(argv)
-      sweep = argv.first == "sweep" && argv.shift
+      mode = MODES.include?(argv.first) ? argv.shift : nil
       options = defaults
-      parse(argv, options, sweep: !!sweep)
-      sweep ? run_sweep(argv, options) : run_single(argv, options)
+      parse(argv, options, mode: mode)
+      case mode
+      when "sweep" then run_sweep(argv, options)
+      when "fuzz" then run_fuzz(argv, options)
+      else run_single(argv, options)
+      end
     end
 
     def self.defaults
-      { config: nil, limit: nil, per_file: 40, top: 25, seed: 1,
+      { config: nil, limit: nil, per_file: 40, top: 25, seed: 1, timeout: 10, repeat: false,
         operators: Mutator::OPERATORS, dry_run: false, verbose: false, type_filter: true, json: false }
     end
 
-    def self.parse(argv, options, sweep:) # rubocop:disable Metrics/AbcSize
+    def self.parse(argv, options, mode:) # rubocop:disable Metrics/AbcSize
       OptionParser.new do |o|
-        o.banner = if sweep
-                     "usage: bundle exec ruby tool/mutation/mutate.rb sweep <paths...> [options]"
-                   else
-                     "usage: bundle exec ruby tool/mutation/mutate.rb <target.rb> [options]"
+        o.banner = case mode
+                   when "sweep" then "usage: bundle exec ruby tool/mutation/mutate.rb sweep <paths...> [options]"
+                   when "fuzz" then "usage: bundle exec ruby tool/mutation/mutate.rb fuzz <paths...> [options]"
+                   else "usage: bundle exec ruby tool/mutation/mutate.rb <target.rb> [options]"
                    end
         o.on("--config PATH", "Rigor config file (default: auto-discover)") { |v| options[:config] = v }
         o.on("--limit N", Integer, "single mode: sample at most N mutants") { |v| options[:limit] = v }
@@ -563,6 +685,12 @@ module RigorMutation
           options[:per_file] = v
         end
         o.on("--top N", Integer, "sweep mode: show the top N survivor clusters (default 25)") { |v| options[:top] = v }
+        o.on("--timeout N", Integer, "fuzz mode: per-mutant hang timeout in seconds (default 10)") do |v|
+          options[:timeout] = v
+        end
+        o.on("--repeat", "fuzz mode: run each mutant twice and flag non-deterministic output") do
+          options[:repeat] = true
+        end
         o.on("--seed N", Integer, "RNG seed for sampling (default 1)") { |v| options[:seed] = v }
         o.on("--operators LIST", "comma list (default #{Mutator::OPERATORS.join(',')}; +arity_extra available)") do |v|
           options[:operators] = v.split(",").map(&:strip).map(&:to_sym)
@@ -599,6 +727,15 @@ module RigorMutation
         paths: argv, config_path: options[:config], per_file: options[:per_file],
         seed: options[:seed], operators: options[:operators], type_filter: options[:type_filter],
         json: options[:json], top: options[:top]
+      ).run
+    end
+
+    def self.run_fuzz(argv, options)
+      abort("fuzz needs at least one path/dir/glob") if argv.empty?
+
+      Fuzz.new(
+        paths: argv, config_path: options[:config], per_file: options[:per_file],
+        seed: options[:seed], timeout: options[:timeout], repeat: options[:repeat]
       ).run
     end
 

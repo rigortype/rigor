@@ -83,9 +83,14 @@ engine gaps** (→ the backlog).
 
 ## Plan (easiest-first), and landings
 
-1. **Harness de-noise** — union-with-Dynamic-arm + `bot` → non-concrete in the filter;
-   `arity_extra` fixed-arity guard. Removes ~150+ noise survivors; makes the backlog
-   trustworthy. *(pending)*
+1. **Harness de-noise — LANDED `599a7922`+1.** The type filter now treats a union with
+   any `Dynamic`/`Top`/`Bot` arm (and bare `bot`) as non-concrete (`non_concrete_type?`),
+   and `arity_extra` is dropped from the default operator set (most Ruby methods accept an
+   extra arg → equivalent mutant; still selectable via `--operators` for arity-teeth
+   measurement). `type_node` sweep: 16 survivors (incl. `Data.define` arity + `Array |
+   Dynamic[top]`.inspect noise) → **3, all real candidates** (`ResolverChain#freeze`,
+   `non-negative-int#>=` ×2). The backlog is now trustworthy. A signature-arity guard that
+   would make `arity_extra` default-worthy is a follow-up.
 2. **Union / nilable receiver teeth** —
    - **Slice 1 (non-nil unions): LANDED `a07195bd`.** `call.undefined-method` now fires on
      a union receiver when the method is absent on *every* non-nil arm

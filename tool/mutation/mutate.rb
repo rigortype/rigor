@@ -71,10 +71,18 @@ module RigorMutation
     IDENT = /\A[a-z_][A-Za-z0-9_]*\z/
     QUOTES = ['"', "'"].freeze
 
-    # The operator set this prototype ships. Each maps to the diagnostic rule
+    # Every operator the harness knows. Each maps to the diagnostic rule
     # family it is *engineered* to trip when the mutated value/call sits in a
     # context where Rigor has type knowledge.
-    OPERATORS = %i[nil_inject type_swap undefined_method arity_extra].freeze
+    ALL_OPERATORS = %i[nil_inject type_swap undefined_method arity_extra].freeze
+
+    # The default set. `arity_extra` is excluded: most Ruby methods accept an
+    # extra argument (splat / optional), so appending one is usually an
+    # equivalent mutant — it contributes almost only noise to a survivor
+    # backlog. Re-enable it explicitly via `--operators` to measure arity
+    # teeth. (A signature-arity guard would make it default-worthy — a
+    # follow-up.)
+    OPERATORS = %i[nil_inject type_swap undefined_method].freeze
 
     def initialize(source, operators: OPERATORS)
       @source = source
@@ -168,10 +176,23 @@ module RigorMutation
       type = scope.type_of(anchor)
       return [true, nil] if type.nil?
 
-      concrete = !(type.is_a?(Rigor::Type::Dynamic) || type.is_a?(Rigor::Type::Top))
+      concrete = !non_concrete_type?(type)
       [concrete, concrete ? render_type(type) : nil]
     rescue StandardError
       [true, nil] # never let a probe failure hide a candidate
+    end
+
+    # A receiver type Rigor cannot bite on, so a mutation anchored to it would
+    # survive as noise: `Dynamic` / `Top` / `bot`, or a union with any such arm
+    # (gradually valid — `Array | Dynamic[top]`.whatever never fires). A union
+    # of fully-concrete arms (`String | Symbol`) stays concrete — it now has
+    # undefined-method teeth.
+    def non_concrete_type?(type)
+      return true if type.is_a?(Rigor::Type::Dynamic) || type.is_a?(Rigor::Type::Top) ||
+                     type.is_a?(Rigor::Type::Bot)
+      return type.members.any? { |member| non_concrete_type?(member) } if type.is_a?(Rigor::Type::Union)
+
+      false
     end
 
     def render_type(type)
@@ -543,7 +564,7 @@ module RigorMutation
         end
         o.on("--top N", Integer, "sweep mode: show the top N survivor clusters (default 25)") { |v| options[:top] = v }
         o.on("--seed N", Integer, "RNG seed for sampling (default 1)") { |v| options[:seed] = v }
-        o.on("--operators LIST", "comma list: #{Mutator::OPERATORS.join(',')}") do |v|
+        o.on("--operators LIST", "comma list (default #{Mutator::OPERATORS.join(',')}; +arity_extra available)") do |v|
           options[:operators] = v.split(",").map(&:strip).map(&:to_sym)
         end
         o.on("--no-type-filter", "keep every mutation, even on Dynamic sites") { options[:type_filter] = false }

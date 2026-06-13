@@ -156,6 +156,28 @@ engine gaps** (→ the backlog).
    sweep-as-backlog, adjudicate-don't-assume) and the landed/deferred items into a
    decision record. This note remains the living tracker; the ADR is the rationale.
 
+## Cumulative result (`lib/rigor`, `--per-file 12`)
+
+After the three engine fixes (union teeth, class-alias resolution, refined-receiver
+dispatch) and the three harness de-noise refinements (union-Dynamic/bot, arity-off-default,
+universal-equality):
+
+| | first sweep | after |
+| --- | --- | --- |
+| teeth (kill %) | 61.7 % | **71.4 %** |
+| survivors | 856 | **611** (−29 %) |
+| `undefined_method` killed | 1095 | **1508** |
+
+More importantly, the **top residual clusters are no longer easily-fixable misses** — they
+are (a) the deliberate ADR-24 self-dogfood deferral (`Type::Constant#value` 44,
+`Type::Tuple#elements` 15, the project-class `MethodCatalog` singleton — the
+`call.self-undefined-method` rule ships `:off` pending its external FP gate) and (b)
+*correct silence*: `OptionParser#on` (many overloads → the arg rule needs a single one to
+refute), `File.join` (rest-positional args are deliberately not arg-checked), `Hash#[]` /
+`fetch` (any key is valid Ruby). The easily-actionable engine backlog is worked down; what
+remains is design-level (nilable-union N3 narrowing — needs a corpus FP study) or a feature
+(user-facing type-protection coverage).
+
 ## Loop demonstrated
 
 `String | Symbol` was the sweep's top real cluster → diagnosed as an intentional union

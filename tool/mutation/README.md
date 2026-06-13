@@ -6,7 +6,12 @@ source file, re-runs `rigor check` on the mutated bytes, and reports whether a
 **new diagnostic** appears. A *surviving* mutant — no new diagnostic — is a
 candidate false-negative.
 
-This is **not** a CLI command and is off the ADR-50 frozen-contract surface.
+This is **not** a CLI command and is off the ADR-50 frozen-contract surface. The
+*per-file effectiveness measurement* it pioneered was productized into the supported
+`rigor coverage --protection --mutation` ([ADR-63](../../docs/adr/63-type-protection-coverage.md)
+Tier 2); the type-visible `Mutator` now lives in `lib/rigor/protection/mutator.rb` and this
+harness reuses it (one source of truth). What stays dev-only here is the survivor
+**sweep / fuzz / clustering** tooling (ADR-62 WD4).
 
 ```sh
 # single file — full per-mutant breakdown

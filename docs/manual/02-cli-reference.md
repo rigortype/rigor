@@ -265,6 +265,27 @@ an untyped receiver), then the least-protected files;
 upper bound on real protection — a concrete receiver is necessary
 but not sufficient for a diagnostic to fire.
 
+Adding `--mutation` (with `--protection`) switches to the
+**effectiveness** tier: instead of "could Rigor catch a bug
+here", it measures whether Rigor *actually does*. It introduces
+type-visible breakages at each dispatch site — dropping a
+call-argument to `nil`, swapping its type, renaming a call to a
+missing method — re-analyses the mutated source against a clean
+baseline, and reports the kill rate (caught breakages). It
+defaults to the git-changed `.rb` files (whole-project is
+minutes; pass explicit paths to widen), and leads with the
+effectiveness ratio, then the breakages Rigor missed ("add a type
+here"), then the least-effective files. `--threshold` gates on
+the effectiveness ratio and `--format=json` carries `mode`,
+`killed`, `survived`, `effectiveness_ratio`, per-file rows, and
+`add_a_type_here`. It is the truth tier behind the static
+`--protection` proxy, at the cost of many analyses — an opt-in CI
+deep-dive, not an interactive check.
+
+```sh
+rigor coverage --protection --mutation [paths]
+```
+
 ## `rigor mcp`
 
 Run the Rigor MCP (Model Context Protocol) server over stdio,

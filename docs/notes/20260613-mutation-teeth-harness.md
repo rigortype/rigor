@@ -194,6 +194,19 @@ refute), `File.join` (rest-positional args are deliberately not arg-checked), `H
 remains is design-level (nilable-union N3 narrowing — needs a corpus FP study) or a feature
 (user-facing type-protection coverage).
 
+## Productized into a user command — ADR-63 (2026-06-14)
+
+The "user-facing type-protection coverage" feature shipped as
+[ADR-63](../adr/63-type-protection-coverage.md): `rigor coverage --protection` (Tier 1, a
+static dispatch-site receiver-concreteness proxy) and `rigor coverage --protection
+--mutation` (Tier 2, the per-file *actual* mutation kill rate). Tier 2 lifts a **narrow,
+curated subset** of this dev harness into `lib/rigor/protection/` — the type-visible
+`Mutator`, the type-aware filter, the warm loop, and the kill criterion — as the supported
+`Protection::MutationScanner`; this harness's `mutate.rb` now **reuses the lib `Mutator`**
+(one source of truth) and keeps only the dev-only sweep / fuzz / survivor-clustering
+tooling (ADR-62 WD4 holds). Framing is load-bearing: effectiveness / where-to-add-a-type,
+never raw survival.
+
 ## Loop demonstrated
 
 `String | Symbol` was the sweep's top real cluster → diagnosed as an intentional union

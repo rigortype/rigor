@@ -1,10 +1,10 @@
 # ADR-63 — User-facing type-protection coverage
 
 Status: **Accepted — Tier 1 (static proxy) IMPLEMENTED 2026-06-14 (`rigor coverage
---protection`); Tier 2 (mutation effectiveness) is designed here and phased as a
-follow-up.** Extends `rigor coverage` with a *protection* dimension: not "how precise are
-my types" but "if I introduce a bug, would Rigor catch it" — the user-facing surfacing of
-the ADR-62 teeth work.
+--protection`) and Tier 2 (mutation effectiveness) IMPLEMENTED 2026-06-14 (`rigor coverage
+--protection --mutation`).** Extends `rigor coverage` with a *protection* dimension: not
+"how precise are my types" but "if I introduce a bug, would Rigor catch it" — the
+user-facing surfacing of the ADR-62 teeth work.
 
 Grounding: [ADR-62](62-mutation-testing-teeth-measurement.md) (the internal teeth
 methodology this productizes) and
@@ -42,14 +42,17 @@ this would frighten working code and breach the false-positive discipline.
   *upper bound* on real protection (a concrete receiver is necessary but not sufficient
   for a diagnostic to fire) and is one analysis pass — fast enough to run interactively
   and in CI.
-- **Tier 2 — mutation effectiveness (designed here, phased).** The truth tier: for each
+- **Tier 2 — mutation effectiveness (implemented 2026-06-14).** The truth tier: for each
   type-visible mutation at a site, does Rigor kill it (ADR-62)? Reports the per-file
   *actual* kill rate. It refines Tier 1 (could-bite → does-bite) at the cost of N
   analyses per site, so it is an opt-in CI deep-dive (`--protection --mutation`), scoped
   to changed files by default. Productizing it ships a **narrow, curated subset** of the
   ADR-62 harness (the per-file effectiveness measurement) as a supported command — it
   does **not** ship the dev sweep / fuzz / clustering tooling, which stays dev-only per
-  ADR-62 WD4. This is a deliberate, scoped refinement of that WD, not a reversal.
+  ADR-62 WD4. This is a deliberate, scoped refinement of that WD, not a reversal. The
+  productized core lives in `lib/rigor/protection/` (`Mutator` + `MutationScanner` — the
+  warm loop, type-aware filter, and kill criterion lifted from `tool/mutation/`, which now
+  reuses the lib `Mutator` so there is one source of truth).
 
 Both tiers reuse the existing `coverage` plumbing: `--threshold` becomes the **CI gate**
 (exit 1 below the protected/effectiveness ratio) and `--format json` the machine output —
@@ -72,9 +75,15 @@ so "report + gate" is satisfied without new surface.
   `--threshold` gates; `--format json` carries `{protected, unprotected, ratio, sites}`
   for CI. The structured fields follow ADR-61 (an agent consumes them without parsing
   text).
-- **WD4 — Tier 2 phased, changed-files-scoped.** The mutation tier ships after Tier 1,
-  defaults to `git`-changed files (whole-project is minutes), and reuses the ADR-62 warm
-  loop moved into `lib/`. Its kill criterion and type-aware filter are exactly ADR-62's.
+- **WD4 — Tier 2 phased, changed-files-scoped (implemented).** The mutation tier ships
+  after Tier 1, defaults to `git`-changed files (`git status --porcelain`; explicit paths
+  override and enable the whole-project opt-in), and reuses the ADR-62 warm loop moved
+  into `lib/` (`Protection::MutationScanner` over a once-built
+  `LanguageServer::ProjectContext`). Its kill criterion (a new diagnostic signature versus
+  a clean baseline) and FP-safe type-aware filter are exactly ADR-62's. `--mutation`
+  requires `--protection` (usage error otherwise); `--threshold` gates on the effectiveness
+  ratio; `--format json` carries `{mode, killed, survived, effectiveness_ratio, files,
+  add_a_type_here}`.
 
 ## Rejected / deferred alternatives
 
@@ -94,8 +103,10 @@ so "report + gate" is satisfied without new surface.
 - **Negative** — Tier 1 over-estimates (concrete receiver ≠ a diagnostic actually fires);
   the report must teach that it is an upper bound. Tier 2 adds a supported, perf-sensitive
   surface (the maintenance ADR-62 deliberately avoided) — hence phased and scoped.
-- **Carry-over** — Tier 2 productization and the changed-files scoping are the queued
-  follow-up; the teeth note tracks status.
+- **Carry-over** — both tiers have landed. Remaining demand-gated polish: an optional
+  per-file mutation cap for pathological files (the scanner already accepts a seeded
+  `limit:`, unused by the CLI — the changed-files default bounds cost), and an
+  ADR-46-incremental-backed cheaper whole-project Tier 2.
 
 ## Relationship to other ADRs
 

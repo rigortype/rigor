@@ -1,0 +1,86 @@
+# frozen_string_literal: true
+
+require "json"
+require "stringio"
+require "tmpdir"
+
+require "rigor/cli/coverage_command"
+
+# Focused coverage for the `rigor coverage` command object. The type-precision
+# and Tier 1 protection paths are exercised through the dispatcher; this spec is
+# the safety net for the ADR-63 Tier 2 mutation-effectiveness mode (`--protection
+# --mutation`) and its git-changed-files default.
+RSpec.describe Rigor::CLI::CoverageCommand do
+  def run(argv)
+    out = StringIO.new
+    err = StringIO.new
+    status = described_class.new(argv: argv, out: out, err: err).run
+    [status, out.string, err.string]
+  end
+
+  around do |example|
+    Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
+  end
+
+  it "rejects --mutation without --protection (usage error)" do
+    File.write("a.rb", "x = 1\n")
+    status, _out, err = run(["--mutation", "a.rb"])
+
+    expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+    expect(err).to include("--mutation requires --protection")
+  end
+
+  it "measures mutation effectiveness for an explicit file and reports the ratio" do
+    File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+
+    status, out, = run(["--protection", "--mutation", "greet.rb"])
+
+    expect(status).to eq(0)
+    expect(out).to include("Type-protection effectiveness")
+    expect(out).to include("caught breakages:")
+  end
+
+  it "emits the structured Tier 2 fields under --format json" do
+    File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+
+    status, out, = run(["--protection", "--mutation", "--format", "json", "greet.rb"])
+
+    expect(status).to eq(0)
+    payload = JSON.parse(out)
+    expect(payload["mode"]).to eq("mutation")
+    expect(payload).to have_key("effectiveness_ratio")
+    expect(payload["killed"]).to be >= 1
+  end
+
+  it "reports nothing to measure when no paths are given and nothing changed" do
+    # An empty git work tree → no changed Ruby files → vacuous success.
+    system("git", "init", "--quiet", out: File::NULL, err: File::NULL)
+
+    status, out, = run(["--protection", "--mutation"])
+
+    expect(status).to eq(0)
+    expect(out).to include("No changed Ruby files")
+  end
+
+  describe "#changed_path (git porcelain line parsing)" do
+    def parse(line)
+      described_class.new(argv: []).send(:changed_path, line)
+    end
+
+    it "extracts a modified Ruby path" do
+      expect(parse(" M lib/foo.rb\n")).to eq("lib/foo.rb")
+    end
+
+    it "extracts the destination of a rename" do
+      expect(parse("R  lib/old.rb -> lib/new.rb\n")).to eq("lib/new.rb")
+    end
+
+    it "strips surrounding quotes git adds for unusual paths" do
+      expect(parse(%(?? "spaced name.rb"\n))).to eq("spaced name.rb")
+    end
+
+    it "ignores non-Ruby paths" do
+      expect(parse(" M README.md\n")).to be_nil
+    end
+  end
+end

@@ -447,7 +447,7 @@ Ruby で実需があり Rigor に**まだ無い**ものはどれか」。全 ~50
 | --- | --- | --- | --- | --- |
 | **AdditionalConstructors** → Ruby「追加 initializer」 | **PARTIAL**: ivar 型シードが `initialize` **のみ**（scope_indexer.rb:79, :214-220, :411） | **高** | ◎ | **取り込み推奨（小・先行）** |
 | **AllowedSubTypes** → sealed / 網羅性 | **ABSENT**: `case/in` 網羅性なし（statement_evaluator.rb:539-541）。ADR-36 WD3 で sealed-parent fact は既に spec 済・`is_a?` 網羅 narrowing は deferred（nested_class_template.rb:61-69） | **高** | ◎（網羅漏れを正しく検出） | **取り込み推奨（中・ADR-36 と統合）** |
-| **Collector<TNode,TValue>** | **PARTIAL**: FactStore+`prepare` はあるが per-node 収集 primitive 無し、各 plugin が自前 re-walk（base.rb:166-178） | 中 | ○ | **§6 の NodeRule に統合**（cross-file 集約版） |
+| **`Collector<TNode,TValue>`** | **PARTIAL**: FactStore+`prepare` はあるが per-node 収集 primitive 無し、各 plugin が自前 re-walk（base.rb:166-178） | 中 | ○ | **§6 の NodeRule に統合**（cross-file 集約版） |
 | **MethodParameterClosureType**（yield 引数型） | **PARTIAL**: `block_as_methods` は **self 型のみ**（block_as_method.rb:47-51）。yield 引数型は builtin+RBS のみ、plugin field 無し | 中 | ○ | **manifest に `yields:` 追加を検討（demand-driven）** |
 | **AlwaysUsed* / ReadWriteProperties**（dead-code FP 抑制） | **PARTIAL**: dead-code は局所変数/分岐のみ（check_rules.rb:74, :1058）。メンバ単位の未使用検出は**無い** | 中（条件付き） | ◎（**抑制側**が要） | **メンバ dead-code を入れる時に抑制 hook を同梱**（単体では入れない） |
 | **RestrictedUsage 系**（内部 API / test-only） | **PARTIAL**: Ruby の private + Liskov override のみ（check_rules.rb:69-70）。呼出元制約は無し | 低〜中 | ○ | demand-driven で 1.x |

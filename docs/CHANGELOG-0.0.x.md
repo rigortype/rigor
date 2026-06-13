@@ -28,7 +28,7 @@ The next release after `0.0.9` is `0.1.0` — single-digit version-component pol
 
 - **`Analysis::Runner.cache_store` surface + `rigor check --no-cache`.** Runner defaults to a `Cache::Store` rooted at `.rigor/cache`; the CLI flag threads `nil` through to disable. `Environment.for_project(cache_store:)` plumbs the Store down to the underlying `RbsLoader`.
 - **First end-to-end cached producer — `RbsLoader#constant_type` reads from `RbsConstantTable`.** Cold runs build the translated constant-type table once and persist it; warm runs (and a separate loader sharing the same Store) skip the env walk entirely and pay only a `Marshal.load` of the table.
-- **Five more cache producers** — `RbsKnownClassNames` (Set<String>), `RbsClassAncestorTable` (Hash<String, Array<String>>), `RbsClassTypeParamNames` (Hash<String, Array<Symbol>>), and `RbsEnvironment` (the full `RBS::Environment`). The fifth producer (`RbsEnvironment`) caches the biggest cold-start cost — `RBS::EnvironmentLoader#load + Environment.from_loader + resolve_type_names` — by adding minimal `_dump`/`_load` Marshal hooks to the rbs gem's C-extension `RBS::Location`. The patch is purely additive and idempotent; `RBS::Location` is never read from any analysis path so the lost source-position metadata is inert.
+- **Five more cache producers** — `RbsKnownClassNames` (`Set<String>`), `RbsClassAncestorTable` (`Hash<String, Array<String>>`), `RbsClassTypeParamNames` (`Hash<String, Array<Symbol>>`), and `RbsEnvironment` (the full `RBS::Environment`). The fifth producer (`RbsEnvironment`) caches the biggest cold-start cost — `RBS::EnvironmentLoader#load + Environment.from_loader + resolve_type_names` — by adding minimal `_dump`/`_load` Marshal hooks to the rbs gem's C-extension `RBS::Location`. The patch is purely additive and idempotent; `RBS::Location` is never read from any analysis path so the lost source-position metadata is inert.
 - **`Cache::Store#stats` + `--cache-stats` runtime breakdown.** In-process hits / misses / writes counters (per-producer breakdown) bumped inside `fetch_or_compute`; `rigor check --cache-stats` prints an on-disk inventory followed by a "this run:" section. Under `--no-cache` the section is omitted.
 - **`Cache::Store#fetch_or_compute(serialize:, deserialize:)` callable surface.** Producers whose return values are not Marshal-clean (RBS-native objects with `RBS::Location` members, raw `IO`, …) can register custom round-trip callables. Default stays at `Marshal.dump` / `Marshal.load`. Deserialiser exceptions become cache misses. `RbsEnvironment` rides this surface.
 - **Shared `Rigor::Cache::RbsDescriptor`.** Every RBS-derived producer attaches the same descriptor (rbs gem locked version + `:digest` entries for every `.rbs` file under `signature_paths` + a `rbs.libraries` configs entry), so a signature change or rbs gem bump invalidates them in lockstep.
@@ -87,7 +87,7 @@ The seventh preview. Theme: **pre-plugin coverage push** — close the gap betwe
 - **`Regexp` literal lift.** Non-interpolated `Prism::RegularExpressionNode` lifts to `Constant<Regexp>` (preserving source and option flags); interpolated regexes keep the conservative `Nominal[Regexp]`. Activates the new `Constant<String>#scan(/regex/)` fold path end-to-end.
 - **Pathname delegation.** `Pathname` joins `Type::Constant::SCALAR_CLASSES`; `Pathname.new(Constant<String>)` lifts via a `MethodDispatcher#meta_new` constant-constructor table; a curated 14-method unary / 8-method binary fold table covers pure path manipulation (`to_s`, `basename`, `dirname`, `extname`, `cleanpath`, `+`, `join`, `<=>`, `==`, `relative_path_from`, …). Filesystem-touching methods (`exist?`, `file?`, `read`, `stat`, …) are intentionally NOT folded.
 
-#### Constant<Range> precision
+#### `Constant<Range>` precision
 
 - **`to_a`** lifts to a per-position `Tuple[…]` for finite integer ranges (capped at 16 elements); **`first` / `last` / `min` / `max`** and **`count` / `size` / `length`** fold to precise `Constant<Integer>` values for the no-arg form, bypassing the catalog's `:block_dependent` classification of the optional-block variants.
 
@@ -645,7 +645,7 @@ Test count: 1148 → 1250 examples (+102), RuboCop clean,
   `IteratorDispatch` generalises beyond Integer iteration to
   project the element type per receiver shape (Array / Set /
   Range nominals, Tuple, HashShape, Hash nominal,
-  Constant<Array>, Constant<Range>) and tightens the index slot
+  `Constant<Array>`, `Constant<Range>`) and tightens the index slot
   to `non-negative-int` over the RBS-declared `Integer`.
   Self-asserting fixture: `spec/integration/fixtures/each_with_index.rb`.
 

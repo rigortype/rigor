@@ -639,8 +639,8 @@ load_plugin_settings      # iterates Redmine::Plugin.all
 
 ### 2. Pattern taxonomy
 
-| Pattern | Sites | Description |
-| --- | --- | --- |
+| Pattern | Sites |
+| --- | --- |
 | (a) static-text heredoc, no interpolation | none — every Redmine heredoc interpolates at least the method name |
 | (b) heredoc interpolating source-visible literals | A, B |
 | (b′) heredoc interpolating file-driven literals | C |

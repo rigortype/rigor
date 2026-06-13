@@ -46,7 +46,7 @@ Fire when a method call's shape is wrong.
 | `call.undefined-method` | The receiver class is statically known and the method is not defined on it (RBS or in-source). | error |
 | `call.wrong-arity` | The number of positional arguments does not satisfy any overload's arity. | error |
 | `call.argument-type-mismatch` | An argument's type provably does not satisfy the parameter contract (RBS or `RBS::Extended` `param:`). | error |
-| `call.possible-nil-receiver` | The receiver type is `T | nil` and the method is not defined on `NilClass`. | warning |
+| `call.possible-nil-receiver` | The receiver type is `T \| nil` and the method is not defined on `NilClass`. | warning |
 | `call.unresolved-toplevel` | An implicit-self call at the top level (outside any `def` / `class` / `module`) resolves against no same-file `def`, `pre_eval:` monkey-patch, or `Kernel` / `Object` method — surfacing typos in standalone scripts. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
 
 `call.*` rules are the highest-volume diagnostics on

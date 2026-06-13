@@ -39,7 +39,7 @@ Rigor's existing carriers are the precision tools the principle directs the anal
 | `Tuple[T1, …, Tn]` | Fixed-arity heterogeneous container | `5.divmod(3)` → `Tuple[Constant[1], Constant[2]]` |
 | `HashShape{k: T, …}` | Symbol-keyed record with known keys | `{name: "A", age: 30}` |
 | `IntegerRange[a, b]` | Bounded integer | `Array#size` → `non-negative-int` |
-| `Union[T1, …, Tn]` | Finite, small set of distinct possibilities | `n.even? ? :even : :odd` → `Constant[:even] | Constant[:odd]` |
+| `Union[T1, …, Tn]` | Finite, small set of distinct possibilities | `n.even? ? :even : :odd` → `Constant[:even] \| Constant[:odd]` |
 | `Nominal[Class[args]]` | A class with applied generic arguments | `Array#map { String }` → `Array[String]` |
 | `Nominal[Class]` | Raw nominal | `Object#dup` → `self` (still a nominal) |
 | `Dynamic[T]` | Last-resort gradual fallback | When nothing more specific can be proved |
@@ -75,7 +75,7 @@ Parameter authorship reaches for the widest correctness-preserving carrier. In o
 | --- | --- | --- |
 | Capability role (`_ReadableStream`, `_ToS`, …) | The body uses only the methods the role lists | `def write(stream) = stream.write(...)` → `_Writable` |
 | Structural interface (RBS `interface _Foo`) | The body uses a small fixed surface | `def each(enum)` → `_Each[T]` |
-| `Union[T1, T2]` | The body handles each case explicitly | `def render(content) = content.nil? ? "" : content.to_s` → `String | nil` |
+| `Union[T1, T2]` | The body handles each case explicitly | `def render(content) = content.nil? ? "" : content.to_s` → `String \| nil` |
 | `Nominal[Superclass]` | The body uses only superclass methods | `def add(numeric)` → `Numeric`, not `Integer` |
 | `Nominal[ExactClass]` | The body genuinely requires this class | `def freeze_string(s)` → `String` only |
 

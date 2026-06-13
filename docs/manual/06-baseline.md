@@ -80,13 +80,19 @@ default — one bucket per file × rule) or `--match-mode=message`
 ## Working a baseline down
 
 `rigor triage` summarises a diagnostic stream — rule
-distribution, the files with the most diagnostics, and
-heuristic hints about likely causes — so you can decide what
-to tackle first:
+distribution, class/method selectors, the files with the most
+diagnostics, and heuristic hints about likely causes — so you can
+decide what to tackle first:
 
 ```sh
 rigor triage
 ```
+
+The `selectors` section (`rigor triage --format json | jq
+'.selectors'`) is the best prioritisation signal: a class/method
+with a high `count` spread across many `files` is a systemic cause
+one fix or a `pre_eval:` entry clears in bulk, while a low-`count`
+selector is a candidate genuine bug to fix at the site.
 
 It is advisory and always exits `0`. The intended loop is
 `triage` to prioritise → fix or suppress a rule → `rigor

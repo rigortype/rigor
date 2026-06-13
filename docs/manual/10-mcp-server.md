@@ -32,7 +32,7 @@ There is no conflict in running both simultaneously.
 |---|---|---|
 | `rigor_check` | `rigor check --format json` | JSON diagnostic report |
 | `rigor_type_of` | `rigor type-of --format json` | JSON type at `FILE:LINE:COL` |
-| `rigor_triage` | `rigor triage --format json` | JSON distribution + hotspots + hints |
+| `rigor_triage` | `rigor triage --format json` | JSON distribution + class/method selectors + hotspots + hints |
 | `rigor_annotate` | `rigor annotate --no-color` | Annotated Ruby source |
 | `rigor_sig_gen` | `rigor sig-gen --print --format json` | JSON RBS skeleton candidates |
 | `rigor_explain` | `rigor explain --format json` | JSON rule catalog entries |
@@ -265,8 +265,8 @@ generating a signature.
 ### rigor_triage
 
 Summarize a project's diagnostic stream: rule distribution,
-per-file hotspots, and heuristic hints for the most common error
-clusters.
+class/method selectors, per-file hotspots, and heuristic hints for
+the most common error clusters.
 
 **Input:**
 
@@ -280,22 +280,36 @@ clusters.
 
 ```json
 {
-  "summary": { "total_diagnostics": 488, "files_with_diagnostics": 31 },
+  "summary": { "total": 488, "error": 480, "warning": 8, "info": 0 },
   "distribution": [
-    { "rule": "call.possible-nil-receiver", "count": 212, "pct": 43.4 }
+    { "rule": "call.possible-nil-receiver", "count": 212 }
+  ],
+  "selectors": [
+    { "receiver": "String", "method": "squish", "count": 31, "files": 12,
+      "rules": { "call.undefined-method": 31 } }
   ],
   "hotspots": [
-    { "path": "app/models/account.rb", "count": 38 }
+    { "file": "app/models/account.rb", "count": 38,
+      "by_rule": { "call.possible-nil-receiver": 30 } }
   ],
   "hints": [
-    { "id": "H1", "message": "Likely missing ActiveSupport core_ext RBS ...", "action": "..." }
+    { "id": "activesupport-core-ext", "confidence": "likely",
+      "diagnostic_count": 365, "summary": "...", "action": "..." }
   ]
 }
 ```
 
+The `selectors` array is the by-(class, method) axis: each row is a
+dispatch target with its `count`, distinct-`files` spread, and
+per-`rule` breakdown, keyed on a normalised receiver class — so an
+agent answers "which method concentrates the diagnostics?" from
+structured fields, never by parsing a `message`.
+
 **Typical agent use:** run `rigor_triage` at the start of a code
-review or cleanup session to understand the diagnostic landscape before
-deciding which rules and files to focus on.
+review or cleanup session to understand the diagnostic landscape
+before deciding which rules and files to focus on — sort `selectors`
+by `count` for the highest-leverage class/method, or filter by
+`files` to separate systemic clusters from one-off bugs.
 
 ---
 

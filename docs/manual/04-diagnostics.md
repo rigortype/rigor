@@ -74,6 +74,42 @@ severity_overrides:
 
 A rule-specific override beats a family override.
 
+## Machine-readable output (`--format json`)
+
+`rigor check --format json` emits the diagnostics as a JSON
+document for editors, CI, and AI agents. Each diagnostic is an
+object with **stable, structured fields** — so a consumer filters
+and groups on them directly and **never parses the human-readable
+`message`** (the wording is presentation, not contract, and may be
+reworded in a minor release):
+
+| Field | Present | Meaning |
+| --- | --- | --- |
+| `path` / `line` / `column` | always | Location (1-based line and column). |
+| `severity` | always | `error` / `warning` / `info`. |
+| `rule` | always (`null` for parse / internal errors) | The `family.rule` ID. |
+| `source_family` | always | `builtin`, `rbs_extended`, `generated.*`, or `plugin.<id>`. |
+| `message` | always | Human-readable text — *presentation, not contract*. |
+| `receiver_type` | when the rule has a receiver | The called receiver's displayed type (`String`, `Array[User]`, …). |
+| `method_name` | when the rule has a method | The called / defined method name. |
+| `project_definition_site` | `call.undefined-method` monkey-patch case | `path:line` where the project itself defines the method (ADR-17). |
+
+The `receiver_type` / `method_name` pair is populated by the
+call-family rules and the method-level `def.*` rules. Group a run
+by the called class and method with `jq`, no message parsing:
+
+```sh
+# every diagnostic that names a method, as {receiver, method, rule}
+rigor check --format json \
+  | jq '[.diagnostics[] | select(.method_name) | {receiver: .receiver_type, method: .method_name, rule}]'
+```
+
+The `check` stream is **faithful per-site** — a literal receiver
+reports its literal type (`"hi"`, `42`). For the **aggregated**
+view — counts per class/method across the whole run, with literal
+receivers folded to their class — use
+[`rigor triage`](02-cli-reference.md)'s `selectors` section.
+
 ## Suppressing a diagnostic
 
 Three layers, from narrowest to broadest.

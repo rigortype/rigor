@@ -72,7 +72,13 @@ module Rigor
         }
       )
 
-      producer :locale_index do |_params|
+      # `watch:` covers every `.yml` / `.yaml` file under the locale
+      # search paths so the cache invalidates when locale files are
+      # added, removed, or edited (ADR-60 WD3). `@load_errors` is a
+      # producer-side capture: it is populated only when the block
+      # runs (a cache miss / a watched file changed), which is exactly
+      # when a malformed YAML must re-surface.
+      producer :locale_index, watch: -> { [[@locale_search_paths, "**/*.yml", "**/*.yaml"]] } do |_params|
         loader = LocaleLoader.new(
           io_boundary: io_boundary,
           search_paths: @locale_search_paths
@@ -85,21 +91,19 @@ module Rigor
       def init(_services)
         @locale_search_paths = Array(config.fetch("locale_search_paths")).map(&:to_s)
         @configured_locales = Array(config.fetch("configured_locales")).map(&:to_s)
-        @locale_index = nil
         @load_errors = []
         @load_errors_emitted = false
-        @runtime_error = nil
       end
 
       # File-level only: the once-per-run YAML load errors + the
       # runtime (cache-load) error. Per-call `t('key')` validation runs
       # over the engine-owned walk via the node_rule below (ADR-37). The
-      # locale index is lazily loaded + memoised by locale_index_or_nil.
+      # locale index is lazily loaded + memoised by `producer_value`.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        index = locale_index_or_nil
+        index = producer_value(:locale_index)
         diagnostics = []
         diagnostics.concat(consume_load_error_diagnostics(path)) unless @load_errors.empty?
-        diagnostics << runtime_error_diagnostic(path) if index.nil? && @runtime_error
+        diagnostics << runtime_error_diagnostic(path) if index.nil? && producer_error(:locale_index)
         diagnostics
       end
 
@@ -107,38 +111,20 @@ module Rigor
       # (the controller action), supplied by the node-rule NodeContext;
       # the controller scope comes from the file path.
       node_rule Prism::CallNode do |node, _scope, path, _fc, context|
-        index = locale_index_or_nil
+        index = producer_value(:locale_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.violations_for(
-          call_node: node, locale_index: index, configured_locales: @configured_locales,
-          controller_scope: Analyzer.controller_scope_from_path(path),
-          action: context.enclosing_def&.name
-        ).map do |violation|
-          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
-        end
+        diagnostics_for(
+          Analyzer.violations_for(
+            call_node: node, locale_index: index, configured_locales: @configured_locales,
+            controller_scope: Analyzer.controller_scope_from_path(path),
+            action: context.enclosing_def&.name
+          ),
+          path: path, node: node
+        )
       end
 
       private
-
-      def locale_index_or_nil
-        return @locale_index if @locale_index
-
-        # Pass an explicit descriptor covering every `.yml` / `.yaml`
-        # file under the configured locale search paths so the cache
-        # invalidates when locale files are added, removed, or edited.
-        # Without it the auto-built descriptor depends on the
-        # `IoBoundary`'s in-process read history — empty on the
-        # first call of a fresh process — so warm cache hits would
-        # serve stale `LocaleIndex` data and hide per-call load
-        # errors (a malformed YAML in one run would not surface
-        # when a healthy cache entry from an earlier run exists).
-        descriptor = glob_descriptor(@locale_search_paths, "**/*.yml", "**/*.yaml")
-        @locale_index = cache_for(:locale_index, params: {}, descriptor: descriptor).call
-      rescue StandardError => e
-        @runtime_error = "rigor-rails-i18n: failed to load locales: #{e.class}: #{e.message}"
-        nil
-      end
 
       # The runner only invokes `diagnostics_for_file` for
       # Ruby files (`paths:` is filtered to `.rb`). YAML
@@ -161,9 +147,10 @@ module Rigor
       end
 
       def runtime_error_diagnostic(path)
+        error = producer_error(:locale_index)
         Rigor::Analysis::Diagnostic.new(
           path: path, line: 1, column: 1,
-          message: @runtime_error,
+          message: "rigor-rails-i18n: failed to load locales: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )

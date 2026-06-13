@@ -53,7 +53,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | Surface | Used for |
 | --- | --- |
 | `manifest(... config_schema:)` | `locale_search_paths` / `configured_locales` knobs (ADR-40 declared defaults). |
-| `Plugin::Base.producer :locale_index` | Caches the discovered locale index across runs (keyed via `glob_descriptor` over the locale globs). |
+| `Plugin::Base.producer :locale_index` | Caches the discovered locale index across runs (cache invalidates via `producer watch:`). |
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each `.yml` / `.yaml` under `locale_search_paths` through the trusted scope. |
 | `node_rule` + `NodeContext` (ADR-37) | Per-call validation over the engine-owned walk; the lexical ancestor chain resolves a lazy `t('.key')` to its enclosing controller action. |
 

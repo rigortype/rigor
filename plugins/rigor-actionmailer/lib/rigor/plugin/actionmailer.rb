@@ -65,7 +65,13 @@ module Rigor
         }
       )
 
-      producer :mailer_index do |_params|
+      # `watch:` covers every mailer class under `mailer_search_paths`
+      # AND every view template under `views_root` (ADR-60 WD3) — a
+      # newly-added view a mailer references must invalidate the index,
+      # and `view_exists?` failures the producer never records would
+      # otherwise be invisible to the dependency descriptor.
+      producer :mailer_index,
+               watch: -> { [[@mailer_search_paths, "**/*.rb"], [@views_root, "**/*"]] } do |_params|
         MailerDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @mailer_search_paths,
@@ -78,8 +84,6 @@ module Rigor
         @mailer_search_paths = Array(config.fetch("mailer_search_paths")).map(&:to_s)
         @mailer_base_classes = Array(config.fetch("mailer_base_classes")).map(&:to_s)
         @views_root = config.fetch("views_root").to_s
-        @mailer_index = nil
-        @load_error = nil
       end
 
       # File-level: load-error + the missing-view check (anchored on the
@@ -88,45 +92,21 @@ module Rigor
       # arity) runs over the engine-owned walk via the node_rule below
       # (ADR-37). The mailer index is lazily loaded + memoised, shared.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        index = mailer_index_or_nil
-        return [load_error_diagnostic(path)] if index.nil? && @load_error
+        index = producer_value(:mailer_index)
+        return [load_error_diagnostic(path)] if index.nil? && producer_error(:mailer_index)
         return [] if index.nil? || index.empty?
 
         missing_view_diagnostics(path, index)
       end
 
       node_rule Prism::CallNode do |node, _scope, path|
-        index = mailer_index_or_nil
+        index = producer_value(:mailer_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.violations_for(call_node: node, mailer_index: index).map do |violation|
-          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
-        end
+        diagnostics_for(Analyzer.violations_for(call_node: node, mailer_index: index), path: path, node: node)
       end
 
       private
-
-      def mailer_index_or_nil
-        return @mailer_index if @mailer_index
-
-        # Two-glob descriptor: every mailer class under
-        # `mailer_search_paths` AND every view template under
-        # `views_root`. Without explicit enumeration the cache
-        # invalidates only on files the `IoBoundary` has already
-        # read in the current process — empty on the first call
-        # of a fresh process, so warm hits would serve stale
-        # `MailerIndex` data after mailers are added / removed or
-        # view templates are added (`view_exists?` failures aren't
-        # recorded, so the auto-built descriptor cannot detect a
-        # newly-added view).
-        mailer_d = glob_descriptor(@mailer_search_paths, "**/*.rb")
-        view_d = glob_descriptor([@views_root], "**/*")
-        descriptor = Rigor::Cache::Descriptor.compose(mailer_d, view_d)
-        @mailer_index = cache_for(:mailer_index, params: {}, descriptor: descriptor).call
-      rescue StandardError => e
-        @load_error = "rigor-actionmailer: failed to discover mailers: #{e.class}: #{e.message}"
-        nil
-      end
 
       # Anchors `missing-view` diagnostics on the mailer file
       # itself: when the file currently being analysed is the
@@ -158,9 +138,10 @@ module Rigor
       end
 
       def load_error_diagnostic(path)
+        error = producer_error(:mailer_index)
         Rigor::Analysis::Diagnostic.new(
           path: path, line: 1, column: 1,
-          message: @load_error,
+          message: "rigor-actionmailer: failed to discover mailers: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )

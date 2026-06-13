@@ -91,27 +91,22 @@ module Rigor
         ]
       )
 
-      # Phase 2 cached producer — the controller index built
-      # from `controller_search_paths`. The IoBoundary records
-      # a `FileEntry` digest for every file the discoverer
-      # reads, so the cache invalidates when any controller
-      # file changes.
-      producer :controller_index do |_params|
+      # Phase 2 cached producer — the controller index built from
+      # `controller_search_paths`. `watch:` (ADR-60 WD3) covers every
+      # `.rb` file under those roots so the cache invalidates when a
+      # controller is added, removed, or edited; the discoverer's
+      # in-block `io_boundary` reads are captured into the dependency
+      # descriptor too, so no explicit priming is needed.
+      producer :controller_index, watch: -> { [[@controller_search_paths, "**/*.rb"]] } do |_params|
         ControllerDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @controller_search_paths
         ).discover
       end
 
-      def init(services)
-        @services = services
+      def init(_services)
         @controller_search_paths = Array(config.fetch("controller_search_paths")).map(&:to_s)
         @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
-        @helper_table = nil
-        @helper_table_resolved = false
-        @controller_index = nil
-        @model_index_value = nil
-        @model_index_resolved = false
       end
 
       # ADR-37 — the four Action Pack phases run per-call over the
@@ -123,16 +118,16 @@ module Rigor
       # The filter / render phases read the enclosing controller from the
       # node-rule `NodeContext` ancestors (its fifth block argument).
 
-      # Phase 4 — route-helper consumption.
+      # Phase 4 — route-helper consumption. `:helper_table` is
+      # rigor-rails-routes's published fact (ADR-9), read lazily via
+      # `read_fact`.
       node_rule Prism::CallNode do |node, _scope, path|
         next [] unless controller_file?(path)
 
-        table = helper_table
+        table = read_fact(plugin_id: "rails-routes", name: :helper_table)
         next [] if table.nil? || table.empty?
 
-        Analyzer.helper_violations_for(call_node: node, helper_table: table).map do |v|
-          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
-        end
+        diagnostics_for(Analyzer.helper_violations_for(call_node: node, helper_table: table), path: path, node: node)
       end
 
       # Phase 2 — filter-chain validation. Skips silently when the
@@ -141,12 +136,13 @@ module Rigor
       node_rule Prism::CallNode do |node, _scope, path, _fc, context|
         next [] unless controller_file?(path)
 
-        index = controller_index_or_nil
+        index = producer_value(:controller_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.filter_violations_for(call_node: node, ancestors: context.ancestors, controller_index: index).map do |v|
-          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
-        end
+        diagnostics_for(
+          Analyzer.filter_violations_for(call_node: node, ancestors: context.ancestors, controller_index: index),
+          path: path, node: node
+        )
       end
 
       # Phase 3 — render-target validation against the configured
@@ -157,12 +153,13 @@ module Rigor
       node_rule Prism::CallNode do |node, _scope, path, _fc, context|
         next [] unless controller_file?(path)
 
-        Analyzer.render_violations_for(
-          call_node: node, ancestors: context.ancestors, path: path,
-          view_search_roots: @view_search_paths, controller_index: controller_index_or_nil
-        ).map do |v|
-          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
-        end
+        diagnostics_for(
+          Analyzer.render_violations_for(
+            call_node: node, ancestors: context.ancestors, path: path,
+            view_search_roots: @view_search_paths, controller_index: producer_value(:controller_index)
+          ),
+          path: path, node: node
+        )
       end
 
       # Phase 1 — strong-parameter validation. Reads the `:model_index`
@@ -173,73 +170,13 @@ module Rigor
       node_rule Prism::CallNode do |node, _scope, path|
         next [] unless controller_file?(path)
 
-        index = model_index
+        index = read_fact(plugin_id: "activerecord", name: :model_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.permit_violations_for(call_node: node, model_index: index).map do |v|
-          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
-        end
+        diagnostics_for(Analyzer.permit_violations_for(call_node: node, model_index: index), path: path, node: node)
       end
 
       private
-
-      def controller_index_or_nil
-        return @controller_index if @controller_index
-
-        # Read project source first so the IoBoundary's
-        # FileEntry digests get captured into the descriptor
-        # before `cache_for` snapshots it (mirrors
-        # rigor-rails-routes / rigor-pundit's pattern).
-        prime_io_boundary_for_index
-        @controller_index = cache_for(:controller_index, params: {}).call
-      rescue StandardError
-        nil
-      end
-
-      def prime_io_boundary_for_index
-        @controller_search_paths.each do |root|
-          absolute = File.expand_path(root)
-          next unless File.directory?(absolute)
-
-          Dir.glob(File.join(absolute, "**", "*.rb")).each do |path|
-            io_boundary.read_file(path)
-          rescue Plugin::AccessDeniedError, Errno::ENOENT
-            nil
-          end
-        end
-      end
-
-      # Lazily resolves the helper table from the cross-plugin
-      # fact store. The cache is per-run because the runner
-      # builds a fresh `FactStore` per invocation; memoizing on
-      # the plugin instance saves the per-file `read` while
-      # still picking up a freshly-published table on the next
-      # `bundle exec rigor check` run.
-      def helper_table
-        return @helper_table if @helper_table_resolved
-
-        @helper_table = @services.fact_store.read(
-          plugin_id: "rails-routes", name: :helper_table
-        )
-        @helper_table_resolved = true
-        @helper_table
-      end
-
-      # Phase 1 — lazily reads the cross-plugin :model_index
-      # fact from rigor-activerecord. The cache is per-run
-      # because the runner builds a fresh FactStore per
-      # invocation; memoizing on the plugin instance saves the
-      # per-file read while still picking up a freshly
-      # published index on the next `bundle exec rigor check`.
-      def model_index
-        return @model_index_value if @model_index_resolved
-
-        @model_index_value = @services.fact_store.read(
-          plugin_id: "activerecord", name: :model_index
-        )
-        @model_index_resolved = true
-        @model_index_value
-      end
 
       def controller_file?(path)
         @controller_search_paths.any? do |root|

@@ -65,7 +65,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | Surface | Used for |
 | --- | --- |
 | `manifest(... config_schema:)` | `mailer_search_paths` / `mailer_base_classes` / `views_root` knobs (ADR-40 declared defaults). |
-| `Plugin::Base.producer :mailer_index` | Caches the discovered mailer index across runs (keyed via `glob_descriptor` over the mailer + view globs). |
+| `Plugin::Base.producer :mailer_index` | Caches the discovered mailer index across runs (cache invalidates via `producer watch:`). |
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each mailer `.rb` AND every existing view template through the trusted scope. |
 | `node_rule` + `NodeContext` (ADR-37) | Per-call validation over the engine-owned walk; `missing-view` diagnostics surface when the file under analysis is the mailer's source. |
 | `Plugin::Inflector` (ADR-39) | Mailer-name → view-directory `underscore` via the real `ActiveSupport::Inflector`. |

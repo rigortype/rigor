@@ -21,12 +21,13 @@ module Rigor
     # - `init` reads the configured `routes_file` path from the
     #   plugin's frozen `config` Hash. Default: `config/routes.yml`.
     # - `diagnostics_for_file` consults a memoised `RouteTable`
-    #   produced via the cache surface; first call reads the file
-    #   through `IoBoundary#read_file` (so `TrustPolicy` validates
-    #   the path AND the boundary records a `:digest` `FileEntry`),
-    #   then calls into `cache_for(:route_table)` whose captured
-    #   descriptor includes that digest. Subsequent runs hit the
-    #   cache when `routes.yml` content is unchanged.
+    #   produced via the cache surface; the producer block reads the
+    #   file through `IoBoundary#read_file` (so `TrustPolicy`
+    #   validates the path AND the boundary records a `:digest`
+    #   `FileEntry`), and `cache_for` (ADR-60 WD3 record-and-validate)
+    #   captures that digest into the dependency descriptor after the
+    #   block runs. Subsequent runs hit the cache when `routes.yml`
+    #   content is unchanged.
     # - The `Walker` finds every `*_path` / `*_url` implicit-
     #   receiver call. Each is checked against the table for
     #   existence and arity (= number of `:foo` placeholders in
@@ -61,12 +62,14 @@ module Rigor
       DID_YOU_MEAN_DISTANCE = 3
 
       # Cached producer (slice 6-A). The block runs through
-      # `instance_exec` so `@routes_file`, `io_boundary`, and
-      # private helpers are all in scope. The cache descriptor
-      # (slice 6-B) is auto-assembled from the plugin's
-      # `PluginEntry` template plus the `IoBoundary`'s
-      # accumulated `FileEntry` digests; nothing to wire up by
-      # hand.
+      # `instance_exec` so `@routes_file`, `io_boundary`, and private
+      # helpers are all in scope. Under ADR-60 WD3 record-and-validate,
+      # the `io_boundary.read_file` BELOW runs inside the block, and
+      # its `FileEntry` digest is captured into the dependency
+      # descriptor *after* the block runs — so editing `routes.yml`
+      # invalidates the cache with nothing to wire up by hand. (A
+      # producer that globbed a directory would add `watch:` to cover
+      # file additions; this one reads a single named file.)
       producer :route_table do |_params|
         contents = io_boundary.read_file(@routes_file)
         RouteTable.parse(contents)
@@ -95,14 +98,13 @@ module Rigor
       def route_table
         return @table if @table
 
-        # Read the file FIRST so the IoBoundary records the
-        # digest, then call `cache_for` — the descriptor it
-        # captures now includes the digest, so the cache key
-        # invalidates when `routes.yml` changes. (Pattern from
-        # `spec/rigor/plugin/cache_producer_spec.rb` —
-        # "invalidates when files read via io_boundary BEFORE
-        # cache_for change between calls".)
-        io_boundary.read_file(@routes_file)
+        # ADR-60 WD3 record-and-validate: the producer reads
+        # `@routes_file` in-block and that read is captured into the
+        # dependency descriptor after the block runs, so the cache
+        # invalidates when `routes.yml` changes — no priming read is
+        # needed here. (See `spec/rigor/plugin/cache_producer_spec.rb`
+        # — "recomputes when a file read INSIDE the producer block
+        # changes between sessions".)
         @table = cache_for(:route_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
         @load_error = "rigor-routes: #{e.message}"

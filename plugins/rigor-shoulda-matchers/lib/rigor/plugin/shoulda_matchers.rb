@@ -70,40 +70,20 @@ module Rigor
         ]
       )
 
-      def init(services)
-        @services = services
-        @model_index = nil
-        @model_index_resolved = false
-      end
-
       # ADR-37 — per-matcher validation over the engine-owned walk. The
       # model anchor (the enclosing `describe <Model>` const) comes from
       # the node-rule NodeContext ancestors; the diagnostic points at the
       # matcher name (message_loc). The :model_index fact (from
-      # rigor-activerecord) is read lazily; without it the rule is silent.
+      # rigor-activerecord) is read lazily via `read_fact`; without it
+      # the rule is silent.
       node_rule Prism::CallNode do |node, _scope, path, _fc, context|
-        index = model_index_or_nil
+        index = read_fact(plugin_id: "activerecord", name: :model_index)
         next [] if index.nil?
 
         Analyzer.violations_for(matcher_call: node, ancestors: context.ancestors, model_index: index).map do |violation|
           diagnostic(node, path: path, location: node.message_loc,
                            message: violation.message, severity: :warning, rule: violation.rule)
         end
-      end
-
-      private
-
-      # Lazily resolves `:model_index` from
-      # `rigor-activerecord`. Returns nil when the plugin
-      # isn't loaded or no index has been published; the
-      # analyzer treats nil as "no cross-check available" and
-      # falls silent.
-      def model_index_or_nil
-        return @model_index if @model_index_resolved
-
-        @model_index = @services.fact_store.read(plugin_id: "activerecord", name: :model_index)
-        @model_index_resolved = true
-        @model_index
       end
     end
 

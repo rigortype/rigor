@@ -48,12 +48,12 @@ module Rigor
         }
       )
 
-      # Cached: discovered job index. The producer reads every
-      # file under `job_search_paths` via the trusted
-      # `IoBoundary`; the descriptor's auto-collected
-      # `FileEntry` digests invalidate the cache when any of
-      # those files change.
-      producer :job_index do |_params|
+      # Cached: discovered job index. `watch:` (ADR-60 WD3) covers
+      # every `.rb` under `job_search_paths` so the cache invalidates
+      # when a job is added, removed, or edited; the discoverer's
+      # in-block `IoBoundary` reads are captured into the record-and-
+      # validate dependency descriptor after the block runs.
+      producer :job_index, watch: -> { [[@job_search_paths, "**/*.rb"]] } do |_params|
         JobDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @job_search_paths,
@@ -64,50 +64,33 @@ module Rigor
       def init(_services)
         @job_search_paths = Array(config.fetch("job_search_paths")).map(&:to_s)
         @job_base_classes = Array(config.fetch("job_base_classes")).map(&:to_s)
-        @job_index = nil
-        @load_error = nil
       end
 
       # File-level only: the load-error emission. Per-call arity
       # validation runs over the engine-owned walk via the node_rule
       # below (ADR-37). The job index is lazily loaded + memoised by
-      # job_index_or_nil, shared by both surfaces.
+      # `producer_value`, shared by both surfaces.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        index = job_index_or_nil
-        return [load_error_diagnostic(path)] if index.nil? && @load_error
+        index = producer_value(:job_index)
+        return [load_error_diagnostic(path)] if index.nil? && producer_error(:job_index)
 
         []
       end
 
       node_rule Prism::CallNode do |node, _scope, path|
-        index = job_index_or_nil
+        index = producer_value(:job_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.violations_for(call_node: node, job_index: index).map do |violation|
-          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
-        end
+        diagnostics_for(Analyzer.violations_for(call_node: node, job_index: index), path: path, node: node)
       end
 
       private
 
-      def job_index_or_nil
-        return @job_index if @job_index
-
-        # Read-then-cache pattern: the discoverer's
-        # IoBoundary reads happen INSIDE `discover`, which is
-        # invoked through `cache_for`'s producer block. The
-        # boundary's accumulated FileEntry digests get
-        # captured into the descriptor at cache_for time.
-        @job_index = cache_for(:job_index, params: {}).call
-      rescue StandardError => e
-        @load_error = "rigor-activejob: failed to discover jobs: #{e.class}: #{e.message}"
-        nil
-      end
-
       def load_error_diagnostic(path)
+        error = producer_error(:job_index)
         Rigor::Analysis::Diagnostic.new(
           path: path, line: 1, column: 1,
-          message: @load_error,
+          message: "rigor-activejob: failed to discover jobs: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )

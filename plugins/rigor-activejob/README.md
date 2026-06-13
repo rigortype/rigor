@@ -47,7 +47,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | Surface | Used for |
 | --- | --- |
 | `manifest(... config_schema:)` | `job_search_paths` / `job_base_classes` knobs (ADR-40 declared defaults). |
-| `Plugin::Base.producer :job_index` | Caches the discovered job index across runs (keyed via `glob_descriptor` over `app/jobs/**/*.rb`). |
+| `Plugin::Base.producer :job_index` | Caches the discovered job index across runs (cache invalidates via `producer watch:`). |
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `job_search_paths` through the trusted scope. |
 | `node_rule` (ADR-37) | Per-call validation of every `Job.perform_*` call over the engine-owned walk. |
 

@@ -70,7 +70,12 @@ module Rigor
         }
       )
 
-      producer :channel_index do |_params|
+      # `watch:` covers every `.rb` file under the channel search paths
+      # so the cache invalidates when channels are added, removed, or
+      # edited (ADR-60 WD3). The dependency descriptor is recorded after
+      # the discoverer runs, so the `io_boundary` reads inside it are
+      # captured too.
+      producer :channel_index, watch: -> { [[@channel_search_paths, "**/*.rb"]] } do |_params|
         ChannelDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @channel_search_paths,
@@ -81,54 +86,33 @@ module Rigor
       def init(_services)
         @channel_search_paths = Array(config.fetch("channel_search_paths")).map(&:to_s)
         @channel_base_classes = Array(config.fetch("channel_base_classes")).map(&:to_s)
-        @channel_index = nil
-        @load_error = nil
       end
 
       # File-level only: the load-error emission. Per-call broadcast
       # validation runs over the engine-owned walk via the node_rule
       # below (ADR-37). The channel index is lazily loaded + memoised by
-      # channel_index_or_nil, shared by both surfaces.
+      # `producer_value`, shared by both surfaces.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        index = channel_index_or_nil
-        return [load_error_diagnostic(path)] if index.nil? && @load_error
+        index = producer_value(:channel_index)
+        return [load_error_diagnostic(path)] if index.nil? && producer_error(:channel_index)
 
         []
       end
 
       node_rule Prism::CallNode do |node, _scope, path|
-        index = channel_index_or_nil
+        index = producer_value(:channel_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.violations_for(call_node: node, channel_index: index).map do |violation|
-          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
-        end
+        diagnostics_for(Analyzer.violations_for(call_node: node, channel_index: index), path: path, node: node)
       end
 
       private
 
-      def channel_index_or_nil
-        return @channel_index if @channel_index
-
-        # Pass an explicit descriptor covering every `.rb` file
-        # under the configured channel search paths so the cache
-        # invalidates when channels are added, removed, or edited.
-        # Without it the auto-built descriptor depends on the
-        # `IoBoundary`'s in-process read history — empty on the
-        # first call of a fresh process, so warm cache hits would
-        # serve stale `ChannelIndex` data when project files have
-        # changed between sessions.
-        descriptor = glob_descriptor(@channel_search_paths, "**/*.rb")
-        @channel_index = cache_for(:channel_index, params: {}, descriptor: descriptor).call
-      rescue StandardError => e
-        @load_error = "rigor-actioncable: failed to discover channels: #{e.class}: #{e.message}"
-        nil
-      end
-
       def load_error_diagnostic(path)
+        error = producer_error(:channel_index)
         Rigor::Analysis::Diagnostic.new(
           path: path, line: 1, column: 1,
-          message: @load_error,
+          message: "rigor-actioncable: failed to discover channels: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )

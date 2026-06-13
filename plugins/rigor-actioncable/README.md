@@ -48,7 +48,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | Surface | Used for |
 | --- | --- |
 | `manifest(... config_schema:)` | `channel_search_paths` / `channel_base_classes` knobs (ADR-40 declared defaults). |
-| `Plugin::Base.producer :channel_index` | Caches the discovered channel index across runs (keyed via `glob_descriptor`). |
+| `Plugin::Base.producer :channel_index` | Caches the discovered channel index across runs (cache invalidates via `producer watch:`). |
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `channel_search_paths` through the trusted scope. |
 | `Plugin::Base#diagnostics_for_file` | Emits the once-per-file `load-error` when channel discovery fails (file-level only). |
 | `node_rule(Prism::CallNode)` (ADR-37) | Per-call validation of every `<Channel>.broadcast_to` / `ActionCable.server.broadcast` over the engine-owned walk. |

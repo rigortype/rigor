@@ -48,7 +48,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | Surface | Used for |
 | --- | --- |
 | `manifest(... config_schema:)` | `worker_search_paths` / `worker_marker_modules` knobs (ADR-40 declared defaults). |
-| `Plugin::Base.producer :worker_index` | Caches the discovered worker index across runs (keyed via `glob_descriptor`). |
+| `Plugin::Base.producer :worker_index` | Caches the discovered worker index across runs (cache invalidates via `producer watch:`). |
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `worker_search_paths` through the trusted scope; the digest list feeds the cache descriptor. |
 | `Plugin::Base#diagnostics_for_file` | Emits the once-per-file `load-error` when worker discovery fails (file-level only). |
 | `node_rule(Prism::CallNode)` (ADR-37) | Per-call arity validation of every `Worker.perform_*` over the engine-owned walk. |

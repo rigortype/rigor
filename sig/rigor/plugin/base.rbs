@@ -50,11 +50,14 @@ class Rigor::Plugin::Base
 
   # Authoring helpers.
   def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> untyped
+  def diagnostics_for: (untyped violations, path: untyped, ?node: untyped) -> Array[untyped]
+  def read_fact: (plugin_id: untyped, name: untyped) -> untyped
+  def producer_value: (untyped id, ?params: untyped) -> untyped
+  def producer_error: (untyped id) -> untyped
   def manifest: () -> Rigor::Plugin::Manifest
   def signature_paths: () -> Array[String]
   def protocol_contracts: () -> untyped
   def io_boundary: () -> Rigor::Plugin::IoBoundary
   def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> untyped
-  def glob_descriptor: (untyped roots, *untyped patterns) -> untyped
   def plugin_entry: () -> untyped
 end

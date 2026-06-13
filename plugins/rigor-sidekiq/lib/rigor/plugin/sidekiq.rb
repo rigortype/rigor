@@ -63,7 +63,7 @@ module Rigor
         }
       )
 
-      producer :worker_index do |_params|
+      producer :worker_index, watch: -> { [[@worker_search_paths, "**/*.rb"]] } do |_params|
         WorkerDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @worker_search_paths,
@@ -74,46 +74,33 @@ module Rigor
       def init(_services)
         @worker_search_paths = Array(config.fetch("worker_search_paths")).map(&:to_s)
         @worker_marker_modules = Array(config.fetch("worker_marker_modules")).map(&:to_s)
-        @worker_index = nil
-        @load_error = nil
       end
 
       # File-level only: the load-error emission. The per-call arity
       # validation runs over the engine-owned walk via the node_rule
       # below (ADR-37). The worker index is lazily loaded + memoised by
-      # worker_index_or_nil, shared by both surfaces.
+      # `producer_value`, shared by both surfaces.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        index = worker_index_or_nil
-        return [load_error_diagnostic(path)] if index.nil? && @load_error
+        index = producer_value(:worker_index)
+        return [load_error_diagnostic(path)] if index.nil? && producer_error(:worker_index)
 
         []
       end
 
       node_rule Prism::CallNode do |node, _scope, path|
-        index = worker_index_or_nil
+        index = producer_value(:worker_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.violations_for(call_node: node, worker_index: index).map do |violation|
-          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
-        end
+        diagnostics_for(Analyzer.violations_for(call_node: node, worker_index: index), path: path, node: node)
       end
 
       private
 
-      def worker_index_or_nil
-        return @worker_index if @worker_index
-
-        descriptor = glob_descriptor(@worker_search_paths, "**/*.rb")
-        @worker_index = cache_for(:worker_index, params: {}, descriptor: descriptor).call
-      rescue StandardError => e
-        @load_error = "rigor-sidekiq: failed to discover workers: #{e.class}: #{e.message}"
-        nil
-      end
-
       def load_error_diagnostic(path)
+        error = producer_error(:worker_index)
         Rigor::Analysis::Diagnostic.new(
           path: path, line: 1, column: 1,
-          message: @load_error,
+          message: "rigor-sidekiq: failed to discover workers: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )

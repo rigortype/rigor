@@ -66,7 +66,7 @@ module Rigor
         }
       )
 
-      producer :policy_index do |_params|
+      producer :policy_index, watch: -> { [[@policy_search_paths, "**/*.rb"]] } do |_params|
         PolicyDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @policy_search_paths,
@@ -77,46 +77,35 @@ module Rigor
       def init(_services)
         @policy_search_paths = Array(config.fetch("policy_search_paths")).map(&:to_s)
         @policy_base_classes = Array(config.fetch("policy_base_classes")).map(&:to_s)
-        @policy_index = nil
-        @load_error = nil
       end
 
       # File-level only: the load-error emission. The per-call policy
       # validation runs over the engine-owned walk via the node_rule
       # below (ADR-37). The index is lazily loaded + memoised by
-      # policy_index_or_nil, so both surfaces share one load.
+      # `producer_value`, so both surfaces share one load.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        index = policy_index_or_nil
-        return [load_error_diagnostic(path)] if index.nil? && @load_error
+        index = producer_value(:policy_index)
+        return [load_error_diagnostic(path)] if index.nil? && producer_error(:policy_index)
 
         []
       end
 
       node_rule Prism::CallNode do |node, scope, path|
-        index = policy_index_or_nil
+        index = producer_value(:policy_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.violations_for(call_node: node, policy_index: index, scope: scope).map do |violation|
-          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
-        end
+        diagnostics_for(
+          Analyzer.violations_for(call_node: node, policy_index: index, scope: scope), path: path, node: node
+        )
       end
 
       private
 
-      def policy_index_or_nil
-        return @policy_index if @policy_index
-
-        descriptor = glob_descriptor(@policy_search_paths, "**/*.rb")
-        @policy_index = cache_for(:policy_index, params: {}, descriptor: descriptor).call
-      rescue StandardError => e
-        @load_error = "rigor-pundit: failed to discover policies: #{e.class}: #{e.message}"
-        nil
-      end
-
       def load_error_diagnostic(path)
+        error = producer_error(:policy_index)
         Rigor::Analysis::Diagnostic.new(
           path: path, line: 1, column: 1,
-          message: @load_error,
+          message: "rigor-pundit: failed to discover policies: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )

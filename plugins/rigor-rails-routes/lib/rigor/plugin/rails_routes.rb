@@ -94,7 +94,12 @@ module Rigor
       #
       # Passes a `file_reader` lambda so the parser can follow
       # `draw(:admin)` → `config/routes/admin.rb` partials.
-      producer :helper_table do |_params|
+      # `watch:` (ADR-60 WD3) covers every `.rb` under `helper_paths:`
+      # so ADDING a helper file invalidates the table — the producer's
+      # own in-block reads (the routes file + the partials it follows
+      # via `draw`) are captured post-compute, but a brand-new helper
+      # file the prior run never read would otherwise read as fresh.
+      producer :helper_table, watch: -> { @helper_paths.map { |dir| [dir, "**/*.rb"] } } do |_params|
         routes_dir = "#{File.dirname(@routes_file)}/routes"
         file_reader = lambda do |name|
           io_boundary.read_file("#{routes_dir}/#{name}")
@@ -130,14 +135,6 @@ module Rigor
           next
         end
         HelperDiscoverer.discover(contents_per_path)
-      end
-
-      def pre_read_helper_files
-        each_helper_file do |path|
-          io_boundary.read_file(path)
-        rescue Plugin::AccessDeniedError, Errno::ENOENT
-          next
-        end
       end
 
       def each_helper_file(&)
@@ -214,15 +211,11 @@ module Rigor
         return @helper_table if @helper_table_built
 
         @helper_table_built = true
-        # Read first so the IoBoundary's FileEntry digest
-        # captures into the descriptor before `cache_for`
-        # snapshots it (the same pattern documented in
-        # rigor-routes / rigor-activerecord). Helper files are
-        # pre-read for the same reason — editing a file under
-        # `app/helpers/` MUST invalidate the helper_table cache
-        # so the new custom-helper set is picked up.
-        io_boundary.read_file(@routes_file)
-        pre_read_helper_files
+        # ADR-60 WD3 record-and-validate: the producer's in-block reads
+        # (the routes file + the partials it follows) are captured into
+        # the dependency descriptor AFTER the block runs, and the
+        # producer's `watch:` covers helper-file additions — so no
+        # priming read is needed here.
         @helper_table = cache_for(:helper_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
         @load_error = "rigor-rails-routes: #{e.message}"

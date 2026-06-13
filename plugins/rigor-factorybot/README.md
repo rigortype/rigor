@@ -45,7 +45,7 @@ an `errors_demo.rb` triggering the `unknown-factory` /
 | --- | --- |
 | `manifest(... config_schema:, consumes:)` | declares the `factory_search_paths` knob (ADR-40 default) + the optional `activerecord#:model_index` dependency for the AR cross-check |
 | `Plugin::Base#io_boundary` (`read_file`) | reads `spec/factories` content under the trusted scope |
-| `Plugin::Base.producer` + `#cache_for` | caches the per-run factory index (keyed via `glob_descriptor` over the factory paths) |
+| `Plugin::Base.producer` + `#cache_for` | caches the per-run factory index (cache invalidates via `producer watch:`) |
 | `node_rule` (ADR-37) | per-call validation over the engine-owned walk |
 | `Plugin::Base.suggest` | did-you-mean for both `unknown-*` rules |
 | `Plugin::Inflector` (ADR-39) | factory-name → model-class fallback (`camelize`) |

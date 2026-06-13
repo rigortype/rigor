@@ -87,19 +87,15 @@ module Rigor
         ]
       )
 
-      producer :factory_index do |_params|
+      producer :factory_index, watch: -> { [[@factory_search_paths, "**/*.rb"]] } do |_params|
         FactoryDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @factory_search_paths
         ).discover
       end
 
-      def init(services)
-        @services = services
+      def init(_services)
         @factory_search_paths = Array(config.fetch("factory_search_paths")).map(&:to_s)
-        @factory_index = nil
-        @model_index = nil
-        @model_index_resolved = false
       end
 
       # ADR-37 — per-call factory/attribute validation over the
@@ -108,42 +104,17 @@ module Rigor
       # is positioned via `diagnostic(node, location:)`. No file-level
       # diagnostic remains, so there is no `diagnostics_for_file`.
       node_rule Prism::CallNode do |node, _scope, path|
-        index = factory_index_or_nil
+        index = producer_value(:factory_index)
         next [] if index.nil? || index.empty?
 
-        Analyzer.violations_for(
-          call_node: node, factory_index: index, model_index: model_index_or_nil
-        ).map do |violation|
-          diagnostic(
-            node, path: path, location: violation.location,
-                  message: violation.message, severity: violation.severity, rule: violation.rule
-          )
-        end
-      end
-
-      private
-
-      # Phase 1 (c) — lazily resolves the :model_index fact
-      # from rigor-activerecord. Returns nil when
-      # rigor-activerecord isn't loaded or hasn't published
-      # an index; the analyzer treats nil as "no cross-check"
-      # and falls back to Phase 1 (a) behaviour (factory
-      # attributes only).
-      def model_index_or_nil
-        return @model_index if @model_index_resolved
-
-        @model_index = @services.fact_store.read(plugin_id: "activerecord", name: :model_index)
-        @model_index_resolved = true
-        @model_index
-      end
-
-      def factory_index_or_nil
-        return @factory_index if @factory_index
-
-        descriptor = glob_descriptor(@factory_search_paths, "**/*.rb")
-        @factory_index = cache_for(:factory_index, params: {}, descriptor: descriptor).call
-      rescue StandardError
-        nil
+        # `:model_index` is rigor-activerecord's published fact (ADR-9);
+        # nil when that plugin isn't loaded, in which case the analyzer
+        # falls back to factory-attributes-only checking.
+        violations = Analyzer.violations_for(
+          call_node: node, factory_index: index,
+          model_index: read_fact(plugin_id: "activerecord", name: :model_index)
+        )
+        diagnostics_for(violations, path: path, node: node)
       end
     end
 

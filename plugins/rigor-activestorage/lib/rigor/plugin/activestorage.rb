@@ -54,8 +54,11 @@ module Rigor
       )
 
       # Cached: attachment index. Walks every `.rb` file under
-      # `model_search_paths` for `has_*_attached` macros.
-      producer :attachment_index do |_params|
+      # `model_search_paths` for `has_*_attached` macros. `watch:`
+      # (ADR-60 WD3) covers model-file additions; the discoverer's
+      # in-block reads are captured into the record-and-validate
+      # dependency descriptor after the block runs.
+      producer :attachment_index, watch: -> { [[@model_search_paths, "**/*.rb"]] } do |_params|
         rows = AttachmentDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @model_search_paths
@@ -126,12 +129,11 @@ module Rigor
       def attachment_index
         return @attachment_index if @attachment_index
 
-        # Walk first so the IoBoundary's digest list captures
-        # the model file digests before cache_for snapshots.
-        AttachmentDiscoverer.new(
-          io_boundary: io_boundary,
-          search_paths: @model_search_paths
-        ).discover
+        # ADR-60 WD3 record-and-validate: the producer's in-block
+        # `AttachmentDiscoverer` reads are captured into the
+        # dependency descriptor after the block runs, and the
+        # producer's `watch:` covers model-file additions — so no
+        # priming walk is needed (it used to run the discover twice).
         @attachment_index = cache_for(:attachment_index, params: {}).call
       rescue Plugin::AccessDeniedError => e
         @load_errors << "rigor-activestorage: #{e.message}"

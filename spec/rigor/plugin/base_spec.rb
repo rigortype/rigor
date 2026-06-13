@@ -122,6 +122,9 @@ RSpec.describe Rigor::Plugin::Base do
     end
   end
 
+  # Private since ADR-60 WD3 — `producer watch:` is the declared way to
+  # cover a producer's glob; this remains its building block, exercised
+  # here via `send`.
   describe "#glob_descriptor" do
     let(:plugin_class) do
       Class.new(described_class) do
@@ -138,7 +141,7 @@ RSpec.describe Rigor::Plugin::Base do
         File.write(File.join(dir, "lib", "b.rb"), "puts :b\n")
         File.write(File.join(dir, "lib", "ignored.txt"), "not ruby\n")
 
-        descriptor = plugin.glob_descriptor([File.join(dir, "lib")], "**/*.rb")
+        descriptor = plugin.send(:glob_descriptor, [File.join(dir, "lib")], "**/*.rb")
 
         paths = descriptor.files.map(&:path).map { |p| File.basename(p) }
         expect(paths).to contain_exactly("a.rb", "b.rb")
@@ -152,10 +155,10 @@ RSpec.describe Rigor::Plugin::Base do
         path = File.join(dir, "lib", "x.rb")
 
         File.write(path, "puts :first\n")
-        before = plugin.glob_descriptor([File.join(dir, "lib")], "**/*.rb")
+        before = plugin.send(:glob_descriptor, [File.join(dir, "lib")], "**/*.rb")
 
         File.write(path, "puts :second\n")
-        after = plugin.glob_descriptor([File.join(dir, "lib")], "**/*.rb")
+        after = plugin.send(:glob_descriptor, [File.join(dir, "lib")], "**/*.rb")
 
         expect(before).not_to eq(after)
       end
@@ -166,17 +169,17 @@ RSpec.describe Rigor::Plugin::Base do
         FileUtils.mkdir_p(File.join(dir, "lib"))
         File.write(File.join(dir, "lib", "a.rb"), "puts :a\n")
 
-        before = plugin.glob_descriptor([File.join(dir, "lib")], "**/*.rb")
+        before = plugin.send(:glob_descriptor, [File.join(dir, "lib")], "**/*.rb")
 
         File.write(File.join(dir, "lib", "b.rb"), "puts :b\n")
-        after = plugin.glob_descriptor([File.join(dir, "lib")], "**/*.rb")
+        after = plugin.send(:glob_descriptor, [File.join(dir, "lib")], "**/*.rb")
 
         expect(before).not_to eq(after)
       end
     end
 
     it "returns an empty descriptor when no roots exist on disk" do
-      descriptor = plugin.glob_descriptor(["/definitely/does/not/exist"], "**/*.rb")
+      descriptor = plugin.send(:glob_descriptor, ["/definitely/does/not/exist"], "**/*.rb")
       expect(descriptor.files).to be_empty
     end
 
@@ -186,7 +189,7 @@ RSpec.describe Rigor::Plugin::Base do
         File.write(File.join(dir, "b.erb"), "")
         File.write(File.join(dir, "c.txt"), "")
 
-        descriptor = plugin.glob_descriptor([dir], "**/*.rb", "**/*.erb")
+        descriptor = plugin.send(:glob_descriptor, [dir], "**/*.rb", "**/*.erb")
         names = descriptor.files.map(&:path).map { |p| File.basename(p) }
         expect(names).to contain_exactly("a.rb", "b.erb")
       end
@@ -198,7 +201,7 @@ RSpec.describe Rigor::Plugin::Base do
         File.write(File.join(dir, "a.rb"), "")
         # `**/*` matches both `sub` and `a.rb`; only `a.rb` should
         # appear in the descriptor.
-        descriptor = plugin.glob_descriptor([dir], "**/*")
+        descriptor = plugin.send(:glob_descriptor, [dir], "**/*")
         names = descriptor.files.map(&:path).map { |p| File.basename(p) }
         expect(names).to contain_exactly("a.rb")
       end
@@ -323,6 +326,115 @@ RSpec.describe Rigor::Plugin::Base do
       diag = plugin.diagnostic(node, path: "demo.rb", message: "m", location: node.message_loc)
       expect(diag.line).to eq(node.message_loc.start_line)
       expect(diag.column).to eq(node.message_loc.start_column + 1)
+    end
+  end
+
+  describe "#diagnostics_for (ADR-60 WD4)" do
+    let(:plugin) do
+      Class.new(described_class) { manifest(id: "demo", version: "0.1.0") }.new(services: services)
+    end
+    let(:node) { Prism.parse("foo(:bar)").value.statements.body.first }
+    let(:violation) { Struct.new(:node, :message, :severity, :rule, :location, keyword_init: true) }
+
+    it "maps duck-typed violations through #diagnostic" do
+      violations = [
+        violation.new(node: node, message: "boom", severity: :warning, rule: "demo.x"),
+        violation.new(node: node, message: "bang", rule: "demo.y")
+      ]
+      diags = plugin.diagnostics_for(violations, path: "demo.rb")
+      expect(diags.map(&:message)).to eq(%w[boom bang])
+      expect(diags.map(&:severity)).to eq(%i[warning error])
+      expect(diags.map(&:rule)).to eq(%w[demo.x demo.y])
+      expect(diags).to all(be_a(Rigor::Analysis::Diagnostic))
+    end
+
+    it "falls back to the shared node: argument when a violation carries no node" do
+      bare = Struct.new(:message, keyword_init: true)
+      diags = plugin.diagnostics_for([bare.new(message: "m")], path: "demo.rb", node: node)
+      expect(diags.first.line).to eq(node.location.start_line)
+    end
+
+    it "honours a per-violation location override" do
+      diags = plugin.diagnostics_for(
+        [violation.new(node: node, message: "m", location: node.message_loc)], path: "demo.rb"
+      )
+      expect(diags.first.column).to eq(node.message_loc.start_column + 1)
+    end
+
+    it "returns [] for nil / empty input" do
+      expect(plugin.diagnostics_for(nil, path: "demo.rb")).to eq([])
+      expect(plugin.diagnostics_for([], path: "demo.rb")).to eq([])
+    end
+  end
+
+  describe "#read_fact (ADR-60 WD4)" do
+    let(:fact_store) { Rigor::Plugin::FactStore.new }
+    let(:services) do
+      Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection,
+        type: Rigor::Type::Combinator,
+        configuration: Rigor::Configuration.new,
+        fact_store: fact_store
+      )
+    end
+    let(:plugin) do
+      Class.new(described_class) { manifest(id: "demo", version: "0.1.0") }.new(services: services)
+    end
+
+    it "reads a published fact" do
+      fact_store.publish(plugin_id: "other", name: :index, value: { a: 1 })
+      expect(plugin.read_fact(plugin_id: "other", name: :index)).to eq({ a: 1 })
+    end
+
+    it "returns nil for an unpublished fact and memoises the nil (no re-read)" do
+      reads = 0
+      allow(fact_store).to receive(:read).and_wrap_original do |orig, **kw|
+        reads += 1
+        orig.call(**kw)
+      end
+      expect(plugin.read_fact(plugin_id: "other", name: :missing)).to be_nil
+      expect(plugin.read_fact(plugin_id: "other", name: :missing)).to be_nil
+      expect(reads).to eq(1)
+    end
+
+    it "coerces String/Symbol plugin_id and name to the canonical channel" do
+      fact_store.publish(plugin_id: "other", name: :index, value: 42)
+      expect(plugin.read_fact(plugin_id: :other, name: "index")).to eq(42)
+    end
+  end
+
+  describe "#producer_value / #producer_error (ADR-60 WD4)" do
+    let(:plugin) do
+      Class.new(described_class) do
+        manifest(id: "demo", version: "0.1.0")
+        producer(:ok) { |_params| 7 }
+        producer(:boom) { |_params| raise "broken project file" }
+      end.new(services: services)
+    end
+
+    it "returns the producer value and memoises it (--no-cache path runs once)" do
+      calls = 0
+      klass = Class.new(described_class) do
+        manifest(id: "demo", version: "0.1.0")
+      end
+      counter = -> { calls += 1 }
+      klass.producer(:count) { |_params| counter.call }
+      inst = klass.new(services: services)
+      inst.producer_value(:count)
+      inst.producer_value(:count)
+      expect(calls).to eq(1)
+    end
+
+    it "rescues a raising producer to nil and records the error" do
+      expect(plugin.producer_value(:boom)).to be_nil
+      expect(plugin.producer_error(:boom)).to be_a(StandardError)
+      expect(plugin.producer_error(:boom).message).to eq("broken project file")
+    end
+
+    it "reports no error for a producer that has not been run or succeeded" do
+      expect(plugin.producer_error(:ok)).to be_nil
+      expect(plugin.producer_value(:ok)).to eq(7)
+      expect(plugin.producer_error(:ok)).to be_nil
     end
   end
 

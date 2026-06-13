@@ -86,10 +86,7 @@ module Rigor
         ]
       )
 
-      def init(services)
-        @services = services
-        @factory_index_resolved = false
-        @factory_index = nil
+      def init(_services)
         # Per-path `LetScopeIndex` cache. The let-binding
         # `dynamic_return` rule (and its `file_methods:` gate)
         # consult the index per call node; building it once
@@ -152,7 +149,7 @@ module Rigor
         LetTypeResolver.resolve(
           block_node,
           describe_const: describe_const,
-          factory_index: factory_index_or_nil,
+          factory_index: read_fact(plugin_id: "factorybot", name: :factory_index),
           environment: scope.environment
         )
       end
@@ -183,14 +180,6 @@ module Rigor
         LetScopeIndex.build(parse_result.value)
       rescue Rigor::Plugin::AccessDeniedError, Errno::ENOENT
         nil
-      end
-
-      def factory_index_or_nil
-        return @factory_index if @factory_index_resolved
-
-        @factory_index = @services&.fact_store&.read(plugin_id: "factorybot", name: :factory_index)
-        @factory_index_resolved = true
-        @factory_index
       end
 
       def build_diagnostic(diag)

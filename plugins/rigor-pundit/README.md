@@ -51,7 +51,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | Surface | Used for |
 | --- | --- |
 | `manifest(... config_schema:)` | `policy_search_paths` / `policy_base_classes` knobs (ADR-40 declared defaults). |
-| `Plugin::Base.producer :policy_index` | Caches the discovered policy index across runs (keyed via `glob_descriptor`). |
+| `Plugin::Base.producer :policy_index` | Caches the discovered policy index across runs (cache invalidates via `producer watch:`). |
 | `Plugin::Base#io_boundary` (`read_file`) | Reads each `.rb` file under `policy_search_paths` through the trusted scope. |
 | `node_rule(Prism::CallNode)` (ADR-37) | Per-call validation of every `authorize` / `policy` / `policy_scope` over the engine-owned walk (the once-per-file load-error stays in `diagnostics_for_file`). |
 | `Scope#type_of(receiver)` | Resolves the record argument's inferred type when it isn't a constant; gracefully degrades when the type isn't `Nominal[T]`. |

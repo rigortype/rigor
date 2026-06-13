@@ -481,6 +481,13 @@ module Rigor
         # memo-on-first-dispatch is a Hash-content mutation, sound even on
         # a self-freezing plugin.
         @dynamic_return_runtime_cache = {}
+        # ADR-60 WD4 — nil-inclusive memo tables for the authoring
+        # helpers ({#read_fact} / {#producer_value} / {#producer_error}).
+        # Allocated here, before any subclass `initialize` self-freeze,
+        # for the same reason: a populate is a Hash-content mutation.
+        @fact_cache = {}
+        @producer_value_cache = {}
+        @producer_errors = {}
       end
 
       # Override in subclasses to wire any state the plugin needs
@@ -661,6 +668,69 @@ module Rigor
         )
       end
 
+      # ADR-60 WD4 — maps a plugin's own violation objects to
+      # `Rigor::Analysis::Diagnostic`s through {#diagnostic}, absorbing
+      # the `violations.map { |v| diagnostic(node, …) }` block the
+      # node-rule plugins otherwise repeat. Each violation duck-types:
+      # `#message` (required); optional `#node` (the Prism node to
+      # position at — falls back to the `node:` argument, the common
+      # "all violations point at the same call" case), `#location` (a
+      # sub-location such as `node.message_loc`), `#severity` (defaults
+      # `:error`), and `#rule`. Returns an Array suitable for direct
+      # return from `#diagnostics_for_file` / a `node_rule` block.
+      def diagnostics_for(violations, path:, node: nil)
+        Array(violations).map do |violation|
+          target = (violation.node if violation.respond_to?(:node)) || node
+          diagnostic(
+            target,
+            path: path,
+            message: violation.message,
+            severity: (violation.respond_to?(:severity) && violation.severity) || :error,
+            rule: (violation.rule if violation.respond_to?(:rule)),
+            location: (violation.location if violation.respond_to?(:location))
+          )
+        end
+      end
+
+      # ADR-60 WD4 — reads a cross-plugin fact (ADR-9) published by
+      # another plugin's `#prepare` hook, memoised per `(plugin_id,
+      # name)` on this instance INCLUDING a nil result. The nil-inclusive
+      # memo retires the hand-rolled `@x_resolved` flag the discovery
+      # plugins carried to distinguish "fact not published" from "not yet
+      # read". `services.fact_store` is the only sanctioned cross-plugin
+      # channel; a fact no loaded producer published reads as nil.
+      def read_fact(plugin_id:, name:)
+        key = [plugin_id.to_s, name.to_sym].freeze
+        return @fact_cache[key] if @fact_cache.key?(key)
+
+        @fact_cache[key] = services.fact_store.read(plugin_id: plugin_id.to_s, name: name.to_sym)
+      end
+
+      # ADR-60 WD4 — runs a declared {.producer} through {#cache_for}
+      # and returns its value, memoised per `(id, params)` INCLUDING nil.
+      # A `StandardError` the producer raises (a malformed project file,
+      # an I/O failure) is rescued, recorded for {#producer_error}, and
+      # yields nil — so one bad project file degrades a plugin to silence
+      # rather than aborting the whole run. This is the `*_index_or_nil`
+      # shape the discovery plugins hand-rolled, named once.
+      def producer_value(id, params: {})
+        key = [id.to_sym, params].freeze
+        return @producer_value_cache[key] if @producer_value_cache.key?(key)
+
+        @producer_value_cache[key] = cache_for(id, params: params).call
+      rescue StandardError => e
+        @producer_errors[id.to_sym] = e
+        @producer_value_cache[key] = nil
+      end
+
+      # ADR-60 WD4 — the `StandardError` a prior {#producer_value} call
+      # rescued for `id`, or nil when it succeeded or was never called.
+      # Plugins surface it as a load-error diagnostic from
+      # `#diagnostics_for_file`.
+      def producer_error(id)
+        @producer_errors[id.to_sym]
+      end
+
       # Boilerplate-reduction helper (review §1.3): the "did you mean …?"
       # suggestion every diagnostic-emitting plugin otherwise hand-rolls.
       # Returns the closest of `candidates` to `name` via
@@ -798,31 +868,13 @@ module Rigor
       # descriptor), or any removal (the previously-matched file
       # drops out).
       #
-      # Pass the returned descriptor as `cache_for(..., descriptor: …)`
-      # so the cache key reflects the project files the producer
-      # reads from. Without it, `Plugin::Base#cache_for`'s
-      # auto-built descriptor only includes files the
-      # {Plugin::IoBoundary} has already read in the current
-      # process — empty on the first call of a fresh process — so
-      # the cache key is identical regardless of project state and
-      # warm runs return stale producer output when files have
-      # changed between sessions.
-      #
-      # Discovery-style producers (`actioncable`'s `:channel_index`,
-      # `actionmailer`'s `:mailer_index`, `rails-i18n`'s
-      # `:locale_index`) all follow the same pattern: walk a glob
-      # under one or more search roots, parse / read every match,
-      # build a typed index. They MUST call this helper at the
-      # `cache_for(descriptor: …)` site to be cache-correct under
-      # the persistent `Cache::Store` `rigor check` uses by
-      # default.
-      #
-      # The helper pays one SHA-256 read per matched file at
-      # call time; the producer block typically re-reads through
-      # `io_boundary.read_file` so the cost is doubled. For
-      # discovery globs in the 10-100 file range this is
-      # negligible (~ms) relative to the parse + walk the
-      # producer does on cache miss.
+      # ADR-60 WD3 made this **private**: the declared way for a
+      # discovery-style producer to cover its glob is `producer
+      # watch:` (one {Cache::Descriptor::GlobEntry} per glob in the
+      # record-and-validate dependency descriptor), not a hand-built
+      # descriptor composed into the cache *key*. The method survives
+      # only as the building block for the rare producer that needs
+      # `FileEntry` rows directly; plugin code calls `watch:`.
       #
       # @param roots    [Array<String>] search roots (relative to
       #   the project root, or absolute paths)
@@ -842,6 +894,7 @@ module Rigor
         end
         Cache::Descriptor.new(files: entries)
       end
+      private :glob_descriptor
 
       private
 

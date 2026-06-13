@@ -27,10 +27,12 @@ module Rigor
     #    whose direct superclass is in `model_base_classes`, and
     #    composes them with the schema table into a {ModelIndex}.
     #
-    # Both producers ride `Plugin::Base#cache_for`. The descriptor
-    # auto-includes the digests of every file the boundary read,
-    # so editing `db/schema.rb` or any model file invalidates
-    # exactly the right cache entry.
+    # Both producers ride `Plugin::Base#cache_for` (ADR-60 WD3
+    # record-and-validate): each producer's in-block boundary reads
+    # are captured into its dependency descriptor after the block
+    # runs, and `model_index`'s `watch:` covers model-file additions,
+    # so editing `db/schema.rb`, editing any model, or adding a new
+    # model file invalidates exactly the right cache entry.
     #
     # The per-file `#diagnostics_for_file` hook delegates to
     # {Analyzer}, which walks Prism and emits diagnostics for
@@ -101,8 +103,11 @@ module Rigor
       end
 
       # Cached: model index. Walks every model file, then composes
-      # the rows with the cached schema table.
-      producer :model_index do |_params|
+      # the rows with the cached schema table. `watch:` (ADR-60 WD3)
+      # covers model-file additions; the discoverer's in-block reads
+      # are captured into the record-and-validate dependency
+      # descriptor after the block runs.
+      producer :model_index, watch: -> { [[@model_search_paths, "**/*.rb"]] } do |_params|
         rows = ModelDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @model_search_paths,
@@ -571,16 +576,11 @@ module Rigor
         table = schema_table_or_nil
         return nil if table.nil?
 
-        # Walk model files first so the IoBoundary's digest list
-        # captures them BEFORE `cache_for` snapshots the
-        # descriptor (the same "read first, cache_for second"
-        # pattern documented at the top of rigor-routes).
-        ModelDiscoverer.new(
-          io_boundary: io_boundary,
-          search_paths: @model_search_paths,
-          base_classes: @model_base_classes
-        ).discover
-
+        # ADR-60 WD3 record-and-validate: the producer's own in-block
+        # `ModelDiscoverer` reads are captured into the dependency
+        # descriptor after the block runs, and the producer's `watch:`
+        # covers model-file additions — so no priming walk is needed
+        # (it used to run the discover twice).
         @model_index = cache_for(:model_index, params: {}).call
       rescue StandardError => e
         @load_errors << "model index build failed: #{e.class}: #{e.message}"
@@ -599,9 +599,10 @@ module Rigor
         return nil if @schema_load_attempted
 
         @schema_load_attempted = true
-        # Same pattern: read schema file via boundary, then call
-        # cache_for so the descriptor includes the file digest.
-        io_boundary.read_file(@schema_file)
+        # ADR-60 WD3 record-and-validate: the producer reads
+        # `@schema_file` in-block, and that read is captured into the
+        # dependency descriptor after the block runs — so no priming
+        # read is needed here.
         @schema_table = cache_for(:schema_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
         @load_errors << "rigor-activerecord: #{e.message}"

@@ -1,0 +1,31 @@
+# frozen_string_literal: true
+
+# ADR-29 WD8 — the gem set packed into the in-browser ruby.wasm build.
+#
+# This is intentionally the playground's *exact runtime set* and nothing
+# else. The `rigortype` engine carries the `rigor-rbs-inline` plugin the
+# playground pre-loads (ADR-29 WD4) directly: the plugin has no gemspec of
+# its own — it is bundled into `rigortype` via the gemspec's `require_paths`
+# (`plugins/*/lib`), so the `rigortype` path gem packs it. `rbwasm` compiles
+# and statically links every C extension in this bundle — here `prism` and
+# `rbs` (pulled in transitively by `rigortype`).
+#
+# `ruby_wasm` provides the `rbwasm` build CLI. It is a build-time tool,
+# not part of the shipped wasm; it stays in its own group so a plain
+# `bundle install` for inspection does not pull the wasi toolchain.
+source "https://rubygems.org"
+
+gem "rigortype", path: "../../.."
+
+# Runtime dependency of the rigor-rbs-inline plugin (ADR-32). The plugin
+# itself rides along inside `rigortype`; only its upstream gem is a separate
+# dependency. Pinned to the same range the top-level gemspec declares.
+gem "rbs-inline", ">= 0.5", "< 1.0"
+
+group :build do
+  # The rbwasm build driver. >= 2.7 is the first line shipping Ruby 4.0
+  # targets and `--ruby-version 4.0`.
+  gem "ruby_wasm", ">= 2.7"
+  # Drives the Rakefile (`bundle exec rake build`).
+  gem "rake", ">= 13.0", "< 15.0"
+end

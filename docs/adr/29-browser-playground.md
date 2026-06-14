@@ -32,6 +32,25 @@ the equivalent per-rule override) so the new
 most likely to be the user's first interaction with the
 Playground.
 
+**Re-evaluated 2026-06-14**: the Option-A blockers below were
+assessed on 2026-05-23; the `ruby.wasm` ecosystem has since moved.
+`ruby/ruby.wasm` now publishes Ruby 4.0 builds (the
+`@ruby/4.0-wasm-wasi` package), and `rbwasm`'s from-source build
+links a bundle's gem C extensions — so the `prism`/`rbs` blocker is
+now a *build-and-verify* task, not a missing-upstream one. WD6 is
+revised with per-condition status; **WD8** records the concrete
+`rbwasm` build pipeline and **WD9** the in-browser transport, both
+implemented as the `plugins/rigor-playground/wasm/` scaffolding.
+Crucially, the [try.ruby-lang.org](https://try.ruby-lang.org/playground/)
+hosting model (the wasm module served as a *static asset*)
+sidesteps blocker 4 entirely: the ~1 MB cap is a Cloudflare
+*Workers* script limit, not a Pages / static-CDN one — a 15 MB+
+wasm is just a cached file there, exactly as try.ruby ships it.
+This re-evaluation does **not** flip the production default: Option
+B remains the deployed backend until WD6 conditions ② and ③ are
+verified green. It moves the open work from "wait for upstream" to
+"run the gating `rbwasm` build spike."
+
 ## Context
 
 A publicly accessible playground lets users try Rigor against an
@@ -323,31 +342,57 @@ proxy layer via `fly.toml` `http_service.rate_limiting`. A global
 concurrency limit of 4 in-flight requests prevents a burst from
 monopolizing the single machine's CPU during the RBS environment boot.
 
-### WD6 — ruby.wasm migration gate (three conditions)
+### WD6 — ruby.wasm migration gate (three conditions; status 2026-06-14)
 
 Migration from Option B to Option A (fully in-browser WASM) requires
-**all three** of the following conditions to hold simultaneously:
+**all three** of the following conditions to hold simultaneously. The
+status line under each records the 2026-06-14 re-evaluation.
 
 1. **An official Ruby 4.0 WASM build is production-grade.** "Production-
    grade" means: published under `ruby/ruby.wasm`, passing the upstream
    test suite, and available from a CDN or as a stable npm package. An
    experimental or nightly build does not satisfy this condition.
+   - **Status: MET in practice.** `ruby/ruby.wasm` ships Ruby 4.0
+     builds (`ruby-4.0.0` artifacts; the `@ruby/4.0-wasm-wasi` npm
+     package). The one caveat is wording: `ruby.wasm` publishes under
+     dated *pre-release* tags by convention rather than a "stable"
+     release — but these are the same builds `try.ruby-lang.org` ships
+     in production, so the spirit (not nightly/experimental,
+     CDN-installable) holds.
 
 2. **`prism` and `rbs` WASM packages are available.** Both gems must
    ship official WASM builds (either bundled in the ruby.wasm runtime
    or as separately loadable `.wasm` modules), passing their own test
    suites under the WASM target.
+   - **Status: `prism` MET, `rbs` is the gating spike.** `prism` is
+     CRuby's own parser and ships *inside* the interpreter wasm — no
+     separate package needed. `rbs` carries a self-contained C
+     extension (no external-lib dependency à la nokogiri/libxml2);
+     `rbwasm`'s from-source build links bundle C extensions against the
+     wasi-sdk, so this is reachable but **unverified**. Confirming a
+     clean `rbs` + `prism` link is exactly the WD8 build spike.
 
 3. **Rigor's own test suite passes under WASM.** A CI job running
    `make test` inside the ruby.wasm runtime (stubbing `flock` and the
    fork-based worker pool) must pass without test count regressions.
    This gate catches engine code that silently assumes POSIX semantics
    absent from the WASM sandbox.
+   - **Status: UNMET, but the POSIX surface is now mapped and small.**
+     One `flock` site ([`lib/rigor/cache/store.rb`](../../lib/rigor/cache/store.rb)),
+     reached only when the persistent cache is active — `--no-cache`
+     (which the playground already mandates, WD4) bypasses it. The
+     fork pool already self-degrades to sequential when
+     `Process.respond_to?(:fork)` is false
+     ([`pool_coordinator.rb`](../../lib/rigor/analysis/runner/pool_coordinator.rb)),
+     which is the wasm case. `Runner#run_source` gives an in-memory
+     analysis entry needing no `Tempfile`. Load-time `Ractor.make_shareable`
+     calls deep-freeze without spawning a Ractor and are expected to
+     survive the sandbox. The remaining work is the CI job itself.
 
 Until all three conditions hold, the server-side API (Option B) is the
-production backend. Re-evaluation of WD6 should happen when the
-`ruby.wasm` project ships a Ruby 4.x announcement or when `prism`
-publishes a WASM distribution.
+production backend. The next concrete step is no longer "wait for
+upstream" — it is to run the WD8 `rbwasm` build and resolve condition
+② (then ③).
 
 ### WD7 — `rigor annotate` output in the playground
 
@@ -364,6 +409,70 @@ replacing the editor content — this is deferred until the CodeMirror
 inlay hint API stabilises in the ecosystem and the playground has
 real-user feedback on whether the toggle UX is sufficient.
 
+### WD8 — `rbwasm` build pipeline (added 2026-06-14)
+
+The in-browser build lives in
+[`plugins/rigor-playground/wasm/`](../../plugins/rigor-playground/wasm/)
+and is produced by `rbwasm` (the `ruby_wasm` gem) over a dedicated
+`Gemfile` containing the `rigortype` path gem, `rigor-rbs-inline`, and
+`rbs-inline` — the playground's exact runtime set. Because `rbs` carries
+a C extension, the build uses `rbwasm`'s **from-source** path
+(`--build-options`/wasi-sdk), which compiles and statically links
+`prism` and `rbs` into a single `.wasm`. This is the load-bearing
+property that distinguishes the build from a prebuilt + pure-ruby-gem
+pack: it is the only route that satisfies WD6 ②.
+
+Packing decisions:
+
+- **Catalog + signature data ride along with the path gem.** The
+  `rigortype` gemspec already lists `data/builtins/**/*.yml` and
+  `sig/**/*.rbs` in `spec.files`, so `rbwasm` packs them into the gem's
+  VFS tree alongside `lib/`; the engine's `__dir__`-relative reads
+  resolve unchanged. (The build doc records an explicit `--dir` fallback
+  in case a `ruby_wasm` version packs only `require_paths`.)
+- **The cache is off, so `flock` is never reached.** The in-VM adapter
+  invokes `rigor check --format=json --no-cache` (WD4 already mandates a
+  cacheless playground), which removes the single POSIX-locking
+  dependency without touching engine code.
+- **Config travels as a packed `.rigor.yml`.** A copy of the
+  playground config (loads `rigor-rbs-inline`, `severity_profile:
+  strict`) is mapped into the VFS at the adapter's working directory so
+  `Rigor::CLI.start`'s normal cwd discovery finds it — the same config
+  surface the Rack backend relies on.
+- **Contract fidelity by construction.** The adapter calls
+  `Rigor::CLI.start(argv, out:, err:)` against `StringIO` buffers,
+  byte-for-byte the same invocation as the backend's `run_cli`
+  ([`app.rb`](../../plugins/rigor-playground/lib/rigor/playground/app.rb)).
+  The WD2 JSON shapes are therefore identical between transports; only
+  the bytes' origin (network vs in-VM) differs.
+
+**Known v1 cost — per-call RBS env rebuild.** The CLI rebuilds the RBS
+environment on every invocation, and with the disk cache off there is no
+cross-call reuse. In wasm that boot is seconds, not the backend's
+~100 ms. The optimisation is a persistent `Runner` that builds the env
+once at page load and re-runs `run_source` per keystroke (the
+`ProjectContext` env-once pattern used by the mutation harness); it is
+deliberately out of the v1 scaffolding because it must re-derive the
+CLI's plugin/config wiring without the CLI, and shipping a faithful
+slow path first keeps the contract honest. Tracked as the WD8 perf
+follow-up.
+
+### WD9 — in-browser transport (added 2026-06-14)
+
+The wasm frontend reuses the CodeMirror 6 editor, lint markers, type
+overlay, and the WD2 JSON shapes verbatim; only the transport changes.
+Where the backend page calls `fetch("/check", …)`, the wasm page sets
+the request on a JS global and calls `vm.eval` against the adapter,
+which reads it and returns the same JSON string. To keep the working
+backend page (`frontend/index.html`) untouched, the wasm variant is a
+**separate self-contained static page**
+([`wasm/index.html`](../../plugins/rigor-playground/wasm/)) — the two
+deployments (Pages-over-backend vs fully-static-wasm) stay independent,
+matching WD1's independent-deploy stance. `vm.eval` runs Ruby
+synchronously on the main thread; offloading analysis to a Web Worker
+(so a slow keystroke does not block typing) is the WD9 responsiveness
+follow-up, paired with WD8's persistent-env work.
+
 ## Implementation slices
 
 No slice is scheduled by this ADR. The playground is a new parallel
@@ -375,4 +484,4 @@ track that does not block the `0.2.x` evaluation line.
 | 2 | `plugins/rigor-playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
 | 3 | `/annotate` endpoint + frontend toggle view. |
 | 4 | `/type-of` endpoint + frontend hover integration. |
-| 5 | (Demand-driven) ruby.wasm migration once WD6 conditions hold. |
+| 5 | ruby.wasm migration (WD8/WD9). **Scaffolding landed 2026-06-14** under `plugins/rigor-playground/wasm/` — `rbwasm` Gemfile + build task, in-VM CLI adapter, packed `.rigor.yml`, static wasm frontend. Gated on running the build to resolve WD6 ② (`rbs` C-extension link) + the WD6 ③ wasm CI job; both require the wasi-sdk toolchain, which is not in the Flake. Until the build is verified green, the scaffolding is "ready to build", not "shipping". |

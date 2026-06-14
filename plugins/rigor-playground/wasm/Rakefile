@@ -1,0 +1,66 @@
+# frozen_string_literal: true
+
+# ADR-29 WD8 — build orchestration for the in-browser ruby.wasm playground.
+#
+# Prerequisites (NOT in the project Flake — the wasi-sdk toolchain is a
+# separate, heavy download fetched by `rbwasm` on first build):
+#   * Ruby 4.0 on PATH (the host ruby; matches the gemspec pin)
+#   * `bundle install` in this directory (installs `ruby_wasm` + the path gems)
+#   * Network access for the first build (wasi-sdk + binaryen, ~hundreds of MB)
+#
+# Then: `rake build` → rigor-playground.wasm ; `rake serve` → http://localhost:8000
+
+WASM_OUT  = "rigor-playground.wasm"
+WASM_RAW  = "build/ruby-rigor.wasm"   # intermediate: Ruby + gems, before VFS pack
+RUBY_WASM = "4.0"
+
+task default: :build
+
+desc "Build the in-browser ruby.wasm module (prism + rbs C extensions linked from source)"
+task :build do
+  sh "bundle", "install"
+  mkdir_p "build"
+
+  # Step 1 — `rbwasm build` reads the Gemfile, builds Ruby 4.0 from source,
+  # and packs the bundle's gems, statically linking the C extensions (here
+  # prism + rbs). This is the heavy step (wasi-sdk download on first run,
+  # then a source build). The Ruby build is cached by ruby_wasm across runs.
+  sh "bundle", "exec", "rbwasm", "build", "--ruby-version", RUBY_WASM, "-o", WASM_RAW
+
+  # Step 2 — `rbwasm pack` (wasi-vfs) folds the adapter + .rigor.yml into the
+  # WASI filesystem at /playground (boot.rb chdirs there for config discovery).
+  # `build` has no --dir; directory mapping is a separate, fast pack step.
+  sh "bundle", "exec", "rbwasm", "pack", WASM_RAW, "--dir", "./vfs::/playground", "-o", WASM_OUT
+
+  size_mb = format("%.1f", File.size(WASM_OUT) / (1024.0 * 1024.0))
+  puts "\nBuilt #{WASM_OUT} (#{size_mb} MB). Run `rake serve` and open http://localhost:8000"
+end
+
+desc "Serve this directory statically so the browser can fetch the .wasm + index.html"
+task :serve do
+  abort "Run `rake build` first — #{WASM_OUT} is missing." unless File.exist?(WASM_OUT)
+
+  puts "Serving #{Dir.pwd} at http://localhost:8000 (Ctrl-C to stop)"
+  # ruby -run httpd serves with sane MIME types, including application/wasm.
+  ruby "-run", "-e", "httpd", ".", "-p", "8000"
+end
+
+desc "Smoke-check the adapter under plain WASI (wasmtime) — no browser needed (WD6 condition ③)"
+task :smoke do
+  abort "Run `rake build` first." unless File.exist?(WASM_OUT)
+  abort "wasmtime not found on PATH." if `which wasmtime`.empty?
+
+  sample = %(x = nil\nx.upcase\n)
+  IO.popen(["wasmtime", "run", "--dir", ".", WASM_OUT, "--", "/playground/boot.rb", "check"], "r+") do |io|
+    io.write(sample)
+    io.close_write
+    puts io.read
+  end
+end
+
+desc "Remove the built wasm module and intermediate artifacts"
+task :clean do
+  rm_f WASM_OUT
+  rm_rf "build"
+  puts "Removed #{WASM_OUT} and build/"
+end

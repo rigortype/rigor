@@ -237,26 +237,38 @@ overload with rest / keyword params, a gradual (interface-alias) param, or one t
 nil suppresses it, and a declaration-sourced ivar nil is excused (ADR-58 parity). Mirrors
 the union-undefined-method "rejected on every arm" shape.
 
-- **Gate:** `make verify` clean (6330 + 8 examples, self-check `lib` + check-plugins, all
-  precision snapshots); **corpus FP gate — zero new firings** across 12 `rigor-survey`
-  projects (mastodon app/models+services, kramdown, parser, net-ssh, oj, liquid, faraday,
-  tdiary-core, slim, herb, mail, strap); 5-example regression spec
-  (`multi_overload_nil_argument_spec.rb`).
-- **Re-measure (loop closed):** the same sweep re-run is byte-stable at 8,611 mutants —
-  teeth **53.1% → 53.8%**, **+66 killed / −66 survivors**, the drops concentrated exactly
-  in the targeted clusters (`nil_inject` on `N` −17, `non-negative-int` −13, `Integer`
-  −12, `positive-int` −12, `Float`, `int<N,max>` …). No survivor count rose.
+**Gap B LANDED too (FP-safe, nil-only).** The nil channel is unified onto a
+`param_admits_nil?` predicate evaluated on the **RBS parameter type** (not the translated
+Rigor type, which is exactly what loses the interface info). It resolves a type alias
+(`RbsLoader#expand_type_alias`: `string` → `String | _ToStr`) and decides an interface by
+whether NilClass implements every required method (`interface_method_names` ∩
+`nil_class_has_method?` — NilClass has no `to_str` / `to_int`, so `string` / `int` reject
+nil; a hypothetical `_ToS` would admit, since `NilClass#to_s` exists). Conservative
+throughout: only a concrete non-nil-ancestor class instance and an interface NilClass fails
+to satisfy return "rejects"; every other RBS form (optional, bases, tuple, proc, …) admits.
+This makes single-overload interface params (`"a" + nil`, `"a".include?(nil)`) and
+multi-overload interface params (`[1, 2, 3].fetch(nil)`) fire. Still nil-only (the coerce
+concern), still ADR-58-excused.
 
-**Gap B (interface-alias nil) deferred** — needs a nil-vs-interface `param_admits_nil?`
-predicate (resolve the alias / interface, check NilClass's method set so `_ToStr` etc. are
-known not to admit nil); riskier, and the single-overload String cluster (~380 mutants) is
-the prize. Recorded as the next argument-channel slice. The non-nil (`type_swap`) channel
-stays deferred behind the same coerce concern.
+- **Gate:** `make verify` clean (6331 + 8 examples, self-check `lib` (0 arg-mismatch) +
+  check-plugins, all precision snapshots); **corpus FP gate — zero new firings** across the
+  same 12 `rigor-survey` projects; regression spec broadened to
+  `nil_argument_mismatch_spec.rb` (both gaps).
+- **Re-measure (loop closed, byte-stable 8,611 mutants):** teeth **53.1% → 53.8% (Gap A) →
+  57.7% (Gap A+B)** — Gap A **+66 killed**, Gap B **+334 killed**, total **+400 killed /
+  −400 survivors, +4.6 pts**. Gap B's drops are exactly the targeted clusters: `nil_inject`
+  on `String` −103, `singleton(File)` −51, `Array`/`Array[T]` variants (−34 / −22 / −19 /
+  …), the `"…"` String literal −30. No survivor count rose.
+
+**Still deferred:** the non-nil (`type_swap`) channel — a non-nil arg a numeric overload
+"rejects" can be valid via `coerce`, so widening past nil needs a coerce-aware model.
 
 ## Loop demonstrated
 
 `String | Symbol` was the first sweep's top real cluster → diagnosed as an intentional
 union bail → FP-safe fix → `make verify` green → harness re-measures the cluster as
-**killed**. The CRuby-`lib/` `Integer#* nil` cluster repeated the loop on a fresh corpus
-(+66 kills). Find → fix-at-root → re-measure-kill: the harness is a self-improving loop,
-not just a report.
+**killed**. The CRuby-`lib/` argument-channel work repeated the loop on a fresh corpus and
+scaled it: the multi-overload numeric-nil and interface-alias-nil clusters (`Integer#*`,
+`String#+`, `File.*`) went from survivors to **+400 kills, teeth +4.6 pts**, FP-gated to
+zero new corpus firings. Find → fix-at-root → corpus-gate → re-measure-kill: the harness is
+a self-improving loop, not just a report.

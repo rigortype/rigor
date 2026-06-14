@@ -643,6 +643,27 @@ module Rigor
         interface_definition(interface_name)&.methods&.keys
       end
 
+      # @param rbs_alias [RBS::Types::Alias] a type-alias reference (`string`,
+      #   `int`, …) appearing in a method signature.
+      # @return [RBS::Types::t, nil] the alias's aliased type one level out
+      #   (`string` → `::String | ::_ToStr`), or nil for a generic alias
+      #   (one with type parameters — arg substitution is out of scope) or an
+      #   unresolved name. Lets a caller see through the alias that
+      #   {Inference::RbsTypeTranslator} otherwise degrades to `untyped`,
+      #   which is why an interface/alias parameter does not reject `nil`.
+      def expand_type_alias(rbs_alias)
+        return nil if env.nil?
+
+        name = rbs_alias.name
+        entry = env.type_alias_decls[name] || env.type_alias_decls[name.absolute!]
+        return nil if entry.nil?
+        return nil unless entry.decl.type_params.empty?
+
+        entry.decl.type
+      rescue ::RBS::BaseError, StandardError
+        nil
+      end
+
       # @return [RBS::Definition, nil] the resolved singleton (class
       #   object) definition for `class_name`. The methods on this
       #   definition are the *class methods* of `class_name`, including

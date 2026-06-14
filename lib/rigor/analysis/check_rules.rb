@@ -1670,8 +1670,7 @@ module Rigor
         # `Money`), but `nil` never coerces — a `nil` that every overload's
         # matching positional param rejects is a guaranteed `TypeError`. The
         # shape mirrors the "absent on every arm" union-undefined-method rule.
-        # The interface-alias single-overload case (`String#+(string)`) and
-        # non-nil multi-overload arguments are a separately-gated follow-up.
+        # Non-nil multi-overload arguments remain a separately-gated follow-up.
         def nil_argument_mismatch_across_overloads(method_types, call_node, scope, param_overrides)
           functions = method_types.map(&:type)
           return nil unless functions.all? { |function| argument_check_eligible?(function) }
@@ -1682,32 +1681,91 @@ module Rigor
             next unless nil_member?(arg_type) # pure nil only — not a `T | nil` union
             next if declaration_sourced_nil_argument?(arg, scope) # ADR-58 parity
 
-            expected = overload_positional_param_types(functions, index, scope, param_overrides)
-            next if expected.nil?
-            unless expected.all? { |param_type| Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no? }
-              next
-            end
+            params = overload_positional_params(functions, index)
+            next if params.nil? # arity divergence — some overload lacks a param here
+            next if params.any? { |param| param_admits_nil?(param, param_overrides, scope) }
 
-            return { node: arg, name: nil, expected: Type::Combinator.union(*expected), actual: arg_type }
+            return { node: arg, name: nil, expected: nil_param_expected_label(params), actual: arg_type }
           end
           nil
         end
 
-        # The translated positional-param Rigor types at `index` across every
-        # overload, or nil when any overload lacks a param there (arity
-        # divergence) or carries a gradual (`Dynamic`/`Top`) param we cannot
-        # refute against — both FP-safe "do not fire" outcomes.
-        def overload_positional_param_types(functions, index, scope, param_overrides)
-          functions.map do |function|
-            params = function.required_positionals + function.optional_positionals
-            param = params[index]
-            return nil if param.nil?
+        # The matching positional RBS param across every overload, or nil when
+        # any overload has no param at `index` (arity divergence — the
+        # wrong-arity rule's concern, not this one's).
+        def overload_positional_params(functions, index)
+          params = functions.map { |function| (function.required_positionals + function.optional_positionals)[index] }
+          params.any?(&:nil?) ? nil : params
+        end
 
-            param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
-            return nil if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
+        # The class names whose instances `nil` IS — `NilClass` and every
+        # ancestor. A parameter typed as any other class instance rejects nil.
+        NIL_COMPATIBLE_CLASS_NAMES = %w[NilClass Object BasicObject Kernel].to_set.freeze
+        private_constant :NIL_COMPATIBLE_CLASS_NAMES
 
-            param_type
+        # Does this parameter admit a `nil` argument? Decided on the RBS
+        # parameter type (a `rigor:v1:param` override takes precedence).
+        # Conservative throughout: any case we cannot decide returns true
+        # (admits → do not fire), so the rule never fires on uncertainty.
+        def param_admits_nil?(param, param_overrides, scope)
+          override = param_overrides[param.name]
+          return rigor_type_admits_nil?(override) if override
+
+          rbs_type_admits_nil?(param.type, scope)
+        end
+
+        # The `rigor:v1:param` override variant — a refinement
+        # (`non-empty-string`) rejects nil; an explicit nil / nilable union /
+        # gradual override admits it.
+        def rigor_type_admits_nil?(type)
+          return true if type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
+          return true if nil_member?(type)
+          return union_contains_nil?(type) if type.is_a?(Type::Union)
+
+          false
+        end
+
+        # Walks the RBS parameter type. The load-bearing cases are `Alias`
+        # (`string` = `String | _ToStr`) and `Interface` (`_ToStr`), which
+        # {Inference::RbsTypeTranslator} degrades to `untyped` — the reason a
+        # `nil` argument is invisible after translation (the interface-alias
+        # gap). Resolving them here recovers the rejection. Only a concrete
+        # class instance that is not a `nil` ancestor, and an interface
+        # NilClass does not satisfy, return false; everything else admits.
+        def rbs_type_admits_nil?(rbs_type, scope)
+          case rbs_type
+          when RBS::Types::Union then rbs_type.types.any? { |member| rbs_type_admits_nil?(member, scope) }
+          when RBS::Types::Alias
+            expanded = scope.environment&.rbs_loader&.expand_type_alias(rbs_type)
+            expanded.nil? || rbs_type_admits_nil?(expanded, scope)
+          when RBS::Types::ClassInstance
+            NIL_COMPATIBLE_CLASS_NAMES.include?(rbs_type.name.to_s.delete_prefix("::"))
+          when RBS::Types::Interface then interface_admits_nil?(rbs_type, scope)
+          else true # Optional / bases / variable / tuple / record / proc / literal / intersection → conservative admit
           end
+        end
+
+        # An interface parameter (`_ToStr`) admits nil only when NilClass
+        # implements every method it requires (`to_str`, `to_int`, … — which
+        # NilClass does not, so `string` / `int` params reject nil; a
+        # hypothetical `_ToS` would admit, since NilClass#to_s exists).
+        # Unresolvable → conservative true.
+        def interface_admits_nil?(rbs_type, scope)
+          loader = scope.environment&.rbs_loader
+          return true if loader.nil?
+
+          methods = loader.interface_method_names(rbs_type.name.to_s)
+          return true if methods.nil? || methods.empty?
+
+          methods.all? { |method_name| nil_class_has_method?(method_name, scope) }
+        end
+
+        # A readable "expected" label for a nil mismatch — the RBS parameter
+        # type(s) as written (`string`, or the per-overload set for a
+        # multi-overload operator), since the translated Rigor type degrades
+        # the interface-alias the rejection hinges on.
+        def nil_param_expected_label(params)
+          params.map { |param| param.type.to_s.delete_prefix("::") }.uniq.join(" | ")
         end
 
         # ADR-58 parity for the nil channel: a declaration-sourced ivar read
@@ -1729,22 +1787,35 @@ module Rigor
             param = params[index]
             next if param.nil? # arity mismatch is the wrong-arity rule's concern.
 
-            # `rigor:v1:param: <name> <refinement>` annotations
-            # tighten the RBS-declared parameter type. The
-            # override is the authoritative contract when
-            # present; otherwise we translate the RBS type as
-            # before.
-            param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
-            next if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
-
-            arg_type = scope.type_of(arg)
-            next if arg_type.is_a?(Type::Dynamic) || arg_type.is_a?(Type::Top)
-
-            next unless argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
-
-            return { node: arg, name: param.name, expected: param_type, actual: arg_type }
+            mismatch = single_argument_mismatch(param, arg, scope, param_overrides)
+            return mismatch if mismatch
           end
           nil
+        end
+
+        # The mismatch (or nil) for one positional argument against one
+        # parameter. The nil channel decides a pure `nil` argument on the RBS
+        # parameter type — seeing through the `string` / `int` interface-alias
+        # the translator degrades to gradual (so `"a" + nil` fires), excusing a
+        # declaration-sourced ivar nil (ADR-58 parity). The non-nil channel is
+        # the original translated-acceptance check, with a `rigor:v1:param`
+        # override taking precedence over the RBS-declared type.
+        def single_argument_mismatch(param, arg, scope, param_overrides)
+          arg_type = scope.type_of(arg)
+
+          if nil_member?(arg_type)
+            return nil if declaration_sourced_nil_argument?(arg, scope)
+            return nil if param_admits_nil?(param, param_overrides, scope)
+
+            return { node: arg, name: param.name, expected: nil_param_expected_label([param]), actual: arg_type }
+          end
+
+          param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
+          return nil if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
+          return nil if arg_type.is_a?(Type::Dynamic) || arg_type.is_a?(Type::Top)
+          return nil unless argument_genuinely_mismatches?(arg, arg_type, param_type, scope)
+
+          { node: arg, name: param.name, expected: param_type, actual: arg_type }
         end
 
         # The parameter rejects the argument AND the rejection is not a
@@ -1805,8 +1876,10 @@ module Rigor
         def build_argument_type_diagnostic(path, call_node, class_name, mismatch)
           method_label = "`#{call_node.name}' on #{class_name}"
           parameter_label = mismatch[:name] ? "parameter `#{mismatch[:name]}' of #{method_label}" : method_label
+          expected = mismatch[:expected]
+          expected_description = expected.is_a?(String) ? expected : expected.describe(:short)
           message = "argument type mismatch at #{parameter_label}: " \
-                    "expected #{mismatch[:expected].describe(:short)}, " \
+                    "expected #{expected_description}, " \
                     "got #{mismatch[:actual].describe(:short)}"
           Diagnostic.from_node(
             mismatch[:node],

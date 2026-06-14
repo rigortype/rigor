@@ -242,12 +242,13 @@ Request: `{ "source": "..." }`
 Response: `{ "annotations": { "1": "String", "5": ":asc | :desc" } }`
 
 The map is keyed by 1-based line number (JSON object keys
-are strings); the value is the type comment payload
-(everything after the `#=>` marker that `rigor annotate`
-appends to the corresponding line). Lines without an
-annotation are absent from the map. Both endpoints share the same `rigor annotate`
-invocation; `/annotate-lines` is purely a presentation
-variant.
+are strings); the value is the inferred type's short
+description. `/annotate-lines` invokes `rigor annotate
+--format json`, which emits this map straight from the
+engine's line-type data — no `#=>`-comment text is rendered
+or reparsed (the earlier string-parsing approach broke
+silently when the comment spelling changed). Lines without
+an annotation are absent from the map.
 
 **`POST /type-of`**
 

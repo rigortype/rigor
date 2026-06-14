@@ -163,6 +163,7 @@ module Rigor
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
         @project_data_member_layouts = {}.freeze
+        @project_struct_member_layouts = {}.freeze
         build_collaborators
       end
 
@@ -479,6 +480,7 @@ module Rigor
         end
         @project_discovered_methods = result.discovered_methods if result.discovered_methods
         @project_data_member_layouts = result.data_member_layouts if result.data_member_layouts
+        @project_struct_member_layouts = result.struct_member_layouts if result.struct_member_layouts
       end
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result
 
@@ -837,7 +839,7 @@ module Rigor
           tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
         end
         tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
-        tables[:data_member_layouts] = @project_data_member_layouts unless @project_data_member_layouts.empty?
+        seed_member_layout_tables(tables)
         # ADR-46 slice 1 — the class-declaration source map is read only by
         # the ancestry accessors during dependency recording, so seed it
         # only when recording is on; a normal run never carries it.
@@ -845,6 +847,16 @@ module Rigor
           tables[:discovered_class_sources] = @project_discovered_class_sources
         end
         tables
+      end
+
+      # ADR-48 — seed the Data + Struct member-layout tables (each only when
+      # non-empty). Extracted to keep {#project_scope_seed_tables} under the
+      # complexity budget.
+      def seed_member_layout_tables(tables)
+        tables[:data_member_layouts] = @project_data_member_layouts unless @project_data_member_layouts.empty?
+        return if @project_struct_member_layouts.empty?
+
+        tables[:struct_member_layouts] = @project_struct_member_layouts
       end
 
       # ADR-46 slice 1 — when dependency recording is enabled, wrap the

@@ -12,6 +12,7 @@ require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/data_folding"
+require_relative "method_dispatcher/struct_folding"
 require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/reduce_folding"
@@ -814,6 +815,14 @@ module Rigor
         # member layout), so it never shadows meta's Array/Set/Range lifts.
         data_result = DataFolding.try_dispatch(context)
         return data_result if data_result
+
+        # ADR-48 Struct follow-up — runs in the same band and for the same
+        # reason as DataFolding: `meta_new` would otherwise intercept every
+        # `Singleton[*].new` (the old `struct_new_lift` produced a bare
+        # `Singleton[Struct]`), masking a Struct class's precise instance.
+        # Only fires on Struct receivers, so it never shadows meta's lifts.
+        struct_result = StructFolding.try_dispatch(context)
+        return struct_result if struct_result
 
         meta_result = try_meta_introspection(context.receiver, context.method_name, context.args)
         return meta_result if meta_result

@@ -28,7 +28,8 @@ module Rigor
       :discovered_superclasses,
       :discovered_includes,
       :discovered_class_sources,
-      :data_member_layouts
+      :data_member_layouts,
+      :struct_member_layouts
     )
 
     class DiscoveryIndex
@@ -53,7 +54,8 @@ module Rigor
         discovered_superclasses: EMPTY_TABLE,
         discovered_includes: EMPTY_TABLE,
         discovered_class_sources: EMPTY_TABLE,
-        data_member_layouts: EMPTY_TABLE
+        data_member_layouts: EMPTY_TABLE,
+        struct_member_layouts: EMPTY_TABLE
       )
     end
   end

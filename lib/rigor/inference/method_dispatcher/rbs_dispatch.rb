@@ -249,15 +249,8 @@ module Rigor
               ["Array", :instance, tuple_type_args(receiver)]
             when Type::HashShape
               ["Hash", :instance, hash_shape_type_args(receiver)]
-            when Type::DataInstance
-              # ADR-48 — project a member-instance carrier to its tagging
-              # class (or the `Data` supertype) so non-member calls
-              # (`inspect`, `==`, `frozen?`, ...) resolve through RBS
-              # rather than mis-firing undefined-method. Member reads were
-              # already folded by DataFolding above this tier.
-              [receiver.class_name || "Data", :instance, []]
-            when Type::DataClass
-              [receiver.class_name || "Data", :singleton, []]
+            when Type::DataInstance, Type::DataClass, Type::StructInstance, Type::StructClass
+              member_carrier_descriptor(receiver)
             when Type::BoundMethod
               # `BoundMethod` is a precision-bearing alias for
               # `Nominal[Method]`: it carries the
@@ -272,6 +265,20 @@ module Rigor
               ["Method", :instance, []]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
+            end
+          end
+
+          # ADR-48 — project a `Data`/`Struct` member carrier to its tagging
+          # class (or the `Data`/`Struct` supertype) so non-member calls
+          # (`inspect`, `==`, `frozen?`, ...) resolve through RBS rather than
+          # mis-firing undefined-method. Precise member reads were already
+          # folded by DataFolding / StructFolding above this tier.
+          def member_carrier_descriptor(receiver)
+            case receiver
+            when Type::DataInstance then [receiver.class_name || "Data", :instance, []]
+            when Type::DataClass then [receiver.class_name || "Data", :singleton, []]
+            when Type::StructInstance then [receiver.class_name || "Struct", :instance, []]
+            when Type::StructClass then [receiver.class_name || "Struct", :singleton, []]
             end
           end
 

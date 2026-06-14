@@ -1,5 +1,7 @@
 ---
 locals:
-  inst: Struct
-  klass: singleton(Struct)
-  zero: Struct
+  inst: 'Struct(foo: 1)'
+  klass: Struct.new(:foo, :bar)
+  point: Struct.new(:x, :y)
+  stored: 'Struct(foo: 1)'
+  zero: 'Struct(foo: nil, bar: nil)'

@@ -51,6 +51,7 @@ module Rigor
     def discovered_includes = @discovery.discovered_includes
     def discovered_class_sources = @discovery.discovered_class_sources
     def data_member_layouts = @discovery.data_member_layouts
+    def struct_member_layouts = @discovery.struct_member_layouts
 
     # Narrowing key for an indexed read `receiver[key]` where both
     # the receiver and the key are stable enough to address. The
@@ -480,6 +481,20 @@ module Rigor
       # Record the ancestry dependency only on a hit — DataFolding consults
       # this for every `Singleton[*].new`, and a miss (the common case: an
       # ordinary class) must not manufacture a spurious cross-file edge.
+      record_class_dependency(class_name) if layout && Analysis::DependencyRecorder.active?
+      layout
+    end
+
+    # ADR-48 Struct follow-up — the `{ members:, keyword_init: }` layout
+    # recorded for a `Struct.new(...)`-defined class, in the constant form
+    # (`Point = Struct.new(:x, :y)`) and the named-subclass form
+    # (`class Point < Struct.new(:x, :y)`). Consumed by
+    # {Inference::MethodDispatcher::StructFolding} so `Point.new(...)` on a
+    # `Singleton[Point]` receiver materialises a member instance. Returns nil
+    # when the class has no recorded struct layout. Mirrors
+    # {#data_member_layout}'s dependency-recording contract.
+    def struct_member_layout(class_name)
+      layout = @discovery.struct_member_layouts[class_name.to_s]
       record_class_dependency(class_name) if layout && Analysis::DependencyRecorder.active?
       layout
     end

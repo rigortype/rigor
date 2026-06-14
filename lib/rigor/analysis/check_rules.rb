@@ -1623,6 +1623,21 @@ module Rigor
         UNIVERSAL_EQUALITY_METHODS = %i[== != eql? equal? <=>].to_set.freeze
         private_constant :UNIVERSAL_EQUALITY_METHODS
 
+        # ADR-64 WD1 — the binary arithmetic / bit / ordering operators
+        # dispatch through Ruby's `coerce` protocol (and `<=>` for the
+        # comparisons): `5 + Money.new` is valid at runtime because
+        # `Integer#+` calls `Money#coerce(5)`, even though no RBS `Integer#+`
+        # overload lists `Money`. A non-`Numeric` argument to them is therefore
+        # NOT statically refutable — any user type may define `coerce` — so the
+        # *non-nil* argument-type-mismatch channel excludes them (a fixed
+        # allow-list, modelled on {UNIVERSAL_EQUALITY_METHODS}, not `coerce`
+        # detection). `nil` never coerces, so the nil channel stays in force
+        # here; the exclusion applies to the non-nil case only. `<=>` and the
+        # `==` family are already excluded wholesale by
+        # {UNIVERSAL_EQUALITY_METHODS}.
+        COERCE_DISPATCH_METHODS = %i[+ - * / % ** & | ^ << >> < > <= >=].to_set.freeze
+        private_constant :COERCE_DISPATCH_METHODS
+
         def argument_type_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
           return nil if UNIVERSAL_EQUALITY_METHODS.include?(call_node.name)
@@ -1655,43 +1670,72 @@ module Rigor
         end
 
         # Single overload → the exact per-argument acceptance (unchanged).
-        # Multiple overloads → only a pure-`nil` argument that EVERY overload
-        # rejects (the FP-safe slice; see
-        # {#nil_argument_mismatch_across_overloads}).
+        # Multiple overloads → the nil channel (a pure-`nil` argument every
+        # overload rejects) plus, on non-coerce methods, the non-nil channel
+        # (a single-concrete-class argument every overload rejects). See
+        # {#multi_overload_argument_mismatch}.
         def argument_mismatch(method_types, call_node, scope, param_overrides)
           if method_types.size == 1
             first_argument_mismatch(method_types.first, call_node, scope, param_overrides)
           else
-            nil_argument_mismatch_across_overloads(method_types, call_node, scope, param_overrides)
+            multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides)
           end
         end
 
-        # Multi-overload argument-type-mismatch, deliberately narrowed to a
-        # pure `nil` argument that no overload accepts. Restricting to nil is
-        # the FP-safe core: a non-nil argument a numeric-operator overload
-        # "rejects" can still be valid through the `coerce` protocol
-        # (`5 + Money.new` works though no RBS `Integer#+` overload lists
-        # `Money`), but `nil` never coerces — a `nil` that every overload's
-        # matching positional param rejects is a guaranteed `TypeError`. The
-        # shape mirrors the "absent on every arm" union-undefined-method rule.
-        # Non-nil multi-overload arguments remain a separately-gated follow-up.
-        def nil_argument_mismatch_across_overloads(method_types, call_node, scope, param_overrides)
+        # Multi-overload argument-type-mismatch. The dispatcher's per-overload
+        # acceptance plumbing is not run here; instead the FP-safe shape mirrors
+        # the "absent on every arm" union-undefined-method rule: an argument is
+        # a mismatch only when EVERY overload's matching positional param
+        # rejects it.
+        #
+        # Two channels, both gated on a positively-refuted argument:
+        # - **nil** (any method): a pure `nil` no overload admits is a
+        #   guaranteed `TypeError` — `nil` never coerces.
+        # - **non-nil** (ADR-64, non-coerce methods only): an argument that
+        #   types to a single concrete RBS-known class that no overload admits.
+        #   Excludes {COERCE_DISPATCH_METHODS} (`5 + Money.new` is valid via
+        #   `coerce`), restricts to a single concrete class (WD3 — a union arg
+        #   stays deferred), and decides acceptance on the RBS param type
+        #   ({#param_accepts_arg_class?}) so it sees through the `int` / `string`
+        #   interface-aliases the translator degrades.
+        def multi_overload_argument_mismatch(method_types, call_node, scope, param_overrides)
           functions = method_types.map(&:type)
           return nil unless functions.all? { |function| argument_check_eligible?(function) }
 
+          coerce_method = COERCE_DISPATCH_METHODS.include?(call_node.name)
           arguments = call_node.arguments&.arguments || []
           arguments.each_with_index do |arg, index|
             arg_type = scope.type_of(arg)
-            next unless nil_member?(arg_type) # pure nil only — not a `T | nil` union
-            next if declaration_sourced_nil_argument?(arg, scope) # ADR-58 parity
-
             params = overload_positional_params(functions, index)
             next if params.nil? # arity divergence — some overload lacks a param here
-            next if params.any? { |param| param_admits_nil?(param, param_overrides, scope) }
 
-            return { node: arg, name: nil, expected: nil_param_expected_label(params), actual: arg_type }
+            mismatch =
+              if nil_member?(arg_type) # pure nil only — not a `T | nil` union
+                nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+              elsif !coerce_method
+                non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+              end
+            return mismatch if mismatch
           end
           nil
+        end
+
+        # The nil channel: a pure `nil` argument no overload admits (ADR-58
+        # parity excuses a declaration-sourced ivar nil).
+        def nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+          return nil if declaration_sourced_nil_argument?(arg, scope)
+          return nil if params.any? { |param| param_admits_nil?(param, param_overrides, scope) }
+
+          { node: arg, name: nil, expected: overload_param_expected_label(params), actual: arg_type }
+        end
+
+        # The non-nil channel (ADR-64 WD2/WD3): a single-concrete-class
+        # argument no overload admits, on a non-coerce method.
+        def non_nil_arg_overload_mismatch(arg, arg_type, params, param_overrides, scope)
+          return nil unless single_concrete_arg_class?(arg_type, scope)
+          return nil if params.any? { |param| param_accepts_arg_class?(param, arg_type, param_overrides, scope) }
+
+          { node: arg, name: nil, expected: overload_param_expected_label(params), actual: arg_type }
         end
 
         # The matching positional RBS param across every overload, or nil when
@@ -1764,11 +1808,107 @@ module Rigor
           methods.all? { |method_name| nil_class_has_method?(method_name, scope) }
         end
 
-        # A readable "expected" label for a nil mismatch — the RBS parameter
-        # type(s) as written (`string`, or the per-overload set for a
-        # multi-overload operator), since the translated Rigor type degrades
-        # the interface-alias the rejection hinges on.
-        def nil_param_expected_label(params)
+        # ADR-64 WD3 — the non-nil channel fires only on an argument that types
+        # to a single concrete, RBS-known class. A union arg mirrors the
+        # union-receiver story and stays deferred; a class/module object
+        # (`Singleton`) has a special acceptance surface and is skipped; a
+        # non-RBS project class is skipped because its conversion protocol (a
+        # duck-typed `to_int` / `to_str`) is invisible to us, so we cannot
+        # refute acceptance.
+        def single_concrete_arg_class?(arg_type, scope)
+          return false if arg_type.is_a?(Type::Union)
+          return false if arg_type.is_a?(Type::Singleton)
+
+          class_name = concrete_class_name(arg_type)
+          return false if class_name.nil?
+
+          Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+        end
+
+        # ADR-64 WD2 — does this parameter accept the (non-nil) argument?
+        # The non-nil generalization of {#param_admits_nil?}: decided on the RBS
+        # parameter type (a `rigor:v1:param` override takes precedence) so it
+        # sees through the `int` / `string` interface-aliases the translator
+        # degrades to gradual. Conservative throughout — any case we cannot
+        # decide returns true (accepts → do not fire).
+        def param_accepts_arg_class?(param, arg_type, param_overrides, scope)
+          override = param_overrides[param.name]
+          return rigor_type_accepts_arg?(override, arg_type) if override
+
+          rbs_type_accepts_arg?(param.type, arg_type, scope)
+        end
+
+        # The `rigor:v1:param` override variant — a Rigor `Type`, so the
+        # acceptance engine decides directly (gradual; only a proven rejection
+        # refutes). Dynamic / Top admit unconditionally.
+        def rigor_type_accepts_arg?(param_type, arg_type)
+          return true if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
+
+          !Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no?
+        end
+
+        # Walks the RBS parameter type, mirroring {#rbs_type_admits_nil?}. The
+        # load-bearing cases are `Alias` / `Interface` (`int` = `Integer |
+        # _ToInt`), which the translator degrades to gradual — resolving them
+        # here recovers the rejection. A faithfully-translated `ClassInstance`
+        # is handed to the acceptance engine; everything undecidable admits.
+        def rbs_type_accepts_arg?(rbs_type, arg_type, scope)
+          case rbs_type
+          when RBS::Types::Union then rbs_type.types.any? { |member| rbs_type_accepts_arg?(member, arg_type, scope) }
+          when RBS::Types::Alias
+            expanded = scope.environment&.rbs_loader&.expand_type_alias(rbs_type)
+            expanded.nil? || rbs_type_accepts_arg?(expanded, arg_type, scope)
+          when RBS::Types::ClassInstance then class_instance_accepts_arg?(rbs_type, arg_type, scope)
+          when RBS::Types::Interface then interface_accepts_arg?(rbs_type, arg_type, scope)
+          else true # bases / variable / tuple / record / proc / literal / intersection / optional → conservative admit
+          end
+        end
+
+        # A `ClassInstance` param (`Integer`, `Numeric`, …) is translated
+        # faithfully (no interface degradation), so the acceptance engine — the
+        # canonical RBS-ancestry / generic-aware subtype check — decides it.
+        # Only a proven rejection refutes; an unresolvable class is `:maybe`,
+        # which admits.
+        def class_instance_accepts_arg?(rbs_type, arg_type, scope)
+          translated = translate_param_type(rbs_type, scope.environment)
+          return true if translated.is_a?(Type::Dynamic) || translated.is_a?(Type::Top)
+
+          !Inference::Acceptance.accepts(translated, arg_type, mode: :gradual).no?
+        end
+
+        # An interface param (`_ToInt`) accepts the arg only when the arg's
+        # class implements every method it requires (`to_int`, …). The non-nil
+        # mirror of {#interface_admits_nil?}: ask the arg class, not NilClass.
+        # Unresolvable anywhere → conservative true (admit).
+        def interface_accepts_arg?(rbs_type, arg_type, scope)
+          loader = scope.environment&.rbs_loader
+          return true if loader.nil?
+
+          methods = loader.interface_method_names(rbs_type.name.to_s)
+          return true if methods.nil? || methods.empty?
+
+          class_name = concrete_class_name(arg_type)
+          return true if class_name.nil?
+
+          methods.all? { |method_name| arg_class_has_method?(class_name, method_name, scope) }
+        end
+
+        # The non-nil mirror of {#nil_class_has_method?}, but conservative on
+        # the unknown side: an unresolvable definition returns true (the class
+        # *might* implement the method — e.g. a metaprogrammed conversion), so
+        # the channel never fires on uncertainty.
+        def arg_class_has_method?(class_name, method_name, scope)
+          definition = Rigor::Reflection.instance_definition(class_name, scope: scope)
+          return true if definition.nil?
+
+          !definition.methods[method_name.to_sym].nil?
+        end
+
+        # A readable "expected" label for a multi-overload mismatch — the RBS
+        # parameter type(s) as written (`string`, or the per-overload set), since
+        # the translated Rigor type degrades the interface-alias the rejection
+        # hinges on. Shared by the nil and non-nil channels.
+        def overload_param_expected_label(params)
           params.map { |param| param.type.to_s.delete_prefix("::") }.uniq.join(" | ")
         end
 
@@ -1811,7 +1951,7 @@ module Rigor
             return nil if declaration_sourced_nil_argument?(arg, scope)
             return nil if param_admits_nil?(param, param_overrides, scope)
 
-            return { node: arg, name: param.name, expected: nil_param_expected_label([param]), actual: arg_type }
+            return { node: arg, name: param.name, expected: overload_param_expected_label([param]), actual: arg_type }
           end
 
           param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)

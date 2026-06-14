@@ -1,0 +1,16 @@
+# Built wasm module (run `rake build` to produce it) and bundler state.
+rigor-playground.wasm
+build.log
+/.bundle/
+/vendor/
+# rbwasm's downloaded toolchain + build scratch.
+/build/
+/rubies/
+/.ruby_wasm/
+# Runtime scratch the in-VM adapter writes (also lives only in the wasm memfs).
+/vfs/buffer.rb
+Gemfile.lock
+/vfs/.rigor/
+# Node deps for the headless smoke (smoke.mjs); installed by `rake smoke`.
+/node_modules/
+package-lock.json

@@ -123,6 +123,79 @@ RSpec.describe "call.self-undefined-method rule" do
     RUBY
   end
 
+  it "does not fire on a method an abstract base's subclass implements (template-method hook)" do
+    # Mail::CommonField#decoded calls `do_decode`, defined by every
+    # `< CommonField` subclass; Mail::Retriever#find by POP3 / IMAP. A base
+    # that calls a method its subclasses supply is a template-method hook, not
+    # a typo. (WD4 corpus eval, Bucket 2 — the abstract-base pattern.)
+    expect(firings(<<~RUBY)).to be_empty
+      class CommonField
+        def decoded
+          do_decode
+        end
+      end
+
+      class UnstructuredField < CommonField
+        def do_decode
+          "x"
+        end
+      end
+    RUBY
+  end
+
+  it "still fires on a genuine typo even when a subclass exists" do
+    # The subclass gate must suppress only the exact missed name — a real typo
+    # (`do_decodee`) that no subclass defines still fires.
+    expect(firings(<<~RUBY)).to include(:do_decodee)
+      class CommonField
+        def decoded
+          do_decodee
+        end
+      end
+
+      class UnstructuredField < CommonField
+        def do_decode
+          "x"
+        end
+      end
+    RUBY
+  end
+
+  it "does not fire on a class with a dynamic (non-constant) superclass" do
+    # `class X < DelegateClass(Array)` / `< Struct.new(...)` inherits a
+    # dynamically produced surface the engine cannot enumerate from a constant
+    # name, so a missed self-call is not provably a typo.
+    expect(firings(<<~RUBY)).to be_empty
+      class PartsList < DelegateClass(Array)
+        def collect_each
+          each { |x| x }
+        end
+      end
+    RUBY
+  end
+
+  it "does not fire on a universal base (Object / BasicObject) — a self-type fallback, not a typo" do
+    # An implicit-self miss tagged `Object` / `BasicObject` means the engine
+    # fell back to the root self-type because it could not resolve the real
+    # class (a `class << self` / metaprogramming surface). Their method set is
+    # never project-complete, so a miss there is a resolution gap. (WD4 corpus
+    # eval: the dominant false-positive class — protobuf / tdiary, ~357 firings.)
+    expect(firings(<<~RUBY)).to be_empty
+      class Object
+        def my_helper
+          definitely_undefined_xyz
+        end
+      end
+    RUBY
+    expect(firings(<<~RUBY)).to be_empty
+      class BasicObject
+        def my_helper
+          definitely_undefined_xyz
+        end
+      end
+    RUBY
+  end
+
   it "does not fire on a `class X < Data.define(...)` member read" do
     expect(firings(<<~RUBY)).to be_empty
       class Money < Data.define(:amount)

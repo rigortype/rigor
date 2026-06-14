@@ -52,11 +52,18 @@ module Rigor
           when Prism::ClassNode
             name = constant_path_name(node.constant_path)
             child_prefix = name ? prefix + [name] : prefix
-            names << child_prefix.join("::") if name && dynamic_attr_class?(node)
+            names << child_prefix.join("::") if name && class_surface_open?(node)
             walk(node.body, child_prefix, names) if node.body
           else
             node.compact_child_nodes.each { |child| walk(child, prefix, names) }
           end
+        end
+
+        # A class whose source-declared surface cannot be fully enumerated:
+        # a dynamic `attr_*` accessor, or a non-constant (dynamically produced)
+        # superclass.
+        def class_surface_open?(class_node)
+          dynamic_attr_class?(class_node) || dynamic_superclass?(class_node)
         end
 
         # True when the class body directly invokes an `attr_*` macro with a
@@ -79,6 +86,20 @@ module Rigor
           return false if args.nil? || args.empty?
 
           args.any? { |arg| !arg.is_a?(Prism::SymbolNode) && !arg.is_a?(Prism::StringNode) }
+        end
+
+        # True when the class declares a superclass that is not a static
+        # constant — `class X < DelegateClass(Array)` / `< Struct.new(...)` /
+        # `< Data.define(...)`. The inherited surface is then a dynamically
+        # produced class the engine cannot enumerate from a constant name (the
+        # superclass is a method call, so `discovered_superclasses` never
+        # records it and the closed-class gate would wrongly treat the class as
+        # standalone), so a missed self-call is not provably a typo.
+        def dynamic_superclass?(class_node)
+          superclass = class_node.superclass
+          return false if superclass.nil?
+
+          !superclass.is_a?(Prism::ConstantReadNode) && !superclass.is_a?(Prism::ConstantPathNode)
         end
 
         # Renders a class/module path node to its source-qualified name

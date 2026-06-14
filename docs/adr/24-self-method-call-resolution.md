@@ -8,8 +8,15 @@ and reverted 2026-06-05 — 135 false positives on Rigor's own `lib`. Slice
 (standalone-class gate, shipped `:off`) implemented 2026-06-05 — mini-corpus
 467→15 recorder misses, attempt-1 FP classes to zero, the rule FP-clean on
 Rigor's own `lib` (and it caught a real latent bug). The external WD4
-corpus FP gate (before default-on) + gate widening to superclass/include
-chains remain. See slice 4 below.**
+corpus FP gate ran 2026-06-14
+([note](../notes/20260614-adr24-slice4-self-undefined-fp-eval.md)): the rule
+**stays `:off` — NOT promotable**. ~454 corpus firings, ~all false positives;
+the dominant `Object`/`BasicObject` self-type-fallback class (287) is now
+excluded, but the abstract / template-method base-class pattern (a base calls
+a method its subclasses implement) is an unaddressed false-positive under the
+current per-class gate. Gate widening to superclass/include chains is deferred
+(it would only enlarge that class); the required next step is subclass-aware
+gating. See slice 4 below.**
 
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)

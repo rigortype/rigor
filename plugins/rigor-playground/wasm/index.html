@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rigor Playground (WASM)</title>
+
+  <!--
+    ADR-29 WD10 — wasm location. Defaults to the same-origin relative path
+    used by `rake serve` for local dev. In production the docs-site sync step
+    rewrites this tag's `content` to the Cloudflare R2 URL of the version-
+    pinned build, so the page never hard-codes a deploy detail. Leave the
+    content empty to keep the relative default.
+  -->
+  <meta name="rigor-wasm-url" content="">
+
+
+  <!--
+    ADR-29 WD9 — fully in-browser Rigor playground.
+
+    No backend: the Rigor engine runs in a ruby.wasm VM compiled by
+    plugins/rigor-playground/wasm/Rakefile (`rake build`). This page is a
+    static asset; deploy it + rigor-playground.wasm to any static host
+    (Cloudflare Pages, GitHub Pages, …) — the try.ruby-lang.org model.
+
+    It reuses the WD2 JSON contract verbatim: the in-VM adapter (boot.rb)
+    returns the same {diagnostics, error_count, success} / {annotations}
+    shapes the Rack backend does, so the rendering code matches the
+    backend page. The only difference is the transport — `callVM()`
+    replaces `fetch("/check")`.
+  -->
+
+  <script>
+    (function () {
+      const stored = localStorage.getItem("rigor-theme") || "system"
+      const dark   = stored === "dark" ||
+                     (stored === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+      document.documentElement.dataset.theme = dark ? "dark" : "light"
+    })()
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --rigor-ink-2: #2A2F38; --rigor-ink-3: #585F6B;
+      --rigor-paper: #F6F4EE; --rigor-paper-2: #EFEBE0; --rigor-paper-3: #E6E1D2; --rigor-rule: #D6D2C7;
+      --rigor-term-bg: #1A1D23; --rigor-term-fg: #E6E1D2;
+      --rigor-accent: #7A2A2A;
+      --rigor-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      --rigor-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    :root, :root[data-theme="light"] {
+      --bg: var(--rigor-paper); --surface: var(--rigor-paper-2); --border: var(--rigor-rule);
+      --border-strong: #B7B2A2; --text: var(--rigor-ink-2); --muted: var(--rigor-ink-3);
+      --accent: var(--rigor-accent); --hover: var(--rigor-paper-3); --active-line: #ECE7D8;
+      --selection: #D9C9C5; --gutter-fg: var(--rigor-ink-3); --gutter-bg: var(--rigor-paper-2);
+      --anno: var(--rigor-ink-3);
+      --c-error: #B5302B; --c-warning: #8A5F12; --c-info: #2D5C9E; --c-ok: #2E6F3F; --sev-fg: #fff;
+    }
+    :root[data-theme="dark"] {
+      --bg: var(--rigor-term-bg); --surface: #22262E; --border: #353941; --border-strong: #4A4F58;
+      --text: var(--rigor-term-fg); --muted: #B6BAC2; --accent: #E08C84; --hover: #2A2E37;
+      --active-line: #232830; --selection: #3D2F2E; --gutter-fg: #8A909B; --gutter-bg: #181B21;
+      --anno: #8A909B;
+      --c-error: #ED8B82; --c-warning: #E4B25A; --c-info: #8AB6E6; --c-ok: #86C28E; --sev-fg: #0E1116;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      display: flex; flex-direction: column; height: 100vh;
+      font-family: var(--rigor-font-sans); font-size: 14px;
+      background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased;
+    }
+    header {
+      display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      flex-shrink: 0; min-height: 44px;
+    }
+    .brand { font-weight: 700; letter-spacing: -0.01em; color: var(--text); display: flex; align-items: baseline; gap: 8px; }
+    .brand::before { content: ""; display: inline-block; width: 10px; height: 10px; background: var(--accent); border-radius: 1px; transform: translateY(1px); }
+    .brand .product { font-weight: 500; color: var(--muted); }
+    .brand .wasm-tag { font-family: var(--rigor-font-mono); font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 2px; padding: 1px 4px; }
+    #status { font-family: var(--rigor-font-mono); font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+    #status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.8; }
+    #status.checking { color: var(--c-warning); } #status.ok { color: var(--c-ok); } #status.error { color: var(--c-error); }
+    .toolbar { margin-left: auto; display: flex; gap: 8px; }
+    .btn { font: 500 13px var(--rigor-font-sans); padding: 5px 12px; min-height: 28px; border-radius: 4px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); cursor: pointer; }
+    .btn:hover { background: var(--hover); } .btn.active { background: var(--accent); border-color: var(--accent); color: var(--sev-fg); }
+    main { display: flex; flex: 1; overflow: hidden; }
+    #editor-wrap { flex: 1; overflow: auto; min-width: 0; }
+    #sidebar { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--border); overflow: hidden; }
+    #sidebar-header { display: flex; justify-content: space-between; padding: 12px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--border); }
+    #diag-count { font-family: var(--rigor-font-mono); text-transform: none; }
+    #diagnostics { flex: 1; overflow-y: auto; }
+    .diag-empty { padding: 16px; font-family: var(--rigor-font-mono); font-size: 12px; color: var(--muted); display: flex; gap: 8px; }
+    .diag-empty::before { content: "✓"; color: var(--c-ok); font-weight: 700; }
+    .diag-item { display: flex; gap: 12px; padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border); }
+    .diag-item:hover { background: var(--hover); }
+    .diag-sev { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px; border-radius: 2px; flex-shrink: 0; align-self: flex-start; margin-top: 1px; color: var(--sev-fg); min-width: 56px; text-align: center; }
+    .diag-sev.error { background: var(--c-error); } .diag-sev.warning { background: var(--c-warning); } .diag-sev.info { background: var(--c-info); }
+    .diag-body { flex: 1; min-width: 0; }
+    .diag-loc { font-family: var(--rigor-font-mono); font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+    .diag-msg { font-size: 13px; line-height: 1.45; word-break: break-word; }
+    .diag-rule { font-family: var(--rigor-font-mono); font-size: 11px; color: var(--accent); margin-top: 4px; }
+    .cm-editor { height: 100%; font-size: 13.5px; } .cm-editor.cm-focused { outline: none; } .cm-scroller { height: 100%; font-family: var(--rigor-font-mono); }
+    .cm-type-annotation { color: var(--anno); font-style: italic; pointer-events: none; user-select: none; }
+
+    /* Boot overlay — the wasm VM download + first env build can take several
+       seconds; surfacing the phase is the key UX difference vs the backend. */
+    #boot {
+      position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px; background: var(--bg); color: var(--text);
+    }
+    #boot.hidden { display: none; }
+    #boot .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    #boot-msg { font-family: var(--rigor-font-mono); font-size: 13px; color: var(--muted); }
+    #boot-note { font-size: 12px; color: var(--muted); max-width: 32ch; text-align: center; line-height: 1.5; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { #boot .spinner { animation: none; } }
+  </style>
+</head>
+<body>
+  <div id="boot">
+    <div class="spinner" aria-hidden="true"></div>
+    <div id="boot-msg">Starting…</div>
+    <div id="boot-note">Loading the Rigor engine into a Ruby&nbsp;4.0 WebAssembly VM. The first analysis builds the type environment and is slower; subsequent edits reuse it.</div>
+  </div>
+
+  <header>
+    <span class="brand">Rigor <span class="product">Playground</span> <span class="wasm-tag">WASM</span></span>
+    <span id="status" aria-live="polite">Booting</span>
+    <div class="toolbar">
+      <button class="btn" id="theme-btn" title="Cycle theme">Dark</button>
+      <button class="btn" id="type-btn" aria-pressed="false">Show types</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="editor-wrap"><div id="editor"></div></div>
+    <aside id="sidebar" aria-label="Diagnostics">
+      <div id="sidebar-header"><span>Diagnostics</span><span id="diag-count">0</span></div>
+      <div id="diagnostics"><p class="diag-empty">No diagnostics</p></div>
+    </aside>
+  </main>
+
+  <script type="module">
+    import { basicSetup, EditorView, EditorState } from "https://esm.sh/@codemirror/basic-setup@0.20"
+    import { StateField, StateEffect }             from "https://esm.sh/@codemirror/state@0.20"
+    import { Decoration, WidgetType }              from "https://esm.sh/@codemirror/view@0.20"
+    import { StreamLanguage }                      from "https://esm.sh/@codemirror/language@0.20"
+    import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
+    import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
+    import { DefaultRubyVM }                       from "https://cdn.jsdelivr.net/npm/@ruby/wasm-wasi@2.7.1/dist/browser/+esm"
+
+    // ADR-29 WD10 — the docs-site sync step injects the R2 URL into the
+    // <meta name="rigor-wasm-url"> tag in production; local `rake serve` keeps
+    // the same-origin relative default.
+    const WASM_URL =
+      document.querySelector('meta[name="rigor-wasm-url"]')?.content || "./rigor-playground.wasm"
+
+    const SAMPLE = `# Rigor Playground (WASM) — runs entirely in your browser.
+
+def greet(name)
+  "Hello, " + name
+end
+
+result = greet("World")
+result.upcase
+
+# Try introducing an error:
+x = nil
+x.upcase   # possible-nil-receiver
+
+# Inline-RBS works without a magic comment (rigor-rbs-inline is
+# pre-loaded with require_magic_comment: false, per ADR-32 WD10):
+class AscDesc
+  # @rbs asc_or_desc: :asc | :desc
+  def ascdesc(asc_or_desc)
+    asc_or_desc
+  end
+end
+
+AscDesc.new.ascdesc(:bad)
+`
+
+    // ── ruby.wasm transport (replaces the backend's fetch calls) ───────────
+    //
+    // The VM is booted once. Each request sets a JSON string on a JS global
+    // (read by boot.rb via JS.global) and synchronously evaluates the adapter,
+    // which returns the same JSON the Rack backend produces.
+
+    let vm = null
+
+    function setBoot(msg) { document.getElementById("boot-msg").textContent = msg }
+
+    async function bootVM() {
+      setBoot("Downloading Ruby 4.0 WASM…")
+      const response = await fetch(WASM_URL)
+      if (!response.ok) throw new Error(`could not fetch ${WASM_URL} (HTTP ${response.status})`)
+      const module = await WebAssembly.compileStreaming(response)
+      setBoot("Booting the Ruby VM…")
+      const result = await DefaultRubyVM(module)
+      vm = result.vm
+      setBoot("Loading the Rigor engine…")
+      // Activate the packed bundle (ruby_wasm's generated load-path setup —
+      // NOT bundler/setup, which hits a rubygems path that is disabled in the
+      // ruby.wasm build) and load the in-VM adapter. boot.rb itself does the
+      // `require "rubygems"` the RBS env needs and stages a writable /work
+      // under DefaultRubyVM's in-memory root.
+      vm.eval(`require "/bundle/setup"; require "/playground/boot"`)
+    }
+
+    function callVM(kind, request) {
+      globalThis.rigorRequestJson = JSON.stringify(request)
+      const json = vm.eval(`Rigor::Playground::Wasm.dispatch(${JSON.stringify(kind)})`).toString()
+      return JSON.parse(json)
+    }
+
+    // ── Type-annotation ghost text (same widget as the backend page) ───────
+
+    class TypeAnnotationWidget extends WidgetType {
+      constructor(type, pad) { super(); this.type = type; this.pad = pad }
+      eq(o) { return o.type === this.type && o.pad === this.pad }
+      ignoreEvent() { return true }
+      toDOM() {
+        const el = document.createElement("span"); el.className = "cm-type-annotation"
+        const spacer = document.createElement("span")
+        spacer.style.cssText = `display:inline-block;width:${this.pad}ch`
+        el.appendChild(spacer); el.appendChild(document.createTextNode(this.type)); return el
+      }
+    }
+    const setAnnoEffect = StateEffect.define()
+    const annoField = StateField.define({
+      create: () => Decoration.none,
+      update(deco, tr) { deco = deco.map(tr.changes); for (const e of tr.effects) if (e.is(setAnnoEffect)) deco = e.value; return deco },
+      provide: f => EditorView.decorations.from(f)
+    })
+    function applyAnnotations(annotations) {
+      const BASE_GAP = 3, doc = view.state.doc
+      const entries = Object.entries(annotations).map(([l, type]) => ({ n: parseInt(l, 10), type })).filter(({ n }) => n >= 1 && n <= doc.lines)
+      if (!entries.length) { view.dispatch({ effects: setAnnoEffect.of(Decoration.none) }); return }
+      const maxLen = Math.max(...entries.map(({ n }) => doc.line(n).length))
+      const ranges = entries.map(({ n, type }) => {
+        const line = doc.line(n), pad = maxLen - line.length + BASE_GAP
+        return Decoration.widget({ widget: new TypeAnnotationWidget(type, pad), side: 1 }).range(line.to)
+      }).sort((a, b) => a.from - b.from)
+      view.dispatch({ effects: setAnnoEffect.of(Decoration.set(ranges)) })
+    }
+    function clearAnnotations() { view.dispatch({ effects: setAnnoEffect.of(Decoration.none) }) }
+
+    // ── Editor ─────────────────────────────────────────────────────────────
+
+    const MONO = `'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace`
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: SAMPLE,
+        extensions: [
+          basicSetup, StreamLanguage.define(ruby), lintGutter(), annoField,
+          EditorView.updateListener.of(u => { if (!u.docChanged) return; if (typesVisible) clearAnnotations(); scheduleCheck() }),
+          EditorView.theme({
+            "&": { backgroundColor: "var(--bg)", color: "var(--text)", height: "100%" },
+            ".cm-content": { caretColor: "var(--accent)", fontFamily: MONO, padding: "8px 0" },
+            ".cm-gutters": { backgroundColor: "var(--gutter-bg)", color: "var(--gutter-fg)", border: "none", borderRight: "1px solid var(--border)" },
+            ".cm-activeLine": { backgroundColor: "var(--active-line)" },
+            ".cm-selectionBackground": { backgroundColor: "var(--selection)" },
+            "&.cm-focused .cm-selectionBackground": { backgroundColor: "var(--selection)" },
+            ".cm-lintRange-error": { textDecoration: "underline wavy var(--c-error)", textDecorationThickness: "1.5px" },
+            ".cm-lintRange-warning": { textDecoration: "underline wavy var(--c-warning)", textDecorationThickness: "1.5px" },
+          })
+        ]
+      }),
+      parent: document.getElementById("editor")
+    })
+
+    let debounceTimer = null, typesVisible = false
+
+    // ── Theme toggle ─────────────────────────────────────────────────────────
+    const THEME_CYCLE = ["dark", "light", "system"], THEME_LABELS = { dark: "Dark", light: "Light", system: "Auto" }
+    let themeMode = localStorage.getItem("rigor-theme") || "system"
+    const mediaDark = matchMedia("(prefers-color-scheme: dark)")
+    const themeBtn = document.getElementById("theme-btn")
+    function applyTheme() {
+      const dark = themeMode === "dark" || (themeMode === "system" && mediaDark.matches)
+      document.documentElement.dataset.theme = dark ? "dark" : "light"
+      themeBtn.textContent = THEME_LABELS[themeMode]
+    }
+    themeBtn.addEventListener("click", () => {
+      themeMode = THEME_CYCLE[(THEME_CYCLE.indexOf(themeMode) + 1) % THEME_CYCLE.length]
+      localStorage.setItem("rigor-theme", themeMode); applyTheme()
+    })
+    mediaDark.addEventListener("change", () => { if (themeMode === "system") applyTheme() })
+    applyTheme()
+
+    // ── Check ─────────────────────────────────────────────────────────────
+
+    function scheduleCheck() { clearTimeout(debounceTimer); debounceTimer = setTimeout(runCheck, 500) }
+
+    function runCheck() {
+      if (!vm) return
+      const source = view.state.doc.toString()
+      setStatus("checking", "Checking…")
+      // Defer one frame so the status paint lands before the synchronous eval.
+      requestAnimationFrame(() => {
+        try {
+          const data = callVM("check", { source })
+          const diags = data.diagnostics || []
+          applyLintMarkers(diags); renderSidebar(diags)
+          const n = data.error_count ?? 0
+          setStatus(data.success ? "ok" : "error", data.success ? "No errors" : `${n} error${n === 1 ? "" : "s"}`)
+          if (typesVisible) runAnnotateLines(source)
+        } catch (e) {
+          setStatus("error", `Engine error: ${e.message}`)
+        }
+      })
+    }
+
+    function runAnnotateLines(source) {
+      try { applyAnnotations(callVM("annotate-lines", { source }).annotations || {}) } catch (_) { /* best-effort */ }
+    }
+
+    function applyLintMarkers(diagnostics) {
+      const doc = view.state.doc
+      const cm = diagnostics.map(d => {
+        const lineNum = Math.max(1, Math.min(d.line, doc.lines)), line = doc.line(lineNum)
+        const from = line.from + Math.max(0, (d.column || 1) - 1)
+        const to = Math.max(from + 1, Math.min(line.to, from + 10))
+        return { from, to, severity: d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "info", message: d.message + (d.rule ? `  [${d.rule}]` : "") }
+      })
+      view.dispatch(setDiagnostics(view.state, cm))
+    }
+
+    function renderSidebar(diagnostics) {
+      const container = document.getElementById("diagnostics")
+      document.getElementById("diag-count").textContent = diagnostics.length
+      if (!diagnostics.length) { container.innerHTML = '<p class="diag-empty">No diagnostics</p>'; return }
+      container.innerHTML = diagnostics.map((d, i) => `
+        <div class="diag-item" data-index="${i}" tabindex="0" role="button">
+          <span class="diag-sev ${d.severity}">${d.severity}</span>
+          <div class="diag-body">
+            <div class="diag-loc">Line ${d.line}, col ${d.column}</div>
+            <div class="diag-msg">${escHtml(d.message)}</div>
+            ${d.rule ? `<div class="diag-rule">${escHtml(d.rule)}</div>` : ""}
+          </div>
+        </div>`).join("")
+      container.querySelectorAll(".diag-item").forEach(el => {
+        const jump = () => {
+          const d = diagnostics[+el.dataset.index], doc = view.state.doc
+          const n = Math.max(1, Math.min(d.line, doc.lines))
+          const pos = doc.line(n).from + Math.max(0, (d.column || 1) - 1)
+          view.dispatch({ selection: { anchor: pos }, scrollIntoView: true }); view.focus()
+        }
+        el.addEventListener("click", jump)
+        el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump() } })
+      })
+    }
+
+    const typeBtn = document.getElementById("type-btn")
+    typeBtn.addEventListener("click", () => {
+      typesVisible = !typesVisible
+      typeBtn.setAttribute("aria-pressed", String(typesVisible))
+      typeBtn.classList.toggle("active", typesVisible)
+      typeBtn.textContent = typesVisible ? "Hide types" : "Show types"
+      if (typesVisible) runAnnotateLines(view.state.doc.toString()); else clearAnnotations()
+    })
+
+    function setStatus(cls, text) { const el = document.getElementById("status"); el.className = cls; el.textContent = text }
+    function escHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+
+    // ── Boot ──────────────────────────────────────────────────────────────
+    bootVM().then(() => {
+      document.getElementById("boot").classList.add("hidden")
+      setStatus("checking", "Ready")
+      runCheck()
+    }).catch(e => {
+      setBoot(`Failed to start: ${e.message}`)
+      document.getElementById("boot-msg").style.color = "var(--c-error)"
+      setStatus("error", "Boot failed")
+    })
+  </script>
+</body>
+</html>

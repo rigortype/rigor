@@ -45,9 +45,18 @@ const r = dispatch("check", { source: SRC })
 console.log(`success=${r.success} error_count=${r.error_count}`)
 for (const d of r.diagnostics) console.log(`  L${d.line}:${d.column} [${d.rule}] ${d.message}`)
 
-// Expect exactly the two diagnostics the backend produces for this snippet.
+// "Show types" — annotate-lines must return a non-empty map (it parses
+// `rigor annotate`'s `#=> <type>` suffixes).
+const a = dispatch("annotate-lines", { source: SRC })
+const annoCount = Object.keys(a.annotations || {}).length
+console.log(`annotations: ${annoCount}`)
+
+// Expect exactly the two diagnostics the backend produces for this snippet,
+// and at least one type annotation.
 const rules = r.diagnostics.map((d) => d.rule).sort()
-const ok = r.error_count === 2 &&
-  rules.join(",") === "call.argument-type-mismatch,call.undefined-method"
+const ok =
+  r.error_count === 2 &&
+  rules.join(",") === "call.argument-type-mismatch,call.undefined-method" &&
+  annoCount > 0
 console.log(ok ? "SMOKE OK" : "SMOKE FAILED")
 process.exit(ok ? 0 : 1)

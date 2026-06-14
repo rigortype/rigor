@@ -125,7 +125,8 @@ module Rigor
         annotated = run_cli(["annotate", "--no-color", path])
         annotations = {}
         annotated.each_line.with_index(1) do |line, num|
-          m = line.match(/#=>\s*dump_type:\s*(.+?)\s*\z/)
+          # `rigor annotate` appends `#=> <type>` to each expression line.
+          m = line.match(/#=>\s*(.+?)\s*\z/)
           annotations[num.to_s] = m[1] if m
         end
         JSON.generate({ "annotations" => annotations })

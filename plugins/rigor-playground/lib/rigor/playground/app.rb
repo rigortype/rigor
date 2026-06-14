@@ -90,11 +90,12 @@ module Rigor
 
         annotated = with_tempfile(source) { |path| run_cli(["annotate", "--no-color", path]) }
 
-        # Parse "  #=> dump_type: <type>" suffixes added by rigor annotate.
-        # Keys are 1-based line numbers as strings (JSON object keys must be strings).
+        # Parse the "  #=> <type>" suffixes rigor annotate appends to each
+        # expression line. Keys are 1-based line numbers as strings (JSON
+        # object keys must be strings).
         annotations = {}
         annotated.each_line.with_index(1) do |line, num|
-          m = line.match(/#=>\s*dump_type:\s*(.+?)\s*\z/)
+          m = line.match(/#=>\s*(.+?)\s*\z/)
           annotations[num.to_s] = m[1] if m
         end
 

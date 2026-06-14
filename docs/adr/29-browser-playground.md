@@ -243,9 +243,9 @@ Response: `{ "annotations": { "1": "String", "5": ":asc | :desc" } }`
 
 The map is keyed by 1-based line number (JSON object keys
 are strings); the value is the type comment payload
-(everything after `#=> dump_type:` in the corresponding
-`/annotate` output). Lines without an annotation are absent
-from the map. Both endpoints share the same `rigor annotate`
+(everything after the `#=>` marker that `rigor annotate`
+appends to the corresponding line). Lines without an
+annotation are absent from the map. Both endpoints share the same `rigor annotate`
 invocation; `/annotate-lines` is purely a presentation
 variant.
 

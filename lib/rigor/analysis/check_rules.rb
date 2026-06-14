@@ -712,11 +712,15 @@ module Rigor
           # surface is the base's. Resolve to the base so the call rules
           # (undefined-method / wrong-arity / argument-type-mismatch) reason
           # about it instead of bailing. `Type::Refined` carries string-family
-          # refinements (`non-empty-string`, `lowercase-string`, …) over an
-          # explicit `.base`; `Type::IntegerRange` carries the bounded-int
-          # refinements (`non-negative-int`, `positive-int`, `int<1,5>`), every
-          # one an Integer.
-          when Type::Refined then concrete_class_name(type.base)
+          # refinements (`lowercase-string`, …) over an explicit `.base`;
+          # `Type::IntegerRange` carries the bounded-int refinements
+          # (`non-negative-int`, `positive-int`, `int<1,5>`), every one an
+          # Integer; `Type::Difference` (`A - B`) carries the non-empty /
+          # non-zero refinements (`non-empty-string` = `String - ""`,
+          # `non-empty-array` = `Array - []`, `non-zero-int` = `Integer - 0`)
+          # — subtracting values never changes the method surface, so the
+          # base (minuend) class dispatches.
+          when Type::Refined, Type::Difference then concrete_class_name(type.base)
           when Type::IntegerRange then "Integer"
           end
         end

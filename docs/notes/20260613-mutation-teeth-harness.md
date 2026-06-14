@@ -260,6 +260,22 @@ concern), still ADR-58-excused.
   on `String` −103, `singleton(File)` −51, `Array`/`Array[T]` variants (−34 / −22 / −19 /
   …), the `"…"` String literal −30. No survivor count rose.
 
+**Refinement-receiver (Difference) follow-up LANDED.** The next sweep's top clean cluster
+was `undefined_method` on `non-empty-array` / `non-empty-string`: these refinements are a
+`Type::Difference` (`Array - []`, `String - ""`, `Integer - 0`, `Hash - {}`), a carrier
+`concrete_class_name` did not handle (the earlier refined-receiver fix covered only
+`Type::Refined` / `Type::IntegerRange`), so all three call rules bailed. One case —
+`when Type::Refined, Type::Difference then concrete_class_name(type.base)` — resolves a
+difference to its base (minuend) class, since subtracting *values* never changes the method
+surface. Gate: `make verify` (6333 + 8), self-check / check-plugins 0, snapshots, **zero
+new firings** across the 12 corpus projects (all three call rules); spec added to
+`refined_receiver_dispatch_spec.rb`. Re-measure: **+57 killed, 57.7% → 58.4%**, drops in
+`non-empty-array` / `non-empty-string` undefined_method *and* their nil_inject
+(argument-type-mismatch now reaches them too).
+
+**Session total (three slices over CRuby `lib/`):** teeth **53.1% → 58.4% (+5.3 pts),
++457 killed**, every slice FP-gated to zero new corpus firings.
+
 **Still deferred:** the non-nil (`type_swap`) channel — a non-nil arg a numeric overload
 "rejects" can be valid via `coerce`, so widening past nil needs a coerce-aware model.
 

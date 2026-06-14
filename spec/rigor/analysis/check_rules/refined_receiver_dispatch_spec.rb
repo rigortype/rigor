@@ -45,4 +45,28 @@ RSpec.describe "refined-receiver call-rule dispatch" do
     source = refined_int("n.succ\n  n >= 2\n  n.to_s")
     expect(diagnostics_for(source).select(&:error?)).to be_empty
   end
+
+  # The non-empty / non-zero refinements are `Type::Difference` (`Array - []`,
+  # `String - ""`, `Integer - 0`), a different carrier from `Type::Refined` /
+  # `Type::IntegerRange`. A difference dispatches as its base (minuend) class —
+  # subtracting values never changes the method surface.
+  def non_empty_array(expr)
+    <<~RUBY
+      def f(x)
+        a = [1, 2, 3].select { |e| e > x }
+        return if a.empty?
+        #{expr}
+      end
+    RUBY
+  end
+
+  it "fires undefined-method on a non-empty-array (Difference) receiver" do
+    expect(rule_messages(non_empty_array("a.no_such_zzz"), "call.undefined-method"))
+      .to include(a_string_matching(/undefined method `no_such_zzz'/))
+  end
+
+  it "stays clean on real Array methods called on a non-empty-array receiver" do
+    source = non_empty_array("a.first\n  a.map { |e| e + 1 }\n  a.size")
+    expect(diagnostics_for(source).select(&:error?)).to be_empty
+  end
 end

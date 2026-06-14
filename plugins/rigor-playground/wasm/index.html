@@ -131,6 +131,19 @@
     .cm-tooltip-lint .cm-diagnostic-info { border-left-color: var(--c-info); }
     .cm-tooltip-lint .cm-diagnosticSource { color: var(--muted); }
 
+    /* Autocomplete dropdown — warm theme; selectors out-specify CM's base. */
+    .cm-tooltip.cm-tooltip-autocomplete { padding: 0; overflow: hidden; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul { font-family: var(--rigor-font-mono); font-size: 12.5px; max-height: 16em; background: var(--surface); color: var(--text); margin: 0; padding: 4px; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 3px; color: var(--text); line-height: 1.5; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--sev-fg); }
+    .cm-tooltip-autocomplete .cm-completionLabel { color: inherit; }
+    .cm-tooltip-autocomplete .cm-completionMatchedText { text-decoration: underline; font-weight: 700; color: inherit; }
+    .cm-tooltip-autocomplete .cm-completionDetail { color: var(--muted); font-style: italic; margin-left: auto; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionDetail { color: var(--sev-fg); opacity: 0.85; }
+    .cm-tooltip-autocomplete .cm-completionIcon { color: var(--muted); opacity: 0.8; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionIcon { color: var(--sev-fg); }
+    .cm-completionInfo { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 4px; }
+
     /* Boot overlay — the wasm VM download + first env build can take several
        seconds; surfacing the phase is the key UX difference vs the backend. */
     #boot {
@@ -178,6 +191,7 @@
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
     import { tags as t }                           from "https://esm.sh/@lezer/highlight@1.1.6"
     import { DefaultRubyVM }                       from "https://cdn.jsdelivr.net/npm/@ruby/wasm-wasi@2.7.1/dist/browser/+esm"
+    import LZString                               from "https://esm.sh/lz-string@1.5.0"
 
     // ADR-29 WD10 — the docs-site sync step injects the R2 URL into the
     // <meta name="rigor-wasm-url"> tag in production; local `rake serve` keeps
@@ -296,14 +310,27 @@ AscDesc.new.ascdesc(:bad)
       { tag: t.invalid, color: "var(--c-error)" },
     ])
 
+    // ── Shareable URL state ────────────────────────────────────────────────
+    // The source round-trips through ?c=<lz-string>: restored on load,
+    // rewritten (debounced) on edit. lz-string keeps even a multi-KB snippet
+    // inside a comfortable URL length; history.replaceState updates the address
+    // bar without a navigation or history spam.
+    const QUERY_KEY = "c"
+    function sourceFromUrl() {
+      const c = new URLSearchParams(location.search).get(QUERY_KEY)
+      if (!c) return null
+      try { return LZString.decompressFromEncodedURIComponent(c) || null } catch { return null }
+    }
+    const INITIAL_DOC = sourceFromUrl() ?? SAMPLE
+
     const view = new EditorView({
       state: EditorState.create({
-        doc: SAMPLE,
+        doc: INITIAL_DOC,
         extensions: [
           basicSetup, StreamLanguage.define(ruby),
           Prec.highest(syntaxHighlighting(rigorHighlight)),
           lintGutter(), annoField,
-          EditorView.updateListener.of(u => { if (!u.docChanged) return; if (typesVisible) clearAnnotations(); scheduleCheck() }),
+          EditorView.updateListener.of(u => { if (!u.docChanged) return; if (typesVisible) clearAnnotations(); scheduleCheck(); scheduleUrlSync() }),
           EditorView.theme({
             "&": { backgroundColor: "var(--bg)", color: "var(--text)", height: "100%" },
             ".cm-content": { caretColor: "var(--accent)", fontFamily: MONO, padding: "8px 0" },
@@ -348,6 +375,21 @@ AscDesc.new.ascdesc(:bad)
     // ── Check ─────────────────────────────────────────────────────────────
 
     function scheduleCheck() { clearTimeout(debounceTimer); debounceTimer = setTimeout(runCheck, 500) }
+
+    // Mirror the current source into ?c=<lz-string> (debounced). Clears the
+    // param when the buffer is the untouched sample, so a plain visit keeps a
+    // clean URL.
+    let urlTimer = null
+    function scheduleUrlSync() {
+      clearTimeout(urlTimer)
+      urlTimer = setTimeout(() => {
+        const src = view.state.doc.toString()
+        const url = src === SAMPLE
+          ? location.pathname
+          : `${location.pathname}?${QUERY_KEY}=${LZString.compressToEncodedURIComponent(src)}`
+        history.replaceState(null, "", url)
+      }, 500)
+    }
 
     function runCheck() {
       if (!vm) return

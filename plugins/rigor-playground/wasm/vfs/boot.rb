@@ -122,14 +122,12 @@ module Rigor
 
       def annotate_lines(source)
         path = write_buffer(source)
-        annotated = run_cli(["annotate", "--no-color", path])
-        annotations = {}
-        annotated.each_line.with_index(1) do |line, num|
-          # `rigor annotate` appends `#=> <type>` to each expression line.
-          m = line.match(/#=>\s*(.+?)\s*\z/)
-          annotations[num.to_s] = m[1] if m
-        end
-        JSON.generate({ "annotations" => annotations })
+        # `annotate --format json` returns { "annotations": { line => type } }
+        # straight from the engine's line-type map — no `#=> <type>` text to
+        # reparse. Round-trip through parse/generate to validate.
+        JSON.generate(JSON.parse(run_cli(["annotate", "--format=json", path])))
+      rescue JSON::ParserError
+        JSON.generate({ "annotations" => {} })
       end
 
       def type_of(source, line, column)

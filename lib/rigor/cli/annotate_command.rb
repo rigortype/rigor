@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "English"
+require "json"
 require "optionparser"
 require "prism"
 
@@ -71,11 +72,15 @@ module Rigor
       def parse_options
         # Default: colour a tty, unless `NO_COLOR` opts out. An
         # explicit `--color` / `--no-color` overrides both.
-        options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil }
+        options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil, format: :text }
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          opts.on("--format=FORMAT", %w[text json],
+                  "Output format: text (default) or json (a { line => type } map)") do |value|
+            options[:format] = value.to_sym
+          end
           opts.on("--[no-]color",
                   "Force or disable ANSI colour (default: auto-detect a tty; honours NO_COLOR)") do |value|
             options[:color] = value
@@ -122,8 +127,23 @@ module Rigor
         )
         line_types = LineTypeCollector.new(scope_index).collect(parse_result.value)
 
-        @out.puts(render(annotate(source, line_types), color: options.fetch(:color), bat: options.fetch(:bat)))
+        case options.fetch(:format)
+        when :json
+          emit_json(line_types)
+        else
+          @out.puts(render(annotate(source, line_types), color: options.fetch(:color), bat: options.fetch(:bat)))
+        end
         0
+      end
+
+      # `--format json` — emit the { line_number => type } map directly, the
+      # same data the text renderer consumes, so clients (the playground,
+      # editors) get structured annotations without reparsing the `#=> <type>`
+      # comment grammar. Values are the short type descriptions the text form
+      # also shows; keys are 1-based line numbers as strings (JSON object keys).
+      def emit_json(line_types)
+        annotations = line_types.keys.sort.to_h { |line| [line.to_s, line_types[line].describe(:short)] }
+        @out.puts(JSON.generate({ "annotations" => annotations }))
       end
 
       def base_scope(configuration)

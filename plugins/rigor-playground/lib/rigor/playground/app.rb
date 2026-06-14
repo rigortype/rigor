@@ -88,18 +88,13 @@ module Rigor
         source = read_source(env)
         return too_large if source.bytesize > MAX_SOURCE_BYTES
 
-        annotated = with_tempfile(source) { |path| run_cli(["annotate", "--no-color", path]) }
-
-        # Parse the "  #=> <type>" suffixes rigor annotate appends to each
-        # expression line. Keys are 1-based line numbers as strings (JSON
-        # object keys must be strings).
-        annotations = {}
-        annotated.each_line.with_index(1) do |line, num|
-          m = line.match(/#=>\s*(.+?)\s*\z/)
-          annotations[num.to_s] = m[1] if m
-        end
-
-        json_response(200, { "annotations" => annotations })
+        # `annotate --format json` returns { "annotations": { line => type } }
+        # straight from the engine's line-type map — no `#=> <type>` text to
+        # reparse. Keys are 1-based line numbers as strings.
+        out = with_tempfile(source) { |path| run_cli(["annotate", "--format=json", path]) }
+        json_response(200, JSON.parse(out))
+      rescue JSON::ParserError
+        json_response(200, { "annotations" => {} })
       end
 
       def handle_type_of(env)

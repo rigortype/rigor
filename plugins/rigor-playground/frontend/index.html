@@ -29,6 +29,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://kit.fontawesome.com/ca9a253b70.js" crossorigin="anonymous"></script>
 
   <style>
     /* ─────────────────────────────────────────────────────────────────
@@ -132,6 +133,17 @@
       --lint-warn:    #8A5F12;
 
       --focus-ring:   #7A2A2A;
+
+      /* Syntax highlight — light (deep, warm ink on parchment) */
+      --syn-keyword:  #8A2C6E;
+      --syn-def:      #9A5B12;
+      --syn-type:     #2E6F3F;
+      --syn-string:   #4A6E26;
+      --syn-number:   #9A3F1E;
+      --syn-comment:  #7C7568;
+      --syn-meta:     #2D5C9E;
+      --syn-var:      var(--rigor-ink-2);
+      --syn-operator: var(--rigor-ink-3);
     }
 
     /* ─────────────────────────────────────────────────────────────────
@@ -188,6 +200,17 @@
       --lint-warn:    #E4B25A;
 
       --focus-ring:   #E08C84;
+
+      /* Syntax highlight — dark (warm parchment tones, no cold purple/blue) */
+      --syn-keyword:  #E0A0B4;
+      --syn-def:      #E6B860;
+      --syn-type:     #93C9A3;
+      --syn-string:   #B5C56E;
+      --syn-number:   #EC9A6E;
+      --syn-comment:  #8B8475;
+      --syn-meta:     #D7B6E0;
+      --syn-var:      var(--rigor-term-fg);
+      --syn-operator: #B6BAC2;
     }
 
     /* ─────────────────────────────────────────────────────────────────
@@ -274,6 +297,9 @@
     .toolbar { margin-left: auto; display: flex; gap: var(--rigor-sp-2); }
 
     .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
       font-family: var(--rigor-font-sans);
       font-size: 13px;
       font-weight: 500;
@@ -296,6 +322,8 @@
       color: var(--sev-fg);
     }
     .btn.active:hover { background: var(--accent-press); border-color: var(--accent-press); }
+    .btn svg, .btn .fa-solid, .btn .fa-regular { width: 13px; height: 13px; font-size: 12px; flex-shrink: 0; opacity: 0.9; }
+    .btn.active svg, .btn.active .fa-solid, .btn.active .fa-regular { opacity: 1; }
 
     /* ─── Main layout ──────────────────────────────────────────────── */
 
@@ -427,10 +455,10 @@
        wraps our tooltip DOM in a `.cm-tooltip` container; the
        inner `.cm-type-tooltip` carries the type string. */
     .cm-tooltip.cm-tooltip-above {
-      background: var(--rigor-paper-3);
+      background: var(--surface);
       color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: var(--rigor-radius-1);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--rigor-radius-2);
       padding: 0;
     }
     .cm-type-tooltip {
@@ -442,6 +470,44 @@
       max-width: 60ch;
       overflow-x: auto;
     }
+
+    /* Lint hover tooltip — readable in dark + light. CM6 wraps the lint
+       content (ul.cm-tooltip-lint) in an OUTER .cm-tooltip-hover container
+       that carries the background, so both must be styled. */
+    .cm-tooltip,
+    .cm-tooltip.cm-tooltip-hover,
+    .cm-tooltip.cm-tooltip-above {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--rigor-radius-2);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+      color: var(--text);
+    }
+    .cm-tooltip .cm-tooltip-arrow::before { border-top-color: var(--border-strong); border-bottom-color: var(--border-strong); }
+    .cm-tooltip .cm-tooltip-arrow::after  { border-top-color: var(--surface);       border-bottom-color: var(--surface); }
+    ul.cm-tooltip-lint {
+      background: var(--surface);
+      color: var(--text);
+      max-width: 42ch;
+      padding: 0; margin: 0;
+      border-radius: var(--rigor-radius-2);
+      overflow: hidden;
+      list-style: none;
+    }
+    .cm-tooltip-lint .cm-diagnostic {
+      font-family: var(--rigor-font-mono);
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 7px 10px;
+      margin: 0;
+      color: var(--text);
+      border-left-width: 3px;
+      white-space: pre-wrap;
+    }
+    .cm-tooltip-lint .cm-diagnostic-error   { border-left-color: var(--c-error); }
+    .cm-tooltip-lint .cm-diagnostic-warning { border-left-color: var(--c-warning); }
+    .cm-tooltip-lint .cm-diagnostic-info    { border-left-color: var(--c-info); }
+    .cm-tooltip-lint .cm-diagnosticSource   { color: var(--muted); }
 
     /* High-contrast scrollbars for the diagnostics + editor regions */
     #diagnostics::-webkit-scrollbar,
@@ -480,7 +546,7 @@
     <span id="status" aria-live="polite">Ready</span>
     <div class="toolbar">
       <button class="btn" id="theme-btn" title="Cycle theme (Dark / Light / Auto)" aria-label="Toggle theme">Dark</button>
-      <button class="btn" id="type-btn" aria-pressed="false">Show types</button>
+      <button class="btn" id="type-btn" aria-pressed="false"><i class="fa-solid fa-eye" aria-hidden="true"></i><span>Show types</span></button>
     </div>
   </header>
 
@@ -499,11 +565,12 @@
 
   <script type="module">
     import { basicSetup, EditorView, EditorState } from "https://esm.sh/@codemirror/basic-setup@0.20"
-    import { StateField, StateEffect }             from "https://esm.sh/@codemirror/state@0.20"
+    import { StateField, StateEffect, Prec }       from "https://esm.sh/@codemirror/state@0.20"
     import { Decoration, WidgetType, hoverTooltip } from "https://esm.sh/@codemirror/view@0.20"
-    import { StreamLanguage }                      from "https://esm.sh/@codemirror/language@0.20"
+    import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "https://esm.sh/@codemirror/language@0.20?deps=@lezer/highlight@1.1.6"
     import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
+    import { tags as t }                           from "https://esm.sh/@lezer/highlight@1.1.6"
 
     const API = ""
 
@@ -601,6 +668,23 @@ AscDesc.new.ascdesc(:bad)
 
     const MONO_FONT = `'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace`
 
+    /* Rigor warm syntax highlight — drives off CSS vars so it tracks the
+       active light/dark theme. Higher precedence than the basicSetup default
+       so the cold purple/blue is fully replaced. */
+    const rigorHighlight = HighlightStyle.define([
+      { tag: [t.keyword, t.controlKeyword, t.definitionKeyword, t.moduleKeyword, t.operatorKeyword, t.self], color: "var(--syn-keyword)" },
+      { tag: [t.function(t.variableName), t.function(t.definition(t.variableName)), t.definition(t.variableName), t.macroName], color: "var(--syn-def)", fontWeight: "500" },
+      { tag: [t.typeName, t.className, t.namespace, t.tagName], color: "var(--syn-type)" },
+      { tag: [t.string, t.special(t.string), t.character], color: "var(--syn-string)" },
+      { tag: [t.regexp, t.escape], color: "var(--syn-string)" },
+      { tag: [t.number, t.integer, t.float, t.bool, t.null, t.atom, t.constant(t.variableName), t.unit], color: "var(--syn-number)" },
+      { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: "var(--syn-comment)", fontStyle: "italic" },
+      { tag: [t.meta, t.annotation, t.processingInstruction], color: "var(--syn-meta)" },
+      { tag: [t.operator, t.punctuation, t.separator, t.bracket, t.derefOperator], color: "var(--syn-operator)" },
+      { tag: [t.variableName, t.propertyName, t.labelName, t.attributeName], color: "var(--syn-var)" },
+      { tag: t.invalid, color: "var(--c-error)" },
+    ])
+
     // ── Type-of hover (ADR-29 slice 4) ────────────────────────────────────
     //
     // CodeMirror 6's hoverTooltip fires after a short hover dwell (default
@@ -655,6 +739,7 @@ AscDesc.new.ascdesc(:bad)
         extensions: [
           basicSetup,
           StreamLanguage.define(ruby),
+          Prec.highest(syntaxHighlighting(rigorHighlight)),
           lintGutter(),
           annoField,
           typeHover,
@@ -695,6 +780,12 @@ AscDesc.new.ascdesc(:bad)
 
     const THEME_CYCLE  = ["dark", "light", "system"]
     const THEME_LABELS = { dark: "Dark", light: "Light", system: "Auto" }
+    const THEME_ICONS  = { dark: "fa-solid fa-moon", light: "fa-solid fa-sun", system: "fa-solid fa-circle-half-stroke" }
+    const THEME_TITLES = {
+      dark:   "Theme: Dark — click for Light",
+      light:  "Theme: Light — click for Auto",
+      system: "Theme: Auto (matches your system) — click for Dark",
+    }
 
     let themeMode = localStorage.getItem("rigor-theme") || "system"
     const mediaDark = window.matchMedia("(prefers-color-scheme: dark)")
@@ -707,7 +798,8 @@ AscDesc.new.ascdesc(:bad)
 
     function applyTheme() {
       document.documentElement.dataset.theme = isDarkResolved() ? "dark" : "light"
-      themeBtn.textContent = THEME_LABELS[themeMode]
+      themeBtn.innerHTML = `<i class="${THEME_ICONS[themeMode]}" aria-hidden="true"></i><span>${THEME_LABELS[themeMode]}</span>`
+      themeBtn.title = THEME_TITLES[themeMode]
     }
 
     const themeBtn = document.getElementById("theme-btn")
@@ -826,11 +918,11 @@ AscDesc.new.ascdesc(:bad)
       typesVisible = !typesVisible
       typeBtn.setAttribute("aria-pressed", String(typesVisible))
       if (typesVisible) {
-        typeBtn.textContent = "Hide types"
+        typeBtn.innerHTML = '<i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>Hide types</span>'
         typeBtn.classList.add("active")
         await runAnnotateLines(view.state.doc.toString())
       } else {
-        typeBtn.textContent = "Show types"
+        typeBtn.innerHTML = '<i class="fa-solid fa-eye" aria-hidden="true"></i><span>Show types</span>'
         typeBtn.classList.remove("active")
         clearAnnotations()
       }

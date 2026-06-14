@@ -46,6 +46,21 @@ task :build do
     sh "bundle", "exec", "rbwasm", "build", "--ruby-version", RUBY_WASM, "-o", WASM_RAW
   end
 
+  # Step 1.5 — shrink the download. The from-source build keeps DWARF debug
+  # info (`-g`), which is a large, production-unneeded chunk; `--strip-debug`
+  # removes it and `-Oz` size-optimizes. Run on the pre-pack module (the code
+  # lives here; pack only appends the read-only VFS data section). binaryen's
+  # wasm-opt ships in the toolchain ruby_wasm downloaded for the build.
+  wasm_opt = Dir.glob("build/toolchain/binaryen*/bin/wasm-opt").first
+  if wasm_opt
+    before = File.size(WASM_RAW)
+    sh wasm_opt, "--strip-debug", "-Oz", WASM_RAW, "-o", WASM_RAW
+    after = File.size(WASM_RAW)
+    puts format("wasm-opt: %.1f MB -> %.1f MB", before / 1048576.0, after / 1048576.0)
+  else
+    warn "wasm-opt not found under build/toolchain/binaryen*; skipping size optimization"
+  end
+
   # Step 2 — `rbwasm pack` (wasi-vfs) folds the adapter + .rigor.yml into the
   # WASI filesystem at /playground (boot.rb chdirs there for config discovery).
   # `build` has no --dir; directory mapping is a separate, fast pack step.

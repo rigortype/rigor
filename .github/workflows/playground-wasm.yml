@@ -103,19 +103,27 @@ jobs:
           R2_BUCKET: ${{ vars.R2_BUCKET }}
         run: |
           KEY="playground/rigor-playground-${GITHUB_SHA::8}.wasm"
-          npx --yes wrangler r2 object put "$R2_BUCKET/$KEY" \
-            --file rigor-playground.wasm \
-            --content-type application/wasm \
-            --remote
-          # Also overwrite a stable pointer. The docs site derives the wasm URL
-          # from the submodule's commit sha, which 404s when the submodule sits
-          # on a commit that built no wasm (a docs-only bump). Pointing the
-          # site's RIGOR_WASM_URL at this fixed object decouples the playground
-          # from the exact pin — it then always loads the latest build (releases
-          # + playground pushes), at the cost of strict version-pinning.
+          # Stable pointer: the docs site derives the wasm URL from the
+          # submodule's commit sha, which 404s when the submodule sits on a
+          # commit that built no wasm (a docs-only bump). Pointing the site's
+          # RIGOR_WASM_URL at this fixed object decouples the playground from the
+          # exact pin (always serves the latest build), at the cost of strict
+          # version-pinning; the sha-keyed object stays for version-pinning.
           LATEST="playground/rigor-playground-latest.wasm"
-          npx --yes wrangler r2 object put "$R2_BUCKET/$LATEST" \
-            --file rigor-playground.wasm \
-            --content-type application/wasm \
-            --remote
-          echo "Published to r2://$R2_BUCKET/$KEY and r2://$R2_BUCKET/$LATEST"
+
+          # Pre-compress with max-quality brotli and serve the stored bytes with
+          # Content-Encoding: br. Cloudflare's on-the-fly brotli is lower quality
+          # (~19 MB for this module vs ~14 MB at q11); a pre-encoded object is
+          # served as-is. WebAssembly.compileStreaming decompresses transparently.
+          if ! command -v brotli >/dev/null; then sudo apt-get update -q && sudo apt-get install -y -q brotli; fi
+          brotli -q 11 -f -o rigor-playground.wasm.br rigor-playground.wasm
+          ls -l rigor-playground.wasm rigor-playground.wasm.br
+
+          for OBJ in "$KEY" "$LATEST"; do
+            npx --yes wrangler r2 object put "$R2_BUCKET/$OBJ" \
+              --file rigor-playground.wasm.br \
+              --content-type application/wasm \
+              --content-encoding br \
+              --remote
+          done
+          echo "Published (brotli) to r2://$R2_BUCKET/$KEY and r2://$R2_BUCKET/$LATEST"

@@ -1642,13 +1642,81 @@ module Rigor
 
           method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
           return nil if method_def.nil? || method_def == true
-          return nil unless method_def.method_types.size == 1
 
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
-          mismatch = first_argument_mismatch(method_def.method_types.first, call_node, scope, param_overrides)
+          mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides)
           return nil if mismatch.nil?
 
           build_argument_type_diagnostic(path, call_node, class_name, mismatch)
+        end
+
+        # Single overload → the exact per-argument acceptance (unchanged).
+        # Multiple overloads → only a pure-`nil` argument that EVERY overload
+        # rejects (the FP-safe slice; see
+        # {#nil_argument_mismatch_across_overloads}).
+        def argument_mismatch(method_types, call_node, scope, param_overrides)
+          if method_types.size == 1
+            first_argument_mismatch(method_types.first, call_node, scope, param_overrides)
+          else
+            nil_argument_mismatch_across_overloads(method_types, call_node, scope, param_overrides)
+          end
+        end
+
+        # Multi-overload argument-type-mismatch, deliberately narrowed to a
+        # pure `nil` argument that no overload accepts. Restricting to nil is
+        # the FP-safe core: a non-nil argument a numeric-operator overload
+        # "rejects" can still be valid through the `coerce` protocol
+        # (`5 + Money.new` works though no RBS `Integer#+` overload lists
+        # `Money`), but `nil` never coerces — a `nil` that every overload's
+        # matching positional param rejects is a guaranteed `TypeError`. The
+        # shape mirrors the "absent on every arm" union-undefined-method rule.
+        # The interface-alias single-overload case (`String#+(string)`) and
+        # non-nil multi-overload arguments are a separately-gated follow-up.
+        def nil_argument_mismatch_across_overloads(method_types, call_node, scope, param_overrides)
+          functions = method_types.map(&:type)
+          return nil unless functions.all? { |function| argument_check_eligible?(function) }
+
+          arguments = call_node.arguments&.arguments || []
+          arguments.each_with_index do |arg, index|
+            arg_type = scope.type_of(arg)
+            next unless nil_member?(arg_type) # pure nil only — not a `T | nil` union
+            next if declaration_sourced_nil_argument?(arg, scope) # ADR-58 parity
+
+            expected = overload_positional_param_types(functions, index, scope, param_overrides)
+            next if expected.nil?
+            unless expected.all? { |param_type| Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual).no? }
+              next
+            end
+
+            return { node: arg, name: nil, expected: Type::Combinator.union(*expected), actual: arg_type }
+          end
+          nil
+        end
+
+        # The translated positional-param Rigor types at `index` across every
+        # overload, or nil when any overload lacks a param there (arity
+        # divergence) or carries a gradual (`Dynamic`/`Top`) param we cannot
+        # refute against — both FP-safe "do not fire" outcomes.
+        def overload_positional_param_types(functions, index, scope, param_overrides)
+          functions.map do |function|
+            params = function.required_positionals + function.optional_positionals
+            param = params[index]
+            return nil if param.nil?
+
+            param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
+            return nil if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
+
+            param_type
+          end
+        end
+
+        # ADR-58 parity for the nil channel: a declaration-sourced ivar read
+        # that types as nil is the same not-diagnostic-fuel case the union
+        # path gates in {#declaration_sourced_nil_only_mismatch?}; suppress it
+        # here too so a ctor-seeded `@x = nil` read passed as an argument does
+        # not fire on a working program's cross-method invariant.
+        def declaration_sourced_nil_argument?(arg, scope)
+          arg.is_a?(Prism::InstanceVariableReadNode) && scope.declaration_sourced?(:ivar, arg.name)
         end
 
         def first_argument_mismatch(method_type, call_node, scope, param_overrides)

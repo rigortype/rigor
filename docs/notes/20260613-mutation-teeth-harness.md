@@ -207,9 +207,56 @@ curated subset** of this dev harness into `lib/rigor/protection/` — the type-v
 tooling (ADR-62 WD4 holds). Framing is load-bearing: effectiveness / where-to-add-a-type,
 never raw survival.
 
+## CRuby `lib/` sweep + the multi-overload-nil argument fix (2026-06-14)
+
+A second, larger corpus: a `--per-file 40` sweep over all of CRuby's `lib/` (626 files —
+stdlib + vendored bundler/rubygems). **8,611 type-relevant mutants, teeth 53.1%, 800
+survivor clusters.** Filtering the already-adjudicated buckets (vendored `Bundler` /
+`Gem::*` needs-RBS, the deliberate nilable `String?` N3 silence, `Hash#[]` / `fetch`
+any-key, `File.join` rest-args) left the **`call.argument-type-mismatch` channel** as the
+dominant real candidate (String / Integer / File / MatchData / Array receiving a `nil` /
+wrong-typed literal).
+
+Root cause, mapped with a controlled `.rbs` experiment (a class with plain-nominal,
+interface-alias, multi-overload, and nilable params each called with `nil`) — **two gates**:
+
+- **Gap A — multi-overload bail.** `argument_type_diagnostic` did `return nil unless
+  method_def.method_types.size == 1`, so `5 * nil` (`Integer#*` = 4 overloads) never
+  reached argument checking even though it raises `TypeError`.
+- **Gap B — interface-alias params.** A `string` (`String | _ToStr`) / `int`
+  (`Integer | _ToInt`) param does not *definitively* reject `nil` (the interface arm
+  translates to a gradual type), so `"a" + nil` stays silent even at a single overload.
+
+**Gap A LANDED (FP-safe, nil-only).** `argument_mismatch` now extends to multi-overload
+methods via `nil_argument_mismatch_across_overloads`, firing only when a **pure-`nil`
+argument is rejected by every overload's matching positional param**. Restricting to `nil`
+is the FP-safe core: `nil` never participates in the `coerce` protocol, so a `nil` no
+overload accepts is a guaranteed error — unlike a non-nil argument a numeric overload
+"rejects", which can be valid via `coerce` (`5 + Money.new`). Conservative envelope: any
+overload with rest / keyword params, a gradual (interface-alias) param, or one that admits
+nil suppresses it, and a declaration-sourced ivar nil is excused (ADR-58 parity). Mirrors
+the union-undefined-method "rejected on every arm" shape.
+
+- **Gate:** `make verify` clean (6330 + 8 examples, self-check `lib` + check-plugins, all
+  precision snapshots); **corpus FP gate — zero new firings** across 12 `rigor-survey`
+  projects (mastodon app/models+services, kramdown, parser, net-ssh, oj, liquid, faraday,
+  tdiary-core, slim, herb, mail, strap); 5-example regression spec
+  (`multi_overload_nil_argument_spec.rb`).
+- **Re-measure (loop closed):** the same sweep re-run is byte-stable at 8,611 mutants —
+  teeth **53.1% → 53.8%**, **+66 killed / −66 survivors**, the drops concentrated exactly
+  in the targeted clusters (`nil_inject` on `N` −17, `non-negative-int` −13, `Integer`
+  −12, `positive-int` −12, `Float`, `int<N,max>` …). No survivor count rose.
+
+**Gap B (interface-alias nil) deferred** — needs a nil-vs-interface `param_admits_nil?`
+predicate (resolve the alias / interface, check NilClass's method set so `_ToStr` etc. are
+known not to admit nil); riskier, and the single-overload String cluster (~380 mutants) is
+the prize. Recorded as the next argument-channel slice. The non-nil (`type_swap`) channel
+stays deferred behind the same coerce concern.
+
 ## Loop demonstrated
 
-`String | Symbol` was the sweep's top real cluster → diagnosed as an intentional union
-bail → FP-safe fix → `make verify` green → harness re-measures the cluster as **killed**.
-Find → fix-at-root → re-measure-kill: the harness is a self-improving loop, not just a
-report.
+`String | Symbol` was the first sweep's top real cluster → diagnosed as an intentional
+union bail → FP-safe fix → `make verify` green → harness re-measures the cluster as
+**killed**. The CRuby-`lib/` `Integer#* nil` cluster repeated the loop on a fresh corpus
+(+66 kills). Find → fix-at-root → re-measure-kill: the harness is a self-improving loop,
+not just a report.

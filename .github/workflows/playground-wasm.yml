@@ -22,9 +22,18 @@ name: Playground wasm
 
 on:
   workflow_dispatch:
-  # Enable once the psych/libyaml link is fixed and `rake build` is green:
-  # release:
-  #   types: [published]
+  push:
+    # Version tags (rake release pushes v*) publish that release's wasm. Path
+    # filters are not evaluated for tag pushes, so every release fires
+    # regardless of what the release commit touched.
+    tags:
+      - "v*"
+    # Plus master pushes that touch the playground, so frontend / adapter
+    # changes land without waiting for a release.
+    branches:
+      - master
+    paths:
+      - "plugins/rigor-playground/**"
 
 concurrency:
   group: playground-wasm-${{ github.ref }}

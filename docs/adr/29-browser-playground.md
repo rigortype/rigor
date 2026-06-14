@@ -364,21 +364,19 @@ status line under each records the 2026-06-14 re-evaluation.
    ship official WASM builds (either bundled in the ruby.wasm runtime
    or as separately loadable `.wasm` modules), passing their own test
    suites under the WASM target.
-   - **Status: `prism` + `rbs` link cleanly — spike ran 2026-06-14.**
-     `prism` is CRuby's own parser and ships inside the interpreter
-     wasm. The WD8 `rbwasm` from-source build compiled and statically
-     linked both `prism` and `rbs` against wasi-sdk-24.0 with **zero
-     linker errors** — the C-extension risk this condition was about
-     (specifically `rbs`) is cleared. The from-source build does,
-     however, currently **abort on `psych`**: `libyaml` cross-compiles
-     to wasm fine (its `libyaml.a` is produced and `--with-libyaml-dir`
-     points at it), but its symbols never reach the final static
-     `wasm-ld` link, so `psych` fails with undefined `yaml_*` symbols.
-     Rigor needs `psych` (it parses `.rigor.yml` and the `data/builtins`
-     YAML catalogs), so this is a real remaining packaging task — a
-     `ruby_wasm` static-ext link-wiring gap, **not** an `rbs` problem.
-     Next: a `ruby_wasm` bump when one ships, an explicit libyaml link
-     patch, or an upstream report.
+   - **Status: MET — full build green 2026-06-14.** `prism` is CRuby's
+     own parser and ships inside the interpreter wasm. The WD8 `rbwasm`
+     from-source build compiles and statically links `prism`, `rbs`,
+     **and** `psych` against wasi-sdk-24.0 with zero linker errors,
+     producing a 69.9 MB `rigor-playground.wasm`. The initial spike hit
+     one wiring gap — `psych`'s `-lyaml` did not reach the final static
+     link even though `libyaml.a` was built and `--with-libyaml-dir`
+     passed — fixed by a confined build patch
+     ([`wasm/build_patches/libyaml_link.rb`](../../plugins/rigor-playground/wasm/build_patches/libyaml_link.rb))
+     that forces `libyaml.a` onto the crossruby XLDFLAGS the way
+     `ruby_wasm` already does for wasi-vfs. The C-extension risk this
+     condition was about is fully cleared; what remains is WD6 ③
+     (runtime correctness under the sandbox).
 
 3. **Rigor's own test suite passes under WASM.** A CI job running
    `make test` inside the ruby.wasm runtime (stubbing `flock` and the
@@ -533,4 +531,4 @@ track that does not block the `0.2.x` evaluation line.
 | 2 | `plugins/rigor-playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
 | 3 | `/annotate` endpoint + frontend toggle view. |
 | 4 | `/type-of` endpoint + frontend hover integration. |
-| 5 | ruby.wasm migration (WD8/WD9). **Scaffolding landed 2026-06-14** under `plugins/rigor-playground/wasm/` — `rbwasm` Gemfile + build task, in-VM CLI adapter, packed `.rigor.yml`, static wasm frontend. **Build spike ran 2026-06-14**: `prism` + `rbs` link cleanly under wasi-sdk-24.0 (WD6 ② largely answered), but the from-source build aborts on `psych`/libyaml final-link wiring (see WD6 ②). Remaining: resolve the `psych` link, then the WD6 ③ wasm CI job. Until the build produces a runnable `.wasm`, the scaffolding is "ready to build", not "shipping". |
+| 5 | ruby.wasm migration (WD8/WD9/WD10). **Scaffolding + green build landed 2026-06-14** under `plugins/rigor-playground/wasm/` — `rbwasm` Gemfile + build task, in-VM CLI adapter, packed `.rigor.yml`, static wasm frontend. **`rake build` now succeeds**: `prism` + `rbs` + `psych` link under wasi-sdk-24.0 (WD6 ② MET, via the `libyaml_link` build patch), producing a **69.9 MB** `rigor-playground.wasm` — which, being ≫ 25 MiB, confirms the WD10 R2 hosting path. Remaining before shipping: WD6 ③ runtime correctness in the sandbox, R2 bucket setup, and the docs-site sync wiring. |

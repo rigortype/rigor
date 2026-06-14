@@ -59,42 +59,34 @@ cannot carry `rbs`.
 
 ## Status — what's verified vs. what gates shipping
 
-This scaffolding is **"ready to build", not "shipping"**.
+**`rake build` succeeds (2026-06-14).** `prism`, `rbs`, and `psych` all link
+under `wasi-sdk-24.0` with zero linker errors, producing a **69.9 MB**
+`rigor-playground.wasm`. The ADR's binding C-extension risk (`rbs`) is cleared.
 
-**Spike result (2026-06-14):** `rake build` was run end-to-end. The good news
-answers the ADR's binding question: **`prism` and `rbs` link cleanly** under
-`wasi-sdk-24.0` — zero linker errors. The C-extension risk the ADR feared
-(`rbs`) is cleared.
+The build initially aborted on `psych`: `libyaml` cross-compiled fine
+(`LibYAMLProduct` builds `libyaml.a` and `--with-libyaml-dir` points at it),
+but in a cross-compiled `--with-static-linked-ext` build `psych`'s `-lyaml`
+never reached the final `wasm-ld` link, so every `yaml_*` symbol was undefined.
+Fixed by [`build_patches/libyaml_link.rb`](build_patches/libyaml_link.rb),
+preloaded into the build via `RUBYOPT`, which forces `libyaml.a` onto the
+crossruby `XLDFLAGS` the way `ruby_wasm` already does for wasi-vfs.
 
-The build then **aborts on `psych`** (stdlib YAML):
+**Size note.** 69.9 MB raw is well over the 25 MiB Cloudflare Workers Static
+Assets cap — confirming the WD10 decision to host the binary on R2, not as a
+static asset. (Compresses to roughly a third over the wire; `--optimize` /
+stdlib trimming can shrink it further later.)
 
-```
-wasm-ld: error: ext/psych/psych.a(...): undefined symbol: yaml_get_version
-wasm-ld: error: ext/psych/psych.a(...): undefined symbol: yaml_emitter_initialize
-...
-```
+**Remaining before shipping:**
 
-`libyaml` itself cross-compiles fine — `ruby_wasm`'s `LibYAMLProduct` produces
-`build/wasm32-unknown-wasip1/yaml-0.2.5/opt/usr/local/lib/libyaml.a`, and
-`configure` is given `--with-libyaml-dir` pointing at it (the same mechanism
-that links `openssl`/`zlib`). But `psych`'s `-lyaml` does not reach the final
-static `wasm-ld` link, so the `yaml_*` symbols are undefined. This is a
-`ruby_wasm` static-ext link-wiring gap, **not** a Rigor or `rbs` problem — and
-Rigor genuinely needs `psych` (it parses `.rigor.yml` and the `data/builtins`
-YAML catalogs), so it can't simply be excluded.
-
-**Next steps to a runnable `.wasm`:**
-
-1. Resolve the `psych`/libyaml link — options, cheapest first:
-   - bump `ruby_wasm` when a release past 2.9.4 ships (this may be a
-     version-specific regression);
-   - patch the crossruby link to add `libyaml.a` to `XLDFLAGS` explicitly
-     (via `rbwasm build -p PATCH` or a vendored build step);
-   - report upstream to `ruby/ruby.wasm` with the link trace above.
-2. `rake smoke` (or open the page). Confirm the sample's diagnostics match the
-   backend's for the same input → **contract fidelity** (WD2).
-3. Wire a CI job that runs the adapter under `wasmtime` on a fixed corpus →
-   **WD6 ③**.
+1. **WD6 ③ — runtime correctness.** Confirm the engine actually runs in the
+   wasm sandbox and the sample's diagnostics match the backend (`rake serve`
+   in a browser, or `rake smoke` under `wasmtime`). Note the packed
+   `/playground` is read-only, so the adapter must write its buffer to a
+   writable path — verify this end-to-end.
+2. **R2 + CI.** Set up the R2 bucket + secrets and enable the
+   `playground-wasm` workflow's publish step.
+3. **Docs-site wiring.** The `public/playground/` sync + `<meta>` R2-URL
+   injection on `rigor.typedduck.fail`.
 
 ### Known v1 limitations / fallbacks
 

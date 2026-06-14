@@ -14,6 +14,17 @@ WASM_OUT  = "rigor-playground.wasm"
 WASM_RAW  = "build/ruby-rigor.wasm"   # intermediate: Ruby + gems, before VFS pack
 RUBY_WASM = "4.0"
 
+# Run a block with extra RUBYOPT entries, restoring the previous value after.
+# Used to preload build_patches/* into the `rbwasm` subprocess for the build
+# step only (subprocesses inherit ENV).
+def with_rubyopt(opt)
+  old = ENV["RUBYOPT"]
+  ENV["RUBYOPT"] = [old, opt].compact.join(" ")
+  yield
+ensure
+  ENV["RUBYOPT"] = old
+end
+
 task default: :build
 
 desc "Build the in-browser ruby.wasm module (prism + rbs C extensions linked from source)"
@@ -25,7 +36,15 @@ task :build do
   # and packs the bundle's gems, statically linking the C extensions (here
   # prism + rbs). This is the heavy step (wasi-sdk download on first run,
   # then a source build). The Ruby build is cached by ruby_wasm across runs.
-  sh "bundle", "exec", "rbwasm", "build", "--ruby-version", RUBY_WASM, "-o", WASM_RAW
+  #
+  # build_patches/libyaml_link.rb is preloaded via RUBYOPT (build step only —
+  # NOT `bundle install`, which would chicken-egg on ruby_wasm not yet being
+  # installed) to force libyaml.a onto the final link, fixing the psych
+  # undefined-symbol abort. See that file for the full rationale.
+  patch = File.expand_path("build_patches/libyaml_link.rb", __dir__)
+  with_rubyopt("-r#{patch}") do
+    sh "bundle", "exec", "rbwasm", "build", "--ruby-version", RUBY_WASM, "-o", WASM_RAW
+  end
 
   # Step 2 — `rbwasm pack` (wasi-vfs) folds the adapter + .rigor.yml into the
   # WASI filesystem at /playground (boot.rb chdirs there for config discovery).

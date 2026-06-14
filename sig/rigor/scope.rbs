@@ -11,6 +11,7 @@ module Rigor
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
+    attr_reader struct_fold_safe_locals: Set[Symbol]
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -29,6 +30,7 @@ module Rigor
     def discovered_includes: () -> Hash[String, Array[String]]
     def discovered_class_sources: () -> Hash[String, Set[String]]
     def data_member_layouts: () -> Hash[String, Array[Symbol]]
+    def struct_member_layouts: () -> Hash[String, { members: Array[Symbol], keyword_init: bool }]
 
     class DiscoveryIndex
       attr_reader declared_types: Hash[untyped, Type::t]
@@ -46,10 +48,11 @@ module Rigor
       attr_reader discovered_includes: Hash[String, Array[String]]
       attr_reader discovered_class_sources: Hash[String, Set[String]]
       attr_reader data_member_layouts: Hash[String, Array[Symbol]]
+      attr_reader struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }]
 
       EMPTY: DiscoveryIndex
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?data_member_layouts: Hash[String, Array[Symbol]]) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }]) -> DiscoveryIndex
     end
 
     class IndexedKey
@@ -68,6 +71,8 @@ module Rigor
 
     def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?) -> void
     def with_source_path: (String? path) -> Scope
+    def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
+    def struct_fold_safe?: (String | Symbol name) -> bool
     def with_discovery: (DiscoveryIndex index) -> Scope
     def local: (String | Symbol name) -> Type::t?
     def ivar: (String | Symbol name) -> Type::t?
@@ -94,6 +99,7 @@ module Rigor
     def discovered_method_visibility: (String | Symbol class_name, String | Symbol method_name) -> Symbol?
     def superclass_of: (String | Symbol class_name) -> String?
     def data_member_layout: (String | Symbol class_name) -> Array[Symbol]?
+    def struct_member_layout: (String | Symbol class_name) -> { members: Array[Symbol], keyword_init: bool }?
     def includes_of: (String | Symbol class_name) -> Array[String]
     def indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Type::t?
     def with_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key, Type::t type) -> Scope

@@ -153,19 +153,30 @@ discovery composes uniformly across both shapes.
 ## `Struct.new`
 
 `Struct.new(*Symbol)` produces a positional-arg constructor
-plus the same accessors as `Data.define`. Rigor handles both
-shapes:
+plus the same accessors as `Data.define`. Rigor folds struct
+member reads too, but — because a `Struct` is mutable — only
+where the value cannot have changed:
 
 ```ruby
 Coord = Struct.new(:x, :y)
 
+# A never-mutated struct local folds its member reads.
 c = Coord.new(10, 20)
-assert_type("Dynamic[top]", c.x)   # Struct members are not constant-folded (mutable)
-assert_type("Dynamic[top]", c.y)
+assert_type("10", c.x)
+assert_type("20", c.y)
+
+# A local that is mutated, aliased, or escapes is not fold-safe —
+# its reads degrade to Dynamic, never a stale value.
+m = Coord.new(1, 2)
+m.x = 9
+assert_type("Dynamic[top]", m.x)
 ```
 
-`Struct` adds mutability (the accessors are also writers), so
-ivar-style accumulation applies. `Data` is read-only.
+Because `Struct` accessors are also writers, the fold is gated:
+a member read off a freshly constructed instance (`Coord.new(1,
+2).x`) or a local the analysis proves is never written, aliased,
+or passed away folds to the member's type; anything else widens
+to `Dynamic[top]`. `Data` is read-only, so its reads always fold.
 
 ## Inheritance and method resolution
 

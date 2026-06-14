@@ -23,7 +23,7 @@ module Rigor
                 :ivars, :cvars, :globals,
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced,
-                :source_path, :discovery
+                :source_path, :discovery, :struct_fold_safe_locals
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # {DiscoveryIndex} the scope carries by a single reference; the
@@ -51,6 +51,7 @@ module Rigor
     def discovered_includes = @discovery.discovered_includes
     def discovered_class_sources = @discovery.discovered_class_sources
     def data_member_layouts = @discovery.data_member_layouts
+    def struct_member_layouts = @discovery.struct_member_layouts
 
     # Narrowing key for an indexed read `receiver[key]` where both
     # the receiver and the key are stable enough to address. The
@@ -99,8 +100,14 @@ module Rigor
     # principle. Any flow-live touch (write / narrowing) drops the mark, so
     # the diagnostic keeps firing exactly as before on flow-observed nil.
     EMPTY_DECLARATION_SOURCED = Set.new.freeze
+    # ADR-48 Struct slice 3 — the per-body set of local names whose struct
+    # member reads are fold-safe (provably never mutated / aliased / escaped).
+    # A static per-scope context like {#source_path}: inherited unchanged
+    # through flow transitions and ignored by `==` / `hash`.
+    EMPTY_FOLD_SAFE = Set.new.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
-                     :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED
+                     :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
+                     :EMPTY_FOLD_SAFE
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -120,7 +127,8 @@ module Rigor
       indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
       method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
       declaration_sourced: EMPTY_DECLARATION_SOURCED,
-      source_path: nil
+      source_path: nil,
+      struct_fold_safe_locals: EMPTY_FOLD_SAFE
     )
       @environment = environment
       @locals = locals
@@ -134,6 +142,7 @@ module Rigor
       @method_chain_narrowings = method_chain_narrowings
       @declaration_sourced = declaration_sourced
       @source_path = source_path
+      @struct_fold_safe_locals = struct_fold_safe_locals
       freeze
     end
 
@@ -189,6 +198,19 @@ module Rigor
     # thread-locals.
     def with_source_path(path)
       rebuild(source_path: path)
+    end
+
+    # ADR-48 Struct slice 3 — installs the per-body fold-safe-local set
+    # ({Inference::StructFoldSafety}). Set once at body entry; inherited
+    # unchanged through subsequent flow transitions.
+    def with_struct_fold_safe(locals)
+      rebuild(struct_fold_safe_locals: locals)
+    end
+
+    # True when `name`'s `Struct` member reads are fold-safe in this body
+    # (the local is provably never mutated / aliased / escaped).
+    def struct_fold_safe?(name)
+      @struct_fold_safe_locals.include?(name.to_sym)
     end
 
     # ADR-53 Track A — swaps the whole discovery index in one transition.
@@ -484,6 +506,20 @@ module Rigor
       layout
     end
 
+    # ADR-48 Struct follow-up — the `{ members:, keyword_init: }` layout
+    # recorded for a `Struct.new(...)`-defined class, in the constant form
+    # (`Point = Struct.new(:x, :y)`) and the named-subclass form
+    # (`class Point < Struct.new(:x, :y)`). Consumed by
+    # {Inference::MethodDispatcher::StructFolding} so `Point.new(...)` on a
+    # `Singleton[Point]` receiver materialises a member instance. Returns nil
+    # when the class has no recorded struct layout. Mirrors
+    # {#data_member_layout}'s dependency-recording contract.
+    def struct_member_layout(class_name)
+      layout = @discovery.struct_member_layouts[class_name.to_s]
+      record_class_dependency(class_name) if layout && Analysis::DependencyRecorder.active?
+      layout
+    end
+
     # ADR-24 slice 2 — per-class/module table mapping a fully
     # qualified user class or module to the list of module
     # names it `include`s / `prepend`s, AS WRITTEN at the
@@ -674,7 +710,8 @@ module Rigor
       indexed_narrowings: @indexed_narrowings,
       method_chain_narrowings: @method_chain_narrowings,
       declaration_sourced: @declaration_sourced,
-      source_path: @source_path
+      source_path: @source_path,
+      struct_fold_safe_locals: @struct_fold_safe_locals
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -684,7 +721,8 @@ module Rigor
         indexed_narrowings: indexed_narrowings,
         method_chain_narrowings: method_chain_narrowings,
         declaration_sourced: declaration_sourced,
-        source_path: source_path
+        source_path: source_path,
+        struct_fold_safe_locals: struct_fold_safe_locals
       )
     end
 

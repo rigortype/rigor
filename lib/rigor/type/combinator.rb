@@ -405,6 +405,21 @@ module Rigor
         DataInstance.new(members, class_name)
       end
 
+      # ADR-48 Struct follow-up — the class object produced by
+      # `Struct.new(:x, :y)`. `members` is the ordered Symbol member-name
+      # list; `keyword_init` records the `keyword_init:` flag; `class_name`
+      # tags the class when known (the named-subclass form).
+      def struct_class_of(members:, class_name: nil, keyword_init: false)
+        StructClass.new(members, class_name, keyword_init: keyword_init)
+      end
+
+      # ADR-48 Struct follow-up — a `Struct.new` value instance. `members`
+      # is the ordered member-name -> value-type map; `class_name` tags the
+      # instance's class when known.
+      def struct_instance_of(members:, class_name: nil)
+        StructInstance.new(members, class_name)
+      end
+
       # Normalized union. Flattens nested Unions, deduplicates structurally
       # equal members, drops Bot, and collapses 0/1-member results.
       def union(*types)

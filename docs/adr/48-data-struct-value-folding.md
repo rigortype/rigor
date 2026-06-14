@@ -1,6 +1,8 @@
 # ADR-48 — Struct / Data value folding (member-shape carriers)
 
-Status: **Accepted — `Data.define` slices 1–4 implemented (v0.1.17).** Two new
+Status: **Accepted — `Data.define` slices 1–4 implemented (v0.1.17); `Struct`
+follow-up slices 1–3 implemented (fresh-chain + fold-safe bound-local member
+folding).** Two new
 type carriers — a **member-class carrier** (`Type::DataClass`) and a
 **member-instance carrier** (`Type::DataInstance`) — so that a
 `Data.define`-defined value object folds member reads to precise types
@@ -24,10 +26,38 @@ Phase-5 coverage audit
 which deferred this as ADR-worthy and named `Data.define` the better
 first target.
 
+**`Struct` follow-up — slices 1 + 2 landed (the sound *transient* form).**
+The mutable sibling carriers `Type::StructClass` / `Type::StructInstance`
+ship, `Struct.new(...)` folds to a `StructClass` member layout, `.new` /
+`[]` materialises a `StructInstance`, and a member read off a **fresh**
+(chained) instance folds (`Struct.new(:x, :y).new(1, 2).x` → `Constant[1]`,
+for the anonymous / constant / subclass / local-class forms, positional +
+`keyword_init:`). The mutation-soundness story is resolved by a
+**fresh-receiver gate** rather than write-site invalidation: a member read
+off a *stored* binding degrades to `Dynamic[top]` (a transient cannot have
+been mutated between materialisation and a chained read, so no invalidation
+is needed; a stored binding might have, so it is not folded). This touches
+no write sites — far lower false-positive risk than enumerating every escape
+path — and is precisely the gate the deferred slice 3 relaxes. See
+§ "Struct follow-up" below for the full record.
+
+**Struct slice 3 landed (2026-06-15) — fold-safe bound-local member folding.**
+A member read off a *stored* local now folds when a conservative whole-body
+allow-list scan ([`Inference::StructFoldSafety`](../../lib/rigor/inference/struct_fold_safety.rb))
+proves the local is never mutated, aliased, or escaped (`p = Point.new(1, 2);
+p.x` → `Constant[1]`); a written / aliased / escaped local stays
+`Dynamic[top]`. The scan is an allow-list (every use must be a known-pure read
+— a missed case is over-conservative, never unsound), installed once per body
+on the scope (`Scope#struct_fold_safe?`) at the top-level and method-body
+entry points. See § "Struct follow-up".
+
 **Remaining (demand-gated):** bare-local block-form parity
 (`c = Data.define(:x) do … end`, where the block's defs aren't registered
 under a resolvable name so the reader-redefinition guard can't consult them —
-no corpus demand, conservative bail is FP-safe) and the **`Struct` follow-up**.
+no corpus demand, conservative bail is FP-safe), and the `Struct`
+**slice 4** (precise re-typing of a mutated member through a setter — `s.x = 5;
+s.x` → the assigned type, the sibling stays precise), designed in
+[`docs/notes/20260615-struct-folding-slice3-design.md`](../notes/20260615-struct-folding-slice3-design.md).
 
 ## Motivation
 
@@ -320,25 +350,63 @@ Slices 1–2 are the value; 3 is what makes it pay off on real code (most
 4 is the false-positive guard that keeps the subclass form sound when the
 body redefines a reader.
 
-## Struct follow-up (deferred, separate slice with its own soundness story)
+## Struct follow-up (slices 1 + 2 landed; slices 3 + 4 deferred)
 
-`Struct` is **not** in this ADR's committed scope. The class carrier is
-nearly identical (add a `keyword_init: bool` field and the
-`Struct.new("Name", :x, keyword_init: true)` arg-shape parsing the
-existing `struct_new_positionals` already handles), but the **instance
-carrier is unsound under mutation**: `Struct` has `x=` setters and `[]=`,
-so a `StructInstance`'s member map can be invalidated by a later write or
-by aliasing + external mutation. Modelling that soundly needs either (a)
-flow-sensitive invalidation (drop member-value precision on any observed
-setter / `[]=` / escape of the instance — the mutation-widening machinery
-in `ScopeIndexer#widen_member_for_observed_mutators` is the prior art), or
-(b) folding member *reads* only when the analysis proves no mutation
-reaches the read. Both are real design surface and belong in their own
-ADR slice once `Data` proves the carrier shape out. The `DataClass` /
-`DataInstance` carriers are deliberately named `Data*` (not a neutral
-`Record*`) to keep that boundary explicit; the Struct follow-up decides
-whether to add a `kind:` discriminator and rename, or add sibling
-`StructClass` / `StructInstance` carriers.
+The class carrier is nearly identical to `DataClass` (it adds a
+`keyword_init: bool` field, parsing the trailing `keyword_init:` option the
+existing `struct_new_positionals` already strips), but the **instance carrier
+is mutable**: `Struct` has `x=` setters and `[]=`, so a `StructInstance`'s
+member map can be invalidated by a later write or by aliasing + external
+mutation. The 2026-06-15 implementation resolves this in two ways the
+original deferral left open:
+
+**Carrier decision — dedicated `StructClass` / `StructInstance` carriers**
+(not a `kind:` discriminator on the `Data*` carriers). The mutability gate,
+the acceptance projection, and `receiver_descriptor` all pattern-match
+cleanly on the carrier type, and `keyword_init` diverges the class carrier;
+the `Data*` carriers stay structurally and behaviourally immutable.
+
+**Soundness — a fresh-receiver gate, not write-site invalidation (route b,
+sharpened).** The ADR named two routes: (a) flow-sensitive invalidation on
+every observed setter / `[]=` / escape (prior art
+`ScopeIndexer#widen_member_for_observed_mutators`), or (b) fold reads only
+where no mutation can reach them. Route (a) requires *enumerating every
+escape path* — a call argument, an alias assignment, a container store, a
+block capture — and **missing one is unsound, which manufactures a
+false positive** (the project's cardinal sin). Route (b) is realised at its
+soundest extreme: a `StructInstance` member read folds **only when its
+receiver node is a fresh `.new(...)` / `.with(...)` call** — a transient that
+provably cannot have been mutated between materialisation and the chained
+read. A read off a *stored* binding degrades to `Dynamic[top]`. This touches
+**no write sites**, so no escape path can be missed; the cost is that bound
+instances (the common `p = Point.new(1, 2); p.x` shape) do not yet fold.
+Member *setters* (`s.x = v`) return the assigned value type (modelling the
+setter's own return, sound regardless of mutation state, and avoiding a
+fall-through undefined-method on an unregistered writer).
+
+**Slice plan (Struct):** slice 1 = the `StructClass` carrier + `Struct.new`
+recognition; slice 2 = the `StructInstance` carrier + fresh-chain member
+folding + the side-table (`Scope#struct_member_layout`) for the
+constant/subclass forms. Both landed together (the side-table is needed for
+the common constant form, and completes the materialisation foundation).
+**Slice 3 landed (2026-06-15):** the fresh-receiver gate now also folds a
+member read off a *mutation-free bound local*, proven by a conservative
+fold-safe scan ([`Inference::StructFoldSafety`](../../lib/rigor/inference/struct_fold_safety.rb)
+— a local folds only when every use is a member read / known-pure projection;
+any setter, index-write, alias, escape, or unknown-method call disqualifies
+it). Soundness rests on a counting identity: a local is fold-safe iff every
+`LocalVariableReadNode(n)` is the receiver of a pure-read call
+(`total_reads == pure_receiver_reads`), which catches every mutation / escape
+/ alias without enumerating escape paths (the allow-list keeps a missed case
+over-conservative, never unsound). The set is computed once per local-variable
+scope (respecting `def` / `class` / `module` boundaries; blocks share locals)
+and installed on the scope (`Scope#struct_fold_safe?`) at the top-level
+(`ScopeIndexer`) and method-body (`build_method_entry_scope` /
+`build_user_method_body_scope`) entry points — measured perf-neutral on the
+self-check. **Deferred:** slice 4 = precise re-typing of a mutated member
+through a setter (`s.x = 5; s.x` → the assigned type, the sibling stays
+precise), designed in
+[`docs/notes/20260615-struct-folding-slice3-design.md`](../notes/20260615-struct-folding-slice3-design.md).
 
 ## Rejected / deferred alternatives
 

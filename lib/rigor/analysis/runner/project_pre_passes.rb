@@ -45,7 +45,8 @@ module Rigor
           :discovered_class_sources,
           :discovered_method_visibilities,
           :discovered_methods,
-          :data_member_layouts
+          :data_member_layouts,
+          :struct_member_layouts
         )
 
         # @param configuration [Rigor::Configuration]
@@ -139,7 +140,8 @@ module Rigor
             discovered_class_sources: def_index.fetch(:class_sources),
             discovered_method_visibilities: def_index.fetch(:method_visibilities),
             discovered_methods: def_index.fetch(:methods),
-            data_member_layouts: def_index.fetch(:data_member_layouts)
+            data_member_layouts: def_index.fetch(:data_member_layouts),
+            struct_member_layouts: def_index.fetch(:struct_member_layouts)
           )
         end
 
@@ -182,7 +184,8 @@ module Rigor
             discovered_class_sources: nil,
             discovered_method_visibilities: nil,
             discovered_methods: nil,
-            data_member_layouts: nil
+            data_member_layouts: nil,
+            struct_member_layouts: nil
           )
         end
 

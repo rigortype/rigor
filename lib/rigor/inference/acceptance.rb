@@ -249,6 +249,12 @@ module Rigor
             # anonymous local-bound form projects to `Data` itself).
             accepts(self_type, project_data_instance_to_nominal(other_type), mode: mode)
               .with_reason("projected DataInstance to Nominal[#{other_type.class_name || 'Data'}]")
+          when Type::StructInstance
+            # ADR-48 Struct follow-up: same projection as DataInstance — a
+            # class-tagged Struct value is exactly one value of its tagging
+            # class (the anonymous form projects to `Struct` itself).
+            accepts(self_type, project_struct_instance_to_nominal(other_type), mode: mode)
+              .with_reason("projected StructInstance to Nominal[#{other_type.class_name || 'Struct'}]")
           when Type::Difference, Type::Refined
             # A refinement carrier's value set is a subset of its
             # base. So if `self` (Nominal) accepts the base, it
@@ -384,6 +390,10 @@ module Rigor
 
         def project_data_instance_to_nominal(instance)
           Type::Combinator.nominal_of(instance.class_name || "Data")
+        end
+
+        def project_struct_instance_to_nominal(instance)
+          Type::Combinator.nominal_of(instance.class_name || "Struct")
         end
 
         def project_hash_shape_to_nominal(shape)

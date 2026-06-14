@@ -760,13 +760,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
-    describe "Struct.new return-type lift (meta_new — anonymous Struct subclass)" do
+    describe "Struct.new return-type folding (StructFolding — anonymous Struct subclass)" do
       def singleton(name) = Rigor::Type::Combinator.singleton_of(name)
       def sym(value) = Rigor::Type::Combinator.constant_of(value)
 
-      it "lifts `Struct.new(:a, :b)` (all symbol members) to Singleton[Struct] so chained `.new` dispatches" do
+      it "folds `Struct.new(:a, :b)` (all symbol members) to a StructClass member layout" do
+        # ADR-48 Struct follow-up — StructFolding supersedes the old
+        # `struct_new_lift` (which produced a bare `Singleton[Struct]`); the
+        # chained `.new` now dispatches against the precise member layout.
         result = dispatch(receiver: singleton("Struct"), method_name: :new, args: [sym(:a), sym(:b)])
-        expect(result).to eq(singleton("Struct"))
+        expect(result).to eq(Rigor::Type::Combinator.struct_class_of(members: %i[a b]))
       end
 
       it "lifts the instance-construction `.new(1, 2)` (non-symbol args) to Nominal[Struct]" do

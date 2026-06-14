@@ -7,6 +7,7 @@ require_relative "../type"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "statement_evaluator"
+require_relative "struct_fold_safety"
 
 module Rigor
   module Inference
@@ -150,12 +151,27 @@ module Rigor
         # `table[node]` to type predicates; the second pass's
         # entry is the one that reflects all flow-derived
         # rebinds, so it MUST overwrite the first.
+        # ADR-48 Struct slice 3 — install the top-level fold-safe-local set so
+        # a member read off a mutation-free top-level struct binding folds.
+        seeded_scope = seed_struct_fold_safe(seeded_scope, root)
+
         on_enter = ->(node, scope) { table[node] = scope }
         StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter,
                                converged_loop_recording: converged_loop_recording).evaluate(root)
 
         propagate(root, table, seeded_scope)
         table
+      end
+
+      # ADR-48 Struct slice 3 — installs the top-level fold-safe-local set
+      # ({Inference::StructFoldSafety}). Struct member layouts of constant
+      # receivers are resolved through the side-table the seeded scope carries.
+      def seed_struct_fold_safe(seeded_scope, root)
+        seeded_scope.with_struct_fold_safe(
+          StructFoldSafety.fold_safe_locals(
+            root, ->(name) { seeded_scope.struct_member_layout(name)&.[](:members) }
+          )
+        )
       end
 
       # v0.0.2 #5 + ADR-24 slice 2 — seeds the three
@@ -185,11 +201,9 @@ module Rigor
         method_visibilities = default_scope.discovered_method_visibilities.merge(
           build_discovered_method_visibilities(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
-        # ADR-48 — per-file Data member layouts merged OVER the cross-file
-        # seed (same-file declaration is authoritative for its own classes).
-        data_member_layouts = default_scope.data_member_layouts.merge(
-          build_data_member_layouts(root)
-        )
+        # ADR-48 — per-file Data + Struct member layouts merged OVER the
+        # cross-file seed (same-file declaration is authoritative).
+        data_member_layouts, struct_member_layouts = merge_member_layouts(default_scope, root)
 
         seeded_scope.with_discovery(
           seeded_scope.discovery.with(
@@ -198,9 +212,21 @@ module Rigor
             discovered_superclasses: superclasses,
             discovered_includes: includes,
             discovered_method_visibilities: method_visibilities,
-            data_member_layouts: data_member_layouts
+            data_member_layouts: data_member_layouts,
+            struct_member_layouts: struct_member_layouts
           )
         )
+      end
+
+      # ADR-48 — the per-file Data + Struct member-layout tables, each merged
+      # OVER the cross-file seed so a same-file declaration wins for its own
+      # classes. Returned as a pair to keep {#merge_project_method_indexes}
+      # under the method-size budget.
+      def merge_member_layouts(default_scope, root)
+        [
+          default_scope.data_member_layouts.merge(build_data_member_layouts(root)),
+          default_scope.struct_member_layouts.merge(build_struct_member_layouts(root))
+        ]
       end
 
       # Slice 7 phase 2. Builds the class-level ivar accumulator
@@ -1883,6 +1909,74 @@ module Rigor
         accumulator[qualified_parts.join("::")] = members.freeze
       end
 
+      # ADR-48 Struct follow-up — the `Struct.new(...)` sibling of
+      # {#build_data_member_layouts}. A separate, additive table so the
+      # existing `Data.define` value-shape contract (a bare `[Symbol]`) is
+      # untouched: a Struct entry carries `{ members:, keyword_init: }`
+      # because the dispatcher needs the flag to fold the matching `.new`
+      # call form (positional vs keyword) without manufacturing a wrong map.
+      def build_struct_member_layouts(root)
+        accumulator = {}
+        walk_struct_member_layouts(root, [], accumulator)
+        accumulator.freeze
+      end
+
+      def walk_struct_member_layouts(node, qualified_prefix, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            record_struct_member_layout(accumulator, qualified_prefix + [name], node.superclass)
+            walk_struct_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
+            return
+          end
+        when Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            walk_struct_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
+            return
+          end
+        when Prism::ConstantWriteNode
+          record_struct_member_layout(accumulator, qualified_prefix + [node.name.to_s], node.value)
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_struct_member_layouts(child, qualified_prefix, accumulator)
+        end
+      end
+
+      # Records `qualified -> { members:, keyword_init: }` when `expr` is a
+      # `Struct.new(*Symbol [, keyword_init: <bool>])` call with at least one
+      # literal-Symbol member.
+      def record_struct_member_layout(accumulator, qualified_parts, expr)
+        return unless struct_new_call?(expr)
+
+        members = meta_member_names(expr)
+        return if members.empty?
+
+        accumulator[qualified_parts.join("::")] = {
+          members: members.freeze,
+          keyword_init: struct_new_keyword_init?(expr)
+        }.freeze
+      end
+
+      # True when a `Struct.new` call carries `keyword_init: true` as a
+      # literal in its trailing keyword hash. A non-literal value (or its
+      # absence) reads as `false` — the conservative positional default.
+      def struct_new_keyword_init?(call_node)
+        args = call_node.arguments&.arguments || []
+        last = args.last
+        return false unless last.is_a?(Prism::KeywordHashNode)
+
+        last.elements.any? do |assoc|
+          assoc.is_a?(Prism::AssocNode) &&
+            assoc.key.is_a?(Prism::SymbolNode) && assoc.key.unescaped == "keyword_init" &&
+            assoc.value.is_a?(Prism::TrueNode)
+        end
+      end
+
       MIXIN_CALL_NAMES = %i[include prepend].freeze
 
       # ADR-24 slice 2 — per-class/module table mapping a fully
@@ -2252,7 +2346,8 @@ module Rigor
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
         acc = { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, superclasses: {}, includes: {},
-                method_visibilities: {}, methods: {}, class_sources: {}, data_member_layouts: {} }
+                method_visibilities: {}, methods: {}, class_sources: {}, data_member_layouts: {},
+                struct_member_layouts: {} }
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
@@ -2306,6 +2401,7 @@ module Rigor
         record_class_sources(acc[:class_sources], path, root, superclasses, includes)
         merge_class_keyed_index_tables(acc, root)
         acc[:data_member_layouts].merge!(build_data_member_layouts(root))
+        acc[:struct_member_layouts].merge!(build_struct_member_layouts(root))
       end
 
       # Folds the per-class method-visibility and method-existence tables of

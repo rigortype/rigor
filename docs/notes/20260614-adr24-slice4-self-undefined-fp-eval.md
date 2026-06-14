@@ -39,44 +39,53 @@ narrowing — it cannot remove a genuine firing on a real project class.
 Verified protobuf 73 → 0 (whole-project before/after); clears the entire
 `Object` column. Regression spec added (reopened `class Object` / `BasicObject`).
 
-### Bucket 2 — non-`Object` receivers (167) — the promotion blocker
+### Bucket 2 — non-`Object` receivers (167) — partially addressed
 
 These fire on a *named* project class the gate considers "confidently closed"
 (no superclass, no `include`/`prepend`, no `method_missing`), yet the call is
-valid. The pattern that dominates is **abstract / template-method base
-classes** — a base defines a method that *calls* a method its subclasses
-implement, without itself declaring it:
+valid. The eval found several distinct sub-classes; two are now fixed, the
+rest remain.
 
-- `Mail::CommonField#do_decode` / `#do_encode`, `Mail::Retriever#find` — the
-  base calls the subclass hook (POP3 / IMAP / etc. implement `find`).
-- `Concurrent::ThreadSafe::Util::Striped64#cells` / `#base` / `#cas_base` —
-  primitives defined by a platform-specific subclass / mixin the gate cannot
-  see.
-- `Concurrent::…#java` — a JRuby-only method, correct on its platform.
-- `Numo::NArray#…` (72) — a C-extension class; its method surface lives in C,
-  invisible to a source-only "complete surface" claim.
-- `RbNaCl::SimpleBox#nonce_bytes`, `Mail::PartsList#each` (Enumerable /
-  delegation).
+**Fixed — abstract / template-method base classes.** A base defines a method
+that *calls* a method its subclasses implement, without itself declaring it:
+`Mail::CommonField#decoded` calls `do_decode` (every `< CommonField` subclass
+defines it); `Mail::Retriever#find` is implemented by POP3 / IMAP.
+**Subclass-aware gating** now suppresses a miss when the missed method is
+defined (a plain `def` via the def-node table, or a dynamic definition) on any
+known subclass of the self-class — walking the `discovered_superclasses`
+child→parent map inverted, resolving each recorded (unqualified) parent name in
+the child's namespace. A genuine typo no subclass defines still fires.
 
-The rule's founding premise — *a standalone class with no superclass / mixin
-has a complete, project-known method surface* — is **unsound for the abstract-
-base pattern**, which is pervasive in real Ruby. A standalone class can still
-legitimately call a method that a *subclass* (or a C extension, or a
-platform-conditional reopen) supplies.
+**Fixed — dynamic (non-constant) superclass.** `Mail::PartsList <
+DelegateClass(Array)` (and `< Struct.new(...)` / `< Data.define(...)`)
+inherits a dynamically produced surface; the recorder never records a
+non-constant superclass, so the gate wrongly treated the class as standalone.
+The `SelfClosednessScanner` now marks a class with a non-constant superclass
+open.
+
+Per-target effect of the two fixes: mail 12 → 0, faraday 5 → 2.
+
+**Remaining (still false positives, rule stays off).** Sub-classes the
+per-class gate still cannot see:
+- `Numo::NArray#…` (72) — a **C-extension** class; its method surface lives in
+  C, invisible to a source-only "complete surface" claim.
+- `Concurrent::ThreadSafe::Util::Striped64#cells` / … (20) — metaprogrammed /
+  platform-specific primitives; `Concurrent::…#java` (5) — a JRuby-only method.
+- `TDiary::Application` / `TDiary::Style::*` (31), `RbNaCl::SimpleBox` (8),
+  `Textbringer::*` (7) — metaprogramming / project-specific surfaces.
 
 ## Decision
 
-- **Keep the rule `:off`.** The corpus gate is red: the abstract-base FP class
-  is not addressable by the current per-class gate (it would need
-  subclass-awareness — "is this class subclassed anywhere in the project, and
-  is the missed method defined on a subclass?" — or an abstract-marker
-  heuristic).
-- **Land the universal-base exclusion** (Bucket 1) as a sound incremental
-  accuracy win — the rule is opt-in usable today via `severity_overrides:`,
-  and this removes ~63 % of its corpus false positives for those users.
+- **Keep the rule `:off`.** The corpus gate is still red on the remaining
+  Bucket-2 sub-classes (dominated by C-extension and metaprogrammed surfaces),
+  which the per-class source scan fundamentally cannot enumerate.
+- **Landed the universal-base exclusion** (Bucket 1, 287) **+ subclass-aware
+  gating + the dynamic-superclass guard** (Bucket 2 abstract-base / delegate-
+  class, ~15) — all pure narrowings, sound incremental accuracy wins for the
+  opt-in users the rule is usable by today (`severity_overrides:`).
 - **Do not** widen the standalone-only gate to superclass / include chains
-  (the other half of the slice-4 backlog) until the abstract-base FP is
-  solved — widening would only enlarge Bucket 2.
+  (the other half of the slice-4 backlog) — the C-ext / metaprogramming FP
+  classes would only grow.
 
 ## Follow-up (demand-gated)
 

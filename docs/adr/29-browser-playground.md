@@ -383,17 +383,27 @@ status line under each records the 2026-06-14 re-evaluation.
    fork-based worker pool) must pass without test count regressions.
    This gate catches engine code that silently assumes POSIX semantics
    absent from the WASM sandbox.
-   - **Status: UNMET, but the POSIX surface is now mapped and small.**
-     One `flock` site ([`lib/rigor/cache/store.rb`](../../lib/rigor/cache/store.rb)),
-     reached only when the persistent cache is active — `--no-cache`
-     (which the playground already mandates, WD4) bypasses it. The
-     fork pool already self-degrades to sequential when
-     `Process.respond_to?(:fork)` is false
-     ([`pool_coordinator.rb`](../../lib/rigor/analysis/runner/pool_coordinator.rb)),
-     which is the wasm case. `Runner#run_source` gives an in-memory
-     analysis entry needing no `Tempfile`. Load-time `Ractor.make_shareable`
-     calls deep-freeze without spawning a Ractor and are expected to
-     survive the sandbox. The remaining work is the CI job itself.
+   - **Status: MET for the playground — runtime verified 2026-06-14.**
+     The adapter runs end-to-end in the `@ruby/wasm-wasi` VM and emits
+     **diagnostics byte-identical to the Rack backend** (the
+     `nil.upcase` undefined-method *and* the `rigor-rbs-inline`
+     argument-type-mismatch), confirmed headlessly by `rake smoke`
+     ([`wasm/smoke.mjs`](../../plugins/rigor-playground/wasm/smoke.mjs),
+     which replicates the browser `DefaultRubyVM` WASI). Four
+     wasm-runtime integration fixes were needed and are in place:
+     (a) `gem "js"` in the bundle — `DefaultRubyVM` requires it to
+     instantiate; (b) `require "rubygems"` in the adapter — ruby.wasm
+     runs rubygems-disabled, and without it RBS's loader silently builds
+     an **empty** type universe (0 classes → nothing flagged); now 334+
+     classes load; (c) `require "/bundle/setup"` (ruby_wasm's load-path
+     setup) not `bundler/setup` (which hits the disabled rubygems path);
+     (d) a writable working dir — WASI mounts the packed gem/config tree
+     read-only, so the adapter stages `/work` (the browser VM's in-memory
+     `/`; an explicit preopen under Node) for the cwd-relative cache +
+     per-request buffer. The `flock`/fork concerns held as predicted
+     (shimmed / self-degrading). A full `make test` under wasm remains a
+     larger, separate exercise, but the playground's runtime correctness
+     is established.
 
 Until all three conditions hold, the server-side API (Option B) is the
 production backend. The next concrete step is no longer "wait for
@@ -531,4 +541,4 @@ track that does not block the `0.2.x` evaluation line.
 | 2 | `plugins/rigor-playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
 | 3 | `/annotate` endpoint + frontend toggle view. |
 | 4 | `/type-of` endpoint + frontend hover integration. |
-| 5 | ruby.wasm migration (WD8/WD9/WD10). **Scaffolding + green build landed 2026-06-14** under `plugins/rigor-playground/wasm/` — `rbwasm` Gemfile + build task, in-VM CLI adapter, packed `.rigor.yml`, static wasm frontend. **`rake build` now succeeds**: `prism` + `rbs` + `psych` link under wasi-sdk-24.0 (WD6 ② MET, via the `libyaml_link` build patch), producing a **69.9 MB** `rigor-playground.wasm` — which, being ≫ 25 MiB, confirms the WD10 R2 hosting path. Remaining before shipping: WD6 ③ runtime correctness in the sandbox, R2 bucket setup, and the docs-site sync wiring. |
+| 5 | ruby.wasm migration (WD8/WD9/WD10). **Scaffolding + green build landed 2026-06-14** under `plugins/rigor-playground/wasm/` — `rbwasm` Gemfile + build task, in-VM CLI adapter, packed `.rigor.yml`, static wasm frontend. **`rake build` now succeeds**: `prism` + `rbs` + `psych` link under wasi-sdk-24.0 (WD6 ② MET, via the `libyaml_link` build patch), producing a **~70 MB** `rigor-playground.wasm` — which, being ≫ 25 MiB, confirms the WD10 R2 hosting path. **Runtime verified (WD6 ③)**: `rake smoke` runs the adapter in a browser-representative VM and reproduces the backend's diagnostics byte-for-byte (after four wasm integration fixes — `gem "js"`, `require "rubygems"`, `/bundle/setup`, writable `/work`). Remaining before shipping: R2 bucket + secrets, and the docs-site sync wiring. |

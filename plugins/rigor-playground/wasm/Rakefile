@@ -11,14 +11,14 @@
 # Then: `rake build` → rigor-playground.wasm ; `rake serve` → http://localhost:8000
 
 WASM_OUT  = "rigor-playground.wasm"
-WASM_RAW  = "build/ruby-rigor.wasm"   # intermediate: Ruby + gems, before VFS pack
+WASM_RAW  = "build/ruby-rigor.wasm" # intermediate: Ruby + gems, before VFS pack
 RUBY_WASM = "4.0"
 
 # Run a block with extra RUBYOPT entries, restoring the previous value after.
 # Used to preload build_patches/* into the `rbwasm` subprocess for the build
 # step only (subprocesses inherit ENV).
 def with_rubyopt(opt)
-  old = ENV["RUBYOPT"]
+  old = ENV.fetch("RUBYOPT", nil)
   ENV["RUBYOPT"] = [old, opt].compact.join(" ")
   yield
 ensure
@@ -64,17 +64,15 @@ task :serve do
   ruby "-run", "-e", "httpd", ".", "-p", "8000"
 end
 
-desc "Smoke-check the adapter under plain WASI (wasmtime) — no browser needed (WD6 condition ③)"
+desc "Headless runtime smoke (browser-representative, @ruby/wasm-wasi in Node) — WD6 condition ③"
 task :smoke do
-  abort "Run `rake build` first." unless File.exist?(WASM_OUT)
-  abort "wasmtime not found on PATH." if `which wasmtime`.empty?
+  abort "Run `rake build` first — #{WASM_OUT} is missing." unless File.exist?(WASM_OUT)
+  abort "node not found on PATH." if `which node`.strip.empty?
 
-  sample = %(x = nil\nx.upcase\n)
-  IO.popen(["wasmtime", "run", "--dir", ".", WASM_OUT, "--", "/playground/boot.rb", "check"], "r+") do |io|
-    io.write(sample)
-    io.close_write
-    puts io.read
-  end
+  # smoke.mjs replicates the browser DefaultRubyVM (browser_wasi_shim writable
+  # "/" preopen) and asserts the snippet's diagnostics match the backend's.
+  sh "npm", "install", "--silent", "--no-audit", "--no-fund"
+  sh "node", "smoke.mjs"
 end
 
 desc "Remove the built wasm module and intermediate artifacts"

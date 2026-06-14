@@ -11,3 +11,6 @@ build.log
 /vfs/buffer.rb
 Gemfile.lock
 /vfs/.rigor/
+# Node deps for the headless smoke (smoke.mjs); installed by `rake smoke`.
+/node_modules/
+package-lock.json

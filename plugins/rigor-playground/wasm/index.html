@@ -204,8 +204,12 @@ AscDesc.new.ascdesc(:bad)
       const result = await DefaultRubyVM(module)
       vm = result.vm
       setBoot("Loading the Rigor engine…")
-      // Activate the packed bundle and load the in-VM adapter.
-      vm.eval(`require "bundler/setup"; require "/playground/boot"`)
+      // Activate the packed bundle (ruby_wasm's generated load-path setup —
+      // NOT bundler/setup, which hits a rubygems path that is disabled in the
+      // ruby.wasm build) and load the in-VM adapter. boot.rb itself does the
+      // `require "rubygems"` the RBS env needs and stages a writable /work
+      // under DefaultRubyVM's in-memory root.
+      vm.eval(`require "/bundle/setup"; require "/playground/boot"`)
     }
 
     function callVM(kind, request) {

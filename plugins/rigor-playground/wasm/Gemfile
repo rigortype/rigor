@@ -17,6 +17,12 @@ source "https://rubygems.org"
 
 gem "rigortype", path: "../../.."
 
+# The ruby.wasm JS-host bridge. Required in the bundle for @ruby/wasm-wasi's
+# DefaultRubyVM to instantiate (it wires Ruby's `JS.global` to the page's
+# JS world); without it the VM aborts at boot with "add `gem \"js\"`". The
+# in-VM adapter (boot.rb) uses it to read the request global the page sets.
+gem "js"
+
 # Runtime dependency of the rigor-rbs-inline plugin (ADR-32). The plugin
 # itself rides along inside `rigortype`; only its upstream gem is a separate
 # dependency. Pinned to the same range the top-level gemspec declares.

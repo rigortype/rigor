@@ -34,14 +34,23 @@ Encoding.default_internal = Encoding::UTF_8
 File.class_eval { def flock(*) = 0 }
 IO.class_eval   { def fsync(*) = 0 }
 
-# Give cache-root and config resolution a writable, existing base. The build
-# packs this adapter + .rigor.yml at /playground. `Dir.home` can only *read*
-# HOME (and raises when it is unset under WASI), so set ENV directly here.
-ENV["HOME"] ||= "/playground" # rubocop:disable Style/EnvHome
-
+# ruby.wasm runs with rubygems disabled (`Gem` is a stub that is never fully
+# loaded; `/bundle/setup` only unshifts $LOAD_PATH). Rigor's RBS environment
+# loader needs the real rubygems (`Gem::MissingSpecError`, `Gem::Requirement`,
+# …), and without it the RBS env builds EMPTY — the analysis then runs with
+# zero type information and flags nothing. A single require initialises it.
+require "rubygems"
 require "json"
+require "fileutils"
 require "stringio"
 require "rigor/cli"
+
+# WASI exposes the packed gem + config tree (/bundle, /playground) READ-ONLY,
+# and the host (index.html / smoke.mjs) provides exactly one writable mount at
+# /work. Rigor's cache is cwd-relative (`<cwd>/.rigor/`) and the adapter writes
+# a per-request buffer file, so both need a writable cwd — stage one under
+# /work by copying the read-only config in and chdir-ing there.
+WASM_WORK_DIR = "/work"
 
 # `js` only exists in the browser ruby.wasm build. Guard the require so this
 # file can also be loaded under a plain wasmtime/WASI smoke run (WD6 ③ CI),
@@ -151,10 +160,13 @@ module Rigor
   end
 end
 
-# Run from the packed config directory so `Rigor::CLI.start`'s cwd-based
-# `.rigor.yml` discovery finds the playground config (loads rigor-rbs-inline,
-# strict severity).
-Dir.chdir(File.dirname(__FILE__))
+# Stage the writable working dir: copy the packed (read-only) .rigor.yml into
+# /work and chdir there, so `Rigor::CLI.start`'s cwd-based config discovery
+# finds it (loads rigor-rbs-inline, strict severity) and the cwd-relative cache
+# + buffer writes land on the writable mount.
+FileUtils.mkdir_p(WASM_WORK_DIR)
+FileUtils.cp(File.join(File.dirname(__FILE__), ".rigor.yml"), File.join(WASM_WORK_DIR, ".rigor.yml"))
+Dir.chdir(WASM_WORK_DIR)
 
 # Plain-WASI smoke path (WD6 ③): `wasmtime … -- /playground/boot.rb <kind>`
 # reads the source from stdin and prints the JSON result. No-ops in the

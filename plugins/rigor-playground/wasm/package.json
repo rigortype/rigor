@@ -1,0 +1,13 @@
+{
+  "name": "rigor-playground-wasm",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only deps for the ADR-29 WD6 ③ headless runtime smoke (smoke.mjs).",
+  "scripts": {
+    "smoke": "node smoke.mjs"
+  },
+  "devDependencies": {
+    "@ruby/wasm-wasi": "^2.9.3",
+    "@bjorn3/browser_wasi_shim": "^0.4.2"
+  }
+}

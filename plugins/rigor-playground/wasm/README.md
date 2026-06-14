@@ -76,16 +76,21 @@ Assets cap — confirming the WD10 decision to host the binary on R2, not as a
 static asset. (Compresses to roughly a third over the wire; `--optimize` /
 stdlib trimming can shrink it further later.)
 
+**Runtime verified (WD6 ③, 2026-06-14).** `rake smoke` boots the wasm in a
+browser-representative VM (`@ruby/wasm-wasi` + `browser_wasi_shim`, writable
+`/` preopen) and asserts the sample's diagnostics match the backend — they do,
+byte for byte (the `nil.upcase` undefined-method and the inline-RBS
+argument-type-mismatch). Four wasm integration fixes made it work and are in
+the build / adapter: `gem "js"`, `require "rubygems"` (ruby.wasm runs
+rubygems-disabled, which otherwise leaves the RBS type universe empty),
+`require "/bundle/setup"` instead of `bundler/setup`, and staging a writable
+`/work` for the read-only-FS sandbox.
+
 **Remaining before shipping:**
 
-1. **WD6 ③ — runtime correctness.** Confirm the engine actually runs in the
-   wasm sandbox and the sample's diagnostics match the backend (`rake serve`
-   in a browser, or `rake smoke` under `wasmtime`). Note the packed
-   `/playground` is read-only, so the adapter must write its buffer to a
-   writable path — verify this end-to-end.
-2. **R2 + CI.** Set up the R2 bucket + secrets and enable the
+1. **R2 + CI.** Set up the R2 bucket + secrets and enable the
    `playground-wasm` workflow's publish step.
-3. **Docs-site wiring.** The `public/playground/` sync + `<meta>` R2-URL
+2. **Docs-site wiring.** The `public/playground/` sync + `<meta>` R2-URL
    injection on `rigor.typedduck.fail`.
 
 ### Known v1 limitations / fallbacks

@@ -131,6 +131,19 @@
     .cm-tooltip-lint .cm-diagnostic-info { border-left-color: var(--c-info); }
     .cm-tooltip-lint .cm-diagnosticSource { color: var(--muted); }
 
+    /* Autocomplete dropdown — warm theme; selectors out-specify CM's base. */
+    .cm-tooltip.cm-tooltip-autocomplete { padding: 0; overflow: hidden; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul { font-family: var(--rigor-font-mono); font-size: 12.5px; max-height: 16em; background: var(--surface); color: var(--text); margin: 0; padding: 4px; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 3px; color: var(--text); line-height: 1.5; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--sev-fg); }
+    .cm-tooltip-autocomplete .cm-completionLabel { color: inherit; }
+    .cm-tooltip-autocomplete .cm-completionMatchedText { text-decoration: underline; font-weight: 700; color: inherit; }
+    .cm-tooltip-autocomplete .cm-completionDetail { color: var(--muted); font-style: italic; margin-left: auto; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionDetail { color: var(--sev-fg); opacity: 0.85; }
+    .cm-tooltip-autocomplete .cm-completionIcon { color: var(--muted); opacity: 0.8; }
+    .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionIcon { color: var(--sev-fg); }
+    .cm-completionInfo { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 4px; }
+
     /* Boot overlay — the wasm VM download + first env build can take several
        seconds; surfacing the phase is the key UX difference vs the backend. */
     #boot {

@@ -6,6 +6,16 @@
   <title>Rigor Playground (WASM)</title>
 
   <!--
+    ADR-29 WD10 — wasm location. Defaults to the same-origin relative path
+    used by `rake serve` for local dev. In production the docs-site sync step
+    rewrites this tag's `content` to the Cloudflare R2 URL of the version-
+    pinned build, so the page never hard-codes a deploy detail. Leave the
+    content empty to keep the relative default.
+  -->
+  <meta name="rigor-wasm-url" content="">
+
+
+  <!--
     ADR-29 WD9 — fully in-browser Rigor playground.
 
     No backend: the Rigor engine runs in a ruby.wasm VM compiled by
@@ -144,7 +154,11 @@
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
     import { DefaultRubyVM }                       from "https://cdn.jsdelivr.net/npm/@ruby/wasm-wasi@2.7.1/dist/browser/+esm"
 
-    const WASM_URL = "./rigor-playground.wasm"
+    // ADR-29 WD10 — the docs-site sync step injects the R2 URL into the
+    // <meta name="rigor-wasm-url"> tag in production; local `rake serve` keeps
+    // the same-origin relative default.
+    const WASM_URL =
+      document.querySelector('meta[name="rigor-wasm-url"]')?.content || "./rigor-playground.wasm"
 
     const SAMPLE = `# Rigor Playground (WASM) — runs entirely in your browser.
 

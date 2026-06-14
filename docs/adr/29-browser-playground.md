@@ -481,6 +481,47 @@ synchronously on the main thread; offloading analysis to a Web Worker
 (so a slow keystroke does not block typing) is the WD9 responsiveness
 follow-up, paired with WD8's persistent-env work.
 
+### WD10 — deployment: docs-site sub-path, CI-built wasm on R2 (added 2026-06-14)
+
+The playground ships at `https://rigor.typedduck.fail/playground/`, a
+sub-path of the existing documentation site (Astro + Starlight on
+Cloudflare Workers Static Assets, with `rigor` vendored as the
+`upstream/rigor` submodule). Two facts of that site shape the design:
+
+1. **The site CI is Node-only** (it never builds Ruby and deliberately
+   avoids the heavy `references/*` submodules), so the wasm cannot be
+   built there — it must arrive as a pre-built artifact.
+2. **Cloudflare Workers Static Assets cap a single file at 25 MiB.** A
+   from-source Ruby 4.0 wasm with the full stdlib + `data/builtins`
+   plausibly exceeds that, so the binary is not a static asset.
+
+Decision (chosen 2026-06-14):
+
+- **The wasm is built in `rigor`'s own CI** (it has the toolchain
+  context) on release / manual dispatch, and **published to Cloudflare
+  R2** — keeping the multi-MB binary out of both the per-deploy Astro
+  asset bundle and git history, and sidestepping the 25 MiB asset cap.
+  The build is **version-pinned**: the wasm is produced from the same
+  `rigor` commit the site's submodule points at, so the playground's
+  behaviour matches the synced docs.
+- **The frontend (`index.html`) is served as a static asset** under the
+  site's `public/playground/`, copied from the submodule by a dedicated
+  sync step (mirroring `sync-rigor-docs`). It is a full-bleed app, so it
+  sits *outside* the Starlight doc chrome; a Starlight page links to it.
+- **The page fetches the wasm from R2 by a configurable URL** (the page
+  defaults to a same-origin relative path for local `rake serve`; the
+  site sync step overrides it to the R2 URL via a `<meta>` tag). The
+  transport indirection means the page is agnostic to whether the binary
+  is an asset or R2-hosted. `WebAssembly.compileStreaming` requires
+  HTTPS (Cloudflare provides it); a cross-origin R2 URL needs CORS on
+  the bucket; the content-hashed wasm is served `immutable`.
+
+Rejected: building in the site CI (no Ruby toolchain, would balloon
+deploy time); committing the binary to either repo (large git blobs,
+re-uploaded every deploy); a routing Worker to proxy R2 same-origin (the
+site is assets-only with no `main` Worker — an R2 custom domain or
+public URL is simpler than introducing Worker script logic).
+
 ## Implementation slices
 
 No slice is scheduled by this ADR. The playground is a new parallel

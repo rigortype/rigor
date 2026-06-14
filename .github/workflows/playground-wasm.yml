@@ -1,0 +1,101 @@
+# ADR-29 WD8/WD10 — build the in-browser playground wasm and publish it to
+# Cloudflare R2, where the docs site (rigor.typedduck.fail) fetches it from.
+#
+# This is intentionally a *separate, manually-triggered* workflow, not part of
+# the per-push CI gate: the from-source ruby.wasm build downloads the wasi-sdk
+# and source-builds Ruby 4.0 (tens of minutes), far too heavy to run on every
+# commit. It runs on demand and (once enabled) on release.
+#
+# STATUS: the build currently aborts on psych/libyaml static-link wiring (see
+# plugins/rigor-playground/wasm/README.md "Status"). This workflow is ready,
+# but will not produce a runnable artifact until that is resolved — which is
+# why the `release` trigger below is commented out (enable it once a green
+# build lands, so a release is never blocked by a known-red job).
+#
+# Required repository secrets for the R2 publish step (the build + artifact
+# upload work without them, so PRs/forks still validate the build):
+#   CLOUDFLARE_API_TOKEN  — token with "Workers R2 Storage: Edit"
+#   CLOUDFLARE_ACCOUNT_ID — the Cloudflare account id
+# And one repository variable:
+#   R2_BUCKET             — the destination R2 bucket name
+name: Playground wasm
+
+on:
+  workflow_dispatch:
+  # Enable once the psych/libyaml link is fixed and `rake build` is green:
+  # release:
+  #   types: [published]
+
+concurrency:
+  group: playground-wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build + publish playground wasm
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/rigor-playground/wasm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Set up Ruby 4.0
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+
+      # Cache the wasi-sdk toolchain + the cross-compiled Ruby so re-runs skip
+      # the ~30-minute cold build. Keyed on the ruby_wasm version + the wasm
+      # build inputs.
+      - name: Cache ruby_wasm toolchain + build
+        uses: actions/cache@v4
+        with:
+          path: plugins/rigor-playground/wasm/build
+          key: ruby-wasm-${{ runner.os }}-${{ hashFiles('plugins/rigor-playground/wasm/Gemfile') }}
+
+      - name: Install build gems
+        run: bundle install
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/plugins/rigor-playground/wasm/Gemfile
+
+      - name: Build wasm
+        run: bundle exec rake build
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/plugins/rigor-playground/wasm/Gemfile
+
+      - name: Resolve version label
+        id: ver
+        run: echo "v=${GITHUB_REF_TYPE:+$GITHUB_REF_NAME}-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      # Always keep the artifact even without R2 secrets, so the build is
+      # verifiable on PRs and forks.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rigor-playground-wasm-${{ steps.ver.outputs.v }}
+          path: plugins/rigor-playground/wasm/rigor-playground.wasm
+          if-no-files-found: error
+
+      # Publish to R2 only when the secrets are present (skipped on forks/PRs).
+      # The object is version-pinned by the commit sha; the docs-site sync step
+      # injects this exact URL into the playground page's <meta rigor-wasm-url>.
+      - name: Publish to Cloudflare R2
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          KEY="playground/rigor-playground-${GITHUB_SHA::8}.wasm"
+          npx --yes wrangler r2 object put "$R2_BUCKET/$KEY" \
+            --file rigor-playground.wasm \
+            --content-type application/wasm \
+            --remote
+          echo "Published to r2://$R2_BUCKET/$KEY"

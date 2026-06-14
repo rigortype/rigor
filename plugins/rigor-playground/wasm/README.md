@@ -124,9 +124,26 @@ YAML catalogs), so it can't simply be excluded.
   blocking full analysis). It returns from `boot.rb` already; add it once the
   Worker offload lands.
 
-## Deploying
+## Deploying (ADR-29 WD10)
 
-`index.html` + `rigor-playground.wasm` are static files. Upload both to any
-static host (Cloudflare Pages, GitHub Pages, Netlify). Serve `.wasm` as
-`application/wasm`. No COOP/COEP headers are required for the single-threaded
-VM. This is the deployment ADR-29 WD6 unlocks once the build is verified.
+Target: `https://rigor.typedduck.fail/playground/`, a sub-path of the Astro +
+Starlight docs site (Cloudflare Workers Static Assets). The chosen pipeline:
+
+- **Frontend** (`index.html`, ~tens of KB) is served as a **static asset**
+  under the site's `public/playground/`, copied from this directory by a
+  docs-site sync step (mirroring `sync-rigor-docs`). It runs full-bleed,
+  outside the Starlight chrome; a Starlight page links to it.
+- **The wasm binary** is built by **`rigor`'s own CI**
+  ([`.github/workflows/playground-wasm.yml`](../../../.github/workflows/playground-wasm.yml))
+  and published to **Cloudflare R2** — it likely exceeds the 25 MiB
+  Workers-Static-Assets per-file cap, and R2 keeps the multi-MB binary out of
+  both the per-deploy Astro bundle and git. The build is **version-pinned** to
+  the `rigor` commit the site's submodule points at.
+- **The page fetches the wasm from R2** via the `<meta name="rigor-wasm-url">`
+  tag: empty here (so local `rake serve` uses the relative path), rewritten to
+  the R2 URL by the site's sync step. `WebAssembly.compileStreaming` needs
+  HTTPS (Cloudflare provides it); a cross-origin R2 URL needs CORS on the
+  bucket; the content-hashed wasm is served `immutable`.
+
+For local development, `rake serve` alone is the whole story — the relative
+`./rigor-playground.wasm` default needs no R2.

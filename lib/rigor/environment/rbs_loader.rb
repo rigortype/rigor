@@ -644,22 +644,24 @@ module Rigor
       end
 
       # @param rbs_alias [RBS::Types::Alias] a type-alias reference (`string`,
-      #   `int`, …) appearing in a method signature.
-      # @return [RBS::Types::t, nil] the alias's aliased type one level out
-      #   (`string` → `::String | ::_ToStr`), or nil for a generic alias
-      #   (one with type parameters — arg substitution is out of scope) or an
-      #   unresolved name. Lets a caller see through the alias that
-      #   {Inference::RbsTypeTranslator} otherwise degrades to `untyped`,
-      #   which is why an interface/alias parameter does not reject `nil`.
+      #   `int`, `range[int?]`, …) appearing in a method signature.
+      # @return [RBS::Types::t, nil] the alias's aliased type one level out,
+      #   with type arguments substituted for a generic alias (`string` →
+      #   `::String | ::_ToStr`; `range[int?]` → `::Range[int?] |
+      #   ::_Range[int?]`), or nil for an unresolved name. Lets a caller see
+      #   through the alias that {Inference::RbsTypeTranslator} otherwise
+      #   degrades to `untyped`, which is why an interface/alias parameter
+      #   does not reject `nil`. `expand_alias2` handles the (rarer) generic
+      #   case — a `range[T]` param previously fell back to "admits", which
+      #   suppressed e.g. `MatchData#[](nil)`.
       def expand_type_alias(rbs_alias)
         return nil if env.nil?
 
         name = rbs_alias.name
-        entry = env.type_alias_decls[name] || env.type_alias_decls[name.absolute!]
-        return nil if entry.nil?
-        return nil unless entry.decl.type_params.empty?
+        name = name.absolute! unless name.absolute?
+        return nil unless env.type_alias_decls.key?(name)
 
-        entry.decl.type
+        builder.expand_alias2(name, rbs_alias.args)
       rescue ::RBS::BaseError, StandardError
         nil
       end

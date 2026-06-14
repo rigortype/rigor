@@ -37,6 +37,11 @@ RSpec.describe "nil argument-type-mismatch" do
     expect(arg_mismatches("x = 5\nx * nil\n")).to include(a_string_matching(/`\*' on Integer.*got nil/))
     # Array#fetch is multi-overload with an interface-alias `int` param.
     expect(arg_mismatches("a = [1, 2, 3]\na.fetch(nil)\n")).to include(a_string_matching(/`fetch' on Array.*got nil/))
+    # MatchData#[] has a `range[int?]` GENERIC-alias overload; resolving it
+    # (not bailing to "admits") lets every overload reject nil so `m[nil]`
+    # fires.
+    expect(arg_mismatches(%(m = "abc".match(/b/)\nunless m.nil?\n  m[nil]\nend\n)))
+      .to include(a_string_matching(/`\[\]' on MatchData.*got nil/))
   end
 
   it "stays clean when the param admits nil" do

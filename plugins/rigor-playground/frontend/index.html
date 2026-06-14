@@ -602,6 +602,7 @@
     import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
     import { tags as t }                           from "https://esm.sh/@lezer/highlight@1.1.6"
+    import LZString                                from "https://esm.sh/lz-string@1.5.0"
 
     const API = ""
 
@@ -764,9 +765,21 @@ AscDesc.new.ascdesc(:bad)
       }
     }, { hideOn: () => false })
 
+    // ── Shareable URL state ────────────────────────────────────────────────
+    // The source round-trips through ?c=<lz-string>: restored on load,
+    // rewritten (debounced) on edit. history.replaceState updates the address
+    // bar without a navigation or history spam.
+    const QUERY_KEY = "c"
+    function sourceFromUrl() {
+      const c = new URLSearchParams(location.search).get(QUERY_KEY)
+      if (!c) return null
+      try { return LZString.decompressFromEncodedURIComponent(c) || null } catch { return null }
+    }
+    const INITIAL_DOC = sourceFromUrl() ?? SAMPLE
+
     const view = new EditorView({
       state: EditorState.create({
-        doc: SAMPLE,
+        doc: INITIAL_DOC,
         extensions: [
           basicSetup,
           StreamLanguage.define(ruby),
@@ -778,6 +791,7 @@ AscDesc.new.ascdesc(:bad)
             if (!update.docChanged) return
             if (typesVisible) clearAnnotations()
             scheduleCheck()
+            scheduleUrlSync()
           }),
           EditorView.theme({
             "&"                       : { backgroundColor: "var(--bg)",         color: "var(--text)",      height: "100%" },
@@ -851,6 +865,21 @@ AscDesc.new.ascdesc(:bad)
     function scheduleCheck() {
       clearTimeout(debounceTimer)
       debounceTimer = setTimeout(runCheck, 600)
+    }
+
+    // Mirror the current source into ?c=<lz-string> (debounced). Clears the
+    // param when the buffer is the untouched sample, so a plain visit keeps a
+    // clean URL.
+    let urlTimer = null
+    function scheduleUrlSync() {
+      clearTimeout(urlTimer)
+      urlTimer = setTimeout(() => {
+        const src = view.state.doc.toString()
+        const url = src === SAMPLE
+          ? location.pathname
+          : `${location.pathname}?${QUERY_KEY}=${LZString.compressToEncodedURIComponent(src)}`
+        history.replaceState(null, "", url)
+      }, 600)
     }
 
     async function runCheck() {

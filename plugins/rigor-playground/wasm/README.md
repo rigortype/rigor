@@ -59,11 +59,38 @@ cannot carry `rbs`.
 
 ## Status — what's verified vs. what gates shipping
 
-This scaffolding is **"ready to build", not "shipping"**. The blocking
-unknown is whether `rbs`'s C extension links cleanly under the wasi-sdk — the
-WD6 ② spike. To resolve it:
+This scaffolding is **"ready to build", not "shipping"**.
 
-1. `rake build`. If it completes, `prism` + `rbs` link → **WD6 ② green**.
+**Spike result (2026-06-14):** `rake build` was run end-to-end. The good news
+answers the ADR's binding question: **`prism` and `rbs` link cleanly** under
+`wasi-sdk-24.0` — zero linker errors. The C-extension risk the ADR feared
+(`rbs`) is cleared.
+
+The build then **aborts on `psych`** (stdlib YAML):
+
+```
+wasm-ld: error: ext/psych/psych.a(...): undefined symbol: yaml_get_version
+wasm-ld: error: ext/psych/psych.a(...): undefined symbol: yaml_emitter_initialize
+...
+```
+
+`libyaml` itself cross-compiles fine — `ruby_wasm`'s `LibYAMLProduct` produces
+`build/wasm32-unknown-wasip1/yaml-0.2.5/opt/usr/local/lib/libyaml.a`, and
+`configure` is given `--with-libyaml-dir` pointing at it (the same mechanism
+that links `openssl`/`zlib`). But `psych`'s `-lyaml` does not reach the final
+static `wasm-ld` link, so the `yaml_*` symbols are undefined. This is a
+`ruby_wasm` static-ext link-wiring gap, **not** a Rigor or `rbs` problem — and
+Rigor genuinely needs `psych` (it parses `.rigor.yml` and the `data/builtins`
+YAML catalogs), so it can't simply be excluded.
+
+**Next steps to a runnable `.wasm`:**
+
+1. Resolve the `psych`/libyaml link — options, cheapest first:
+   - bump `ruby_wasm` when a release past 2.9.4 ships (this may be a
+     version-specific regression);
+   - patch the crossruby link to add `libyaml.a` to `XLDFLAGS` explicitly
+     (via `rbwasm build -p PATCH` or a vendored build step);
+   - report upstream to `ruby/ruby.wasm` with the link trace above.
 2. `rake smoke` (or open the page). Confirm the sample's diagnostics match the
    backend's for the same input → **contract fidelity** (WD2).
 3. Wire a CI job that runs the adapter under `wasmtime` on a fixed corpus →

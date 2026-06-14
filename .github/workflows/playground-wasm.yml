@@ -107,4 +107,15 @@ jobs:
             --file rigor-playground.wasm \
             --content-type application/wasm \
             --remote
-          echo "Published to r2://$R2_BUCKET/$KEY"
+          # Also overwrite a stable pointer. The docs site derives the wasm URL
+          # from the submodule's commit sha, which 404s when the submodule sits
+          # on a commit that built no wasm (a docs-only bump). Pointing the
+          # site's RIGOR_WASM_URL at this fixed object decouples the playground
+          # from the exact pin — it then always loads the latest build (releases
+          # + playground pushes), at the cost of strict version-pinning.
+          LATEST="playground/rigor-playground-latest.wasm"
+          npx --yes wrangler r2 object put "$R2_BUCKET/$LATEST" \
+            --file rigor-playground.wasm \
+            --content-type application/wasm \
+            --remote
+          echo "Published to r2://$R2_BUCKET/$KEY and r2://$R2_BUCKET/$LATEST"

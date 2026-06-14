@@ -197,11 +197,24 @@ prints the overlay + what the project adopts (`--format text|json`); and
 `severity_overrides:` (exact or family) and *above* the profile table.
 With the registry empty the composed map is `{}`, so resolution stays
 bit-for-bit unchanged — the first queued discipline lands as a single
-`FEATURES` entry with no further engine plumbing. **Not yet shipped
-(next slice):** the `--bleeding-edge[=ids]` CLI flag on `rigor check`
-(the config key is the primary opt-in; the CLI mirror needs the active
-selection threaded to the two `resolve` call sites) and the dedicated
-bleeding-edge CHANGELOG section (no entries to carry yet).
+`FEATURES` entry with no further engine plumbing.
+
+**CLI mirror landed (Unreleased).** `rigor check --bleeding-edge[=ids]`
+/ `--no-bleeding-edge` override the configured `bleeding_edge:` selection
+for a single run (same CLI-over-config precedence as `--workers` /
+`--no-cache`). Rather than thread a parallel override through every
+`Runner` construction site (and across the worker boundary), the CLI
+rebuilds the loaded `Configuration` via a new `Configuration#with_bleeding_edge`
+— a frozen `dup` that re-derives `bleeding_edge_severity_overrides` — so
+the two `SeverityProfile.resolve` sites and the worker path see the run's
+selection unchanged, keeping `Configuration` the single source of truth.
+The flag uses OptionParser's `=[LIST]` (attached-value-only) form so a bare
+`--bleeding-edge lib` adopts the overlay and checks `lib` rather than
+consuming the path. Surfacing the list form also frozen-ized the selector
+ids in `coerce_bleeding_edge`, restoring `Ractor.shareable?` for the
+config-file list path. **Not yet shipped:** the dedicated bleeding-edge
+CHANGELOG section (no entries to carry yet — it lands with the first
+queued feature).
 
 ### WD3 — What counts as a breaking diagnostic change (the discipline test)
 

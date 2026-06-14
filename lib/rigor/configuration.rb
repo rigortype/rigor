@@ -437,6 +437,32 @@ module Rigor
       }
     end
 
+    # ADR-50 § WD2 — returns a sibling Configuration whose bleeding-edge
+    # selection (and the derived `bleeding_edge_severity_overrides` the two
+    # {SeverityProfile.resolve} sites consult) is replaced by `value`,
+    # leaving every other field shared with the receiver. `value` takes the
+    # same forms as the `bleeding_edge:` config key — `false` / `true` / a
+    # feature-id Array / `{ "all" => true, "except" => [...] }` — and is
+    # normalised through the same {#coerce_bleeding_edge} path, so an unknown
+    # id stays inert.
+    #
+    # The CLI's `--bleeding-edge[=ids]` / `--no-bleeding-edge` flag uses this
+    # to override the configured selection for a single run (the same
+    # CLI-over-config precedence `--workers` and `--no-cache` follow). It is a
+    # frozen `dup` with the two bleeding-edge ivars re-set: `dup` returns an
+    # unfrozen shallow copy (every other ivar is the receiver's deeply-frozen
+    # value, safe to share read-only), the two replacements are themselves
+    # deeply frozen, and the re-`freeze` keeps the result `Ractor.shareable?`
+    # for the worker path.
+    def with_bleeding_edge(value)
+      selector = coerce_bleeding_edge(value)
+      copy = dup
+      copy.instance_variable_set(:@bleeding_edge, selector)
+      copy.instance_variable_set(:@bleeding_edge_severity_overrides,
+                                 BleedingEdge.severity_overrides_for(selector))
+      copy.freeze
+    end
+
     private
 
     # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is
@@ -593,7 +619,7 @@ module Rigor
       case value
       when nil, false then { "mode" => "none" }
       when true then { "mode" => "all" }
-      when Array then { "mode" => "list", "ids" => value.map(&:to_s).freeze }
+      when Array then { "mode" => "list", "ids" => freeze_ids(value) }
       when Hash then coerce_bleeding_edge_hash(value)
       else
         raise ArgumentError,
@@ -605,10 +631,20 @@ module Rigor
     def coerce_bleeding_edge_hash(value)
       hash = value.to_h { |k, v| [k.to_s, v] }
       if hash.fetch("all", false) == true
-        { "mode" => "all", "except" => Array(hash["except"]).map(&:to_s).freeze }
+        { "mode" => "all", "except" => freeze_ids(Array(hash["except"])) }
       else
         { "mode" => "none" }
       end
+    end
+
+    # Feature ids reach `coerce_bleeding_edge` from YAML, a `to_h` round-trip,
+    # or the CLI's `--bleeding-edge=a,b` (all runtime-created, non-frozen
+    # Strings). Each id String is frozen so the normalized selector — and thus
+    # the whole Configuration — stays deeply frozen and `Ractor.shareable?`
+    # for the worker path (the same invariant `#initialize`'s final `freeze`
+    # upholds for every other field).
+    def freeze_ids(ids)
+      ids.map { |id| id.to_s.dup.freeze }.freeze
     end
 
     # Renders the normalized selector back into the user-facing

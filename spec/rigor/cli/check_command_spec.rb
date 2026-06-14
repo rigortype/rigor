@@ -147,4 +147,52 @@ RSpec.describe Rigor::CLI::CheckCommand do
       saved == :absent ? ENV.delete("RIGOR_RACTOR_WORKERS") : (ENV["RIGOR_RACTOR_WORKERS"] = saved)
     end
   end
+
+  # ADR-50 § WD2 — the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI
+  # mirror of the `bleeding_edge:` config key.
+  describe "the --bleeding-edge flag" do
+    def options_for(argv)
+      command = described_class.new(argv: argv, out: StringIO.new, err: StringIO.new)
+      [command, command.send(:parse_check_options)]
+    end
+
+    it "defaults to :unset so an absent flag leaves the configured selection in place" do
+      _, options = options_for([])
+      expect(options[:bleeding_edge]).to eq(:unset)
+    end
+
+    it "treats a bare --bleeding-edge as the whole overlay without swallowing a path" do
+      command, options = options_for(["--bleeding-edge", "lib"])
+      expect(options[:bleeding_edge]).to be(true)
+      expect(command.instance_variable_get(:@argv)).to eq(["lib"])
+    end
+
+    it "parses --bleeding-edge=a,b into a feature-id list, trimming blanks" do
+      command, options = options_for(["--bleeding-edge=a, b ,", "lib"])
+      expect(options[:bleeding_edge]).to eq(%w[a b])
+      expect(command.instance_variable_get(:@argv)).to eq(["lib"])
+    end
+
+    it "maps --no-bleeding-edge to false" do
+      _, options = options_for(["--no-bleeding-edge", "lib"])
+      expect(options[:bleeding_edge]).to be(false)
+    end
+
+    describe "#apply_bleeding_edge_override (CLI-over-config precedence)" do
+      subject(:command) { described_class.new(argv: [], out: StringIO.new, err: StringIO.new) }
+
+      let(:configuration) { Rigor::Configuration.new("bleeding_edge" => true) }
+
+      it "returns the loaded configuration unchanged when the flag is unset" do
+        result = command.send(:apply_bleeding_edge_override, configuration, { bleeding_edge: :unset })
+        expect(result).to equal(configuration)
+      end
+
+      it "overrides the configured selection when the flag is given" do
+        result = command.send(:apply_bleeding_edge_override, configuration, { bleeding_edge: false })
+        expect(result.bleeding_edge).to eq("mode" => "none")
+        expect(configuration.bleeding_edge).to eq("mode" => "all")
+      end
+    end
+  end
 end

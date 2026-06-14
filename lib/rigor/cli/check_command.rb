@@ -35,6 +35,7 @@ module Rigor
         return CLI::EXIT_USAGE if buffer == :usage_error
 
         configuration = load_check_configuration(options)
+        configuration = apply_bleeding_edge_override(configuration, options)
         cache_root = configuration.cache_path
         handle_clear_cache(cache_root) if options.fetch(:clear_cache)
 
@@ -335,7 +336,13 @@ module Rigor
           # the human output; for GitLab / reviewdog-routed CIs, print a
           # one-line hint. On by default; `--no-ci-detect` (or
           # `RIGOR_CI_DETECT=0`) disables it.
-          ci_detect: true
+          ci_detect: true,
+          # ADR-50 § WD2 — the `--bleeding-edge[=ids]` / `--no-bleeding-edge`
+          # CLI mirror of the `bleeding_edge:` config key. `:unset` means "no
+          # flag — use the configured selection"; `true` adopts the whole
+          # overlay, `false` adopts none, and an Array of ids adopts only
+          # those (see `apply_bleeding_edge_override`).
+          bleeding_edge: :unset
         }
         parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = "Usage: rigor check [options] [paths]"
@@ -385,6 +392,18 @@ module Rigor
                   "ADR-51: do not auto-emit CI-native output when a CI environment is detected") do
             options[:ci_detect] = false
           end
+          # ADR-50 § WD2 — `=[LIST]` (not ` [LIST]`) so a bare `--bleeding-edge`
+          # never swallows a following positional path: `rigor check
+          # --bleeding-edge lib` adopts the whole overlay and checks `lib`.
+          opts.on("--bleeding-edge=[LIST]",
+                  "ADR-50: adopt the bleeding-edge overlay for this run " \
+                  "(all features, or a comma-separated feature-id list)") do |value|
+            options[:bleeding_edge] = value.nil? || value.split(",").map(&:strip).reject(&:empty?)
+          end
+          opts.on("--no-bleeding-edge",
+                  "ADR-50: ignore any configured bleeding_edge: selection for this run") do
+            options[:bleeding_edge] = false
+          end
         end
         parser.parse!(@argv)
         options
@@ -408,6 +427,20 @@ module Rigor
         data = data.dup
         data["plugins"] = inject_treat_all_as_inline_rbs(Array(data["plugins"]))
         Configuration.new(Configuration::DEFAULTS.merge(data))
+      end
+
+      # ADR-50 § WD2 — applies the `--bleeding-edge[=ids]` / `--no-bleeding-edge`
+      # CLI selection over the configured `bleeding_edge:` value, mirroring the
+      # CLI-over-config precedence `--workers` and `--no-cache` follow. `:unset`
+      # (no flag) leaves the loaded configuration untouched; any other value is
+      # normalised by {Configuration#with_bleeding_edge}, so the two
+      # `SeverityProfile.resolve` sites (and the worker path, which receives the
+      # whole frozen Configuration) see the run's selection.
+      def apply_bleeding_edge_override(configuration, options)
+        selection = options.fetch(:bleeding_edge)
+        return configuration if selection == :unset
+
+        configuration.with_bleeding_edge(selection)
       end
 
       def inject_treat_all_as_inline_rbs(entries)

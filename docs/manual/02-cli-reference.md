@@ -39,6 +39,8 @@ the `paths:` list from the configuration file.
 | `--no-baseline` | Ignore any configured baseline. |
 | `--baseline-strict` | Fail the run on any baseline drift — a CI gate. |
 | `--treat-all-as-inline-rbs` | Force-load `rigor-rbs-inline` with `require_magic_comment: false`, so every analysed file is treated as inline-RBS without the `# rbs_inline: enabled` comment (ADR-32). |
+| `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. The overlay is empty in this release, so this is currently a no-op. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
+| `--no-bleeding-edge` | Ignore any configured `bleeding_edge:` selection for this run (adopt none). |
 | `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. |
 
 Exit `0` when no error-severity diagnostics remain, `1` when

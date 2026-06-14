@@ -283,6 +283,44 @@ RSpec.describe Rigor::Configuration do
           expect(described_class.load(path).bleeding_edge).to eq("mode" => "list", "ids" => ["some-feature"])
         end
       end
+
+      it "stays Ractor.shareable? for every form (frozen ids for the list paths)" do
+        expect(Ractor.shareable?(config_with(true))).to be(true)
+        expect(Ractor.shareable?(config_with(%w[a b]))).to be(true)
+        expect(Ractor.shareable?(config_with("all" => true, "except" => ["x"]))).to be(true)
+      end
+
+      # ADR-50 § WD2 — the CLI mirror (`--bleeding-edge[=ids]`) overrides the
+      # configured selection for a single run via this method.
+      describe "#with_bleeding_edge" do
+        let(:base) { config_with(false) }
+
+        it "returns a sibling whose selection (and derived severity map) is replaced" do
+          expect(base.with_bleeding_edge(true).bleeding_edge).to eq("mode" => "all")
+          expect(base.with_bleeding_edge(%w[a b]).bleeding_edge).to eq("mode" => "list", "ids" => %w[a b])
+          expect(base.with_bleeding_edge(false).bleeding_edge).to eq("mode" => "none")
+        end
+
+        it "recomputes bleeding_edge_severity_overrides from the new selector" do
+          # The overlay is empty in this release, so every selection still maps
+          # to an empty severity overlay — the wiring, not a populated result,
+          # is what this pins.
+          expect(base.with_bleeding_edge(true).bleeding_edge_severity_overrides).to eq({})
+        end
+
+        it "leaves the receiver untouched and returns a frozen, shareable config" do
+          result = base.with_bleeding_edge(true)
+          expect(base.bleeding_edge).to eq("mode" => "none")
+          expect(result).to be_frozen
+          expect(Ractor.shareable?(result)).to be(true)
+        end
+
+        it "shares every other field with the receiver" do
+          result = base.with_bleeding_edge(true)
+          expect(result.paths).to equal(base.paths)
+          expect(result.severity_profile).to eq(base.severity_profile)
+        end
+      end
     end
 
     it "exposes an empty Configuration::Dependencies by default (ADR-10 slice 1)" do

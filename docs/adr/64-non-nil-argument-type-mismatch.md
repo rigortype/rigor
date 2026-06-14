@@ -9,8 +9,8 @@ protocol — now ships for **multi-overload** methods (WD1+WD2+WD3 below): the
 coerce-dispatch operators are excluded, and acceptance is decided on the RBS
 parameter type (`param_accepts_arg_class?`) over a single concrete RBS-known
 argument class. It met the gate it set for itself — **zero new firings across
-25 `rigor-survey` projects, with the mutation-teeth `type_swap` kill count
-rising** (kramdown 5 → 9, liquid 0 → 7). The pre-existing single-overload
+31 `rigor-survey` projects (including Mastodon's `app` + `lib`), with the
+mutation-teeth `type_swap` kill count rising** (kramdown 5 → 9, liquid 0 → 7). The pre-existing single-overload
 per-argument acceptance check is unchanged; the comparison operators it covers
 (`Integer#< : (Numeric)` is single-overload) keep their prior behaviour.
 
@@ -70,10 +70,10 @@ where **runtime acceptance is decidable from types alone** — where neither
 the added FP surface: a `rigor-survey` corpus pass showing the non-operator
 non-nil channel produces **real teeth with zero new corpus false positives** —
 the bar the nil channel cleared. The build (multi-overload channel) cleared it:
-a before/after diff over 25 `rigor-survey` projects (lib-bearing libraries +
-the algorithm corpora) found **zero new `call.argument-type-mismatch`
-firings**, while a `type_swap` mutation sweep rose from 5 → 9 kills on kramdown
-and 0 → 7 on liquid. The high-FP-risk surface (the bounded interface
+a before/after diff over 31 `rigor-survey` projects (lib-bearing libraries, the
+algorithm corpora, and the Mastodon `app` + `lib` headline FP benchmark) found
+**zero new `call.argument-type-mismatch` firings**, while a `type_swap` mutation
+sweep rose from 5 → 9 kills on kramdown and 0 → 7 on liquid. The high-FP-risk surface (the bounded interface
 resolution over a single RBS-known argument class) stayed silent on real code
 because correct programs pass correctly-typed arguments; the teeth appear only
 under mutation.

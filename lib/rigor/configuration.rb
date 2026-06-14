@@ -233,6 +233,9 @@ module Rigor
     # included files first (in declaration order), then the
     # current file's own keys override. Relative paths inside
     # each file are resolved against that file's directory.
+    # Public so the CLI can run the include-aware load before
+    # applying `--treat-all-as-inline-rbs`'s plugin injection
+    # (see {CLI::CheckCommand#load_check_configuration}).
     def self.load_with_includes(path, visited: Set.new)
       absolute = File.expand_path(path)
       raise ArgumentError, "circular include: #{absolute}" if visited.include?(absolute)
@@ -328,7 +331,7 @@ module Rigor
       out["source_inference"] = left_si + right_si unless both_empty # rigor:disable flow.always-truthy-condition
       out
     end
-    private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge,
+    private_class_method :merge_includes, :resolve_paths_in, :deep_merge,
                          :merge_value, :merge_dependencies_hash
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity

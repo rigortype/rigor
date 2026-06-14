@@ -550,6 +550,29 @@ RSpec.describe Rigor::CLI do
       end
     end
 
+    it "loads the include-aware config and still injects rigor-rbs-inline when a .rigor.yml exists" do
+      # Regression: `load_check_configuration` reached for
+      # `Configuration.load_with_includes`, which was
+      # `private_class_method` — so the moment a config file was
+      # present (the ternary's truthy branch) the flag crashed
+      # with `NoMethodError: private method 'load_with_includes'`.
+      # The no-config example above never exercises that branch.
+      write_check_fixture(".rigor.yml", <<~YAML)
+        paths:
+          - .
+      YAML
+      write_check_fixture("demo.rb", ascdesc_source)
+      Dir.chdir(tmpdir) do
+        status, out, err = run_cli("check", "--no-cache", "--no-stats",
+                                   "--format=json", "--treat-all-as-inline-rbs", "demo.rb")
+        expect(err).not_to match(/NoMethodError/)
+        expect(status).to eq(1)
+        payload = JSON.parse(out)
+        rules = payload.fetch("diagnostics").map { |d| d["rule"] }
+        expect(rules).to include("call.argument-type-mismatch")
+      end
+    end
+
     it "is a no-op without the flag (proves the flag changed behaviour)" do
       write_check_fixture("demo.rb", ascdesc_source)
       Dir.chdir(tmpdir) do

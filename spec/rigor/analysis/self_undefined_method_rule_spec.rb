@@ -123,6 +123,28 @@ RSpec.describe "call.self-undefined-method rule" do
     RUBY
   end
 
+  it "does not fire on a universal base (Object / BasicObject) — a self-type fallback, not a typo" do
+    # An implicit-self miss tagged `Object` / `BasicObject` means the engine
+    # fell back to the root self-type because it could not resolve the real
+    # class (a `class << self` / metaprogramming surface). Their method set is
+    # never project-complete, so a miss there is a resolution gap. (WD4 corpus
+    # eval: the dominant false-positive class — protobuf / tdiary, ~357 firings.)
+    expect(firings(<<~RUBY)).to be_empty
+      class Object
+        def my_helper
+          definitely_undefined_xyz
+        end
+      end
+    RUBY
+    expect(firings(<<~RUBY)).to be_empty
+      class BasicObject
+        def my_helper
+          definitely_undefined_xyz
+        end
+      end
+    RUBY
+  end
+
   it "does not fire on a `class X < Data.define(...)` member read" do
     expect(firings(<<~RUBY)).to be_empty
       class Money < Data.define(:amount)

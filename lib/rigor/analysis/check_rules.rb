@@ -803,7 +803,22 @@ module Rigor
           end
         end
 
+        # ADR-24 slice 4 — the universal bases. A recorded self-call miss tagged
+        # with one of these means the engine fell back to the root self-type
+        # because it could NOT resolve the real class (a class-body macro context
+        # where self is the Class object, top-level `main`, `instance_eval`, an
+        # FFI / `define_method` metaprogramming surface). Their instance method
+        # set is never "project-known and complete" — every object also responds
+        # to whatever the unresolved real class adds — so a miss there is a
+        # resolution gap, not a typo. This is the dominant false-positive class
+        # the WD4 corpus eval surfaced (protobuf 73 / tdiary 199 / pycall 10 /
+        # … FFI + class-macro calls, 287 firings across the corpus); excluding
+        # it is a pure narrowing.
+        SELF_UNDEFINED_UNIVERSAL_BASES = %w[Object BasicObject Kernel].to_set.freeze
+        private_constant :SELF_UNDEFINED_UNIVERSAL_BASES
+
         def confidently_closed_self_class?(class_name, scope)
+          return false if SELF_UNDEFINED_UNIVERSAL_BASES.include?(class_name)
           return false if unbounded_receiver_surface?(class_name, scope)
           return false if scope.discovered_method?(class_name, :method_missing, :instance)
           # A superclass or mixin extends the surface beyond what this file

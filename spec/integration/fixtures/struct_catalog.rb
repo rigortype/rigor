@@ -42,8 +42,15 @@ assert_type("3", point.new(x: 3, y: 4).x)
 assert_type("{ x: 1, y: 2 }", Struct.new(:x, :y).new(1, 2).to_h)
 assert_type("[1, 2]", Struct.new(:x, :y).new(1, 2).deconstruct)
 
-# SOUNDNESS: a `Struct` is mutable, so a member read off a STORED binding is
-# NOT folded to the construction-time value (a later `inst.foo = ...` could
-# have changed it). It degrades to `Dynamic[top]`, never a stale `1`.
+# ADR-48 slice 3 — a member read off a STORED binding folds once the local is
+# proven fold-safe (never mutated / aliased / escaped in its scope).
 stored = Struct.new(:foo).new(1)
-assert_type("Dynamic[top]", stored.foo)
+assert_type("1", stored.foo)
+
+# SOUNDNESS: a mutated binding is NOT fold-safe — a later setter could have
+# changed the member — so its read degrades to `Dynamic[top]`, never a stale 1.
+# (Alias / escape degradation is covered in struct_folding_spec, where the
+# heredoc source is immune to the auto-formatter stripping a "useless" alias.)
+mutated = Struct.new(:foo).new(1)
+mutated.foo = 9
+assert_type("Dynamic[top]", mutated.foo)

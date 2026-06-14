@@ -8,6 +8,7 @@ require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
+require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "indexed_narrowing"
 require_relative "method_dispatcher"
@@ -2690,6 +2691,14 @@ module Rigor
         fresh = seed_instance_ivars(fresh, singleton: singleton)
         fresh = seed_class_cvars(fresh)
         fresh = seed_program_globals(fresh)
+        # ADR-48 Struct slice 3 — install the method body's fold-safe-local set
+        # so a member read off a mutation-free local folds during the in-body
+        # walk (the call-return inference path is seeded separately).
+        fresh = fresh.with_struct_fold_safe(
+          StructFoldSafety.fold_safe_locals(
+            def_node.body, ->(name) { scope.struct_member_layout(name)&.[](:members) }
+          )
+        )
         bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
       end
 

@@ -1,9 +1,12 @@
 # Struct value folding — slice 3 (fold-safe bound locals) + slice 4 (precise mutated-member re-typing) design
 
-2026-06-15. Handoff for the deferred half of the [ADR-48](../adr/48-data-struct-value-folding.md)
-`Struct` follow-up. Slices 1 + 2 landed (the sound *transient* form); this
-note specifies the two deferred slices so the next implementer can pick them
-up without re-deriving the soundness argument.
+2026-06-15. **Slice 3 LANDED 2026-06-15** as designed below
+([`Inference::StructFoldSafety`](../../lib/rigor/inference/struct_fold_safety.rb)
++ the `Scope#struct_fold_safe?` field + the top-level / method-body wiring);
+this note is kept as its design record and the live spec for the still-deferred
+**slice 4** (precise mutated-member re-typing). Slices 1 + 2 landed earlier
+(the sound *transient* form). The soundness argument below is what the
+implementation realises.
 
 ## What landed (slices 1 + 2)
 

@@ -7,6 +7,7 @@ require_relative "../type"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "statement_evaluator"
+require_relative "struct_fold_safety"
 
 module Rigor
   module Inference
@@ -150,12 +151,27 @@ module Rigor
         # `table[node]` to type predicates; the second pass's
         # entry is the one that reflects all flow-derived
         # rebinds, so it MUST overwrite the first.
+        # ADR-48 Struct slice 3 — install the top-level fold-safe-local set so
+        # a member read off a mutation-free top-level struct binding folds.
+        seeded_scope = seed_struct_fold_safe(seeded_scope, root)
+
         on_enter = ->(node, scope) { table[node] = scope }
         StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter,
                                converged_loop_recording: converged_loop_recording).evaluate(root)
 
         propagate(root, table, seeded_scope)
         table
+      end
+
+      # ADR-48 Struct slice 3 — installs the top-level fold-safe-local set
+      # ({Inference::StructFoldSafety}). Struct member layouts of constant
+      # receivers are resolved through the side-table the seeded scope carries.
+      def seed_struct_fold_safe(seeded_scope, root)
+        seeded_scope.with_struct_fold_safe(
+          StructFoldSafety.fold_safe_locals(
+            root, ->(name) { seeded_scope.struct_member_layout(name)&.[](:members) }
+          )
+        )
       end
 
       # v0.0.2 #5 + ADR-24 slice 2 — seeds the three

@@ -220,21 +220,21 @@ module Rigor
           setter = member_setter_target(method_name, members)
           return args.first if setter && args.size == 1
 
-          fresh = fresh_receiver?(context)
+          foldable = foldable_receiver?(context)
 
           if members.key?(method_name) && args.empty? && !reader_overridden?(instance, method_name, context.scope)
-            # Stored receivers may have been mutated since materialisation —
-            # the member value is not soundly foldable, but the read itself is
-            # valid, so it degrades to `Dynamic[top]` (not nil -> no
-            # undefined-method fall-through on an anonymous instance).
-            return fresh ? members.fetch(method_name) : Type::Combinator.untyped
+            # A stored receiver folds only when the bound local is proven
+            # fold-safe (ADR-48 slice 3 — never mutated / aliased / escaped);
+            # otherwise the member value may be stale, so it degrades to
+            # `Dynamic[top]` (not nil -> no undefined-method fall-through).
+            return foldable ? members.fetch(method_name) : Type::Combinator.untyped
           end
 
-          # Projections fold only off a fresh (provably-unmutated) instance;
-          # off a stored binding they defer to Struct's RBS (`to_h` / `[]` /
-          # `members` / `deconstruct*` all exist on `Struct`), which is sound
-          # and non-regressive.
-          return nil unless fresh
+          # Projections fold only off a foldable (fresh, or proven fold-safe)
+          # instance; off any other stored binding they defer to Struct's RBS
+          # (`to_h` / `[]` / `members` / `deconstruct*` all exist on `Struct`),
+          # which is sound and non-regressive.
+          return nil unless foldable
 
           fold_fresh_projection(instance, method_name, args)
         end
@@ -261,16 +261,33 @@ module Rigor
           members.key?(base) ? base : nil
         end
 
+        # A member read is foldable when the receiver is either FRESH (the
+        # transient result of a `.new(...)`/`.with(...)` chain, which cannot
+        # have been mutated between materialisation and this read) or a
+        # FOLD-SAFE stored local (ADR-48 slice 3 — `StructFoldSafety` proved
+        # the binding is never mutated / aliased / escaped in its scope).
+        def foldable_receiver?(context)
+          fresh_receiver?(context) || fold_safe_local_receiver?(context)
+        end
+
         # A fresh receiver is the transient result of a chained call
-        # (`Point.new(1, 2).x`, `inst.with(x: 9).y`) — a value that cannot
-        # have been mutated between its materialisation and this read. A
-        # stored receiver (a variable / constant read) may have been mutated
-        # since binding, so its member map is not soundly foldable here.
+        # (`Point.new(1, 2).x`, `inst.with(x: 9).y`).
         def fresh_receiver?(context)
           node = context.call_node
           return false if node.nil?
 
           node.receiver.is_a?(Prism::CallNode)
+        end
+
+        # A fold-safe stored receiver is a local-variable read whose name the
+        # body's fold-safe set (on the scope) marks as never mutated.
+        def fold_safe_local_receiver?(context)
+          node = context.call_node
+          receiver = node&.receiver
+          scope = context.scope
+          return false unless receiver.is_a?(Prism::LocalVariableReadNode) && scope
+
+          scope.struct_fold_safe?(receiver.name)
         end
 
         # A `Struct` subclass body can redefine a member's synthesised

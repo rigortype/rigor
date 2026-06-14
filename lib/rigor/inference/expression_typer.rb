@@ -14,6 +14,7 @@ require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
 require_relative "narrowing"
+require_relative "struct_fold_safety"
 
 module Rigor
   module Inference
@@ -2382,7 +2383,19 @@ module Rigor
           environment: scope.environment,
           locals: locals.freeze,
           self_type: receiver,
-          discovery: scope.discovery
+          discovery: scope.discovery,
+          struct_fold_safe_locals: struct_fold_safe_locals_for(def_node.body)
+        )
+      end
+
+      # ADR-48 Struct slice 3 — the fold-safe-local set for a method body
+      # (runs only on a return-memo miss, so the per-call cost is bounded —
+      # measured perf-neutral). Struct member layouts of constant receivers
+      # are resolved through the discovery side-table the body scope inherits.
+      def struct_fold_safe_locals_for(body)
+        StructFoldSafety.fold_safe_locals(
+          body,
+          ->(name) { scope.struct_member_layout(name)&.[](:members) }
         )
       end
 

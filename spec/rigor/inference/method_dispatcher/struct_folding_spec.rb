@@ -61,22 +61,79 @@ RSpec.describe "Struct.new value folding", type: :runner do
     end
   end
 
-  describe "mutation soundness (the fresh-receiver gate)" do
-    it "does NOT fold a member read off a stored binding" do
-      # A `Struct` is mutable, so the construction-time value is not soundly
-      # foldable through a variable — it degrades to Dynamic, never a stale 1.
+  describe "mutation soundness" do
+    it "models a member setter as returning the assigned value" do
+      expect(dumped_types(<<~RUBY)).to eq(["5"])
+        c = Struct.new(:x)
+        p = c.new(1)
+        dump_type(p.x = 5)
+      RUBY
+    end
+
+    it "does NOT fold a member read off an unrecognised local-class binding" do
+      # `p = c.new(1)` where `c` is a local StructClass is conservatively not
+      # treated as a fold-safe materialisation (the scan resolves the constant
+      # and inline forms, not a local-class intermediate) — degrades, never
+      # a stale value.
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
         c = Struct.new(:x)
         p = c.new(1)
         dump_type(p.x)
       RUBY
     end
+  end
 
-    it "models a member setter as returning the assigned value" do
-      expect(dumped_types(<<~RUBY)).to eq(["5"])
-        c = Struct.new(:x)
-        p = c.new(1)
-        dump_type(p.x = 5)
+  describe "fold-safe bound locals (slice 3)" do
+    it "folds a member read off a never-mutated bound local" do
+      expect(dumped_types(<<~RUBY)).to eq(["1", "\"two\""])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, "two")
+        dump_type(p.x)
+        dump_type(p.y)
+      RUBY
+    end
+
+    it "folds a never-mutated bound local materialised inline" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        p = Struct.new(:x).new(1)
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "does NOT fold a bound local mutated through a setter" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        p.x = 9
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "does NOT fold a bound local that escapes through an alias" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        q = p
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "does NOT fold a bound local that escapes as a call argument" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        sink(p)
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "folds a fold-safe bound local inside a method body" do
+      expect(dumped_types(<<~RUBY)).to eq(["1"])
+        Point = Struct.new(:x, :y)
+        def reader
+          p = Point.new(1, 2)
+          dump_type(p.x)
+        end
       RUBY
     end
   end

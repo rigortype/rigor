@@ -147,6 +147,6 @@ for documentation.
 timeout and a response-size cap. The default stays `:disabled`.)
 - **Wire the boundary's cache descriptor into `Cache::Store`.**
   That's slice 6's job — plugin-side cache producers ride
-  `Store#fetch_or_compute(serialize:, deserialize:)` with
-  `PluginEntry` rows in the descriptor schema. Slice 2 only
-  builds the descriptor; nothing consumes it yet.
+  `Store#fetch_or_validate(serialize:, deserialize:)` (ADR-60 WD3
+  record-and-validate) with `PluginEntry` rows in the descriptor schema.
+  Slice 2 only builds the descriptor; nothing consumes it yet.

@@ -117,9 +117,17 @@ The result type unions the per-branch results. When the input
 is a finite literal union, Rigor proves the `else` branch is
 unreachable when every member is matched.
 
+The same narrowing also works in reverse: when a `when <Class>`
+clause is disjoint from the subject's type, or an earlier
+clause already covered it, the clause is dead — Rigor emits
+[`flow.unreachable-clause`](08-understanding-errors.md) so you
+can delete it. (It ships at `:info` under the default profile.)
+
 `case x; in pattern` (one-line pattern matching) narrows the
 same way for the patterns Rigor understands — class checks,
-literal equality, array / hash structural patterns.
+literal equality, array / hash structural patterns. The
+clause-reachability check extends to bare-class `in` patterns
+(`in String` / `in MyClass => x`) too.
 
 ## Boolean composition
 
@@ -197,6 +205,54 @@ def first_word(s)
                    # never nil — and Rigor knows it
 end
 ```
+
+## Hash key-presence narrowing
+
+When you guard on `h.key?(:foo)` (or `has_key?`) and `h` is a
+`HashShape` with `:foo` as an *optional* key, the truthy edge
+promotes that key to *required* — so reading it no longer
+includes `nil` for "key absent":
+
+```ruby
+def port_of(config)
+  # config: HashShape{ host: String, ?port: Integer }  (port optional)
+  if config.key?(:port)
+    # config[:port]: Integer  — the optional key is now required
+    config[:port] + 1
+  else
+    80
+  end
+end
+```
+
+This narrows only concrete `HashShape` carriers, never a
+`Dynamic[T]` hash, and only the truthy edge — a false `key?`
+does not prove much about the other keys.
+
+## Array non-empty narrowing
+
+A bare `arr.empty?` / `arr.any?` / `arr.none?` guard (no block,
+no arguments) refines an `Array[T]` to `non-empty-array[T]` on
+the edge that proves there is at least one element:
+
+```ruby
+def first_or_default(arr)
+  # arr: Array[String]
+  if arr.any?
+    # arr: non-empty-array[String]
+    arr.size      # positive-int — proven at least 1
+    arr.first     # String — Rigor already returns T here
+  else
+    "(empty)"
+  end
+end
+```
+
+`empty?` narrows the *false* edge (the array is NOT empty),
+`any?` / `none?` narrow as you would expect. As with the hash
+form, this fires only on a concrete `Array` carrier — never on
+`Dynamic[T]`, and never on the string / range `empty?` /
+`any?` that look the same syntactically.
 
 ## Named-capture regex narrowing
 

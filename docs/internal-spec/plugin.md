@@ -218,14 +218,23 @@ narrowing). ADR-37 Slice 2 splits those two consumption sites into two
 narrow, declaratively-gated class DSLs — the `producer`-style shape, so
 the block carries logic and runs through `instance_exec`:
 
-- `dynamic_return(receivers:) { |call_node, scope| Type | nil }` — the
-  per-call-site **return type**, gated on the receiver's class. The
-  engine calls the block only when the call's receiver type's class
-  equals or inherits from a declared `receivers:` entry (matched via
-  `Environment#class_ordering`); first non-`nil` wins. The engine
-  invokes it through `#dynamic_return_type(call_node:, scope:,
-  receiver_type:)`. `rigor-mangrove` (unwrap → carried `type_args[0]`)
-  is the worked consumer.
+- `dynamic_return(receivers:, methods:, file_methods:) { |call_node,
+  scope| Type | nil }` — the per-call-site **return type**, gated on the
+  receiver's class, the method name, or both (at least one gate is
+  REQUIRED — a rule gated on neither would fire on every dispatch, which
+  `dynamic_return` rejects at load). With `receivers:` (a non-empty
+  `Array` of class names, or a `-> { … }` callable resolved once per run
+  after `#prepare`, ADR-52 slice 3) the engine calls the block only when
+  the call's receiver type's class equals or inherits from a declared
+  entry (matched via `Environment#class_ordering`). `methods:` (an
+  `Array` of Symbol/String names, or a run-time callable, ADR-52 slice 4)
+  gates on `call_node.name`; `file_methods:` (a callable receiving the
+  path, memoised per `(rule, path)`, ADR-52 slice 5a) is its per-file
+  specialisation for a name set that varies by analysed file
+  (rigor-rspec's `let` names) and replaces `methods:`. First non-`nil`
+  wins. The engine invokes it through `#dynamic_return_type(call_node:,
+  scope:, receiver_type:)`. `rigor-mangrove` (unwrap → carried
+  `type_args[0]`) is the worked consumer.
   - **Binary operators are ordinary calls here.** Ruby's `a + b` parses
     to a `Prism::CallNode` named `:+`, so it reaches this hook like any
     other call: a `dynamic_return(receivers: ["Money"])` rule can branch
@@ -610,8 +619,9 @@ following are now in place and are documented in their own specs:
   declarative {Rigor::Plugin::TrustPolicy} + {Rigor::Plugin::IoBoundary}
   surface; see [`plugin-trust.md`](plugin-trust.md).
 - **Plugin-side cache producers.** Slice 6 wires
-  `Store#fetch_or_compute` for plugins via `PluginEntry`
-  descriptors; see [`plugin-cache-producers.md`](plugin-cache-producers.md).
+  `Store#fetch_or_validate` (ADR-60 WD3 record-and-validate) for plugins
+  via `PluginEntry` descriptors; see
+  [`plugin-cache-producers.md`](plugin-cache-producers.md).
 - **Cross-plugin facts + pre-pass.** `#prepare(services)` +
   `services.fact_store` + `manifest(produces:/consumes:)` shipped in
   v0.1.1 (ADR-9). The extension fields in the `Manifest` table above

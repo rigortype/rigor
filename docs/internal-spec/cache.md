@@ -1,13 +1,15 @@
 # Cache Layer — `Rigor::Cache`
 
-Status: **Stable (introduced v0.0.8; current descriptor schema v3).**
+Status: **Stable (introduced v0.0.8; current descriptor schema v4).**
 This document tracks the cache layer's public read shape. The
 slices below all landed and are stable across v0.1.x; the descriptor
 `SCHEMA_VERSION` was bumped to `2` for the ADR-10 per-gem-version
-`dependencies` slot, and to `3` when `RbsLoader.build_env_for` began
+`dependencies` slot, to `3` when `RbsLoader.build_env_for` began
 synthesizing missing `signature_paths:` namespaces (so an RBS env
 marshalled by an older Rigor — which would leave those signatures
-inert — is rebuilt). Slices 1–2 are in place:
+inert — is rebuilt), and to `4` when [ADR-60](../adr/60-pre-freeze-plugin-contract-consolidation.md)
+WD3 added the `globs` slot (`GlobEntry`) for the record-and-validate
+plugin-producer cache. Slices 1–2 are in place:
 `Rigor::Cache::Descriptor` (the substrate every cached value
 attaches to) and `Rigor::Cache::Store` (the filesystem-backed
 storage that consumes a descriptor + producer + params and
@@ -22,7 +24,7 @@ The schema this module implements is fixed by:
 
 ## `Rigor::Cache::Descriptor` (v0.0.8 slice 1)
 
-The cache invalidation descriptor — a pure value object with four
+The cache invalidation descriptor — a pure value object with six
 slots, every slot an array of typed entries.
 
 ### Slot entries
@@ -33,6 +35,7 @@ GemEntry        :: { name: String, requirement: String, locked: String? }
 PluginEntry     :: { id: String, version: String, config_hash: String? }
 ConfigEntry     :: { key: String, value_hash: String }
 DependencyEntry :: { gem_name: String, gem_version: String, mode: :disabled|:when_missing|:full }
+GlobEntry       :: { root: String, pattern: String, value: String }
 ```
 
 Each entry is constructed via keyword arguments and frozen
@@ -44,8 +47,12 @@ convention). `DependencyEntry` is the ADR-10 per-gem-version slot:
 its `(gem_name, gem_version, mode)` triple keys the opt-in
 dependency-source-inference cache slice so a `Gemfile.lock` bump or a
 `source_inference:` mode change ([`dependency-source-inference.md`](dependency-source-inference.md)) invalidates exactly the affected gems.
+`GlobEntry` is the ADR-60 WD3 record-and-validate slot: its `value`
+is a digest of every file matching `root`/`pattern` (built via
+`GlobEntry.compute`), re-validated by re-globbing so a plugin producer's
+`watch:` glob coverage stays fresh across edits.
 
-### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [])`
+### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [], globs: [])`
 
 Constructs a descriptor. Every slot defaults to an empty array;
 slots are duped and frozen so callers cannot mutate after
@@ -66,6 +73,10 @@ composition rule per slot is **union by key**:
 - `plugins` group by `id`. Same equality rule on
   `(version, config_hash)`.
 - `configs` group by `key`. Same equality rule on `value_hash`.
+- `dependencies` group by `gem_name`. Same equality rule on
+  `(gem_version, mode)`.
+- `globs` group by `slot_key` (`root` + `pattern`). Same equality
+  rule on `value`.
 
 A single contributor that adds duplicate equal entries to its
 own descriptor is harmless — `compose` collapses them. Conflicts
@@ -78,11 +89,12 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `3` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `4` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
-   synthesizing missing `signature_paths:` namespaces).
-   Bumping this constant invalidates every cached value.
+   synthesizing missing `signature_paths:` namespaces; v4 added the
+   `globs` slot for the ADR-60 WD3 record-and-validate plugin-producer
+   cache). Bumping this constant invalidates every cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
 3. `params` (the producer's input hash). Recursively
@@ -98,9 +110,10 @@ keys, regardless of construction order.
 
 Returns the descriptor as a canonical-JSON byte string (UTF-8,
 binary-encoded for transport). Slots appear in lexicographic
-order (`configs`, `files`, `gems`, `plugins`); entries within
-each slot are sorted by their key field (`path` for files, etc.)
-so two equivalent descriptors produce identical bytes.
+order (`configs`, `dependencies`, `files`, `gems`, `globs`,
+`plugins`); entries within each slot are sorted by their key field
+(`path` for files, `(root, pattern)` for globs, etc.) so two
+equivalent descriptors produce identical bytes.
 
 ### Equality and hashing
 
@@ -126,11 +139,16 @@ Filesystem-backed cache store. ADR-6 § "Decisions in detail" fixes
 the contract; this section documents the public read shape that
 producers and the CLI consume.
 
-### `Store.new(root:)`
+### `Store.new(root:, read_only: false, max_bytes: nil)`
 
 Constructs a store rooted at `root` (a directory path, typically
 `.rigor/cache`). The directory is not created eagerly — the first
 write materialises it along with the `schema_version.txt` marker.
+`read_only:` suppresses every write (so a worker can share a parent's
+cache without racing it); `max_bytes:` caps the on-disk size and
+arms the LRU `#evict!` pass (the production default is 256 MB, set by
+the CLI per [ADR-54](../adr/54-cache-slimming.md) WD3 — `nil` here
+leaves the cache unbounded).
 
 ### `store.fetch_or_compute(producer_id:, params:, descriptor:, serialize: nil, deserialize: nil) { ... } -> Object`
 
@@ -164,6 +182,30 @@ The single producer-facing entry point.
 Returns the cached value (loaded from disk on hit; produced by
 the block on miss).
 
+### `store.fetch_or_validate(producer_id:, key_descriptor:, params: {}, serialize: nil, deserialize: nil) { ... } -> Object`
+
+The record-and-validate variant ([ADR-45](../adr/45-unchanged-project-fast-path.md)).
+Unlike `fetch_or_compute` — which keys the entry on the descriptor of
+its inputs, so every input MUST be known before the producer runs —
+this keys on `key_descriptor` (only the stable inputs known up front)
+and stores, alongside the value, a `dependency_descriptor` of the
+files the value actually read, **including inputs discovered DURING
+the computation** (e.g. a plugin reading a project file mid-analysis).
+The block MUST return `[value, dependency_descriptor]`. On the next
+run the stored dependency descriptor is re-validated against the
+filesystem via `Descriptor#fresh?` — every recorded `FileEntry` /
+`GlobEntry` must still match — and a stale dependency forces a
+recompute. A write that is not `Marshal`-clean (or any disk error)
+is swallowed: the freshly-computed value is returned and the next run
+recomputes. This is the sound successor to a pre-analysis fingerprint,
+which would go stale when a plugin reads files Rigor cannot see up
+front.
+
+`Descriptor#fresh?` considers a descriptor fresh only when its
+`gems` / `plugins` / `configs` / `dependencies` slots are all empty
+(those non-file inputs belong in the cache *key*, not the validated
+set); a descriptor carrying any of them is never fresh.
+
 ### Read fault tolerance
 
 A read encountering any of the following silently returns a
@@ -187,7 +229,7 @@ boundary, per ADR-2's trusted-gem trust model.
 `<root>/schema_version.txt` carries
 `Store.schema_marker_value` —
 `"<Descriptor::SCHEMA_VERSION>.<Store::FORMAT_VERSION>"`
-(currently `3.2`), covering both invalidation axes: the
+(currently `4.2`), covering both invalidation axes: the
 descriptor schema and the on-disk byte layout. Checked once per
 `Store` instance (first `fetch_or_compute` / `fetch_or_validate`):
 
@@ -503,7 +545,7 @@ counters from the runner's `Cache::Store`. Output sample:
 
 ```
 Cache (root: .rigor/cache)
-  schema_version: 1
+  schema_version: 4.2
   3 entries, 12.4 KiB
     rbs.constant_type_table: 1 entries, 11.0 KiB
     reflection.instance_method_definition: 2 entries, 1.4 KiB

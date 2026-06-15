@@ -1,13 +1,23 @@
 # Flow Contribution Bundle — `Rigor::FlowContribution`
 
 Status: **Public read shape (v0.0.9 group B).** This document
-fixes the surface every flow-contribution producer (built-in
-narrowing rules today, `RBS::Extended` annotations and plugin
-authors after v0.1.0) hands the analyzer at a single call edge.
-The merge policy that consumes these bundles is owned by
+fixes the bundle shape internal flow-contribution producers
+(built-in narrowing rules and `RBS::Extended` annotations) carry
+at a single call edge. The merge policy that consumes these
+bundles is owned by
 [ADR-2 § "Plugin Contribution Merging"](../adr/2-extension-api.md);
 v0.0.9 ships only the bundle struct itself — the merger lands
 alongside the plugin API in v0.1.0.
+
+**Plugins no longer construct this bundle.** ADR-37 replaced the
+plugin-authored bundle hook with the narrow `dynamic_return`
+(returns a bare `Type`) and `type_specifier` (returns facts)
+DSLs, and ADR-52 WD3 deleted the underlying `flow_contribution_for`
+hook outright. A plugin's `dynamic_return` result is wrapped into
+a `FlowContribution` *by the engine*
+(`MethodDispatcher#collect_gated_contributions`) before it reaches
+the merger; the bundle is therefore an analyzer-internal carrier
+for the merge tiers, not a plugin-author surface.
 
 ## Public surface
 

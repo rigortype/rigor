@@ -142,6 +142,22 @@ assert_type("3", p.x)
 assert_type("4", p.y)
 ```
 
+Member reads are not the only thing that folds. The standard
+`Data` projections stay precise too — `p[:x]`, `p.to_h`,
+`p.deconstruct`, `p.members`, and `p.with(x: 9)` all carry the
+per-member types through:
+
+```ruby
+p.to_h            # HashShape{x: 3, y: 4}
+p.members         # Tuple[Constant<:x>, Constant<:y>]
+p.with(x: 9).x    # Constant<9>
+```
+
+The folding covers all three definition forms — a constant
+(`Point = Data.define(...)`), the `class X < Data.define(...)`
+subclass idiom, and a bare local — and both positional and
+keyword construction.
+
 The discovery walks `define_method`-style block bodies too,
 so `Point = Data.define(:x, :y) do ... end` still works,
 including a block-defined `def initialize(...)` whose

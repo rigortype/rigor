@@ -165,6 +165,38 @@ kind(:nope)    # Constant<nil>  — the implicit nil from
 `return` mid-body works as expected; explicit `raise` excludes
 that branch from the union (a `bot` carrier internally).
 
+### Recursive methods
+
+A recursive method infers a precise return type rather than
+collapsing to `Dynamic[Top]`. When the recursive call has
+fully-constant arguments, Rigor unrolls it (under a hard frame
+budget) and folds the result:
+
+```ruby
+def factorial(n)
+  n <= 1 ? 1 : n * factorial(n - 1)
+end
+
+factorial(5)   # Constant<120>
+```
+
+When the arguments are not constant, Rigor reaches a fixpoint
+*return summary* instead — so a pass-through recursion returns
+the right type rather than a contaminated one:
+
+```ruby
+def last_step(n)
+  n <= 0 ? :done : last_step(n - 1)
+end
+
+last_step(some_int)   # Constant<:done>
+```
+
+Both paths are hard-capped and degrade to the previous
+base-type behaviour when they cannot converge. Mutual
+recursion across two methods terminates, degrading to a safe
+`Dynamic[Top]` floor where a precise summary is unavailable.
+
 ## `def.return-type-mismatch`
 
 When a method has both an RBS-declared return type and an
@@ -261,12 +293,40 @@ assert_type("100", x)  # outer x untouched
 ## Closure escape and captured locals
 
 When a block captures an outer local, the block's writes to
-that local affect the post-call view of the local. For known
-non-escaping methods (`Array#each`, `tap`, …) the post-call
-narrowing is preserved; for escaping methods (`Thread.new`,
-`define_method`, …) the analyzer drops the narrowing on
-captured locals because the block could fire arbitrarily
-later.
+that local flow back into the post-call view of the local. For
+known non-escaping methods (`Array#each`, `tap`, …) the
+write-back is applied; for escaping methods (`Thread.new`,
+`define_method`, …) the analyzer drops captured-local facts
+because the block could fire arbitrarily later.
+
+The write-back covers both *rebinding* a local and *mutating a
+collection* the block was building up. A rebound accumulator
+widens to its base type rather than keeping a stale seed, and a
+collection grown inside the block carries the appended element
+types:
+
+```ruby
+total = 0
+[1, 2, 3].each { |n| total += n }
+# total: Integer  — the rebind is written back (not a stale 0)
+
+out = [0]
+[1, 2, 3].each { |x| out << x }
+# out: Array[Integer]  — the appended element type joins in,
+#                        not just the seed's Constant<0>
+
+squares = [1, 2, 3].each_with_object([]) { |n, acc| acc << n * n }
+# squares: Array[Integer]
+```
+
+The same write-back applies to `while` / `until` loop
+bodies — an accumulator a loop rebinds no longer keeps a stale
+single-pass constant. The analysis runs the body to a small
+fixpoint and widens (it never folds a loop accumulator to a
+value the runtime would exceed). A `for` loop joins a single
+body pass rather than running this fixpoint. For an *escaping* or unknown
+block that mutates a captured collection, the local widens to
+its bare-collection floor instead of an unsoundly-precise seed.
 
 This is the conservative call: better to widen too much than
 to claim narrowed-after-escape facts that the runtime might

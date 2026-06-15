@@ -44,8 +44,8 @@ value object).
 
 ### Methods
 
-- `Rigor::Reflection.instance_method_definition(class_name, method_name, scope: Scope.empty)` — RBS `RBS::Definition::Method` for the instance method, or `nil` when the class or method is not in RBS.
-- `Rigor::Reflection.singleton_method_definition(class_name, method_name, scope: Scope.empty)` — RBS-side singleton (class-side) method definition, or `nil`.
+- `Rigor::Reflection.instance_method_definition(class_name, method_name, scope: nil, environment: nil)` — RBS `RBS::Definition::Method` for the instance method, or `nil` when the class or method is not in RBS.
+- `Rigor::Reflection.singleton_method_definition(class_name, method_name, scope: nil, environment: nil)` — RBS-side singleton (class-side) method definition, or `nil`.
 - `Rigor::Reflection.instance_definition(class_name, scope: nil, environment: nil)` — the full instance-side `RBS::Definition` (whole method table / member list), or `nil`. For callers that walk the class rather than one method.
 - `Rigor::Reflection.singleton_definition(class_name, scope: nil, environment: nil)` — the full singleton-side `RBS::Definition`, or `nil`.
 - `Rigor::Reflection.class_type_param_names(class_name, scope: nil, environment: nil)` — the RBS-declared type-parameter names as `Array<Symbol>` (e.g. `[:Elem]` for `Array[Elem]`), or `[]` for a non-generic or unknown class. Used when binding generic method types to a concrete receiver.

@@ -102,7 +102,7 @@ Rigor sees a tightening.
 
 `RBS::Extended` lives at
 [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md).
-The five directives:
+The per-method directives:
 
 | Directive | Says |
 | --- | --- |
@@ -136,6 +136,30 @@ A short reference:
 | Paired complements | `non-lowercase-string`, `non-uppercase-string`, `non-numeric-string` |
 | Composed | `non-empty-lowercase-string`, `non-empty-uppercase-string`, `non-empty-literal-string` |
 | Shape projections | `pick_of[T, K]`, `omit_of[T, K]`, `partial_of[T]`, `required_of[T]`, `readonly_of[T]` — derive new `HashShape` / `Tuple` carriers from existing ones. See [chapter 4 § "Deriving new shapes"](04-tuples-and-shapes.md#deriving-new-shapes--pick_of--omit_of--partial_of--required_of--readonly_of). |
+
+## Declaring conformance — `conforms-to`
+
+The directives above attach to a `def`. One more attaches to a
+`class` / `module` declaration and asserts the whole class
+satisfies a named structural interface, as a checked design
+assertion — whether or not any call site exercises it:
+
+```rbs
+%a{rigor:v1:conforms-to _RewindableStream}
+class MyBuffer
+  def read: (Integer) -> String
+  def rewind: () -> void
+end
+```
+
+If `MyBuffer` is missing a method the `_RewindableStream`
+interface requires (or the signature is incompatible), Rigor
+reports `rbs_extended.unsatisfied-conformance`; a class that
+satisfies the interface is silent. Multiple `conforms-to`
+directives on one class combine like an intersection of
+interfaces. The directive is purely additive — implicit
+structural compatibility at call sites keeps working with or
+without it.
 
 ## Worked example: an assertion gate
 

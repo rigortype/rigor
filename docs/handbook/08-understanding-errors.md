@@ -33,6 +33,29 @@ fires, when it doesn't, the suppression token, the authored
 severity, and the per-profile severity. `rigor explain` with
 no argument prints the index of every shipped rule.
 
+### Confidence and reference fields
+
+Two extra fields ride along on every built-in diagnostic, for
+agents and dashboards consuming `rigor check --format json`
+(and on each rule in `rigor explain --format json`):
+
+- **`evidence_tier`** — `high` / `medium` / `low`: Rigor's own
+  confidence that the firing is a true positive, derived from
+  the rule's gates, not its severity. `high` means a concrete,
+  statically-known type with no metaprogramming escape (e.g.
+  `call.undefined-method`); `medium` rests on a flow / inference
+  proof with a documented false-positive envelope (e.g.
+  `flow.always-truthy-condition`); `low` is a resolution- or
+  coverage-gap signal that often means missing context rather
+  than a bug (e.g. `call.unresolved-toplevel`). The tier never
+  feeds severity — that stays the `severity_profile:` decision.
+  Informational helpers (`dump.type`) carry no tier.
+- **`documentation_url`** — a stable link to the rule's entry in
+  the published diagnostics catalogue.
+
+Both are presentation metadata. They never change whether a
+diagnostic fires.
+
 ## The rule catalogue
 
 Five families, each with one or more rules:
@@ -62,7 +85,19 @@ Fire when the control flow itself is unsound.
 | `flow.always-raises` | Every reachable evaluation of an expression raises (e.g. `n / 0` where `n: Integer`). | error |
 | `flow.unreachable-branch` | An `if` / `unless` / ternary's predicate is a syntactic literal AND the corresponding dead branch is non-empty. | warning |
 | `flow.always-truthy-condition` | The predicate of an `if` / `unless` / ternary is provably truthy (or falsey) by inferred type, with surgical skips inside loop bodies and on defensive predicate calls. | warning |
+| `flow.unreachable-clause` | A `case <local>; when <Class>` (or bare-class `case`/`in`) clause whose subject narrowing proves it can never match — disjoint from the subject's type, or already exhausted by an earlier clause. | info under `balanced`, warning under `strict`, info under `lenient` |
 | `flow.dead-assignment` | A plain local-variable write whose target name is never read in the same `def` body. | warning |
+
+`flow.unreachable-branch`, `flow.always-truthy-condition`, and
+`flow.unreachable-clause` are the **reachability family** — each
+proves a branch or `case` clause is dead. `unreachable-clause`
+is the newest member: it watches `case <local>; when <Class>`
+(and bare-class `case`/`in`) and fires when an earlier clause
+already covered a member's type or the clause is disjoint from
+the subject. It ships at `:info` under `balanced` (one notch
+below its siblings) while its corpus false-positive gate
+finishes; bump it with `severity_overrides:` if you want it
+louder.
 
 ### `def.*` — method-definition rules
 

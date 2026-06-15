@@ -146,9 +146,12 @@ The four parallel carriers translate to / from `Fact`:
 - **Built-in narrowing facts** — slice 4 implementer adds the
   translation when wiring `Inference::Narrowing` through the
   merger.
-- **Plugin contributions** — slice 5's emission protocol
-  returns `FlowContribution` bundles whose `truthy_facts` /
-  `falsey_facts` slots are already `Fact` arrays.
+- **Plugin contributions** — a plugin's `type_specifier` block
+  (ADR-37; the original `flow_contribution_for` hook was deleted in
+  ADR-52 WD3) returns a `Fact` array, which the engine wraps into a
+  `FlowContribution`'s `post_return_facts` slot before the merge; a
+  `dynamic_return` block returns a bare `Type` the engine wraps into
+  the `return_type` slot.
 
 ## Authority tiers
 

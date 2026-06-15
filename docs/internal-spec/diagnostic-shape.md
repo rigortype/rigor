@@ -26,16 +26,41 @@ page is only about the object's field shape.
 | `severity` | `Symbol` | The *authored* severity (`:error` / `:warning` / `:info`) before profile re-stamping ([severity resolution](../type-specification/diagnostic-policy.md#severity-resolution)). |
 | `rule` | `String?` | Stable kebab-case rule id (`call.undefined-method`). `nil` for diagnostics not produced by `CheckRules` (parse errors, path errors, internal-analyzer errors) — a `nil`-rule diagnostic is **unsuppressible**. |
 | `source_family` | `Symbol` | The rule's producer. Default `:builtin`; non-default families carry provenance (`"plugin.<id>"`, `:rbs_extended`, `:generated`). |
-| `receiver_type` | `String?` | Structured field — the rendered receiver type for call-related rules; `nil` otherwise. |
-| `method_name` | `String?` | Structured field — the called method name for call-related rules; `nil` otherwise. |
+| `receiver_type` | `String?` | Structured field — the rendered receiver type for call/def rules with a dispatch subject; `nil` otherwise. |
+| `method_name` | `String?` | Structured field — the called / defined method name for call/def rules with a dispatch subject; `nil` otherwise. |
 | `project_definition_site` | `String?` | `"path:line"` set by `call.undefined-method` when the project itself defines the called method elsewhere in the analysed set (a reopened class the dispatcher does not apply cross-file). `nil` for every other diagnostic. |
 
 `receiver_type` / `method_name` exist so `rigor triage`'s recognisers
-([ADR-23](../adr/23-diagnostic-triage-command.md)) read the structured pair
-instead of parsing the message; a consumer that finds them `nil` falls
-back to message parsing. `project_definition_site`'s presence is the
+([ADR-23](../adr/23-diagnostic-triage-command.md)) and the ADR-61
+agent-statistics workflow read the structured pair instead of parsing the
+message; a consumer that finds them `nil` falls back to message parsing.
+They are populated by the call/def rules that have a dispatch subject (e.g.
+`call.undefined-method`, the arity/argument rules, the `def.*` override
+rules) and stay `nil` for the `flow.*` and ivar rules, which have no
+receiver/method subject ([ADR-61](../adr/61-agent-friendly-diagnostic-statistics.md)
+WD4). `project_definition_site`'s presence is the
 high-confidence "project monkey-patch, not a bug" signal triage keys on to
 recommend `pre_eval:` ([ADR-17](../adr/17-monkey-patch-pre-evaluation.md)).
+
+## Per-rule JSON enrichment (`evidence_tier` / `documentation_url`)
+
+Two further fields surface in the `rigor check --format json` diagnostic
+stream but are **not** carried on the `Diagnostic` object itself — they
+are *per-rule* properties of `Rigor::Analysis::RuleCatalog`, derived purely
+from the rule id, that the CLI JSON path enriches onto each built-in
+diagnostic ([ADR-65](../adr/65-diagnostic-evidence-tier-and-doc-url.md)):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `evidence_tier` | `String?` | Rigor's own confidence a firing is a true positive: `"high"` / `"medium"` / `"low"`. **Omitted** (absent) for informational rules that carry no tier. Orthogonal to `severity`; it never gates. |
+| `documentation_url` | `String` | Stable per-rule URL into the published diagnostics catalogue (`docs/manual/04-diagnostics.md#…`). |
+
+Both are enriched in `CLI::CheckCommand#enrich_json` only for diagnostics
+whose `source_family` is the default `:builtin` and whose `rule` is
+non-`nil`; plugin / `rbs_extended` / parse-error diagnostics are left
+untouched (they host their own documentation and confidence). The same
+two fields appear on each `Entry#to_h` exposed by `rigor explain`
+/ `rigor explain --format json`.
 
 ## Construction and position convention
 

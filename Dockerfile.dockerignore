@@ -1,0 +1,13 @@
+# Dockerfile-scoped ignore (BuildKit reads `<Dockerfile>.dockerignore`
+# in preference to a repo-wide `.dockerignore`). The image installs
+# rigortype from RubyGems and copies nothing from the build context,
+# so keeping the context empty makes `docker build` fast.
+#
+# This lives next to `Dockerfile` rather than as a top-level
+# `.dockerignore` on purpose: a repo-wide `.dockerignore` is inherited
+# by external tools that embed the rigor source via BuildKit
+# `--build-context`, which would hand them a 2-byte (empty) context and
+# break their build. Scoping it to this Dockerfile keeps rigor's own
+# image build identical while leaving downstream source consumers
+# unaffected.
+*

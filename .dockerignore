@@ -1,3 +1,0 @@
-# The image installs rigortype from RubyGems and copies nothing
-# from the build context — keep the context empty so builds are fast.
-*

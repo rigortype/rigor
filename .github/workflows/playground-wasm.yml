@@ -64,7 +64,7 @@ jobs:
       # the ~30-minute cold build. Keyed on the ruby_wasm version + the wasm
       # build inputs.
       - name: Cache ruby_wasm toolchain + build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: plugins/rigor-playground/wasm/build
           key: ruby-wasm-${{ runner.os }}-${{ hashFiles('plugins/rigor-playground/wasm/Gemfile') }}
@@ -86,7 +86,7 @@ jobs:
       # Always keep the artifact even without R2 secrets, so the build is
       # verifiable on PRs and forks.
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rigor-playground-wasm-${{ steps.ver.outputs.v }}
           path: plugins/rigor-playground/wasm/rigor-playground.wasm

@@ -27,7 +27,7 @@ module Rigor
     #
     # For a successfully resolved `String` value:
     # - empty string  → no refinement (fall through to RBS `String`)
-    # - decimal digits only  → `numeric-string`
+    # - a Ruby numeric literal  → `numeric-string`
     # - non-empty otherwise  → `non-empty-string`
     #
     # **Exclusion set** (`RUNTIME_INSPECTION_EXCLUDED`):
@@ -104,7 +104,11 @@ module Rigor
       # @param value [String] a non-empty string
       # @return [Rigor::Type]
       def self.classify_string(value)
-        value.match?(/\A\d+\z/) ? NUMERIC_STRING : NON_EMPTY_STRING
+        if Type::Refined.ruby_numeric_literal?(value)
+          NUMERIC_STRING
+        else
+          NON_EMPTY_STRING
+        end
       end
       private_class_method :classify_string
     end

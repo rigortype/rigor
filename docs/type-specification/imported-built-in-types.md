@@ -23,7 +23,7 @@ This document defines the reserved built-in **names** Rigor uses for refinements
 | --- | --- | --- |
 | `non-empty-string` | `String` except `""` | `String` |
 | `literal-string` | String known to come from source literals and literal-only composition. v0.0.9 tracks the carrier through string interpolation `"#{...}"`, through `String#+` / `String#*` whose every operand is itself literal-bearing, and through the mutating composition methods `String#<<` / `String#concat` (whose return value is the receiver, so a literal-bearing receiver with literal-bearing args stays literal-string). | `String` |
-| `numeric-string` | String accepted by Rigor's Ruby numeric-string predicate | `String` |
+| `numeric-string` | String that is a single, complete Ruby numeric literal — exactly the syntax that, written in Ruby source, evaluates to a `Numeric`. Spans decimal / `0x` / `0o` (or leading-zero) / `0b` / `0d` integers, underscore digit separators (`1_000`), decimal and scientific floats (`1.5`, `1E-5`), and the `r` rational / `i` imaginary suffixes (`1r`, `2i`), with at most one leading sign. A doubled sign (`--1`), multi-dot junk (`1.2.3`), whitespace padding, or a non-ASCII "digit" (full-width `１`, superscript `²`) is rejected — Ruby's lexer accepts only `[0-9]` in a numeric literal. The predicate delegates to the real Ruby parser. The base-N int-string refinements below are proper subsets. | `String` |
 | `decimal-int-string` | String accepted by Rigor's Ruby decimal-integer-string predicate | `String` |
 | `octal-int-string` | String accepted by Rigor's Ruby octal-integer-string predicate | `String` |
 | `hex-int-string` | String accepted by Rigor's Ruby hex-integer-string predicate | `String` |

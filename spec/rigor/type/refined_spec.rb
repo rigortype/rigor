@@ -81,12 +81,56 @@ RSpec.describe Rigor::Type::Refined do
       expect(r.matches?("Hello")).to be(false)
     end
 
-    it "recognises numeric-string Constants the predicate accepts" do
+    it "recognises every Ruby numeric-literal form as numeric-string" do
       r = Rigor::Type::Combinator.numeric_string
+      # integers (decimal / hex / octal / binary / 0d / underscores)
       expect(r.matches?("42")).to be(true)
+      expect(r.matches?("0xff")).to be(true)
+      expect(r.matches?("0o17")).to be(true)
+      expect(r.matches?("017")).to be(true)
+      expect(r.matches?("0b101")).to be(true)
+      expect(r.matches?("0d99")).to be(true)
+      expect(r.matches?("1_000")).to be(true)
+      # floats (fraction + scientific)
+      expect(r.matches?("3.14")).to be(true)
       expect(r.matches?("-3.14")).to be(true)
-      expect(r.matches?("0xff")).to be(false)
+      expect(r.matches?("1E-5")).to be(true)
+      expect(r.matches?("1.0e10")).to be(true)
+      # rational / imaginary suffixes
+      expect(r.matches?("1r")).to be(true)
+      expect(r.matches?("1.5r")).to be(true)
+      expect(r.matches?("2i")).to be(true)
+      expect(r.matches?("0xffr")).to be(true)
+      # a single leading sign folds into the literal
+      expect(r.matches?("-1")).to be(true)
+      expect(r.matches?("+1")).to be(true)
+    end
+
+    it "rejects non-literal strings as numeric-string" do
+      r = Rigor::Type::Combinator.numeric_string
+      # doubled sign parses as a unary-operator chain, not a literal
+      expect(r.matches?("--1")).to be(false)
+      expect(r.matches?("++1")).to be(false)
+      # multi-dot junk and partial literals are syntax errors
+      expect(r.matches?("1.2.3")).to be(false)
+      expect(r.matches?("0x")).to be(false)
+      expect(r.matches?("1_")).to be(false)
+      expect(r.matches?(".5")).to be(false)
+      # whitespace padding is not part of the literal
+      expect(r.matches?("1 ")).to be(false)
+      expect(r.matches?(" 1")).to be(false)
+      # a whole expression is not a single literal
+      expect(r.matches?("1 + 2")).to be(false)
       expect(r.matches?("forty-two")).to be(false)
+      expect(r.matches?("")).to be(false)
+    end
+
+    it "rejects non-ASCII 'digits' as numeric-string (Ruby's lexer is ASCII-only)" do
+      r = Rigor::Type::Combinator.numeric_string
+      expect(r.matches?("１")).to be(false)  # full-width 1
+      expect(r.matches?("²")).to be(false)  # superscript 2
+      expect(r.matches?("⅐")).to be(false)  # vulgar fraction 1/7
+      expect(r.matches?("一")).to be(false)  # CJK 一 (one)
     end
 
     it "recognises decimal-int-string with optional sign and no fractional tail" do

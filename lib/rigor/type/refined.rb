@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "prism"
+
 require_relative "../trinary"
 require_relative "../value_semantics"
 require_relative "acceptance_router"
@@ -110,12 +112,26 @@ module Rigor
       #
       # Recogniser policy:
       #
-      # - `:numeric` is deliberately conservative — only decimal
-      #   integer and plain-decimal-fraction strings are
-      #   recognised, mirroring `imported-built-in-types.md`'s
-      #   "Rigor's numeric-string predicate" wording. Looser
-      #   forms (scientific, hex, rational) MAY join later
-      #   without breaking the registry contract.
+      # - `:numeric` recognises a string that is a *single Ruby
+      #   numeric literal* — exactly the syntax that, written in
+      #   Ruby source, evaluates to an `Integer` / `Float` /
+      #   `Rational` / `Complex`. The recogniser delegates to the
+      #   real Ruby parser ({Refined.ruby_numeric_literal?} via
+      #   Prism), so it tracks Ruby's grammar precisely: decimal /
+      #   `0x` hex / `0o` (or leading-zero) octal / `0b` binary /
+      #   `0d` decimal integers, underscore digit separators
+      #   (`1_000`), decimal fractions and scientific floats
+      #   (`1.5`, `1E-5`), and the `r` rational / `i` imaginary
+      #   suffixes (`1r`, `2i`, `0xffr`). A single leading sign is
+      #   folded into the literal (`-1`, `+1.5`), but a doubled
+      #   sign (`--1`, `++1`) parses as a unary-operator chain — a
+      #   `CallNode`, not a literal — and is rejected, as are
+      #   multi-dot junk (`1.2.3`), partial literals (`0x`, `1_`),
+      #   whitespace-padded strings, and — crucially — non-ASCII
+      #   "digits" (full-width `１`, superscript `²`, other Unicode
+      #   number characters): Ruby's lexer only accepts `[0-9]` in
+      #   a numeric literal, so those are `CallNode`s too. The
+      #   stricter base-N predicates below remain proper subsets.
       # - `:decimal_int` is "what `Integer(s, 10)` would parse
       #   without remainder" — one or more decimal digits,
       #   optional leading sign, no whitespace, no fractional
@@ -127,20 +143,64 @@ module Rigor
       #   not octal-int-string. This matches the typical user
       #   intent — a refinement marks a string that "looks like
       #   octal", not "happens to be base-8 valid".
-      NUMERIC_STRING_PATTERN = /\A-?\d+(?:\.\d+)?\z/
       DECIMAL_INT_STRING_PATTERN = /\A-?\d+\z/
       OCTAL_INT_STRING_PATTERN = /\A-?(?:0[oO][0-7]+|0[0-7]+)\z/
       HEX_INT_STRING_PATTERN = /\A-?0[xX][0-9a-fA-F]+\z/
-      private_constant :NUMERIC_STRING_PATTERN, :DECIMAL_INT_STRING_PATTERN,
+      private_constant :DECIMAL_INT_STRING_PATTERN,
                        :OCTAL_INT_STRING_PATTERN, :HEX_INT_STRING_PATTERN
+
+      # Prism node classes that represent a numeric literal. A
+      # string is a numeric-string exactly when the parser reduces
+      # the whole input to a single one of these (the leading sign
+      # is already folded into the literal by the parser).
+      NUMERIC_LITERAL_NODES = [
+        Prism::IntegerNode,
+        Prism::FloatNode,
+        Prism::RationalNode,
+        Prism::ImaginaryNode
+      ].freeze
+      private_constant :NUMERIC_LITERAL_NODES
+
+      # Cheap pre-filter applied before invoking the parser: every
+      # Ruby numeric literal starts with an ASCII digit, optionally
+      # preceded by exactly one sign. Strings that fail this never
+      # reach Prism (the common non-numeric case stays allocation-
+      # and parse-free).
+      NUMERIC_LITERAL_PREFIX = /\A[+-]?\d/
+      private_constant :NUMERIC_LITERAL_PREFIX
+
+      # @param value [Object] typically a `Constant#value`
+      # @return [Boolean] true when `value` is a String that is a
+      #   single, complete Ruby numeric literal. Total over
+      #   arbitrary input — never raises (Prism reports malformed
+      #   input through `errors`, it does not throw).
+      def self.ruby_numeric_literal?(value)
+        return false unless value.is_a?(String)
+        return false if value.empty?
+        # A numeric literal carries no whitespace; reject any
+        # leading / trailing / interior space so the *whole* string
+        # must be the literal (Prism would otherwise accept a
+        # trailing-space `"1 "`).
+        return false if value.match?(/\s/)
+        return false unless value.match?(NUMERIC_LITERAL_PREFIX)
+
+        result = Prism.parse(value)
+        return false unless result.errors.empty?
+
+        body = result.value.statements&.body
+        return false unless body && body.size == 1
+
+        node = body.first
+        NUMERIC_LITERAL_NODES.any? { |klass| node.is_a?(klass) }
+      end
 
       PREDICATES = {
         lowercase: ->(v) { v.is_a?(String) && v == v.downcase },
         not_lowercase: ->(v) { v.is_a?(String) && v != v.downcase },
         uppercase: ->(v) { v.is_a?(String) && v == v.upcase },
         not_uppercase: ->(v) { v.is_a?(String) && v != v.upcase },
-        numeric: ->(v) { v.is_a?(String) && NUMERIC_STRING_PATTERN.match?(v) },
-        not_numeric: ->(v) { v.is_a?(String) && !NUMERIC_STRING_PATTERN.match?(v) },
+        numeric: ->(v) { ruby_numeric_literal?(v) },
+        not_numeric: ->(v) { v.is_a?(String) && !ruby_numeric_literal?(v) },
         decimal_int: ->(v) { v.is_a?(String) && DECIMAL_INT_STRING_PATTERN.match?(v) },
         octal_int: ->(v) { v.is_a?(String) && OCTAL_INT_STRING_PATTERN.match?(v) },
         hex_int: ->(v) { v.is_a?(String) && HEX_INT_STRING_PATTERN.match?(v) },

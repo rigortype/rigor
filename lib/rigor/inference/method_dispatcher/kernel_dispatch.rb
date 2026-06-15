@@ -43,14 +43,18 @@ module Rigor
         private_constant :NUMERIC_CONSTRUCTORS
 
         # `Kernel#Integer(s)` predicate-aware refinement set
-        # (v0.1.1 Track 1 slice 2b). Both `decimal-int-string` and
-        # `numeric-string` describe digit-only ASCII strings, so
-        # `Integer(s)` is total over the carrier domain and the
-        # result is `>= 0`. The default `base: 10` invocation
-        # accepts the same shape `String#to_i` does for these
-        # predicates; the `Integer(s, base)` overload is left for
-        # a later slice.
-        INTEGER_REFINEMENT_PREDICATES = Set[:decimal_int, :numeric].freeze
+        # (v0.1.1 Track 1 slice 2b). `decimal-int-string` is the
+        # only string refinement whose every inhabitant `Integer(s)`
+        # parses without remainder, so the result is a plain
+        # `Integer`. `numeric-string` is deliberately NOT in this
+        # set: since it was widened to the full Ruby numeric-literal
+        # grammar (floats, hex, rational, imaginary, signs), an
+        # `Integer(numeric_string)` would raise for a `"1.5"` /
+        # `"2i"` inhabitant and is negative for `"-3"` — the
+        # narrowing is no longer total nor `>= 0`, so it would be
+        # unsound. The `Integer(s, base)` overload is left for a
+        # later slice.
+        INTEGER_REFINEMENT_PREDICATES = Set[:decimal_int].freeze
         private_constant :INTEGER_REFINEMENT_PREDICATES
 
         def try_dispatch(context)

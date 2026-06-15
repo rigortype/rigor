@@ -59,10 +59,14 @@ assert_type("lowercase-string", t.downcase)
 
 n = user.code
 assert_type("numeric-string", n)
-# Digits are case-invariant so both case folds preserve the
-# numeric-string predicate.
+# `numeric-string` is the full Ruby numeric-literal grammar, so
+# `#downcase` preserves it (lowercasing a literal — hex digits,
+# `0X`/`E` prefixes — is always still a valid literal) but
+# `#upcase` does NOT: the rational / imaginary suffixes are
+# lowercase-only (`"1r".upcase == "1R"` is not a literal), so the
+# refinement is soundly dropped to `String`.
 assert_type("numeric-string", n.downcase)
-assert_type("numeric-string", n.upcase)
+assert_type("String", n.upcase)
 
 # The base-N int-string predicate refinements are case-invariant
 # under the case-fold pair: digit-only strings are unchanged and

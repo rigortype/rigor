@@ -573,8 +573,17 @@ module Rigor
                                                                %i[lowercase upcase] => :uppercase_string,
                                                                %i[uppercase upcase] => :refined_self,
                                                                %i[uppercase downcase] => :lowercase_string,
+                                                               # `numeric-string` is the full Ruby numeric-literal
+                                                               # grammar (since the predicate delegates to the
+                                                               # parser). `#downcase` preserves it — lowercasing a
+                                                               # literal (hex digits, `0X` / `E` prefixes) yields a
+                                                               # valid lowercase literal — but `#upcase` does NOT:
+                                                               # the rational / imaginary suffixes are lowercase-only
+                                                               # (`"1r".upcase == "1R"` is not a literal), so `upcase`
+                                                               # drops to the plain base `String` — still sound (the
+                                                               # result is a String), just no longer numeric.
                                                                %i[numeric downcase] => :refined_self,
-                                                               %i[numeric upcase] => :refined_self,
+                                                               %i[numeric upcase] => :base_string,
                                                                # Digit-only strings are case-invariant; the prefix
                                                                # letters in `0o…` / `0x…` are accepted by the
                                                                # predicate in either case so the predicate-subset
@@ -587,19 +596,16 @@ module Rigor
                                                                %i[hex_int downcase] => :refined_self,
                                                                %i[hex_int upcase] => :refined_self,
                                                                # v0.1.1 Track 1 slice 2 — `to_i` / `to_int` on a
-                                                               # known digit-only string. `decimal-int-string`
-                                                               # (`/\A\d+\z/`) and `numeric-string` (Rigor's
-                                                               # numeric-string predicate, ASCII digits) are
-                                                               # predicates over digit-only strings, so the parse
-                                                               # is total over the carrier domain and the result
-                                                               # is always `>= 0`. `non-negative-int` is the
-                                                               # tightest carrier that captures both the lower
-                                                               # bound and the integer-ness without inventing a
-                                                               # narrower carrier.
+                                                               # `decimal-int-string` parses without remainder to an
+                                                               # `Integer` (`non-negative-int` carrier, unchanged
+                                                               # here). `numeric-string` is deliberately NOT projected
+                                                               # to `to_i`: it now spans the full numeric-literal
+                                                               # grammar, so a `"1.5"` / `"2i"` inhabitant has a
+                                                               # fractional or non-Integer parse and a `"-3"` is
+                                                               # negative — the `non-negative-int` claim would be
+                                                               # unsound, so it falls through to the RBS `Integer`.
                                                                %i[decimal_int to_i] => :non_negative_int,
-                                                               %i[decimal_int to_int] => :non_negative_int,
-                                                               %i[numeric to_i] => :non_negative_int,
-                                                               %i[numeric to_int] => :non_negative_int
+                                                               %i[decimal_int to_int] => :non_negative_int
                                                              })
           private_constant :REFINED_STRING_PROJECTIONS
 
@@ -624,6 +630,7 @@ module Rigor
             when :uppercase_string then Type::Combinator.uppercase_string
             when :lowercase_string then Type::Combinator.lowercase_string
             when :non_negative_int then Type::Combinator.non_negative_int
+            when :base_string then refined.base
             end
           end
 

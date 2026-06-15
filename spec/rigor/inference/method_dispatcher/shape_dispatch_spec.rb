@@ -904,12 +904,21 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     context "with a numeric-string receiver" do
       let(:receiver) { Rigor::Type::Combinator.numeric_string }
 
-      it "narrows `to_i` to non-negative-int" do
-        expect(dispatch(receiver: receiver, method_name: :to_i)).to eq(non_negative_int)
+      it "declines `to_i` / `to_int` — the full numeric-literal grammar is not non-negative-int" do
+        # `"1.5".to_i` truncates, `"-3".to_i` is negative, `"2i"` is
+        # not an Integer at all, so projecting to non-negative-int
+        # would be unsound; the projection falls through to RBS Integer.
+        expect(dispatch(receiver: receiver, method_name: :to_i)).to be_nil
+        expect(dispatch(receiver: receiver, method_name: :to_int)).to be_nil
       end
 
-      it "narrows `to_int` to non-negative-int" do
-        expect(dispatch(receiver: receiver, method_name: :to_int)).to eq(non_negative_int)
+      it "preserves the refinement across `#downcase` but drops to base String on `#upcase`" do
+        # downcasing a numeric literal stays a valid literal (hex
+        # digits / `0X` / `E` lowercase fine); upcasing breaks the
+        # lowercase-only rational / imaginary suffixes (`"1r"` →
+        # `"1R"`), so the refinement soundly drops to plain String.
+        expect(dispatch(receiver: receiver, method_name: :downcase)).to eq(receiver)
+        expect(dispatch(receiver: receiver, method_name: :upcase)).to eq(Rigor::Type::Combinator.nominal_of("String"))
       end
     end
 

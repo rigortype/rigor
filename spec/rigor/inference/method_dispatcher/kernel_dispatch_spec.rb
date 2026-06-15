@@ -70,8 +70,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(integer_dispatch(Rigor::Type::Combinator.decimal_int_string)).to eq(non_negative_int)
     end
 
-    it "narrows Integer(numeric-string) to non-negative-int" do
-      expect(integer_dispatch(Rigor::Type::Combinator.numeric_string)).to eq(non_negative_int)
+    it "declines Integer(numeric-string) — the widened grammar is not Integer-total nor non-negative" do
+      # numeric-string now covers the full Ruby numeric-literal grammar
+      # (`1.5`, `2i`, `-3`, …), so Integer(numeric_string) may raise or
+      # be negative — narrowing it to non-negative-int would be unsound.
+      expect(integer_dispatch(Rigor::Type::Combinator.numeric_string)).to be_nil
     end
 
     it "declines on non-digit refinements (lowercase / uppercase / hex)" do

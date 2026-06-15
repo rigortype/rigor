@@ -181,8 +181,8 @@ module Rigor
 
       private
 
-      # ADR-52 slice 4 — the run-time method-name gate for the
-      # `dynamic_return` rule: the static assertion vocabulary
+      # Run-time method-name gate for the `dynamic_return` rule
+      # (ADR-52 slice 4): the static assertion vocabulary
       # (`T.let` / `T.cast` / …), `T.absurd`, and every method name
       # the catalog carries a sig for.
       def recognised_method_names

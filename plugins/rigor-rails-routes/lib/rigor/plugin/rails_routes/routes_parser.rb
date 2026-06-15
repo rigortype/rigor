@@ -1182,21 +1182,14 @@ module Rigor
         # `plural: true` for `resources :users`, `false` for
         # `resource :profile`.
         def register_resourceful_helpers(name, actions, base_arity, context, plural:)
-          # Singular resources (`resource :foo`) use the
-          # given name AS-IS for both path and helper —
-          # singularising would mangle a deliberately-plural
-          # singular-DSL name like Mastodon's
-          # `resource :relationships, only: [:show, :update]`
-          # (Rails generates `relationships_path`, not
-          # `relationship_path`). Plural resources still
-          # singularise for the show / new / edit helpers.
-          # Plural resources singularise for show / new / edit
-          # helpers (`resources :users` → `user_path(id)`);
-          # singular resources use the name AS-IS even when it
-          # looks plural (Mastodon's `resource :relationships,
-          # only: [:show, :update]` → `relationships_path`).
-          # The path segment uses `name` in both shapes — Rails
-          # never singularises the URL.
+          # Plural resources (`resources :users`) singularise
+          # for show / new / edit helpers → `user_path(id)`.
+          # Singular resources (`resource :foo`) use the name
+          # AS-IS — singularising would mangle deliberately-
+          # plural names like Mastodon's `resource
+          # :relationships` → `relationships_path`, not
+          # `relationship_path`. The URL path uses `name`
+          # in both shapes (Rails never singularises the URL).
           singular = plural ? singularize_word(name.to_s) : name.to_s
           path_base = "#{context.path_prefix}/#{name}"
 

@@ -301,19 +301,11 @@ module Rigor
             [entry.method_name, entry]
           end
 
-          # Merge in actions from include'd modules. The
-          # discoverer pre-collected every module's defs as
-          # `module_actions` keyed by fully-qualified module
-          # name. We resolve each include against that map —
-          # tries the full include name first, then walks down
-          # the class's lexical chain looking for a nested
-          # match (e.g. `Emails::Issues` inside `class Notify`
-          # at top-level resolves to top-level `Emails::Issues`).
-          # Includes we cannot resolve are silently skipped;
-          # the per-mailer `unresolved_includes?` predicate
-          # below (consumed by the analyzer) downgrades
-          # `unknown-action` to silence when any include is
-          # unresolved.
+          # Merge actions from include'd modules (pre-collected
+          # in `module_actions` keyed by fully-qualified name).
+          # Unresolvable includes are tracked; `unresolved_includes?`
+          # (consumed by the analyzer) downgrades `unknown-action`
+          # to silence when any include remains unresolved.
           unresolved_includes = []
           includes.each do |include_name|
             inc_actions = module_actions[include_name]

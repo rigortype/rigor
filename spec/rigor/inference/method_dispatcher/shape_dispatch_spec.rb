@@ -882,17 +882,22 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
   end
 
   describe "Refined<String> projections (v0.1.1 Track 1 slice 2)" do
-    def non_negative_int = Rigor::Type::Combinator.non_negative_int
+    def universal_int = Rigor::Type::Combinator.universal_int
 
     context "with a decimal-int-string receiver" do
       let(:receiver) { Rigor::Type::Combinator.decimal_int_string }
 
-      it "narrows `to_i` to non-negative-int" do
-        expect(dispatch(receiver: receiver, method_name: :to_i)).to eq(non_negative_int)
+      it "narrows `to_i` to universal-int (signed: `\"-7\".to_i == -7`)" do
+        # The decimal-int-string predicate `/\A-?\d+\z/` admits a
+        # leading sign, so a `"-7"` inhabitant parses to a negative
+        # Integer — the result is a plain (signed) Integer, NOT
+        # non-negative-int. `String#to_i` is total, so the projection
+        # stays sound.
+        expect(dispatch(receiver: receiver, method_name: :to_i)).to eq(universal_int)
       end
 
-      it "narrows `to_int` to non-negative-int" do
-        expect(dispatch(receiver: receiver, method_name: :to_int)).to eq(non_negative_int)
+      it "narrows `to_int` to universal-int (signed)" do
+        expect(dispatch(receiver: receiver, method_name: :to_int)).to eq(universal_int)
       end
 
       it "preserves the refinement across `#downcase` / `#upcase` (digit-only is case-invariant)" do

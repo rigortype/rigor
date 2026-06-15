@@ -60,14 +60,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
   end
 
   describe ".try_dispatch on Kernel#Integer (v0.1.1 Track 1 slice 2b)" do
-    def non_negative_int = Rigor::Type::Combinator.non_negative_int
+    def universal_int = Rigor::Type::Combinator.universal_int
 
     def integer_dispatch(arg)
       described_class.try_dispatch(cc(receiver: receiver, method_name: :Integer, args: [arg]))
     end
 
-    it "narrows Integer(decimal-int-string) to non-negative-int" do
-      expect(integer_dispatch(Rigor::Type::Combinator.decimal_int_string)).to eq(non_negative_int)
+    it "narrows Integer(decimal-int-string) to universal-int (signed: `\"-7\"` parses to -7)" do
+      # The decimal-int-string predicate `/\A-?\d+\z/` admits a leading
+      # sign, so `Integer("-7") == -7 < 0` — the result is a plain
+      # Integer, NOT non-negative-int. `Integer()` is total over the
+      # carrier, so the (signed) IntegerRange is sound.
+      expect(integer_dispatch(Rigor::Type::Combinator.decimal_int_string)).to eq(universal_int)
     end
 
     it "declines Integer(numeric-string) — the widened grammar is not Integer-total nor non-negative" do

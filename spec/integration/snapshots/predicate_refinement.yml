@@ -1,6 +1,7 @@
 ---
 locals:
   d: decimal-int-string
+  di: int
   h: hex-int-string
   "n": numeric-string
   o: octal-int-string

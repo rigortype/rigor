@@ -46,14 +46,17 @@ module Rigor
         # (v0.1.1 Track 1 slice 2b). `decimal-int-string` is the
         # only string refinement whose every inhabitant `Integer(s)`
         # parses without remainder, so the result is a plain
-        # `Integer`. `numeric-string` is deliberately NOT in this
-        # set: since it was widened to the full Ruby numeric-literal
-        # grammar (floats, hex, rational, imaginary, signs), an
-        # `Integer(numeric_string)` would raise for a `"1.5"` /
-        # `"2i"` inhabitant and is negative for `"-3"` — the
-        # narrowing is no longer total nor `>= 0`, so it would be
-        # unsound. The `Integer(s, base)` overload is left for a
-        # later slice.
+        # `Integer` — but NOT `non-negative-int`: the predicate
+        # `/\A-?\d+\z/` admits a leading sign, so `"-7"` is a valid
+        # decimal-int-string and `Integer("-7") == -7 < 0`. The
+        # narrowing is total (every inhabitant parses) but not `>= 0`,
+        # so it lands on `universal_int`. `numeric-string` is
+        # deliberately NOT in this set at all: since it was widened to
+        # the full Ruby numeric-literal grammar (floats, hex, rational,
+        # imaginary, signs), `Integer(numeric_string)` would raise for
+        # a `"1.5"` / `"2i"` inhabitant — not even total — so it falls
+        # through to RBS `Integer`. The `Integer(s, base)` overload is
+        # left for a later slice.
         INTEGER_REFINEMENT_PREDICATES = Set[:decimal_int].freeze
         private_constant :INTEGER_REFINEMENT_PREDICATES
 
@@ -74,7 +77,7 @@ module Rigor
         # paths, tried in order:
         #
         # 1. A `Refined[String, predicate]` argument whose predicate
-        #    is a digit-only carrier narrows to `non-negative-int`
+        #    is a total-parse carrier narrows to `universal_int`
         #    (see {try_integer_from_refinement}).
         # 2. A `Constant` String or Numeric argument — optionally
         #    with a `Constant[Integer]` base — runs the actual
@@ -124,9 +127,14 @@ module Rigor
         # `Kernel#Integer(s)` over a `Refined[String, predicate]`
         # whose predicate is in {INTEGER_REFINEMENT_PREDICATES}.
         # Mirrors the `String#to_i` projection in `ShapeDispatch`
-        # (v0.1.1 slice 2a) — the result is always
-        # `non-negative-int`. Returns nil for any other arg shape
-        # so the RBS tier handles the generic `Integer(arg)` case.
+        # (v0.1.1 slice 2a) — the result is `universal_int`, NOT
+        # `non-negative-int`: a decimal-int-string admits a leading
+        # sign (`"-7"`), so the parsed Integer can be negative. The
+        # carrier stays an `IntegerRange` (rather than declining to
+        # the RBS `Nominal[Integer]`) so downstream range narrowing
+        # still has a range to intersect. Returns nil for any other
+        # arg shape so the RBS tier handles the generic `Integer(arg)`
+        # case.
         def try_integer_from_refinement(args)
           return nil unless args.size == 1
 
@@ -137,7 +145,7 @@ module Rigor
           return nil unless base.is_a?(Type::Nominal) && base.class_name == "String"
           return nil unless INTEGER_REFINEMENT_PREDICATES.include?(arg.predicate_id)
 
-          Type::Combinator.non_negative_int
+          Type::Combinator.universal_int
         end
 
         def try_array(args)

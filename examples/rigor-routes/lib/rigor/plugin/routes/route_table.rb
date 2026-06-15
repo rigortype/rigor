@@ -11,8 +11,9 @@ module Rigor
       # path template, and the ordered list of placeholders.
       #
       # Marshal-clean by construction so it round-trips through
-      # `Cache::Store#fetch_or_compute` without needing a custom
-      # serialize / deserialize pair.
+      # `Cache::Store#fetch_or_validate` (the record-and-validate path
+      # that `cache_for` uses) without needing a custom serialize /
+      # deserialize pair.
       class RouteTable
         Entry = Struct.new(:name, :method, :path, :params, keyword_init: true) do
           def arity = params.size

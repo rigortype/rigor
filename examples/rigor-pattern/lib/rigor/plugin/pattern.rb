@@ -68,10 +68,9 @@ module Rigor
         raise "rigor-pattern: invalid regex in config: #{e.message}"
       end
 
-      # ADR-37 — per-call validation over the engine-owned walk. The
-      # `validate_call?` gate matches what the old hand-rolled walker
-      # filtered (the configured `method_name` with ≥2 args), so the
-      # plugin no longer ships its own traversal.
+      # ADR-37 — per-call validation over the engine-owned walk.
+      # `validate_call?` gates on the configured `method_name` with
+      # ≥2 args; the plugin ships no traversal of its own.
       node_rule Prism::CallNode do |node, scope, path|
         next [] if @patterns.empty?
         next [] unless validate_call?(node)

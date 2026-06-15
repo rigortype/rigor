@@ -67,8 +67,7 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
     end
 
     it "returns nil when the receiver type isn't a supported carrier" do
-      # `foo` with no receiver — implicit self. Slice 5 doesn't
-      # support implicit-self completion.
+      # `foo` with no receiver — implicit self is not yet supported.
       buffer_table.open(uri: uri, bytes: "foo\n", version: 1)
       expect(provider.provide(uri: uri, line: 0, character: 2)).to be_nil
     end

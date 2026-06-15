@@ -157,12 +157,12 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
   describe "shallow array literals" do
     it "types empty arrays as the empty Tuple[] carrier (v0.0.6)" do
-      # v0.0.6 — `[]` resolves to `Tuple[]` so the per-element
-      # block fold can concatenate across all-empty positions
-      # like `[1, 2].flat_map { |_| [] }`. The empty tuple
-      # erases to the RBS tuple form `[]` (a valid RBS literal
-      # for the empty-tuple type); use `Tuple#describe` rather
-      # than the erasure form for round-trip checks.
+      # `[]` resolves to `Tuple[]` so the per-element block fold
+      # can concatenate across all-empty positions like
+      # `[1, 2].flat_map { |_| [] }`. The empty tuple erases to
+      # the RBS tuple form `[]` (a valid RBS literal for the
+      # empty-tuple type); use `Tuple#describe` rather than the
+      # erasure form for round-trip checks.
       type = scope.type_of(parse_expression("[]"))
       expect(type).to be_a(Rigor::Type::Tuple)
       expect(type.elements).to eq([])
@@ -440,9 +440,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "resolves Array#length on a Nominal[Array] receiver" do
-      # Slice 5 phase 2 returns the precise tuple length as a
-      # Constant rather than the projected Nominal[Integer]; the
-      # carrier still erases to Integer.
+      # Returns the precise Tuple length as a Constant rather than
+      # the projected Nominal[Integer]; the carrier still erases
+      # to Integer.
       type = scope.type_of(parse_expression("[1, 2, 3].length"))
 
       expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
@@ -457,8 +457,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
     it "resolves bool predicates more precisely than RBS when the receiver is a constant (v0.0.3 C)" do
       # `1.zero?` folds to `Constant[false]` — the unary
-      # constant-folding catalogue (v0.0.3 C) wins over the
-      # RBS-widened `Union[Constant[true], Constant[false]]`.
+      # constant-folding catalogue wins over the RBS-widened
+      # `Union[Constant[true], Constant[false]]`.
       # When the receiver is *not* a constant, the union
       # representation is still the answer; the broader
       # widening behaviour is exercised below.
@@ -725,7 +725,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "resolves Array.new(3) as Tuple[nil, nil, nil] via singleton dispatch (v0.0.7)" do
-      # v0.0.7 — `Array.new(n)` lifts to a per-position
+      # `Array.new(n)` lifts to a per-position
       # `Tuple[Constant[nil] * n]` carrier when `n` is a small
       # `Constant<Integer>`. Oversize `n` falls back to
       # `Nominal[Array]`.
@@ -836,7 +836,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "still resolves the 0-arg overload of Array#first" do
-      # () -> Elem. Slice 5 phase 2 narrows the precise first member
+      # `() -> Elem` — narrows to the precise first member
       # of the Tuple shape rather than returning the projected
       # `Elem` union from the underlying `Array#first`.
       type = scope.type_of(parse_expression("[1, 2, 3].first"))
@@ -902,10 +902,10 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "types empty HashNode as the empty HashShape{} carrier (v0.0.7)" do
-      # v0.0.7 — `{}` resolves to `HashShape{}` (closed, no
-      # pairs) so HashShape projections (`empty?`, `count`,
-      # `first`, `keys`, `values`) fold against it. Both
-      # carriers erase to plain `Hash` for RBS interop.
+      # `{}` resolves to `HashShape{}` (closed, no pairs) so
+      # HashShape projections (`empty?`, `count`, `first`, `keys`,
+      # `values`) fold against it. Both carriers erase to plain
+      # `Hash` for RBS interop.
       type = scope.type_of(parse_expression("{}"))
 
       expect(type).to be_a(Rigor::Type::HashShape)

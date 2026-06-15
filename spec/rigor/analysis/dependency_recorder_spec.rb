@@ -4,9 +4,9 @@ require "spec_helper"
 require "tmpdir"
 
 # ADR-46 slice 1 — the cross-file dependency recorder. Verifies that
-# analysing a file records the OTHER files its inference read from, so a
-# later slice can invert this into a `dependents` index and re-analyse
-# only the affected closure on an edit.
+# analysing a file records the OTHER files its inference read from;
+# `Incremental.invert` builds the `dependents` index from these
+# records and the body tier re-analyses only the affected closure.
 RSpec.describe Rigor::Analysis::DependencyRecorder do
   def run_recording(dir)
     configuration = Rigor::Configuration.new("paths" => [dir])

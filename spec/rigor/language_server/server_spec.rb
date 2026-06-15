@@ -13,7 +13,7 @@ RSpec.describe Rigor::LanguageServer::Server do
 
       expect(server.state).to eq(:initialized)
       expect(result[:serverInfo]).to eq(name: "rigor-lsp", version: Rigor::VERSION)
-      # Slice 3 advertises textDocumentSync (FULL).
+      # textDocumentSync: FULL (openClose + change: 1).
       expect(result[:capabilities][:textDocumentSync]).to eq(openClose: true, change: 1)
     end
 
@@ -74,8 +74,8 @@ RSpec.describe Rigor::LanguageServer::Server do
       server.dispatch("initialize", {})
       result = server.dispatch("textDocument/hover", {})
 
-      # Slice 1 advertises nothing in capabilities; hover lands in
-      # slice 5. Until then the dispatcher returns MethodNotFound.
+      # `Server.new` here has no hover_provider wired, so
+      # the dispatcher returns MethodNotFound even for `textDocument/hover`.
       expect(result.dig(:error, :code)).to eq(Rigor::LanguageServer::Server::ERROR_METHOD_NOT_FOUND)
     end
   end

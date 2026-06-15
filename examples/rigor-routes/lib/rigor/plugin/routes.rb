@@ -34,11 +34,6 @@ module Rigor
     #   the path template). Unknown helpers carry a "did you
     #   mean" suggestion via Levenshtein distance ≤ 3.
     #
-    # Same scope note as `rigor-lisp-eval` / `rigor-units`:
-    # diagnostics-only today; once plugin return-type
-    # contributions ship in v0.1.x, the same `RouteTable` lookup
-    # moves into a `FlowContribution` bundle so callers can rely
-    # on the analyzer's own inferred return type.
     #
     # ## Usage
     #

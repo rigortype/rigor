@@ -129,9 +129,8 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
     end
 
     it "binds numbered-block parameters from NumberedParametersNode" do
-      # `_1` is implicit; Slice 6 phase C sub-phase 2 binds it from
-      # the per-position expected_param_types array, just like an
-      # explicit `|x|` would.
+      # `_1` is implicit; it is bound from the per-position
+      # expected_param_types array, just like an explicit `|x|`.
       block = parse_block("foo { _1.succ }")
       expect(block.parameters).to be_a(Prism::NumberedParametersNode)
       bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)

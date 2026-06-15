@@ -67,7 +67,7 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
                             :completionProvider, :documentSymbolProvider)
 
     # hover at the `upcase` position — CallNode renderer produces
-    # the receiver / method / return body (LSP v2 slice A1).
+    # the # Receiver / # Method / # Return body.
     hover = request_responses.find { |f| f[:id] == 2 }
     expect(hover.dig(:result, :contents, :kind)).to eq("markdown")
     body = hover.dig(:result, :contents, :value)

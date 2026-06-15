@@ -22,7 +22,7 @@ RSpec.describe Rigor::Plugin::TypeNodeResolver do
         def resolve(node, _scope)
           return nil unless node.is_a?(Rigor::TypeNode::Generic) && node.head == "Pick"
 
-          # placeholder slice-2 stub — slice 4 will wire pick_of[T, K].
+          # test stub that exercises the subclass resolve path.
           :pick_resolved_stub
         end
       end

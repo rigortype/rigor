@@ -25,7 +25,7 @@ require "spec_helper"
 # per-Ractor mutable cache. Phase 3 (deferred) adds plugin
 # state.
 #
-# See `docs/CURRENT_WORK.md` Open Engineering Items #8 for the
+# See `docs/design/20260514-ractor-migration.md` for the
 # full staged plan.
 RSpec.describe "Ractor readiness", :ractor_readiness do
   def shareable?(obj)

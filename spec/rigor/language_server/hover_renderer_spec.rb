@@ -59,9 +59,8 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
     end
 
     it "falls back to the default body for implicit-`self` calls (no receiver)" do
-      # `foo` with no receiver — implicit self call. Slice 1 only
-      # specialises calls with explicit receivers; later slices may
-      # add implicit-self via the enclosing class lookup.
+      # `foo` with no receiver — implicit self is not specialised;
+      # the renderer falls through to the default body.
       root, index = parse_and_index("foo\n")
       call_node = root.statements.body.first
       scope = index[call_node]

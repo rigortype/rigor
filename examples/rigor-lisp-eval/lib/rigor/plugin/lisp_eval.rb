@@ -200,13 +200,10 @@ module Rigor
         end
       end
 
-      # AST walker scoped to the configured module / method
-      # pair. Public class on the plugin so the integration
-      # spec can drive it directly without spinning up an
-      # analyser run.
       # Receiver-matching helper shared by `#eval_call?` and
-      # the `dynamic_return` block (the AST walk itself is engine-owned
-      # via `node_rule`, so the traversal that used to live here is gone).
+      # the `dynamic_return` block. The AST walk itself is engine-owned
+      # via `node_rule`; Walker holds only the receiver-comparison
+      # logic so the integration spec can exercise it directly.
       module Walker
         module_function
 

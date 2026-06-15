@@ -8,10 +8,8 @@ require "rigor/type"
 require "rigor/inference/narrowing"
 require "rigor/inference/scope_indexer"
 
-# Unit-level coverage for the "stable single-hop method-chain
-# narrowing" slice (ROADMAP § Future cycles / Type-language /
-# engine — "Method-call receiver narrowing across stable
-# receivers"). The recorder lives in `Narrowing` (extension to
+# Unit-level coverage for stable single-hop method-chain
+# narrowing. The recorder lives in `Narrowing` (extension to
 # `analyse_class_predicate`); the lookup lives in
 # `ExpressionTyper#call_type_for` via
 # `method_chain_narrowing_for`; the invalidator lives in

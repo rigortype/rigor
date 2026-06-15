@@ -95,6 +95,7 @@ module Rigor
         render_section("Fires when:", entry.fires_when)
         render_section("Does not fire when:", entry.does_not_fire_when)
         @out.puts("Suppression: #{entry.suppression}")
+        @out.puts("Documentation: #{entry.documentation_url}")
         @out.puts("Since: rigor #{entry.since}")
       end
 
@@ -109,6 +110,7 @@ module Rigor
         @out.puts("Authored severity: :#{entry.severity_authored}")
         profile_table = entry.severity_by_profile.map { |profile, sev| "#{profile} → :#{sev}" }.join(", ")
         @out.puts("Severity by profile: #{profile_table}")
+        @out.puts("Evidence tier: #{entry.evidence_tier || 'n/a (informational)'}")
         @out.puts("")
       end
 

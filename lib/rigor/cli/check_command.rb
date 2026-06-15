@@ -6,6 +6,7 @@ require "optionparser"
 
 require_relative "../configuration"
 require_relative "../analysis/result"
+require_relative "../analysis/rule_catalog"
 require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
@@ -671,7 +672,7 @@ module Rigor
       def write_result(result, format)
         case format
         when "json"
-          @out.puts(JSON.pretty_generate(result.to_h))
+          @out.puts(JSON.pretty_generate(enrich_json(result.to_h)))
         when "text"
           write_text_result(result)
         when ->(fmt) { CLI::DiagnosticFormats.supports?(fmt) }
@@ -683,6 +684,29 @@ module Rigor
         else
           raise OptionParser::InvalidArgument, "unsupported format: #{format}"
         end
+      end
+
+      # Adds the per-rule `evidence_tier` and `documentation_url` fields
+      # to each diagnostic in the `--format json` payload. Both are pure
+      # functions of the rule id (the rule catalogue, ADR-61 / the
+      # 2026-06-15 feedback §4 + §5.1), so they enrich the presentation
+      # layer here rather than threading through every diagnostic
+      # construction site. Only built-in rules carry catalogue metadata;
+      # plugin / `rbs_extended` / parse-error diagnostics are left
+      # untouched (they host their own documentation and confidence).
+      def enrich_json(payload)
+        Array(payload["diagnostics"]).each do |diag|
+          next unless diag["source_family"] == Analysis::Diagnostic::DEFAULT_SOURCE_FAMILY.to_s
+
+          rule = diag["rule"]
+          next unless rule
+
+          tier = Analysis::RuleCatalog.evidence_tier(rule)
+          diag["evidence_tier"] = tier.to_s if tier
+          url = Analysis::RuleCatalog.documentation_url(rule)
+          diag["documentation_url"] = url if url
+        end
+        payload
       end
 
       # ADR-51 WD7 — CI auto-detection. Only augments the default human

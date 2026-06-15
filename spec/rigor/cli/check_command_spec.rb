@@ -56,6 +56,16 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(payload.fetch("diagnostics").map { |d| d["rule"] }).to include("call.undefined-method")
   end
 
+  it "enriches each built-in diagnostic with evidence_tier and documentation_url (--format=json)" do
+    File.write("bad.rb", "x = \"hello\"\nx.no_such_method_here\n")
+
+    _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "bad.rb"])
+
+    diag = JSON.parse(out).fetch("diagnostics").find { |d| d["rule"] == "call.undefined-method" }
+    expect(diag.fetch("evidence_tier")).to eq("high")
+    expect(diag.fetch("documentation_url")).to end_with("04-diagnostics.md#rule-call-undefined-method")
+  end
+
   it "seeds parallel-assignment ivar writes so a cross-method read is not always-falsey (N1)" do
     # `old, @cb = @cb, block` records the `@cb` target into the
     # class-ivar union; before N1 the collector dropped it and `@cb`

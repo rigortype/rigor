@@ -1011,6 +1011,8 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("Suppression:")
       expect(out).to include("Authored severity:")
       expect(out).to include("Severity by profile:")
+      expect(out).to include("Evidence tier: high")
+      expect(out).to include("Documentation: https://github.com/rigortype/rigor")
       expect(out).to include("Since: rigor")
     end
 
@@ -1043,7 +1045,9 @@ RSpec.describe Rigor::CLI do
       expect(status).to eq(0)
       payload = JSON.parse(out)
       expect(payload).to be_an(Array)
-      expect(payload.first).to include("id" => "call.undefined-method", "since" => "0.0.1")
+      expect(payload.first).to include("id" => "call.undefined-method", "since" => "0.0.1",
+                                       "evidence_tier" => "high")
+      expect(payload.first["documentation_url"]).to end_with("#rule-call-undefined-method")
       expect(payload.first["fires_when"]).to be_an(Array)
     end
 

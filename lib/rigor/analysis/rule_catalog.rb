@@ -29,19 +29,48 @@ module Rigor
     # - `severity_by_profile` — Hash of `:lenient` / `:balanced`
     #   / `:strict` to the configured severity per profile, taken
     #   from `Configuration::SeverityProfile::PROFILES`.
+    # - `evidence_tier` — `:high` / `:medium` / `:low` (or `nil`
+    #   for informational helpers), Rigor's own confidence that a
+    #   firing is a true positive, derived from the rule's firing
+    #   gates. `:high` rules fire only on a concrete, statically-
+    #   known type with no metaprogramming escape (Rigor's false-
+    #   positive discipline has already filtered the uncertain
+    #   cases); `:medium` rules rest on flow / inference proofs
+    #   that inherit a documented FP envelope (loop / mutation /
+    #   RBS-strictness modelling gaps); `:low` rules are
+    #   resolution- or coverage-gap signals where a firing often
+    #   reflects missing context rather than a definite bug. The
+    #   tier routes a consumer's attention (and lets a downstream
+    #   classifier promote a `:high` firing without cross-tool
+    #   corroboration); it never feeds severity — that stays the
+    #   `severity_profile:` decision.
     # - `since` — first version the rule shipped in.
     module RuleCatalog # rubocop:disable Metrics/ModuleLength
+      # Stable documentation home for a built-in rule. `documentation_url`
+      # appends a per-rule fragment that resolves to the rule's anchor in
+      # the published diagnostics catalogue; the page itself points at
+      # `rigor explain <rule>` as the authoritative per-rule reference.
+      # Mirrors the gemspec `documentation_uri` URL scheme (`…/tree/main`).
+      DOCUMENTATION_BASE = "https://github.com/rigortype/rigor/blob/main/docs/manual/04-diagnostics.md"
+
       class Entry < Data.define(:id, :summary, :fires_when, :does_not_fire_when,
-                                :suppression, :severity_authored, :severity_by_profile, :since)
+                                :suppression, :severity_authored, :severity_by_profile,
+                                :evidence_tier, :since)
         def aliases
           CheckRules::LEGACY_RULE_ALIASES.select { |_legacy, canonical| canonical == id }.keys
         end
 
+        # Stable per-rule documentation URL (see {RuleCatalog.documentation_url}).
+        def documentation_url
+          RuleCatalog.documentation_url(id)
+        end
+
         # Hash-shaped form for `--format=json` consumers. Keys are
         # Strings so the payload is JSON-stable without a transform
-        # pass.
+        # pass. `evidence_tier` is omitted when nil (informational
+        # helpers carry no confidence tier).
         def to_h
-          {
+          base = {
             "id" => id,
             "aliases" => aliases,
             "summary" => summary,
@@ -50,8 +79,11 @@ module Rigor
             "suppression" => suppression,
             "severity_authored" => severity_authored.to_s,
             "severity_by_profile" => severity_by_profile.transform_keys(&:to_s).transform_values(&:to_s),
+            "documentation_url" => documentation_url,
             "since" => since
           }
+          base["evidence_tier"] = evidence_tier.to_s if evidence_tier
+          base
         end
       end
 
@@ -75,6 +107,7 @@ module Rigor
                        "or `disable: [\"call.undefined-method\"]` in `.rigor.yml`.",
           severity_authored: :error,
           severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
+          evidence_tier: :high,
           since: "0.0.1"
         ),
 
@@ -98,7 +131,41 @@ module Rigor
                        "`severity_overrides: { call.self-undefined-method: warning }` in `.rigor.yml`.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :off, balanced: :off, strict: :off },
+          # Off by default and metaprogramming-prone — a firing on a
+          # class whose real surface the per-class scan cannot enumerate
+          # (C-extension, `class << self`, dynamic accessors) is the
+          # known FP mode, so a firing is a candidate to review, not a
+          # high-confidence bug.
+          evidence_tier: :low,
           since: "0.1.17"
+        ),
+
+        CheckRules::RULE_UNRESOLVED_TOPLEVEL => Entry.new(
+          id: CheckRules::RULE_UNRESOLVED_TOPLEVEL,
+          summary: "Top-level implicit-self call resolves against no def, pre_eval: patch, or Kernel method.",
+          fires_when: [
+            "The call is an implicit-self call (no receiver) at top level (outside any class / module body).",
+            "Its name resolves against no same-file top-level `def`.",
+            "No ADR-17 `pre_eval:` monkey-patch on `Object` / `Kernel` declares it.",
+            "It is not a standard `Kernel` / `Object` private method (`puts`, `require`, `loop`, …)."
+          ],
+          does_not_fire_when: [
+            "The call has an explicit receiver, or sits inside a `def` / `class` / `module` body (ADR-24 WD3 " \
+            "stays lenient there).",
+            "A project file defines the name via a top-level `def` or an Object/Kernel monkey-patch listed in " \
+            "`.rigor.yml`'s `pre_eval:` (ADR-17).",
+            "The name is a Kernel/Object method visible in the loaded RBS environment."
+          ],
+          suppression: "`# rigor:disable call.unresolved-toplevel` on the call line, or list the defining " \
+                       "file in `.rigor.yml`'s `pre_eval:` so the analyzer sees the top-level `def` / patch.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
+          # A firing is frequently a resolution gap — the defining file
+          # is not in the analyzed set or injects the method via a
+          # metaprogramming patch the analyzer does not see — rather than
+          # a definite typo, so it routes to the `pre_eval:` review path.
+          evidence_tier: :low,
+          since: "0.1.14"
         ),
 
         CheckRules::RULE_WRONG_ARITY => Entry.new(
@@ -117,6 +184,7 @@ module Rigor
           suppression: "`# rigor:disable call.wrong-arity`.",
           severity_authored: :error,
           severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
+          evidence_tier: :high,
           since: "0.0.1"
         ),
 
@@ -136,6 +204,7 @@ module Rigor
           suppression: "`# rigor:disable call.argument-type-mismatch`.",
           severity_authored: :error,
           severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          evidence_tier: :high,
           since: "0.0.2"
         ),
 
@@ -155,6 +224,7 @@ module Rigor
           suppression: "`# rigor:disable call.possible-nil-receiver`.",
           severity_authored: :error,
           severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          evidence_tier: :high,
           since: "0.0.2"
         ),
 
@@ -171,6 +241,9 @@ module Rigor
           suppression: "Remove the `dump_type` call (it's a debug helper, not a real diagnostic).",
           severity_authored: :info,
           severity_by_profile: { lenient: :info, balanced: :info, strict: :error },
+          # Informational helper, not a correctness finding — no
+          # confidence tier applies.
+          evidence_tier: nil,
           since: "0.0.1"
         ),
 
@@ -187,6 +260,7 @@ module Rigor
           suppression: "Update the assertion to the actual inferred type, or correct the source.",
           severity_authored: :error,
           severity_by_profile: { lenient: :error, balanced: :error, strict: :error },
+          evidence_tier: :high,
           since: "0.0.1"
         ),
 
@@ -205,6 +279,7 @@ module Rigor
           suppression: "`# rigor:disable flow.always-raises`.",
           severity_authored: :error,
           severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          evidence_tier: :high,
           since: "0.0.3"
         ),
 
@@ -224,6 +299,9 @@ module Rigor
                        "points at the dead branch, not the predicate, so the suppression goes there).",
           severity_authored: :warning,
           severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # The literal-only firing envelope makes the deadness provable
+          # from syntax alone — no inference uncertainty.
+          evidence_tier: :high,
           since: "0.1.2"
         ),
 
@@ -246,6 +324,11 @@ module Rigor
           suppression: "`# rigor:disable always-truthy-condition` on the predicate line.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Rests on inferred-constant folding, which inherits the
+          # loop / mutation FP envelope the `does_not_fire_when` guards
+          # narrow — true positive in the common case, but not literal-
+          # provable like `unreachable-branch`.
+          evidence_tier: :medium,
           since: "0.1.2"
         ),
 
@@ -271,6 +354,9 @@ module Rigor
           # ADR-47 WD4: balanced stays :info (one notch below its `flow.*`
           # siblings' :warning) until the regression-corpus FP gate is green.
           severity_by_profile: { lenient: :info, balanced: :info, strict: :warning },
+          # Narrowing-driven proof that inherits the `always-truthy`
+          # FP envelope; balanced keeps it `:info` pending the corpus gate.
+          evidence_tier: :medium,
           since: "0.1.17"
         ),
 
@@ -292,6 +378,11 @@ module Rigor
           suppression: "`# rigor:disable dead-assignment` on the offending line, or rename the local to `_<name>`.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # The unread-write proof is reliable, but it flags a code
+          # smell rather than a runtime fault, and the syntactic write
+          # classification has narrow corners (the `does_not_fire_when`
+          # exclusions).
+          evidence_tier: :medium,
           since: "0.1.2"
         ),
 
@@ -313,6 +404,10 @@ module Rigor
           suppression: "`# rigor:disable def.return-type-mismatch`.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :warning, balanced: :warning, strict: :error },
+          # Depends on re-typing the body against an authored RBS return;
+          # RBS strict-on-returns plus incomplete body inference makes a
+          # firing usually-right but not concrete-call certain.
+          evidence_tier: :medium,
           since: "0.1.0"
         ),
 
@@ -333,6 +428,7 @@ module Rigor
           suppression: "`# rigor:disable method-visibility-mismatch`.",
           severity_authored: :error,
           severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          evidence_tier: :high,
           since: "0.1.2"
         ),
 
@@ -356,6 +452,10 @@ module Rigor
           suppression: "`# rigor:disable def.override-visibility-reduced` on the override.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
+          # Both the override and the shadowed ancestor visibility are
+          # statically observed from project source — the substitutability
+          # violation is concrete.
+          evidence_tier: :high,
           since: "0.1.15"
         ),
 
@@ -383,6 +483,9 @@ module Rigor
           suppression: "`# rigor:disable def.override-return-widened` on the override.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
+          # Gated on both-sides-authored RBS and a resolvable subtype
+          # relationship, so a firing is a concrete covariance violation.
+          evidence_tier: :high,
           since: "0.1.15"
         ),
 
@@ -413,6 +516,9 @@ module Rigor
           suppression: "`# rigor:disable def.override-param-narrowed` on the override.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
+          # Gated on both-sides-authored RBS and a resolvable subtype
+          # relationship, so a firing is a concrete contravariance violation.
+          evidence_tier: :high,
           since: "0.1.15"
         ),
 
@@ -434,6 +540,9 @@ module Rigor
           suppression: "`# rigor:disable ivar-write-mismatch` on the offending write.",
           severity_authored: :error,
           severity_by_profile: { lenient: :warning, balanced: :warning, strict: :error },
+          # Both writes resolve to concrete classes before firing; the
+          # union / Dynamic / clear-idiom escapes are excluded.
+          evidence_tier: :high,
           since: "0.1.2"
         )
       }.freeze
@@ -465,6 +574,40 @@ module Rigor
 
       def all
         ENTRIES.values.sort_by(&:id)
+      end
+
+      # Rigor's confidence tier (`:high` / `:medium` / `:low`) that a
+      # firing of `token` is a true positive, or nil for an
+      # informational rule (`dump.type`) or an unknown / non-built-in
+      # token (plugin and `rbs_extended.*` rules carry no built-in
+      # tier). Resolves legacy aliases. See {Entry}'s `evidence_tier`
+      # documentation for the tier semantics.
+      def evidence_tier(token)
+        entries = resolve(token)
+        return nil unless entries.size == 1
+
+        entries.first.evidence_tier
+      end
+
+      # Stable documentation URL for `token`, or nil for an unknown /
+      # non-built-in token. The URL is the published diagnostics
+      # catalogue page anchored at the rule's per-rule anchor
+      # (`#rule-<id-with-dots-as-dashes>`); the page itself names
+      # `rigor explain <rule>` as the authoritative per-rule reference.
+      # Resolves legacy aliases to the canonical id.
+      def documentation_url(token)
+        entries = resolve(token)
+        return nil unless entries.size == 1
+
+        "#{DOCUMENTATION_BASE}##{doc_anchor(entries.first.id)}"
+      end
+
+      # The per-rule fragment a `documentation_url` points at:
+      # `call.undefined-method` → `rule-call-undefined-method`. The
+      # `04-diagnostics.md` catalogue carries the matching `<a id>`
+      # anchors.
+      def doc_anchor(rule_id)
+        "rule-#{rule_id.tr('.', '-')}"
       end
     end
   end

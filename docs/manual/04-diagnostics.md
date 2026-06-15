@@ -24,31 +24,57 @@ ID; `rigor explain` with no argument lists them all.
 
 ### Catalogue
 
-| Rule | Fires when |
-| --- | --- |
-| `call.undefined-method` | The method is not defined on the receiver's statically known class. |
-| `call.self-undefined-method` | An implicit-self call (no receiver) resolves to no method on a confidently-closed standalone class. Ships `:off`; opt in via `severity_overrides`. |
-| `call.wrong-arity` | The positional-argument count matches no signature. |
-| `call.argument-type-mismatch` | An argument's type provably violates the parameter contract. |
-| `call.possible-nil-receiver` | The receiver is `T \| nil` and the method is not defined on `NilClass`. |
-| `call.unresolved-toplevel` | A top-level implicit-self call resolves against no same-file `def`, `pre_eval:` patch, or `Kernel` / `Object` method. |
-| `flow.always-raises` | The expression provably raises on every reachable path. |
-| `flow.unreachable-branch` | An `if` / `unless` / ternary branch is statically dead. |
-| `flow.always-truthy-condition` | A condition is provably always truthy or always falsey. |
-| `flow.dead-assignment` | A local is written but never read in the same method. |
-| `flow.unreachable-clause` | A `case`/`when` or `case`/`in` clause is statically dead — its subject type is disjoint with the pattern, or a prior clause already exhausted the subject. |
-| `def.return-type-mismatch` | The method body's result violates its declared RBS return type. |
-| `def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write. |
-| `def.method-visibility-mismatch` | An explicit-receiver call reaches a private method. |
-| `def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor. |
-| `def.override-return-widened` | An override's declared return type widens the inherited return (covariance). |
-| `def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). |
-| `rbs_extended.unsatisfied-conformance` | A class declares `%a{rigor:v1:conforms-to _Interface}` in its RBS but is missing a method the interface requires. Presence-based: only definitively-absent required methods fire. |
-| `assert.type-mismatch` | An `assert_type` expectation does not match the inferred type. |
-| `dump.type` | A `dump_type` call — informational, prints the inferred type. |
+Each rule has a stable per-rule anchor on this page
+(`#rule-<family>-<name>`, dots written as dashes) — the
+`documentation_url` field in `--format json` and `rigor explain`'s
+`Documentation:` line both point here. The `Evidence` column is
+Rigor's confidence that a firing is a true positive (see
+[Evidence tier](#evidence-tier) below).
+
+| Rule | Fires when | Evidence |
+| --- | --- | --- |
+| <a id="rule-call-undefined-method"></a>`call.undefined-method` | The method is not defined on the receiver's statically known class. | high |
+| <a id="rule-call-self-undefined-method"></a>`call.self-undefined-method` | An implicit-self call (no receiver) resolves to no method on a confidently-closed standalone class. Ships `:off`; opt in via `severity_overrides`. | low |
+| <a id="rule-call-wrong-arity"></a>`call.wrong-arity` | The positional-argument count matches no signature. | high |
+| <a id="rule-call-argument-type-mismatch"></a>`call.argument-type-mismatch` | An argument's type provably violates the parameter contract. | high |
+| <a id="rule-call-possible-nil-receiver"></a>`call.possible-nil-receiver` | The receiver is `T \| nil` and the method is not defined on `NilClass`. | high |
+| <a id="rule-call-unresolved-toplevel"></a>`call.unresolved-toplevel` | A top-level implicit-self call resolves against no same-file `def`, `pre_eval:` patch, or `Kernel` / `Object` method. | low |
+| <a id="rule-flow-always-raises"></a>`flow.always-raises` | The expression provably raises on every reachable path. | high |
+| <a id="rule-flow-unreachable-branch"></a>`flow.unreachable-branch` | An `if` / `unless` / ternary branch is statically dead. | high |
+| <a id="rule-flow-always-truthy-condition"></a>`flow.always-truthy-condition` | A condition is provably always truthy or always falsey. | medium |
+| <a id="rule-flow-dead-assignment"></a>`flow.dead-assignment` | A local is written but never read in the same method. | medium |
+| <a id="rule-flow-unreachable-clause"></a>`flow.unreachable-clause` | A `case`/`when` or `case`/`in` clause is statically dead — its subject type is disjoint with the pattern, or a prior clause already exhausted the subject. | medium |
+| <a id="rule-def-return-type-mismatch"></a>`def.return-type-mismatch` | The method body's result violates its declared RBS return type. | medium |
+| <a id="rule-def-ivar-write-mismatch"></a>`def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write. | high |
+| <a id="rule-def-method-visibility-mismatch"></a>`def.method-visibility-mismatch` | An explicit-receiver call reaches a private method. | high |
+| <a id="rule-def-override-visibility-reduced"></a>`def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor. | high |
+| <a id="rule-def-override-return-widened"></a>`def.override-return-widened` | An override's declared return type widens the inherited return (covariance). | high |
+| <a id="rule-def-override-param-narrowed"></a>`def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). | high |
+| <a id="rule-rbs_extended-unsatisfied-conformance"></a>`rbs_extended.unsatisfied-conformance` | A class declares `%a{rigor:v1:conforms-to _Interface}` in its RBS but is missing a method the interface requires. Presence-based: only definitively-absent required methods fire. | — |
+| <a id="rule-assert-type-mismatch"></a>`assert.type-mismatch` | An `assert_type` expectation does not match the inferred type. | high |
+| <a id="rule-dump-type"></a>`dump.type` | A `dump_type` call — informational, prints the inferred type. | — |
 
 Plugins may contribute further families and rules; `rigor
 explain` lists whatever the active configuration loads.
+
+## Evidence tier
+
+Every rule in the catalogue above carries an **evidence tier** —
+Rigor's own confidence that a firing is a *true positive*, derived
+from the rule's firing gates. It is orthogonal to severity (impact) and to
+the severity profile: the tier never changes whether a diagnostic
+surfaces, it only routes attention.
+
+| Tier | Meaning |
+| --- | --- |
+| `high` | Fires only on a concrete, statically-known type with no metaprogramming escape. Rigor's false-positive discipline has already filtered the uncertain cases, so a firing is almost always a real problem — a consumer can act on it (or a downstream classifier can trust it) without cross-checking another tool. |
+| `medium` | Rests on a flow- or inference-level proof that inherits a documented false-positive envelope (loop / mutation / RBS-strictness modelling gaps, narrowed by the rule's *does not fire when* list). Usually right, but not literal-provable. |
+| `low` | A resolution- or coverage-gap signal: a firing frequently reflects context the analyzer cannot see (an unanalyzed file, a metaprogramming patch) rather than a definite bug. Treat as "review this" — e.g. route `call.unresolved-toplevel` to a `pre_eval:` decision. |
+
+Informational rules (`dump.type`) carry no tier. The per-rule tier
+is the single source of truth in the rule catalogue — read it with
+`rigor explain <rule>` or `rigor explain --format json`, and it is
+echoed on each diagnostic in `rigor check --format json` (below).
 
 ## Severity profiles
 
@@ -93,6 +119,18 @@ reworded in a minor release):
 | `receiver_type` | when the rule has a receiver | The called receiver's displayed type (`String`, `Array[User]`, …). |
 | `method_name` | when the rule has a method | The called / defined method name. |
 | `project_definition_site` | `call.undefined-method` monkey-patch case | `path:line` where the project itself defines the method (ADR-17). |
+| `evidence_tier` | built-in rules with a tier | `high` / `medium` / `low` — Rigor's confidence the firing is a true positive ([Evidence tier](#evidence-tier)). |
+| `documentation_url` | built-in rules | A stable URL to the rule's entry in this catalogue. |
+
+`evidence_tier` lets a consumer prioritise without re-deriving
+confidence — e.g. surface only `high` firings in a strict CI gate,
+or route `low` firings to a human review queue:
+
+```sh
+# only the high-confidence diagnostics
+rigor check --format json \
+  | jq '[.diagnostics[] | select(.evidence_tier == "high")]'
+```
 
 The `receiver_type` / `method_name` pair is populated by the
 call-family rules and the method-level `def.*` rules. Group a run

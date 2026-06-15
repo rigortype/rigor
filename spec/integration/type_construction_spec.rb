@@ -270,10 +270,8 @@ RSpec.describe "Rigor type construction (integration)" do
 
     it "concatenates all-empty per-position Tuples into the empty Tuple" do
       # `[1, 2, 3].flat_map { |_n| [] }` — every per-position
-      # result is `Tuple[]`, so the assembled answer is also
-      # `Tuple[]`. Requires the v0.0.6 empty-array literal
-      # carrier change (`[]` resolves to `Tuple[]` instead of
-      # `Nominal[Array]`).
+      # result is `Tuple[]`, so the assembled answer is also `Tuple[]`.
+      # (`[]` resolves to `Tuple[]`, not `Nominal[Array]`.)
       flat_all_empty = harness.local(:flat_all_empty)
       expect(flat_all_empty).to be_a(Rigor::Type::Tuple)
       expect(flat_all_empty.elements).to be_empty
@@ -341,9 +339,9 @@ RSpec.describe "Rigor type construction (integration)" do
     let(:harness) { harness_for("block_map") }
 
     it "binds `strings` to a per-position Tuple of stringified literals" do
-      # v0.0.6 phase 2 — `[1,2,3].map { |n| n.to_s }` folds to
+      # `[1,2,3].map { |n| n.to_s }` folds to
       # `Tuple[Constant["1"], Constant["2"], Constant["3"]]`,
-      # strictly tighter than the previous Array[union] projection.
+      # strictly tighter than the Array[union] projection.
       # Wider receivers (e.g. `Nominal[Integer]`) still widen back
       # to `Array[String]` via the RBS tier.
       strings = harness.local(:strings)

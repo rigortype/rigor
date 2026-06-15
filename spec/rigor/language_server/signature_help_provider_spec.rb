@@ -124,7 +124,6 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
       it "surfaces every overload of a multi-signature method" do
         # `Array#fetch` has multiple overloads in core RBS:
         # `(int) -> Elem`, `(int, X) -> Elem | X`, etc.
-        # Slice C2 should emit one SignatureInformation per overload.
         buffer_table.open(uri: uri, bytes: "[1, 2].fetch(\n", version: 1)
         result = provider.provide(uri: uri, line: 0, character: 13)
 

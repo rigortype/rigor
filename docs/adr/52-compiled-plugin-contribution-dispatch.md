@@ -1,6 +1,8 @@
 # ADR-52 — Compiled plugin contribution dispatch
 
-Status: **Accepted — slice 1 (WD1) implemented 2026-06-10** (commits
+Status: **Accepted — slices 1–6 implemented 2026-06-10/11; the full WD
+surface is complete** (remaining work demand-driven; the per-slice record
+follows). Slice 1 (WD1) landed 2026-06-10 (commits
 `67a552de` + `1deecb2f`: the compiled contribution table + the six engine
 call-site rewirings; gated per WD6 on byte-identical diagnostics over the
 Mastodon 6-plugin and GitLab 11-plugin corpora — the first GitLab sweep

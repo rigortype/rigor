@@ -14,8 +14,10 @@ are the secondary / future options. **Shipped so far:** the Nix flake
 `packages` / `apps` outputs, a published container image (`Dockerfile`
 + `.github/workflows/container.yml`), and the machine-readable install
 guide (`docs/install.md`, v0.1.14) de-recommending the `Gemfile`
-entry. **Still queued:** the copy-pasteable standalone CI workflow
-template and the self-contained single binary.
+entry, and the copy-pasteable standalone CI workflow templates — which
+landed via [ADR-51](51-ci-diagnostic-output-formats.md) WD6
+(`docs/manual/ci-templates/` + the bundled `rigor-ci-setup` skill).
+**Still queued:** the self-contained single binary.
 
 ## Context
 

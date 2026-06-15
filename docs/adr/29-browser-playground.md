@@ -51,6 +51,20 @@ B remains the deployed backend until WD6 conditions ② and ③ are
 verified green. It moves the open work from "wait for upstream" to
 "run the gating `rbwasm` build spike."
 
+**Shipped 2026-06-14/15**: the gating build spike succeeded — the
+`psych`/`libyaml` static-link blocker was resolved
+(`Fix the psych/libyaml link so the playground wasm build is green`),
+the module now runs correctly in the browser VM (WD6 ③,
+`Make the playground wasm run correctly in the browser VM`), and the
+artifact is shrunk (strip + size-optimize + brotli pre-compress) and
+**published to Cloudflare R2 on release tags** (the
+`.github/workflows/playground-wasm.yml` `tags: v*` trigger is live),
+with a stable `-latest` pointer. The docs site
+(`rigor.typedduck.fail`) fetches and serves it as a static asset, so
+the public playground now runs **fully in-browser** with no backend.
+The local `rigor playground` CLI command keeps the Option-B Rack
+backend.
+
 ## Context
 
 A publicly accessible playground lets users try Rigor against an

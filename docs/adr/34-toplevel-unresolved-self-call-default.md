@@ -13,7 +13,9 @@ metaprogramming — is [ADR-17](17-monkey-patch-pre-evaluation.md)'s
 `call.unresolved-toplevel` rule and the `Scope#toplevel?` predicate
 ship, with severity mapped through `severity_profile:` and the
 cross-file toplevel-`def` index in place; the ADR-29 Playground
-default-severity wiring is the remaining slice.
+default-severity wiring shipped too — its sandbox config
+(`plugins/rigor-playground/.rigor.yml`) sets `severity_profile: strict`
+so the rule fires on pasted snippets.
 
 This ADR is intentionally narrow: only the **toplevel** slice flips
 default. Implicit-self calls inside `class` / `module` bodies stay

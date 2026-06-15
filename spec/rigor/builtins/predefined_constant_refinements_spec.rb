@@ -23,6 +23,25 @@ RSpec.describe Rigor::Builtins::PredefinedConstantRefinements do
       type = described_class.lookup("Math::PI")
       expect(type).not_to be_a(Rigor::Type::Nominal)
     end
+
+    it "folds the IEEE 754 binary64 magnitude constants to their exact value" do
+      {
+        "Float::INFINITY" => Float::INFINITY,
+        "Float::MAX" => Float::MAX,
+        "Float::MIN" => Float::MIN,
+        "Float::EPSILON" => Float::EPSILON
+      }.each do |name, value|
+        type = described_class.lookup(name)
+        expect(type).to be_a(Rigor::Type::Constant), "expected #{name} to fold"
+        expect(type.value).to eq(value)
+      end
+    end
+
+    it "does NOT fold Float::NAN (non-reflexive == would break the Constant equality contract)" do
+      # Float::NAN is a non-empty... it's not a String, so tier 2 also
+      # declines — the lookup falls through to the RBS Nominal[Float].
+      expect(described_class.lookup("Float::NAN")).to be_nil
+    end
   end
 
   describe ".lookup — tier 2: runtime String inspection" do

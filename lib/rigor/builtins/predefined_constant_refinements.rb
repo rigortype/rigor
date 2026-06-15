@@ -12,10 +12,21 @@ module Rigor
     #
     # **Tier 1 — exact-value whitelist** (`FOLDED_CONSTANTS`):
     # Constants whose value is bit-for-bit identical across every Ruby
-    # version and platform are folded to `Constant[T]`. Currently
-    # `Math::PI` and `Math::E` (both IEEE 754 mandated as C's `M_PI`
-    # / `M_E`).  Add new entries here only when the value is truly
-    # cross-implementation invariant.
+    # version and platform are folded to `Constant[T]`: the `Math::PI`
+    # / `Math::E` math constants (C's `M_PI` / `M_E`) and the four
+    # IEEE 754 binary64 magnitude constants `Float::INFINITY` /
+    # `::MAX` / `::MIN` / `::EPSILON` (each a single format-mandated bit
+    # pattern). Add new entries only when the value is truly
+    # cross-implementation invariant AND compares reflexively under
+    # `==` — the latter is why `Float::NAN` is deliberately EXCLUDED:
+    # `NaN == NaN` is `false`, so a `Constant[NAN]` would violate the
+    # `Type::Constant` `==` / `eql?` / `hash` contract (it would hash
+    # equal to itself yet compare unequal), corrupting type-equality
+    # and union dedup. The binary64 *integer* shape parameters
+    # (`Float::DIG` / `MANT_DIG` / `MAX_EXP` / …) are intentionally NOT
+    # folded: upstream RBS hedges them as "Usually defaults to …", and
+    # as plain `Integer`s they fall through Tier 2 to the RBS type
+    # harmlessly. `Complex::I` is deferred (no complex-fold consumer).
     #
     # **Tier 2 — runtime String inspection**:
     # For any other constant, the module resolves it via `const_get`
@@ -53,7 +64,16 @@ module Rigor
         # Math module — IEEE 754 bit-identical across all MRI / JRuby /
         # TruffleRuby builds; folding enables precise constant arithmetic.
         "Math::PI" => Type::Combinator.constant_of(::Math::PI).freeze,
-        "Math::E" => Type::Combinator.constant_of(::Math::E).freeze
+        "Math::E" => Type::Combinator.constant_of(::Math::E).freeze,
+
+        # Float magnitude limits — each a single format-mandated IEEE 754
+        # binary64 bit pattern (`+Inf`, `DBL_MAX`, `DBL_MIN`,
+        # `DBL_EPSILON`), reflexive under `==`. `Float::NAN` is excluded
+        # (non-reflexive `==` — see the module-level note).
+        "Float::INFINITY" => Type::Combinator.constant_of(::Float::INFINITY).freeze,
+        "Float::MAX" => Type::Combinator.constant_of(::Float::MAX).freeze,
+        "Float::MIN" => Type::Combinator.constant_of(::Float::MIN).freeze,
+        "Float::EPSILON" => Type::Combinator.constant_of(::Float::EPSILON).freeze
       }.freeze
       private_constant :FOLDED_CONSTANTS
 

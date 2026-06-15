@@ -71,6 +71,22 @@ cache:
 | `bundler.auto_detect` | Boolean | `true` | Auto-detect the Bundler install path and lockfile. |
 | `bundler.bundle_path` | String | `nil` | Explicit Bundler install root. |
 | `bundler.lockfile` | String | `nil` | Explicit `Gemfile.lock` path. |
+
+`bundler.auto_detect` looks for the Bundler install root in project-local
+locations first — the `path` recorded in `<project>/.bundle/config`, then a
+`<project>/vendor/bundle/` directory — and falls back to a user-global
+`bundle config set --global path …` (`~/.bundle/config`) when the project
+has no in-tree bundle.
+
+It deliberately does **not** read `BUNDLE_PATH` from rigor's own
+environment, and it cannot reach gems installed at the *default* shared
+location (the active Ruby's `GEM_HOME`, when no `path` is configured):
+rigor runs in its own isolated Ruby and reads your project as data
+([ADR-27](../adr/27-tool-distribution-model.md)), so it does not know the
+project Ruby's gem home without running your toolchain. If `rigor check`'s
+`--stats` shows gems whose RBS it could not find, point it at the bundle
+explicitly with `bundler.bundle_path:`, or supply signatures another way:
+`rbs collection install` (auto-discovered) or `dependencies.source_inference:`.
 | `rbs_collection.auto_detect` | Boolean | `true` | Auto-discover `rbs_collection.lock.yaml`. |
 | `rbs_collection.lockfile` | String | `nil` | Explicit `rbs_collection.lock.yaml` path. |
 | `dependencies.source_inference` | Array | `[]` | Per-gem source-inference modes (ADR-10). |

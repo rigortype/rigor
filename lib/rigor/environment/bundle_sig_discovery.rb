@@ -84,11 +84,12 @@ module Rigor
       #   supplied) minus any whose `(name, version, platform)`
       #   does not match a lockfile entry.
       def self.discover(bundle_path:, project_root: Dir.pwd, auto_detect: true,
-                        skip_gems: SKIPPED_GEMS_BY_DEFAULT, locked_gems: nil)
+                        skip_gems: SKIPPED_GEMS_BY_DEFAULT, locked_gems: nil, home: nil)
         resolved = resolve_bundle_path(
           bundle_path: bundle_path,
           project_root: project_root,
-          auto_detect: auto_detect
+          auto_detect: auto_detect,
+          home: home
         )
         return [] if resolved.nil?
 
@@ -143,7 +144,7 @@ module Rigor
       # Returns `Pathname` resolved bundle path, or `nil` when
       # neither explicit nor auto-detected. Public for the stats
       # banner so end users can see what rigor picked up.
-      def self.resolve_bundle_path(bundle_path:, project_root: Dir.pwd, auto_detect: true)
+      def self.resolve_bundle_path(bundle_path:, project_root: Dir.pwd, auto_detect: true, home: nil)
         if bundle_path
           path = Pathname.new(File.expand_path(bundle_path.to_s, project_root))
           return path if path.directory?
@@ -153,31 +154,77 @@ module Rigor
 
         return nil unless auto_detect
 
-        detected = auto_detect(project_root: project_root)
+        detected = auto_detect(project_root: project_root, home: home)
         Pathname.new(detected) if detected
       end
 
-      # Auto-detection order:
+      # Auto-detection order — project-local strategies win over the
+      # user-global one, mirroring Bundler's own config precedence:
       # 1. `<project_root>/.bundle/config` carries `BUNDLE_PATH:`
       #    set by `bundle config set --local path <dir>`.
       # 2. `<project_root>/vendor/bundle/` — the conventional
       #    in-tree install location when a developer ran
       #    `bundle install --path vendor/bundle`.
-      # 3. `nil` — let the caller proceed without bundle sig
+      # 3. The user-global bundler config `<home>/.bundle/config`
+      #    `BUNDLE_PATH:` (`bundle config set --global path <dir>`),
+      #    resolved relative to the project root and used only when
+      #    it points at an existing directory — the last resort for
+      #    a project with no in-tree bundle. Purely additive: it is
+      #    consulted only when steps 1–2 found nothing, so it never
+      #    changes an already-working detection.
+      # 4. `nil` — let the caller proceed without bundle sig
       #    discovery (rigor's vendored RBS still loads).
-      def self.auto_detect(project_root:)
-        from_config = read_bundle_config_path(project_root)
+      #
+      # Note (ADR-27): rigor reads the *project* as data, so
+      # detection is limited to paths recorded in project-local or
+      # user-global Bundler config files. The pure-default install
+      # location — gems in the active Ruby's GEM_HOME with no `path`
+      # configured — is the *project's* Ruby's gem home, which the
+      # isolated analyzer cannot know without running the project's
+      # toolchain. Point rigor at it with `bundler.bundle_path:`, or
+      # supply signatures via `rbs collection install` /
+      # `dependencies.source_inference:`. `BUNDLE_PATH` from rigor's
+      # own environment is deliberately NOT consulted — it describes
+      # rigor's bundle, not the analyzed project's.
+      #
+      # `home:` defaults to the invoking user's home directory; it is
+      # a parameter so tests stay hermetic (no read of the real
+      # `~/.bundle/config`).
+      def self.auto_detect(project_root:, home: nil)
+        from_config = read_bundle_config_path(File.join(project_root, ".bundle", "config"))
         return File.expand_path(from_config, project_root) if from_config
 
         vendor = File.join(project_root, "vendor", "bundle")
         return vendor if File.directory?(vendor)
 
-        nil
+        global_bundle_path(project_root: project_root, home: home)
       end
 
-      def self.read_bundle_config_path(project_root)
-        config_path = File.join(project_root, ".bundle", "config")
-        return nil unless File.exist?(config_path)
+      # Resolves the user-global `BUNDLE_PATH` against the project
+      # root, returning it only when it is an existing directory.
+      # Returns nil when there is no global config, no home, or the
+      # configured path does not exist.
+      def self.global_bundle_path(project_root:, home:)
+        home ||= default_home
+        return nil if home.nil?
+
+        configured = read_bundle_config_path(File.join(home, ".bundle", "config"))
+        return nil unless configured
+
+        resolved = File.expand_path(configured, project_root)
+        File.directory?(resolved) ? resolved : nil
+      end
+      private_class_method :global_bundle_path
+
+      def self.default_home
+        Dir.home
+      rescue StandardError
+        nil
+      end
+      private_class_method :default_home
+
+      def self.read_bundle_config_path(config_path)
+        return nil unless config_path && File.exist?(config_path)
 
         # `.bundle/config` is YAML with all-caps env-style keys.
         # `BUNDLE_PATH:` is the canonical key (Bundler 2.x); the
@@ -185,7 +232,8 @@ module Rigor
         data = YAML.safe_load_file(config_path)
         return nil unless data.is_a?(Hash)
 
-        data["BUNDLE_PATH"]
+        path = data["BUNDLE_PATH"]
+        path && !path.to_s.empty? ? path.to_s : nil
       rescue StandardError
         # Malformed `.bundle/config` should not break analysis;
         # silently skip auto-detection.

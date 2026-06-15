@@ -89,7 +89,46 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
     end
 
     it "returns [] when neither .bundle/config nor vendor/bundle resolves" do
-      result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true)
+      # `home:` points at an empty dir so the real user `~/.bundle/config`
+      # is not consulted — the test stays hermetic.
+      result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true, home: tmpdir)
+      expect(result).to eq([])
+    end
+
+    it "falls back to the user-global ~/.bundle/config path when no project-local bundle exists" do
+      home = File.join(tmpdir, "home")
+      bundle = File.join(tmpdir, "global_bundle_root")
+      make_bundle_layout(bundle, ["globalgem", "2.0", "4.0.0"])
+      FileUtils.mkdir_p(File.join(home, ".bundle"))
+      File.write(File.join(home, ".bundle", "config"), "---\nBUNDLE_PATH: #{bundle.inspect}\n")
+
+      result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true, home: home)
+
+      expect(result.size).to eq(1)
+      expect(result.first.to_s).to start_with(bundle)
+    end
+
+    it "prefers a project-local vendor/bundle over the user-global config" do
+      home = File.join(tmpdir, "home")
+      global_bundle = File.join(tmpdir, "global_bundle_root")
+      local_bundle = File.join(tmpdir, "vendor", "bundle")
+      make_bundle_layout(global_bundle, ["globalgem", "2.0", "4.0.0"])
+      make_bundle_layout(local_bundle, ["localgem", "1.0", "4.0.0"])
+      FileUtils.mkdir_p(File.join(home, ".bundle"))
+      File.write(File.join(home, ".bundle", "config"), "---\nBUNDLE_PATH: #{global_bundle.inspect}\n")
+
+      result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true, home: home)
+
+      expect(result.map { |p| p.parent.basename.to_s }).to eq(["localgem-1.0"])
+    end
+
+    it "ignores a user-global config path that does not exist" do
+      home = File.join(tmpdir, "home")
+      FileUtils.mkdir_p(File.join(home, ".bundle"))
+      File.write(File.join(home, ".bundle", "config"), "---\nBUNDLE_PATH: \"/no/such/bundle/root\"\n")
+
+      result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true, home: home)
+
       expect(result).to eq([])
     end
 

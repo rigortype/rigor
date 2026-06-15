@@ -15,6 +15,7 @@ require_relative "inference/synthetic_method_index"
 require_relative "inference/project_patched_methods"
 require_relative "inference/hkt_registry"
 require_relative "builtins/hkt_builtins"
+require_relative "builtins/predefined_constant_refinements"
 require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"
 
@@ -504,7 +505,8 @@ module Rigor
     def constant_for_name(name)
       return nil if rbs_loader.nil?
 
-      rbs_loader.constant_type(name.to_s)
+      Builtins::PredefinedConstantRefinements.lookup(name.to_s) ||
+        rbs_loader.constant_type(name.to_s)
     end
 
     # Returns true when the constant name is known to either the static

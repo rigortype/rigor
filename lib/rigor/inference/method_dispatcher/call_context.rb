@@ -42,10 +42,7 @@ module Rigor
         #
         # This is the single place the call-context field list is
         # enumerated — the whole point of the value object is to absorb
-        # the wide keyword list the tiers used to each redeclare. The
-        # ParameterLists disable here retires the per-tier disables (the
-        # `RbsDispatch` quartet-plus signatures) rather than adding to
-        # them.
+        # the wide keyword list the tiers used to each redeclare.
         def self.build(receiver:, method_name:, args:, # rubocop:disable Metrics/ParameterLists
                        block_type: nil, environment: nil, call_node: nil,
                        scope: nil, self_type_override: nil, public_only: false)

@@ -20,18 +20,9 @@ module Rigor
     # - {Builder.build} folds a `Configuration::Dependencies`
     #   into a frozen {Index} carrying the partitioned outcomes.
     # - {Index} holds the per-run state the dispatcher tier
-    #   consults via `#contribution_for`. Slice 2a ships the
-    #   stub returning `nil`; slice 2b populates the method
-    #   table by walking each resolved gem's `roots:`.
-    #
-    # Per the ADR's "Implementation slicing" section, slice 2 is
-    # split internally:
-    #
-    # - Slice 2a (this commit): gem resolution, index plumbing,
-    #   `Analysis::Runner` wiring, `dynamic.dependency-source.gem-not-found`
-    #   diagnostic for unresolvable entries.
-    # - Slice 2b (next commit): walker, dispatcher tier
-    #   integration, `Type::Dynamic`-wrapped returns.
+    #   consults via `#contribution_for`; the method table is
+    #   fully populated by {Walker} walking each resolved gem's
+    #   `roots:`.
     module DependencySourceInference
     end
   end

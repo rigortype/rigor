@@ -7,18 +7,15 @@ module Rigor
     # piece of a Rigor-side type expression that the reducer
     # ({HktReducer}) walks against a concrete argument list.
     #
-    # Slice 2a ships a programmatic constructor surface only:
-    # plugin and Rigor-bundled overlay authors build a body
-    # tree by hand using these node types. The string-grammar
-    # parser that reads `Definition#body` (the raw String slot
-    # already populated by Slice 1's `HktDirectives.parse_define`)
-    # into a tree is Slice 2b's deliverable; until it ships, the
-    # `body` String stays opaque and `body_tree` is the
-    # evaluable form.
+    # Slice 2a ships a programmatic constructor surface; plugin
+    # and Rigor-bundled overlay authors may build a body tree
+    # by hand using these node types. The string-grammar parser
+    # (`HktBodyParser`, Slice 2b, shipped) reads `Definition#body`
+    # (populated by Slice 1's `HktDirectives.parse_define`) into
+    # this node tree; `body_tree` is the evaluable form.
     #
-    # The five node types cover the JSON.parse and dry-monads
-    # use cases ADR-20 § Implementation slicing names as
-    # near-term adopters:
+    # The nine node types cover JSON.parse, dry-monads, and the
+    # ADR-20 § D3 conditional / membership forms (shipped):
     #
     # - {TypeLeaf}    — wraps a fully-built `Rigor::Type`
     #   (use for atoms like `nil`, `Constant<true>`,

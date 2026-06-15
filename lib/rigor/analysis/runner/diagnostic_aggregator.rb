@@ -423,23 +423,6 @@ module Rigor
           unresolved + lossy
         end
 
-        # ADR-10 slice 5c — drains the per-run
-        # {DependencySourceInference::BoundaryCrossReporter} into
-        # `dynamic.dependency-source.boundary-cross` `:info`
-        # diagnostics. Each event flags a call site where RBS
-        # dispatch produced a concrete answer AND a `mode: :full`
-        # opt-in gem's source catalog ALSO contains an entry for
-        # the same `(class_name, method_name)` — i.e., both
-        # contracts have an opinion. RBS still wins on the
-        # dispatch result; the diagnostic is purely advisory so
-        # the user can verify the two contracts haven't drifted.
-        #
-        # Severity profile re-stamps the rule per project taste.
-        # The diagnostic carries no `path` / `line` / `column`
-        # because the crossing is per-method-per-gem, not
-        # per-call-site — the diagnostic anchors at `.rigor.yml`
-        # like the other `dependency-source.*` diagnostics that
-        # report on opt-in configuration.
         # ADR-32 WD6 — drains the per-run
         # {Plugin::SourceRbsSynthesisReporter} into
         # `source-rbs-synthesis-failed` `:info` diagnostics. Each
@@ -469,6 +452,23 @@ module Rigor
           end
         end
 
+        # ADR-10 slice 5c — drains the per-run
+        # {DependencySourceInference::BoundaryCrossReporter} into
+        # `dynamic.dependency-source.boundary-cross` `:info`
+        # diagnostics. Each event flags a call site where RBS
+        # dispatch produced a concrete answer AND a `mode: :full`
+        # opt-in gem's source catalog ALSO contains an entry for
+        # the same `(class_name, method_name)` — i.e., both
+        # contracts have an opinion. RBS still wins on the
+        # dispatch result; the diagnostic is purely advisory so
+        # the user can verify the two contracts haven't drifted.
+        #
+        # Severity profile re-stamps the rule per project taste.
+        # The diagnostic carries no `path` / `line` / `column`
+        # because the crossing is per-method-per-gem, not
+        # per-call-site — the diagnostic anchors at `.rigor.yml`
+        # like the other `dependency-source.*` diagnostics that
+        # report on opt-in configuration.
         def boundary_cross_diagnostics
           return [] if @boundary_cross_reporter.empty?
 

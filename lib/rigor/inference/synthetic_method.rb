@@ -8,13 +8,13 @@ module Rigor
     # the template name. Stored in {SyntheticMethodIndex} and
     # consulted by {MethodDispatcher} below the RBS dispatch tier.
     #
-    # Per ADR-16 § WD13 (cost-bounded best-effort): the v0.1.x
-    # delivery commitment is the floor — method names emit; their
-    # return types degrade to `Dynamic[T]` until slice 6
-    # (precision promotion) routes the recorded `return_type`
-    # string through ADR-13's `Plugin::TypeNodeResolver` chain.
-    # The string is preserved so the ceiling slice can resolve it
-    # without re-walking.
+    # Per ADR-16 § WD13 (cost-bounded best-effort): method names
+    # emit with return types promoted by the dispatcher's Slice 6
+    # tiers — Slice 6a promotes via `origin_module` (TierB) and
+    # Slice 6b via `return_type` nominal lookup (TierC). The
+    # `return_type` string is preserved so promotion can resolve
+    # it without re-walking; `"untyped"` / `"void"` placeholders
+    # fall back to `Dynamic[Top]`.
     #
     # The `provenance` Hash carries debug / `--explain` metadata:
     # plugin id, the template's call shape, and the source

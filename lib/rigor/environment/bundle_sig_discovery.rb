@@ -4,7 +4,7 @@ require "yaml"
 
 module Rigor
   class Environment
-    # Open item O4 — target-project Bundler awareness.
+    # Target-project Bundler awareness (O4, implemented).
     #
     # Walks a Bundler-installed gem tree (e.g., the project's
     # `vendor/bundle` or a Docker-mounted bundle root) and

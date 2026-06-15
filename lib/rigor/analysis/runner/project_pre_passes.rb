@@ -281,11 +281,9 @@ module Rigor
         # `#diagnostics_for_file` raise envelope in
         # `plugin_runtime_error_diagnostic`.
         #
-        # Slice 3 visits plugins in registration order. Slice 5
-        # introduces topological ordering by `manifest(consumes:)`
-        # so producers always run before consumers; until then,
-        # `Configuration#plugins` order MUST be producer-first if
-        # cross-plugin dependencies exist.
+        # `Plugin::Loader` returns plugins in topological order by
+        # `manifest(consumes:)` (ADR-9 slice 5), so producers
+        # always run before consumers.
         def plugin_prepare_diagnostics(plugin_registry)
           return [] if plugin_registry.empty?
 

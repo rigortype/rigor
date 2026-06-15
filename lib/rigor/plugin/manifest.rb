@@ -32,9 +32,9 @@ module Rigor
       # its `#prepare(services)` hook. `consumes:` lists the
       # `(plugin_id, name)` pairs this plugin reads from
       # `services.fact_store`. The loader uses both for
-      # topological sort + missing-producer detection (slice 5);
-      # slice 4 carries the declarations on the manifest but the
-      # loader does not yet enforce them.
+      # topological sort + missing-producer detection; slice 4
+      # added the declarations; slice 5 (`Loader#topo_sort_plugins`)
+      # enforces ordering and missing-producer validation.
       class Consumption < Data.define(:plugin_id, :name, :optional)
         def initialize(plugin_id:, name:, optional: false)
           super(plugin_id: plugin_id.to_s, name: name.to_sym, optional: optional ? true : false)

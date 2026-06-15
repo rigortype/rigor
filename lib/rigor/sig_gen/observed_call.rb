@@ -5,9 +5,9 @@ module Rigor
     # Per-call-site argument observation produced by
     # {ObservationCollector}. ADR-14 follow-up: the earlier
     # MVP shape (`Array[Type]` of positional types only)
-    # could not represent keyword arguments — every call like
-    # `MethodCatalog.new(path: ..., mutating_selectors: ...)`
-    # discarded the whole observation via `non_positional?`.
+    # could not represent keyword arguments — keyword calls
+    # like `MethodCatalog.new(path: ..., mutating_selectors: ...)`
+    # were silently skipped in that shape.
     # The new shape carries positional and keyword arg types
     # in parallel so the per-position / per-keyword unions
     # can each be reconstructed independently.

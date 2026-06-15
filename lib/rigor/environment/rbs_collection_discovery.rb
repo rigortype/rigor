@@ -4,8 +4,7 @@ require "yaml"
 
 module Rigor
   class Environment
-    # Open item O4 Layer 3 slice 2 — `rbs collection install`
-    # awareness.
+    # `rbs collection install` awareness (O4 Layer 3 slice 2, implemented).
     #
     # When the target project has been set up with `rbs
     # collection install` (the standard RBS-ecosystem flow for

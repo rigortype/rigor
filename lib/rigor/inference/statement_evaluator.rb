@@ -380,9 +380,7 @@ module Rigor
       end
 
       # `receiver[key] ||= default` — the Redmine `Query#as_params`
-      # idiom (ROADMAP § Future cycles / Type-language / engine —
-      # "Indexed-collection narrowing through `Hash[k] ||= default`").
-      # After the `||=`, the next read at `receiver[key]` is known
+      # idiom. After the `||=`, the next read at `receiver[key]` is known
       # non-nil; the next `<<` / `[]=` / other mutator runs against
       # a Tuple / Hash carrier instead of the `Constant[nil]` an
       # empty `HashShape{}` lookup would otherwise fold to.
@@ -1815,9 +1813,8 @@ module Rigor
       # rows for `:always` assert directives (the slice-4a
       # routing places conditional asserts on `truthy_facts` /
       # `falsey_facts`, which `Narrowing.predicate_scopes`
-      # consumes). Future plugin contributions that add
-      # `:always` assertions at the same call site flow through
-      # the same merger and land here.
+      # consumes). Plugin `:always` assertions are handled by
+      # the sibling `apply_plugin_assertions`, not this path.
       def apply_rbs_extended_assertions(call_node, current_scope)
         method_def = resolve_call_method(call_node, current_scope)
         return current_scope if method_def.nil?

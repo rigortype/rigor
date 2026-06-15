@@ -18,10 +18,11 @@ module Rigor
     # overrides {#init} to wire up any state it needs from the
     # injected service container.
     #
-    # Slice 1 ships only the registration / loading plumbing. The
-    # protocol hooks (dynamic-return contributions, type-specifying
-    # contributions, dynamic reflection) land in subsequent v0.1.0
-    # slices and arrive as additional methods on this class.
+    # This class implements all plugin protocol hooks: per-call
+    # return-type contributions (`dynamic_return`), narrowing-fact
+    # contributions (`type_specifier`), AST node rules (`node_rule`),
+    # and producer/cache hooks. Cumulative implementation per the
+    # ADR-37 / ADR-52 slice chain.
     #
     # Example plugin:
     #
@@ -543,10 +544,11 @@ module Rigor
       #
       # `path` is the analysed file path; `scope` is the entry
       # `Rigor::Scope` after `ScopeIndexer` ran; `root` is the
-      # parsed `Prism::Node` root. Plugin authors traverse `root`
-      # themselves if they need node-scoped rules — the
-      # `Rule<TNode>` API ADR-2 § "Custom rules" mentions stays
-      # deferred to v0.1.x.
+      # parsed `Prism::Node` root. Plugin authors can traverse
+      # `root` themselves or declare rules via the `.node_rule` DSL
+      # (ADR-37, shipped). The PHPStan-style `Rule<TNode>` base
+      # class mentioned in ADR-2 was superseded by the block-based
+      # `.node_rule` DSL.
       #
       # Default returns `[]` so plugins that contribute through
       # other channels (e.g. slice-4 narrowing contributions,

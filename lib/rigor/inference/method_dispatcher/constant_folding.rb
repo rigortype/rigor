@@ -40,7 +40,7 @@ module Rigor
       #   receiver/argument combination.
       #
       # Anything else returns `nil`, signalling "no rule matched" so the
-      # caller (`ExpressionTyper`) falls back to `Dynamic[Top]` and records a
+      # caller (`MethodDispatcher`) falls back to `Dynamic[Top]` and records a
       # fail-soft event. Slice 4 (RBS-backed) layers another dispatch tier
       # behind this rule book, but the constant-folding semantics defined
       # here MUST NOT regress: any value reachable by literal arithmetic at

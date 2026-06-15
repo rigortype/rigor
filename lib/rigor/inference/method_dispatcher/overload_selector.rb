@@ -25,9 +25,7 @@ module Rigor
       #    so without this preference, an alias-typed overload like
       #    `Array#[](::int) -> Elem` would beat the strict
       #    `Array#[](Range) -> Array[Elem]?` overload for a Range
-      #    argument. (Surfaced during v0.1.1 self-analysis; see the
-      #    "Interface-strictness on overload selection" item in
-      #    `docs/ROADMAP.md`.)
+      #    argument.
       # 3. **Pass 2 — gradual fall-back.** If no fully strict overload
       #    matches, accept the first arity-and-gradual-accept match
       #    (the v0.1.1 behaviour). Alias / Interface / Intersection

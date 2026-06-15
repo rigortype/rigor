@@ -64,9 +64,8 @@ module Rigor
       end
 
       def base_scope(_path)
-        # Slice 7: pull the Environment from the cached
-        # ProjectContext so hovers don't pay the RBS-load tax on
-        # every cursor stop.
+        # Pulls the Environment from the cached ProjectContext so
+        # each hover avoids repeating the RBS-load build.
         Scope.empty(environment: @project_context.environment)
       end
     end

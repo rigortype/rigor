@@ -29,10 +29,9 @@ module Rigor
       # class-level methods whose block argument runs as if it were
       # an instance method of the receiver.
       #
-      # Slice 1a (this file) is **the contract only**. The engine
-      # hook that consults registered entries and narrows
-      # `Scope#self_type` for a block whose enclosing call matches
-      # arrives in slice 1b.
+      # Engine wiring: `Inference::MacroBlockSelfType.narrow_self_type_for`
+      # (called from expression_typer.rb) consults registered entries
+      # and narrows `Scope#self_type` for matching block call sites.
       #
       # ## Fields
       #

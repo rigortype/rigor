@@ -6,21 +6,13 @@ require_relative "buffer_table"
 module Rigor
   module LanguageServer
     # LSP server lifecycle state machine + JSON-RPC method dispatcher.
-    #
-    # Slice 1 (this commit) ships:
-    # - State machine: `:uninitialized` → `:initialized` → `:shutdown`
-    #   → `:exited`.
-    # - Three lifecycle handlers: `initialize`, `shutdown`, `exit`.
-    # - {#dispatch} which routes (method, params) to the matching
-    #   handler and returns the response payload (or `nil` for
-    #   notifications). Out-of-state requests return the
-    #   spec-defined `InvalidRequest` (-32002) / `MethodNotFound`
-    #   (-32601) error shapes.
-    #
-    # Slice 2 wraps this dispatcher in a stdio JSON-RPC reader /
-    # writer so the CLI subcommand can serve real LSP clients.
-    # Slice 3+ adds document sync; slice 4+ adds publishDiagnostics;
-    # slice 5-8 add the rest of the v1 capability surface.
+    # State machine: `:uninitialized` → `:initialized` → `:shutdown`
+    # → `:exited`. {#dispatch} routes (method, params) to the matching
+    # handler and returns the response payload (`nil` for notifications);
+    # out-of-state requests return `InvalidRequest` (-32002) /
+    # `MethodNotFound` (-32601). Full v1 capability surface (document
+    # sync, publishDiagnostics, hover, completion, sig-help, folding,
+    # selection, and watched-file invalidation) is implemented.
     class Server # rubocop:disable Metrics/ClassLength
       # JSON-RPC error codes per LSP spec § "Response Message".
       ERROR_PARSE_ERROR      = -32_700
@@ -58,8 +50,8 @@ module Rigor
       #   the providers read on every request. When present,
       #   `workspace/didChangeWatchedFiles` and
       #   `workspace/didChangeConfiguration` invalidate the cache;
-      #   nil means "no project context", which is the slice 1-6
-      #   behaviour (each request rebuilds env from scratch).
+      #   nil means "no project context": each request rebuilds env
+      #   from scratch (mainly for specs and backward compatibility).
       def initialize(buffer_table: BufferTable.new, publisher: nil, # rubocop:disable Metrics/ParameterLists
                      hover_provider: nil, document_symbol_provider: nil,
                      completion_provider: nil, signature_help_provider: nil,

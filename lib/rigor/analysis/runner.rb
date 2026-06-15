@@ -58,11 +58,10 @@ module Rigor
       #   slices route real producers through it.
       # @param workers [Integer] ADR-15 Phase 4b — when greater
       #   than zero, per-file analysis dispatches across a pool of
-      #   N Ractor workers built around {WorkerSession}. Default
-      #   `0` keeps the sequential code path bit-for-bit
-      #   unchanged. Phase 4c will wire the CLI / `.rigor.yml`
-      #   surface that produces non-zero values; this slice
-      #   leaves the parameter as a programmatic opt-in only.
+      #   N workers. Default `0` keeps the sequential code path
+      #   bit-for-bit unchanged. Controlled via the
+      #   `RIGOR_RACTOR_WORKERS` env var or `.rigor.yml`
+      #   `parallel.workers:` (Phase 4c, fully wired).
       # @param collect_stats [Boolean] when true (default), `#run`
       #   builds a {RunStats} summary exposed via `result.stats`
       #   — this forces the RBS env build at end-of-run so the

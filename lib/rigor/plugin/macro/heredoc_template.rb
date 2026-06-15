@@ -68,13 +68,10 @@ module Rigor
       # to a later slice — the `returns:` declarations cost
       # nothing to write today and unlock precision then.
       #
-      # ## Slice 2a scope
-      #
-      # This file ships the value class only. Slice 2b wires the
-      # pre-pass that scans Tier C call sites + the
-      # `SyntheticMethodIndex` the dispatcher consults; slice 2c
-      # authors `plugins/rigor-dry-struct/` and
-      # `plugins/rigor-dry-types/` as the worked consumers.
+      # Engine wiring: `Inference::SyntheticMethodScanner` (slice 2b,
+      # `synthetic_method_scanner.rb`) consumes `manifest.heredoc_templates`.
+      # Worked consumers: `plugins/rigor-dry-struct/` and
+      # `plugins/rigor-dry-types/` (slice 2c).
       class HeredocTemplate
         NAME_PLACEHOLDER = "\#{name}"
 

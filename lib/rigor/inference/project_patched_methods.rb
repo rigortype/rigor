@@ -13,13 +13,10 @@ module Rigor
     # project-side `lib/core_ext/string_extensions.rb` patches
     # are visible to cross-file dispatch.
     #
-    # Slice 2 ships the registry at the **floor**: the dispatcher
-    # answers `Type::Combinator.untyped` (Dynamic[Top]) on a hit;
-    # return-type inference for patched methods stays deferred
-    # (a separate slice when concrete demand surfaces — most
-    # real-world `core_ext` patches return shapes the analyzer
-    # could heuristically extract via the same machinery the
-    # ADR-10 walker uses, but slice 2 keeps the surface narrow).
+    # The dispatcher answers `Dynamic[T]` (with a heuristic static
+    # facet) when `Entry#return_type` is non-nil, or `Dynamic[Top]`
+    # when the heuristic declined (`nil`). See {Entry} for the
+    # per-field contract.
     class ProjectPatchedMethods
       # Frozen value-object recording one `def` observed by the
       # pre-pass. `class_name` is the qualified prefix

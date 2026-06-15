@@ -11,17 +11,8 @@ module Rigor
   module LanguageServer
     # Builds the LSP `Hover.contents` markdown body. Dispatches on
     # the hovered Prism node class so each shape (method call,
-    # constant, local, literal, …) gets the most relevant
-    # type-aware presentation.
-    #
-    # Slice A1 (this commit) ships:
-    # - default body bit-for-bit matching the LSP v1 slice 5
-    #   output (`type:` / `erased:` / `node:`),
-    # - `Prism::CallNode` specialisation surfacing the receiver
-    #   type + RBS-erased method signature.
-    #
-    # Slices A2-A4 extend the dispatch with constant /
-    # local / ivar / literal renderers per
+    # constant, local, ivar, literal) gets the most relevant
+    # type-aware presentation per
     # `docs/design/20260517-lsp-hover-completion.md`.
     class HoverRenderer
       # @param node_scope_lookup [#[]] node-to-scope table built

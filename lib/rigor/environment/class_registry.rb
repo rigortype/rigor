@@ -7,8 +7,8 @@ module Rigor
     # Resolves Ruby Class/Module objects to Rigor::Type::Nominal instances.
     # The hardcoded list spans the core classes the literal typer (Slice 1)
     # and the constant-resolution path (Slice 2 strengthening) need.
-    # Slice 4 will extend the registry by reading RBS Definitions through
-    # Rigor::Environment::RbsLoader.
+    # This is the static fast path for built-ins; `Environment` falls through
+    # to `RbsLoader` for all other names — the two tiers are complementary.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract
     # (every entry below MUST always be recognised).
@@ -28,7 +28,8 @@ module Rigor
       # Common Ruby core classes that user code routinely names by constant
       # reference. Adding them to the registry lets `nominal_for_name`
       # resolve `Array`, `Hash`, etc. without each call site re-listing
-      # them; Slice 4's RBS loader will subsume these once it lands.
+      # them. The static registry is the cheap fast path; `RbsLoader`
+      # extends coverage to all other RBS-declared names (Slice 4, landed).
       SLICE_2_BUILT_INS = [
         Array,
         Hash,

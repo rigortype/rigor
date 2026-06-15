@@ -17,37 +17,30 @@ require_relative "check_rules/self_closedness_scanner"
 
 module Rigor
   module Analysis
-    # First-preview catalogue of `rigor check` diagnostic rules.
+    # Catalogue of `rigor check` diagnostic rules.
     #
-    # The rules are intentionally narrow: they fire ONLY when the
-    # engine is confident enough to make a useful claim, and they
-    # MUST NOT raise on unrecognised AST shapes, RBS gaps, or
-    # missing scope information. Each rule consumes the per-node
-    # scope index produced by
+    # Rules fire ONLY when the engine is confident enough to make a
+    # useful claim and MUST NOT raise on unrecognised AST shapes,
+    # RBS gaps, or missing scope information. Each rule consumes
+    # the per-node scope index produced by
     # `Rigor::Inference::ScopeIndexer.index` and yields zero or
     # more `Rigor::Analysis::Diagnostic` values.
     #
-    # The first shipped rule, `UndefinedMethodOnTypedReceiver`,
-    # flags an explicit-receiver `Prism::CallNode` whose receiver
-    # statically resolves to a `Type::Nominal` or `Type::Singleton`
-    # known to the analyzer's RBS environment AND whose method
-    # name does not appear on that class's instance / singleton
-    # method table. This is the canonical "type check" signal
-    # ("Foo has no method bar"), but it explicitly does NOT fire
-    # for:
+    # The primary rule (`call.undefined-method`) flags an
+    # explicit-receiver `Prism::CallNode` whose receiver statically
+    # resolves to a class known to the RBS environment and whose
+    # method name does not appear on that class's method table.
+    # It does NOT fire for:
     #
     # - implicit-self calls (no `node.receiver`) — too noisy
     #   without per-method RBS for every helper in the class.
     # - dynamic / unknown receivers (`Dynamic[T]`, `Top`, `Union`)
     #   — by definition we cannot enumerate the method set.
-    # - shape carriers (`Tuple`, `HashShape`, `Constant`) — their
-    #   dispatch goes through `ShapeDispatch` / `ConstantFolding`
-    #   which the rule does not yet model.
+    # - shape carriers: `Tuple` → "Array", `HashShape` → "Hash",
+    #   `Constant` → the constant's class — `concrete_class_name`
+    #   resolves these to their runtime class for dispatch.
     # - receivers whose class name is NOT registered in the
     #   loader (RBS-blind environments, unknown stdlib).
-    #
-    # The above list is the deliberate conservative envelope of
-    # the first preview; later slices broaden it.
     # rubocop:disable Metrics/ModuleLength
     module CheckRules
       # Canonical identifiers for each rule. Per ADR-8 §

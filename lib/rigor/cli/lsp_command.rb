@@ -8,11 +8,8 @@ module Rigor
   class CLI
     # Executes the `rigor lsp` command.
     #
+    # Starts a long-running LSP server over stdio (JSON-RPC).
     # See `docs/design/20260517-language-server.md` for the design.
-    # Slice 1 (this commit) ships the CLI subcommand entry point.
-    # The actual stdio JSON-RPC reader / writer is queued for slice 2;
-    # invoking `rigor lsp` at slice 1 returns immediately after
-    # validating the transport flag.
     class LspCommand < Command
       USAGE = "Usage: rigor lsp [options]"
 

@@ -21,7 +21,7 @@ require_relative "type_node/resolver_chain"
 
 module Rigor
   # The engine's view of the type universe outside the current scope.
-  # Slice 1 only exposed the class registry; Slice 4 adds the RBS loader,
+  # Slice 1 exposed only the class registry; Slice 4 added the RBS loader,
   # which threads through ExpressionTyper and MethodDispatcher to type
   # constant references and method calls that the literal-typer and
   # constant-folding tiers cannot answer.
@@ -454,11 +454,11 @@ module Rigor
       def invoke_synthesizer_safely(callable, path)
         callable.call(path.to_s)
       rescue StandardError
-        # WD6 fail-soft — a synthesizer that raises does NOT
-        # crash analysis. Slice 2b will turn this into a
-        # `source-rbs-synthesis-failed` info diagnostic; for now
-        # the contract is "no analysis crash on a misbehaving
-        # synthesizer".
+        # WD6 fail-soft — a synthesizer that raises does NOT crash
+        # analysis. Unlike the `[:error, msg]` return path (which
+        # the runner surfaces as `source-rbs-synthesis-failed`),
+        # an unhandled raise is swallowed silently; the
+        # unexamined-raise channel is deliberately silent per WD6.
         nil
       end
     end

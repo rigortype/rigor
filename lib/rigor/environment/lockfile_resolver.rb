@@ -2,7 +2,7 @@
 
 module Rigor
   class Environment
-    # Open item O4 Layer 3 — Gemfile.lock parse.
+    # Gemfile.lock parser for target-project bundler awareness (O4 Layer 3, implemented).
     #
     # Parses a target project's `Gemfile.lock` via Bundler's
     # `LockfileParser` and exposes the locked gem set as a frozen

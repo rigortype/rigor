@@ -528,10 +528,9 @@ module Rigor
       s.dup.freeze
     end
 
-    # Slice 2 only accepts `:disabled` for the network policy. The
-    # YAML scalar may arrive as a String (`"disabled"`) or already
-    # as the Symbol; coerce to the canonical Symbol shape so the
-    # downstream `TrustPolicy` constructor stays strict.
+    # YAML scalar may arrive as a String or already as a Symbol;
+    # coerce to the canonical Symbol shape so the downstream
+    # `TrustPolicy` constructor stays strict.
     #
     # The accepted set is duplicated from
     # {Rigor::Plugin::TrustPolicy::VALID_NETWORK_POLICIES} so

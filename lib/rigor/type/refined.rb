@@ -106,9 +106,8 @@ module Rigor
       # so callers can pass any `Constant#value` without a
       # type-prefilter.
       #
-      # Plugin-contributed predicates land here once ADR-2 is
-      # in flight; today the table is closed over the v0.0.4
-      # built-in catalogue.
+      # Plugin-contributed predicates are not yet wired; today
+      # the table covers the built-in catalogue.
       #
       # Recogniser policy:
       #

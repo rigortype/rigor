@@ -20,11 +20,9 @@ module Rigor
   # contract — see ADR-2 § "Flow Contribution Bundle" for the binding
   # definition.
   #
-  # The element-list flattening (`to_element_list`) ADR-2 mentions is
-  # intentionally not implemented yet: it is the analyzer-internal
-  # bookkeeping behind the merge policy and will land alongside the
-  # plugin contribution merger in v0.1.0. Plugin authors should not
-  # rely on it.
+  # `to_element_list` and `Merger` are implemented; plugin authors
+  # should not depend on the `Element` shape — the bundle is the
+  # public contract.
   class FlowContribution
     # Provenance carries the metadata every contribution needs for
     # diagnostic attribution and cache invalidation. `source_family`

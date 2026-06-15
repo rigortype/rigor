@@ -363,11 +363,11 @@ module Rigor
       #   out at build time so the loader stays robust to fixtures and
       #   bare repositories.
       # @param cache_store [Rigor::Cache::Store, nil] the persistent
-      #   cache the loader consults for translated constant lookups
-      #   (and, in later v0.0.9 slices, other Marshal-clean
-      #   reflection artefacts). Pass `nil` (the default) to skip
-      #   the cache entirely; the runner threads its own Store
-      #   through here when caching is enabled.
+      #   cache the loader threads through to `RbsEnvironment`,
+      #   `RbsKnownClassNames`, `RbsConstantTable`,
+      #   `RbsClassAncestorTable`, and `RbsClassTypeParamNames`
+      #   producers. Pass `nil` (the default) to skip caching; the
+      #   runner threads its own Store through here when enabled.
       # @param virtual_rbs [Array<[String, String]>] ADR-32 WD4 —
       #   `[virtual_filename, rbs_source]` pairs synthesised from
       #   project source by a plugin's

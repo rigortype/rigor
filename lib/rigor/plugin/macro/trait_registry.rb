@@ -78,12 +78,9 @@ module Rigor
       #   facts (attr_reader / after_save / etc.); slice 3 emits
       #   only the module's plain instance methods.
       #
-      # ## Slice 3a scope
-      #
-      # This file ships the value class only. Slice 3b wires the
-      # scanner that walks Tier B call sites + the per-method
-      # explosion via `SyntheticMethodIndex`; slice 3c authors
-      # `plugins/rigor-devise/` model side as the worked consumer.
+      # Engine wiring: `Inference::SyntheticMethodScanner#collect_trait_registries`
+      # (slice 3b) walks Tier B call sites and explodes per-method
+      # entries. Worked consumer: `plugins/rigor-devise/` (slice 3c).
       class TraitRegistry
         REST_POSITION = :rest
 

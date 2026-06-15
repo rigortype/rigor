@@ -38,10 +38,10 @@ module Rigor
       # Trailing `#=> …` annotation comment. Matched and stripped
       # before re-annotating so re-running is idempotent — this
       # follows xmpfilter's convention of owning the `#=>` marker,
-      # and also absorbs the pre-v0.2.0 `#=> dump_type: <type>`
-      # spelling. The leading `\s` requirement keeps a `#=>` inside
-      # a string literal (no preceding whitespace ambiguity aside)
-      # from matching mid-expression.
+      # and also absorbs the older `#=> dump_type: <type>` spelling
+      # (idempotency across re-runs). The leading `\s` requirement
+      # keeps a `#=>` inside a string literal (no preceding
+      # whitespace ambiguity aside) from matching mid-expression.
       ANNOTATION_PATTERN = /\s+#=>(?:\s.*)?\z/
 
       # Arguments for highlighting through `bat`: the annotated

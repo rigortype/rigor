@@ -67,18 +67,12 @@ module Rigor
     #   ...; @warning_issued = true`). Requires tracking the
     #   first-write position; flow-sensitive but orthogonal.
     # - **Local-variable mutation inside a block body** (e.g.
-    #   `arr = []; xs.each { |x| arr << x }`). Block bodies
-    #   create a child scope; the existing closure-escape model
-    #   only widens outer locals when the block ESCAPES the
-    #   call. An in-place mutator inside a non-escaping block on
-    #   an outer LOCAL does not yet flow back. **Ivar mutations
-    #   inside a block ARE handled** (ivars live in the
-    #   method-body scope, not the block-local scope) — the
-    #   widening fires from inside the block and the new ivar
-    #   binding is visible to the outer scope.
+    #   `arr = []; xs.each { |x| arr << x }`) — landed as
+    #   ADR-56 slice A (`widen_after_block`). **Ivar mutations
+    #   inside a block ARE also handled** (ivars live in the
+    #   method-body scope, not the block-local scope).
     #
-    # Those four are documented as "G2 remaining" in
-    # `docs/CURRENT_WORK.md` and are intentionally deferred.
+    # The remaining three items above are demand-gated; see ADR-56.
     module MutationWidening
       # Array mutators that change either the size or the element
       # set of a literal-shape carrier (Tuple). Receiver-mutating

@@ -832,15 +832,13 @@ module Rigor
           Type::AcceptsResult.no(mode: mode, reasons: reason)
         end
 
-        # Slice 4 phase 2c uses Ruby's actual class hierarchy to answer
-        # "is D a subclass of C?". This works for any class loadable
-        # through Object.const_get -- core, stdlib, and live application
-        # classes. When either name fails to resolve we surface "maybe":
-        # the caller (overload selector) treats yes/maybe identically,
-        # so the conservative answer keeps overload coverage intact.
-        # Slice 5 will replace this with an RBS-driven hierarchy lookup
-        # so ahead-of-time type checking no longer relies on Ruby
-        # loading the application classes.
+        # Uses Ruby's actual class hierarchy via Object.const_get to answer
+        # "is D a subclass of C?" for core, stdlib, and application classes.
+        # When either name fails to resolve we surface "maybe": the caller
+        # (overload selector) treats yes/maybe identically, so the conservative
+        # answer keeps overload coverage intact. RbsHierarchy exists but this
+        # path does not yet consult it; migration to an RBS-driven lookup
+        # is deferred.
         def class_subtype_result(target_name:, actual_name:, mode:, kind:)
           return Type::AcceptsResult.yes(mode: mode, reasons: "exact name match") if target_name == actual_name
 

@@ -193,13 +193,17 @@ module Rigor
           summary: "Call passes an argument whose type the parameter cannot accept.",
           fires_when: [
             "The parameter type rejects the argument under `accepts(arg, mode: :gradual)`.",
-            "Method has a single overload (multi-overload checking is deferred).",
+            "Single-overload: no overload accepts the arg class (ADR-64 non-nil channel).",
+            "Multi-overload: every overload rejects a pure-`nil` arg (ADR-64 nil channel) " \
+            "or every overload rejects a single concrete non-nil arg class (non-nil channel).",
             "Both sides have a non-Dynamic concrete type."
           ],
           does_not_fire_when: [
             "Either the parameter or the argument is `Dynamic[T]`.",
-            "Method has multiple overloads.",
-            "Method has `*rest_positionals`, required keywords, or trailing positionals."
+            "The call is a coerce-dispatch operator (`+`, `-`, `*`, `/`, `<`, `>`, …) — " \
+            "excluded because the `coerce` protocol makes acceptance undecidable.",
+            "Method has `*rest_positionals`, required keywords, or trailing positionals.",
+            "The argument type is a union (not a single concrete class)."
           ],
           suppression: "`# rigor:disable call.argument-type-mismatch`.",
           severity_authored: :error,

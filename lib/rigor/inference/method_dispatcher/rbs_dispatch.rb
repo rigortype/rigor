@@ -45,8 +45,9 @@ module Rigor
       # machinery works without duplication: `Tuple[Integer, String]`
       # dispatches as `Array[Integer | String]`, and
       # `HashShape{a: Integer}` dispatches as `Hash[Symbol, Integer]`.
-      # Tuple-aware refinements (e.g., `tuple[0]` returning the precise
-      # member) are deferred to Slice 5 phase 2.
+      # Tuple/HashShape element precision (e.g., `tuple[0]` returning
+      # the precise member) is handled by the preceding `ShapeDispatch`
+      # tier.
       #
       # Remaining limitations:
       #

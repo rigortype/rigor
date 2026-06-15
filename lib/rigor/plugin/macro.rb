@@ -14,11 +14,10 @@ module Rigor
     # `nested_class_templates:`) and the substrate consumes them
     # to recognise the call shapes a library exposes to its users.
     #
-    # Slice 1a (this file's first delivery) ships the Tier A value
-    # class only. The other tiers' value classes + their manifest
-    # slots arrive in subsequent slices per ADR-16 § Implementation
-    # slicing. The namespace is reserved here so subsequent slices
-    # add files alongside `block_as_method.rb` without churn.
+    # Tier A (`BlockAsMethod`), Tier B (`TraitRegistry`), Tier C
+    # (`HeredocTemplate`), and ADR-36 nested-class emission
+    # (`NestedClassTemplate`) value classes are all shipped here.
+    # Engine wiring lives in `lib/rigor/inference/`.
     #
     # Per ADR-16 § WD13, substrate-produced output ships at a
     # **floor** in v0.1.x ("substrate-affected code parses cleanly

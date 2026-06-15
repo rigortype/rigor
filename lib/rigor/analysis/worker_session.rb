@@ -21,21 +21,19 @@ module Rigor
   module Analysis
     # ADR-15 Phase 4a — per-worker analysis substrate.
     # [ADR-15](../../../docs/adr/15-ractor-concurrency.md)
-    # § Phase 4 carves the eventual Ractor-isolated worker pool
-    # into three sub-phases; this is the substrate that 4b will
-    # wrap in `Ractor.new` and 4c will gate behind
-    # `RIGOR_RACTOR_WORKERS`. NO Ractor in the loop yet — 4a
-    # exists so the per-worker ownership boundary is testable in
-    # the absence of any Ractor coordination.
+    # § Phase 4 carves the Ractor-isolated worker pool into sub-phases;
+    # 4a/4b/4c all landed, but the Ractor pool (4b) is blocked by Ruby
+    # Bug #22075 (UAF) — the active pool backend is fork (ADR-15 Amendment).
+    # This class exists so the per-worker ownership boundary is testable
+    # independently of any pool coordinator.
     #
     # The constructor takes only `Ractor.shareable?` inputs:
     #
     # - `configuration` — Phase 2a ({Rigor::Configuration} is
     #   `Ractor.shareable?`).
-    # - `cache_store` — frozen-shareable handle is NOT a precondition;
-    #   future 4b workers build their OWN Store at the shared
-    #   `cache_root` directory. 4a accepts an already-built Store
-    #   for the no-Ractor coordinator path.
+    # - `cache_store` — the fork backend passes the parent runner's
+    #   pre-built Store (`cache_store: @cache_store` in PoolCoordinator);
+    #   workers share it rather than building their own at `cache_root`.
     # - `plugin_blueprints` — Phase 3a
     #   (`Array<Plugin::Blueprint>` is `Ractor.shareable?`).
     # - `explain` — Boolean.
@@ -234,11 +232,9 @@ module Rigor
         Prism.parse(File.read(physical), filepath: path, version: @configuration.target_ruby)
       end
 
-      # Mirrors {Runner#build_trust_policy}. Workers under Phase
-      # 4b will need the same trust derivation, and the
-      # configuration is already shareable, so deriving it inside
+      # Mirrors {Runner#build_trust_policy}. Deriving trust inside
       # the session keeps the substrate decoupled from the
-      # coordinator's helper.
+      # coordinator; configuration is already Ractor-shareable.
       def build_trust_policy
         trusted_gems = @configuration.plugins.map { |entry| trusted_gem_name(entry) }.uniq
         roots = [Dir.pwd]

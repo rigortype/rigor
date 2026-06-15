@@ -151,8 +151,9 @@ module Rigor
         # - target_ruby: minimum Ruby version your project targets.
         # - paths:       directories scanned by `rigor check` and
         #                `rigor type-scan` when no path is given.
-        # - plugins:     reserved for future plugin contributions
-        #                (no plugins are loaded today).
+        # - plugins:     opt-in list of plugin gem names to load.
+        #                See https://github.com/rigortype/rigor/tree/main/plugins
+        #                for production plugins (rigor-activerecord, rigor-sorbet, …).
         # - disable:     list of `rigor check` rule identifiers to
         #                silence project-wide. The shipped rules are
         #                call.undefined-method, call.wrong-arity,

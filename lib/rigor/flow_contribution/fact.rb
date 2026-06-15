@@ -18,7 +18,7 @@ module Rigor
     #    (`Rigor::RbsExtended::PredicateEffect`).
     # 3. RBS::Extended `assert*` directives
     #    (`Rigor::RbsExtended::AssertEffect`).
-    # 4. Future plugin contributions (slice 5 emission protocol).
+    # 4. Plugin contributions via `type_specifier` DSL (ADR-52).
     #
     # Each of those four carriers translates to / from Fact at
     # its boundary; downstream of {Rigor::FlowContribution#to_element_list}

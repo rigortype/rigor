@@ -21,10 +21,9 @@ module Rigor
     # reach the recorder. This module is the ADR-46 / ADR-47 "collect at
     # evaluation time, never recompute" lesson applied to self-calls.
     #
-    # A later slice consumes the recorded misses behind a confidently-
-    # closed-class gate to emit `call.self-undefined-method`, behind its
-    # own external-corpus false-positive gate. This slice (4a) lands the
-    # plumbing OFF by default — {active?} is false on a normal run, so the
+    # ADR-24 slice 4 (`call.self-undefined-method`) consumes the recorded
+    # misses behind a confidently-closed-class gate (see `CheckRules` L775).
+    # The rule ships `:off` by default — {active?} is false on a normal run, so the
     # instrumented choke-point pays a single integer read and records
     # nothing. Recording is purely observational; it never changes a
     # diagnostic.

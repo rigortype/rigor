@@ -10,12 +10,12 @@ module Rigor
     # `%a{rigor:v1:hkt_define: ...}` annotations in shipped
     # `.rbs` files.
     #
-    # Slice 1 keeps the registry **opaque**: it stores the
-    # registration metadata (arity, variance, bound) and the
-    # un-evaluated definition body (a raw String — Slice 2
-    # introduces the conditional / indexed-access evaluator that
-    # parses the body and reduces `Type::App` instances against
-    # it). The carrier never needs to read from the registry
+    # The registry stores registration metadata (arity, variance,
+    # bound) and the definition body as both a raw String and an
+    # evaluable `HktBody` node tree. `HktReducer` (Slice 2a) and
+    # `HktBodyParser` (Slice 2b) are both shipped and reduce
+    # `Type::App` instances against the definition. The carrier
+    # never needs to read from the registry
     # because Slice 1's `Type::App` carries its `bound` directly;
     # the registry exists at this slice solely so the parser
     # round-trip and downstream slices have a stable target API.
@@ -65,16 +65,15 @@ module Rigor
       # definition.
       #
       # `body` is the raw String payload from the `%a{...}`
-      # annotation (Slice 1's parser populates it). It stays
-      # opaque until Slice 2b's body-string parser lands.
+      # annotation (Slice 1's parser populates it); parsed into
+      # `body_tree` by `HktBodyParser` (Slice 2b, shipped).
       #
-      # `body_tree` is the optional evaluable form: a
+      # `body_tree` is the evaluable form: a
       # `Rigor::Inference::HktBody::*` node tree the Slice 2a
       # reducer walks against the application's concrete
       # arguments. Plugin and Rigor-bundled overlay authors
       # construct it programmatically through
-      # {with_body_tree}; the Slice 2b string parser will set
-      # it from `body` once it ships. The reducer treats a
+      # {.definition_with_body_tree}. The reducer treats a
       # `nil` `body_tree` as "definition not yet evaluable"
       # and returns the registered bound.
       Definition = Data.define(:uri, :params, :body, :body_tree, :source_path, :source_line) do

@@ -21,20 +21,14 @@ require_relative "../type/hash_shape"
 
 module Rigor
   module LanguageServer
-    # Answers `textDocument/completion` requests. v1 (slice 5)
-    # ships method completion for `obj.|`: when the cursor sits on
-    # a `CallNode` with a known-type receiver, the provider
-    # enumerates the receiver's RBS-known methods and returns each
-    # as an LSP `CompletionItem`.
-    #
-    # Constant-path completion (slice 6), Union / Intersection /
-    # Refined / Shape receiver handling (slice 7), and parse-recovery
-    # fallback for malformed buffers (slice 8) extend this v1 floor.
+    # Answers `textDocument/completion` requests. Provides method
+    # completion for `obj.|` (known-type receiver → RBS-known methods),
+    # constant-path completion, hash-key completion, Union / Intersection /
+    # Refined / Shape receiver handling, and parse-recovery fallback for
+    # malformed buffers (sentinel injection).
     #
     # LSP `CompletionItemKind` values used:
-    # - 2 = Method
-    #
-    # Slice 6 will add 7 (Class), 9 (Module), 21 (Constant).
+    # - 2 = Method, 5 = Field, 7 = Class, 9 = Module, 21 = Constant.
     class CompletionProvider # rubocop:disable Metrics/ClassLength
       include BufferResolution
 

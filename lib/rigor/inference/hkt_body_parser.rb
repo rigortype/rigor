@@ -11,29 +11,27 @@ module Rigor
     # `%a{rigor:v1:hkt_define}` payloads) into the `HktBody`
     # node tree the Slice 2a reducer evaluates against.
     #
-    # The minimum-viable grammar covered here is the
-    # union-of-atoms-and-parameterised-forms subset of ADR-20
-    # § D3 — sufficient for `JSON.parse`'s `json::value`
-    # recursive sum and for any other recursive-data-shape
-    # signatures (Lisp value trees, dry-types refinements
-    # without conditionals). The conditional / indexed-access
-    # forms (`E <: T ? A : B`, `E in [k1, k2]`) drafted in D3
-    # remain a follow-up slice — bodies that contain `?`
-    # raise `ParseError` and the calling directive parser
-    # drops the body_tree (the body String remains stored and
-    # the reducer falls back to `app.bound`).
+    # The grammar implements the full ADR-20 § D3 subset:
+    # union-of-atoms/parameterised-forms for `JSON.parse`'s
+    # `json::value` recursive sum, plus the conditional and
+    # membership forms shipped in subsequent slices. Indexed-access
+    # forms remain deferred (no concrete demand yet).
     #
-    # ## Grammar (slice 2b)
+    # ## Grammar
     #
     #     body         := union
     #     union        := type_expr ("|" type_expr)*
     #     type_expr    := atom | nominal_app | app_ref | param
+    #                   | conditional
     #     atom         := "nil" | "true" | "false" | "bool" | "untyped"
     #     param        := UCNAME   (when UCNAME ∈ params)
     #     nominal_app  := class_name ("[" type_expr ("," type_expr)* "]")?
     #     class_name   := "::"? UCNAME ("::" UCNAME)*
     #     app_ref      := "App" "[" uri "," type_expr ("," type_expr)* "]"
     #     uri          := IDENT ("::" IDENT)+
+    #     conditional  := "(" test "?" union ":" union ")"
+    #     test         := type_expr ("<:" | "==") type_expr
+    #                   | type_expr "in" "[" type_expr ("," type_expr)* "]"
     #     UCNAME       := /[A-Z]\w*/
     #     IDENT        := /[a-z_]\w*/
     #

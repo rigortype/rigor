@@ -9,10 +9,8 @@ module Rigor
     # inference instead of degrading to `Dynamic[top]` at the
     # dependency boundary.
     #
-    # Slice 1 lands the parser only — `Configuration#dependencies`
-    # is read, but no analyzer machinery consumes it yet. Slice 2
-    # wires `Analysis::DependencySourceInference` against this
-    # value object.
+    # Parser for the `dependencies:` YAML section; consumed by
+    # `Analysis::DependencySourceInference` (ADR-10).
     class Dependencies
       # Walking modes per
       # [ADR-10 § "Decision"](../../../docs/adr/10-dependency-source-inference.md#decision).

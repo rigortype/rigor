@@ -128,9 +128,9 @@ module Rigor
       end
 
       # LSP `Range` is 0-based start + end with `character` in
-      # UTF-16 code units. Slice 6 emits byte columns (correct for
-      # ASCII source); UTF-16 conversion stays queued per design
-      # doc § "Open questions".
+      # UTF-16 code units. This implementation emits byte columns
+      # (correct for ASCII source); UTF-16 conversion stays queued
+      # per design doc § "Open questions".
       def range_from(location)
         {
           start: { line: location.start_line - 1, character: location.start_column },

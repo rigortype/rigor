@@ -24,14 +24,12 @@ module Rigor
     #     )
     #   end
     #
-    # Slice 2 of the ADR-13 envelope (this file) ships the base
-    # class + manifest hook + registry aggregation. The parser-
-    # side wiring that actually consults the resolver chain
-    # arrives in slice 3, when {Rigor::TypeNode::NameScope} and
-    # the dispatcher between {Rigor::Builtins::ImportedRefinements::Parser}
-    # and the chain land. Until then resolvers can be unit-tested
-    # in isolation but never run for a real `%a{rigor:v1:...}`
-    # payload.
+    # ADR-13 — base class, manifest hook, and registry aggregation
+    # for plugin-contributed type-node resolvers. Resolvers declared
+    # via `manifest(type_node_resolvers:)` run for every real
+    # `%a{rigor:v1:...}` payload through `TypeNode::ResolverChain`
+    # (built by `Environment#build_name_scope` from
+    # `Plugin::Registry#type_node_resolvers`).
     #
     # Resolvers SHOULD be stateless and re-entrant; the registry
     # builds the chain once per `Analysis::Runner.run` and may

@@ -4,10 +4,11 @@ module Rigor
   module Analysis
     # Immutable storage for flow-sensitive facts attached to a Scope snapshot.
     #
-    # The first implementation keeps the bucket model deliberately small:
-    # callers can record local-binding and relational facts, invalidate all
-    # facts that mention a target, and conservatively join two stores by
-    # retaining only facts that both incoming edges share.
+    # Six buckets (see BUCKETS): local_binding, captured_local,
+    # object_content, global_storage, dynamic_origin, relational.
+    # Callers can record facts, invalidate all facts that mention a target,
+    # and conservatively join two stores by retaining only facts that both
+    # incoming edges share.
     class FactStore
       BUCKETS = %i[
         local_binding

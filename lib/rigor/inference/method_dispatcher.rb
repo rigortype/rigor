@@ -39,28 +39,15 @@ module Rigor
     # callers (today only `ExpressionTyper`) own the fail-soft fallback
     # and decide whether to record a `FallbackTracer` event.
     #
-    # Tiers (in order):
+    # Tier order is documented inline in `resolve`; the precise-tier
+    # group is built from `PRECISE_TIERS_HEAD`, `STDLIB_SINGLETON_FOLDERS`,
+    # and `PRECISE_TIERS_TAIL`. `ShapeDispatch` runs above {RbsDispatch}
+    # so a precise per-position/per-key answer wins over the projected
+    # `Array#[]`/`Hash#fetch` RBS answer.
     #
-    # 1. {ConstantFolding}: executes the Ruby operation directly when
-    #    the receiver and argument are `Constant` carriers and the
-    #    method is on the curated whitelist. Slice 2.
-    # 2. {ShapeDispatch}: returns the precise element/value type for a
-    #    curated catalogue of `Tuple`/`HashShape` element-access
-    #    methods (`first`, `last`, `[]` with a static integer/key,
-    #    `fetch`, `dig`, `size`/`length`/`count`). Slice 5 phase 2.
-    # 3. {RbsDispatch}: looks up the receiver's class in the RBS
-    #    environment carried by the scope and translates the method's
-    #    return type into a Rigor::Type. Slice 4.
-    #
-    # `ShapeDispatch` deliberately runs *above* {RbsDispatch} so the
-    # precise per-position/per-key answer wins over the projected
-    # `Array#[]`/`Hash#fetch` answer; it falls through (`nil`) when
-    # the call cannot be proved against the static shape, in which
-    # case the projection answer from {RbsDispatch} applies.
-    #
-    # The dispatcher's public signature reserves space for `block_type:`
-    # and ADR-2 plugin extensions (later slices), so call sites added
-    # now do not have to be rewritten when those tiers arrive.
+    # The `block_type:` and plugin contribution (`dynamic_return`) tiers
+    # landed in Slice 6 phase C and v0.1.1 Track 2 respectively; all
+    # call sites pass through `dispatch`/`resolve` unchanged.
     module MethodDispatcher # rubocop:disable Metrics/ModuleLength
       module_function
 
@@ -327,19 +314,6 @@ module Rigor
         Type::Combinator.untyped
       end
 
-      # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2
-      # slice 7; ADR-52 WD3 — consults each loaded plugin's gated
-      # `dynamic_return` rules, wraps the contributed types as
-      # `FlowContribution` bundles, merges them through
-      # `FlowContribution::Merger`, and returns the merged
-      # `return_type` slot (or nil when no plugin contributed a
-      # return type).
-      #
-      # Plugins whose hook raises have their contribution
-      # silently dropped for this call so the dispatch chain
-      # keeps moving — the run-level diagnostic envelope (per
-      # ADR-2 § "Plugin Trust and I/O Policy") is owned by
-      # `Analysis::Runner#plugin_emitted_diagnostics`.
       # ADR-20 slice 3 — looks up the receiver / method pair
       # in {Rigor::Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES}
       # and returns the reduced HKT type. Only fires when the
@@ -414,6 +388,19 @@ module Rigor
         end
       end
 
+      # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2
+      # slice 7; ADR-52 WD3 — consults each loaded plugin's gated
+      # `dynamic_return` rules, wraps the contributed types as
+      # `FlowContribution` bundles, merges them through
+      # `FlowContribution::Merger`, and returns the merged
+      # `return_type` slot (or nil when no plugin contributed a
+      # return type).
+      #
+      # Plugins whose hook raises have their contribution
+      # silently dropped for this call so the dispatch chain
+      # keeps moving — the run-level diagnostic envelope (per
+      # ADR-2 § "Plugin Trust and I/O Policy") is owned by
+      # `Analysis::Runner#plugin_emitted_diagnostics`.
       def try_plugin_contribution(call_node, scope, receiver_type)
         return nil if call_node.nil? || scope.nil?
 
@@ -426,16 +413,6 @@ module Rigor
         FlowContribution::Merger.merge(contributions).return_type
       end
 
-      # ADR-10 slice 2b-ii. Consults the per-run
-      # `Analysis::DependencySourceInference::Index` carried by
-      # the environment for `(class_name, method_name)`
-      # observations harvested from opt-in gems' `roots:`. On a
-      # hit, returns `Combinator.untyped` so the call site
-      # carries the `Dynamic[top]` provenance (per ADR-10's
-      # "Inference contract": gem-source-inferred shapes never
-      # publish as ground-truth `T`). Returns `nil` when the
-      # environment carries no index, the index has no entry, or
-      # the receiver has no nominal class to look up.
       # ADR-16 synthetic-method tier. Slice 2b shipped the floor —
       # a match short-circuits at the right precedence (above
       # dep-source / discovered / user-class-fallback; below RBS)
@@ -557,6 +534,16 @@ module Rigor
         Type::Combinator.dynamic(entry.return_type)
       end
 
+      # ADR-10 slice 2b-ii. Consults the per-run
+      # `Analysis::DependencySourceInference::Index` carried by
+      # the environment for `(class_name, method_name)`
+      # observations harvested from opt-in gems' `roots:`. On a
+      # hit, returns `Combinator.untyped` so the call site
+      # carries the `Dynamic[top]` provenance (per ADR-10's
+      # "Inference contract": gem-source-inferred shapes never
+      # publish as ground-truth `T`). Returns `nil` when the
+      # environment carries no index, the index has no entry, or
+      # the receiver has no nominal class to look up.
       def try_dependency_source(receiver_type, method_name, environment)
         index = environment&.dependency_source_index
         return nil if index.nil? || index.empty?

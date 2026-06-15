@@ -175,24 +175,18 @@ module Rigor
           type.is_a?(Type::Constant) && type.value.is_a?(Symbol)
         end
 
-        # Element-yielding Enumerable methods covered as a v0.0.5
-        # placeholder. RBS already binds the block parameter
-        # correctly for plain `Array[T]` / `Set[T]` / `Range[T]`
-        # receivers via generic substitution; this tier exists so
-        # Tuple- and HashShape-shaped receivers reach the block
-        # body with the precise per-position element union /
-        # `Tuple[K, V]` pair rather than the projected
+        # Element-yielding Enumerable methods covered as a placeholder.
+        # RBS already binds the block parameter correctly for plain
+        # `Array[T]` / `Set[T]` / `Range[T]` receivers via generic
+        # substitution; this tier exists so Tuple- and HashShape-shaped
+        # receivers reach the block body with the precise per-position
+        # element union / `Tuple[K, V]` pair rather than the projected
         # `Array[union]` / `Hash[K, V]` widening.
         #
-        # NOTE (v0.0.5): the per-method coverage here (group_by,
-        # partition, each_slice, each_cons) is intentionally
-        # narrow. The longer-term direction is to move
-        # Enumerable-aware projections into a plugin tier modelled
-        # after PHPStan's extension API (ADR-2). The placeholders
-        # below stay until the plugin surface is in place; once it
-        # ships, this dispatcher loses these arms and the
-        # equivalent rules move into a built-in plugin loaded at
-        # boot.
+        # NOTE: `Plugin::NodeRuleWalk` (ADR-52 WD4) is now in place as
+        # the intended migration target for these Enumerable projections.
+        # The four methods (group_by, partition, each_slice, each_cons)
+        # remain here pending that migration.
         def single_element_block_params(receiver)
           element = element_type_of(receiver)
           return nil if element.nil?

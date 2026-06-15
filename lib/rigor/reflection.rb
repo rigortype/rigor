@@ -17,11 +17,8 @@ module Rigor
   #    classes / modules, in-source constants, discovered method
   #    nodes, class ivar / cvar declarations).
   #
-  # This module is the **stable read shape** that v0.1.0's plugin
-  # API will be designed against. ADR-2 (`docs/adr/2-extension-api.md`)
-  # calls out a unified reflection layer as a prerequisite for the
-  # extension protocols, and `docs/design/20260505-v0.1.0-readiness.md`
-  # nominates this module as the highest-leverage cold-start slice.
+  # This module is the **stable read shape** the plugin API is
+  # designed against (ADR-2, `docs/adr/2-extension-api.md`).
   #
   # The facade is **read-only and additive**. Existing call sites
   # that read directly from `Rigor::Scope` or
@@ -52,8 +49,8 @@ module Rigor
   #   defined in the analyzed sources?
   #
   # The provenance side of the API (which source family contributed
-  # each fact) is explicitly out of scope for the v0.0.7 first
-  # pass. v0.1.0's plugin API adds it as a separate concern.
+  # each fact) is explicitly out of scope for the v0.0.7 first pass;
+  # v0.1.0's plugin API added it as a separate concern.
   module Reflection
     module_function
 

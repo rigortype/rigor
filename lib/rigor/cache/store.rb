@@ -13,9 +13,10 @@ module Rigor
   module Cache
     # Filesystem-backed cache store. Schema, layout, file format,
     # atomicity, and locking are fixed by [ADR-6](../../../docs/adr/6-cache-persistence-backend.md);
-    # callers see the [`Rigor::Cache::Descriptor`](descriptor.rb)
-    # value object plus this class' `#fetch_or_compute` entry point
-    # and nothing else.
+    # callers use `#fetch_or_compute` (producer-keyed),
+    # `#fetch_or_validate` (record-and-validate for discovered-dep
+    # caches, ADR-45), `#stats`, `#evict!`, and `.disk_inventory`,
+    # plus the [`Rigor::Cache::Descriptor`](descriptor.rb) value object.
     #
     # Read failures (missing file, bad magic, format-version mismatch,
     # corrupt SHA-256 trailer, un-inflatable or unmarshal-able payload)
@@ -119,6 +120,7 @@ module Rigor
       #   When the root does not exist or has no schema-version
       #   marker, `schema_version` is nil and the producer list is
       #   empty.
+      #
       # The `schema_version.txt` marker content. Covers BOTH
       # invalidation axes: the descriptor schema and the on-disk byte
       # layout ({FORMAT_VERSION}, ADR-54). A format bump leaves the

@@ -17,10 +17,9 @@ module Rigor
     #
     # Slice 5 phase 1 introduces the carrier and surfaces it from the
     # `ArrayNode` literal handler when every element is a non-splat
-    # value. Tuple-aware refinements for `tuple[0]`, `tuple.first`, and
-    # destructuring assignment are deferred to Slice 5 phase 2; they
-    # will run as a higher-priority dispatch tier above
-    # {Rigor::Inference::MethodDispatcher::RbsDispatch}.
+    # value. Tuple-aware refinements (`tuple[0]`, `tuple.first`,
+    # destructuring) are implemented in `ShapeDispatch`, which runs
+    # above {Rigor::Inference::MethodDispatcher::RbsDispatch}.
     #
     # Equality and hashing are structural across an ordered, frozen
     # element list. The empty Tuple `Tuple[]` is permitted; the array

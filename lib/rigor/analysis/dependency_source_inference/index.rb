@@ -6,14 +6,11 @@ module Rigor
   module Analysis
     module DependencySourceInference
       # Per-run collection of gem-source-inference state. Holds
-      # the resolved gems the walker MAY visit (slice 2b) plus
-      # the unresolvable entries the runner SHOULD surface as
+      # the resolved gems the walker visits plus the unresolvable
+      # entries the runner surfaces as
       # `dynamic.dependency-source.gem-not-found` diagnostics.
-      #
-      # Slice 2a lands the data structure only; the dispatcher
-      # tier consults {#contribution_for} but the lookup always
-      # answers `nil` until slice 2b populates the method table
-      # by walking the resolved gems' `roots:`.
+      # The method table is fully populated by {Walker} at build
+      # time; {#contribution_for} returns live entries.
       class Index
         attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
                     :class_to_gem, :budget_overrun_strategy, :gem_modes

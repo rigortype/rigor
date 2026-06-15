@@ -15,10 +15,10 @@ module Rigor
     # a `BufferBinding` from the BufferTable entry, runs the Runner,
     # and pushes the resulting LSP `Diagnostic[]` through the writer.
     #
-    # Slice 4 is synchronous: each call blocks until analysis
-    # completes (typically 100-300ms warm). Debouncing (200ms
-    # quiet-time before publish) and Ractor-pool dispatch are
-    # queued for slice 4b / slice 8 respectively.
+    # Debouncing is wired via an optional `Debouncer` injected at
+    # construction (delay defaults to 200ms quiet-time); without a
+    # debouncer each call blocks synchronously (primarily for specs).
+    # Ractor-pool dispatch is queued.
     class DiagnosticPublisher
       # Maps Rigor severity symbols to LSP DiagnosticSeverity
       # integers per spec § "Diagnostic":

@@ -324,12 +324,7 @@ module Rigor
         dynamic_top
       end
 
-      # Recognised value-bearing position the Slice 2 engine does not yet
-      # narrow: self, instance/class/global variable reads, block bodies.
-      # Slice 3+ refines these in place; for now we acknowledge the node
-      # class so the coverage scanner stops flagging it without recording
-      # a fail-soft event for every occurrence.
-      # Slice A-engine. `Prism::SelfNode` resolves to the scope's
+      # `Prism::SelfNode` resolves to the scope's
       # `self_type` when one has been injected (by
       # `StatementEvaluator` at class-body and method-body
       # boundaries) or `Dynamic[Top]` at the top level. Class-body
@@ -926,7 +921,8 @@ module Rigor
       end
 
       # `while` and `until` loops produce nil unless interrupted by
-      # `break VALUE`, which Slice 3 phase 1 does not yet model.
+      # `break VALUE`; the expression value of `break VALUE` is not yet
+      # modeled (scope break-path propagation landed in `eval_loop`).
       # Returning Constant[nil] is safe and matches Ruby semantics for
       # the common case.
       def type_of_loop(_node)

@@ -7,43 +7,30 @@ require_relative "rbs_extended/reporter"
 require_relative "rbs_extended/hkt_directives"
 
 module Rigor
-  # Slice 7 phase 15 — first-preview reader for the
-  # `RBS::Extended` annotation surface described in
+  # Reader for the `RBS::Extended` annotation surface described in
   # `docs/type-specification/rbs-extended.md`.
   #
-  # This module reads `%a{rigor:v1:<directive> <payload>}`
-  # annotations off RBS method definitions and returns
-  # well-typed effect objects the inference engine can
-  # consume. v0.0.2 recognises:
+  # Reads `%a{rigor:v1:<directive> <payload>}` annotations off RBS
+  # method definitions and returns well-typed effect objects the
+  # inference engine can consume. Implemented directives:
   #
-  # - `rigor:v1:predicate-if-true <target> is <ClassName>`
-  # - `rigor:v1:predicate-if-false <target> is <ClassName>`
-  # - `rigor:v1:assert <target> is <ClassName>`
-  # - `rigor:v1:assert-if-true <target> is <ClassName>`
-  # - `rigor:v1:assert-if-false <target> is <ClassName>`
+  # - `rigor:v1:predicate-if-true <target> is <ClassName|refinement>`
+  # - `rigor:v1:predicate-if-false <target> is <ClassName|refinement>`
+  # - `rigor:v1:assert <target> is <ClassName|refinement>`
+  # - `rigor:v1:assert-if-true <target> is <ClassName|refinement>`
+  # - `rigor:v1:assert-if-false <target> is <ClassName|refinement>`
+  # - `rigor:v1:param <name> <type-expr>` — per-call param narrowing
+  # - `rigor:v1:return <type-expr>` — per-call return override
+  # - `rigor:v1:conforms-to <InterfaceName>` — structural conformance
   #
-  # `predicate-if-*` fires when the call is used as an
-  # `if` / `unless` condition; `assert` fires unconditionally
-  # at the call's post-scope; `assert-if-true` /
-  # `assert-if-false` fire at the post-scope only when the
-  # call's return value can be observed as truthy / falsey
-  # (currently: when the call is the predicate of a
-  # subsequent `if` / `unless`). Other directives in the spec
-  # (`param`, `return`, `conforms-to`, negation `~T`,
-  # `target: self` narrowing, ...) remain on the v0.0.x
-  # roadmap. Annotations whose key is in the `rigor:v1:`
-  # namespace but whose directive is unrecognised are
-  # silently ignored at first-preview quality (a future slice
-  # MAY surface them as diagnostics-on-Rigor-itself per the
-  # spec's "unsupported metadata" guidance).
-  #
-  # The parser is minimal: it accepts a strict shape
-  # `<target> is <ClassName>` where `<target>` is a Ruby
-  # identifier (parameter name) or `self`, and `<ClassName>`
-  # is a single non-namespaced class identifier or a
-  # `::Foo::Bar` style constant path. Negative refinements
-  # (`~T`), intersections, and unions are deferred to the
-  # next iteration.
+  # `predicate-if-*` fires when the call is used as an `if` / `unless`
+  # condition; `assert` fires unconditionally at the call's post-scope;
+  # `assert-if-true` / `assert-if-false` fire at the post-scope only
+  # when the call's return value can be observed as truthy / falsey.
+  # Negation (`~T`) is supported for both class-name and refinement
+  # right-hand sides. Parameterised refinements (`non-empty-array[T]`)
+  # are also recognised. Annotations whose directive is unrecognised
+  # are silently ignored per the spec's "unsupported metadata" guidance.
   module RbsExtended # rubocop:disable Metrics/ModuleLength
     DIRECTIVE_PREFIX = "rigor:v1:"
 
@@ -58,9 +45,10 @@ module Rigor
     # a kebab-case refinement name (`non-empty-string`,
     # `lowercase-string`, …) instead of a Capitalised class
     # name. The narrowing tier substitutes the carrier for the
-    # current local type; `class_name` is then nil and
-    # `negative` is false (refinement-form directives do not
-    # support `~T` negation in v0.0.4).
+    # current local type; `class_name` is then nil. `negative`
+    # may be true for refinement-form directives — `~T` negation
+    # is supported; the narrowing tier computes the complement
+    # decomposition (see `AssertEffect` docs below).
     class PredicateEffect < Data.define(:edge, :target_kind, :target_name, :class_name, :negative, :refinement_type)
       def truthy_only? = edge == :truthy_only
       def falsey_only? = edge == :falsey_only

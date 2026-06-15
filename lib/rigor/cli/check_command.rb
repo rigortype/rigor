@@ -280,29 +280,18 @@ module Rigor
 
       def parse_check_options # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
         options = {
-          # `nil` triggers `Configuration.discover` (`.rigor.yml` then
-          # `.rigor.dist.yml`); an explicit `--config=PATH` overrides.
           config: nil,
           format: "text",
           explain: false,
           cache_stats: false,
           clear_cache: false,
           no_cache: false,
-          # Run-stats summary (target files, RBS class universe
-          # breakdown, wall time, peak RSS) is on by default
-          # because collection is ~free (single syscall for RSS,
-          # one walk of `class_decl_paths` for the breakdown).
-          # `--no-stats` suppresses it for callers that want a
-          # diagnostic-only output stream.
           stats: true,
           # ADR-15 Phase 4c — when nil, falls back to
           # `RIGOR_RACTOR_WORKERS` then `.rigor.yml`
           # `parallel.workers:` then 0 (sequential). See
           # `resolve_workers` for the precedence chain.
           workers: nil,
-          # Editor mode (`docs/design/20260516-editor-mode.md`).
-          # Both must appear together; the runner uses the pair
-          # to bind an in-flight buffer file to its logical path.
           tmp_file: nil,
           instead_of: nil,
           # ADR-22 — baseline filter. `:unset` means "fall through

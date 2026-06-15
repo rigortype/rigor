@@ -944,9 +944,7 @@ module Rigor
         end
       end
 
-      # ADR-15 Phase 4b.x — eager-allocate the singleton
-      # `Dynamic[Top]` carrier on the main Ractor at load time.
-      # The `untyped` reader above just returns this ivar.
+      # Eager-allocated at load time; see `untyped` method comment above.
       @untyped = Dynamic.new(Top.instance)
     end
   end

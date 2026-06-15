@@ -115,12 +115,8 @@ module Rigor
         # recognised `define_method` calls and records the
         # introduced method names. `rigor check` consults the
         # table to suppress false positives for methods the
-        # user has defined but no RBS sig describes.
-        # Merged UNDER any cross-file pre-pass seed (like the def-node
-        # / include tables below) so a method `def`/`attr_reader`-
-        # declared in one file suppresses a false `undefined-method`
-        # for a call in another — `rigor check` seeds the project-wide
-        # table via `Runner#seed_project_scope`.
+        # user has defined but no RBS sig describes. Merged
+        # UNDER the cross-file pre-pass seed; details: merge_project_method_indexes.
         discovered_methods = deep_merge_class_methods(
           default_scope.discovered_methods, build_discovered_methods(root)
         )

@@ -747,10 +747,6 @@ module Rigor
       # below this chain and is invoked by the outer `dispatch`
       # method.
       #
-      # `BlockFolding` runs last among the precision tiers because
-      # its rules apply only to block-taking calls, so the cheaper
-      # arity-based fold tiers above it filter out the common
-      # cases first. When `block_type` is nil the tier is a no-op.
       # The precise-tier folders, consulted in order via the uniform
       # `_DispatchTier` interface (`try_dispatch(CallContext) -> Type?`).
       # Order is significant: ConstantFolding's exact-value folds win

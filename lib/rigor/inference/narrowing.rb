@@ -11,7 +11,8 @@ require_relative "../builtins/regex_refinement"
 
 module Rigor
   module Inference
-    # Slice 6 phase 1 minimal narrowing surface.
+    # Control-flow predicate narrowing and type-lattice narrowing
+    # primitives.
     #
     # `Rigor::Inference::Narrowing` answers two related questions:
     #
@@ -19,22 +20,19 @@ module Rigor
     #    truthy fragment, its falsey fragment, its nil fragment, and its
     #    non-nil fragment? These primitives understand the value-lattice
     #    algebra (`Constant`, `Nominal`, `Singleton`, `Tuple`, `HashShape`,
-    #    `Union`) and stay conservative on `Top` and `Dynamic[T]`, where
-    #    the analyzer cannot prove the boundary either way.
+    #    `Union`) and stay conservative on `Top` and `Dynamic[T]`.
     # 2. Predicate-level narrowing: given a Prism predicate node and an
     #    entry scope, what are the truthy-edge scope and the falsey-edge
-    #    scope after the predicate has been evaluated? The phase 1
-    #    catalogue covers truthiness on `LocalVariableReadNode`, `nil?`
-    #    against a local, the unary `!` inverter, parenthesised
-    #    predicates, and short-circuiting `&&` / `||` chains.
+    #    scope? The catalogue covers truthiness, `nil?`, `!`, `&&`/`||`,
+    #    class-membership (`is_a?`, `kind_of?`, `instance_of?`), trusted
+    #    equality/inequality against static literals, `case`/`when`,
+    #    regex match globals, string predicates (`start_with?` etc.),
+    #    key-presence, array emptiness, numeric comparison, and
+    #    `respond_to?`.
     #
-    # Predicate-level narrowing is consumed by
-    # `Rigor::Inference::StatementEvaluator` to refine the `then` and
-    # `else` scopes of `IfNode`/`UnlessNode`. Phase 1 narrows local
-    # bindings on truthiness and `nil?`; phase 2 extends the catalogue
-    # with class-membership predicates (`is_a?`, `kind_of?`,
-    # `instance_of?`) and trusted equality/inequality checks against
-    # static literals.
+    # Consumed by `Rigor::Inference::StatementEvaluator` to refine
+    # `then`/`else` scopes of `IfNode`/`UnlessNode` and
+    # `case`/`when` branches.
     #
     # The module is pure: every public function returns fresh values and
     # MUST NOT mutate its inputs. Unrecognised predicate shapes degrade
@@ -43,8 +41,8 @@ module Rigor
     # `[truthy_scope, falsey_scope]` pair (the entry scope twice when no
     # rule matches).
     #
-    # See docs/internal-spec/inference-engine.md (Slice 6 — Narrowing)
-    # and docs/type-specification/control-flow-analysis.md for the
+    # See docs/internal-spec/inference-engine.md (Narrowing) and
+    # docs/type-specification/control-flow-analysis.md for the
     # binding contract.
     # rubocop:disable Metrics/ModuleLength
     module Narrowing

@@ -1515,21 +1515,15 @@ module Rigor
         # parameter (not for every self-call), and sound — only loses
         # precision on the floored argument.
         post_scope = widen_callee_escaped_argument_captures(node, post_scope)
-        # And the same widening for outer-scope locals / ivars
-        # mutated inside the block body (`items.each { |x| arr << x }`):
-        # the block lives in a child scope so without an explicit
-        # propagation step the outer `arr` keeps its pre-mutation
-        # binding. Sound for the same reason — only ever LOSES
-        # precision — so blindly applying is safe regardless of
-        # whether the block actually runs.
+        # Same always-safe rationale as `widen_after_call` above —
+        # propagates outer-scope local / ivar widening from block body
+        # mutations (`items.each { |x| arr << x }`).
         post_scope = MutationWidening.widen_after_block(call_node: node, outer_scope: post_scope)
-        # ADR-56 slice C — receiver-content element-type join. The widening
-        # above forgets a content-mutated collection's literal arity but
-        # keeps only the seed's element types (the B1 unsound under-
-        # approximation for a non-empty seed). Join the appended / stored
-        # element / key / value types into the continuation collection's
-        # parameter so `out = [0]; arr.each { |x| out << x }` types
-        # `Array[0 | Integer]`, not `Array[0]`. Always sound — only widens.
+        # ADR-56 slice C — receiver-content element-type join. Joins
+        # appended / stored element / key / value types into the
+        # continuation collection so `out = [0]; arr.each { |x| out << x }`
+        # types `Array[0 | Integer]`, not `Array[0]`. Same always-safe
+        # rationale (only widens).
         post_scope = content_writeback_block_captures(node, post_scope)
         # Indexed-collection narrowing — drop any
         # `receiver[key] ||= default` narrowing the analyzer
@@ -1880,16 +1874,9 @@ module Rigor
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
 
-      # Per-dispatch collection of plugin narrowing contributions. Mirrors
-      # `MethodDispatcher#collect_plugin_contributions`: visit only the
-      # registry-ordered subset of plugins that implement a per-call path
-      # (`for_statement` = declares a `type_specifier`), gate each path
-      # by membership AND by the ADR-52 WD1 method-name gates (every
-      # `type_specifier` rule is `methods:`-gated, so the common
-      # no-candidate case is a single Set probe; a pruned
-      # consultation could only have returned `[]`), and accumulate
-      # lazily (shared frozen empty array otherwise). Same contributions in
-      # the same order as visiting every plugin; the caller is read-only.
+      # Fast-exit guard: skip if no plugin declares a `type_specifier`, or if
+      # no registered method-name gate matches the call. See
+      # `collect_gated_statement_contributions` for the full consultation.
       def collect_plugin_contributions(registry, call_node, current_scope)
         index = registry.contribution_index
         relevant = index.for_statement
@@ -1901,8 +1888,10 @@ module Rigor
         collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
       end
 
-      # The post-gate walk, in registry order — the same order the
-      # ungated walk used.
+      # ADR-37 slice 2 / ADR-52 WD1 — post-gate walk in registry order.
+      # Visits only plugins in `for_statement` (declare a `type_specifier`),
+      # further gated by the method-name Set probe so the common no-candidate
+      # case is a single lookup. Accumulates lazily; caller is read-only.
       def collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
         result = nil
         relevant.each do |plugin|

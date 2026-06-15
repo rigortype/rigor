@@ -108,17 +108,11 @@ module Rigor
         # @return [Rigor::Type, nil] inferred return type, or `nil`
         #   when no rule resolves (no class name, no method, dispatch
         #   on a Top/Dynamic[Top] receiver, etc.).
-        # @param scope [Rigor::Scope, nil] when supplied, enables
-        #   ADR-43 RBS-complete-ancestor resolution: a call on a
-        #   Ruby-source subclass not known to RBS, whose discovered
-        #   superclass chain reaches an allow-listed RBS-complete
-        #   ancestor (e.g. `Rigor::Plugin::Base`), resolves against
-        #   that ancestor's RBS. `nil` (the default for every caller
-        #   that does not thread a scope) keeps the legacy behaviour —
-        #   such an inherited call stays unresolved and degrades to
-        #   `Dynamic[Top]`, which is the false-positive-safe default
-        #   for the open hierarchies (`< ActionController::Base`, …)
-        #   the allow-list deliberately excludes.
+        # @param scope [Rigor::Scope, nil] when supplied, enables ADR-43
+        #   RBS-complete-ancestor resolution against
+        #   `ALLOWED_RBS_COMPLETE_ANCESTORS`. `nil` keeps inherited calls
+        #   unresolved (`Dynamic[Top]`) — the FP-safe default for open
+        #   hierarchies (`< ActionController::Base`, …).
         def try_dispatch(context)
           environment = context.environment
           return nil if environment.nil?

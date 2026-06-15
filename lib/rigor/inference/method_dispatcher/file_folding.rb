@@ -54,11 +54,10 @@ module Rigor
       # *correctness-preservingly* proved" excludes Constants whose
       # value is host-specific.
       module FileFolding
-        # File class methods that the analyzer can fold *when the
-        # fold is platform-safe to perform*. Today every entry is
-        # platform-sensitive (every one observes `File::SEPARATOR`
-        # or `File::ALT_SEPARATOR`); the gate below requires the
-        # opt-in flag for any of them to fire.
+        # File class methods the analyzer can fold when the opt-in
+        # flag is set. Currently identical to PLATFORM_DEPENDENT_METHODS
+        # — separated for a future non-platform-sensitive tier that
+        # can fold without the opt-in flag.
         FILE_PURE_CLASS_METHODS = Set[
           :basename,
           :dirname,
@@ -72,8 +71,8 @@ module Rigor
         # Methods whose result depends on host directory-separator
         # semantics (`/` on POSIX, `/` AND `\` on Windows, drive
         # letters, UNC paths). Folding these would bake the
-        # analyzer-host's platform into the inferred type. The opt-
-        # in flag below controls whether to do it anyway.
+        # analyzer-host's platform into the inferred type. The opt-in
+        # flag below controls whether to do it anyway.
         PLATFORM_DEPENDENT_METHODS = Set[
           :basename, :dirname, :extname, :join, :split, :absolute_path?
         ].freeze

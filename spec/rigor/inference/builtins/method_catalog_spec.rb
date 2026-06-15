@@ -32,6 +32,27 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
       end
     end
 
+    it "STRING_CATALOG blocks `crypt` (platform `crypt(3)` — not reproducible across OS / libc)" do
+      catalog = Rigor::Inference::Builtins::STRING_CATALOG
+      # `crypt` is classified `:leaf` in string.yml, but its output is
+      # platform-dependent, so it must not fold to a Constant.
+      expect(catalog.safe_for_folding?("String", :crypt)).to be(false)
+    end
+
+    it "universally blocks per-process-non-reproducible selectors (hash / object_id)" do
+      # `#hash` is SipHash-salted per process and `#object_id` is
+      # per-process identity — folding either bakes one process's value
+      # into the type + cache. The block is universal (catalog-wide), not
+      # per-class, because these are Object-level methods on every receiver.
+      %w[String Symbol].each do |klass|
+        expect(Rigor::Inference::Builtins::STRING_CATALOG.safe_for_folding?(klass, :hash)).to be(false)
+      end
+      %w[Integer Float].each do |klass|
+        expect(Rigor::Inference::Builtins::NUMERIC_CATALOG.safe_for_folding?(klass, :hash)).to be(false)
+      end
+      expect(Rigor::Inference::Builtins::STRING_CATALOG.safe_for_folding?("String", :object_id)).to be(false)
+    end
+
     it "ARRAY_CATALOG blocks the mutator soup (push, pop, <<, replace, …)" do
       catalog = Rigor::Inference::Builtins::ARRAY_CATALOG
       %i[push pop shift unshift << replace clear concat insert].each do |sel|

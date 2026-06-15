@@ -83,12 +83,22 @@ module Rigor
         # user-defined `def is_odd(n) = n.odd?` so
         # `Parity.new.is_odd(3)` types as `Constant[true]`
         # rather than the RBS-widened `bool`.
+        # NOTE: `:hash` is deliberately NOT in any of these sets.
+        # `Object#hash` (and the `String`/`Symbol`/`Integer`/`Float`
+        # overrides) is salted with a per-process SipHash seed, so
+        # `"abc".hash` returns a different Integer in every Ruby
+        # process. Folding it to a `Constant` would bake one process's
+        # value into the type (and the on-disk cache), making the
+        # result non-deterministic across runs — a violation of the
+        # purity contract this catalogue rests on. A literal's `.hash`
+        # therefore stays the RBS-widened `Integer`. The deterministic
+        # siblings `:inspect` / `:to_s` remain folded.
         INTEGER_UNARY = Set[
           :odd?, :even?, :zero?, :positive?, :negative?,
           :succ, :pred, :next, :abs, :magnitude,
           :bit_length, :to_s, :to_i, :to_int, :to_f,
           :floor, :ceil, :round, :truncate, :chr,
-          :inspect, :hash, :-@, :+@, :~
+          :inspect, :-@, :+@, :~
         ].freeze
         FLOAT_UNARY = Set[
           :zero?, :positive?, :negative?,
@@ -96,7 +106,7 @@ module Rigor
           :abs, :magnitude, :floor, :ceil, :round, :truncate,
           :next_float, :prev_float,
           :to_s, :to_i, :to_int, :to_f,
-          :inspect, :hash, :-@, :+@
+          :inspect, :-@, :+@
         ].freeze
         STRING_UNARY = Set[
           :upcase, :downcase, :capitalize, :swapcase,
@@ -104,15 +114,15 @@ module Rigor
           :empty?, :strip, :lstrip, :rstrip, :chomp, :chop, :squeeze,
           :to_s, :to_str, :to_sym, :intern,
           :to_i, :to_f, :ord, :chr, :hex, :oct, :succ, :next,
-          :inspect, :hash
+          :inspect
         ].freeze
         SYMBOL_UNARY = Set[
           :to_s, :to_sym, :to_proc, :length, :size,
           :empty?, :upcase, :downcase, :capitalize,
-          :swapcase, :inspect, :hash
+          :swapcase, :inspect
         ].freeze
-        BOOL_UNARY = Set[:!, :to_s, :inspect, :hash, :&, :|, :^].freeze
-        NIL_UNARY  = Set[:nil?, :!, :to_s, :to_a, :to_h, :inspect, :hash].freeze
+        BOOL_UNARY = Set[:!, :to_s, :inspect, :&, :|, :^].freeze
+        NIL_UNARY  = Set[:nil?, :!, :to_s, :to_a, :to_h, :inspect].freeze
         RATIONAL_UNARY = Set[
           :zero?, :integer?, :real, :abs2,
           :conj, :conjugate, :nonzero?

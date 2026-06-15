@@ -26,6 +26,30 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  describe "per-process-non-reproducible selectors never fold" do
+    # `#hash` is SipHash-salted per process; folding `"abc".hash` would
+    # bake one process's random value into a Constant (and the on-disk
+    # cache), wrong in every other process. The fold must decline so the
+    # RBS tier answers with the widened `Integer`.
+    it "declines #hash on Integer / Float / String / Symbol / nil / true" do
+      expect(fold(5, :hash)).to be_nil
+      expect(fold(1.5, :hash)).to be_nil
+      expect(fold("abc", :hash)).to be_nil
+      expect(fold(:sym, :hash)).to be_nil
+      expect(fold(nil, :hash)).to be_nil
+      expect(fold(true, :hash)).to be_nil
+    end
+
+    it "declines #object_id" do
+      expect(fold("abc", :object_id)).to be_nil
+      expect(fold(5, :object_id)).to be_nil
+    end
+
+    it "declines String#crypt (platform crypt(3) — not reproducible across OS / libc)" do
+      expect(fold("hello", :crypt, ["ab"])).to be_nil
+    end
+  end
+
   describe "unary fold (v0.0.3 C)" do
     describe "Integer" do
       it "folds Integer#odd? to a Constant boolean" do

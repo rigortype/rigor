@@ -22,7 +22,15 @@ module Rigor
             :replace, :initialize, :initialize_copy, :clear, :<<, :concat, :insert,
             :prepend, :force_encoding, :encode, :scrub, :unicode_normalize, :"[]=",
             :upto, :each_byte, :each_char, :each_codepoint,
-            :each_grapheme_cluster, :each_line, :bytesplice
+            :each_grapheme_cluster, :each_line, :bytesplice,
+            # `crypt` is not a mutator but is blocked from folding for the
+            # same "do not bake a non-pure result into a Constant" reason:
+            # `rb_str_crypt` delegates to the platform `crypt(3)`, whose
+            # output (algorithm and digest) varies by libc / OS, so
+            # `"x".crypt("ab")` is not deterministic across the platforms
+            # an analyzed project may target. The catalog classifies it
+            # `:leaf` from its C body; this entry overrides that.
+            :crypt
           ],
           "Symbol" => Set[
             # Symbol is immutable in Ruby; the classifier mis-flags

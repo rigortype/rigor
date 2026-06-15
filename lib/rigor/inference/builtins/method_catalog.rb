@@ -27,6 +27,24 @@ module Rigor
         FOLDABLE_PURITIES = Set["leaf", "trivial", "leaf_when_numeric"].freeze
         EMPTY_CATALOG = { "classes" => {} }.freeze
 
+        # Selectors that are classified `:leaf` by the C-body analysis
+        # (they read no global mutable state in the C sense) but whose
+        # result is NOT reproducible across Ruby processes, so they must
+        # never be folded into a `Constant`:
+        #
+        # - `hash` — every core `#hash` (`String`/`Symbol`/`Integer`/
+        #   `Float`/…) is salted with a per-process SipHash seed, so
+        #   `"x".hash` differs in every process. Folding bakes one
+        #   process's value into the type and the on-disk cache.
+        # - `object_id` / `__id__` — identity-allocated per process.
+        #
+        # This is a UNIVERSAL block (across every catalogued class)
+        # because `hash` / `object_id` are `Object`-level and present on
+        # every receiver; a per-class blocklist would silently miss a
+        # class. The deterministic siblings (`inspect`, `to_s`) are
+        # unaffected.
+        NON_REPRODUCIBLE_SELECTORS = Set[:hash, :object_id, :__id__].freeze
+
         # Shared root for the offline-generated catalogues. Resolving it
         # here keeps the repo-relative `../../../../` hop in one place
         # instead of copying it into every per-topic loader.
@@ -59,6 +77,7 @@ module Rigor
 
         def safe_for_folding?(class_name, selector, kind: :instance)
           class_name_str = class_name.to_s
+          return false if NON_REPRODUCIBLE_SELECTORS.include?(selector.to_sym)
           return false if blocked?(class_name_str, selector)
 
           entry = method_entry(class_name_str, selector, kind: kind)

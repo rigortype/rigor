@@ -13,6 +13,7 @@ require_relative "../language_server/project_context"
 require_relative "../scope"
 require_relative "coverage_report"
 require_relative "coverage_renderer"
+require_relative "coverage_scan"
 require_relative "protection_report"
 require_relative "protection_renderer"
 require_relative "mutation_protection_report"
@@ -190,31 +191,18 @@ module Rigor
       end
 
       def scan_paths(paths, options)
-        configuration = Configuration.load(options.fetch(:config))
-        scope = Scope.empty(environment: project_environment(configuration))
-        scanner = Inference::PrecisionScanner.new(scope: scope)
-        accumulator = CoverageAccumulator.new
-
-        paths.each { |path| scan_one(path, scanner, accumulator, configuration) }
-        accumulator.to_report(paths, options)
+        CoverageScan.precision_report(files: paths, configuration: Configuration.load(options.fetch(:config)))
       end
 
+      # Delegated to the shared scan module (see {CoverageScan}); the
+      # protection path below reuses both, and `rigor check --coverage`
+      # reuses `precision_report` over the same machinery.
       def project_environment(configuration)
-        Environment.for_project(
-          libraries: configuration.libraries,
-          signature_paths: configuration.signature_paths
-        )
+        CoverageScan.project_environment(configuration)
       end
 
       def scan_one(path, scanner, accumulator, configuration)
-        source = File.read(path)
-        parse_result = Prism.parse(source, filepath: path, version: configuration.target_ruby)
-        if parse_result.errors.any?
-          accumulator.record_parse_error(path, parse_result.errors)
-          return
-        end
-
-        accumulator.absorb(path, scanner.scan(parse_result.value))
+        CoverageScan.scan_into(path, scanner, accumulator, configuration)
       end
 
       def determine_exit(report, options)

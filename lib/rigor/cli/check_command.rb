@@ -7,6 +7,7 @@ require "optionparser"
 require_relative "../configuration"
 require_relative "../analysis/result"
 require_relative "../analysis/rule_catalog"
+require_relative "coverage_scan"
 require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
@@ -50,7 +51,8 @@ module Rigor
         raw_result = runner.run(@argv.empty? ? configuration.paths : @argv)
         result = apply_baseline_filter(raw_result, configuration, options)
 
-        write_result(result, options.fetch(:format))
+        coverage = compute_coverage(runner, configuration, options)
+        write_result(result, options.fetch(:format), coverage: coverage)
         emit_ci_detected_output(result, options)
         write_run_stats(result.stats) if result.stats
         write_trace_appendices
@@ -343,7 +345,14 @@ module Rigor
           # flag — use the configured selection"; `true` adopts the whole
           # overlay, `false` adopts none, and an Array of ids adopts only
           # those (see `apply_bleeding_edge_override`).
-          bleeding_edge: :unset
+          bleeding_edge: :unset,
+          # Type-precision coverage block. Off by default — it is a
+          # second precision pass over the analyzed files (the same scan
+          # `rigor coverage` runs), so it is opt-in to keep the default
+          # check path's cost unchanged. When set, `--format json` gains
+          # a `coverage` object (scan_files + precision tiers) and the
+          # text output prints a one-line coverage summary.
+          coverage: false
         }
         parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = "Usage: rigor check [options] [paths]"
@@ -354,6 +363,10 @@ module Rigor
           end
           opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
           opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
+          opts.on("--coverage",
+                  "Add a type-precision coverage block (an extra precision pass over the analyzed files)") do
+            options[:coverage] = true
+          end
           opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
           opts.on("--no-cache", "Disable the persistent cache for this run") { options[:no_cache] = true }
           opts.on("--[no-]stats",
@@ -669,12 +682,15 @@ module Rigor
         format("%.1f MiB", bytes / (1024.0 * 1024.0))
       end
 
-      def write_result(result, format)
+      def write_result(result, format, coverage: nil)
         case format
         when "json"
-          @out.puts(JSON.pretty_generate(enrich_json(result.to_h)))
+          payload = enrich_json(result.to_h)
+          payload["coverage"] = coverage_payload(coverage) if coverage
+          @out.puts(JSON.pretty_generate(payload))
         when "text"
           write_text_result(result)
+          write_coverage_summary(coverage) if coverage
         when ->(fmt) { CLI::DiagnosticFormats.supports?(fmt) }
           # ADR-51 — CI-native renderings (SARIF / GitHub Actions commands /
           # GitLab Code Quality). The `github` form is empty when there are no
@@ -684,6 +700,43 @@ module Rigor
         else
           raise OptionParser::InvalidArgument, "unsupported format: #{format}"
         end
+      end
+
+      # Runs the type-precision scan (`--coverage`) over the same file set
+      # the check analyzed and returns a `CoverageReport`, or nil when the
+      # flag is off. It is a second pass — the same scan `rigor coverage`
+      # runs, reused via {CoverageScan} — so it is opt-in to keep the
+      # default check path's cost unchanged.
+      def compute_coverage(runner, configuration, options)
+        return nil unless options.fetch(:coverage)
+
+        files = @argv.empty? ? runner.analysis_file_set : runner.analysis_file_set(@argv)
+        CoverageScan.precision_report(files: files, configuration: configuration)
+      end
+
+      # The `coverage` block embedded in `--format json`. Mirrors the
+      # `summary` of `rigor coverage --format json` (the same vocabulary —
+      # `precise_ratio`, not a separate `typed_ratio`) plus `scan_files`,
+      # so a consumer reads one stream to learn both what fired and how
+      # much of the analyzed surface Rigor could type.
+      def coverage_payload(report)
+        {
+          "scan_files" => report.files.size - report.parse_errors.size,
+          "parse_errors" => report.parse_errors.size,
+          "expressions_typed" => report.grand_total,
+          "precise_count" => report.precise_count,
+          "precise_ratio" => report.precision_ratio.round(4),
+          "dynamic_opaque_count" => report.opaque_count,
+          "dynamic_opaque_ratio" => report.opaque_ratio.round(4)
+        }
+      end
+
+      def write_coverage_summary(report)
+        files = report.files.size - report.parse_errors.size
+        pct = (report.precision_ratio * 100).round(1)
+        @out.puts("Type coverage: #{files} file(s), #{pct}% precise " \
+                  "(#{report.precise_count}/#{report.grand_total} expressions). " \
+                  "Run `rigor coverage` for the full per-file / per-tier breakdown.")
       end
 
       # Adds the per-rule `evidence_tier` and `documentation_url` fields

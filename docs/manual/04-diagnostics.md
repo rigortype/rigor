@@ -132,6 +132,33 @@ rigor check --format json \
   | jq '[.diagnostics[] | select(.evidence_tier == "high")]'
 ```
 
+### Coverage block (`--coverage`)
+
+`rigor check --coverage` adds a top-level `coverage` object so a single
+run reports both *what fired* and *how much of the analyzed surface
+Rigor could type* — useful when a large diagnostic count raises the
+question "did it analyze all my files, or only a few?". The block
+mirrors the `summary` of `rigor check`'s sibling
+[`rigor coverage`](02-cli-reference.md#rigor-coverage) (same
+precision-tier vocabulary), plus `scan_files`:
+
+```jsonc
+"coverage": {
+  "scan_files":            203,
+  "parse_errors":          0,
+  "expressions_typed":     18394,
+  "precise_count":         9847,
+  "precise_ratio":         0.535,
+  "dynamic_opaque_count":  8547,
+  "dynamic_opaque_ratio":  0.465
+}
+```
+
+It is **off by default** — computing it is a second precision pass over
+the analyzed files — so the default check path's cost is unchanged. In
+text mode `--coverage` prints a one-line summary instead. For the full
+per-file / per-tier breakdown, run `rigor coverage` directly.
+
 The `receiver_type` / `method_name` pair is populated by the
 call-family rules and the method-level `def.*` rules. Group a run
 by the called class and method with `jq`, no message parsing:

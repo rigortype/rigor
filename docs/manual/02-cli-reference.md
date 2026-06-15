@@ -34,6 +34,7 @@ the `paths:` list from the configuration file.
 | `--clear-cache` | Delete the cache directory before running. |
 | `--cache-stats` | Print the on-disk cache inventory when finished. |
 | `--[no-]stats` | Print a run summary (files, classes, memory, wall time) to stderr. Default on. |
+| `--coverage` | Add a type-precision coverage block to the output (`coverage` object under `--format json`; a one-line summary in text mode). Off by default — it is a second precision pass over the analyzed files, the same scan [`rigor coverage`](#rigor-coverage) runs, so it is opt-in. |
 | `--workers=N` | Dispatch analysis across `N` parallel worker processes (fork-based pool today; ADR-15). Default `0` (sequential). |
 | `--baseline=PATH` | Load a baseline file, overriding config. |
 | `--no-baseline` | Ignore any configured baseline. |

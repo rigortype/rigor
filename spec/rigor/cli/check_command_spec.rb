@@ -66,6 +66,34 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(diag.fetch("documentation_url")).to end_with("04-diagnostics.md#rule-call-undefined-method")
   end
 
+  it "adds a coverage block under --coverage --format=json" do
+    File.write("sample.rb", "x = 1\ny = x + 2\n")
+
+    _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--coverage", "--format=json", "sample.rb"])
+
+    coverage = JSON.parse(out).fetch("coverage")
+    expect(coverage).to include("scan_files" => 1)
+    expect(coverage.fetch("expressions_typed")).to be > 0
+    expect(coverage).to have_key("precise_ratio")
+  end
+
+  it "omits the coverage block when --coverage is not passed" do
+    File.write("sample.rb", "x = 1\n")
+
+    _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "sample.rb"])
+
+    expect(JSON.parse(out)).not_to have_key("coverage")
+  end
+
+  it "prints a one-line coverage summary under --coverage in text mode" do
+    File.write("sample.rb", "x = 1\n")
+
+    _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--coverage", "sample.rb"])
+
+    expect(out).to include("Type coverage:")
+    expect(out).to include("% precise")
+  end
+
   it "seeds parallel-assignment ivar writes so a cross-method read is not always-falsey (N1)" do
     # `old, @cb = @cb, block` records the `@cb` target into the
     # class-ivar union; before N1 the collector dropped it and `@cb`

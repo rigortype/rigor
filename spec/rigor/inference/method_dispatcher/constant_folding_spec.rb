@@ -180,6 +180,80 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  describe "catalog-uplift additions (pure scalar + Array→Tuple)" do
+    it "folds Integer#[] (bit reference) / #ceildiv" do
+      expect(fold(5, :[], [0]).value).to eq(1)
+      expect(fold(5, :[], [1]).value).to eq(0)
+      expect(fold(7, :ceildiv, [2]).value).to eq(4)
+    end
+
+    it "folds Integer#to_r / #to_c to a Constant Rational / Complex" do
+      expect(fold(5, :to_r).value).to eq(Rational(5, 1))
+      expect(fold(5, :to_c).value).to eq(Complex(5, 0))
+    end
+
+    it "folds Float#quo / #to_r / #rationalize" do
+      expect(fold(3.0, :quo, [2]).value).to eq(1.5)
+      expect(fold(1.5, :to_r).value).to eq(Rational(3, 2))
+      expect(fold(1.5, :rationalize).value).to eq(Rational(3, 2))
+    end
+
+    it "folds String#casecmp / #casecmp? / #sum" do
+      expect(fold("a", :casecmp, ["A"]).value).to eq(0)
+      expect(fold("a", :casecmp?, ["A"]).value).to be(true)
+      expect(fold("abc", :sum).value).to eq(294)
+    end
+
+    it "folds Symbol#succ / #next" do
+      expect(fold(:foo, :succ).value).to eq(:fop)
+      expect(fold(:foo, :next).value).to eq(:fop)
+    end
+
+    it "folds Rational arithmetic and projections" do
+      expect(fold(Rational(1, 2), :+, [Rational(1, 3)]).value).to eq(Rational(5, 6))
+      expect(fold(Rational(1, 2), :**, [2]).value).to eq(Rational(1, 4))
+      expect(fold(Rational(1, 2), :numerator).value).to eq(1)
+      expect(fold(Rational(3, 2), :to_f).value).to eq(1.5)
+    end
+
+    it "folds Complex arithmetic and projections" do
+      expect(fold(Complex(1, 2), :+, [Complex(3, 4)]).value).to eq(Complex(4, 6))
+      expect(fold(Complex(1, 2), :*, [Complex(3, 4)]).value).to eq(Complex(-5, 10))
+      expect(fold(Complex(3, 4), :abs).value).to eq(5.0)
+      expect(fold(Complex(1, 2), :conjugate).value).to eq(Complex(1, -2))
+    end
+
+    it "lifts Integer#digits(base) / #gcdlcm to a Tuple" do
+      d = fold(255, :digits, [16])
+      expect(d).to be_a(Rigor::Type::Tuple)
+      expect(d.elements.map(&:value)).to eq([15, 15])
+
+      g = fold(12, :gcdlcm, [8])
+      expect(g).to be_a(Rigor::Type::Tuple)
+      expect(g.elements.map(&:value)).to eq([4, 24])
+    end
+
+    it "lifts String#partition / #rpartition to a 3-slot Tuple" do
+      p = fold("a-b-c", :partition, ["-"])
+      expect(p).to be_a(Rigor::Type::Tuple)
+      expect(p.elements.map(&:value)).to eq(["a", "-", "b-c"])
+
+      rp = fold("a-b-c", :rpartition, ["-"])
+      expect(rp.elements.map(&:value)).to eq(["a-b", "-", "c"])
+    end
+
+    it "folds a finite integer Range#sum (closed-form)" do
+      expect(fold(1..5, :sum).value).to eq(15)
+      expect(fold(1...5, :sum).value).to eq(10)
+    end
+
+    it "does not fold a NaN-producing result into a Constant" do
+      # 0.0 / 0.0 == NaN, which is non-reflexive under ==; the fold
+      # must decline so it never produces a Constant[NaN].
+      expect(fold(0.0, :/, [0.0])).to be_nil
+    end
+  end
+
   # Methods unlocked by the offline numeric.yml catalog: methods
   # whose CRuby implementation the catalog classifies as `leaf`
   # (no Ruby-level callout) or `leaf_when_numeric` (callout only on

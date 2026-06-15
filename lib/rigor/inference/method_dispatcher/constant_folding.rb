@@ -51,7 +51,7 @@ module Rigor
         NUMERIC_BINARY = Set[
           :+, :-, :*, :/, :%, :**, :&, :|, :^, :<<, :>>,
           :<, :<=, :>, :>=, :==, :!=, :<=>,
-          :gcd, :lcm, :fdiv
+          :gcd, :lcm, :fdiv, :quo, :ceildiv, :[]
         ].freeze
         STRING_BINARY  = Set[
           :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,
@@ -60,12 +60,31 @@ module Rigor
           :match?, :index, :rindex, :center, :ljust, :rjust,
           # 1-arg pure transforms/queries whose output never exceeds the
           # input: `delete`/`squeeze` shrink the string, `count` → Integer.
-          :delete, :count, :squeeze
+          :delete, :count, :squeeze,
+          # ASCII / Unicode-case-fold comparison — deterministic, no
+          # locale read: `casecmp` → -1/0/1, `casecmp?` → bool/nil.
+          :casecmp, :casecmp?
         ].freeze
         SYMBOL_BINARY  = Set[:==, :!=, :<=>, :<, :<=, :>, :>=].freeze
         BOOL_BINARY    = Set[:&, :|, :^, :==, :!=, :===].freeze
         NIL_BINARY     = Set[:==, :!=].freeze
-        RATIONAL_BINARY = Set[:div, :modulo, :%, :remainder, :fdiv].freeze
+        # Rational arithmetic / ordering are exact and pure. Division
+        # (`/`) and `**` may return a `Float`/`Complex` for some operands,
+        # all of which are foldable `Constant` value classes. `==` / `!=`
+        # are deliberately EXCLUDED: `Rational#==` (`nurat_eqeq_p`) routes
+        # through `rb_funcall(:==)` on the operands — user-redefinable —
+        # so the catalog classifies it `:dispatch` and the equality stays
+        # the RBS `bool`. (The set would otherwise bypass that gate.)
+        RATIONAL_BINARY = Set[
+          :+, :-, :*, :/, :**, :<=>, :<, :<=, :>, :>=,
+          :div, :modulo, :%, :remainder, :fdiv, :quo
+        ].freeze
+        # Complex arithmetic. `ops_for` gains a `Complex` branch so these
+        # reach the binary fold path (Complex was previously unary-only).
+        # `/` and `**` stay foldable (Complex result). `==` / `!=` are
+        # excluded for the same reason as Rational (`nucomp_eqeq_p`
+        # delegates to operand `==`); ordering is undefined for Complex.
+        COMPLEX_BINARY = Set[:+, :-, :*, :/, :**].freeze
 
         # v0.0.3 C — pure unary catalogue. Each method must:
         # - take zero arguments,
@@ -98,14 +117,14 @@ module Rigor
           :succ, :pred, :next, :abs, :magnitude,
           :bit_length, :to_s, :to_i, :to_int, :to_f,
           :floor, :ceil, :round, :truncate, :chr,
-          :inspect, :-@, :+@, :~
+          :inspect, :-@, :+@, :~, :to_r, :to_c
         ].freeze
         FLOAT_UNARY = Set[
           :zero?, :positive?, :negative?,
           :nan?, :finite?, :infinite?,
           :abs, :magnitude, :floor, :ceil, :round, :truncate,
           :next_float, :prev_float,
-          :to_s, :to_i, :to_int, :to_f,
+          :to_s, :to_i, :to_int, :to_f, :to_r, :rationalize,
           :inspect, :-@, :+@
         ].freeze
         STRING_UNARY = Set[
@@ -114,20 +133,29 @@ module Rigor
           :empty?, :strip, :lstrip, :rstrip, :chomp, :chop, :squeeze,
           :to_s, :to_str, :to_sym, :intern,
           :to_i, :to_f, :ord, :chr, :hex, :oct, :succ, :next,
-          :inspect
+          :sum, :inspect
         ].freeze
         SYMBOL_UNARY = Set[
           :to_s, :to_sym, :to_proc, :length, :size,
           :empty?, :upcase, :downcase, :capitalize,
-          :swapcase, :inspect
+          :swapcase, :succ, :next, :inspect
         ].freeze
         BOOL_UNARY = Set[:!, :to_s, :inspect, :&, :|, :^].freeze
         NIL_UNARY  = Set[:nil?, :!, :to_s, :to_a, :to_h, :inspect].freeze
         RATIONAL_UNARY = Set[
           :zero?, :integer?, :real, :abs2,
-          :conj, :conjugate, :nonzero?
+          :conj, :conjugate, :nonzero?,
+          :numerator, :denominator, :abs, :magnitude,
+          :to_f, :to_i, :to_int, :to_r, :rationalize,
+          :floor, :ceil, :round, :truncate,
+          :-@, :+@
         ].freeze
-        COMPLEX_UNARY = Set[:zero?, :nonzero?].freeze
+        COMPLEX_UNARY = Set[
+          :zero?, :nonzero?,
+          :abs, :magnitude, :abs2, :arg, :angle, :phase,
+          :conjugate, :conj, :real, :imaginary, :imag,
+          :to_c, :-@, :+@
+        ].freeze
 
         STRING_FOLD_BYTE_LIMIT = 4096
 
@@ -396,7 +424,8 @@ module Rigor
         # Only fires on a single-receiver Range with finite integer
         # endpoints; mixed unions fall through so the existing
         # union-of-Constants path keeps the rest of the arms.
-        RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length, :entries, :minmax].freeze
+        RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length, :entries, :minmax,
+                                 :sum].freeze
         RANGE_TO_A_LIMIT = 16
         private_constant :RANGE_FOLD_METHODS, :RANGE_TO_A_LIMIT
 
@@ -418,6 +447,11 @@ module Rigor
           when :last, :max then range_endpoint_constant(range, :last)
           when :count, :size, :length then Type::Combinator.constant_of(range.to_a.size)
           when :minmax then range_minmax_tuple(range)
+          # `range.sum` is closed-form (Gauss) for an integer range, so a
+          # huge range still costs O(1) and yields a single Integer — no
+          # materialisation, no cap needed. Endless ranges are already
+          # excluded by the Integer-endpoint guard in the caller.
+          when :sum then Type::Combinator.constant_of(range.sum)
           end
         end
 
@@ -455,6 +489,9 @@ module Rigor
           string_lift = try_fold_string_array_binary(receiver_values, method_name, arg_values)
           return string_lift if string_lift
 
+          integer_lift = try_fold_integer_array_binary(receiver_values, method_name, arg_values)
+          return integer_lift if integer_lift
+
           pathname_lift = try_fold_pathname_binary(receiver_values, method_name, arg_values)
           return pathname_lift if pathname_lift
 
@@ -474,7 +511,11 @@ module Rigor
         # capped at `STRING_ARRAY_LIFT_LIMIT` to keep the result
         # bounded for long strings.
         STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :lines, :split].freeze
-        STRING_ARRAY_BINARY_METHODS = Set[:split, :scan].freeze
+        # `partition` / `rpartition` always return a fixed 3-element
+        # `[head, separator, tail]` Array whose members are substrings of
+        # the receiver (bounded by the input), so they lift to a precise
+        # 3-slot `Tuple[Constant…]`.
+        STRING_ARRAY_BINARY_METHODS = Set[:split, :scan, :partition, :rpartition].freeze
         STRING_ARRAY_LIFT_LIMIT = 32
         private_constant :STRING_ARRAY_UNARY_METHODS,
                          :STRING_ARRAY_BINARY_METHODS,
@@ -503,6 +544,14 @@ module Rigor
         # so the negative case bails to the RBS tier.
         INTEGER_ARRAY_UNARY_METHODS = Set[:digits].freeze
         private_constant :INTEGER_ARRAY_UNARY_METHODS
+
+        # 1-arg Integer methods that return an Array of foldable
+        # Integers: `digits(base)` (base-n place values; raises on a
+        # negative receiver or base < 2 → declines) and `gcdlcm(other)`
+        # (the fixed `[gcd, lcm]` pair). Both are pure arithmetic; the
+        # result lifts to a `Tuple[Constant[Integer]…]`.
+        INTEGER_ARRAY_BINARY_METHODS = Set[:digits, :gcdlcm].freeze
+        private_constant :INTEGER_ARRAY_BINARY_METHODS
 
         # v0.0.7 — `Constant<Pathname>` delegates to a curated set
         # of pure path-manipulation methods. Pathname is immutable
@@ -619,6 +668,25 @@ module Rigor
           return nil if receiver.negative?
 
           lift_array_result(receiver.digits)
+        rescue StandardError
+          nil
+        end
+
+        # `Constant<Integer>#digits(base)` / `#gcdlcm(other)` — the
+        # 1-arg Array-returning Integer methods. `digits(base)` declines
+        # on a negative receiver (the unary path's guard); other domain
+        # errors (base < 2) raise and are rescued. `gcdlcm` is total over
+        # Integer args.
+        def try_fold_integer_array_binary(receiver_values, method_name, arg_values)
+          return nil unless INTEGER_ARRAY_BINARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1 && arg_values.size == 1
+
+          receiver = receiver_values.first
+          arg = arg_values.first
+          return nil unless receiver.is_a?(Integer) && arg.is_a?(Integer)
+          return nil if method_name == :digits && receiver.negative?
+
+          lift_array_result(receiver.public_send(method_name, arg))
         rescue StandardError
           nil
         end
@@ -1344,7 +1412,24 @@ module Rigor
         private_constant :FOLDABLE_CONSTANT_CLASSES
 
         def foldable_constant_value?(value)
-          FOLDABLE_CONSTANT_CLASSES.any? { |klass| value.is_a?(klass) }
+          return false unless FOLDABLE_CONSTANT_CLASSES.any? { |klass| value.is_a?(klass) }
+
+          # A NaN result (`0.0 / 0.0`, `Float::NAN`-propagating arithmetic,
+          # or a NaN-bearing Complex) is non-reflexive under `==`, so a
+          # `Constant[NaN]` would break the `==` / `eql?` / `hash` contract
+          # `build_constant_type` relies on for union dedup. Decline the
+          # fold and let the RBS tier answer with the widened class.
+          return false if value.is_a?(Float) && value.nan?
+          return false if value.is_a?(Complex) && complex_nan?(value)
+
+          true
+        end
+
+        # True when either component of a Complex is NaN.
+        def complex_nan?(value)
+          real = value.real
+          imag = value.imaginary
+          (real.is_a?(Float) && real.nan?) || (imag.is_a?(Float) && imag.nan?)
         end
 
         def safe?(receiver_value, method_name, arg_value)
@@ -1365,6 +1450,7 @@ module Rigor
           when true, false    then BOOL_BINARY
           when nil            then NIL_BINARY
           when Rational       then RATIONAL_BINARY
+          when Complex        then COMPLEX_BINARY
           else                     Set.new
           end
         end

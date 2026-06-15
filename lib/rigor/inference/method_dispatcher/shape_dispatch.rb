@@ -99,8 +99,14 @@ module Rigor
           index: :tuple_find_index,
           find_index: :tuple_find_index,
           rindex: :tuple_rindex,
-          flatten: :tuple_flatten
+          flatten: :tuple_flatten,
+          join: :tuple_join
         }.freeze
+
+        # Byte cap on a folded `tuple.join` result — a huge tuple times a
+        # long separator must not materialise an unbounded `Constant`.
+        TUPLE_JOIN_BYTE_LIMIT = 4096
+        private_constant :TUPLE_JOIN_BYTE_LIMIT
 
         HASH_SHAPE_HANDLERS = {
           size: :hash_size,
@@ -800,6 +806,37 @@ module Rigor
             return nil if values.nil?
 
             Type::Combinator.constant_of(values.sum)
+          end
+
+          # `tuple.join(sep = "")` — fold to the joined `Constant[String]`
+          # when every element is a `Constant` (its `to_s` is deterministic
+          # for the scalar value classes) and the separator is absent or a
+          # `Constant[String]`. Capped at `TUPLE_JOIN_BYTE_LIMIT`.
+          def tuple_join(tuple, _method_name, args)
+            sep = tuple_join_separator(args)
+            return nil if sep.nil?
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            result = values.join(sep)
+            return nil if result.bytesize > TUPLE_JOIN_BYTE_LIMIT
+
+            Type::Combinator.constant_of(result)
+          rescue StandardError
+            nil
+          end
+
+          # The join separator: `""` for the no-arg form, the value of a
+          # single `Constant[String]` arg, or `nil` to decline.
+          def tuple_join_separator(args)
+            return "" if args.empty?
+            return nil unless args.size == 1
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
+
+            arg.value
           end
 
           # `tuple.min` / `tuple.max` — fold when every element is

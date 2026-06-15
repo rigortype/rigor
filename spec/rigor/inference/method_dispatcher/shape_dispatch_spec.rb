@@ -158,6 +158,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         expect(dispatch(receiver: mixed_t, method_name: :sum)).to be_nil
       end
 
+      it "folds join with no separator and a Constant String separator" do
+        expect(dispatch(receiver: numeric_t, method_name: :join)).to eq(constant("123"))
+        expect(dispatch(receiver: numeric_t, method_name: :join, args: [constant("-")]))
+          .to eq(constant("1-2-3"))
+      end
+
+      it "declines join with a non-Constant-String separator" do
+        expect(dispatch(receiver: numeric_t, method_name: :join, args: [constant(0)])).to be_nil
+      end
+
       it "folds min / max on comparable Constant elements" do
         expect(dispatch(receiver: numeric_t, method_name: :min)).to eq(constant(1))
         expect(dispatch(receiver: numeric_t, method_name: :max)).to eq(constant(3))

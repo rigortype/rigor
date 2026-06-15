@@ -48,19 +48,31 @@ FOLD_PARITY_CASES = {
     '"hello".end_with?("lo")', '"hello".include?("ell")', '"hello" <=> "world"',
     '"hello".center(11)', '"hello".ljust(8, ".")', '"hello".rjust(8, ".")',
     '"hello".index("l")', '"hello".rindex("l")',
-    '"hello".delete_prefix("he")', '"hello".delete_suffix("lo")'
+    '"hello".delete_prefix("he")', '"hello".delete_suffix("lo")',
+    '"a".casecmp("A")', '"a".casecmp?("A")', '"abc".sum',
+    '"a-b-c".partition("-")', '"a-b-c".rpartition("-")'
   ],
   "Integer — ConstantFolding unary/binary" => [
     "5.even?", "7.odd?", "0.zero?", "4.positive?", "(-2).negative?",
     "(-3).abs", "5.succ", "10.pred", "255.to_s(16)", "10.bit_length",
     "65.chr", "7 + 8", "20 - 5", "6 * 7", "2 ** 10", "17 % 5",
     "12.gcd(18)", "4.lcm(6)", "10.divmod(3)", "255 & 0x0F", "0x0F | 0xF0",
-    "10 <=> 3", "5 == 5", "3.fdiv(2)"
+    "10 <=> 3", "5 == 5", "3.fdiv(2)",
+    "5[0]", "5[1]", "7.ceildiv(2)", "5.to_r", "5.to_c",
+    "255.digits(16)", "12.gcdlcm(8)"
   ],
   "Float — ConstantFolding" => [
     "3.14.floor", "3.14.ceil", "3.7.round", "2.5.to_i", "(-1.5).abs",
     "0.0.zero?", "1.0.nan?", "1.0.finite?", "(1.0 / 0.0).infinite?",
-    "2.0 + 3.0", "10.0 / 4.0", "2.0 ** 3.0", "3.5.truncate"
+    "2.0 + 3.0", "10.0 / 4.0", "2.0 ** 3.0", "3.5.truncate",
+    "3.0.quo(2)", "1.5.to_r", "1.5.rationalize"
+  ],
+  "Rational / Complex / Range — ConstantFolding" => [
+    "Rational(1, 2) + Rational(1, 3)", "Rational(1, 2) ** 2",
+    "Rational(1, 2).numerator", "Rational(3, 2).to_f", "Rational(6, 4).denominator",
+    "Complex(1, 2) + Complex(3, 4)", "Complex(1, 2) * Complex(3, 4)",
+    "Complex(3, 4).abs", "Complex(1, 2).conjugate", "Complex(1, 2).real",
+    "(1..5).sum", "(1...5).sum"
   ],
   "Boolean — ConstantFolding" => [
     "true & false", "true | false", "true ^ true", "!false", "!!nil",
@@ -71,7 +83,8 @@ FOLD_PARITY_CASES = {
     "[1, 2, 3].sum", "[1, 2, 3].min", "[1, 2, 3].max", "[1, 2, 3].size",
     "[1, 2, 3].length", "[1, 2, 3].count", "[1, 2, 2].include?(2)",
     "[1, 2, 3].empty?", "[].empty?", "[1, nil, 2].compact", "[1, 2, 3].take(2)",
-    "[1, 2] + [3, 4]", "[10, 20, 30][1]"
+    "[1, 2] + [3, 4]", "[10, 20, 30][1]",
+    '[1, 2, 3].join("-")', "[1, 2, 3].join"
   ],
   "Hash — ShapeDispatch" => [
     "{ a: 1 }.merge(b: 2)", "{ a: 1, b: 2 }.keys", "{ a: 1, b: 2 }.values",

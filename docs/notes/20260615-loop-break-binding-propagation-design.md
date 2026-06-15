@@ -1,11 +1,14 @@
 # Loop `break`-path binding propagation — FP finding + fix design
 
-2026-06-15. A false-positive class surfaced while corpus-validating the
-ADR-48 `Struct` merge (slices 1–3) against `rigor-survey`. This note records
-the finding, the diagnosis, and the fix design so the core-flow change can be
-implemented deliberately (it touches loop/`break` semantics — control-flow
-spec territory, FP-discipline-sensitive). Candidate for promotion to an ADR
-when the design is ratified.
+2026-06-15. **Status: IMPLEMENTED 2026-06-15** as the "Recommended approach"
+below — the `BREAK_SINK_KEY` thread-local sink + the `directly_targeting_breaks`
+filter + the `eval_loop` / `eval_for` continuation join. A false-positive class
+surfaced while corpus-validating the ADR-48 `Struct` merge (slices 1–3) against
+`rigor-survey`; this note records the finding, the diagnosis, and the design the
+implementation realises. Gate met: the targeted FP clears with zero new firings
+across six corpora, `make verify` green, regression specs in
+`statement_evaluator_spec`. Candidate for promotion to an ADR (it is ADR-56's
+non-local-exit sibling).
 
 ## Corpus context (how it was found)
 

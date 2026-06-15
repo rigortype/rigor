@@ -2306,4 +2306,83 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.global(:$1)).to be_nil
     end
   end
+
+  # See docs/notes/20260615-loop-break-binding-propagation-design.md.
+  describe "break-path binding propagation (loop continuation)" do
+    def local_after(source, name)
+      _, post = evaluate(source)
+      post.local(name)
+    end
+
+    it "joins a `flag = true; break` binding into a `for` loop continuation" do
+      # Pre-fix `flag` typed `false` here (a later `if flag` false-fired
+      # always-falsey); the break path's `true` is now joined in.
+      flag = local_after(<<~RUBY, :flag)
+        flag = false
+        for i in [1, 2, 3]
+          if i then flag = true; break end
+        end
+        flag
+      RUBY
+      expect(flag.describe).to match(/true|bool/i)
+    end
+
+    it "joins a `flag = true; break` binding into a `while` loop continuation" do
+      flag = local_after(<<~RUBY, :flag)
+        flag = false
+        i = 0
+        while i < 3
+          if i then flag = true; break end
+          i += 1
+        end
+        flag
+      RUBY
+      expect(flag.describe).to match(/true|bool/i)
+    end
+
+    it "propagates a break binding written inside a nested loop" do
+      found = local_after(<<~RUBY, :found)
+        found = false
+        for i in [1]
+          for j in [1]
+            found = true
+            break
+          end
+        end
+        found
+      RUBY
+      expect(found.describe).to match(/true|bool/i)
+    end
+
+    it "does NOT pollute the loop local with a break inside a nested block" do
+      # `break` inside `each { ... }` targets `each`, not the `while`; its
+      # scope must not join the while continuation — `flag` stays false.
+      flag = local_after(<<~RUBY, :flag)
+        flag = false
+        while true
+          [1].each { |x| break if x }
+          break
+        end
+        flag
+      RUBY
+      expect(flag).to eq(Rigor::Type::Combinator.constant_of(false))
+    end
+
+    it "does not leak a transient overwritten before the break (no over-widening)" do
+      # `out = nil; out = real; break` — the break scope captures the real
+      # value, never the transient nil, so `out` is not falsely nilable.
+      out = local_after(<<~RUBY, :out)
+        out = []
+        for i in [1]
+          if i
+            out = nil
+            out = i
+            break
+          end
+        end
+        out
+      RUBY
+      expect(out.describe).not_to match(/\bnil\b/)
+    end
+  end
 end

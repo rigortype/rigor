@@ -56,7 +56,8 @@ task :build do
     before = File.size(WASM_RAW)
     sh wasm_opt, "--strip-debug", "-Oz", WASM_RAW, "-o", WASM_RAW
     after = File.size(WASM_RAW)
-    puts format("wasm-opt: %.1f MB -> %.1f MB", before / 1048576.0, after / 1048576.0)
+    puts format("wasm-opt: %<before>.1f MB -> %<after>.1f MB",
+                before: before / 1_048_576.0, after: after / 1_048_576.0)
   else
     warn "wasm-opt not found under build/toolchain/binaryen*; skipping size optimization"
   end

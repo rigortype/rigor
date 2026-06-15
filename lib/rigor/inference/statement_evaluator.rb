@@ -101,6 +101,7 @@ module Rigor
         Prism::CallNode => :eval_call,
         Prism::BlockNode => :eval_block,
         Prism::ReturnNode => :eval_return,
+        Prism::BreakNode => :eval_break,
         Prism::MatchWriteNode => :eval_match_write
       }.freeze
       private_constant :HANDLERS
@@ -115,6 +116,19 @@ module Rigor
       # `def` barrier (whose returns belong to the inner method).
       RETURN_SINK_KEY = :rigor_return_sink
       private_constant :RETURN_SINK_KEY
+
+      # Thread-local sink (an Array of `[BreakNode, Scope]`) collecting the
+      # scope at each `break` reached while evaluating a loop body, so
+      # `eval_loop` / `eval_for` can join a `break`-path binding (`flag = true;
+      # break`) into the loop continuation that the fall-through would
+      # otherwise drop. Stacks like the return sink: a nested loop installs its
+      # own sink, restored on exit, so an inner loop's break does not leak to
+      # the outer one. A `break` inside a block / nested loop targets that
+      # inner construct, not the lexical loop — filtered out by the
+      # directly-targeting break set, see {#directly_targeting_breaks}.
+      # See docs/notes/20260615-loop-break-binding-propagation-design.md.
+      BREAK_SINK_KEY = :rigor_break_sink
+      private_constant :BREAK_SINK_KEY
 
       # Lexical class frame: the `name:` field is the qualified class
       # name as it would render in Ruby (e.g., `"Foo::Bar"`); the
@@ -901,7 +915,11 @@ module Rigor
         # widens `buf`'s Tuple), body-introduced locals' nil-injection, and
         # the loop value itself. The fixpoint then OVERLAYS only the
         # rebound-local bindings it corrects.
-        _body_type, body_scope = sub_eval(node.statements, post_pred)
+        #
+        # The pass runs under a break sink so a `break`-path binding
+        # (`flag = true; break`) the fall-through `body_scope` drops is
+        # collected for the continuation join below.
+        break_targets, break_sink, body_scope = capture_loop_body_breaks(node.statements, post_pred)
         base_scope = join_with_nil_injection(post_pred, body_scope)
 
         rebound, body_first = loop_body_local_writes(node.statements, post_pred)
@@ -916,36 +934,41 @@ module Rigor
           return [Type::Combinator.constant_of(nil), narrow_loop_exit_edge(node, fast)]
         end
 
+        post_loop = converged_loop_scope(node, post_pred, base_scope, names, body_first)
+        # Recover `break`-path bindings the fall-through dropped (`flag = true;
+        # break` -> `flag` is `false | true`, not the stale `false`).
+        post_loop = join_break_scopes(post_loop, break_sink, break_targets, names)
+        post_loop = narrow_loop_exit_edge(node, post_loop)
+        [Type::Combinator.constant_of(nil), post_loop]
+      end
+
+      # The continuation scope for a loop whose body rebinds locals: the
+      # ADR-56 slice-B rebind fixpoint overlaid on `base_scope`, then the
+      # slice-C receiver-content writeback.
+      def converged_loop_scope(node, post_pred, base_scope, names, body_first)
         # ADR-56 slice B — loop-body fixpoint. The body runs 0..N times and
         # may compound (`d *= 2`), so the historical single body pass joined
         # with the pre-loop scope kept stale folded constants
         # (`d = 1; while …; d *= 2; end` → `1 | 2`, never reaching `4, 8`).
-        # Fold each body-written local's continuation binding through the
-        # same capped fixpoint slice A uses for non-escaping block captures.
-        #
-        # Seed: a pre-existing local seeds with its post-predicate binding;
-        # a local FIRST assigned inside the body seeds with `nil` so the
-        # 0-iteration path (the body may never run) degrades it to
-        # `T | nil`, matching the historical nil-injection treatment.
+        # Fold each body-written local's continuation binding through the same
+        # capped fixpoint slice A uses for non-escaping block captures. Seed:
+        # a pre-existing local seeds with its post-predicate binding; a local
+        # FIRST assigned inside the body seeds with `nil` so the 0-iteration
+        # path degrades it to `T | nil`, matching the nil-injection treatment.
         result = loop_rebind_fixpoint(node, post_pred, names, body_first)
         # Display-path re-record: the fixpoint's body re-evaluations fire
         # `on_enter` with the cap-N INTERMEDIATE assumptions, so the
         # last-visit-wins scope index would annotate loop-body lines with
-        # stale pre-convergence constants. One extra pass from the
-        # converged bindings (result discarded) re-records the body's
-        # entry scopes post-writeback.
+        # stale pre-convergence constants. One extra pass from the converged
+        # bindings (result discarded) re-records the body's entry scopes.
         record_converged_loop_body(node, post_pred, result, names, body_first)
         post_loop = result.reduce(base_scope) { |acc, (name, type)| acc.with_local(name, type) }
-        # ADR-56 slice C — loop-body receiver-content element-type join. A
-        # loop that content-mutates a collection (`acc << n`) keeps only the
-        # seed's element types after the single-pass widen (B1 unsoundness:
-        # `acc = [0]; while …; acc << n; end` → `Array[0]`, runtime
-        # `[0, n, …]`). Join the appended/stored types into the continuation
-        # collection. Pre-state is read from `post_loop` so a local both
-        # rebound and content-mutated composes.
-        post_loop = loop_content_writeback(node.statements, post_loop)
-        post_loop = narrow_loop_exit_edge(node, post_loop)
-        [Type::Combinator.constant_of(nil), post_loop]
+        # ADR-56 slice C — loop-body receiver-content element-type join. A loop
+        # that content-mutates a collection (`acc << n`) keeps only the seed's
+        # element types after the single-pass widen; join the appended/stored
+        # types into the continuation collection (pre-state read from
+        # `post_loop` so a local both rebound and content-mutated composes).
+        loop_content_writeback(node.statements, post_loop)
       end
 
       # Item 4 — loop-exit predicate narrowing. A `while pred` / `until pred`
@@ -982,6 +1005,87 @@ module Rigor
           found = true if descendant.is_a?(Prism::BreakNode)
         end
         found
+      end
+
+      # A `break` inside one of these nested constructs targets the inner
+      # construct (an inner loop, a block's method, a nested def), NOT the
+      # lexical loop — so the directly-targeting break scan does not descend
+      # into them.
+      BREAK_BOUNDARY_NODES = [
+        Prism::ForNode, Prism::WhileNode, Prism::UntilNode,
+        Prism::BlockNode, Prism::LambdaNode, Prism::DefNode,
+        Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+      ].freeze
+      private_constant :BREAK_BOUNDARY_NODES
+
+      # The `BreakNode`s that lexically target THIS loop — reachable from the
+      # body without crossing a nested loop / block / def boundary. An
+      # identity-keyed Hash used as a membership set to filter the collected
+      # break scopes (the thread-local sink also collects breaks from nested
+      # blocks that did not install their own sink).
+      def directly_targeting_breaks(statements)
+        found = {}.compare_by_identity
+        collect_direct_breaks(statements, found)
+        found
+      end
+
+      def collect_direct_breaks(node, found)
+        return if node.nil?
+
+        found[node] = true if node.is_a?(Prism::BreakNode)
+        node.compact_child_nodes.each do |child|
+          next if BREAK_BOUNDARY_NODES.any? { |klass| child.is_a?(klass) }
+
+          collect_direct_breaks(child, found)
+        end
+      end
+
+      # Installs a fresh thread-local break sink around `yield` (a loop-body
+      # evaluation), returning `[collected, yield_result]`. Stacks: the
+      # previous sink is restored on exit so a nested loop's breaks do not
+      # leak to the enclosing loop.
+      def collect_break_scopes
+        previous = Thread.current[BREAK_SINK_KEY]
+        sink = []
+        Thread.current[BREAK_SINK_KEY] = sink
+        begin
+          result = yield
+        ensure
+          Thread.current[BREAK_SINK_KEY] = previous
+        end
+        [sink, result]
+      end
+
+      # Runs a loop body's single pass under a break sink. Returns the
+      # directly-targeting break set, the collected break scopes, and the
+      # fall-through body scope — the three inputs the continuation's
+      # {#join_break_scopes} needs. Shared by `eval_loop` and `eval_for`.
+      def capture_loop_body_breaks(statements, entry)
+        targets = directly_targeting_breaks(statements)
+        sink, (_type, body_scope) = collect_break_scopes { sub_eval(statements, entry) }
+        [targets, sink, body_scope]
+      end
+
+      # Joins each directly-targeting break's body-written local bindings into
+      # the loop continuation, so a `break`-path binding the fall-through
+      # dropped is recovered (`flag = true; break` -> `flag` becomes `false |
+      # true`). Only loop-body-written names are joined — an unchanged local
+      # unions to itself; a break-only-written local is already present via the
+      # fixpoint / nil-injection seed, so the union reflects its break value.
+      def join_break_scopes(continuation, sink, targeting, names)
+        return continuation if sink.empty? || names.empty?
+
+        breaks = sink.select { |(node, _scope)| targeting.key?(node) }
+        breaks.reduce(continuation) do |cont, (_node, break_scope)|
+          names.reduce(cont) do |acc, name|
+            break_value = break_scope.local(name)
+            next acc if break_value.nil?
+
+            current = acc.local(name)
+            joined = current ? Type::Combinator.union(current, break_value) : break_value
+            acc.with_local(name, joined)
+          end
+        end
       end
 
       # Joins loop-body content mutations into the continuation collection
@@ -1108,11 +1212,19 @@ module Rigor
         element_type = for_iteration_element_type(coll_type)
         body_entry = bind_for_index(node.index, element_type, post_coll)
 
-        body_scope = node.statements ? sub_eval(node.statements, body_entry).last : body_entry
-        [
-          Type::Combinator.constant_of(nil),
-          join_with_nil_injection(post_coll, body_scope)
-        ]
+        if node.statements.nil?
+          return [Type::Combinator.constant_of(nil), join_with_nil_injection(post_coll, body_entry)]
+        end
+
+        # Run the body pass under a break sink so a `break`-path binding the
+        # fall-through drops is recovered into the continuation (the `for`
+        # sibling of `eval_loop`'s break join; `for` has no fixpoint, so the
+        # single-pass join is the only continuation).
+        break_targets, break_sink, body_scope = capture_loop_body_breaks(node.statements, body_entry)
+        continuation = join_with_nil_injection(post_coll, body_scope)
+        pre_existing, body_first = loop_body_local_writes(node.statements, post_coll)
+        continuation = join_break_scopes(continuation, break_sink, break_targets, pre_existing + body_first)
+        [Type::Combinator.constant_of(nil), continuation]
       end
 
       # `for x in coll` is semantically `coll.each { |x| ... }`. We
@@ -2920,6 +3032,19 @@ module Rigor
       def eval_return(node)
         sink = Thread.current[RETURN_SINK_KEY]
         record_return_value(node, sink) if sink
+        [Type::Combinator.bot, scope]
+      end
+
+      # A `break` transfers control to the loop exit (its flow value is `Bot`,
+      # like `return`). It records the current scope into the active loop's
+      # break sink so the loop join can recover a `break`-path binding the
+      # fall-through would drop (`flag = true; break` -> `flag` is `false |
+      # true` after the loop). nil sink = a `break` not inside an inferred
+      # loop body (a block targeting a method, or top-level) — left to the
+      # existing escaping-block / no-op handling.
+      def eval_break(node)
+        sink = Thread.current[BREAK_SINK_KEY]
+        sink << [node, scope] if sink
         [Type::Combinator.bot, scope]
       end
 

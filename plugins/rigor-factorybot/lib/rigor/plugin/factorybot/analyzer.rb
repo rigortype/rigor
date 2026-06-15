@@ -86,14 +86,14 @@ module Rigor
         # a `Prism::SymbolNode` is treated as a literal
         # attribute reference.
         #
-        # Phase 1 (c) — when `model_index` (the cross-plugin
-        # `:model_index` fact published by rigor-activerecord)
-        # is present, the effective accepted key set is the
-        # UNION of the factory's declared attributes plus the
-        # corresponding model's columns. FactoryBot's runtime
-        # accepts any AR attribute regardless of whether the
-        # factory declared it, so the cross-check broadens the
-        # acceptance accordingly.
+        # When `model_index` (the cross-plugin `:model_index`
+        # fact published by rigor-activerecord) is present,
+        # the effective accepted key set is the UNION of the
+        # factory's declared attributes plus the corresponding
+        # model's columns. FactoryBot's runtime accepts any AR
+        # attribute regardless of whether the factory declared
+        # it, so the cross-check broadens the acceptance
+        # accordingly.
         def unknown_attribute_violations(call_node, entry, model_index)
           accepted_keys, suggestion_dictionary = effective_keys(entry, model_index)
           attr_spell_checker = DidYouMean::SpellChecker.new(dictionary: suggestion_dictionary)

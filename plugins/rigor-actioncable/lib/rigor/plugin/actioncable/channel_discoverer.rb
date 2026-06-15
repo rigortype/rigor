@@ -26,7 +26,7 @@ module Rigor
       #   `stream_for` call) so the analyzer knows it can't
       #   be sure of every stream name.
       #
-      # Limitations (intentional for v0.1.0):
+      # Intentional limitations:
       #
       # - Direct-superclass match only.
       # - Public-vs-private is not tracked; the framework

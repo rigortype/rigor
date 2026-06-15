@@ -25,10 +25,10 @@ module Rigor
     # resolver methods themselves; rigor's value here is producing a
     # static type table downstream consumers can cross-reference.
     #
-    # ## What downstream consumers DO with `:graphql_type_table`
+    # ## What downstream consumers DO with the published facts
     #
-    # The fact is the substrate for two future capabilities (both
-    # demand-driven, NOT in slice 1):
+    # The tables are the substrate for two future capabilities
+    # (demand-driven, not yet implemented):
     #
     # - Resolver-method check: for each `field :name, Type` whose
     #   `name` is also defined as a Ruby method on the class, verify
@@ -37,33 +37,25 @@ module Rigor
     #   plugin could type `Schema.execute(query).to_h` against the
     #   queried fields.
     #
-    # ## Floor / ceiling (slice 1)
+    # ## What's recognised
     #
-    # Slice 1 ships the **floor**:
+    # - `class T < GraphQL::Schema::Object` subclasses (including
+    #   nested namespaces); `field :name, Type, null: ...`
+    #   declarations with constant-reference or list-array types
+    #   and GraphQL→Ruby scalar mapping.
+    # - `class T < GraphQL::Schema::Enum`; `value "ACTIVE"` calls.
+    # - `class T < GraphQL::Schema::InputObject` /
+    #   `GraphQL::Schema::Mutation`; `argument :name, Type,
+    #   required: ...` declarations.
+    # - No user-facing diagnostics yet.
     #
-    # - Recognises `class T < GraphQL::Schema::Object` subclasses
-    #   (including nested namespaces: `class Types::User < ...`,
-    #   `module Types; class User < ...; end; end`).
-    # - Recognises the `field :name, Type, **opts` declaration with:
-    #   - `Type` as a `ConstantReadNode` / `ConstantPathNode` (`String`
-    #     / `Integer` / `Boolean` / `Float` / `ID`, or a user-defined
-    #     `Types::OtherObject`).
-    #   - `null: true` / `null: false` keyword extracts nullability.
-    # - Maps the canonical GraphQL scalar names to underlying Ruby
-    #   classes (`String` → `String`, `Integer` → `Integer`,
-    #   `Boolean` → `TrueClass`, `Float` → `Float`, `ID` → `String`).
-    # - Publishes the table; no user-facing diagnostics yet.
+    # ## Deferred (demand-driven)
     #
-    # The **ceiling** (future slices, demand-driven):
-    #
-    # - **`GraphQL::Schema::Enum`** with `value "ACTIVE"` calls.
-    # - **`GraphQL::Schema::Mutation`** + **`GraphQL::Schema::InputObject`**.
-    # - **List / Non-Null wrappers** (`[String]`, `String.array`).
     # - **`resolver:` / `mutation:` reroute** recognition.
     # - **String type expressions** (`field :foo, "User"`) — defeats
     #   static resolution by design (graphql-ruby's `BuildType.parse_type`
     #   constantizes at runtime); a future slice could surface these
-    #   as `graphql.string-type` `:info` diagnostics that point the
+    #   as `graphql.string-type` `:info` diagnostics pointing the
     #   user at the constant-reference form for static typing.
     class Graphql < Rigor::Plugin::Base
       manifest(

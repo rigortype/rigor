@@ -29,11 +29,10 @@ module Rigor
     #   nesting; `def self.foo` is recognised as a singleton
     #   method.
     #
-    # Slice 1 vocabulary is the bare minimum to round-trip the
-    # most common sig shapes; the {TypeTranslator} table
-    # documents what's covered. Anything else (T.proc / T::Array
-    # / T.class_of / T::Struct) degrades silently to
-    # `Dynamic[top]` for now — slice 3 widens the translator.
+    # The {TypeTranslator} table documents coverage. Most of
+    # Sorbet's vocabulary translates; remaining gaps (`T.proc`,
+    # `T::Struct` subclasses, `T.attached_class`, etc.) degrade
+    # silently to `Dynamic[top]`.
     #
     # Architecture: per-run `Catalog` is built lazily on first
     # access by walking every configured `paths:` entry's `.rb`
@@ -99,20 +98,15 @@ module Rigor
         # `false` to record every file's sigs regardless of
         # sigil (current behaviour pre-this-config).
         @enforce_sigil = config.fetch("enforce_sigil")
-        # ADR-11 deferred follow-up — per-call-site assertion
-        # gating. Catalog harvest's `@sigil_by_path` cache is
-        # consulted at every per-call recognition so
-        # `T.let` / `T.cast` / `T.must` / `T.bind` /
-        # `T.assert_type!` only fire in files Sorbet itself
-        # would enforce (`# typed: true` / `:strict` /
-        # `:strong`). When `@enforce_sigil` is off (the user
-        # opted out at harvest time), the gate also opens at
-        # every call site — current behaviour. Files whose
-        # sigil hasn't been observed yet (e.g. the catalog
-        # hasn't run, or the call site is in a fixture /
-        # synthetic path the harvest didn't see) treat
-        # missing-info as enforced — failing-open is friendlier
-        # for spec ergonomics than failing-closed.
+        # Per-call-site assertion gating: `@sigil_by_path` (built
+        # during catalog harvest) is consulted so `T.let` /
+        # `T.cast` / `T.must` / `T.bind` / `T.assert_type!` only
+        # fire in files Sorbet itself would enforce (`:true` /
+        # `:strict` / `:strong`). With `enforce_sigil: false` the
+        # gate is open everywhere. Missing-sigil paths (synthetic
+        # fixtures, out-of-tree call sites) default to enforced —
+        # failing-open suits spec ergonomics better than
+        # failing-closed. See `assertion_enforced_here?`.
         @sigil_by_path = {}
         @catalog = nil
         @parse_errors_by_path = {}
@@ -160,8 +154,7 @@ module Rigor
         diagnostics
       end
 
-      # ADR-52 slice 4 — the per-call return-type path, migrated off
-      # the legacy `flow_contribution_for` hook onto the
+      # ADR-52 slice 4 — per-call return-type path via the
       # method-name-gated `dynamic_return` DSL. The recognised name
       # set is only known at run time (the catalog's `def` names come
       # from the lazy catalog build), so it is declared as a
@@ -170,17 +163,15 @@ module Rigor
       # resolved Symbol Set. The gate is a safe over-approximation —
       # a project method merely *named* `cast` or `find` passes it
       # and is declined by the block's own `T.`-receiver / catalog
-      # checks, exactly as the ungated hook used to decline.
+      # checks.
       dynamic_return methods: -> { recognised_method_names } do |call_node, scope|
         contribution_return_type(call_node, scope)
       end
 
       # ADR-52 slice 4 — `T.bind(self, T)`'s self-narrowing fact,
-      # migrated off the legacy hook's `post_return_facts` slot onto
-      # the method-gated `type_specifier` DSL (once
-      # `flow_contribution_for` is gone, the statement evaluator
-      # consults only this path for narrowing facts). The
-      # return-type half (`Constant[nil]`) flows through the
+      # contributed via the method-gated `type_specifier` DSL. The
+      # statement evaluator consults this path for narrowing facts.
+      # The return-type half (`Constant[nil]`) flows through the
       # `dynamic_return` rule above; the block re-checks the `T.`
       # receiver via the recogniser, so an unrelated `bind` call
       # contributes nothing.
@@ -202,20 +193,17 @@ module Rigor
         names
       end
 
-      # The migrated body of the legacy `flow_contribution_for` —
-      # same recognition order, but returns the bare `Rigor::Type`
-      # the `dynamic_return` contract expects. Resolves the receiver
-      # in two passes:
+      # Main contribution body for the `dynamic_return` rule.
+      # Returns the bare `Rigor::Type` the contract expects.
+      # Resolves the receiver in three passes:
       #
       # 1. Constant receiver (`User.find(...)`) → singleton-side
       #    catalog lookup.
       # 2. Nominal receiver-type (`user.name` where `user`'s
       #    inferred type is `Nominal["User"]`) → instance-side
       #    catalog lookup.
-      #
-      # Implicit-self calls (no receiver, current-class method)
-      # are deferred to slice 2 — slice 1 covers the common case
-      # where the sig is on the called method's own class.
+      # 3. Implicit-self (receiver-less inside a method body) →
+      #    current-class lookup via `implicit_self_lookup`.
       def contribution_return_type(call_node, scope)
         return nil unless call_node.is_a?(Prism::CallNode)
 
@@ -286,9 +274,8 @@ module Rigor
         contribution&.post_return_facts
       end
 
-      # ADR-11 deferred follow-up — per-call-site assertion
-      # gating. With `enforce_sigil: false`, the gate is fully
-      # open (matches the pre-feature behaviour). With
+      # Per-call-site assertion gating (ADR-11). With
+      # `enforce_sigil: false` the gate is fully open. With
       # `enforce_sigil: true` (default), the caller file's
       # sigil must reach `:true` / `:strict` / `:strong` for
       # assertions to fire. Three honest fallbacks:
@@ -334,7 +321,7 @@ module Rigor
         end
       end
 
-      # ADR-11 slice 2 (deferred from slice 1) — implicit-self calls.
+      # ADR-11 slice 2 — implicit-self calls.
       # A receiver-less call inside a method body resolves against the
       # engine's own `scope.self_type`: `Nominal[Foo]` inside an
       # instance method (instance-side lookup), `Singleton[Foo]` inside

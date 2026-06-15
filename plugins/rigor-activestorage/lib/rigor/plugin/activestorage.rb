@@ -132,8 +132,7 @@ module Rigor
         # ADR-60 WD3 record-and-validate: the producer's in-block
         # `AttachmentDiscoverer` reads are captured into the
         # dependency descriptor after the block runs, and the
-        # producer's `watch:` covers model-file additions — so no
-        # priming walk is needed (it used to run the discover twice).
+        # producer's `watch:` covers model-file additions.
         @attachment_index = cache_for(:attachment_index, params: {}).call
       rescue Plugin::AccessDeniedError => e
         @load_errors << "rigor-activestorage: #{e.message}"

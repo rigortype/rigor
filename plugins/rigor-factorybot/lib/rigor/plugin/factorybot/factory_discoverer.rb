@@ -23,8 +23,8 @@ module Rigor
       # - `factory :users, aliases: [:author] do ... end` — alias form
       #
       # Inside a factory block, attribute declarations come in
-      # several shapes. Phase 1 (a) recognises the literal-name
-      # forms only (Symbol arg / String arg):
+      # several shapes. Only literal-name forms are recognised
+      # (Symbol arg / String arg):
       #
       # - `name { "Alice" }` — implicit attribute via
       #   `method_missing` with a block (FactoryBot's modern
@@ -116,8 +116,8 @@ module Rigor
           Rigor::Source::Literals.symbol_or_string_name(call_node.arguments&.arguments&.first)
         end
 
-        # Pillar 2 Slice 3 — resolve the model class name for
-        # the factory. Three sources, in priority order:
+        # Resolves the model class name for the factory.
+        # Three sources, in priority order:
         #
         # 1. Explicit `class: <Const>` keyword arg —
         #    ConstantReadNode / ConstantPathNode value.
@@ -188,11 +188,10 @@ module Rigor
           attributes
         end
 
-        # Walks the block body collecting attribute names. The
-        # recogniser looks at top-level statements only —
-        # attributes inside `trait :admin do ... end` or other
-        # nested blocks are NOT collected in Phase 1 (a)
-        # (traits ship in a follow-up).
+        # Walks the block body collecting attribute names. Only
+        # top-level statements are examined — attributes inside
+        # `trait :admin do ... end` or other nested blocks are
+        # not collected (traits deferred to a follow-up).
         def collect_attributes_from(node, accumulator)
           return unless node.is_a?(Prism::Node)
 
@@ -206,8 +205,7 @@ module Rigor
         def record_attribute(node, accumulator)
           return unless node.is_a?(Prism::CallNode) && node.receiver.nil?
           # Skip association / sequence / trait / framework
-          # methods — Phase 1 (a) only records plain attribute
-          # declarations.
+          # methods — only plain attribute declarations are recorded.
           return if SKIPPED_METHODS.include?(node.name)
 
           name = if node.name == :add_attribute

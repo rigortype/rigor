@@ -22,9 +22,8 @@ module Rigor
     # Other dry-rb adapter plugins consume this fact:
     #
     # - `rigor-dry-struct` reads it so `attribute :city, Types::String`
-    #   can promote `address.city` from `Dynamic[T]` to `Nominal[String]`
-    #   (gated on the slice-6 precision-promotion work + ADR-13
-    #   resolver chain).
+    #   promotes `address.city` from `Dynamic[Top]` to `Nominal[String]`
+    #   via ADR-18's `returns_from_arg:` fact lookup.
     # - `rigor-dry-validation` / `rigor-dry-schema` read it for
     #   per-key type recognition in `schema { … }` / `params { … }`
     #   blocks (separate plugin slice).
@@ -43,17 +42,19 @@ module Rigor
     #   "<UnderlyingClass>" }` so consumers can match on the
     #   qualified constant name they see in source.
     #
-    # The **ceiling** (slice 2+):
+    # Implemented beyond the floor:
     #
-    # - Recognises nested namespaces (`Types::Coercible::Integer`,
+    # - Nested-namespace aliases (`Types::Coercible::Integer`,
     #   `Types::Strict::Symbol`, `Types::Params::Bool`,
-    #   `Types::JSON::Date`) — each is a separate dry-types
-    #   "category" with its own coercion semantics.
-    # - Recognises user-authored compositions
-    #   (`Types::String.constrained(min_size: 1)`,
-    #   `Email = Types::String.constrained(format: …)`) so the
-    #   alias surface extends beyond the canonical names.
-    # - Emits `dry-types.unknown-alias` / `dry-types.alias-shadow`
+    #   `Types::JSON::Date`) — the four coercion categories each
+    #   map to the same underlying class as their canonical shortcut.
+    # - User-authored compositions (`Email = Types::String.constrained(...)`,
+    #   transitive resolution through composition chains) — the alias
+    #   surface extends beyond the 15 canonical names.
+    #
+    # Deferred:
+    #
+    # - `dry-types.unknown-alias` / `dry-types.alias-shadow`
     #   diagnostics when downstream code references a name that
     #   wasn't published.
     #

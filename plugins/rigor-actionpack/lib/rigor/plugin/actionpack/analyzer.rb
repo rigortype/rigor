@@ -33,9 +33,8 @@ module Rigor
         # Phase 2 — filter-chain DSL methods. Each takes a
         # variadic list of filter names (Symbols / Strings) plus
         # optional `only:` / `except:` / `if:` / `unless:`
-        # modifiers. The validation key is the filter NAMES; the
-        # modifiers are accepted but their action-name argument
-        # is not yet validated (Phase 2.5).
+        # modifiers. Only the filter NAMES are validated; the
+        # `only:`/`except:` action-name arguments are not (deferred).
         FILTER_DSL_METHODS = %i[
           before_action after_action around_action
           skip_before_action skip_after_action skip_around_action
@@ -43,18 +42,14 @@ module Rigor
         ].freeze
 
         # Phase 3 — render-target template extensions checked in
-        # priority order. The first six cover the templating
-        # engines used by the projects this plugin is regularly
-        # exercised against: ERB (Rails default — `.html.erb`,
-        # `.text.erb`), HAML (Mastodon, Solidus admin —
-        # `.html.haml`), Slim, and JSON (`.json.jbuilder` plus a
-        # raw `.json.erb` for hand-rolled API responses). When a
-        # template exists under any of these extensions, the
-        # missing-template diagnostic stays silent.
-        # Configurable extension list is queued — see the
-        # `external-author plugin SKILL` track (v0.2.0). For now
-        # this set is wide enough to cover the surveyed real-world
-        # projects without leaking FPs.
+        # priority order. Covers the engines used by surveyed
+        # projects: ERB (Rails default — `.html.erb`, `.text.erb`),
+        # HAML (Mastodon, Solidus admin — `.html.haml`), Slim, and
+        # JSON (`.json.jbuilder` plus `.json.erb` for hand-rolled API
+        # responses). When a template exists under any of these
+        # extensions, the missing-template diagnostic stays silent.
+        # A configurable extension list is deferred; this set is wide
+        # enough to cover surveyed real-world projects without FPs.
         RENDER_TEMPLATE_EXTENSIONS = %w[
           .html.erb
           .text.erb
@@ -167,8 +162,7 @@ module Rigor
         # list (looked up via the model_index fact published by
         # `rigor-activerecord`). Calls whose `:require` argument is a
         # non-literal Symbol are passed through; namespaced models
-        # (`params.require(:admin_user)` → `Admin::User`) are deferred to a
-        # Phase 1.5 follow-up.
+        # (`params.require(:admin_user)` → `Admin::User`) are deferred.
         #
         # @param call_node [Prism::Node]
         # @param model_index [Hash{String => Hash}]

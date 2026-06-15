@@ -21,10 +21,9 @@ module Rigor
     #   cross-plugin fact.
     # - Ships an RBS overlay (`sig/dry_validation.rbs`) typing
     #   `Dry::Validation::Contract#call` (returns Result) and
-    #   `Dry::Validation::Result#{success?, failure?, to_h}`. Users
-    #   add the path to their `.rigor.yml`'s `signature_paths:` so
-    #   `contract.call(input).to_h` infers cleanly. See the README
-    #   for the wiring step.
+    #   `Dry::Validation::Result#{success?, failure?, to_h}`.
+    #   The manifest's `signature_paths: ["sig"]` auto-contributes
+    #   the overlay (ADR-25) — no project-side wiring needed.
     #
     # Slice 2 (deferred, per design note):
     #

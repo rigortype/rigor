@@ -9,14 +9,6 @@ module Rigor
       # block's `params(...)` and `returns(...)` clauses) into
       # Rigor's internal type carriers.
       #
-      # Slice 1 covered the minimum vocabulary that lets a
-      # typical `sig { params(x: Integer).returns(String) }`
-      # round-trip; slice 3 widens it to cover the dense middle
-      # of Sorbet's surface — generic class applications
-      # (`T::Array[E]`, `T::Hash[K, V]`, etc.), class-object
-      # types (`T.class_of(C)`, `T::Class[T]`), tuples, and
-      # shapes:
-      #
       # | Sorbet form              | Rigor carrier                            |
       # | ------------------------ | ---------------------------------------- |
       # | `Integer` etc.           | `Nominal["Integer"]`                     |
@@ -42,10 +34,9 @@ module Rigor
       #
       # Anything else (`T.proc`, `T.attached_class`,
       # `T.self_type`, `T.type_parameter`, `T::Struct` / `T::Enum`
-      # subclasses, …) degrades to `Dynamic[top]`. The degraded
-      # path stays silent for now per ADR-11's slice plan; a
-      # later slice surfaces the gap as a `dynamic.sorbet.unsupported`
-      # diagnostic.
+      # subclasses, …) degrades silently to `Dynamic[top]`. The
+      # `dynamic.sorbet.unsupported` diagnostic for degraded
+      # forms is deferred.
       module TypeTranslator
         BOOLEAN_NAME = "Boolean"
 
@@ -235,9 +226,8 @@ module Rigor
         # analogue (Singleton names a specific class); the
         # closest faithful translation is `Singleton[name]`
         # when `T` is a constant, or `Singleton[Object]` for
-        # broader applications. Lossy translation; emitted as
-        # `dynamic.sorbet.degraded` once slice 3's diagnostic
-        # surface lands.
+        # broader applications. Lossy — the `dynamic.sorbet.degraded`
+        # diagnostic for this case is deferred.
         def translate_t_class_subscript(args)
           inner = args.first
           return Rigor::Type::Combinator.singleton_of("Class") if inner.nil?

@@ -1171,9 +1171,10 @@ module Rigor
         end
 
         def in_singular_resource?(*)
-          # Slice 1 doesn't model the singular-resource frame
-          # separately; placeholder so member / collection
-          # blocks at least descend.
+          # Stub: always returns true so member / collection
+          # blocks descend. The singular-resource frame
+          # (`push_singular_resource`) is modelled in Context;
+          # a future caller could use it to tighten this check.
           true
         end
 

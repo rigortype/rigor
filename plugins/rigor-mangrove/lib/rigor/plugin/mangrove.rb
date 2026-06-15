@@ -71,9 +71,9 @@ module Rigor
     # - `is_a?(Result::Ok)` / `Some` / `None` exhaustive
     #   narrowing — core control-flow analysis over a sealed
     #   hierarchy, not a plugin surface.
-    # - The `variants do variant Const, Type end` Enum DSL — needs
-    #   an ADR-16 nested-class emission tier (ADR-36). Today's
-    #   contract has no `const_set`-emitting macro substrate.
+    # - The `variants do variant Const, Type end` Enum DSL is handled
+    #   via ADR-36 `nested_class_templates:` in this plugin's manifest
+    #   (Slice A — see `nested_class_templates:` block below).
     class Mangrove < Rigor::Plugin::Base
       manifest(
         id: "mangrove",

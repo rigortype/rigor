@@ -11,15 +11,13 @@ require_relative "rspec/let_type_resolver"
 module Rigor
   module Plugin
     # rigor-rspec — validates RSpec `let` / `subject`
-    # declarations within each describe / context scope.
+    # declarations within each describe / context scope,
+    # narrows `expect(x).to MATCHER` assertions downstream,
+    # and binds `let`/`subject` locals to their inferred
+    # return types inside `it` bodies.
     #
     # Tier 3A of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
-    # Deliberately scoped — the roadmap describes a much
-    # larger plugin (let-typo detection in `it` bodies,
-    # `expect(x).to receive(:method)` mock-target
-    # validation). Both are out of scope for v0.1.0; this
-    # plugin ships the two checks that have the lowest
-    # false-positive risk:
+    # Ships four checks:
     #
     # 1. **Duplicate `let` / `subject` declarations** in
     #    the same scope (`warning`). RSpec's runtime lets
@@ -31,14 +29,21 @@ module Rigor
     #    (`error`). At runtime this infinite-loops; users
     #    typically meant to call a different method or
     #    forgot to introduce a `super`.
+    # 3. **`expect(x).to MATCHER` narrowing** — narrows
+    #    the named local `x` on the post-call edge for
+    #    eight matchers (see `MatcherAnalyzer`).
+    # 4. **`let`/`subject` local binding** — binds `let`
+    #    / `subject` names in `it` bodies to the block's
+    #    inferred return type (see `LetTypeResolver`).
     #
     # ## Configuration
     #
-    # No knobs in v0.1.0. The plugin walks every analysed
-    # file looking for `RSpec.describe ... do` blocks; spec
-    # files outside the project's `paths:` are not scanned.
+    # No configuration knobs. The plugin walks every
+    # analysed file for `RSpec.describe ... do` blocks;
+    # spec files outside the project's `paths:` are not
+    # scanned.
     #
-    # ## Limitations (v0.1.0)
+    # ## Limitations
     #
     # - **No let-typo detection.** Detecting an `it`
     #   block's reference to a misspelled `let` name
@@ -102,14 +107,14 @@ module Rigor
         Analyzer.diagnose(path: path, root: root).map { |diag| build_diagnostic(diag) }
       end
 
-      # ADR-37 slice 2 — Pillar 2 Slice 1 matcher narrowing
+      # ADR-37 slice 2 — matcher narrowing
       # (`expect(x).to be_a(T)` → `post_return_facts` on `x`),
       # method-gated by the engine on the expectation verbs.
       type_specifier methods: %i[to not_to to_not] do |call_node, scope|
         MatcherAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
       end
 
-      # Pillar 2 Slice 2 / ADR-52 slice 5a — binds local reads in `it` /
+      # ADR-52 slice 5a — binds local reads in `it` /
       # spec bodies to their `let(:name) { ... }` block's inferred return
       # type. The name set varies per file (each spec file's
       # `describe`/`let` structure), so the rule gates on the per-file
@@ -130,7 +135,7 @@ module Rigor
         let_scope_index_for(path)&.let_names || []
       end
 
-      # Pillar 2 Slice 2 — when the call node is a no-receiver
+      # When the call node is a no-receiver
       # method call (`user`, `subject`, etc.) inside an RSpec
       # `describe` block whose lets include a matching name,
       # return the let block's inferred type.

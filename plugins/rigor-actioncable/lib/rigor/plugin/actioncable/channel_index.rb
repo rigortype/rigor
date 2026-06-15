@@ -69,9 +69,9 @@ module Rigor
         # True when at least one discovered channel uses a
         # dynamic stream registration. The analyzer treats
         # this as "we can't be sure any literal name is
-        # missing" and downgrades unknown-stream from
-        # `:warning` to `:info` (or drops it entirely;
-        # current behaviour: skip warnings).
+        # missing" and skips the `unknown-stream` warning
+        # entirely — absence of a literal match doesn't prove
+        # the name is wrong.
         def any_dynamic_streams?
           @entries.any?(&:dynamic_streams)
         end

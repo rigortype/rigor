@@ -75,10 +75,9 @@ module Rigor
           "model_base_classes" => { kind: :array, default: %w[ApplicationRecord ActiveRecord::Base] }
         },
         produces: [:model_index],
-        # ADR-25 — the bundled `ActiveRecord::Relation` RBS, the
-        # type `flow_contribution_for`'s relation-typed call sites
-        # (`has_many` accessors, `Model.where`, scopes) dispatch
-        # against.
+        # ADR-25 — the bundled `ActiveRecord::Relation` RBS that
+        # relation-typed call sites (`has_many` accessors,
+        # `Model.where`, scopes) dispatch against.
         signature_paths: ["sig"],
         # ADR-26 — `ActiveRecord::Relation` is an "open" receiver:
         # it delegates an unbounded set of user-defined scopes /
@@ -89,7 +88,7 @@ module Rigor
       )
 
       # The class the bundled `sig/active_record/relation.rbs`
-      # describes; `flow_contribution_for` contributes
+      # describes; `dynamic_return` contributes
       # `ActiveRecord::Relation[Model]` for relation-returning
       # call sites (`has_many` accessors, `Model.where`, scopes).
       RELATION_CLASS_NAME = "ActiveRecord::Relation"
@@ -261,9 +260,8 @@ module Rigor
         names
       end
 
-      # The migrated body of the legacy `flow_contribution_for` —
-      # same resolution order, returning the bare type the
-      # `dynamic_return` contract expects.
+      # Resolution body for `dynamic_return` — same four-path
+      # order, returning the bare type the contract expects.
       def contribution_return_type(call_node, scope)
         return nil unless call_node.is_a?(Prism::CallNode)
 

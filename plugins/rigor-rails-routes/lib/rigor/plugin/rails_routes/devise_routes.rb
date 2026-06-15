@@ -38,11 +38,9 @@ module Rigor
       #   (`user_facebook_omniauth_authorize_path`) and Devise
       #   declares them from the configured providers, which
       #   live in an initializer this static parser does not
-      #   read. We register the SHAPE-FAMILY suffix matchers
-      #   `_omniauth_authorize_path` / `_omniauth_callback_path`
-      #   via a separate hook (see `OMNIAUTH_HELPER_PATTERNS`);
-      #   these are NOT in the table but consulted by the
-      #   `Analyzer.allowed_dynamic_pattern?` check.
+      #   read. The suffix patterns are registered in
+      #   `OMNIAUTH_SUFFIXES` and consulted by
+      #   `HelperTable#omniauth_match?`.
       module DeviseRoutes
         # The standard Devise controllers and the helper
         # actions each generates. Keys are the controller
@@ -190,7 +188,7 @@ module Rigor
 
         # Returns the set of OmniAuth pattern suffixes the
         # analyzer accepts for a given resource. The analyzer
-        # consults this set (via `HelperTable#allows_omniauth?`)
+        # consults this set (via `HelperTable#omniauth_match?`)
         # when a `*_path` / `*_url` call's name does not match
         # any registered entry and its prefix matches a Devise
         # resource.

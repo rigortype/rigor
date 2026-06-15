@@ -6,7 +6,7 @@ require "rigor/type"
 module Rigor
   module Plugin
     class Rspec < Rigor::Plugin::Base
-      # Pillar 2 Slice 2 — resolves the runtime type of a
+      # Resolves the runtime type of a
       # `let(:name) { body }` or `subject(:name) { body }`
       # block by pattern-matching its body's tail expression.
       #

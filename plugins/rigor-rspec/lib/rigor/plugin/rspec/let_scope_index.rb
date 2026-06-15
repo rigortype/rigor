@@ -21,10 +21,9 @@ module Rigor
       #   { ... }` and `subject(:name) { ... }` declarations.
       #   `:subject` is the key for the implicit `subject { ... }`.
       #
-      # Pillar 2 Slice 2 — used by the plugin's let-binding
-      # `dynamic_return` rule to bind `let`-named
-      # method-shape calls inside `it` bodies to the let
-      # block's inferred type.
+      # Used by the plugin's let-binding `dynamic_return`
+      # rule to bind `let`-named method-shape calls inside
+      # `it` bodies to the let block's inferred type.
       class LetScopeIndex
         Record = Struct.new(:outer_range, :describe_const, :lets, keyword_init: true) do
           def contains?(line) = outer_range.cover?(line)

@@ -30,10 +30,10 @@ module Rigor
     #
     # ## Configuration
     #
-    # No knobs in v0.1.0. Activate via `plugins: ["rigor-minitest"]`
-    # in `.rigor.yml`.
+    # No configuration knobs. Activate via
+    # `plugins: ["rigor-minitest"]` in `.rigor.yml`.
     #
-    # ## Limitations (v0.1.0)
+    # ## Limitations
     #
     # - **No `assert_raises(T) { ... }`** — that's a block-shape
     #   matcher and Rigor's narrowing model is for

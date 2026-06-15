@@ -168,9 +168,8 @@ module Rigor
         # contribution mirrors `T.must` minus the nil-stripping:
         # the call's return type is the inner expression's
         # inferred type. The companion diagnostic is emitted by
-        # the plugin's `diagnostics_for_file` hook through
-        # {RevealTypeRecognizer}; the recogniser here is
-        # contribution-only.
+        # the plugin's `diagnostics_for_file` hook; this
+        # method handles the contribution only.
         def resolve_reveal_type(call_node, scope)
           inner = nth_argument(call_node, 0)
           return Rigor::Type::Combinator.untyped if inner.nil? || scope.nil?

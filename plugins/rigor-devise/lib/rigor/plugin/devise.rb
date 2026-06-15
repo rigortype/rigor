@@ -44,19 +44,17 @@ module Rigor
     # `send_reset_password_instructions`, etc. resolve through the
     # synthetic-method tier without `call.undefined-method`.
     #
-    # ## Floor / ceiling per ADR-16 WD13
+    # ## Precision tier
     #
-    # Slice 3 ships at the **floor**: synthesised method names
-    # emit and the dispatcher's `try_synthetic_method` tier
-    # returns `Type::Combinator.untyped` (Dynamic[T]) for every
-    # match. Per the slice-3 design judgment (1) the precision
-    # promotion — looking up the module's authored RBS return
-    # type at dispatch time — is **slice-6 ceiling work** and is
-    # NOT a delivery commitment of slice 3c. The `origin_module:`
-    # provenance field is recorded so the ceiling slice can
-    # promote without rescanning.
+    # The scanner records `origin_module:` in each synthetic
+    # method's provenance. The dispatcher's slice-6a TierB path
+    # (`promote_via_origin_module`) redispatches on
+    # `Nominal[origin_module]` via `RbsDispatch`, so Devise's
+    # authored RBS return types win: `valid_password?` returns
+    # `bool`, not `Dynamic[T]`. Unknown return types degrade
+    # gracefully to `Dynamic[T]`.
     #
-    # ## Scope (slice 3c minimum)
+    # ## Scope
     #
     # - Recognises model-side `devise :a, :b` on any AR::Base
     #   subclass; trait symbol set mirrors `lib/devise/modules.rb`.

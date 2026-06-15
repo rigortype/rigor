@@ -17,15 +17,12 @@ module Rigor
       # default) when no sigil is present, matching how Sorbet
       # treats sigil-less files.
       #
-      # Slice 5 of ADR-11 uses this purely at catalog-harvest
-      # time: `# typed: ignore` files are skipped entirely (the
-      # plugin records no sigs from them). The other levels are
-      # detected for forward compatibility but treated
-      # identically — per-call-site sigil honouring (e.g. only
-      # firing `T.let` recognition in `# typed: true`+ files)
-      # requires threading the file path through
-      # the per-call recognition path, which lives behind a
-      # future plugin-contract widening slice.
+      # ADR-11 slice 5 uses this at catalog-harvest time:
+      # `# typed: ignore` files are skipped entirely; other
+      # levels gate both sig contributions (`:true`/`:strict`/
+      # `:strong` only) and per-call assertion recognition
+      # (`T.let` / `T.cast` / `T.must` / etc.) via
+      # `Sorbet#assertion_enforced_here?`.
       module SigilDetector
         # Sorbet's strictness-level names. Stored as symbols to
         # match the analyzer's existing convention for level

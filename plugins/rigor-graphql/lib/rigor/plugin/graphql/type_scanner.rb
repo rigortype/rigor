@@ -50,12 +50,13 @@ module Rigor
 
         # @param paths [Array<String>] absolute paths to `.rb` files
         #   the project's `paths:` resolves to.
-        # @return [Hash{Symbol => Hash}] frozen 3-key result with
+        # @return [Hash{Symbol => Hash}] frozen 4-key result:
         #   `:types` (per-`Schema::Object` field table),
-        #   `:enums` (per-`Schema::Enum` value list), and
-        #   `:input_objects` (per-`Schema::InputObject` argument
-        #   table). Any subset may be empty when no recognisable
-        #   declaration of that kind is found.
+        #   `:enums` (per-`Schema::Enum` value list),
+        #   `:input_objects` (per-`Schema::InputObject` argument table),
+        #   `:mutations` (per-`Schema::Mutation` arguments+fields table).
+        #   Any subset may be empty when no recognisable declaration
+        #   of that kind is found.
         def scan(paths:)
           acc = empty_accumulator
           paths.each do |path|
@@ -97,10 +98,9 @@ module Rigor
         private_class_method :scan_file
 
         # Walks the AST collecting `class X < GraphQL::Schema::Object`,
-        # `class X < GraphQL::Schema::Enum`, and
-        # `class X < GraphQL::Schema::InputObject` decls at any
-        # nesting level. Returns a 3-key hash so the caller can
-        # publish multiple cross-plugin facts from one walk.
+        # `Schema::Enum`, `Schema::InputObject`, and `Schema::Mutation`
+        # decls at any nesting level. Returns a 4-key hash so the
+        # caller can publish multiple cross-plugin facts from one walk.
         def collect_definitions(node, qualified_prefix)
           return empty_accumulator if node.nil?
 
@@ -203,10 +203,9 @@ module Rigor
         # The first positional must be a String literal — the
         # graphql-ruby `value` API also accepts a Symbol form
         # (`value :ACTIVE`) but the documented idiom is String.
-        # Slice 2b only stores the GraphQL-side value name; the
-        # optional `value:` kwarg (Ruby-side override) and
-        # `description:` stay out of the published table for
-        # the floor.
+        # Only the GraphQL-side value name is stored; the optional
+        # `value:` kwarg (Ruby-side override) and `description:`
+        # are omitted from the published table.
         def collect_values(body)
           return [] if body.nil?
 

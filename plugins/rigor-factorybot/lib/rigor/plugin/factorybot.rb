@@ -13,12 +13,10 @@ module Rigor
     # attributes_for / *_list family against a per-run index
     # built from `factory_search_paths`.
     #
-    # **Phase 1 (a)** of the FactoryBot plugin family — the
-    # self-contained slice. Recognises factory NAMES + literal
-    # ATTRIBUTE KEYS in the call's keyword hash. Phase 1 (c)
-    # ships the AR column cross-check via the
-    # `rigor-activerecord` `:model_index` ADR-9 fact, after
-    # `rigor-activerecord` adds the matching publish hook.
+    # Recognises factory NAMES + literal ATTRIBUTE KEYS in
+    # the call's keyword hash. The AR column cross-check uses
+    # the `rigor-activerecord` `:model_index` ADR-9 fact when
+    # that plugin is loaded (optional `consumes:`).
     # Traits, sequences, parent / child factories, and dynamic
     # factory names are deferred to follow-up slices.
     #
@@ -54,9 +52,9 @@ module Rigor
     # `.build_stubbed_list`. The legacy `FactoryGirl` constant
     # is recognised identically. Implicit-receiver calls
     # (`create(:name)` inside an `include FactoryBot::Syntax::Methods`
-    # context) are NOT recognised in Phase 1 (a) — too many
-    # false positives on plain `create` calls outside test
-    # files; this needs receiver-type inference (Phase 1 (b)).
+    # context) are NOT recognised — too many false positives on
+    # plain `create` calls outside test files; deferred until
+    # receiver-type inference can disambiguate.
     #
     # ## What's recognised inside `factory :name do ... end`
     #

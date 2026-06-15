@@ -4,22 +4,18 @@ module Rigor
   module Plugin
     class Sorbet < Rigor::Plugin::Base
       # Frozen description of one Sorbet `sig` block as parsed by
-      # {SigParser}. Holds enough to reconstruct the method's
-      # call-site return type (slice 1's deliverable) plus the
-      # parameter shape and modifier list (kept for slice 2+ when
-      # we begin checking call-site argument types and override
-      # compatibility).
+      # {SigParser}. Holds the return type, parameter shape, and
+      # modifier list. Call-site argument-type checking and
+      # override-compatibility validation are deferred; only the
+      # return-type contribution is active.
       #
       # `kind` distinguishes `def foo` (`:instance`) from
       # `def self.foo` / `class << self; def foo; end`
       # (`:singleton`).
       #
-      # `modifiers` is the set of `sig`-level modifiers we
-      # observed: `:abstract`, `:override`, `:overridable`,
-      # `:final`. Slice 1 records them but does not act on them;
-      # later slices wire `:abstract` into the existing
-      # `def.return-type-mismatch` check and `:override` into
-      # override-compatibility validation.
+      # `modifiers` records the `sig`-level flags observed:
+      # `:abstract`, `:override`, `:overridable`, `:final`.
+      # Currently stored but not acted on.
       MethodSignature = Data.define(
         :class_name, :method_name, :kind, :params, :return_type, :modifiers
       )

@@ -4,15 +4,14 @@ module Rigor
   module Plugin
     class Factorybot < Rigor::Plugin::Base
       # Per-run frozen index of discovered FactoryBot factories
-      # and the attribute keys each declares. Phase 1 (a) keys
-      # only the **literal symbol/string** factory name + the
-      # **literal symbol** attribute names; sequences,
-      # parent/child relationships, traits, and dynamically-
-      # named factories ship behind later slices.
+      # and the attribute keys each declares. Indexes only
+      # **literal symbol/string** factory names + **literal
+      # symbol** attribute names; sequences, parent/child
+      # relationships, traits, and dynamically-named factories
+      # are deferred to follow-up slices.
       #
-      # v0.2.0 (Pillar 2 Slice 3) adds `model_class` to each
-      # entry — the inferred or explicit class the factory
-      # builds. Resolved from:
+      # Each entry carries a `model_class` — the inferred or
+      # explicit class the factory builds. Resolved from:
       #
       #   1. An explicit `factory :user, class: User do`
       #      keyword option (ConstantReadNode / ConstantPathNode

@@ -227,8 +227,8 @@ module Rigor
         # Recognised single-instance and collection association
         # DSL methods. The kind drives the eventual return-type
         # contribution: singular associations narrow to
-        # `Nominal[Target] | nil`, plural ones currently degrade
-        # to the RBS envelope (relation types are a future track).
+        # `Nominal[Target] | nil`, plural ones narrow to
+        # `ActiveRecord::Relation[Target]`.
         #
         # `composed_of` value-object aggregations and
         # `delegated_type` roles are folded in here too — both
@@ -447,8 +447,8 @@ module Rigor
 
         # `scope :active, -> { ... }`. Records the scope name
         # only (the body is intentionally NOT introspected —
-        # scopes return ActiveRecord::Relation, which Rigor
-        # doesn't carry a precise type for yet).
+        # the caller contributes `ActiveRecord::Relation[Model]`
+        # based on the name alone via `class_scope_return_type`).
         def lookup_scopes(body)
           return [] if body.nil?
 

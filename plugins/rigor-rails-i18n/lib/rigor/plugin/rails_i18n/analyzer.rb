@@ -169,7 +169,7 @@ module Rigor
 
         # Extracts the literal-string first argument when
         # present. Returns nil for variable / expression keys —
-        # those are out of scope for v0.1.0.
+        # only literal keys are statically validated.
         def literal_key_for(call_node)
           args = call_node.arguments&.arguments || []
           return nil if args.empty?
@@ -224,9 +224,7 @@ module Rigor
 
         def collect_assoc_keys(hash_node)
           # Both `Prism::HashNode` and `Prism::KeywordHashNode`
-          # expose `#elements`; the conditional was an
-          # accidental no-op carried over from an earlier
-          # draft.
+          # expose `#elements`, so a single path handles both.
           hash_node.elements.filter_map do |element|
             next nil unless element.is_a?(Prism::AssocNode)
 

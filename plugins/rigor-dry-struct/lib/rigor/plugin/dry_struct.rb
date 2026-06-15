@@ -35,16 +35,15 @@ module Rigor
     # other files then dispatch through the synthetic record rather
     # than falling through to `call.undefined-method`.
     #
-    # ## Floor / ceiling per ADR-16 WD13
+    # ## Precision model (ADR-16 WD13 + ADR-18)
     #
-    # Slice 2 ships at the **floor**: the synthetic reader's return
-    # type degrades to `Dynamic[T]`. The manifest's `returns: "Object"`
-    # is recorded but not resolved — precise return-type promotion
-    # (so `attribute :city, Types::String` makes `address.city`
-    # return `String`) is the **ceiling**, deferred to slice 6
-    # (ADR-13 `Plugin::TypeNodeResolver` chain). The plugin's manifest
-    # value of `returns:` would today be the upstream gem's reader
-    # return shape; slice 6 unlocks precision without re-authoring.
+    # The synthetic reader's return type is resolved via ADR-18's
+    # `returns_from_arg:` fact lookup: the call-site's second argument
+    # (`Types::String` etc.) is looked up through the `:dry_type_aliases`
+    # fact published by `rigor-dry-types`, yielding `Nominal[String]`
+    # for common cases. When the lookup misses (e.g. inline method-chain
+    # argument whose chain-head isn't currently extracted), the row
+    # falls back to `Dynamic[Top]` silently.
     #
     # ## Scope (slice 2c minimum)
     #

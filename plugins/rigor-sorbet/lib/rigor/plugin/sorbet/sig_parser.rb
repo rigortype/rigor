@@ -26,9 +26,8 @@ module Rigor
       # whatever it recognises (`params` / `returns` / `void` /
       # `abstract` / `override` / `overridable` / `final` /
       # `type_parameters` / `checked` / `on_failure`) into a
-      # frozen result hash. Slice 1 wires the parsed structure
-      # into {MethodSignature}; later slices will start *acting*
-      # on the modifiers and `type_parameters`.
+      # frozen result hash stored in {MethodSignature}. Modifiers
+      # and `type_parameters` are recorded but not yet acted on.
       #
       # The parser is intentionally tolerant — unknown chain
       # nodes degrade to "the rest of the chain is opaque" rather
@@ -93,8 +92,8 @@ module Rigor
             when :params
               accumulator[:params].merge!(parse_params(current))
             when :type_parameters
-              # Slice 1: recognise to suppress the degraded
-              # path; widen translation in slice 3.
+              # Recognised to suppress the degraded path;
+              # payload intentionally discarded (deferred).
             when *RECOGNISED_MODIFIERS
               accumulator[:modifiers] << current.name
             when *RUNTIME_ONLY_STEPS

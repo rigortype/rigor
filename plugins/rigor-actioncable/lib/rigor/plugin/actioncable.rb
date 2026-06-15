@@ -41,7 +41,7 @@ module Rigor
     #    `stream_for record`) — the absence of a literal
     #    match doesn't prove absence.
     #
-    # ## Limitations (v0.1.0)
+    # ## Limitations
     #
     # - **Direct-superclass match only.** Indirect
     #   inheritance (`AdminChannel < BaseChannel <
@@ -51,8 +51,8 @@ module Rigor
     #   ActionCable actions are invoked from JS via
     #   `subscription.perform("action_name", data)`; we
     #   don't analyse JS so the action-method index is
-    #   currently informational only (future cross-plugin
-    #   handoff to a hypothetical JS-side analyzer).
+    #   informational only (deferred: cross-plugin handoff
+    #   to a JS-side analyzer).
     # - **`broadcast_to` arity isn't checked.** The method
     #   takes any record + any data hash; there's no
     #   useful arity envelope.

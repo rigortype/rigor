@@ -12,8 +12,9 @@ module Rigor
       # (`Float::INFINITY` for the upper bound when `*args`
       # is present). `keyword_required` lists any required
       # keyword arguments — Active Job supports keyword args
-      # but they're rare in user code, so the analyzer only
-      # validates positional arity for v0.1.0.
+      # but they're rare in user code, so the analyzer
+      # validates positional arity only (keyword arity
+      # validation is deferred).
       class JobIndex
         Entry = Data.define(:class_name, :min_arity, :max_arity, :keyword_required) do
           # Flexible-friendly textual form of the arity for

@@ -8,7 +8,7 @@ require "rigor/flow_contribution/fact"
 module Rigor
   module Plugin
     class Rspec < Rigor::Plugin::Base
-      # Pillar 2 Slice 1 — recognises `expect(x).to MATCHER`
+      # Recognises `expect(x).to MATCHER`
       # patterns at per-call recognition time and emits
       # `post_return_facts` that narrow the named local on the
       # post-call edge.

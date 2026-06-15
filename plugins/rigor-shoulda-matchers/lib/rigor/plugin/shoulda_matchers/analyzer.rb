@@ -31,7 +31,6 @@ module Rigor
       #   validate_absence_of(:col)
       #   validate_format_of(:col)
       #   validate_confirmation_of(:col)
-      #   allow_value(...).for(:col)
       #   have_db_column(:col)
       #   have_db_index(:col)
       #

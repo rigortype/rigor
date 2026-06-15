@@ -40,7 +40,7 @@ module Rigor
     #    arguments. Missing placeholders are errors; extra
     #    arguments are warnings.
     #
-    # ## Limitations (v0.1.0)
+    # ## Limitations
     #
     # - Only literal-string keys are validated. `t(key)` with
     #   a variable receiver is silently passed through.

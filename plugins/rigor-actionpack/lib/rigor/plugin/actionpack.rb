@@ -68,17 +68,14 @@ module Rigor
     class Actionpack < Rigor::Plugin::Base
       manifest(
         id: "actionpack",
-        # Bumped 2026-06-02 — ADR-37 node_rule migration. The four
-        # phases (helper / filter / render / strong-params) now run
-        # per-call over the engine-owned walk instead of the
-        # hand-rolled `diagnostics_for_file` traversal; the enclosing
-        # controller is read from the node-rule `NodeContext` ancestors.
-        # Nested-module qualification is preserved — a
-        # `module Admin; class DomainBlocksController; end` file still
+        # ADR-37: the four phases (helper / filter / render /
+        # strong-params) run per-call over the engine-owned walk;
+        # the enclosing controller is read from the node-rule
+        # `NodeContext` ancestors. Nested-module qualification is
+        # preserved — `module Admin; class DomainBlocksController`
         # resolves as `Admin::DomainBlocksController` (matching the
-        # `ControllerDiscoverer`), so render paths
-        # (`admin/domain_blocks/new`) and filter-chain validation on
-        # nested controllers are unchanged.
+        # `ControllerDiscoverer`), so render paths and filter-chain
+        # validation on nested controllers are correct.
         version: "0.8.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {

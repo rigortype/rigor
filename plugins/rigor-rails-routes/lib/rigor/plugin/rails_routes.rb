@@ -26,9 +26,9 @@ module Rigor
     # - One level of nested `resources`
     #
     # The plugin publishes its parsed `:helper_table` through
-    # the ADR-9 cross-plugin fact store so future
-    # `rigor-actionpack` Phase 4 can consume it for
-    # route-helper validation in controller code.
+    # the ADR-9 cross-plugin fact store; `rigor-actionpack`
+    # Phase 4 consumes it for route-helper validation in
+    # controller code.
     #
     # ## Configuration
     #
@@ -147,8 +147,8 @@ module Rigor
       end
 
       # Publishes the parsed table to the cross-plugin fact
-      # store so future Tier 2 plugins (rigor-actionpack
-      # Phase 4) can read it via `services.fact_store.read`.
+      # store; `rigor-actionpack` Phase 4 reads it via
+      # `services.fact_store.read`.
       def prepare(services)
         table = helper_table_or_nil
         return if table.nil?

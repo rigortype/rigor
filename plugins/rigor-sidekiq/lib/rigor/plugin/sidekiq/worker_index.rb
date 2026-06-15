@@ -9,10 +9,11 @@ module Rigor
       # analyzer can validate `Worker.perform_async(...)`
       # call sites.
       #
-      # Same envelope shape as `rigor-activejob`'s
-      # `JobIndex::Entry`: `min_arity` / `max_arity` form a
-      # closed range (`Float::INFINITY` for the upper bound
-      # when `*args` is present).
+      # Uses the same `min_arity` / `max_arity` closed-range
+      # envelope as `rigor-activejob`'s `JobIndex::Entry`
+      # (`Float::INFINITY` upper bound when `*args` is present);
+      # Sidekiq workers serialize args to JSON so keyword arity
+      # is not tracked here.
       class WorkerIndex
         Entry = Data.define(:class_name, :min_arity, :max_arity) do
           def arity_label

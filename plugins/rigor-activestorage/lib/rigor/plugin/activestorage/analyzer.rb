@@ -11,13 +11,11 @@ module Rigor
       # plugin recognised so users can verify the model →
       # attachment mapping the plugin sees.
       #
-      # No `:error` diagnostics in this slice — the
-      # `dynamic_return` return-type narrowing carries
-      # the type-checking value; surfacing unknown attachment
-      # names as errors requires a coupled receiver-class
-      # narrowing pass that the integration spec doesn't yet
-      # rely on. A future slice can add `unknown-attachment`
-      # similar to `rigor-activerecord`'s `unknown-column`.
+      # No `:error` diagnostics here — the `dynamic_return`
+      # return-type narrowing carries the type-checking value.
+      # An `unknown-attachment` rule (similar to
+      # `rigor-activerecord`'s `unknown-column`) is deferred:
+      # it requires a coupled receiver-class narrowing pass.
       class Analyzer
         attr_reader :diagnostics
 

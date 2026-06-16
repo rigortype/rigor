@@ -3,6 +3,7 @@
 require "optparse"
 
 require_relative "../analysis/baseline"
+require_relative "options"
 require_relative "../analysis/runner"
 require_relative "../cache/store"
 require_relative "../configuration"
@@ -106,7 +107,7 @@ module Rigor
         }
         parser = OptionParser.new do |opts|
           opts.banner = "Usage: rigor baseline #{subcommand} [options]"
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          Options.add_config(opts, options)
           opts.on("--output=PATH", "Write baseline to PATH (default: #{DEFAULT_BASELINE_PATH})") do |v|
             options[:output] = v
           end
@@ -270,7 +271,7 @@ module Rigor
         }
         parser = OptionParser.new do |opts|
           opts.banner = "Usage: rigor baseline drift [options]"
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          Options.add_config(opts, options)
           opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
             options[:baseline] = v
           end
@@ -344,7 +345,7 @@ module Rigor
         }
         parser = OptionParser.new do |opts|
           opts.banner = "Usage: rigor baseline prune [options]"
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          Options.add_config(opts, options)
           opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
             options[:baseline] = v
           end

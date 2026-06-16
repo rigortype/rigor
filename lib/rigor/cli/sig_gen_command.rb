@@ -3,6 +3,7 @@
 require "optionparser"
 
 require_relative "../configuration"
+require_relative "options"
 require_relative "../sig_gen"
 require_relative "command"
 
@@ -145,7 +146,7 @@ module Rigor
           opts.on("--tighter-returns", "Emit only tighter-return classifications") do
             options[:selection] << SigGen::Classification::TIGHTER_RETURN
           end
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          Options.add_config(opts, options)
         end
       end
 

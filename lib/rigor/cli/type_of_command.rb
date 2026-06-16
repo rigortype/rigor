@@ -53,7 +53,7 @@ module Rigor
           opts.banner = USAGE
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--trace", "Record fail-soft fallbacks via FallbackTracer") { options[:trace] = true }
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          Options.add_config(opts, options)
           Options.add_editor_mode(opts, options)
         end
         parser.parse!(@argv)

@@ -6,6 +6,7 @@ require "optionparser"
 require "prism"
 
 require_relative "../configuration"
+require_relative "options"
 require_relative "../environment"
 require_relative "../scope"
 require_relative "../inference/def_return_typer"
@@ -76,7 +77,7 @@ module Rigor
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          Options.add_config(opts, options)
           opts.on("--format=FORMAT", %w[text json],
                   "Output format: text (default) or json (a { line => type } map)") do |value|
             options[:format] = value.to_sym

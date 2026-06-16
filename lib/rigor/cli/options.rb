@@ -17,6 +17,15 @@ module Rigor
     module Options
       module_function
 
+      # Defines the standard `--config=PATH` flag on `parser`, writing the
+      # path into `options[:config]`. Used by every subcommand that loads a
+      # `.rigor.yml`; the few whose `--config` help text is intentionally
+      # bespoke (`diff`, `mcp`, `show-bleedingedge`) keep their own
+      # `parser.on` rather than this shared wording.
+      def add_config(parser, options)
+        parser.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+      end
+
       # Defines the `--tmp-file` / `--instead-of` editor-mode flag pair
       # on `parser`, writing into `options`.
       def add_editor_mode(parser, options)

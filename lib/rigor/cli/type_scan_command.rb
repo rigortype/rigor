@@ -4,6 +4,7 @@ require "optionparser"
 require "prism"
 
 require_relative "../configuration"
+require_relative "options"
 require_relative "../environment"
 require_relative "../inference/coverage_scanner"
 require_relative "../scope"
@@ -46,7 +47,7 @@ module Rigor
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          Options.add_config(opts, options)
           opts.on("--limit=N", Integer, "Max example events to print (text only)") do |value|
             options[:limit] = value
           end

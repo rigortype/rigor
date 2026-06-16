@@ -345,7 +345,7 @@ module Rigor
         }
         parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = "Usage: rigor check [options] [paths]"
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          Options.add_config(opts, options)
           opts.on("--format=FORMAT",
                   "Output format: text, json, sarif, github, gitlab, checkstyle, junit, teamcity") do |value|
             options[:format] = value

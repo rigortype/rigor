@@ -5,6 +5,7 @@ require "optionparser"
 require "prism"
 
 require_relative "../configuration"
+require_relative "options"
 require_relative "../environment"
 require_relative "../scope"
 require_relative "../inference/flow_tracer"
@@ -63,7 +64,7 @@ module Rigor
             options[:line] = value
           end
           opts.on("--verbose", "Include every expression enter/result frame") { options[:verbose] = true }
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          Options.add_config(opts, options)
         end
         parser.parse!(@argv)
         options

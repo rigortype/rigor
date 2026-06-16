@@ -3,6 +3,7 @@
 require "optparse"
 
 require_relative "../configuration"
+require_relative "options"
 require_relative "../plugin"
 require_relative "../plugin/loader"
 require_relative "../plugin/services"
@@ -102,7 +103,7 @@ module Rigor
         options = { config: nil, format: "text", strict: false, capabilities: false }
         OptionParser.new do |opts|
           opts.banner = USAGE
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          Options.add_config(opts, options)
           opts.on("--format=FORMAT", "Output format: text (default) or json") { |v| options[:format] = v }
           opts.on("--strict", "Exit 1 if any plugin failed to load (CI gate)") { options[:strict] = true }
           opts.on("--capabilities", "Emit the per-plugin extension-protocol catalogue (ADR-37)") do

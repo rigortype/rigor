@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "command"
+require_relative "options"
 
 require "optionparser"
 
@@ -106,9 +107,7 @@ module Rigor
           opts.on("--log=PATH", "Write LSP wire log + server debug to PATH (default: stderr)") do |value|
             options[:log] = value
           end
-          opts.on("--config=PATH", "Path to the Rigor configuration file") do |value|
-            options[:config] = value
-          end
+          Options.add_config(opts, options)
         end
         parser.parse!(@argv)
         options

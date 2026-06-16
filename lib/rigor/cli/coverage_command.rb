@@ -5,6 +5,7 @@ require "optionparser"
 require "prism"
 
 require_relative "../configuration"
+require_relative "options"
 require_relative "../environment"
 require_relative "../inference/precision_scanner"
 require_relative "../inference/protection_scanner"
@@ -63,7 +64,7 @@ module Rigor
         OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--format=FORMAT", "Output format: text or json") { |v| options[:format] = v }
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          Options.add_config(opts, options)
           opts.on(
             "--protection",
             "Report type-protection coverage (ADR-63 Tier 1) instead of type precision"

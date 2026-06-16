@@ -3,6 +3,7 @@
 require "optionparser"
 
 require_relative "../configuration"
+require_relative "options"
 require_relative "../analysis/runner"
 require_relative "../cache/store"
 require_relative "../triage"
@@ -42,7 +43,7 @@ module Rigor
         options = { config: nil, format: "text", top: 10, sections: DEFAULT_SECTIONS }
         OptionParser.new do |opts|
           opts.banner = USAGE
-          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          Options.add_config(opts, options)
           opts.on("--format=FORMAT", "Output format: text (default) or json") { |v| options[:format] = v }
           opts.on("--top=N", Integer, "Hotspot-file count (default 10)") { |v| options[:top] = v }
           opts.on("--hints-only", "Print only the heuristic-hints section") { options[:sections] = %i[hints] }

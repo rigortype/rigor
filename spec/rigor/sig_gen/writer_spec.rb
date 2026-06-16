@@ -438,4 +438,77 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(result.skipped.map { |c, _| c.method_name }).to eq([:count=])
     end
   end
+
+  # Regression: a subdirectory file declaring `class Foo::Bar`
+  # (a compact constant path) never names `Foo`, so the
+  # generator records no kind for the `Foo` wrapper segment.
+  # The writer used to default that children-only wrapper to
+  # `module Foo` while the sibling `foo.rb` (declaring
+  # `class Foo`) wrote `class Foo` — and loading both `.rbs`
+  # files raised `RBS::DuplicatedDeclarationError`, aborting
+  # the whole RBS env build. `write_all` now folds every
+  # candidate's per-file kinds into one run-level view where
+  # the authoritative `class Foo` governs the wrapper keyword
+  # across files. (Found on whitequark/parser's
+  # `source/comment.rb` + `source/comment/associator.rb`.)
+  describe "cross-file class/module reconciliation (compact constant path)" do
+    def write_source(rel_path, contents)
+      full = File.join(tmpdir, rel_path)
+      FileUtils.mkdir_p(File.dirname(full))
+      File.write(full, contents)
+      full
+    end
+
+    def generated_candidates
+      lib = File.join(tmpdir, "lib")
+      config = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [lib], "signature_paths" => nil).compact
+      )
+      Rigor::SigGen::Generator.new(configuration: config, paths: [lib]).run
+    end
+
+    # Replays `rigor check`'s env-build step: the duplicate is
+    # detected at `add_source`, so a clean build means the
+    # generated tree no longer mixes `class` / `module`.
+    def build_environment(*sources)
+      env = RBS::Environment.new
+      sources.each_with_index do |src, i|
+        buffer = RBS::Buffer.new(name: "gen-#{i}.rbs", content: src)
+        _, directives, decls = RBS::Parser.parse_signature(buffer)
+        env.add_source(RBS::Source::RBS.new(buffer, directives || [], decls || []))
+      end
+      env.resolve_type_names
+    end
+
+    it "wraps the subdirectory nested class with `class`, matching the parent file's declaration" do
+      write_source("lib/widget.rb", <<~RUBY)
+        module Pkg
+          class Widget
+            def own
+              1
+            end
+          end
+        end
+      RUBY
+      write_source("lib/widget/helper.rb", <<~RUBY)
+        module Pkg
+          class Widget::Helper
+            def nested
+              "x"
+            end
+          end
+        end
+      RUBY
+
+      writer.write_all(generated_candidates)
+
+      parent = File.read(File.join(tmpdir, "sig/widget.rbs"))
+      nested = File.read(File.join(tmpdir, "sig/widget/helper.rbs"))
+
+      expect(parent).to match(/class Widget\b/)
+      expect(nested).to match(/class Widget\b/)
+      expect(nested).not_to match(/module Widget\b/)
+      expect { build_environment(parent, nested) }.not_to raise_error
+    end
+  end
 end

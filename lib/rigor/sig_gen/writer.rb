@@ -46,6 +46,11 @@ module Rigor
       def initialize(path_mapper:, overwrite: false)
         @path_mapper = path_mapper
         @overwrite = overwrite
+        # Run-level (cross-file) namespace-kind view, populated
+        # per `#write_all` from every candidate's per-file map.
+        # Empty until then so the single-target `#write` path
+        # falls back to per-candidate kinds only.
+        @global_namespace_kinds = {}
       end
 
       # Process the full candidate list by resolving each
@@ -65,6 +70,7 @@ module Rigor
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         return [] if emittable.empty?
 
+        @global_namespace_kinds = build_namespace_kinds(candidates)
         emittable.group_by { |c| @path_mapper.target_for(c.path, class_name: c.class_name) }
                  .map { |target, group| write_target(target, group) }
       end
@@ -161,11 +167,43 @@ module Rigor
       end
 
       def merged_namespace_kinds(candidates)
-        merged = {}
+        merged = @global_namespace_kinds.dup
         candidates.each do |c|
-          (c.namespace_kinds || {}).each { |k, v| merged[k] = v }
+          (c.namespace_kinds || {}).each { |k, v| apply_namespace_kind(merged, k, v) }
         end
         merged
+      end
+
+      # Folds every candidate's per-file namespace-kind map
+      # into one run-level view so a `class Foo` recorded
+      # while scanning `foo.rb` governs the wrapper keyword
+      # emitted for `Foo` in a *sibling* file's target — e.g.
+      # `foo/bar.rb` declaring `class Foo::Bar`, whose compact
+      # constant path never names `Foo`, so the walker records
+      # no kind for it. Without this view that sibling target
+      # wraps the nested class in `module Foo` while `foo.rbs`
+      # declares `class Foo`; loading both raises
+      # `RBS::DuplicatedDeclarationError`, aborting the whole
+      # RBS env build.
+      def build_namespace_kinds(candidates)
+        candidates.each_with_object({}) do |candidate, acc|
+          (candidate.namespace_kinds || {}).each { |name, kind| apply_namespace_kind(acc, name, kind) }
+        end
+      end
+
+      # A `class` declaration is authoritative and MUST win
+      # over the `:module` wrapper default: a compact
+      # `class Foo::Bar` never names `Foo`, so the only signal
+      # for `Foo`'s kind is an actual `class Foo` (or
+      # `Const = Data.define(...)` shell) seen elsewhere. This
+      # guarantees the generated tree never mixes `class` /
+      # `module` for the same constant.
+      def apply_namespace_kind(map, key, kind)
+        if kind == :class
+          map[key] = :class
+        else
+          map[key] ||= :module
+        end
       end
 
       # Tree node: { name:, children: Hash{String => node},

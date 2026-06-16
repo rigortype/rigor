@@ -75,6 +75,39 @@ RSpec.describe Rigor::Builtins::PredefinedConstantRefinements do
       expect(described_class.lookup("MyProject::UNDEFINED_FOO")).to be_nil
     end
 
+    it "does not invoke const_missing for a const_missing-resolved path (e.g. Digest::UUID)" do
+      # Analysing a reference must never drive the analyzer's own runtime
+      # through a const_missing hook: `Digest::UUID` makes Digest.const_missing
+      # run `require "digest/uuid"`, and a missing optional library raises
+      # LoadError (a ScriptError, not NameError) — which used to abort the
+      # whole run. The const_defined?(false) guard answers "resolvable here?"
+      # without the side effect.
+      called = false
+      probe = Module.new do
+        define_singleton_method(:const_missing) do |_name|
+          called = true
+          raise LoadError, "library not found"
+        end
+      end
+      stub_const("RigorSpecConstMissingProbe", probe)
+
+      expect { described_class.lookup("RigorSpecConstMissingProbe::Whatever") }.not_to raise_error
+      expect(described_class.lookup("RigorSpecConstMissingProbe::Whatever")).to be_nil
+      expect(called).to be(false)
+    end
+
+    it "returns nil (rescuing LoadError) when an autoload target library is missing" do
+      # An autoload-registered constant passes the const_defined? guard, so
+      # const_get fires the autoload; a missing target raises LoadError, which
+      # the rescue must absorb into a fall-through rather than crash the run.
+      probe = Module.new
+      probe.autoload(:Missing, "rigor/spec/definitely/missing/file")
+      stub_const("RigorSpecAutoloadProbe", probe)
+
+      expect { described_class.lookup("RigorSpecAutoloadProbe::Missing") }.not_to raise_error
+      expect(described_class.lookup("RigorSpecAutoloadProbe::Missing")).to be_nil
+    end
+
     it "returns nil for an empty string constant" do
       stub_const("RIGOR_SPEC_EMPTY_CONST", "")
       expect(described_class.lookup("RIGOR_SPEC_EMPTY_CONST")).to be_nil

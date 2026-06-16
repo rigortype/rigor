@@ -110,13 +110,28 @@ module Rigor
       def self.inspect_runtime_string(name)
         return nil if RUNTIME_INSPECTION_EXCLUDED.include?(name)
 
-        parts = name.split("::")
-        value = parts.reduce(::Object) { |mod, part| mod.const_get(part, false) }
+        mod = ::Object
+        name.split("::").each do |part|
+          # Resolve only constants already present — never let analysing a
+          # reference drive the analyzer's own runtime to autoload or run a
+          # `const_missing` hook. A `Digest::UUID` reference in project code
+          # otherwise makes `const_get` trigger `Digest.const_missing` →
+          # `require "digest/uuid"`, and a missing optional library raises
+          # `LoadError` (a `ScriptError`, not the `NameError` the const_get
+          # walk expects), which would abort the whole run rather than fall
+          # through to the RBS tier. `const_defined?(part, false)` answers
+          # the same "is this resolvable here" question without the side
+          # effect — a project-defined constant (the common case) is simply
+          # absent and returns nil, no exception raised.
+          return nil unless mod.is_a?(::Module) && mod.const_defined?(part, false)
 
-        return nil unless value.is_a?(::String) && !value.empty?
+          mod = mod.const_get(part, false)
+        end
 
-        classify_string(value)
-      rescue ::NameError, ::TypeError
+        return nil unless mod.is_a?(::String) && !mod.empty?
+
+        classify_string(mod)
+      rescue ::NameError, ::TypeError, ::LoadError
         nil
       end
       private_class_method :inspect_runtime_string

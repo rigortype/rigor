@@ -101,6 +101,35 @@ first), or when a `rigor-faraday` plugin is scoped.
 - **Carry-over** — WD2 (declared, faraday) is the FP-safe first step; WD3 (definition-following)
   removes the per-builder declaration but carries the override-`.new` soundness question.
 
+## Implementation note (scoping, 2026-06-16)
+
+A pre-implementation dig pinned the extension point and the real crux, so the dedicated
+session starts de-risked:
+
+- **Extension point** — `Inference::ScopeIndexer#struct_new_call?` (`scope_indexer.rb` ~L2615)
+  matches only the literal `Struct` receiver (`meta_constant_receiver?`). Add a *separate*
+  `struct_builder_new_call?` — do NOT broaden the shared `struct_new_call?`, which also gates
+  `record_meta_superclass_members` and the check-rules arity path — that accepts a
+  `<Const>.new(*symbols)` whose receiver constant **transitively descends from `Struct`** via
+  the `discovered_superclasses` map, and route it into `record_struct_member_layout` only.
+  `meta_member_names` / `struct_new_keyword_init?` already work unchanged on such a call (the
+  non-`Struct.new` branch keeps the symbol args and drops a trailing keyword hash by node
+  type). FP-safe by construction: an unresolvable receiver does not fold (stays `Dynamic`).
+  faraday is tractable — `class Options < Struct`; `ConnectionOptions = Options.new(:request, …)`.
+- **The crux — cross-file builder folding needs a two-phase project pre-pass.** Layouts are
+  built in two places: the per-file path (`merge_member_layouts`, which already has the
+  *complete* cross-file `discovered_superclasses` from the project seed) and the project
+  pre-pass (`accumulate_project_index` ~L2401, which accumulates `acc[:superclasses]`
+  *incrementally* per file). A builder constant (`ConnectionOptions`) is **used across files**,
+  so its layout must land in the cross-file seed the pre-pass builds — but the pre-pass may
+  process the *use* file before the *definition* file (`Options < Struct`), leaving its
+  superclass map incomplete when it folds. The sound fix is to split `accumulate_project_index`
+  into two phases (accumulate all superclasses first, then compute builder layouts against the
+  complete map), not to fold against the incremental map. Per-file-only folding gates green but
+  yields ~no faraday win (cross-file usage dominates) — this two-phase restructure is the
+  careful part and the real reason this is separate-session work. faraday baseline to beat:
+  227/1066 (21.3%) protected.
+
 ## Relationship to other ADRs
 
 - **ADR-48** — the carrier substrate this generalises; recognition is the only addition.

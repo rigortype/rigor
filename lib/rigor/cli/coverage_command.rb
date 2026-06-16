@@ -9,6 +9,7 @@ require_relative "options"
 require_relative "../environment"
 require_relative "../inference/precision_scanner"
 require_relative "../inference/protection_scanner"
+require_relative "../inference/parameter_inference_collector"
 require_relative "../protection/mutation_scanner"
 require_relative "../language_server/project_context"
 require_relative "../scope"
@@ -97,12 +98,30 @@ module Rigor
 
       def scan_protection(paths, options)
         configuration = Configuration.load(options.fetch(:config))
-        scope = Scope.empty(environment: project_environment(configuration))
+        environment = project_environment(configuration)
+        scope = scope_with_inferred_params(paths, configuration, environment)
         scanner = Inference::ProtectionScanner.new(scope: scope)
         accumulator = ProtectionAccumulator.new
 
         paths.each { |path| scan_one(path, scanner, accumulator, configuration) }
         accumulator.to_report
+      end
+
+      # ADR-67 WD3 — seed the call-site parameter-inference table so the
+      # protection scan counts an inferred-parameter receiver (e.g. `node.loc`
+      # where `node` is a `def compile(node)` parameter) as protected when its
+      # call sites resolve to concrete argument types. ONLY the parameter table
+      # is seeded — no cross-file discovery — so every site that does not gain
+      # an inferred parameter type is classified byte-identically to the
+      # un-inferred baseline. Collection spans the scanned `paths`.
+      def scope_with_inferred_params(paths, configuration, environment)
+        base = Scope.empty(environment: environment)
+        table = Inference::ParameterInferenceCollector.collect(
+          files: paths, environment: environment, target_ruby: configuration.target_ruby
+        )
+        return base if table.empty?
+
+        base.with_discovery(base.discovery.with(param_inferred_types: table))
       end
 
       def determine_protection_exit(report, options)

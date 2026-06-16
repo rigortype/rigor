@@ -29,7 +29,8 @@ module Rigor
       :discovered_includes,
       :discovered_class_sources,
       :data_member_layouts,
-      :struct_member_layouts
+      :struct_member_layouts,
+      :param_inferred_types
     )
 
     class DiscoveryIndex
@@ -55,7 +56,16 @@ module Rigor
         discovered_includes: EMPTY_TABLE,
         discovered_class_sources: EMPTY_TABLE,
         data_member_layouts: EMPTY_TABLE,
-        struct_member_layouts: EMPTY_TABLE
+        struct_member_layouts: EMPTY_TABLE,
+        # ADR-67 WD3 — the call-site parameter-inference table, keyed by
+        # `[class_name, method_name, kind]` (the same `(class, method, kind)`
+        # triple {Inference::ParameterInferenceCollector} records and that
+        # `build_method_entry_scope` reconstructs from the lexical class path).
+        # The value is a `{param_name(Symbol) => Rigor::Type}` map of the union
+        # of resolved call-site argument types. Empty on every normal run; only
+        # the `coverage --protection` collection pass populates it today, so a
+        # `check` run leaves it empty and seeds nothing (byte-identical).
+        param_inferred_types: EMPTY_TABLE
       )
     end
   end

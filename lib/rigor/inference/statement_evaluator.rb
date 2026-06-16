@@ -2769,6 +2769,12 @@ module Rigor
           source_path: scope.source_path
         )
         bindings = binder.bind(def_node)
+        # ADR-67 WD3 — override an undeclared parameter with its call-site
+        # inferred type (precision-additive; an RBS-declared parameter wins,
+        # the table is empty on a normal `check` run). The inferred type lives
+        # only as a body local, never as an RBS contract, so it cannot fire a
+        # parameter-boundary diagnostic (WD1, satisfied by construction).
+        bindings = seed_inferred_param_types(bindings, def_node, singleton)
 
         # Method bodies do NOT see the outer scope's locals. They start
         # from a fresh scope with the same environment, then receive
@@ -2791,6 +2797,36 @@ module Rigor
           )
         )
         bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # ADR-67 WD3 — consult the call-site parameter-inference table for this
+      # `def` and replace each undeclared (untyped) parameter binding with its
+      # inferred type. Keyed by `[class_name, method_name, kind]`, reconstructed
+      # from the lexical class path — the same triple
+      # {Inference::ParameterInferenceCollector} records. An RBS-declared
+      # parameter (a non-untyped binding) always wins. No-op when the table is
+      # empty (the normal `check` path), so the seed is byte-identical there.
+      def seed_inferred_param_types(bindings, def_node, singleton)
+        inferred = scope.param_inferred_types
+        return bindings if inferred.empty?
+
+        path = current_class_path
+        return bindings if path.nil?
+
+        table = inferred[[path, def_node.name, singleton ? :singleton : :instance]]
+        return bindings if table.nil? || table.empty?
+
+        merged = bindings.dup
+        table.each do |name, type|
+          merged[name] = type if merged.key?(name) && untyped_binding?(merged[name])
+        end
+        merged
+      end
+
+      # True for the `Dynamic[Top]` carrier `MethodParameterBinder` leaves on an
+      # undeclared parameter — the only bindings ADR-67 WD3 overrides.
+      def untyped_binding?(type)
+        type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
       end
 
       def seed_instance_ivars(body_scope, singleton:)

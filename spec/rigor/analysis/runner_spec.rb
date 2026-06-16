@@ -724,7 +724,7 @@ RSpec.describe Rigor::Analysis::Runner do
             expect(diag).not_to be_nil
             expect(diag.message).to include("the project defines `String#shout' at")
             expect(diag.message).to include("pre_eval:")
-            expect(diag.project_definition_site).to match(/core_ext\.rb:2/)
+            expect(diag.project_definition_site).to include("core_ext.rb:2")
           end
         end
       end

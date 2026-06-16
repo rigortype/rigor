@@ -139,7 +139,7 @@ RSpec.describe Rigor::Plugin::Loader do
 
       expect(registry.plugins).to be_empty
       expect(registry.load_errors.size).to eq(1)
-      expect(registry.load_errors.first.message).to match(/could not load plugin gem "rigor-alpha"/)
+      expect(registry.load_errors.first.message).to include('could not load plugin gem "rigor-alpha"')
     end
 
     it "surfaces missing-registration failures as load errors" do
@@ -148,7 +148,7 @@ RSpec.describe Rigor::Plugin::Loader do
       registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
 
       expect(registry.plugins).to be_empty
-      expect(registry.load_errors.first.message).to match(/did not register any plugin/)
+      expect(registry.load_errors.first.message).to include("did not register any plugin")
     end
 
     it "surfaces multi-registration ambiguity as a load error" do
@@ -161,7 +161,7 @@ RSpec.describe Rigor::Plugin::Loader do
       registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
 
       expect(registry.plugins).to be_empty
-      expect(registry.load_errors.first.message).to match(/registered multiple plugins/)
+      expect(registry.load_errors.first.message).to include("registered multiple plugins")
     end
 
     it "resolves an explicit `id:` even when the gem registers multiple plugins" do
@@ -203,7 +203,7 @@ RSpec.describe Rigor::Plugin::Loader do
 
       registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
       expect(registry.plugins.size).to eq(1)
-      expect(registry.load_errors.first.message).to match(/appeared twice/)
+      expect(registry.load_errors.first.message).to include("appeared twice")
     end
 
     it "surfaces config schema violations as load errors" do
@@ -224,7 +224,7 @@ RSpec.describe Rigor::Plugin::Loader do
 
       registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
       expect(registry.plugins).to be_empty
-      expect(registry.load_errors.first.message).to match(/expected boolean/)
+      expect(registry.load_errors.first.message).to include("expected boolean")
     end
 
     it "surfaces #init exceptions as load errors without crashing the loader" do

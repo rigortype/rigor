@@ -66,7 +66,7 @@ RSpec.describe "examples/rigor-lisp-eval" do
     error_diag = plugin_diagnostics(result).find { |d| d.rule == "type-error" }
     expect(error_diag).not_to be_nil
     expect(error_diag.severity).to eq(:error)
-    expect(error_diag.message).to match(/`\+` expects numeric operands/)
+    expect(error_diag.message).to include("`+` expects numeric operands")
     expect(error_diag.qualified_rule).to eq("plugin.lisp-eval.type-error")
   end
 

@@ -59,8 +59,8 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       result = run_plugin(source: source)
       mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
       expect(mismatches).not_to be_empty
-      expect(mismatches.first.message).to match(/:asc \| :desc/)
-      expect(mismatches.first.message).to match(/:bad/)
+      expect(mismatches.first.message).to include(":asc | :desc")
+      expect(mismatches.first.message).to include(":bad")
     end
 
     it "contributes nothing for a file without the magic comment" do

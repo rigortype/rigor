@@ -57,7 +57,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
       reporter = collect_reporter
       result = described_class.parse_register("rigor:v1:hkt_register: arity=1", reporter: reporter)
       expect(result).to be_nil
-      expect(reporter.entries.first[:message]).to match(/uri/)
+      expect(reporter.entries.first[:message]).to include("uri")
     end
 
     it "returns nil and emits a reporter entry for un-namespaced uri" do
@@ -67,7 +67,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
         reporter: reporter
       )
       expect(result).to be_nil
-      expect(reporter.entries.first[:message]).to match(/namespaced/)
+      expect(reporter.entries.first[:message]).to include("namespaced")
     end
 
     it "returns nil and emits a reporter entry for non-positive arity" do
@@ -77,7 +77,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
         reporter: reporter
       )
       expect(result).to be_nil
-      expect(reporter.entries.first[:message]).to match(/arity must be a positive Integer/)
+      expect(reporter.entries.first[:message]).to include("arity must be a positive Integer")
     end
 
     it "returns nil and emits a reporter entry for variance / arity mismatch" do
@@ -87,7 +87,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
         reporter: reporter
       )
       expect(result).to be_nil
-      expect(reporter.entries.first[:message]).to match(/variance length/)
+      expect(reporter.entries.first[:message]).to include("variance length")
     end
 
     it "falls back to `untyped` and warns when bound is an unrecognised expression" do
@@ -98,7 +98,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
       )
       expect(result).not_to be_nil
       expect(result.bound).to eq(untyped)
-      expect(reporter.entries.first[:message]).to match(/bound `lower` not recognised/)
+      expect(reporter.entries.first[:message]).to include("bound `lower` not recognised")
     end
   end
 
@@ -143,7 +143,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
         reporter: reporter
       )
       expect(result).to be_nil
-      expect(reporter.entries.first[:message]).to match(/missing body/)
+      expect(reporter.entries.first[:message]).to include("missing body")
     end
 
     it "returns nil and emits a reporter entry for missing params" do
@@ -153,7 +153,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
         reporter: reporter
       )
       expect(result).to be_nil
-      expect(reporter.entries.first[:message]).to match(/params/)
+      expect(reporter.entries.first[:message]).to include("params")
     end
 
     it "drops body_tree (keeps body String) when body grammar fails to parse" do
@@ -162,7 +162,7 @@ RSpec.describe Rigor::RbsExtended::HktDirectives do
       defn = described_class.parse_define(string, reporter: reporter)
       expect(defn).not_to be_nil
       expect(defn.body_tree).to be_nil
-      expect(reporter.entries.last[:message]).to match(/body parse error/)
+      expect(reporter.entries.last[:message]).to include("body parse error")
     end
   end
 

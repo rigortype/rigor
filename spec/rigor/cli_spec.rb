@@ -565,7 +565,7 @@ RSpec.describe Rigor::CLI do
       Dir.chdir(tmpdir) do
         status, out, err = run_cli("check", "--no-cache", "--no-stats",
                                    "--format=json", "--treat-all-as-inline-rbs", "demo.rb")
-        expect(err).not_to match(/NoMethodError/)
+        expect(err).not_to include("NoMethodError")
         expect(status).to eq(1)
         payload = JSON.parse(out)
         rules = payload.fetch("diagnostics").map { |d| d["rule"] }

@@ -360,7 +360,7 @@ RSpec.describe Rigor::Inference::HktBodyParser do
       defn = Rigor::RbsExtended::HktDirectives.parse_define(payload, reporter: reporter)
       expect(defn).not_to be_nil
       expect(defn.body_tree).to be_nil
-      expect(collected.last[:message]).to match(/body parse error/)
+      expect(collected.last[:message]).to include("body parse error")
     end
   end
 end

@@ -97,7 +97,7 @@ RSpec.describe Rigor::Playground::App do
       expect(last_response.status).to eq(200)
       body = JSON.parse(last_response.body)
       expect(body).to include("type")
-      expect(body["type"]).to match(/hello/)
+      expect(body["type"]).to include("hello")
     end
 
     it "returns 422 when the position has no resolvable type" do

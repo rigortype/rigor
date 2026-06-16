@@ -7,17 +7,81 @@ require_relative "../source/node_walker"
 
 module Rigor
   module Inference
-    # ADR-67 WD3 — call-site parameter type inference (single-level).
+    # Pure argument-type classification for {ParameterInferenceCollector} — no
+    # collector state, so it lives outside the orchestration class. Decides which
+    # argument types may seed a parameter (concrete enough for the protection
+    # metric to bite) and widens a literal argument to its nominal.
+    module ParameterArgTypes
+      module_function
+
+      CONSTANT_CLASSES = {
+        Integer => "Integer", Float => "Float", String => "String",
+        Symbol => "Symbol", Range => "Range", TrueClass => "TrueClass",
+        FalseClass => "FalseClass", NilClass => "NilClass"
+      }.freeze
+
+      # A parameter holds a *value of* a type across its lifetime, not a pinned
+      # literal — so a `Constant<"text">` argument widens to its nominal
+      # (`String`); recurses through unions so `Constant<"a"> | Constant<"b">`
+      # collapses to `String`.
+      def widen_for_param(type)
+        case type
+        when Type::Constant
+          name = constant_class_name(type.value)
+          name ? Type::Combinator.nominal_of(name) : type
+        when Type::Union
+          Type::Combinator.union(*type.members.map { |member| widen_for_param(member) })
+        else
+          type
+        end
+      end
+
+      def constant_class_name(value)
+        CONSTANT_CLASSES.each { |klass, name| return name if value.is_a?(klass) }
+        nil
+      end
+
+      # The dispatch class for a receiver type, for the subset the collector
+      # resolves to a user `def` (mirrors `CheckRules#concrete_class_name` for the
+      # carriers a user-method receiver is typed as). `class_name_of` is the
+      # Nominal/Singleton-only variant for an implicit-self `self_type`.
+      def concrete_class_name(type)
+        case type
+        when Type::Nominal, Type::Singleton then type.class_name
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
+        end
+      end
+
+      def class_name_of(type)
+        type.class_name if type.is_a?(Type::Nominal) || type.is_a?(Type::Singleton)
+      end
+
+      # Whether `type` is too gradual to seed (not a concrete dispatch target) —
+      # the negation of `ProtectionScanner#concrete_receiver?` (a union is
+      # concrete only when every arm is).
+      def non_concrete?(type)
+        case type
+        when Type::Dynamic, Type::Top, Type::Bot then true
+        when Type::Union then type.members.any? { |member| non_concrete?(member) }
+        else false
+        end
+      end
+    end
+
+    # ADR-67 WD3 + WD5 — call-site parameter type inference (capped fixpoint).
     #
-    # A `def` parameter with no RBS signature types `untyped` (the gradual
-    # entry point), so a param flowing into an ivar or a receiver drains
-    # everything downstream to `Dynamic`. This pass closes the *single-level*
-    # slice of that hole: it walks every project file, types each call's
-    # positional arguments in their lexical scope, resolves which user-defined
-    # `def` each call targets, and records the **union of resolved call-site
-    # argument types** per parameter — TypeProf's "a parameter's type is the
-    # union of every actual argument across all call sites", taken one level
-    # deep (no fixpoint).
+    # A `def` parameter with no RBS signature types `untyped` (the gradual entry
+    # point), so a param flowing into an ivar or a receiver drains everything
+    # downstream to `Dynamic`. This pass closes that hole: it walks every project
+    # file, types each call's positional arguments in their lexical scope,
+    # resolves which user-defined `def` each call targets, and records the
+    # **union of resolved call-site argument types** per parameter — TypeProf's
+    # "a parameter's type is the union of every actual argument across all call
+    # sites". WD5: it iterates (cap {DEFAULT_ROUNDS}), re-seeding each round with
+    # the previous round's inferred parameters, so a parameter passed *another*
+    # parameter is typed one hop further per round (round 1 alone is the
+    # single-level pass).
     #
     # The result is keyed by `[class_name, method_name, kind]` — the same triple
     # `StatementEvaluator#build_method_entry_scope` reconstructs from the lexical
@@ -29,19 +93,17 @@ module Rigor
     #
     # Soundness (WD4): the inferred type is a sound over-approximation only when
     # every contributed call site resolves to a concrete argument type. Any
-    # `Dynamic` / `Top` / `Bot` argument (the fixpoint case — an argument that is
-    # itself an untyped parameter — or a `send`/dynamic-dispatch caller)
-    # **poisons** the parameter, which then contributes nothing (stays
-    # `untyped`). Unresolved call sites simply do not contribute. This keeps the
-    # single-level pass from ever narrowing a parameter on incomplete evidence.
+    # `Dynamic` / `Top` / `Bot` argument (a `send`/dynamic-dispatch caller, or a
+    # parameter not yet typed in an earlier round) **poisons** the parameter,
+    # which then contributes nothing this round (it may type in a later round
+    # once its own argument resolves). Unresolved call sites do not contribute.
     #
-    # What it does NOT do yet (deferred follow-ups, ADR-67 WD5 / the check-wiring
-    # slice): the whole-program worklist *fixpoint* (so a parameter passed
-    # another untyped parameter is never typed), keyword / optional / rest /
-    # block parameters, inherited-method receivers, top-level helpers, and a
-    # rigorous closed-call-site-set proof (today's union is optimistic over
-    # resolved sites — acceptable because the only consumer is the protection
-    # metric, which runs no diagnostics).
+    # What it does NOT do yet (deferred — the check-wiring slice): feeding the
+    # table into the `check` walk (only `coverage --protection` consumes it
+    # today), keyword / optional / rest / block parameters, inherited-method
+    # receivers, top-level helpers, and a rigorous closed-call-site-set proof
+    # (the union is optimistic over resolved sites — acceptable because the only
+    # consumer is the protection metric, which runs no diagnostics).
     class ParameterInferenceCollector
       EMPTY = {}.freeze
 
@@ -50,40 +112,87 @@ module Rigor
       # (poisoned) rather than carrying an unbounded union.
       MAX_CALL_SITE_TYPES = 16
 
+      # WD5 — the call-site union is a worklist fixpoint: each round re-types the
+      # project with the previous round's inferred parameters seeded, so a
+      # parameter passed *another* parameter is typed one hop further per round.
+      # Capped (no true-convergence requirement — the metric tolerates a bounded
+      # approximation, and the table can oscillate at the margin since a newly
+      # resolved receiver can surface a fresh untyped-argument call site). The
+      # cap matches the `Inference::BodyFixpoint` cap-3 convention. Round 1 alone
+      # is the single-level pass.
+      DEFAULT_ROUNDS = 3
+
       # @param files [Array<String>] project `.rb` paths to scan for call sites.
       # @param environment [Rigor::Environment]
       # @param target_ruby [String, nil] Prism parse target.
+      # @param max_rounds [Integer] the WD5 fixpoint cap (1 = single-level).
       # @return [Hash{[String,Symbol,Symbol] => Hash{Symbol => Rigor::Type}}] frozen.
-      def self.collect(files:, environment:, target_ruby: nil)
-        new(files: files, environment: environment, target_ruby: target_ruby).collect
+      def self.collect(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS)
+        new(files: files, environment: environment, target_ruby: target_ruby, max_rounds: max_rounds).collect
       end
 
-      def initialize(files:, environment:, target_ruby: nil)
+      def initialize(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS)
         @files = files
         @environment = environment
         @target_ruby = target_ruby
-        # `[[class, method, kind], param_sym]` => [Type] of observed concrete
-        # arguments. A default-block Hash (not a `{}` literal) so the analyzer
-        # types its reads generically — see {#finalize}.
+        @max_rounds = max_rounds
+        # Reset per round (see {#run_round}). `[[class, method, kind], param_sym]`
+        # => [Type] of observed concrete arguments (a default-block Hash, not a
+        # `{}` literal, so the analyzer types its reads generically — {#finalize}),
+        # plus the ids widened to `untyped` (an untyped / over-cap argument).
         @type_observations = Hash.new { |hash, id| hash[id] = [] }
-        # The same ids whose union was widened to `untyped` (an untyped /
-        # over-cap argument); short-circuits later call sites.
         @poisoned_params = Set.new
       end
 
       def collect
-        seed_scope = build_seed_scope
-        @files.each { |path| collect_file(path, seed_scope) }
-        finalize
+        parsed = parse_all
+        discovery = discovery_seed_tables
+        table = EMPTY
+        @max_rounds.times do
+          rounded = run_round(parsed, discovery, table)
+          return rounded if rounded == table # fixpoint reached
+
+          table = rounded
+        end
+        table
       end
 
       private
 
-      # A scope carrying the cross-file discovery index so the collector can
-      # resolve `Foo.new` receivers and implicit-self calls to a user `def`.
-      def build_seed_scope
+      # Parse every project file once; rounds re-index the cached ASTs against an
+      # evolving seed rather than re-parsing.
+      def parse_all
+        @files.filter_map do |path|
+          result = Prism.parse(File.read(path), filepath: path, version: @target_ruby)
+          [path, result.value] if result.errors.empty?
+        rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
+          nil
+        end
+      end
+
+      # One fixpoint round: re-type every file with `seed_table` (the previous
+      # round's inferred parameters) seeded, collecting the next round's table.
+      def run_round(parsed, discovery_tables, seed_table)
+        @type_observations = Hash.new { |hash, id| hash[id] = [] }
+        @poisoned_params = Set.new
+        seed_scope = build_seed_scope(discovery_tables, seed_table)
+        parsed.each do |path, ast|
+          index = ScopeIndexer.index(ast, default_scope: seed_scope.with_source_path(path))
+          Source::NodeWalker.each(ast) do |node|
+            record_call(node, index) if node.is_a?(Prism::CallNode)
+          end
+        end
+        finalize
+      end
+
+      # A scope carrying the cross-file discovery index (so `Foo.new` receivers
+      # and implicit-self calls resolve to a user `def`) plus the prior round's
+      # inferred parameters (so an argument that reads a parameter types to its
+      # current inferred type — the WD5 propagation).
+      def build_seed_scope(discovery_tables, seed_table)
         base = Scope.empty(environment: @environment)
-        tables = discovery_seed_tables
+        tables = discovery_tables
+        tables = tables.merge(param_inferred_types: seed_table) unless seed_table.empty?
         return base if tables.empty?
 
         base.with_discovery(base.discovery.with(**tables))
@@ -119,20 +228,6 @@ module Rigor
         struct_member_layouts: :struct_member_layouts
       }.freeze
       private_constant :DISCOVERY_FIELD
-
-      def collect_file(path, seed_scope)
-        source = File.read(path)
-        parse = Prism.parse(source, filepath: path, version: @target_ruby)
-        return unless parse.errors.empty?
-
-        file_scope = seed_scope.with_source_path(path)
-        index = ScopeIndexer.index(parse.value, default_scope: file_scope)
-        Source::NodeWalker.each(parse.value) do |node|
-          record_call(node, index) if node.is_a?(Prism::CallNode)
-        end
-      rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
-        nil
-      end
 
       def record_call(call_node, index)
         args = positional_args(call_node)
@@ -197,12 +292,13 @@ module Rigor
         self_type = scope.self_type
         return [nil, nil] if self_type.nil?
 
-        [class_name_of(self_type), self_type.is_a?(Type::Singleton) ? :singleton : :instance]
+        [ParameterArgTypes.class_name_of(self_type), self_type.is_a?(Type::Singleton) ? :singleton : :instance]
       end
 
       def explicit_receiver_target(receiver, index, scope)
         receiver_type = (index[receiver] || scope).type_of(receiver)
-        [concrete_class_name(receiver_type), receiver_type.is_a?(Type::Singleton) ? :singleton : :instance]
+        [ParameterArgTypes.concrete_class_name(receiver_type),
+         receiver_type.is_a?(Type::Singleton) ? :singleton : :instance]
       end
 
       def lookup_def(scope, class_name, method, kind)
@@ -230,43 +326,13 @@ module Rigor
         id = [key, param_name.to_sym]
         return if @poisoned_params.include?(id)
 
-        if arg_type.nil? || non_concrete?(arg_type)
+        if arg_type.nil? || ParameterArgTypes.non_concrete?(arg_type)
           poison(id)
         else
           observations = @type_observations[id]
-          observations << widen_for_param(arg_type)
+          observations << ParameterArgTypes.widen_for_param(arg_type)
           poison(id) if observations.length > MAX_CALL_SITE_TYPES
         end
-      end
-
-      # A parameter holds a *value of* a type across its lifetime, not a pinned
-      # literal — so a `Constant<"text">` argument widens to its nominal
-      # (`String`). Keeps the inferred type sound as a parameter type (and avoids
-      # a downstream literal-fold the parameter never actually guarantees).
-      # Recurses through unions so `Constant<"a"> | Constant<"b">` collapses to
-      # `String`.
-      def widen_for_param(type)
-        case type
-        when Type::Constant
-          name = constant_class_name(type.value)
-          name ? Type::Combinator.nominal_of(name) : type
-        when Type::Union
-          Type::Combinator.union(*type.members.map { |member| widen_for_param(member) })
-        else
-          type
-        end
-      end
-
-      CONSTANT_CLASSES = {
-        Integer => "Integer", Float => "Float", String => "String",
-        Symbol => "Symbol", Range => "Range", TrueClass => "TrueClass",
-        FalseClass => "FalseClass", NilClass => "NilClass"
-      }.freeze
-      private_constant :CONSTANT_CLASSES
-
-      def constant_class_name(value)
-        CONSTANT_CLASSES.each { |klass, name| return name if value.is_a?(klass) }
-        nil
       end
 
       # A poisoned parameter is dropped from the observation store and recorded
@@ -289,39 +355,12 @@ module Rigor
           union = Type::Combinator.union(*observations)
           # A union that collapsed to a non-concrete shape (e.g. a gradual arm
           # leaked in) is no better than `untyped`; drop it.
-          next if non_concrete?(union)
+          next if ParameterArgTypes.non_concrete?(union)
 
           key, param = id
           result[key][param] = union
         end
         result.transform_values(&:freeze).freeze
-      end
-
-      def class_name_of(type)
-        type.class_name if type.is_a?(Type::Nominal) || type.is_a?(Type::Singleton)
-      end
-
-      # The dispatch class for a receiver type, for the subset the collector
-      # resolves to a user `def`. Mirrors `CheckRules#concrete_class_name` for
-      # the carriers a user-method receiver is typed as.
-      def concrete_class_name(type)
-        case type
-        when Type::Nominal, Type::Singleton then type.class_name
-        when Type::Tuple then "Array"
-        when Type::HashShape then "Hash"
-        end
-      end
-
-      # Whether `type` is too gradual to seed: it is not a concrete dispatch
-      # target the protection metric can bite. Mirrors the negation of
-      # `ProtectionScanner#concrete_receiver?` (a union is concrete only when
-      # every arm is).
-      def non_concrete?(type)
-        case type
-        when Type::Dynamic, Type::Top, Type::Bot then true
-        when Type::Union then type.members.any? { |member| non_concrete?(member) }
-        else false
-        end
       end
     end
   end

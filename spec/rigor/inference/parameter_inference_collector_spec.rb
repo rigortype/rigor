@@ -9,14 +9,14 @@ require "rigor/environment"
 # inferred type is the union of resolved call-site argument types; an argument
 # that is itself untyped (the fixpoint case) poisons the parameter.
 RSpec.describe Rigor::Inference::ParameterInferenceCollector do
-  def collect(*sources)
+  def collect(*sources, max_rounds: described_class::DEFAULT_ROUNDS)
     Dir.mktmpdir do |dir|
       paths = sources.each_with_index.map do |source, i|
         path = File.join(dir, "f#{i}.rb")
         File.write(path, source)
         path
       end
-      described_class.collect(files: paths, environment: Rigor::Environment.default)
+      described_class.collect(files: paths, environment: Rigor::Environment.default, max_rounds: max_rounds)
     end
   end
 
@@ -157,6 +157,44 @@ RSpec.describe Rigor::Inference::ParameterInferenceCollector do
     RUBY
     inferred = table.fetch(["Hub", :handle, :instance])
     expect(inferred[:x].describe(:short)).to eq("String")
+  end
+
+  it "propagates a parameter through a one-hop chain (WD5 fixpoint)" do
+    source = <<~RUBY
+      class A; end
+      class Hub
+        def entry = middle(A.new)
+        def middle(x)
+          inner(x)
+        end
+        def inner(y)
+          y
+        end
+      end
+    RUBY
+    table = collect(source)
+    # `middle.x` is concrete in round 1 (called with `A.new`); `inner.y` is only
+    # reachable in round 2, once `x` is seeded so `inner(x)` types `x` as `A`.
+    expect(table.fetch(["Hub", :middle, :instance])[:x].describe(:short)).to eq("A")
+    expect(table.fetch(["Hub", :inner, :instance])[:y].describe(:short)).to eq("A")
+  end
+
+  it "does not propagate the chain at max_rounds: 1 (single-level)" do
+    source = <<~RUBY
+      class A; end
+      class Hub
+        def entry = middle(A.new)
+        def middle(x)
+          inner(x)
+        end
+        def inner(y)
+          y
+        end
+      end
+    RUBY
+    table = collect(source, max_rounds: 1)
+    expect(table.fetch(["Hub", :middle, :instance])[:x].describe(:short)).to eq("A")
+    expect(table[["Hub", :inner, :instance]]).to be_nil
   end
 
   it "resolves a call site in a sibling file" do

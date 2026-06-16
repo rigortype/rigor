@@ -1,9 +1,10 @@
-# ADR-67 WD3 — single-level call-site parameter inference (implementation + measurement)
+# ADR-67 WD3 + WD5 — call-site parameter inference (implementation + measurement)
 
 2026-06-16. Landed the [ADR-67](../adr/67-parameter-type-inference.md) substrate
-(WD1 + WD3, single-level) and measured it. This note records the architecture, the
-measured deltas, and — load-bearing — *why the two cited corpora barely move* and what
-the follow-ups are. Do not re-litigate the cited-corpora finding; it is measured.
+(WD1 + WD3 single-level, then WD5 capped fixpoint) and measured it. This note records the
+architecture, the measured deltas, and — load-bearing — *why the two cited corpora barely
+move* and what the one remaining follow-up is. Do not re-litigate the cited-corpora
+finding; it is measured.
 
 ## What landed
 
@@ -12,6 +13,15 @@ the follow-ups are. Do not re-litigate the cited-corpora finding; it is measured
   `ScopeIndexer.index`) and records, per user-defined method `[class, method, kind]`, the
   **union of resolved call-site argument types**. Keyed by the qualified class name (not
   AST identity), so collection and consumption — which parse different trees — agree.
+- **WD5 capped fixpoint** — `collect` iterates (cap `DEFAULT_ROUNDS` = 3, `BodyFixpoint`
+  convention, early-stop on table equality), re-seeding each round with the prior round's
+  `param_inferred_types`. Because the *same* consumption path (`build_method_entry_scope`
+  consulting the table) types parameter reads, an argument that reads a parameter resolves
+  to that parameter's current inferred type → one hop of propagation per round. Parses are
+  cached across rounds; only re-indexing repeats. Not true-convergent (the table can
+  oscillate when a newly resolved receiver surfaces a fresh untyped-argument call site) —
+  the cap bounds it and the metric tolerates the approximation. Round 1 alone is the
+  single-level pass.
 - **`param_inferred_types` side-table** on `Scope::DiscoveryIndex` (+ a `Scope` reader),
   following the `data_member_layouts` / `struct_member_layouts` template.
 - **Consumption** in `StatementEvaluator#build_method_entry_scope`: an undeclared
@@ -43,37 +53,42 @@ to its nominal (`Constant<"x">` → `String`) — a parameter is not a pinned li
 
 ## Measured (`coverage --protection`, `lib`)
 
-| Project | Baseline | WD3 | Δ sites | Δ ratio |
+| Project | Baseline | Single-level (round 1) | Capped fixpoint (cap 3) | Δ vs baseline |
 | --- | --- | --- | --- | --- |
-| faraday | 227 / 1066 (0.2129) | 250 / 1066 (0.2345) | +23 | +2.16 pp |
-| haml | 512 / 1606 (0.3188) | 611 / 1606 (0.3804) | +99 | +6.16 pp |
+| faraday | 227 / 1066 (0.2129) | 250 (0.2345) | 256 / 1066 (0.2402) | +29 (+6 from the fixpoint) |
+| haml | 512 / 1606 (0.3188) | 611 (0.3804) | 617 / 1606 (0.3842) | +105 (+6 from the fixpoint) |
 
 haml's `compile(node)`-style compiler chain (methods called with constructed AST nodes —
-concrete arguments) is the single-level sweet spot. faraday moves less.
+concrete arguments) is the sweet spot. The fixpoint adds the param→param chains on top
+(+6 each here). `coverage --protection lib` on haml runs in ~3 s incl. shell startup.
 
-## Why the cited corpora (mostly) don't move — the single-level ceiling
+## Why the cited corpora don't move — even with the fixpoint
 
 The 2026-06-16 verification cited parser `numeric.loc` and faraday `env[:method]` as the
-M3 headline. Single-level WD3 does **not** move either:
+M3 headline. Neither moves, even with the WD5 fixpoint:
 
 - **parser `unary_num(unary_t, numeric)`** — every call site is in generated `.y` grammar
   files (`@builder.unary_num(val[0], val[1])`), which Rigor does not analyse, and `val[*]`
-  is an untyped value-stack read regardless. No analysed Ruby call site → no inference.
+  is an untyped value-stack read regardless. No analysed Ruby call site → no inference, at
+  any round.
 - **faraday `match(env)`** — its one call site is `stubs.match(env)` inside `def call(env)`,
-  so the argument `env` is *itself* an untyped parameter → poisoned. And `call(env)`'s own
-  entry is reached by dynamic middleware dispatch, so even the fixpoint cannot seed its root.
+  so the argument `env` is `call`'s parameter; the fixpoint can only type it if `call(env)`
+  itself gets a typed `env`, but `call`'s entry is reached by dynamic middleware dispatch
+  (no analysed call site) → its `env` stays untyped → the chain never seeds.
 
-Both are **fixpoint-gated**: the argument is another untyped parameter, and only the
-whole-program worklist (WD5) types it. faraday's root is dynamic-dispatch-gated beyond
-even that.
+The only path that reaches these is feeding the inference into the **`check` walk** (so
+the *whole program's* downstream typing improves), not the protection scan — and that is
+the deferred follow-up below.
 
-## Follow-ups (deferred, both budget-gated)
+## Remaining follow-up (deferred, budget-gated)
 
-1. **WD5 — whole-program worklist fixpoint.** Iterate the collection until parameter
-   types converge (cap per ADR-41, reuse the ADR-57 run-scoped return memo). This is what
-   moves the cited param-passed-to-param chains. The metric-completing slice.
-2. **`check`-walk wiring.** Make the `check` walk consume the table (today only the
-   protection scan does). Requires running collection before the main walk (a cost the ADR
-   budget-gates) **and** the WD1 in-body provenance mark + the diagnostic guards (so a
-   sound-but-newly-concrete parameter receiver cannot manufacture an in-body false
-   positive). Gate: zero new diagnostics across the standing corpora.
+**`check`-walk wiring.** Make the `check` walk consume `param_inferred_types` (today only
+the protection scan does). Requires running collection before the main walk (a cost the
+ADR budget-gates — likely an opt-in / incremental-backed) **and** the WD1 in-body
+provenance mark + the diagnostic guards, so a sound-but-newly-concrete parameter receiver
+cannot manufacture an in-body false positive. Note the *value* is murkier than it looks:
+with the WD1 suppression mark the inferred type adds *folding* precision but is designed
+**not** to fire new in-body diagnostics, so the `check` benefit is indirect (better
+downstream typing) and could even be net-negative if it surfaces downstream FPs. Gate:
+zero new diagnostics across the standing `rigor-survey` corpora. Per the ADR's own
+budget-gating, deferral may remain the right call until a concrete demand appears.

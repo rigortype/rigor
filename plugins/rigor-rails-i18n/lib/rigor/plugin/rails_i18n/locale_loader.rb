@@ -57,7 +57,7 @@ module Rigor
             parsed.each do |locale, tree|
               locale = locale.to_s
               locales << locale
-              flatten_tree(tree, []).each do |dotted_key, value|
+              each_flattened(tree, []) do |dotted_key, value|
                 placeholders = (per_key[dotted_key] ||= {})
                 placeholders[locale] = extract_placeholders(value)
                 kinds = (per_key_kinds[dotted_key] ||= {})
@@ -101,24 +101,40 @@ module Rigor
         end
 
         # Recursively walks the per-locale subtree, yielding
-        # `[dotted_key, leaf_value]` pairs. Hash leaves are
+        # `[dotted_key, leaf_value]` for each leaf. Hash leaves are
         # *not* recorded as entries themselves — only their
-        # descendants — but every leaf scalar / array IS
-        # recorded.
-        def flatten_tree(node, breadcrumbs)
-          case node
-          when Hash
-            node.flat_map do |k, v|
-              flatten_tree(v, breadcrumbs + [k.to_s])
+        # descendants — but every leaf scalar / array IS recorded.
+        #
+        # `breadcrumbs` is a single mutable stack reused across the
+        # whole walk (push before recursing, pop after): for the
+        # 530-file / 14 MB Mastodon locale corpus the old
+        # `flat_map { flatten_tree(v, breadcrumbs + [k]) }` shape
+        # allocated a fresh breadcrumb Array at every node plus an
+        # intermediate result Array at every level — millions of
+        # short-lived objects and the run's top allocation site. The
+        # dotted key is still materialised once per leaf (it has to
+        # be); everything else is now allocation-free traversal.
+        def each_flattened(node, breadcrumbs, &)
+          if node.is_a?(Hash)
+            node.each do |k, v|
+              breadcrumbs.push(k.to_s)
+              each_flattened(v, breadcrumbs, &)
+              breadcrumbs.pop
             end
           else
-            [[breadcrumbs.join("."), node]]
+            yield breadcrumbs.join("."), node
           end
         end
 
         def extract_placeholders(value)
           case value
-          when String then value.scan(PLACEHOLDER_RE).flatten.to_set
+          when String
+            # Most locale leaves carry no `%{var}`; skip the scan +
+            # flatten + to_set allocation trio for them. A string with
+            # no `%{` yields an empty placeholder set either way.
+            return Set.new unless value.include?("%{")
+
+            value.scan(PLACEHOLDER_RE).flatten.to_set
           when Array then value.map { |v| extract_placeholders(v) }.reduce(Set.new) { |a, s| a | s }
           else Set.new
           end

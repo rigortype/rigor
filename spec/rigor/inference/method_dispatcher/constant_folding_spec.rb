@@ -247,6 +247,34 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(1...5, :sum).value).to eq(10)
     end
 
+    it "lifts Range#first(n) / #take(n) / #last(n) to a Tuple" do
+      first = fold(1..10, :first, [3])
+      expect(first).to be_a(Rigor::Type::Tuple)
+      expect(first.elements.map(&:value)).to eq([1, 2, 3])
+
+      expect(fold(1..10, :take, [3]).elements.map(&:value)).to eq([1, 2, 3])
+      expect(fold(1..10, :last, [3]).elements.map(&:value)).to eq([8, 9, 10])
+      # Exclusive range — the final n elements stop before `end`.
+      expect(fold(1...10, :last, [3]).elements.map(&:value)).to eq([7, 8, 9])
+    end
+
+    it "folds Range#first(0) to an empty Tuple and clamps n to the range size" do
+      expect(fold(1..10, :first, [0]).elements).to eq([])
+      # `n` larger than the range yields every element (still within cap).
+      expect(fold(1..3, :first, [20]).elements.map(&:value)).to eq([1, 2, 3])
+    end
+
+    it "declines a Range head/tail projection that would exceed the materialisation cap" do
+      # 50 > RANGE_TO_A_LIMIT — defer to RBS rather than materialise.
+      expect(fold(1..100, :first, [50])).to be_nil
+      # A tiny slice of a huge range stays cheap and folds.
+      expect(fold(1..(10**9), :first, [3]).elements.map(&:value)).to eq([1, 2, 3])
+    end
+
+    it "declines a Range head/tail projection on a non-foldable argument" do
+      expect(fold(1..10, :first, [-1])).to be_nil
+    end
+
     it "does not fold a NaN-producing result into a Constant" do
       # 0.0 / 0.0 == NaN, which is non-reflexive under ==; the fold
       # must decline so it never produces a Constant[NaN].

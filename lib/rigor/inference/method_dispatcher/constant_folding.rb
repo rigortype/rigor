@@ -426,8 +426,13 @@ module Rigor
         # union-of-Constants path keeps the rest of the arms.
         RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length, :entries, :minmax,
                                  :sum].freeze
+        # 1-arg head/tail projections on a `Constant<Range>`. `first(n)` /
+        # `take(n)` return the first `n` elements, `last(n)` the final `n` —
+        # each lifts to a per-position `Tuple[Constant[Integer]…]`. The
+        # no-arg `first` / `last` stay on the unary path (single Integer).
+        RANGE_FOLD_BINARY_METHODS = Set[:first, :last, :take].freeze
         RANGE_TO_A_LIMIT = 16
-        private_constant :RANGE_FOLD_METHODS, :RANGE_TO_A_LIMIT
+        private_constant :RANGE_FOLD_METHODS, :RANGE_FOLD_BINARY_METHODS, :RANGE_TO_A_LIMIT
 
         def try_fold_range_constant_unary(receiver_values, method_name)
           return nil unless RANGE_FOLD_METHODS.include?(method_name)
@@ -485,7 +490,40 @@ module Rigor
           )
         end
 
+        # `(1..10).first(3)` / `.take(3)` / `.last(3)` — the 1-arg head /
+        # tail forms. `first`/`last` already fold no-arg through the unary
+        # path; this is the n-arg sibling, mirroring the Tuple carrier's
+        # `first(n)`/`take(n)` handlers. Lifts to `Tuple[Constant…]`.
+        def try_fold_range_constant_binary(receiver_values, method_name, arg_values)
+          return nil unless RANGE_FOLD_BINARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1 && arg_values.size == 1
+
+          range = receiver_values.first
+          return nil unless range.is_a?(Range)
+          return nil unless range.begin.is_a?(Integer) && range.end.is_a?(Integer)
+
+          range_take_tuple(range, method_name, arg_values.first)
+        rescue StandardError
+          nil
+        end
+
+        def range_take_tuple(range, method_name, count)
+          return nil unless count.is_a?(Integer) && !count.negative?
+          # `first(n)`/`last(n)`/`take(n)` materialise at most `min(n, size)`
+          # elements; cap that count so a huge `n` (or range) never blows up
+          # the Constant. `Range#size` is O(1) for integer endpoints.
+          return nil if [count, range.size].min > RANGE_TO_A_LIMIT
+
+          values = method_name == :last ? range.last(count) : range.first(count)
+          return Type::Combinator.tuple_of if values.empty?
+
+          Type::Combinator.tuple_of(*values.map { |v| Type::Combinator.constant_of(v) })
+        end
+
         def try_fold_binary_set(receiver_values, method_name, arg_values)
+          range_lift = try_fold_range_constant_binary(receiver_values, method_name, arg_values)
+          return range_lift if range_lift
+
           string_lift = try_fold_string_array_binary(receiver_values, method_name, arg_values)
           return string_lift if string_lift
 

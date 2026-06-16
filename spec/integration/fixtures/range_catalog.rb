@@ -64,3 +64,12 @@ assert_type("[1, 2, 3, 4, 5]", (1..5).entries)
 assert_type("[1, 10]", (1..10).minmax)
 # Empty range `minmax` returns Tuple[nil, nil].
 assert_type("[nil, nil]", (1..0).minmax)
+
+# `first(n)` / `take(n)` / `last(n)` — the 1-arg head/tail forms lift to a
+# per-position Tuple[Constant…], mirroring the Tuple carrier and the no-arg
+# `first`/`last` folds above.
+assert_type("[1, 2, 3]", (1..10).first(3))
+assert_type("[1, 2, 3]", (1..10).take(3))
+assert_type("[8, 9, 10]", (1..10).last(3))
+# An exclusive range stops before `end`.
+assert_type("[7, 8, 9]", (1...10).last(3))

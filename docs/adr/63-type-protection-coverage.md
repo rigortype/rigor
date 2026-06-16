@@ -84,6 +84,37 @@ so "report + gate" is satisfied without new surface.
   requires `--protection` (usage error otherwise); `--threshold` gates on the effectiveness
   ratio; `--format json` carries `{mode, killed, survived, effectiveness_ratio, files,
   add_a_type_here}`.
+- **WD5 — the act-on-coverage skill layer (proposed; not implemented).** Tiers 1–2
+  *surface* "add a type here"; they never author the type. The follow-on is an **agent
+  skill** (not a new analyzer surface) that closes the loop per unprotected site:
+  `coverage --protection` (Tier 1 `add_a_type_here`, optionally Tier-2-confirmed) → **try
+  `rigor sig-gen` first** → hand-author a *minimal* annotation only for the residual sig-gen
+  cannot reach → **double-gate verify**. **Load-bearing criterion (ADR-59):** the mutation /
+  coverage signal is a *witness that prioritizes and verifies*, never the type's *source* —
+  the type is modelled from the real contract (code + usage), so a wrong guess can never
+  become a binding signature. Guardrails: (a) **sig-gen-first** (AGENTS.md § RBS Authorship)
+  — a hand-written annotation is the residual, and each residual is itself a
+  sig-gen-improvement signal to record, not discard; (b) **"minimal" = annotation
+  *footprint*, not minimal-to-kill-the-mutant** — optimizing literally for mutant-death
+  Goodharts the metric and yields semantically-wrong types (worse than none, a future FP
+  source); (c) **double gate** — a candidate lands only when the site becomes protected /
+  the targeted mutant dies *and* `rigor check` stays diagnostic-clean (no new FP), reusing
+  the ADR-62/57 adjudicate-don't-assume protocol; (d) **robustness** (ADR-5: tighten
+  returns, keep params lenient — an over-tight param annotation breaks callers, breaching
+  the FP discipline); (e) **cheapest carrier per hole class** — `Dynamic` return → annotate
+  that method's return (via sig-gen); `Dynamic[top] | nil` ivar read → `# @rbs @field: T`
+  (ADR-58 territory, the protection-hole majority); untyped param → a lenient param
+  annotation. **Carrier caveat (dry-run-confirmed 2026-06-16):** a sidecar `.rbs` is *not*
+  purely additive — declaring a class flips it from inference-mode to RBS-declared mode and
+  drops the inferred members the file omits (a lone `formatted: () -> String` sig regressed
+  `Money.new(500)` to a "wrong number of arguments" FP because the partial RBS had no
+  `initialize`). So either adopt the full sig-gen base *before* adding the residual, or use
+  an in-place additive carrier (rbs-inline `#:` / `%a{rigor:v1:…}`). Gate (c) catches the
+  miss either way. **Scope: user projects, not Rigor's own `lib/`** — injecting hand types into
+  the self-checked tree collides hardest with the sig-gen ethos; this rides the ADR-31
+  external-author / v0.2.0-queued skill path, not a contributor lib-coverage tool. Entry
+  tier is the shipped Tier-1 static proxy (interactive); Tier-2 confirmation is an opt-in
+  deepening. May graduate to its own ADR + `SKILL.md` once past WD shape.
 
 ## Rejected / deferred alternatives
 
@@ -94,6 +125,8 @@ so "report + gate" is satisfied without new surface.
 | Mutation (Tier 2) as the only / default tier | **Rejected** — minutes per project, not interactive; Tier 1's one-pass proxy carries the everyday value, Tier 2 is the opt-in deep-dive. |
 | Whole-project Tier 2 by default | **Deferred** — changed-files default; whole-project is an explicit opt-in (ADR-46 incremental would make it cheaper later). |
 | Ship the full ADR-62 harness (sweep/fuzz/clustering) as user CLI | **Rejected** — stays dev-only (ADR-62 WD4); only the narrow per-file effectiveness measurement is productized. |
+| Author the *minimal type that kills the mutant* (mutation-as-type-source) | **Rejected (WD5)** — Goodharts the metric: kills the synthetic variant while diverging from the real contract, a false-confidence type worse than none. The signal prioritizes/verifies; the contract sources the type (ADR-59). |
+| The act-on-coverage layer as a new CLI/engine surface | **Deferred to a skill (WD5)** — authoring a type is an agent judgement (sig-gen-first, then a residual annotation, gated by `rigor check`), not an analyzer pass; it consumes the shipped command rather than extending it. |
 
 ## Consequences
 
@@ -106,7 +139,9 @@ so "report + gate" is satisfied without new surface.
 - **Carry-over** — both tiers have landed. Remaining demand-gated polish: an optional
   per-file mutation cap for pathological files (the scanner already accepts a seeded
   `limit:`, unused by the CLI — the changed-files default bounds cost), and an
-  ADR-46-incremental-backed cheaper whole-project Tier 2.
+  ADR-46-incremental-backed cheaper whole-project Tier 2. **WD5 (proposed)** — the
+  act-on-coverage skill that authors the residual type and verifies, downstream of the
+  shipped command; design parked here, may graduate to its own ADR + `SKILL.md`.
 
 ## Relationship to other ADRs
 
@@ -117,3 +152,8 @@ so "report + gate" is satisfied without new surface.
   vocabulary.
 - **ADR-23** — `triage`-adjacent: protection points attention (where to type), never feeds
   severity.
+- **ADR-59** (WD5) — the witness-not-signature rule: a mutation/coverage signal prioritizes
+  and verifies a type but never sources it; the contract does.
+- **ADR-31 / AGENTS.md § RBS Authorship** (WD5) — the act-on-coverage layer is the
+  external-author / v0.2.0-queued skill path and is sig-gen-first; a hand-written annotation
+  is the residual sig-gen cannot reach.

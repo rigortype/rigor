@@ -277,10 +277,18 @@ module Rigor
         end
       end
 
-      def validate_produces!(produces)
-        return if produces.is_a?(Array) && produces.all? { |p| p.is_a?(Symbol) || p.is_a?(String) }
+      # Shared shape check for the Array-of-X manifest fields. Every entry
+      # must satisfy the block; otherwise raise the uniform "must be an
+      # Array of <label>" message. Centralises the message format the
+      # field validators below share so it cannot drift between them.
+      def validate_array_of!(field, value, label, &)
+        return if value.is_a?(Array) && value.all?(&)
 
-        raise ArgumentError, "plugin manifest produces must be an Array of Symbol/String, got #{produces.inspect}"
+        raise ArgumentError, "plugin manifest #{field} must be an Array of #{label}, got #{value.inspect}"
+      end
+
+      def validate_produces!(produces)
+        validate_array_of!("produces", produces, "Symbol/String") { |p| p.is_a?(Symbol) || p.is_a?(String) }
       end
 
       # ADR-10 5a — `owns_receivers:` declares the class names
@@ -291,11 +299,7 @@ module Rigor
       # so plugin contributions stay authoritative for those
       # types.
       def validate_owns_receivers!(owns_receivers)
-        return if owns_receivers.is_a?(Array) && owns_receivers.all? { |c| c.is_a?(String) && !c.empty? }
-
-        raise ArgumentError,
-              "plugin manifest owns_receivers must be an Array of non-empty String, " \
-              "got #{owns_receivers.inspect}"
+        validate_array_of!("owns_receivers", owns_receivers, "non-empty String") { |c| c.is_a?(String) && !c.empty? }
       end
 
       # ADR-26 — `open_receivers:` declares the class names this
@@ -309,11 +313,7 @@ module Rigor
       # `owns_receivers:` (which routes dispatch); this one only
       # suppresses the diagnostic.
       def validate_open_receivers!(open_receivers)
-        return if open_receivers.is_a?(Array) && open_receivers.all? { |c| c.is_a?(String) && !c.empty? }
-
-        raise ArgumentError,
-              "plugin manifest open_receivers must be an Array of non-empty String, " \
-              "got #{open_receivers.inspect}"
+        validate_array_of!("open_receivers", open_receivers, "non-empty String") { |c| c.is_a?(String) && !c.empty? }
       end
 
       # ADR-13 slice 2 — `type_node_resolvers:` declares the
@@ -325,11 +325,9 @@ module Rigor
       # integration that actually drives the chain lands in
       # slice 3.
       def validate_type_node_resolvers!(resolvers)
-        return if resolvers.is_a?(Array) && resolvers.all?(TypeNodeResolver)
-
-        raise ArgumentError,
-              "plugin manifest type_node_resolvers must be an Array of " \
-              "Rigor::Plugin::TypeNodeResolver instances, got #{resolvers.inspect}"
+        validate_array_of!("type_node_resolvers", resolvers, "Rigor::Plugin::TypeNodeResolver instances") do |r|
+          r.is_a?(TypeNodeResolver)
+        end
       end
 
       # ADR-16 slice 1a — `block_as_methods:` declares the Tier A
@@ -338,11 +336,9 @@ module Rigor
       # actually narrows `Scope#self_type` for matching blocks
       # arrives in a subsequent slice.
       def validate_block_as_methods!(entries)
-        return if entries.is_a?(Array) && entries.all?(Macro::BlockAsMethod)
-
-        raise ArgumentError,
-              "plugin manifest block_as_methods must be an Array of " \
-              "Rigor::Plugin::Macro::BlockAsMethod instances, got #{entries.inspect}"
+        validate_array_of!("block_as_methods", entries, "Rigor::Plugin::Macro::BlockAsMethod instances") do |e|
+          e.is_a?(Macro::BlockAsMethod)
+        end
       end
 
       # ADR-16 slice 2a — `heredoc_templates:` declares the Tier C
@@ -351,11 +347,9 @@ module Rigor
       # manifest; the pre-pass + `SyntheticMethodIndex` that actually
       # emit synthetic methods arrive in slice 2b.
       def validate_heredoc_templates!(entries)
-        return if entries.is_a?(Array) && entries.all?(Macro::HeredocTemplate)
-
-        raise ArgumentError,
-              "plugin manifest heredoc_templates must be an Array of " \
-              "Rigor::Plugin::Macro::HeredocTemplate instances, got #{entries.inspect}"
+        validate_array_of!("heredoc_templates", entries, "Rigor::Plugin::Macro::HeredocTemplate instances") do |e|
+          e.is_a?(Macro::HeredocTemplate)
+        end
       end
 
       # ADR-36 — `nested_class_templates:` declares the
@@ -365,11 +359,10 @@ module Rigor
       # subclasses + their `#inner` reader through the existing
       # `SyntheticMethodIndex` primitive.
       def validate_nested_class_templates!(entries)
-        return if entries.is_a?(Array) && entries.all?(Macro::NestedClassTemplate)
-
-        raise ArgumentError,
-              "plugin manifest nested_class_templates must be an Array of " \
-              "Rigor::Plugin::Macro::NestedClassTemplate instances, got #{entries.inspect}"
+        validate_array_of!("nested_class_templates", entries,
+                           "Rigor::Plugin::Macro::NestedClassTemplate instances") do |e|
+          e.is_a?(Macro::NestedClassTemplate)
+        end
       end
 
       # ADR-16 slice 3a — `trait_registries:` declares the Tier B
@@ -379,11 +372,9 @@ module Rigor
       # `SyntheticMethodIndex` (slice 2b primitive) arrives in
       # slice 3b.
       def validate_trait_registries!(entries)
-        return if entries.is_a?(Array) && entries.all?(Macro::TraitRegistry)
-
-        raise ArgumentError,
-              "plugin manifest trait_registries must be an Array of " \
-              "Rigor::Plugin::Macro::TraitRegistry instances, got #{entries.inspect}"
+        validate_array_of!("trait_registries", entries, "Rigor::Plugin::Macro::TraitRegistry instances") do |e|
+          e.is_a?(Macro::TraitRegistry)
+        end
       end
 
       # ADR-20 slice 6 — `hkt_registrations:` declares the
@@ -398,11 +389,9 @@ module Rigor
       # user `.rbs` overlays merge on top of plugin entries
       # last-write-wins.
       def validate_hkt_registrations!(entries)
-        return if entries.is_a?(Array) && entries.all?(Inference::HktRegistry::Registration)
-
-        raise ArgumentError,
-              "plugin manifest hkt_registrations must be an Array of " \
-              "Rigor::Inference::HktRegistry::Registration instances, got #{entries.inspect}"
+        validate_array_of!("hkt_registrations", entries, "Rigor::Inference::HktRegistry::Registration instances") do |e|
+          e.is_a?(Inference::HktRegistry::Registration)
+        end
       end
 
       # ADR-20 slice 6 — `hkt_definitions:` declares the
@@ -415,11 +404,9 @@ module Rigor
       # via {Rigor::Inference::HktBody}'s node-constructor API
       # without parsing a string.
       def validate_hkt_definitions!(entries)
-        return if entries.is_a?(Array) && entries.all?(Inference::HktRegistry::Definition)
-
-        raise ArgumentError,
-              "plugin manifest hkt_definitions must be an Array of " \
-              "Rigor::Inference::HktRegistry::Definition instances, got #{entries.inspect}"
+        validate_array_of!("hkt_definitions", entries, "Rigor::Inference::HktRegistry::Definition instances") do |e|
+          e.is_a?(Inference::HktRegistry::Definition)
+        end
       end
 
       # ADR-25 — `signature_paths:` declares the RBS signature
@@ -429,11 +416,7 @@ module Rigor
       # loader validates each exists and `Environment.for_project`
       # merges the resolved set into the RBS environment.
       def validate_signature_paths!(paths)
-        return if paths.is_a?(Array) && paths.all? { |p| p.is_a?(String) && !p.empty? }
-
-        raise ArgumentError,
-              "plugin manifest signature_paths must be an Array of non-empty String, " \
-              "got #{paths.inspect}"
+        validate_array_of!("signature_paths", paths, "non-empty String") { |p| p.is_a?(String) && !p.empty? }
       end
 
       # ADR-28 — `protocol_contracts:` declares the path-scoped
@@ -449,11 +432,9 @@ module Rigor
       # MAY override `Plugin::Base#protocol_contracts` to fold in
       # per-project config (e.g. a custom convention path).
       def validate_protocol_contracts!(entries)
-        return if entries.is_a?(Array) && entries.all?(ProtocolContract)
-
-        raise ArgumentError,
-              "plugin manifest protocol_contracts must be an Array of " \
-              "Rigor::Plugin::ProtocolContract instances, got #{entries.inspect}"
+        validate_array_of!("protocol_contracts", entries, "Rigor::Plugin::ProtocolContract instances") do |e|
+          e.is_a?(ProtocolContract)
+        end
       end
 
       # ADR-38 — `additional_initializers:` declares the
@@ -465,11 +446,9 @@ module Rigor
       # loaded plugins; `Inference::ScopeIndexer` consults the set at
       # its single gate.
       def validate_additional_initializers!(entries)
-        return if entries.is_a?(Array) && entries.all?(AdditionalInitializer)
-
-        raise ArgumentError,
-              "plugin manifest additional_initializers must be an Array of " \
-              "Rigor::Plugin::AdditionalInitializer instances, got #{entries.inspect}"
+        validate_array_of!("additional_initializers", entries, "Rigor::Plugin::AdditionalInitializer instances") do |e|
+          e.is_a?(AdditionalInitializer)
+        end
       end
 
       # ADR-32 WD4 — `source_rbs_synthesizer:` declares a callable

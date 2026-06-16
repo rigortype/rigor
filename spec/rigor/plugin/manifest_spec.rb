@@ -636,4 +636,36 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(a.hash).to eq(b.hash)
     end
   end
+
+  # Pins the exact reject message of every Array-of-X field. The thirteen
+  # validators delegate to one `validate_array_of!`, so the message format
+  # and each per-field label live in a single place; this table guards
+  # against any of them drifting (the messages are part of the plugin-author
+  # experience even though no analysis path exercises them).
+  describe "array-field validation messages" do
+    [
+      [:produces, [123], "Symbol/String"],
+      [:owns_receivers, [""], "non-empty String"],
+      [:open_receivers, [""], "non-empty String"],
+      [:type_node_resolvers, [:x], "Rigor::Plugin::TypeNodeResolver instances"],
+      [:block_as_methods, [:x], "Rigor::Plugin::Macro::BlockAsMethod instances"],
+      [:heredoc_templates, [:x], "Rigor::Plugin::Macro::HeredocTemplate instances"],
+      [:nested_class_templates, [:x], "Rigor::Plugin::Macro::NestedClassTemplate instances"],
+      [:trait_registries, [:x], "Rigor::Plugin::Macro::TraitRegistry instances"],
+      [:hkt_registrations, [:x], "Rigor::Inference::HktRegistry::Registration instances"],
+      [:hkt_definitions, [:x], "Rigor::Inference::HktRegistry::Definition instances"],
+      [:signature_paths, [""], "non-empty String"],
+      [:protocol_contracts, [:x], "Rigor::Plugin::ProtocolContract instances"],
+      [:additional_initializers, [:x], "Rigor::Plugin::AdditionalInitializer instances"]
+    ].each do |field, bad_value, label|
+      it "rejects a bad #{field} with the uniform message" do
+        expect do
+          described_class.new(**{ id: "x", version: "0.1.0", field => bad_value })
+        end.to raise_error(
+          ArgumentError,
+          "plugin manifest #{field} must be an Array of #{label}, got #{bad_value.inspect}"
+        )
+      end
+    end
+  end
 end

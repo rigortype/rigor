@@ -143,6 +143,33 @@ session starts de-risked:
   unary_num(unary_t, numeric)` *parameter* — pure M3, untouched by adding the node's RBS.)
   This makes ADR-67 the foundational prerequisite for both ADR-66 and ADR-68 to pay off on
   real apps.
+- **Corrected scope (2026-06-16, second dig — supersedes the "one extension point" framing
+  above).** A deeper wiring dig found the note's pinned extension point (`struct_builder_new_call?`
+  feeding `struct_member_layouts`) is only *half* the work. Folding `Const.new(...).x` requires
+  the `Inference::MethodDispatcher::StructFolding` tier's `fold_named_new` path
+  (`struct_folding.rb:62`/`73`), which fires only when the **receiver types as
+  `Singleton[Const]`** and `Scope#struct_member_layout(Const)` returns a layout. So a builder
+  constant needs **two** side-tables, not one:
+  1. `struct_member_layouts[Const] = {members:, keyword_init:}` — the pinned extension point
+     (`build_struct_member_layouts` / `accumulate_project_index`).
+  2. `discovered_classes[Const] = Singleton[Const]` — so the constant is a known singleton and
+     the tier fires at all. Today only `record_meta_new_constant?` (gated on
+     `data_define_call?` / `struct_new_call?`) types a constant this way; a builder constant
+     falls to `Dynamic`, so `.new` is `Dynamic` and the tier never dispatches.
+  The hard part: (2) is built by a **separate** pre-pass, `discovered_classes_for_paths` →
+  `collect_class_decls`, which **does not carry the `discovered_superclasses` map** the builder
+  recognition needs (only `discovered_def_index_for_paths` builds it). So the correct
+  implementation is a **three-walk, two-phase** change — `collect_class_decls` (singleton-typing,
+  needs superclasses threaded in), the def-index `struct_member_layouts` (layout, two-phase per
+  the note above), and both per-file paths (`merge_project_method_indexes` declarations +
+  `merge_member_layouts`, which *do* hold the complete cross-file superclass seed) — plus
+  receiver-constant lexical name resolution (`Const = Options.new` → `Faraday::Options`) and a
+  transitive-`< Struct` descent check. Materially larger than "add one predicate"; the
+  separate-session estimate stands, with this corrected scope. **A smaller FP-safe middle slice**
+  if a partial win is wanted: do the builder recognition **only in the two per-file paths** (they
+  already have the complete superclass seed), which folds *same-file* `Builder.new` declaration +
+  use but not the cross-file case (faraday's dominant shape) — gates green, mechanism proven, the
+  cross-file two-phase + the `collect_class_decls` superclass-threading deferred.
 
 ## Relationship to other ADRs
 

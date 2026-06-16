@@ -1,13 +1,13 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-06-12T21:42:46Z",
-  "calibrated_on": "ubuntu-latest (GitHub Actions), master @ run 27444722315",
-  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here.",
+  "calibrated_at": "2026-06-16T15:14:23Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.2.0 @ run 27627812560",
+  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated for the v0.2.0 cycle: allocations + peak_rss_kb grew with the detection-teeth / protection-coverage / constant-folding additions while wall_s held (GC kept pace).",
   "targets": {
     "lib": {
       "wall_s": 13.75,
-      "allocations": 16045321,
-      "peak_rss_kb": 206352,
+      "allocations": 18769957,
+      "peak_rss_kb": 232292,
       "diagnostics": 1
     }
   }

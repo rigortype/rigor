@@ -3,6 +3,7 @@
 require_relative "../trinary"
 require_relative "../value_semantics"
 require_relative "acceptance_router"
+require_relative "plain_lattice"
 
 module Rigor
   module Type
@@ -46,17 +47,7 @@ module Rigor
         "Method"
       end
 
-      def top
-        Trinary.no
-      end
-
-      def bot
-        Trinary.no
-      end
-
-      def dynamic
-        Trinary.no
-      end
+      include Rigor::Type::PlainLattice
 
       include Rigor::Type::AcceptanceRouter
 

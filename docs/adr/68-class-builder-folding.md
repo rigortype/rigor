@@ -129,6 +129,20 @@ session starts de-risked:
   yields ~no faraday win (cross-file usage dominates) — this two-phase restructure is the
   careful part and the real reason this is separate-session work. faraday baseline to beat:
   227/1066 (21.3%) protected.
+- **Verified value caveat (2026-06-16) — the fold is bounded by M3 ([ADR-67](67-parameter-type-inference.md)).**
+  Probing faraday's *use* sites showed they are themselves M3-blocked: `def match(env)` /
+  `def call(env)` take the Options type as an **untyped parameter** (the `# @param env
+  [Faraday::Env]` is a comment core Rigor does not consume), and instances flow via
+  `ConnectionOptions.from(options)` / `Env.from(env)` — an untyped custom class-method return
+  — not direct `Const.new(...)` construction. So folding the constant only protects the
+  *direct-construction* sites `Const.new(...).x`, which faraday rarely writes. The real-world
+  protection win is therefore gated by ADR-67 (param inference) and by typing the `.from`-style
+  returns; **do not expect the two-phase restructure to move faraday's headline ratio much on
+  its own.** (The same probe falsified the ast-pilot's "needs `Parser::AST::Node` RBS"
+  diagnosis: parser's `numeric.loc` receiver at `builders/default.rb:309` is the `def
+  unary_num(unary_t, numeric)` *parameter* — pure M3, untouched by adding the node's RBS.)
+  This makes ADR-67 the foundational prerequisite for both ADR-66 and ADR-68 to pay off on
+  real apps.
 
 ## Relationship to other ADRs
 

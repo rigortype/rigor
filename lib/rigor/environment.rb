@@ -7,6 +7,7 @@ require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
 require_relative "environment/reporters"
 require_relative "environment/hkt_registry_holder"
+require_relative "environment/constant_type_cache_holder"
 require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/rbs_collection_discovery"
@@ -124,6 +125,7 @@ module Rigor
       # build at all.
       @hkt_registry_base = hkt_registry || Inference::HktRegistry::EMPTY
       @hkt_registry_holder = HktRegistryHolder.new
+      @constant_type_cache = ConstantTypeCacheHolder.new
       @name_scope = build_name_scope
       freeze
     end
@@ -505,8 +507,14 @@ module Rigor
     def constant_for_name(name)
       return nil if rbs_loader.nil?
 
-      Builtins::PredefinedConstantRefinements.lookup(name.to_s) ||
-        rbs_loader.constant_type(name.to_s)
+      # Pure function of `name` for this Environment's lifetime — the
+      # refinement table and the RBS constant table are both fixed — so
+      # memoise across the lexical-candidate ladder's heavy name reuse.
+      key = name.to_s
+      @constant_type_cache.fetch(key) do
+        Builtins::PredefinedConstantRefinements.lookup(key) ||
+          rbs_loader.constant_type(key)
+      end
     end
 
     # Returns true when the constant name is known to either the static

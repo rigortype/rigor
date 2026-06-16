@@ -541,14 +541,15 @@ module Rigor
           end
           build_constant_type(results, source: receiver_values + arg_values)
         end
-        # v0.0.7 — `Constant<String>#chars` / `bytes` / `lines` /
-        # `split` (no-arg) return a Ruby Array of foldable
+        # v0.0.7 — `Constant<String>#chars` / `bytes` / `codepoints` /
+        # `lines` / `split` (no-arg) return a Ruby Array of foldable
         # scalars; `foldable_constant_value?` rejects Array
         # results, so the standard unary path declines. Lift the
         # Array to a per-position `Tuple[Constant…]` directly,
         # capped at `STRING_ARRAY_LIFT_LIMIT` to keep the result
-        # bounded for long strings.
-        STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :lines, :split].freeze
+        # bounded for long strings. (`codepoints` yields per-character
+        # Integer codepoints, the sibling of the byte-valued `bytes`.)
+        STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :codepoints, :lines, :split].freeze
         # `partition` / `rpartition` always return a fixed 3-element
         # `[head, separator, tail]` Array whose members are substrings of
         # the receiver (bounded by the input), so they lift to a precise

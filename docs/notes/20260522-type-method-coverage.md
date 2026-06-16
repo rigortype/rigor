@@ -37,6 +37,7 @@
 | `bytesize` | ✅ | STRING_UNARY → `Constant[Integer]`。 |
 | `bytes` | ✅ | `try_fold_string_array_unary` → `Tuple[Constant[Integer]…]`。 |
 | `capitalize` | ✅ | STRING_UNARY → `Constant[String]`。 |
+| `codepoints` | ✅ | `try_fold_string_array_unary` → `Tuple[Constant[Integer]…]`（`bytes` の兄弟、コードポイント単位）。 |
 | `capitalize!` | 🚫 | 破壊的変更。 |
 | `casecmp` | 🔲 | STRING_BINARY 追加で `Constant[Integer\|nil]`。低優先度。 |
 | `casecmp?` | 🔲 | STRING_BINARY 追加で `Constant[bool\|nil]`。低優先度。 |

@@ -1,0 +1,130 @@
+# Hand-authored by Rigor maintainers. See LICENSE.upstream.
+#
+# Covers AST::Node, AST::Processor::Mixin, AST::Processor, and
+# AST::Sexp from the `ast` gem (whitequark/ast v2.4.3).
+#
+# Design notes (ADR-5 robustness principle):
+#  - `children` is `Array[untyped]` — AST node children are
+#    heterogeneous (other Nodes, Symbols, Integers, Strings, nils).
+#  - `#==` / `#eql?` accept `untyped` — `#==` calls `to_ast` on the
+#    argument and `#eql?` does a class + field equality check.
+#  - `#updated` returns `AST::Node`, not `instance`, because concrete
+#    subclasses (Parser::AST::Node) override `initialize` via
+#    `original_dup` + `send(:initialize, ...)`, so the return type is
+#    always an instance of `self.class` at runtime — widening to
+#    `AST::Node` is the safe upper bound Rigor can check against.
+#  - `AST::Processor::Mixin#process` returns `AST::Node?` — the method
+#    returns `nil` when given `nil`, and handlers may return `nil` to
+#    preserve the original node (then `process` returns the original).
+
+module AST
+  # Immutable AST node. The type and children are set at construction
+  # and the object is frozen. Subclasses add metadata (e.g. source
+  # location) via `#assign_properties`.
+  class Node
+    # Returns the node type (e.g. `:send`, `:begin`, `:int`).
+    attr_reader type: Symbol
+
+    # Returns the (frozen) children array. Elements are heterogeneous:
+    # either other AST::Node instances or plain Ruby values (Symbol,
+    # Integer, String, nil, …).
+    attr_reader children: Array[untyped]
+
+    # Precomputed hash based on type, children, and class.
+    attr_reader hash: Integer
+
+    # Constructs a new Node. `type` is coerced with `to_sym`;
+    # `children` is coerced with `to_a` and then frozen.
+    def initialize: (untyped type, ?untyped children, ?untyped properties) -> void
+
+    # Equality ignores metadata; only type and children are compared.
+    def ==: (untyped other) -> bool
+
+    # Structural equality (type, children, and class must match).
+    def eql?: (untyped other) -> bool
+
+    # Returns a new Node with non-nil arguments replacing the
+    # corresponding fields. If the result would be identical to self,
+    # returns self unchanged.
+    def updated: (?Symbol? type, ?Array[untyped]? children, ?Hash[Symbol, untyped]? properties) -> AST::Node
+
+    # Concatenates `array` with children and returns a new node.
+    def concat: (Array[untyped] array) -> AST::Node
+
+    # Alias for `concat`.
+    def +: (Array[untyped] array) -> AST::Node
+
+    # Appends `element` to children and returns a new node.
+    def append: (untyped element) -> AST::Node
+
+    # Alias for `append`.
+    def <<: (untyped element) -> AST::Node
+
+    # Alias for `children`.
+    def to_a: () -> Array[untyped]
+
+    # Returns self — nodes are already frozen.
+    def dup: () -> AST::Node
+
+    # Alias for `dup`.
+    def clone: () -> AST::Node
+
+    # Returns self — satisfies the `to_ast` protocol.
+    def to_ast: () -> AST::Node
+
+    # Pretty-printed s-expression string.
+    def to_sexp: (?Integer indent) -> String
+
+    # Alias for `to_sexp`.
+    def to_s: (?Integer indent) -> String
+
+    # Ruby-source s-expression string (uses `s(:type, ...)` notation).
+    def inspect: (?Integer indent) -> String
+
+    # Converts to `[type, *children_as_sexp_arrays]` recursively.
+    def to_sexp_array: () -> Array[untyped]
+
+    # Pattern-match support: `[type, *children]`.
+    def deconstruct: () -> Array[untyped]
+
+    # Assigns entries from `properties` as instance variables.
+    # Protected in Ruby; declared here without visibility for RBS
+    # compatibility (RBS does not support `protected` on class members).
+    def assign_properties: (Hash[Symbol, untyped] properties) -> nil
+
+    # Returns the type with underscores replaced by dashes.
+    def fancy_type: () -> String
+
+    # The original unfrozen `dup` kept for use in `#updated`.
+    private def original_dup: () -> AST::Node
+  end
+
+  # The processor mixin provides a node-dispatch framework. Mix into a
+  # class and define `on_<type>` handlers; unhandled nodes fall through
+  # to `#handler_missing`.
+  module Processor::Mixin
+    # Dispatches `node` to the appropriate `on_<type>` handler.
+    # Returns the handler's return value if non-nil, otherwise the
+    # original `node`. Returns `nil` when `node` is `nil`.
+    def process: (AST::Node? node) -> AST::Node?
+
+    # Processes each node in `nodes` and returns the array of results.
+    def process_all: (Array[AST::Node?] nodes) -> Array[AST::Node?]
+
+    # Default handler for unrecognised node types. Does nothing and
+    # returns `nil`, which causes `#process` to return the node unchanged.
+    def handler_missing: (AST::Node node) -> nil
+  end
+
+  # Deprecated superclass. Prefer `include AST::Processor::Mixin`.
+  class Processor
+    include AST::Processor::Mixin
+  end
+
+  # Mixin providing the `s(type, *children)` shorthand for building
+  # nodes in tests or DSLs.
+  module Sexp
+    # Creates an AST::Node with the given type and children.
+    def s: (Symbol type, *untyped children) -> AST::Node
+  end
+end

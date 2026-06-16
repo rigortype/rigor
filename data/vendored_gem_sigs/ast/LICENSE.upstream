@@ -1,0 +1,11 @@
+Source: hand-written by Rigor maintainers (the `ast` gem ships no RBS
+        and `ruby/gem_rbs_collection` carries no entry for it as of 2026-06-16).
+Reference: whitequark/ast gem source (lib/ast/node.rb, lib/ast/processor/mixin.rb,
+           lib/ast/sexp.rb) at v2.4.3.
+License: MPL-2.0 (matches the rest of Rigor).
+
+This stub covers the core `AST::Node` API and the `AST::Processor::Mixin`
+that the `parser` gem (and many other Ruby AST-manipulation libraries) use.
+Coverage is deliberately scoped to the methods that appear in real-world
+call sites; the full `Node` surface is tiny and all public methods are
+included.

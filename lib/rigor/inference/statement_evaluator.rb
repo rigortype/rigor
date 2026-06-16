@@ -494,10 +494,24 @@ module Rigor
         # then-branch unconditionally exits (return / next /
         # break / raise) and there is no else, the post-scope
         # is the falsey edge of the predicate (subsequent
-        # statements observe the predicate-was-false world).
+        # statements observe the predicate-was-false world). The
+        # then-body is the *skipped* path, so the bare narrowing
+        # (no body assignments) is the correct continuation.
         return [Type::Combinator.union(then_type, else_type), falsey_scope] \
           if branch_terminates?(node.statements, then_type) && node.subsequent.nil?
-        return [Type::Combinator.union(then_type, else_type), truthy_scope] \
+        # Symmetric case: the else / elsif-chain (`node.subsequent`)
+        # unconditionally exits, so the only surviving path is the
+        # then-branch that RAN. The continuation must therefore carry
+        # `then_scope` — the predicate-truthy narrowing PLUS the
+        # then-body's assignments — not the bare `truthy_scope`.
+        # Returning `truthy_scope` drops every local the then-body
+        # bound, leaving it unbound for any enclosing merge to
+        # spuriously nil-inject: e.g. the inner `elsif … else raise`
+        # of `if a then x=… elsif b then x=… else raise end` would
+        # return with `x` unbound, and the outer if's join would then
+        # read `x` as `… | nil` and fire a false `possible-nil-receiver`
+        # (liquid v5.x sweep, Event 3).
+        return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.subsequent, else_type) && node.statements
 
         [
@@ -532,10 +546,17 @@ module Rigor
         else_type, else_scope = eval_branch_or_nil(node.else_clause, truthy_scope)
         # Slice 7 phase 14 — same early-return narrowing as
         # `if`: when the body unconditionally exits and there
-        # is no else, the post-scope is the truthy edge.
+        # is no else, the post-scope is the truthy edge (the body
+        # is the skipped path, so the bare narrowing is correct).
         return [Type::Combinator.union(then_type, else_type), truthy_scope] \
           if branch_terminates?(node.statements, then_type) && node.else_clause.nil?
-        return [Type::Combinator.union(then_type, else_type), falsey_scope] \
+        # Symmetric to the `if` else-exits fix: when the else-clause
+        # exits, the surviving path is the unless-body that RAN, so the
+        # continuation carries `then_scope` (the predicate-falsey
+        # narrowing PLUS the body's assignments), not the bare
+        # `falsey_scope` — otherwise body-bound locals are dropped and
+        # an enclosing merge nil-injects them.
+        return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.else_clause, else_type) && node.statements
 
         [

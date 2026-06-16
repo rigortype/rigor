@@ -126,6 +126,50 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type).to be_a(Rigor::Type::Union)
       expect(type.members.map(&:value)).to contain_exactly(1, 2, 3)
     end
+
+    # The surviving path of `if P then BODY else raise end` is BODY,
+    # so the post-scope must carry BODY's assignments forward — not the
+    # bare predicate narrowing, which would leave them unbound. Mirrors
+    # the case/when `drops a terminating else` rule.
+    it "carries a then-body assignment past a terminating else (no nil-injection)" do
+      _, post = evaluate(<<~RUBY)
+        if cond
+          x = 1
+        else
+          raise ArgumentError
+        end
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "carries an unless-body assignment past a terminating else" do
+      _, post = evaluate(<<~RUBY)
+        unless cond
+          x = 1
+        else
+          raise ArgumentError
+        end
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    # Regression — liquid v5.x sweep, Event 3. The inner `elsif … else
+    # raise` previously returned the bare truthy narrowing (with `x`
+    # unbound), so the OUTER if's join nil-injected `x` into a spurious
+    # `… | nil`. Every reachable path assigns `x` (the else raises), so
+    # the post-scope must bind `x` without nil.
+    it "binds a local across an if/elsif/else-raise chain without nil-injection" do
+      _, post = evaluate(<<~RUBY)
+        if a
+          x = 1
+        elsif b
+          x = 2
+        else
+          raise ArgumentError
+        end
+      RUBY
+      expect(post.local(:x).members.map(&:value)).to contain_exactly(1, 2)
+    end
   end
 
   describe "case/when branching" do

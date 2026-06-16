@@ -1542,6 +1542,80 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Regression — liquid v5.x sweep, Event 3
+      # (docs/notes/20260616-liquid-v5.x-regression-sweep.md). A local
+      # conditionally assigned across an `if/elsif/else: raise` chain is
+      # bound on every reachable path (the else raises), so reading it
+      # afterwards must NOT fire `possible-nil-receiver`. The bug only
+      # surfaced when one assigning arm was `Dynamic`-typed and another
+      # concrete: the inner `elsif … else raise` dropped its body's
+      # assignment, leaving the local unbound for the outer if's join to
+      # nil-inject. The `Dynamic | concrete` union then leaked the
+      # injected nil past the FP-discipline gate that silences a *bare*
+      # `Dynamic` receiver. The fix carries the surviving then-body's
+      # scope forward; the whole bisection table must stay clean.
+      describe "if/elsif/else-raise conditional-local definite assignment" do
+        def nil_receiver_diags(result)
+          result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+        end
+
+        it "2-arm if/else-raise, single concrete arm → clean" do
+          result = analyze(<<~RUBY)
+            def m(n)
+              if n.is_a?(String) then partial = n.to_s
+              else raise ::ArgumentError end
+              partial.foo
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+
+        it "3-arm if/elsif/else-raise, two concrete arms → clean" do
+          result = analyze(<<~RUBY)
+            def m(t, n)
+              if t.is_a?(String) then partial = t.to_s
+              elsif n.is_a?(String) then partial = n.to_s
+              else raise ::ArgumentError end
+              partial.foo
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+
+        it "3-arm if/elsif/else-raise, one Dynamic + one concrete arm → clean (the bug)" do
+          result = analyze(<<~RUBY)
+            def m(t, n)
+              if t then partial = t.anything
+              elsif n.is_a?(String) then partial = n.to_s
+              else raise ::ArgumentError end
+              partial.foo
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+
+        it "bare Dynamic receiver (no conditional) → clean" do
+          result = analyze(<<~RUBY)
+            def m(t)
+              partial = t.anything
+              partial.foo
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+
+        it "2-arm if/else (no raise), Dynamic-or-concrete → clean" do
+          result = analyze(<<~RUBY)
+            def m(t, n)
+              if t then partial = t.anything
+              else partial = n.to_s end
+              partial.foo
+            end
+          RUBY
+          expect(nil_receiver_diags(result)).to be_empty
+        end
+      end
+
       it "skips methods with required keyword arguments" do
         expect(analyze("[1, 2].push(1)\n")).to be_success
       end

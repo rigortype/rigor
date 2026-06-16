@@ -178,6 +178,22 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         expect(dispatch(receiver: tuple, method_name: :max)).to eq(constant(nil))
       end
 
+      it "folds minmax to a Tuple[min, max] of comparable Constant elements" do
+        unsorted = tuple(constant(3), constant(1), constant(2))
+        expect(dispatch(receiver: unsorted, method_name: :minmax))
+          .to eq(Rigor::Type::Combinator.tuple_of(constant(1), constant(3)))
+      end
+
+      it "folds minmax to Tuple[nil, nil] on the empty tuple" do
+        expect(dispatch(receiver: tuple, method_name: :minmax))
+          .to eq(Rigor::Type::Combinator.tuple_of(constant(nil), constant(nil)))
+      end
+
+      it "declines minmax on incomparable mixed-class Constant elements" do
+        mixed = tuple(constant(1), constant("a"))
+        expect(dispatch(receiver: mixed, method_name: :minmax)).to be_nil
+      end
+
       it "folds sort to a per-position Tuple of sorted Constants" do
         unsorted = tuple(constant(3), constant(1), constant(2))
         expect(dispatch(receiver: unsorted, method_name: :sort))

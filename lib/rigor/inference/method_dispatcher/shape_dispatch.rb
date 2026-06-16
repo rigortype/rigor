@@ -81,6 +81,7 @@ module Rigor
           sum: :tuple_sum,
           min: :tuple_min,
           max: :tuple_max,
+          minmax: :tuple_minmax_pair,
           sort: :tuple_sort,
           reverse: :tuple_reverse,
           to_a: :tuple_to_a,
@@ -859,6 +860,32 @@ module Rigor
 
             result = values.public_send(edge)
             Type::Combinator.constant_of(result)
+          rescue StandardError
+            nil
+          end
+
+          # `tuple.minmax` — the `[min, max]` pair as a 2-slot
+          # `Tuple[Constant[min], Constant[max]]`, mirroring the
+          # `Range#minmax` fold. Every element must be a `Constant`
+          # and the values must Ruby-compare; an empty tuple folds to
+          # `Tuple[nil, nil]` (Ruby's `[].minmax`), incomparable
+          # mixed-class values decline.
+          def tuple_minmax_pair(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            if tuple.elements.empty?
+              nil_const = Type::Combinator.constant_of(nil)
+              return Type::Combinator.tuple_of(nil_const, nil_const)
+            end
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            low, high = values.minmax
+            Type::Combinator.tuple_of(
+              Type::Combinator.constant_of(low),
+              Type::Combinator.constant_of(high)
+            )
           rescue StandardError
             nil
           end

@@ -24,3 +24,7 @@ assert_type("[30, 10, 20]", xs.rotate(2))
 assert_type("[1, 2, 3]", [1, 2, 2, 3].uniq)
 assert_type("1", [1, 2, 2, 3].index(2))
 assert_type("2", [1, 2, 2, 3].rindex(2))
+
+# Comparable all-Constant elements also fold `minmax` to a 2-slot
+# `Tuple[min, max]`, mirroring `Range#minmax`.
+assert_type("[10, 30]", xs.minmax)

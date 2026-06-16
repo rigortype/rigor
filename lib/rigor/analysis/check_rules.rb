@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../reflection"
 require_relative "../source/node_walker"
+require_relative "../source/constant_path"
 require_relative "../type"
 require_relative "diagnostic"
 require_relative "dependency_recorder"
@@ -1320,25 +1321,10 @@ module Rigor
           receiver = call_node.receiver
           return true if receiver.nil?
 
-          name = constant_name_of(receiver)
+          name = Source::ConstantPath.qualified_name_or_nil(receiver)
           return false if name.nil?
 
           RIGOR_TESTING_RECEIVERS.include?(name)
-        end
-
-        def constant_name_of(node)
-          case node
-          when Prism::ConstantReadNode then node.name.to_s
-          when Prism::ConstantPathNode then render_constant_path(node)
-          end
-        end
-
-        def render_constant_path(node)
-          parent = node.parent
-          base = constant_name_of(parent)
-          return nil if parent && base.nil?
-
-          parent ? "#{base}::#{node.name}" : node.name.to_s
         end
 
         def build_assert_type_diagnostic(path, call_node, expected, actual)

@@ -14,3 +14,4 @@ end
 require_relative "source/node_locator"
 require_relative "source/node_walker"
 require_relative "source/literals"
+require_relative "source/constant_path"

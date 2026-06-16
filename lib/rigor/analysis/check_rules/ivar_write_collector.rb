@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "../../source/constant_path"
+
 module Rigor
   module Analysis
     module CheckRules
@@ -80,7 +82,7 @@ module Rigor
 
           case node
           when Prism::ClassNode, Prism::ModuleNode
-            name = qualified_name_for(node.constant_path)
+            name = Source::ConstantPath.qualified_name(node.constant_path)
             if name
               walk(node.body, qualified_prefix + [name]) if node.body
               return
@@ -118,28 +120,6 @@ module Rigor
           @accumulator[class_name] ||= {}
           @accumulator[class_name][node.name] ||= []
           @accumulator[class_name][node.name] << { node: node, type: rvalue_type }
-        end
-
-        # Same shape resolution as `ScopeIndexer.qualified_name_for`
-        # (single-segment ConstantReadNode and dotted
-        # ConstantPathNode). Inlined here to keep the collector
-        # self-contained — the rule lives outside the indexer's
-        # private surface.
-        def qualified_name_for(constant_path_node)
-          case constant_path_node
-          when Prism::ConstantReadNode then constant_path_node.name.to_s
-          when Prism::ConstantPathNode then render_constant_path(constant_path_node)
-          end
-        end
-
-        def render_constant_path(node)
-          prefix =
-            case node.parent
-            when Prism::ConstantReadNode then "#{node.parent.name}::"
-            when Prism::ConstantPathNode then "#{render_constant_path(node.parent)}::"
-            else ""
-            end
-          "#{prefix}#{node.name}"
         end
       end
     end

@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "../../source/constant_path"
+
 module Rigor
   module Analysis
     module CheckRules
@@ -45,12 +47,12 @@ module Rigor
 
           case node
           when Prism::ModuleNode
-            name = constant_path_name(node.constant_path)
+            name = Source::ConstantPath.qualified_name_or_nil(node.constant_path)
             child_prefix = name ? prefix + [name] : prefix
             names << child_prefix.join("::") if name
             walk(node.body, child_prefix, names) if node.body
           when Prism::ClassNode
-            name = constant_path_name(node.constant_path)
+            name = Source::ConstantPath.qualified_name_or_nil(node.constant_path)
             child_prefix = name ? prefix + [name] : prefix
             names << child_prefix.join("::") if name && class_surface_open?(node)
             walk(node.body, child_prefix, names) if node.body
@@ -100,20 +102,6 @@ module Rigor
           return false if superclass.nil?
 
           !superclass.is_a?(Prism::ConstantReadNode) && !superclass.is_a?(Prism::ConstantPathNode)
-        end
-
-        # Renders a class/module path node to its source-qualified name
-        # (`Foo`, `Foo::Bar`, leading `::` stripped); nil for a dynamic
-        # constant path the scanner cannot name statically.
-        def constant_path_name(node)
-          case node
-          when Prism::ConstantReadNode
-            node.name.to_s
-          when Prism::ConstantPathNode
-            parent = node.parent ? constant_path_name(node.parent) : nil
-            child = node.name.to_s
-            node.parent.nil? ? child : (parent && "#{parent}::#{child}")
-          end
         end
       end
     end

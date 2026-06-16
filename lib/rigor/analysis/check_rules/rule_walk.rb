@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "../../source/constant_path"
+
 module Rigor
   module Analysis
     module CheckRules
@@ -183,28 +185,8 @@ module Rigor
           def extend_prefix(node, prefix)
             return prefix unless CLASS_OR_MODULE_NODE_CLASSES.any? { |klass| node.is_a?(klass) }
 
-            name = qualified_name_for(node.constant_path)
+            name = Source::ConstantPath.qualified_name(node.constant_path)
             name ? prefix + [name] : prefix
-          end
-
-          # Same shape resolution as `IvarWriteCollector#qualified_name_for`
-          # and `ScopeIndexer.qualified_name_for` (single-segment
-          # ConstantReadNode and dotted ConstantPathNode).
-          def qualified_name_for(constant_path_node)
-            case constant_path_node
-            when Prism::ConstantReadNode then constant_path_node.name.to_s
-            when Prism::ConstantPathNode then render_constant_path(constant_path_node)
-            end
-          end
-
-          def render_constant_path(node)
-            prefix =
-              case node.parent
-              when Prism::ConstantReadNode then "#{node.parent.name}::"
-              when Prism::ConstantPathNode then "#{render_constant_path(node.parent)}::"
-              else ""
-              end
-            "#{prefix}#{node.name}"
           end
         end
       end

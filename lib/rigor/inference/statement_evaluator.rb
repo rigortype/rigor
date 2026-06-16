@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../type"
 require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
+require_relative "../source/constant_path"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "struct_fold_safety"
@@ -1389,7 +1390,7 @@ module Rigor
       # (`Constant[nil]` for an empty body); we discard the body's
       # post-scope.
       def eval_class_or_module(node)
-        name = qualified_name_for(node.constant_path)
+        name = Source::ConstantPath.qualified_name(node.constant_path)
         new_context = @class_context + [ClassFrame.new(name: name, singleton: false)]
         body_type, _body_scope = eval_class_body(node, new_context)
         [body_type, scope]
@@ -1714,7 +1715,7 @@ module Rigor
         args = matcher.arguments&.arguments || []
         return nil unless args.size == 1
 
-        class_name = constant_node_name(args.first)
+        class_name = Source::ConstantPath.qualified_name_or_nil(args.first)
         return nil if class_name.nil?
 
         { local: local_name, kind: :class, class_name: class_name, exact: exact }
@@ -1768,35 +1769,6 @@ module Rigor
         return false unless matcher.name == matcher_name
 
         matcher.arguments.nil? || matcher.arguments.arguments.empty?
-      end
-
-      # Decodes a `Prism::ConstantReadNode` /
-      # `Prism::ConstantPathNode` into a colon-joined class
-      # name string, or returns nil for any other node
-      # shape. Mirrors the conservative envelope used by the
-      # `is_a?` / `kind_of?` predicate narrower.
-      def constant_node_name(node)
-        case node
-        when Prism::ConstantReadNode
-          node.name.to_s
-        when Prism::ConstantPathNode
-          flatten_constant_path(node)
-        end
-      end
-
-      def flatten_constant_path(node)
-        parts = []
-        cursor = node
-        while cursor.is_a?(Prism::ConstantPathNode)
-          parts.unshift(cursor.name.to_s)
-          cursor = cursor.parent
-        end
-        case cursor
-        when Prism::ConstantReadNode then parts.unshift(cursor.name.to_s)
-        when nil then nil # ::Foo absolute root — preserve as-is
-        else return nil
-        end
-        parts.join("::")
       end
 
       # Slice 4b-2 (ADR-7 § "Slice 4-A/4-B") — applies the
@@ -2890,7 +2862,7 @@ module Rigor
         when Prism::ConstantReadNode
           receiver.name.to_s == prefix.last
         when Prism::ConstantPathNode
-          rendered = render_constant_path(receiver)
+          rendered = Source::ConstantPath.render(receiver)
           return false unless rendered
 
           path = rendered.split("::")
@@ -2928,25 +2900,6 @@ module Rigor
         else
           Type::Combinator.nominal_of(path)
         end
-      end
-
-      def qualified_name_for(constant_path_node)
-        case constant_path_node
-        when Prism::ConstantReadNode
-          constant_path_node.name.to_s
-        when Prism::ConstantPathNode
-          render_constant_path(constant_path_node)
-        end
-      end
-
-      def render_constant_path(node)
-        prefix =
-          case node.parent
-          when Prism::ConstantReadNode then "#{node.parent.name}::"
-          when Prism::ConstantPathNode then "#{render_constant_path(node.parent)}::"
-          else ""
-          end
-        "#{prefix}#{node.name}"
       end
 
       def singleton_context_for(node)
@@ -2987,7 +2940,7 @@ module Rigor
         when Prism::ConstantReadNode
           expression.name.to_s
         when Prism::ConstantPathNode
-          render_constant_path(expression)
+          Source::ConstantPath.render(expression)
         end
       end
 

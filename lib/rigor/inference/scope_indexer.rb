@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../scope"
 require_relative "../type"
+require_relative "../source/constant_path"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "statement_evaluator"
@@ -379,7 +380,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
             if node.body
@@ -863,7 +864,7 @@ module Rigor
 
         case root
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(root.constant_path)
+          name = Source::ConstantPath.qualified_name(root.constant_path)
           if name && root.body
             child = prefix + [name]
             collect_class_method_defs(root.body, child, acc)
@@ -1273,7 +1274,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
             walk_class_cvars(node.body, child_prefix, default_scope, accumulator) if node.body
@@ -1359,7 +1360,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
             walk_constant_writes(node.body, child_prefix, default_scope, accumulator) if node.body
@@ -1369,7 +1370,7 @@ module Rigor
           record_constant_write(node, qualified_prefix, default_scope, accumulator, node.name.to_s)
           return
         when Prism::ConstantPathWriteNode
-          full = qualified_name_for(node.target)
+          full = Source::ConstantPath.qualified_name(node.target)
           record_constant_write(node, [], default_scope, accumulator, full) if full
           return
         end
@@ -1435,7 +1436,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
             record_meta_superclass_members(node, child_prefix, accumulator) if node.is_a?(Prism::ClassNode)
@@ -1488,7 +1489,7 @@ module Rigor
         when Prism::SelfNode
           qualified_prefix
         when Prism::ConstantReadNode, Prism::ConstantPathNode
-          rendered = qualified_name_for(node.expression)
+          rendered = Source::ConstantPath.qualified_name(node.expression)
           return nil unless rendered
 
           if !qualified_prefix.empty? && qualified_prefix.last == rendered
@@ -1595,7 +1596,7 @@ module Rigor
         when Prism::ConstantReadNode
           receiver.name.to_s == qualified_prefix.last
         when Prism::ConstantPathNode
-          rendered = render_constant_path(receiver)
+          rendered = Source::ConstantPath.render(receiver)
           return false unless rendered
 
           path = rendered.split("::")
@@ -1627,7 +1628,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
             walk_def_nodes(node.body, child_prefix, false, accumulator) if node.body
@@ -1703,7 +1704,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             walk_singleton_body(node.body, qualified_prefix + [name], false, accumulator) if node.body
             return
@@ -1832,16 +1833,16 @@ module Rigor
 
         case node
         when Prism::ClassNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             full = (qualified_prefix + [name]).join("::")
-            superclass = node.superclass && qualified_name_for(node.superclass)
+            superclass = node.superclass && Source::ConstantPath.qualified_name(node.superclass)
             accumulator[full] = superclass if superclass
             walk_class_superclasses(node.body, qualified_prefix + [name], accumulator) if node.body
             return
           end
         when Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             walk_class_superclasses(node.body, qualified_prefix + [name], accumulator) if node.body
             return
@@ -1873,14 +1874,14 @@ module Rigor
 
         case node
         when Prism::ClassNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             record_data_member_layout(accumulator, qualified_prefix + [name], node.superclass)
             walk_data_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
             return
           end
         when Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             walk_data_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
             return
@@ -1922,14 +1923,14 @@ module Rigor
 
         case node
         when Prism::ClassNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             record_struct_member_layout(accumulator, qualified_prefix + [name], node.superclass)
             walk_struct_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
             return
           end
         when Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             walk_struct_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
             return
@@ -1996,7 +1997,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             full = (qualified_prefix + [name]).join("::")
             walk_class_includes(node.body, qualified_prefix + [name], full, accumulator) if node.body
@@ -2016,7 +2017,7 @@ module Rigor
         return unless MIXIN_CALL_NAMES.include?(node.name)
 
         node.arguments&.arguments&.each do |arg|
-          mod = qualified_name_for(arg)
+          mod = Source::ConstantPath.qualified_name(arg)
           (accumulator[current_class] ||= []) << mod if mod
         end
       end
@@ -2056,7 +2057,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
             walk_method_visibilities(node.body, child_prefix, false, :public, accumulator) if node.body
@@ -2194,7 +2195,7 @@ module Rigor
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             collect_class_alias_map(node.body, qualified_prefix + [name], accumulator) if node.body
             return accumulator
@@ -2456,14 +2457,14 @@ module Rigor
 
         case node
         when Prism::ClassNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             full = (qualified_prefix + [name]).join("::")
             accumulator[full] = Type::Combinator.singleton_of(full)
             return collect_class_decls(node.body, qualified_prefix + [name], accumulator) if node.body
           end
         when Prism::ModuleNode
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name(node.constant_path)
           return collect_class_decls(node.body, qualified_prefix + [name], accumulator) if name && node.body
         when Prism::ConstantWriteNode
           record_class_new_constant_decl(node, qualified_prefix, accumulator)
@@ -2509,7 +2510,7 @@ module Rigor
         arg = call_node.arguments&.arguments&.first
         return nil if arg.nil?
 
-        raw = qualified_name_for(arg)
+        raw = Source::ConstantPath.qualified_name(arg)
         return nil if raw.nil?
 
         prefix = qualified_prefix.dup
@@ -2554,7 +2555,7 @@ module Rigor
       end
 
       def record_class_or_module?(node, qualified_prefix, identity_table, discovered)
-        name = qualified_name_for(node.constant_path)
+        name = Source::ConstantPath.qualified_name(node.constant_path)
         return false unless name
 
         full = (qualified_prefix + [name]).join("::")
@@ -2664,25 +2665,6 @@ module Rigor
         when Prism::ConstantPathNode
           node.parent.nil? && node.name == expected_name
         end
-      end
-
-      def qualified_name_for(constant_path_node)
-        case constant_path_node
-        when Prism::ConstantReadNode
-          constant_path_node.name.to_s
-        when Prism::ConstantPathNode
-          render_constant_path(constant_path_node)
-        end
-      end
-
-      def render_constant_path(node)
-        prefix =
-          case node.parent
-          when Prism::ConstantReadNode then "#{node.parent.name}::"
-          when Prism::ConstantPathNode then "#{render_constant_path(node.parent)}::"
-          else ""
-          end
-        "#{prefix}#{node.name}"
       end
 
       # Walks `node`'s subtree DFS and fills in scope entries for every

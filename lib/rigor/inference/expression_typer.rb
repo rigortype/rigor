@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../ast"
+require_relative "../source/constant_path"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
@@ -408,7 +409,7 @@ module Rigor
       end
 
       def type_of_constant_path(node)
-        full_name = build_constant_path_name(node)
+        full_name = Source::ConstantPath.qualified_name_or_nil(node)
         return fallback_for(node, family: :prism) if full_name.nil?
 
         resolve_constant_name(full_name) || fallback_for(node, family: :prism)
@@ -474,24 +475,6 @@ module Rigor
         st = scope.self_type
         case st
         when Type::Nominal, Type::Singleton then st.class_name
-        end
-      end
-
-      # Builds the dotted-colon name for a `Foo`, `Foo::Bar`, or `::Foo`
-      # path. Returns nil when an inner segment is not itself a constant
-      # reference (for example `expr::Foo`), so the caller can fall back.
-      def build_constant_path_name(node)
-        case node
-        when Prism::ConstantReadNode
-          node.name.to_s
-        when Prism::ConstantPathNode
-          parent = node.parent
-          return node.name.to_s if parent.nil?
-
-          parent_name = build_constant_path_name(parent)
-          return nil if parent_name.nil?
-
-          "#{parent_name}::#{node.name}"
         end
       end
 
@@ -833,7 +816,7 @@ module Rigor
       # Other pattern shapes (Range, Regexp, custom `===`) stay
       # `:maybe` — the existing union fallback handles them.
       def case_when_pattern_certainty(subject_type, pattern_node)
-        class_name = build_constant_path_name(pattern_node)
+        class_name = Source::ConstantPath.qualified_name_or_nil(pattern_node)
         return Narrowing.class_pattern_certainty(subject_type, class_name, environment: scope.environment) if class_name
 
         literal = literal_pattern_value(pattern_node)

@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "project_patched_methods"
 require_relative "../analysis/dependency_source_inference/return_type_heuristic"
+require_relative "../source/constant_path"
 
 module Rigor
   module Inference
@@ -161,7 +162,7 @@ module Rigor
       private_class_method :walk_children
 
       def descend_class_or_module(node, qualified_prefix, in_singleton_class, source_path, entries)
-        name = qualified_name_for(node.constant_path)
+        name = Source::ConstantPath.qualified_name_or_nil(node.constant_path)
         if name && node.body
           walk_node(node.body, qualified_prefix + [name], in_singleton_class, source_path, entries)
         else
@@ -193,18 +194,6 @@ module Rigor
         )
       end
       private_class_method :record_def_node
-
-      def qualified_name_for(node)
-        case node
-        when Prism::ConstantReadNode then node.name.to_s
-        when Prism::ConstantPathNode
-          parent = node.parent.nil? ? nil : qualified_name_for(node.parent)
-          return nil if !node.parent.nil? && parent.nil?
-
-          parent.nil? ? node.name.to_s : "#{parent}::#{node.name}"
-        end
-      end
-      private_class_method :qualified_name_for
     end
   end
 end

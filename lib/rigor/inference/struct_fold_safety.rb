@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "../source/constant_path"
+
 module Rigor
   module Inference
     # ADR-48 Struct follow-up, slice 3 — the fold-safe-local scan. Determines,
@@ -133,7 +135,7 @@ module Rigor
           struct_new_member_set(receiver)
 
         when Prism::ConstantReadNode, Prism::ConstantPathNode
-          name = constant_name(receiver)
+          name = Source::ConstantPath.qualified_name_or_nil(receiver)
           name && member_set_of(layout_lookup.call(name))
         end
       end
@@ -163,28 +165,6 @@ module Rigor
         when Prism::ConstantReadNode then node.name == name
         when Prism::ConstantPathNode then node.parent.nil? && node.name == name
         end
-      end
-
-      def constant_name(node)
-        case node
-        when Prism::ConstantReadNode then node.name.to_s
-        when Prism::ConstantPathNode then constant_path_name(node)
-        end
-      end
-
-      def constant_path_name(node)
-        parts = []
-        cursor = node
-        while cursor.is_a?(Prism::ConstantPathNode)
-          parts.unshift(cursor.name.to_s)
-          cursor = cursor.parent
-        end
-        case cursor
-        when Prism::ConstantReadNode then parts.unshift(cursor.name.to_s)
-        when nil then nil # leading `::Foo` — keep the parts as written
-        else return nil
-        end
-        parts.join("::")
       end
 
       # Yields each child to recurse into, skipping the subtree of a nested

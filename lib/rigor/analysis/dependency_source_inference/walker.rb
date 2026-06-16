@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "return_type_heuristic"
+require_relative "../../source/constant_path"
 
 module Rigor
   module Analysis
@@ -166,7 +167,7 @@ module Rigor
         # children under the same prefix so any inner class
         # definitions are still recorded under their own name.
         def descend_class_or_module(node, qualified_prefix, in_singleton_class, accumulator, budget)
-          name = qualified_name_for(node.constant_path)
+          name = Source::ConstantPath.qualified_name_or_nil(node.constant_path)
           if name && node.body
             walk_node(node.body, qualified_prefix + [name], in_singleton_class, accumulator, budget)
           else
@@ -196,23 +197,6 @@ module Rigor
 
           return_type = ReturnTypeHeuristic.extract(node)
           accumulator[key] = CatalogEntry.new(kind: kind, return_type: return_type)
-        end
-
-        # Resolves a `Prism::ConstantPathNode` /
-        # `Prism::ConstantReadNode` chain to its dot-separated
-        # name (e.g. `"Foo::Bar"`). Returns nil for the rare
-        # dynamic-prefix shape (`module ::Foo`-rooted variants
-        # whose left side is a runtime expression) so the
-        # walker treats those as opaque rather than guessing.
-        def qualified_name_for(node)
-          case node
-          when Prism::ConstantReadNode then node.name.to_s
-          when Prism::ConstantPathNode
-            parent = node.parent.nil? ? nil : qualified_name_for(node.parent)
-            return nil if !node.parent.nil? && parent.nil?
-
-            parent.nil? ? node.name.to_s : "#{parent}::#{node.name}"
-          end
         end
       end
     end

@@ -1,7 +1,7 @@
 # ADR-67 — Parameter type inference (the M3 frontier): call-site and in-body, precision-additive only
 
-Status: **Accepted — WD1 + WD3 (single-level) implemented 2026-06-16; WD5 fixpoint
-and the `check`-walk wiring deferred (demand-gated).** Re-opens the algorithm-corpora
+Status: **Accepted — WD1 + WD3 + WD5 (capped fixpoint) implemented 2026-06-16; the
+`check`-walk wiring deferred (demand-gated).** Re-opens the algorithm-corpora
 survey's "M3 — untyped-param → whole-method Dynamic: **EXCUSED, do not pursue**" verdict
 on new **protection-coverage** evidence. Method / ctor parameters default to `untyped`
 today (the gradual entry point); the pilot shows a param flowing into an ivar or
@@ -13,28 +13,29 @@ The landed slice is the **substrate**: a call-site argument-union collector
 (`Inference::ParameterInferenceCollector`) keyed by `[class, method, kind]`, a
 `param_inferred_types` `DiscoveryIndex` side-table, and consumption in
 `build_method_entry_scope` (an undeclared parameter is seeded with its inferred type;
-an RBS-declared parameter wins). It is **single-level** — a parameter is typed from
-call sites whose arguments are themselves concrete (a `Foo.new`, a literal, a typed
-local); a call site passing another untyped parameter (the *fixpoint* case) poisons the
-parameter to `untyped` (WD4). It is wired into **`coverage --protection` only**: the
-`check` walk leaves the table empty, so its diagnostics are byte-identical and WD1's
-"never fire at the parameter boundary" holds *by construction* (an inferred type is a
-body local, never an RBS contract, and the boundary rules consult RBS).
+an RBS-declared parameter wins). It runs as a **capped fixpoint** (WD5): each round
+re-types the project with the previous round's inferred parameters seeded, so a parameter
+passed *another* parameter is typed one hop further per round (cap 3, the `BodyFixpoint`
+convention, early-stop on convergence; round 1 alone is the single-level pass). A call
+site whose argument is a not-yet-typed parameter poisons the parameter *that round* (WD4),
+and it may type in a later round once its own argument resolves. It is wired into
+**`coverage --protection` only**: the `check` walk leaves the table empty, so its
+diagnostics are byte-identical and WD1's "never fire at the parameter boundary" holds *by
+construction* (an inferred type is a body local, never an RBS contract, and the boundary
+rules consult RBS).
 
 **Measured caveat (the 2026-06-16 verification, do not re-litigate):** the two ADRs cited
-as the headline cases are *not* moved by the single-level slice. parser's `unary_num`
+as the headline cases are *not* moved, even with the fixpoint. parser's `unary_num`
 parameter is fed from generated `.y` value-stack code (`val[0]`, never analysed Ruby);
-faraday's `match(env)` is called with `env`, itself an untyped parameter of `call(env)`
-whose own entry is reached by dynamic middleware dispatch. Both are **fixpoint-gated** (WD5),
-and faraday's root is dynamic-dispatch-gated beyond it. The single-level slice moves the
-metric where a user method is called with concretely-typed arguments — a real surface,
-just not the cited clusters. **Measured** (`coverage --protection`, `lib`): faraday
-0.2129 → 0.2345 (+23 protected sites), haml 0.3188 → 0.3804 (+99 sites) — haml's
-`compile(node)`-style compiler chain (methods called with constructed AST nodes) is the
-single-level sweet spot, the cited `env` / `numeric` clusters are not. WD5 (whole-program
-worklist) is the metric-completing follow-up; the `check`-walk wiring (and with it the WD1
-in-body provenance *mark*) is the second follow-up, both budget-gated per the cost
-discussion below.
+faraday's `match(env)` is called with `env`, itself a parameter of `call(env)` whose own
+entry is reached by dynamic middleware dispatch (so the fixpoint never seeds its root).
+The pass moves the metric where a user method is (transitively) called with concretely-typed
+arguments. **Measured** (`coverage --protection`, `lib`): faraday 0.2129 → 0.2402 (+29
+protected sites; +6 of them from the fixpoint over single-level), haml 0.3188 → 0.3842
+(+105 sites; +6 from the fixpoint) — haml's `compile(node)`-style compiler chain (methods
+called with constructed AST nodes) is the sweet spot, the cited `env` / `numeric` clusters
+are not. The `check`-walk wiring (and with it the WD1 in-body provenance *mark*) is the
+remaining follow-up, budget-gated per the cost discussion below.
 
 Grounding: the algorithm-corpora survey
 ([`docs/notes/20260612-algorithm-corpora-survey.md`](../notes/20260612-algorithm-corpora-survey.md)
@@ -97,27 +98,31 @@ proceed without breaching the robustness principle.
   bound** (responds-to set / interface) and let it drive protection on `arr.<method>`. No
   call sites needed, so it helps the leaf-script corpus the survey excused — but yields a
   duck/structural bound, not a nominal type.
-- **WD3 — call-site union (TypeProf-style; the real lever for apps). Single-level
-  implemented; fixpoint deferred (WD5).** A param's inferred type = the union of resolved
-  call-site argument types (needs ≥1 resolved call site). The **single-level** pass
-  (`ParameterInferenceCollector`) is landed: it resolves a call to its user `def` via the
+- **WD3 — call-site union (TypeProf-style; the real lever for apps). Implemented.** A
+  param's inferred type = the union of resolved call-site argument types (needs ≥1 resolved
+  call site). `ParameterInferenceCollector` resolves a call to its user `def` via the
   cross-file discovery index, types the positional arguments, unions them per parameter, and
-  skips non-simple parameter shapes / arity mismatches / splat calls. It closes the
-  `ctor-param → ivar → receiver` chain *only when the call-site argument is itself concrete*;
-  the transitive case (an argument that is another untyped parameter) needs the WD5 fixpoint.
-  It is whole-program-ish and in tension with Rigor's per-file model
-  ([ADR-46](46-incremental-dependency-graph.md)), so it runs only in the `coverage --protection`
-  command (not the `check` walk) and is **budget-gated** (a per-parameter union cap;
-  `MAX_CALL_SITE_TYPES`), and is unsound under unseen call sites / dynamic dispatch → falls
-  back to `untyped` (no false narrowing).
+  skips non-simple parameter shapes / arity mismatches / splat calls. It is whole-program-ish
+  and in tension with Rigor's per-file model ([ADR-46](46-incremental-dependency-graph.md)),
+  so it runs only in the `coverage --protection` command (not the `check` walk) and is
+  **budget-gated** (a per-parameter union cap, `MAX_CALL_SITE_TYPES`, and the WD5 round cap),
+  and is unsound under unseen call sites / dynamic dispatch → falls back to `untyped` (no
+  false narrowing).
 - **WD4 — soundness fallbacks.** Unseen call sites, `send`/dynamic dispatch, and
   metaprogrammed callers contribute nothing (the param stays `untyped`); a single dynamic
   caller does not widen an otherwise-precise inference into a false narrowing. The inferred
   type is an over-approximation only where the call-site set is closed.
-- **WD5 — budget + termination.** The call-site union is a worklist fixpoint; cap it under
-  [ADR-41](41-inference-budget-design.md) and reuse the run-scoped return memo infrastructure
-  ([ADR-57](57-self-call-return-adoption.md)) so the whole-program pass does not re-type
-  callees unboundedly. WD2 (in-body) is local and cheap; WD3 (call-site) is the cost driver.
+- **WD5 — budget + termination. Implemented (capped, not true-convergent).** The call-site
+  union is a worklist fixpoint: each round re-types the project with the prior round's
+  inferred parameters seeded (the same `param_inferred_types` consumption path the protection
+  scan uses), propagating one hop per round. Capped at `DEFAULT_ROUNDS` (3, the
+  [ADR-41](41-inference-budget-design.md) budget; the `BodyFixpoint` convention) with an
+  early-stop on table equality — convergence is *not* required because the table can
+  oscillate at the margin (a newly resolved receiver can surface a fresh untyped-argument
+  call site), and the protection metric tolerates a bounded approximation. Parses are cached
+  across rounds; only re-indexing repeats. The ADR-57 run-scoped return memo is the
+  forward-looking reuse for the deferred `check`-walk wiring (where callee re-typing must not
+  be unbounded); the protection-only pass does not need it.
 
 ## Rejected / deferred alternatives
 

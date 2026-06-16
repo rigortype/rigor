@@ -38,157 +38,36 @@ that shaped each cut are preserved in git history (see
 | v0.1.17 | 2026-06-06 | Internal-structure review + performance tuning. Incremental analysis (`rigor check --incremental`, ADR-46) + unchanged-project fast path (ADR-45) + large allocation reductions (ADR-44); Elixir-v1.20-inspired narrowing (`Array` non-empty, `Hash` key-presence) + `flow.unreachable-clause` (ADR-47); `rigor:v1:conforms-to` directive; `call.self-undefined-method` rule (shipped `:off`, ADR-24 slice 4); `Data.define` value folding (ADR-48). Also shipped (process / CI / docs, not in the user-facing notes): the release-engineering machinery for the road to v0.2.0 — ADR-49 (ADR-authoring rubric + `rigor-adr-author` skill + corpus audit), ADR-50 (release-engineering + stability strategy), the `release/x.y.z` branch + `release-gate.yml` + `make bench-perf` perf gate. See `CHANGELOG.md` § `[0.1.17]`. |
 | v0.1.18 | 2026-06-11 | CI-environment support (ADR-51): six `rigor check --format` CI-native renderings (SARIF, GitHub Actions, GitLab Code Quality, Checkstyle, JUnit, TeamCity) + runtime CI auto-detection (WD7) + copy-paste CI setup templates + the bundled `rigor-ci-setup` skill. See `CHANGELOG.md` § `[0.1.18]`. |
 | v0.1.19 | 2026-06-13 | Precision-and-trust cycle for procedural Ruby — and the **effective release candidate for v0.2.0** (final `0.1.x` preview cut). Method-call results flow through user-defined helpers (ADR-57) backed by recursive-return (ADR-55) and block/loop captured-mutation (ADR-56) precision; a large real-world false-positive batch on data-structure / parsing / networking code (ADR-58 + the CRuby-stdlib and 16-repo realistic-usecase sweeps); a run-scoped return memo removing a superlinear whole-`lib` slowdown the new inference would otherwise cost; pre-1.0 plugin-contract consolidation (ADR-60, with BC breaks); agent-friendly structured diagnostic fields (ADR-61); the ADR-50 WD1 compatibility surface doc + WD2 bleeding-edge opt-in foundation; and ADR-54 cache slimming (~33.7 MB → ~2 MB per project). See `CHANGELOG.md` § `[0.1.19]`. |
+| v0.2.0 | 2026-06-17 | **First publicly-announced (general / evaluation) release** ([ADR-50](adr/50-release-engineering-and-stability-strategy.md)): publishes the enumerated compatibility surface ([`docs/compatibility.md`](compatibility.md)) as a minor-non-break trial toward the v1.0.0 freeze. Detection **"teeth"** + protection coverage — `call.undefined-method` / `call.argument-type-mismatch` now fire on union / refinement / multi-overload receivers (ADR-62 mutation harness, ADR-63 `coverage --protection`); wider constant folding; predefined-constant refinement; `Struct.new` value folding (ADR-48); `evidence_tier` + `documentation_url` diagnostic metadata (ADR-65). See `CHANGELOG.md` § `[0.2.0]`. |
 | v0.1.16 | 2026-06-03 | Plugin architecture overhaul and internal mechanism re-documentation. ADR-37/38/39/40 fully landed: all 14 bundled diagnostic-emitting plugins migrated onto `node_rule` (engine-owned walk, PHPStan-style); `dynamic_return` / `type_specifier` Slice 2; `rigor plugins --capabilities` AI-legible catalogue (Slice 3); `additional_initializers:` (ADR-38 def-form); `config_schema` declared defaults (ADR-40, 13 plugins migrated); `Source::Literals` grid complete + 10 plugins migrated; `Plugin::Inflector` over real `ActiveSupport::Inflector` + selectable isolation strategy (`process` default, `Plugin::Isolation`). ADR-43 RBS-complete ancestor resolution (`Plugin::Base` allow-list) + `make check-plugins` gate in `verify` + CI. Plugin contract structural guards: conformance spec, all-plugins-load spec, demos-run spec, external-plugin fixture (v0.2.0 gate 1 executable evidence). `Plugin::Base` + `Manifest` RBS surface completed. RBS robustness: synthesised namespaces + stub types for malformed/stale project `signature_paths:` sigs. `rigor-activerecord` missing-schema memoization fix (Redmine −86% memory, −51% wall time). Inference-budget survey + `RIGOR_BUDGET_TRACE` instrumentation. See `CHANGELOG.md` § `[0.1.16]`. |
 
-## Release strategy — the road to v0.2.0
+## Release strategy — the road to v1.0.0
 
-The `0.1.x` line is the **preview** line. The `0.2.x` line opens
-the **evaluation** line — still not a formal / GA release, but the
-first publicly announced version meant for trial deployment in
-real products.
+The `0.1.x` line was the **preview** line. **v0.2.0 (2026-06-17) opened the
+`0.2.x` evaluation line** — the first publicly-announced version, meant for
+trial deployment in real products and to solicit outside feedback. It is still
+not a formal / GA release; the road now points at **v1.0.0**, the hard
+contract freeze.
 
 | Line | Role |
 | --- | --- |
-| `0.1.x` | Preview. v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / tdiary / GitLab FOSS extended the line through v0.1.17 with substantial false-positive-reduction, onboarding, feature, architecture, and performance cycles. v0.1.12 left Mastodon `app + lib` at 6 unrelated errors; v0.1.13 – v0.1.15 added AI-assisted onboarding + Liskov `def.override-*`; v0.1.16 landed the full plugin interface-segregation + ergonomics suite (ADR-37/38/39/40/43) and the v0.2.0 gate-1 executable evidence; v0.1.17 completed the internal-structure review + performance tuning (incremental analysis, fast path, allocation cuts) and stood up the release-engineering machinery (ADR-49/50, the `release/x.y.z` gate); **v0.1.18 (CI-environment support, ADR-51) shipped on 2026-06-11 and v0.1.19 (the precision-and-trust cycle — ADR-55/56/57/58/60/61 + ADR-54) on 2026-06-13.** v0.1.19 is the **final preview cut — effectively the release candidate**; the next release is **v0.2.0**, the first publicly-announced evaluation release (see § "Release strategy"). |
-| `v0.2.0` | **First evaluation release.** Publicly announced as the first version intended for real-product trial deployment; opens the evaluation period and invites outside feedback. |
-| `0.2.x` | Evaluation line. Not yet a formal version, but the goal is to bring **every planned feature except the Ractor concurrency track** to high completion / production quality. |
+| `0.1.x` | **Preview (closed).** v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / GitLab FOSS extended it through v0.1.19 with false-positive-reduction, onboarding, feature, architecture, and performance cycles. v0.1.19 (2026-06-13) was the final preview cut / effective RC. |
+| `v0.2.0` | **First evaluation release (RELEASED 2026-06-17).** Publicly announced as the first version intended for real-product trial deployment; opens the evaluation period. See `CHANGELOG.md` § `[0.2.0]`. |
+| `0.2.x` | **Evaluation line (current).** Not yet a formal version; the goal is to bring every planned feature — **except the Ractor concurrency track** — to high completion / production quality, and to gather outside feedback. |
+| `v1.0.0` | **Hard contract freeze (target).** The enumerated public surface ([`docs/compatibility.md`](compatibility.md)) becomes binding; a change invalidating a conforming user's config / plugin / suppression is major-version-only from here. |
 
-### Where we stand after v0.1.19
+### What the road to v0.2.0 settled (now complete)
 
-The v0.1.9 "last preview cut" intent has been met (SKILL trio, ADR-22 slice 5, empirical-defaults tightening shipped) and the line has been *extended* through ten additional trial-, architecture-, and performance-driven patch cuts (v0.1.10 – v0.1.19). **The next-release question is now resolved: v0.1.19 (2026-06-13) is the final preview cut — effectively the release candidate — and the next release is v0.2.0, the first publicly-announced evaluation release** — see below and `docs/CURRENT_WORK.md` § "Next-session entry point" (A).
+The v0.2.0 gating conditions — all **met**:
 
-- 99.2% Mastodon FP reduction empirically demonstrated; Redmine 51%, GitLab FOSS ~80% on the surveyed scopes; Redmine memory footprint reduced −86% after the v0.1.16 `rigor-activerecord` memoization fix.
-- All three flow-folding G2 follow-ups (`retry`, intervening call, read-before-write nil) are closed (v0.1.12).
-- The `rigor plugins` (activation readiness, v0.1.12), `rigor plugin` (bundled-source browsing, v0.1.15), and `rigor plugins --capabilities` (AI-legible extension-protocol catalogue, v0.1.16) subcommands close the plugin-configuration and discovery gaps.
-- Onboarding is self-serve: `rigor skill` + `docs/install.md` let an AI agent install and configure Rigor from a single prompt (v0.1.13 / v0.1.14).
-- The `pre_eval:` mechanism (ADR-17), the Liskov `def.override-*` family (ADR-35), and the plugin interface-segregation + ergonomics suite (ADR-37/38/39/40/43) all shipped, closing the major remaining ADR queues through v0.1.16.
-- **v0.2.0 gate 1 executable evidence landed** (v0.1.16): the external-plugin fixture + conformance spec + all-plugins-load spec + demos-run spec prove the public plugin contract supports out-of-tree `rigor-*` gems. The remaining step is the *documented stability commitment* (the "won't break within 0.2.x" statement for pinned namespaces).
+- **External plugin contract stabilised + documented.** Executable evidence (external-plugin fixture + conformance / all-plugins-load / demos-run specs) landed v0.1.16; the documented stability commitment shipped v0.1.19 as [`docs/compatibility.md`](compatibility.md) (the [ADR-50](adr/50-release-engineering-and-stability-strategy.md) WD1 surface document) — it binds as a **trial** at v0.2.0 and freezes at v1.0.0.
+- **Distribution model settled** as a single bundled `rigortype` gem ([ADR-31](adr/31-contribution-and-supply-chain-policy.md), commit `9769f5fa`) — the subtree-split / per-plugin-publish gate was *superseded*, leaving only the external third-party `rigor-*` path (the author's own repo, depending on `gem "rigortype"`).
+- **Onboarding self-serve** via the SKILL trio + `docs/install.md` (v0.1.9 / v0.1.13 / v0.1.14).
+- **Release-engineering machinery** ([ADR-50](adr/50-release-engineering-and-stability-strategy.md), PHPStan-modelled): v0.2.0 is the release-engineering *trial* (the machinery + a minor-non-break pledge as rehearsal), v1.0.0 the *hard freeze*. The `release/x.y.z` branch + `release-gate.yml` + `make bench-perf` shipped v0.1.17; the perf baseline + Mastodon OSS-sweep thresholds are calibrated and the gate is required (both **recalibrated at the v0.2.0 cut** — `bench/baseline.json` + `data/oss-sweep/mastodon-thresholds.json`; see `docs/CURRENT_WORK.md`). The WD2 bleeding-edge opt-in foundation is wired (empty overlay; `bleeding_edge:` config + `rigor show-bleedingedge` + `rigor check --bleeding-edge[=ids]`).
 
-The v0.2.0 gates have been **reduced from three to one**: the SKILL trio (gate 3) shipped, and the subtree-split / per-plugin-publish gate was **superseded** by the single-bundled-`rigortype`-gem distribution model ([ADR-31](adr/31-contribution-and-supply-chain-policy.md) + commit `9769f5fa`). The one substantive gate left is the documented stability commitment for the external plugin contract — **[ADR-50](adr/50-release-engineering-and-stability-strategy.md) provides the policy** (see below) and its WD1 surface document **shipped in v0.1.19** ([`docs/compatibility.md`](compatibility.md)); it binds as a trial at v0.2.0 and freezes at v1.0.0, so this gate is now met.
+**Released-version detail lives in `CHANGELOG.md`** (the milestones table above points to each `§`): v0.1.18 (CI-environment support, [ADR-51](adr/51-ci-diagnostic-output-formats.md) — six CI-native `--format` renderings + runtime CI auto-detection), v0.1.19 (precision-and-trust + the pre-freeze plugin-contract consolidation [ADR-60]), v0.2.0 (detection teeth [ADR-62] + protection coverage [ADR-63] + the compatibility-surface trial [ADR-50]).
 
-**v0.1.17 shipped** the internal-structure review + performance-tuning cycle (full record in `CHANGELOG.md` § `[0.1.17]`): ADR-44 allocation de-churn (~−42% allocations on Mastodon), ADR-45 the unchanged-project fast path (~42× on an unchanged GitLab run), ADR-46 incremental analysis (`rigor check --incremental`, ~6–9× on unchanged / leaf-edit, CI-gated by `--verify-incremental`), ADR-47 `flow.unreachable-clause`, the `rigor:v1:conforms-to` directive, the `call.self-undefined-method` rule (`:off`), and ADR-48 `Data.define` value folding.
-
-**The road to v0.2.0 is now formalised in [ADR-50](adr/50-release-engineering-and-stability-strategy.md)** (release-engineering + stability strategy, PHPStan-modelled): **v0.2.0 is a release-engineering *trial*** (the machinery + a minor-non-break pledge as rehearsal) and **v1.0.0 the *hard contract freeze*** — resolving the ADR-25/32-vs-37 freeze-timing split in favour of v1.0.0. It fixes the compatibility surface (public face frozen / engine internals free), keeps diagnostic *output* non-contract while gating a *new required discipline* behind a PHPStan-style inspectable bleeding-edge overlay until graduation (default-on at the next major after a ~4-week soak), commits a `make bench-perf` + CI perf gate, and sets the support line (latest + previous minor → PHPStan `1.x`-default-branch post-1.0). **The machinery shipped in v0.1.17** — the `release/x.y.z` branch trigger on `ci.yml` + the `release-gate.yml` + `make bench-perf`; v0.1.17 was the first cut on it (caught + fixed a real config-crash bug mid-cut). **Gate calibration and hardening DONE (2026-06-13):** `bench/baseline.json` calibrated from a Linux CI run (lib wall 13.75 s / 16.0 M allocs / 206 MB RSS, `calibrated: true`, `ddbcb071`), the release gate hardened from advisory → required (ADR-50 WD4/WD6); the Mastodon OSS-sweep thresholds calibrated against v4.5.10 `app lib config` (445 diagnostics / min precision 0.4284, exact-count gate, `1d7162a5`); the ADR-27 § WD3 `setup-ruby` prebuilt-Ruby-4.0 timing caveat verified and closed (`26fb8536`). **Remaining v0.2.0 work:** the ADR-50 staged implementation — the enumerated public-surface doc (the one substantive gate) **shipped in v0.1.19** ([`docs/compatibility.md`](compatibility.md)) and the **bleeding-edge overlay foundation landed** in the same cut (WD2: `Rigor::BleedingEdge` registry — empty overlay —, the `bleeding_edge:` config key, `rigor show-bleedingedge`, and the `SeverityProfile.resolve` composition hook; the first queued discipline lands as one `FEATURES` entry). Still queued: WD2's `--bleeding-edge` CLI flag on `rigor check` (optional — the config key is the primary opt-in), the support-line model (WD5), and a `rigor upgrade` migration command (WD7). **The next-release decision is made — v0.1.19 was the final preview / effective RC, and v0.2.0 is the next cut.** See `docs/CURRENT_WORK.md` § "Next-session entry point".
-
-### v0.1.18 — CI-environment support (RELEASED 2026-06-11)
-
-This preview cut delivered **first-class support for running Rigor in users'
-CI environments** — GitHub Actions, GitLab CI, and others — building on the
-distribution / CI channel of [ADR-27](adr/27-tool-distribution-model.md).
-(Distinct from Rigor's *own* `ci.yml` / `release-gate.yml`, which test Rigor
-itself; this is about users running Rigor in *their* pipelines.) Full release
-notes in `CHANGELOG.md` § `[0.1.18]`.
-
-**Landed — [ADR-51](adr/51-ci-diagnostic-output-formats.md) (the core of the cycle):**
-
-- **Six `rigor check --format` CI-native renderings** of the diagnostic
-  stream (`lib/rigor/cli/diagnostic_formats.rb`), each a pure presentation
-  layer over the `--format json` fields — no new analysis: `sarif` (SARIF
-  2.1.0, the cross-platform anchor + reviewdog `-f=sarif`), `github` (GitHub
-  Actions workflow commands → inline PR annotations), `gitlab` (Code Quality
-  → the MR widget), `checkstyle` (→ reviewdog `-f=checkstyle` → *any*
-  reviewdog reporter + Jenkins), `junit` (test-report CIs), `teamcity`
-  (TeamCity inspections). WD2 fixes the per-format severity/identifier
-  contract table.
-- **Runtime CI auto-detection** (WD7, `lib/rigor/cli/ci_detector.rb`,
-  PHPStan `CiDetectedErrorFormatter`-modelled): on the default `text` output,
-  a detected **first-class** CI auto-emits its native form (GitHub Actions →
-  `github`, TeamCity → `teamcity`, on top of the human log); GitLab hints
-  `--format gitlab`; **second-class** CIs (CircleCI/Jenkins/Travis/Azure/
-  Bitbucket/Buildkite/Drone/…) hint the reviewdog / `junit` path. Augments
-  text only (explicit `--format` untouched), opt-out `--no-ci-detect` /
-  `RIGOR_CI_DETECT=0`.
-- **The onboarding half** ([ADR-27 § WD3](adr/27-tool-distribution-model.md)'s
-  queued templates): copy-paste CI setup templates under
-  `docs/manual/ci-templates/` (SARIF / annotations / reviewdog
-  `.github/workflows/rigor.yml`, `.gitlab-ci.yml`, generic recipe), the
-  bundled **`rigor-ci-setup`** skill (`rigor skill` — Phase 0 platform
-  detection + per-platform reviewdog reporter routing), and the rewritten CI
-  manual chapter `docs/manual/11-ci.md`.
-
-**Scoping decisions resolved this cycle:** a **new ADR** (ADR-51, not an
-ADR-27 amendment — distribution vs output are distinct public-contract
-surfaces under [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
-WD1); **all six formats** shipped (SARIF the cross-platform anchor;
-`checkstyle`/`junit`/`teamcity` for reviewdog / Jenkins / test-report reach —
-comparator PHPStan ships github/gitlab/checkstyle/junit/teamcity but **no
-SARIF**); the **GitHub default surface is `github` annotations, not SARIF**
-(SARIF upload needs code scanning = GitHub Advanced Security on private
-repos); **first-class (native, PHPStan-supported) vs second-class (reviewdog)**
-is the runtime split (WD7). Built on the CI-friendly primitives already in
-place: stable exit codes, `--format json`, the baseline mechanism
-([ADR-22](adr/22-baseline-and-project-onboarding.md)), severity profiles
-([ADR-8](adr/8-steep-inspired-improvements.md)), `--no-cache`.
-
-**Demand-gated follow-ups** (recorded in ADR-51, none were gating):
-`--output FILE`, reviewdog native `rdjson`, richer SARIF rule metadata.
-The ADR-27 § WD3 `setup-ruby` prebuilt-Ruby-4.0 timing caveat was verified and
-closed before the cut (`26fb8536`; 4.0.0–4.0.5 prebuilt, 0.30 s observed).
-
-### v0.1.19 — precision-and-trust cycle / effective RC (RELEASED 2026-06-13)
-
-The **final `0.1.x` preview cut — effectively the release candidate for
-v0.2.0**. Full release notes in `CHANGELOG.md` § `[0.1.19]`; this is the
-planning view.
-
-**Theme:** trustworthy inference for ordinary procedural Ruby, plus the
-last pre-freeze plugin-contract work. Headline: method-call results now
-flow through user-defined helper methods instead of widening to an opaque
-type ([ADR-57](adr/57-self-call-return-adoption.md)), backed by
-recursive-return ([ADR-55](adr/55-recursive-return-precision.md)) and
-block/loop captured-mutation ([ADR-56](adr/56-block-captured-local-mutation.md))
-precision, and a large false-positive batch on real-world data-structure /
-parsing / networking code ([ADR-58](adr/58-ivar-field-typing.md) + the
-CRuby-stdlib and 16-repo realistic-usecase sweeps). A sound run-scoped
-return memo removes the superlinear whole-`lib` slowdown the new inference
-would otherwise cost.
-
-**Also landed:** the pre-1.0 plugin-contract consolidation
-([ADR-60](adr/60-pre-freeze-plugin-contract-consolidation.md) — the
-last-window BC breaks before the v1.0 surface freeze); agent-friendly
-structured diagnostic fields ([ADR-61](adr/61-agent-friendly-diagnostic-statistics.md));
-the [ADR-50](adr/50-release-engineering-and-stability-strategy.md) WD1
-compatibility surface document ([`docs/compatibility.md`](compatibility.md))
-+ WD2 bleeding-edge opt-in *foundation* (empty overlay); and
-[ADR-54](adr/54-cache-slimming.md) cache slimming (~33.7 MB → ~2 MB per
-project).
-
-**Next:** v0.2.0 — the first publicly-announced evaluation release (§ below).
-
-### v0.2.0 — first evaluation release
-
-The first publicly announced version, intended for trial
-deployment in real products. v0.2.0 is an **evaluation** release,
-not a GA / formal version — it opens the evaluation period and
-solicits outside feedback. Gating conditions (the v0.1.x
-"out of scope today" list this release absorbs):
-
-- The ADR-2 plugin-contract surface stabilised enough to support
-  external `rigor-*` gems outside this monorepo (a third-party
-  gem depending on `gem "rigortype"` per [ADR-31](adr/31-contribution-and-supply-chain-policy.md)
-  WD4), with an external-author onboarding path and a test that an
-  out-of-tree plugin loads and runs. **Executable evidence landed** (v0.1.16):
-  external-plugin fixture, conformance spec, all-plugins-load spec, and
-  demos-run spec are all in CI. The documented stability commitment —
-  the "won't break within 0.2.x" statement for the pinned
-  plugin-contract namespaces (and the wider public surface) —
-  **shipped in v0.1.19** as [`docs/compatibility.md`](compatibility.md)
-  (the ADR-50 WD1 surface document); it binds as a trial at v0.2.0 and
-  freezes at v1.0.0. This gate is now met.
-- ~~The subtree-split / RubyGems publishing flow exercised for at
-  least the `rigor-rails` family.~~ **Superseded.** The
-  distribution model changed to a **single bundled `rigortype`
-  gem** — all bundled plugins ship inside it (per-plugin gemspecs
-  dropped, commit `9769f5fa`), and [ADR-31](adr/31-contribution-and-supply-chain-policy.md)
-  retracted subtree-split as a default path (WD5 keeps subtree
-  *merge* only as a rare reserved option, never the planned flow).
-  So there is no per-plugin publish flow to exercise; the only
-  published artefact is `rigortype` itself (already on the release
-  cadence). What remains of this gate folds into the first bullet:
-  the *external* third-party `rigor-*` path (the author's own repo
-  + gemspec, depending on `gem "rigortype"`).
-- The SKILL trio shipped (v0.1.9) so newcomers have an onboarding
-  path.
+**ADR-50 remaining (post-v0.2.0):** the support-line model (WD5 — latest + previous minor, → PHPStan `1.x`-default-branch post-1.0), a `rigor upgrade` migration command (WD7, deferred until a concrete BC gives it a target), and the first bleeding-edge `FEATURES` entry when a next-major discipline is queued (the overlay is empty today).
 
 ### v0.2.x — high-completion evaluation line
 

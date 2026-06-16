@@ -1,6 +1,6 @@
 # Compatibility and the public surface
 
-Status: **Draft (v0.1.x preview line; enumerating toward the v0.2.0 trial and the v1.0.0 freeze).**
+Status: **Trial (v0.2.0 evaluation line; the enumerated surface below is committed as a minor-non-break discipline — a rehearsal of the v1.0.0 freeze).**
 
 This is the human-readable companion to [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
 (release engineering and stability strategy) — the document the
@@ -20,13 +20,14 @@ Rigor follows a **trial-then-freeze** path (ADR-50 § Decision 1):
 
 | Line | What stability means here |
 | --- | --- |
-| **`0.1.x` — preview (current)** | The surface is still *extending*, and a breaking change to it is allowed within the line. This document **enumerates** the surface so the freeze has a target; it does not yet bind. (E.g. [ADR-60](adr/60-pre-freeze-plugin-contract-consolidation.md) intentionally took the last-window plugin-contract BC breaks in this line.) |
-| **`v0.2.0` — evaluation trial** | The first version that **pledges minor-non-break on the enumerated surface** as an operating discipline — a rehearsal of the v1.0.0 contract, run while the inference engine still evolves. The surface is enumerated and committed-to-as-a-trial, not frozen. |
+| **`0.1.x` — preview** | The surface was still *extending*, and a breaking change to it was allowed within the line. This document **enumerated** the surface so the freeze has a target; it did not yet bind. (E.g. [ADR-60](adr/60-pre-freeze-plugin-contract-consolidation.md) intentionally took the last-window plugin-contract BC breaks in this line.) |
+| **`v0.2.0` — evaluation trial (current)** | The first version that **pledges minor-non-break on the enumerated surface** as an operating discipline — a rehearsal of the v1.0.0 contract, run while the inference engine still evolves. The surface is enumerated and committed-to-as-a-trial, not frozen. |
 | **`v1.0.0` — hard freeze** | The enumerated surface below becomes **binding** under the compatibility policy. A change that invalidates a conforming user's configuration, plugin, or suppression is a breaking change and is major-version-only from here. |
 
-So today (a `0.1.x` cut) this is a **draft enumeration**: it is the
-surface v0.2.0 will commit to as a trial and v1.0.0 will freeze. Pin a
-specific Rigor version while the line is in preview.
+So today (the `v0.2.0` cut) this is a **committed trial**: the
+enumerated surface below is the discipline Rigor pledges to keep
+minor-non-break, and v1.0.0 will freeze it. Pin a specific Rigor version
+while the engine still evolves through the trial.
 
 ## The compatibility model
 

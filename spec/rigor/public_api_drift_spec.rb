@@ -67,6 +67,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     locals()
     method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name)
     method_chain_narrowings()
+    param_inferred_types()
     program_globals()
     seed_declaration_sourced_ivar(req:name,req:type)
     self_type()

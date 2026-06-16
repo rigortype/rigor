@@ -52,6 +52,12 @@ module Rigor
     def discovered_class_sources = @discovery.discovered_class_sources
     def data_member_layouts = @discovery.data_member_layouts
     def struct_member_layouts = @discovery.struct_member_layouts
+    # ADR-67 WD3 — call-site-inferred parameter types, keyed by
+    # `[class_name, method_name, kind]`. `build_method_entry_scope` consults
+    # this to seed an undeclared `def` parameter with the union of its
+    # resolved call-site argument types (precision-additive; an RBS-declared
+    # parameter always wins). Empty unless a collection pass seeded it.
+    def param_inferred_types = @discovery.param_inferred_types
 
     # Narrowing key for an indexed read `receiver[key]` where both
     # the receiver and the key are stable enough to address. The

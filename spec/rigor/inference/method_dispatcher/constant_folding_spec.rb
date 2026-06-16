@@ -1202,6 +1202,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         expect(result).to eq(tuple_of(constant_of(97), constant_of(98)))
       end
 
+      it "lifts (s).codepoints to a per-position Tuple of codepoint Constants" do
+        result = fold_types(constant_of("aé"), :codepoints)
+        expect(result).to eq(tuple_of(constant_of(97), constant_of(233)))
+      end
+
       it "lifts (s).lines to a per-position Tuple of line Constants" do
         result = fold_types(constant_of("a\nb\nc"), :lines)
         expect(result).to eq(tuple_of(constant_of("a\n"), constant_of("b\n"), constant_of("c")))

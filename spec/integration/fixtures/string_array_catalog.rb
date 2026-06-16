@@ -46,3 +46,7 @@ assert_type("3", "hello".rindex("l"))
 assert_type('"  hi  "', "hi".center(6))
 assert_type('"hi   "', "hi".ljust(5))
 assert_type('"   hi"', "hi".rjust(5))
+
+# `codepoints` lifts to a per-position Tuple of Integer codepoints,
+# the sibling of `bytes` (`é` is one codepoint 233 but two UTF-8 bytes).
+assert_type("[97, 233]", "aé".codepoints)

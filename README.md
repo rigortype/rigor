@@ -224,3 +224,35 @@ contributors should read.
 ## License
 
 Mozilla Public License Version 2.0. See [`LICENSE`](LICENSE).
+
+## Sponsors
+
+Rigor is built and maintained by one person, who has spent the better
+part of the last month — nearly every spare hour of personal time — on
+this project. Sustainable development depends on sustainable funding.
+
+**The current monthly budget is well short of the $200 minimum needed
+to keep this pace going; $600 or more would let me work on it
+properly.** If Rigor is saving you time or catching real bugs, please
+consider contributing:
+
+- **GitHub Sponsors**: [github.com/sponsors/zonuexe](https://github.com/sponsors/zonuexe)
+- **FANBOX** (credit-card / PayPal): [tadsan.fanbox.cc](https://tadsan.fanbox.cc/)
+
+**For individuals** — any amount is welcome and genuinely appreciated.
+Even a small recurring pledge (think of it as buying me one coffee a
+month) makes a difference when it adds up across many users.
+
+**For companies** using Rigor in production — please consider a
+contribution that reflects the engineering hours Rigor is saving you.
+A modest business sponsorship goes a long way toward keeping this
+project alive and actively maintained.
+
+**Sponsors at $50/month or more** are listed here with a banner.
+*(This threshold will likely move to $100/month at some point — early
+sponsors lock in the lower bar.)*
+
+To the sponsors who have already contributed: **thank you sincerely.**
+Your support makes the difference between a project that stalls and
+one that ships.
+

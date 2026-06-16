@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "singleton_folding"
+require_relative "member_shape_projection"
 
 module Rigor
   module Inference
@@ -29,6 +30,10 @@ module Rigor
       # See docs/adr/48-data-struct-value-folding.md.
       module DataFolding
         module_function
+
+        # The `[]` / `to_h` / `deconstruct` / `members` / `with` projections
+        # and the reader-redefinition guard are shared with {StructFolding}.
+        extend MemberShapeProjection
 
         # @return [Rigor::Type, nil] the folded result, or nil to defer.
         def try_dispatch(context)
@@ -165,80 +170,11 @@ module Rigor
           when :deconstruct then instance_deconstruct(instance)
           when :deconstruct_keys then instance_deconstruct_keys(instance, args)
           when :members then instance_members(instance)
-          when :with then instance_with(instance, args)
+          when :with
+            instance_with(instance, args) do |members, class_name|
+              Type::Combinator.data_instance_of(members: members, class_name: class_name)
+            end
           end
-        end
-
-        # A `Data.define` class body (the `class Point < Data.define(:x);
-        # def x; …; end; end` subclass body, or a `Const = Data.define(:x) do
-        # def x; …; end; end` block) can redefine a member's synthesised
-        # reader. When it does, `inst.x` runs that `def`, NOT the member, so
-        # folding the read to the member type would be unsound (a downstream
-        # FP). Both named forms register the override as a real `def` node
-        # under the class name, so an entry in the project def-node table is
-        # the discriminator (the synthesised reader has no def node). The
-        # value accessors `[]` / `to_h` / `deconstruct` bypass the reader and
-        # stay foldable, so this gate is on the bare member read only.
-        def reader_overridden?(instance, method_name, scope)
-          class_name = instance.class_name
-          return false if class_name.nil? || scope.nil?
-
-          !scope.user_def_for(class_name, method_name).nil?
-        end
-
-        def instance_index(instance, args)
-          return nil unless args.size == 1
-
-          arg = args.first
-          return nil unless arg.is_a?(Type::Constant)
-
-          key = arg.value
-          case key
-          when Symbol
-            instance.members[key]
-          when Integer
-            values = instance.members.values
-            idx = key.negative? ? key + values.size : key
-            values[idx] if idx && idx >= 0 && idx < values.size
-          end
-        end
-
-        def instance_to_h(instance)
-          Type::Combinator.hash_shape_of(instance.members.dup)
-        end
-
-        def instance_deconstruct(instance)
-          Type::Combinator.tuple_of(*instance.members.values)
-        end
-
-        # `deconstruct_keys(nil)` / `deconstruct_keys([:x])` both yield a
-        # subset of the member map; the conservative, always-correct answer
-        # is the full closed member shape.
-        def instance_deconstruct_keys(instance, args)
-          return nil unless args.size <= 1
-
-          Type::Combinator.hash_shape_of(instance.members.dup)
-        end
-
-        def instance_members(instance)
-          Type::Combinator.tuple_of(*instance.member_names.map { |name| Type::Combinator.constant_of(name) })
-        end
-
-        # `Data#with(x: 9)` returns a new frozen copy with the named members
-        # overridden. Only a closed keyword `HashShape` whose keys are a
-        # subset of the members folds; anything else defers (RBS resolves
-        # `with` to `self`, returning the unchanged instance type).
-        def instance_with(instance, args)
-          return instance if args.empty?
-          return nil unless args.size == 1
-
-          shape = args.first
-          return nil unless shape.is_a?(Type::HashShape) && shape.closed?
-          return nil unless shape.optional_keys.empty?
-          return nil unless shape.pairs.keys.all? { |key| instance.members.key?(key) }
-
-          merged = instance.members.merge(shape.pairs)
-          Type::Combinator.data_instance_of(members: merged, class_name: instance.class_name)
         end
       end
     end

@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "singleton_folding"
+require_relative "member_shape_projection"
 
 module Rigor
   module Inference
@@ -42,6 +43,10 @@ module Rigor
       # See docs/adr/48-data-struct-value-folding.md § "Struct follow-up".
       module StructFolding
         module_function
+
+        # The `[]` / `to_h` / `deconstruct` / `members` / `with` projections
+        # and the reader-redefinition guard are shared with {DataFolding}.
+        extend MemberShapeProjection
 
         # @return [Rigor::Type, nil] the folded result, or nil to defer.
         def try_dispatch(context)
@@ -246,7 +251,10 @@ module Rigor
           when :deconstruct then instance_deconstruct(instance)
           when :deconstruct_keys then instance_deconstruct_keys(instance, args)
           when :members then instance_members(instance)
-          when :with then instance_with(instance, args)
+          when :with
+            instance_with(instance, args) do |members, class_name|
+              Type::Combinator.struct_instance_of(members: members, class_name: class_name)
+            end
           end
         end
 
@@ -288,69 +296,6 @@ module Rigor
           return false unless receiver.is_a?(Prism::LocalVariableReadNode) && scope
 
           scope.struct_fold_safe?(receiver.name)
-        end
-
-        # A `Struct` subclass body can redefine a member's synthesised
-        # reader (`def x`); when it does, `inst.x` runs that `def`, not the
-        # member, so folding the read would be unsound. Mirrors
-        # {DataFolding#reader_overridden?}: a real `def` node under the class
-        # name is the discriminator (the synthesised reader has none).
-        def reader_overridden?(instance, method_name, scope)
-          class_name = instance.class_name
-          return false if class_name.nil? || scope.nil?
-
-          !scope.user_def_for(class_name, method_name).nil?
-        end
-
-        def instance_index(instance, args)
-          return nil unless args.size == 1
-
-          arg = args.first
-          return nil unless arg.is_a?(Type::Constant)
-
-          key = arg.value
-          case key
-          when Symbol
-            instance.members[key]
-          when Integer
-            values = instance.members.values
-            idx = key.negative? ? key + values.size : key
-            values[idx] if idx && idx >= 0 && idx < values.size
-          end
-        end
-
-        def instance_to_h(instance)
-          Type::Combinator.hash_shape_of(instance.members.dup)
-        end
-
-        def instance_deconstruct(instance)
-          Type::Combinator.tuple_of(*instance.members.values)
-        end
-
-        def instance_deconstruct_keys(instance, args)
-          return nil unless args.size <= 1
-
-          Type::Combinator.hash_shape_of(instance.members.dup)
-        end
-
-        def instance_members(instance)
-          Type::Combinator.tuple_of(*instance.member_names.map { |name| Type::Combinator.constant_of(name) })
-        end
-
-        # `Struct#with(x: 9)` (Ruby 3.2+) returns a new copy with the named
-        # members overridden. Only a closed keyword `HashShape` whose keys
-        # are a subset of the members folds; anything else defers.
-        def instance_with(instance, args)
-          return instance if args.empty?
-          return nil unless args.size == 1
-
-          shape = args.first
-          return nil unless shape.is_a?(Type::HashShape) && shape.closed?
-          return nil unless shape.optional_keys.empty?
-          return nil unless shape.pairs.keys.all? { |key| instance.members.key?(key) }
-
-          merged = instance.members.merge(shape.pairs)
-          Type::Combinator.struct_instance_of(members: merged, class_name: instance.class_name)
         end
       end
     end

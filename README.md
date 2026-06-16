@@ -204,12 +204,15 @@ the reference companions.
 
 ## Status
 
-Current release: **`v0.1.18`** (2026-06-11), with `v0.2.0` — the first
-evaluation release — landing shortly. Rigor analyses real Ruby today:
-the `0.1.x` line has been hardened against Mastodon, Redmine, and
-GitLab FOSS, and the deliberately conservative rule catalogue grows
-only as fast as the zero-false-positive bar allows. Release history:
-[`CHANGELOG.md`](CHANGELOG.md) · forward-looking commitments:
+Current release: **`v0.2.0`** (2026-06-17) — the first
+publicly-announced (general / evaluation) release. It publishes an
+enumerated [compatibility surface](docs/compatibility.md) as a
+minor-non-break trial, rehearsing the contract that hard-freezes at
+`v1.0.0`. Rigor analyses real Ruby today: it has been hardened against
+Mastodon, Redmine, and GitLab FOSS, and the deliberately conservative
+rule catalogue grows only as fast as the zero-false-positive bar
+allows. Release history: [`CHANGELOG.md`](CHANGELOG.md) ·
+forward-looking commitments:
 [Roadmap](https://rigor.typedduck.fail/reference/roadmap/).
 
 ## Contributing

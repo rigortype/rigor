@@ -378,7 +378,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `length` / `size` | ✅ | `tuple_size` → `Constant[Integer]`。 |
 | `max` / `min` | ✅ | `tuple_max` / `tuple_min` → 要素型の Union。 |
 | `max_by` / `min_by` | 🔲 | ブロックあり形式。BlockFolding 非対応。中優先度。 |
-| `minmax` | 🔲 | `Tuple[min, max]` 形式。中優先度。 |
+| `minmax` | ✅ | `tuple_minmax_pair` → `Tuple[Constant[min], Constant[max]]`（全要素 Constant かつ比較可能なとき）。 |
 | `none?` | ✅ | `tuple_none?` → `Constant[bool]`。 |
 | `pack` | 🔲 | バイナリパッキング → `Constant[String]`。低優先度。 |
 | `pop` / `shift` | 🚫 | 破壊的変更。 |
@@ -403,7 +403,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `to_h` | ✅ | `tuple_to_h` → HashShape（`Tuple[Tuple[K,V]…]` 形式）。 |
 | `transpose` | 🔲 | 2 次元 Tuple の行列転置。低優先度。 |
 | `union` | 🔲 | 集合和（dedup）。低優先度。 |
-| `uniq` | 🔲 | Tuple 要素の重複除去。低優先度。 |
+| `uniq` | ✅ | `tuple_uniq` → Constant 要素の重複除去 Tuple。 |
 | `values_at` | ✅ | `values_at(*indices)` → 位置指定 Tuple。**高優先度。** `tuple_values_at` 実装。 |
 | `zip` | ✅ | `tuple_zip` → 要素ペア Tuple。 |
 
@@ -424,8 +424,8 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [ ] slice     → TUPLE_HANDLERS → values_at の Range / 2 引数形式
 
 低優先度:
-[ ] uniq      → TUPLE_HANDLERS → Union 縮小 Tuple
-[ ] minmax    → TUPLE_HANDLERS → Tuple[min_type, max_type]
+[x] uniq      → TUPLE_HANDLERS → `tuple_uniq`（Constant 要素の重複除去 Tuple）
+[x] minmax    → TUPLE_HANDLERS → `tuple_minmax_pair` → Tuple[Constant[min], Constant[max]]
 [ ] max_by / min_by → ExpressionTyper ブロックフォールド追加
 ```
 

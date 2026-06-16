@@ -1,0 +1,28 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- StringScanner#[] ---
+#
+# The pinned `rbs` gem (4.0.2) declares `StringScanner#[]` as only:
+#
+#   def []: (Integer) -> String?
+#
+# But `StringScanner#[]` also accepts a capture-group *name* — a `String`
+# or `Symbol` — and returns the named capture from the most recent match.
+# Named-capture access (`scanner[:key]`) is the idiomatic form when the
+# scan pattern uses named groups:
+#
+#   scanner.skip(/(?<key>\w+)=/)
+#   scanner[:key]   # => the captured String, or nil
+#
+# Newer `ruby/rbs` already widens the signature to
+# `(Integer | String | Symbol) -> String?`; the pinned 4.0.2 gem lags.
+# Without the wider overload, a named-capture access such as Mastodon's
+# `scanner[:key]` false-fires `call.argument-type-mismatch` (the lone
+# overload rejects a `Symbol`).
+#
+# The overlay supplies the runtime-accurate overload; drop it once the
+# pinned `rbs` gem carries the wider signature.
+class StringScanner
+  def []: (Integer | String | Symbol) -> String?
+        | ...
+end

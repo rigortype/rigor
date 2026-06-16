@@ -2455,7 +2455,14 @@ module Rigor
         # everything, so they stay silent (FP-safe). `self`/`instance`
         # are translated with `self_type: nil` on both sides, so a
         # parent `-> self` and an override `-> self` never fire.
-        def override_return_widened_diagnostic(path, def_node, scope_index)
+        # The authored-override resolution shared by the Liskov override
+        # rules (`def.override-return-widened` and
+        # `def.override-param-narrowed`): the def must be an instance method
+        # whose own class declares it in RBS, and a project-discovered
+        # ancestor must also declare it. Returns
+        # `[scope, override_method, parent_class, parent_method]`, or nil
+        # (the rule does not fire) when any gate is unmet.
+        def resolve_authored_override(def_node, scope_index)
           return nil unless def_node.receiver.nil? # instance methods only (singleton: follow-on)
 
           scope = scope_index[def_node]
@@ -2475,6 +2482,14 @@ module Rigor
           return nil if parent.nil?
 
           parent_class, parent_method = parent
+          [scope, override_method, parent_class, parent_method]
+        end
+
+        def override_return_widened_diagnostic(path, def_node, scope_index)
+          resolved = resolve_authored_override(def_node, scope_index)
+          return nil if resolved.nil?
+
+          scope, override_method, parent_class, parent_method = resolved
           override_return = declared_return_union(override_method, scope.environment)
           parent_return = declared_return_union(parent_method, scope.environment)
           return nil if override_return.nil? || parent_return.nil?
@@ -2547,25 +2562,10 @@ module Rigor
         # overload-arm ambiguity, both sides must have exactly one
         # method type.
         def override_param_narrowed_diagnostic(path, def_node, scope_index)
-          return nil unless def_node.receiver.nil? # instance methods only
+          resolved = resolve_authored_override(def_node, scope_index)
+          return nil if resolved.nil?
 
-          scope = scope_index[def_node]
-          return nil if scope.nil?
-
-          self_type = scope.self_type
-          return nil unless self_type.respond_to?(:class_name)
-
-          class_name = self_type.class_name.to_s
-          method_name = def_node.name
-
-          override_method = safe_instance_method_definition(class_name, method_name, scope)
-          return nil if override_method.nil?
-          return nil unless defined_on?(override_method, class_name)
-
-          parent = nearest_ancestor_method_def(scope, class_name, method_name)
-          return nil if parent.nil?
-
-          parent_class, parent_method = parent
+          _scope, override_method, parent_class, parent_method = resolved
           override_params = positional_param_types(override_method)
           parent_params = positional_param_types(parent_method)
           return nil if override_params.nil? || parent_params.nil?

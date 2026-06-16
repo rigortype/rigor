@@ -202,11 +202,12 @@
 | `%` | 🚫 | — | `Enumerator` / ブロック反復子 |
 | `all?` / `any?` / `none?` / `one?` | 🔷 | — | BlockFolding 経由 |
 | `map` / `select` / `reject` / `flat_map` 等 | 🔷 | — | BlockFolding / RBS |
-| `sum` | 🔲 | — | Integer 等差数列は `n*(a+b)/2` で Constant に畳める。中優先度 |
+| `sum` | ✅ | `15` | `RANGE_FOLD_METHODS` に `:sum` 追加 + `range_constant_unary` の `when :sum`（Gauss 閉形式）で `Constant[Integer]`。 |
 | `entries` | ✅ | `Array[Dynamic[top]]` | `RANGE_FOLD_METHODS` に `:entries` 追加 + `range_constant_unary` に `when :entries` 追加済み。 |
 | `minmax` | ✅ | `[Dynamic[top]\|nil, Dynamic[top]\|nil]` | `range_constant_unary` に `when :minmax` + `range_minmax_tuple` 追加済み。 |
-| `first(n)` | 🔲 | `Array[Dynamic[top]]` | 整数引数あり形式。Tuple リフト可。中優先度 |
-| `last(n)` | 🔲 | `Array[Dynamic[top]]` | 同上 |
+| `first(n)` | ✅ | `[1, 2, 3]` | `try_fold_range_constant_binary` → `range_take_tuple`（n ≤ `RANGE_TO_A_LIMIT`）で Tuple リフト。 |
+| `last(n)` | ✅ | `[8, 9, 10]` | 同上（末尾 n 要素、排他範囲は `end` 手前で止まる）。 |
+| `take(n)` | ✅ | `[1, 2, 3]` | `first(n)` と同義。同経路で Tuple リフト。 |
 | `to_h` | 🚫 | — | Range 要素が `[k, v]` の 2 要素 Array でない限り raise |
 
 ### 3-2. 優先度別チェックリスト
@@ -216,10 +217,10 @@
 
 **🟡 中優先度**（実装済み）
 - [x] `minmax` → `range_constant_unary` に `when :minmax` + `range_minmax_tuple` 追加済み
-- [ ] `first(n)` / `last(n)` → `try_fold_binary_set` または専用の `try_fold_range_constant_binary` で整数引数 n ≤ LIMIT の場合に Tuple リフト
+- [x] `first(n)` / `last(n)` / `take(n)` → 専用の `try_fold_range_constant_binary`（`range_take_tuple`）で整数引数 n ≤ `RANGE_TO_A_LIMIT` の場合に Tuple リフト（`min(n, range.size)` で実材料化数を上限）
 
-**🟢 低優先度**
-- [ ] `sum` → 等差数列公式で Constant に畳む（ただし Integer Range のみ対象）
+**🟢 低優先度**（実装済み）
+- [x] `sum` → 等差数列公式（Gauss 閉形式）で `Constant[Integer]` に畳む（Integer Range のみ対象）
 
 ---
 

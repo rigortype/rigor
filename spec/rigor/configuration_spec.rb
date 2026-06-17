@@ -241,6 +241,30 @@ RSpec.describe Rigor::Configuration do
       end.to raise_error(ArgumentError, /must be one of/)
     end
 
+    it "gives a friendly error when a severity is an unquoted YAML boolean" do
+      # `off` is YAML 1.1-reserved and parses to `false`; the user
+      # almost certainly meant the severity string "off".
+      expect do
+        described_class.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "severity_overrides" => { "flow.dead-assignment" => false }
+          )
+        )
+      end.to raise_error(
+        ArgumentError,
+        /severity_overrides\["flow\.dead-assignment"\].*did you mean the string "off".*quote the severity/m
+      )
+    end
+
+    it "accepts the quoted \"off\" severity" do
+      configuration = described_class.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "severity_overrides" => { "flow.dead-assignment" => "off" }
+        )
+      )
+      expect(configuration.severity_overrides).to eq("flow.dead-assignment" => :off)
+    end
+
     # ADR-50 § WD2 — the `bleeding_edge:` overlay selector.
     describe "bleeding_edge:" do
       def config_with(value)

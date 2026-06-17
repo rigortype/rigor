@@ -600,6 +600,18 @@ module Rigor
       raise ArgumentError, "severity_overrides must be a Hash, got #{value.inspect}" unless value.is_a?(Hash)
 
       value.to_h do |k, v|
+        # YAML 1.1 parses bare `off`/`on`/`no`/`yes`/`true`/`false`
+        # as booleans, so a user who wrote `off` (a valid severity)
+        # without quotes hands us `false`. Catch the non-Symbol /
+        # non-String case before `to_sym` blows up with a backtrace.
+        unless v.is_a?(String) || v.is_a?(Symbol)
+          hint = v == false ? %( — did you mean the string "off"?) : ""
+          raise ArgumentError,
+                "severity_overrides[#{k.inspect}] is #{v.inspect}, a YAML boolean#{hint} " \
+                "Bare off/on/no/yes/true/false are parsed as booleans; quote the severity " \
+                "(e.g. \"off\")."
+        end
+
         sym = v.to_sym
         unless SeverityProfile::VALID_SEVERITIES.include?(sym)
           raise ArgumentError,

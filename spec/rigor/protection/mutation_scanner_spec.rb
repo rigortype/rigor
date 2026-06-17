@@ -16,11 +16,12 @@ RSpec.describe Rigor::Protection::MutationScanner do
     Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  def scanner
+  def scanner(site_selector: :biteable)
     config = Rigor::Configuration.load(nil)
     context = Rigor::LanguageServer::ProjectContext.new(configuration: config)
     described_class.new(
-      configuration: config, environment: context.environment, project_scan: context.project_scan
+      configuration: config, environment: context.environment, project_scan: context.project_scan,
+      site_selector: site_selector
     )
   end
 
@@ -84,6 +85,29 @@ RSpec.describe Rigor::Protection::MutationScanner do
     expect(result.unprotected).to be >= 1
     expect(result.test_killed).to eq(0)
     expect(result.sites.first.protection).to eq(:none)
+  end
+
+  it "probes Dynamic-receiver dispatch sites under the :all selector and credits the test axis (Seam 2)" do
+    # `x` is an untyped param, so `x.save` is a Dynamic-receiver site the biteable
+    # filter drops entirely (nothing to measure). Under :all it is mutated and,
+    # being un-bite-able, falls straight to the test axis.
+    File.write("dyn.rb", %(def f(x)\n  x.save\nend\n))
+
+    biteable = scanner.scan_file_fused("dyn.rb", test_oracle: fake_test_oracle(true))
+    expect(biteable.total).to eq(0)
+
+    all = scanner(site_selector: :all).scan_file_fused("dyn.rb", test_oracle: fake_test_oracle(true))
+    expect(all.type_killed).to eq(0)   # the type checker can never bite a Dynamic receiver
+    expect(all.test_killed).to be >= 1 # but the test axis reached it
+  end
+
+  it "marks a Dynamic-receiver site unprotected when no test catches it (:all selector)" do
+    File.write("dyn.rb", %(def f(x)\n  x.save\nend\n))
+
+    all = scanner(site_selector: :all).scan_file_fused("dyn.rb", test_oracle: fake_test_oracle(false))
+
+    expect(all.unprotected).to be >= 1
+    expect(all.sites.first.method_name).to eq("save")
   end
 
   it "never reaches the suite when the type checker already kills the mutant (gradual short-circuit)" do

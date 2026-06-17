@@ -1,19 +1,19 @@
 # ADR-69 — Pluggable mutation substrate (kill-oracle + operator seam)
 
-Status: **Accepted — Seam 1 (kill oracle) implemented 2026-06-17, co-landed with
-[ADR-70](70-fused-protection-coverage.md); Seam 2 (site selector) deferred to its only
-consumer ([ADR-71](71-type-guided-external-mutation-testing.md)).** Generalize the ADR-62/63
-mutation machinery so the **kill oracle** and the **site-selection strategy** are parameters,
-not assumptions baked into `Protection::MutationScanner`. Today the only oracle is "a new
-Rigor diagnostic appeared" and the only selector is "keep sites Rigor can bite"; both were
-hard-wired. Seam 1 now lets the substrate carry a second oracle (*"the test suite went
-red"*, `Protection::TestSuiteOracle`); Seam 2 (the inverted "mutate `Dynamic` sites too"
-selector) is held until ADR-71 builds the external tool that needs it — landing it now would
-be the dead abstraction this ADR warns against.
+Status: **Accepted — both seams implemented 2026-06-17.** Seam 1 (kill oracle) co-landed
+with [ADR-70](70-fused-protection-coverage.md); Seam 2 (site selector, surfaced as
+`--include-dynamic`) followed the same day — pulled forward from
+[ADR-71](71-type-guided-external-mutation-testing.md) when validating ADR-70 showed the fused
+overlay could not otherwise reach `Dynamic` sites (the map's most valuable cell). Generalize
+the ADR-62/63 mutation machinery so the **kill oracle** and the **site-selection strategy**
+are parameters, not assumptions baked into `Protection::MutationScanner`: the substrate now
+carries a second oracle (*"the test suite went red"*, `Protection::TestSuiteOracle`) and a
+second selector (`:all` — mutate `Dynamic`-receiver dispatch sites too, where a test is the
+only possible protection).
 
-Implemented: `lib/rigor/protection/diagnostic_oracle.rb` (Seam 1, the extracted ADR-62/63
-behaviour), `Protection::MutationScanner#initialize(oracle:)` + `#scan_file_fused`
-(`mutation_scanner.rb`) consuming it. ADR-70's `TestSuiteOracle` is the first second-oracle.
+Implemented: `diagnostic_oracle.rb` (Seam 1, the extracted ADR-62/63 behaviour),
+`Mutator#dispatch_site_mutations` (Seam 2 — every dispatch site, Dynamic included),
+`MutationScanner#initialize(oracle:, site_selector:)` + `#scan_file_fused` consuming both.
 
 Grounding: [`docs/notes/20260617-type-guided-mutation-testing-strategy.md`](../notes/20260617-type-guided-mutation-testing-strategy.md)
 (the strategy split this enables) and the current code:
@@ -49,14 +49,17 @@ Factor the substrate along two seams, leaving the Prism splicer oracle-agnostic.
   (ADR-70) implements. The scanner takes `oracle:` and routes its `classify` through it; the
   `DiagnosticOracle` default is **byte-identical** to today (the ADR-63 Tier 2 scanner spec
   is unchanged).
-- **Seam 2 — the site selector. Deferred (its consumer is deferred).** The plan is to make
-  the type-aware filter (`filter_by_type`) one swappable strategy (`BiteableSites` — keep
-  concrete-anchor sites, FP-safe) so a consumer can pass an `AllSites` / `Dynamic`-preferring
-  selector. But the *only* consumer of an inverted selector is the external tool ADR-71
-  defers; ADR-70's fused overlay reuses the **biteable** sites (it runs tests on the
-  type-survivors of the existing filter), so it does not exercise Seam 2. Landing `AllSites`
-  now would be exactly the dead abstraction the criterion forbids — so Seam 2 lands **with**
-  ADR-71, not before.
+- **Seam 2 — the site selector. Implemented (`MutationScanner site_selector:`).** The
+  biteable filter (`filter_by_type` — keep concrete-anchor sites, FP-safe) is now one
+  strategy; `Mutator#dispatch_site_mutations` is the other (`:all` — keep every dispatch
+  site, Dynamic receiver included; drop only non-dispatch literals). It is gated to the fused
+  overlay's `--with-tests` path (at a `Dynamic` site the type pass can never kill, so without
+  the test axis these are all noise — the ADR-62 Criterion-A trap). The ADR-63 Tier 2
+  `scan_file` stays `:biteable`, unchanged. This was *deferred to ADR-71* until the 2026-06-17
+  ADR-70 validation made the demand concrete (the overlay was blind to `Dynamic` sites — the
+  exact place a *test*-protection view matters most); building it is contained — it reuses
+  the existing warm loop and changes only which sites are mutated — not the ADR-71 external
+  product.
 - **No new user surface.** This is internal restructuring under ADR-50 (the frozen contract
   is the CLI vocabulary + JSON keys, not the `Protection::*` class shapes). `tool/mutation/`
   and the ADR-63 `coverage --protection --mutation` command observe no behavioural change.
@@ -77,14 +80,13 @@ Factor the substrate along two seams, leaving the Prism splicer oracle-agnostic.
 - **Negative** — a small indirection cost (an interface where there was a method) for value
   that only materializes once ADR-70 lands; if ADR-70 were abandoned the seam would be
   dead abstraction (so land them together).
-- **Carry-over** — Seam 1 co-landed with ADR-70's `TestSuiteOracle`, so the interface is
-  exercised, not speculative; the `DiagnosticOracle` default kept the ADR-63 scanner spec
-  green (the byte-identical gate). **Seam 2 (the site selector) is the remaining slice.** The
-  2026-06-17 ADR-70 validation gave it *empirical demand earlier than expected*: because the
-  fused overlay reuses the biteable filter, it never mutates `Dynamic` sites, so it cannot
-  show "a `Dynamic` site guarded only by a test" — the fused map's most valuable cell. Seam 2
-  is the bridge there, though mutating `Dynamic` sites + running tests is the expensive path
-  ADR-71 defers — so it is a real scope decision, not a free win.
+- **Carry-over** — both seams co-landed with ADR-70; the `DiagnosticOracle` default kept the
+  ADR-63 scanner spec green (the byte-identical gate). Seam 2 was pulled forward the same day
+  on the validation's empirical demand (the overlay was blind to `Dynamic` sites); validated
+  on liquid `lexer.rb` — `--include-dynamic` widened the map from 76 biteable sites (75 type /
+  1 test / 0 unprotected) to 115 dispatch sites (75 type / **38 test** / **2 unprotected**),
+  surfacing the test-protected `Dynamic` cell and two real gaps biteable-only could not see.
+  The remaining ADR-71 boundary is a *public* selector/oracle plugin API, still demand-gated.
 
 ## Relationship to other ADRs
 

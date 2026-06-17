@@ -222,5 +222,34 @@ forward is a real scope decision, not a free win.)
 shows as unprotected). Correct-by-construction — the verdict is only as complete as the test
 command's coverage — but for an accurate map the command should run all tests covering the
 file, trading cost for completeness.
+
+## Seam 2 landed — `--include-dynamic` (2026-06-17, same day)
+
+The load-bearing finding above (the overlay was blind to `Dynamic` sites) was acted on
+immediately rather than left to ADR-71: ADR-69 Seam 2 shipped as `--include-dynamic`. The
+`MutationScanner` gained a `site_selector:` (`:biteable` default, `:all` opt-in);
+`Mutator#dispatch_site_mutations` keeps every dispatch site (method call or call-argument
+literal), `Dynamic` receiver included, dropping only non-dispatch literals. It is gated to
+`--with-tests` — at a `Dynamic` site the type pass can never kill, so without the test axis
+these are all noise (the ADR-62 Criterion-A trap). The ADR-63 Tier 2 `scan_file` stays
+`:biteable`, unchanged. This is *contained*: it reuses the existing warm loop and the fused
+classification, changing only which sites are mutated — not the ADR-71 external product.
+
+Re-validated on liquid `lexer.rb` (vs `lexer_unit_test.rb`):
+
+| | dispatch sites | type-killed | test-killed | unprotected |
+| --- | --- | --- | --- | --- |
+| biteable only | 76 | 75 | 1 | 0 |
+| `--include-dynamic` | **115** | 75 | **38** | **2** |
+
+The 39 `Dynamic`-receiver sites the biteable view dropped are now scored: **38 are
+test-protected** (the lexer test exercises them — "your `Dynamic` code IS covered"), and **2
+are genuinely unprotected** — `#raise` @ L168 (an error path) and `#scan_byte` @ L118 — the
+real "add a type or a test here" gaps that only the complete map surfaces. The headline cell
+of the fused map ("a `Dynamic` site guarded only by a test") is now reachable, and the map
+covers *all* dispatch sites, not just the biteable subset. Cost rises (every `Dynamic` site
+is a type-survivor → a suite run), so it is an explicit opt-in. `make verify` clean; files
+restored byte-for-byte. This closes the critical-analysis point #4 not by refuting it but by
+giving the user the lever to see past it.
 </content>
 </invoke>

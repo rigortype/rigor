@@ -120,7 +120,11 @@ the mutants Rigor did not kill**, then reports a fused per-site classification.
   the type axis short-circuits the vast majority and the test axis is only ever consulted on
   concrete-site survivors — the fused map's headline cell (*a `Dynamic` site guarded only by
   a test*) is unreachable without **ADR-69 Seam 2 (`AllSites`)**, which the validation
-  re-prioritizes from "with ADR-71" toward sooner. See
+  re-prioritizes from "with ADR-71" toward sooner — and it **landed the same day** as
+  `--include-dynamic` (ADR-69 Seam 2). Re-validated on liquid `lexer.rb`: the flag widens the
+  map from 76 biteable sites (75 type / 1 test / 0 unprotected) to 115 dispatch sites (75
+  type / **38 test-protected** / **2 unprotected** — `#raise`, `#scan_byte`), surfacing the
+  test-protected `Dynamic` cell and two genuine gaps the biteable view could not show. See
   [`docs/notes/20260617-type-guided-mutation-testing-strategy.md`](../notes/20260617-type-guided-mutation-testing-strategy.md)
   § Validation.
 

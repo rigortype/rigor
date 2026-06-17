@@ -65,10 +65,16 @@ module Rigor
       # @param seed [Integer] RNG seed for the optional sample.
       # @param oracle [#baseline, #killed?, nil] the kill oracle (ADR-69 Seam 1);
       #   defaults to the {DiagnosticOracle} (the ADR-62/63 behaviour).
-      def initialize(configuration:, environment:, project_scan:, limit: nil, seed: 1, oracle: nil)
+      # @param site_selector [:biteable, :all] which sites to mutate (ADR-69
+      #   Seam 2). `:biteable` (default) keeps only concrete-type sites Rigor can
+      #   bite; `:all` also mutates Dynamic-receiver dispatch sites — use only
+      #   with a {TestSuiteOracle} (the fused overlay), never the diagnostic path.
+      def initialize(configuration:, environment:, project_scan:, limit: nil, seed: 1, oracle: nil,
+                     site_selector: :biteable)
         @environment = environment
         @limit = limit
         @seed = seed
+        @site_selector = site_selector
         @oracle = oracle || DiagnosticOracle.new(
           configuration: configuration, environment: environment, project_scan: project_scan
         )
@@ -128,11 +134,19 @@ module Rigor
 
       private
 
-      # Type-visible mutations whose anchor Rigor holds a concrete type for
-      # (the FP-safe filter — an unresolved receiver is kept), optionally sampled.
+      # The mutations to measure: the biteable filter (concrete-type sites only;
+      # the FP-safe default — an unresolved receiver is kept) or, under the
+      # `:all` selector (ADR-69 Seam 2), every dispatch site including Dynamic
+      # receivers. Optionally sampled.
       def kept_mutations(source, path)
         mutator = Mutator.new(source)
-        kept, = mutator.filter_by_type(mutator.mutations, environment: @environment, path: path)
+        muts = mutator.mutations
+        kept =
+          if @site_selector == :all
+            mutator.dispatch_site_mutations(muts, environment: @environment, path: path)
+          else
+            mutator.filter_by_type(muts, environment: @environment, path: path).first
+          end
         sample(kept)
       end
 

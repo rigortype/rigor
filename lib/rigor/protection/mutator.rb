@@ -98,6 +98,27 @@ module Rigor
         [kept, mutations.size - kept.size]
       end
 
+      # ADR-69 Seam 2 (AllSites) — keep every *dispatch-site* mutation (a method
+      # call or a call-argument literal), Dynamic receiver included, annotating
+      # the anchor type where Rigor holds one. Drops only non-dispatch literals
+      # (a literal outside any call — no receiver contract to violate). The
+      # biteable {#filter_by_type} hides exactly the Dynamic sites a test-suite
+      # consumer most wants to probe: where Rigor cannot bite, a test is the only
+      # protection. Use only with a {TestSuiteOracle} — at a Dynamic site the
+      # type pass can never kill, so without the test axis these are all noise.
+      def dispatch_site_mutations(mutations, environment:, path:)
+        base = Rigor::Scope.empty(environment: environment, source_path: path)
+        index = Rigor::Inference::ScopeIndexer.index(@parse.value, default_scope: base)
+        cache = {}
+        mutations.select do |mut|
+          next false if mut.method_name.nil?
+
+          _keep, type = anchor_decision(mut.anchor, index, cache)
+          mut.anchor_type = type
+          true
+        end
+      end
+
       private
 
       def walk(node, &blk)

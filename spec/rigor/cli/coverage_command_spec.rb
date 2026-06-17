@@ -117,6 +117,29 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(payload).to have_key("protected_ratio")
       expect(payload["unprotected"]).to be >= 1
     end
+
+    it "rejects --include-dynamic without --with-tests (usage error)" do
+      File.write("a.rb", "x = 1\n")
+      status, _out, err = run(["--protection", "--mutation", "--include-dynamic", "a.rb"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("--include-dynamic requires --with-tests")
+    end
+
+    it "mutates Dynamic-receiver sites under --include-dynamic, crediting the test axis (Seam 2)" do
+      # `x.save` on an untyped param has no biteable site; --include-dynamic
+      # mutates it anyway so the test axis can score it.
+      File.write("dyn.rb", %(def f(x)\n  x.save\nend\n))
+      stub_oracle(green: true, kills: true)
+
+      status, out, = run(["--protection", "--mutation", "--with-tests", "--include-dynamic", "--format", "json",
+                          "dyn.rb"])
+
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      expect(payload["type_killed"]).to eq(0)
+      expect(payload["test_killed"]).to be >= 1
+    end
   end
 
   describe "#changed_path (git porcelain line parsing)" do

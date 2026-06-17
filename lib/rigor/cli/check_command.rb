@@ -5,7 +5,7 @@ require "json"
 require "optionparser"
 
 require_relative "../configuration"
-require_relative "../signature_path_audit"
+require_relative "../config_audit"
 require_relative "../analysis/result"
 require_relative "../analysis/rule_catalog"
 require_relative "coverage_scan"
@@ -39,7 +39,7 @@ module Rigor
 
         configuration = load_check_configuration(options)
         configuration = apply_bleeding_edge_override(configuration, options)
-        sig_path_warnings = warn_unresolved_signature_paths(configuration)
+        config_warnings = warn_unresolved_config(configuration)
         cache_root = configuration.cache_path
         handle_clear_cache(cache_root) if options.fetch(:clear_cache)
 
@@ -54,7 +54,7 @@ module Rigor
         result = apply_baseline_filter(raw_result, configuration, options)
 
         coverage = compute_coverage(runner, configuration, options)
-        write_result(result, options.fetch(:format), coverage: coverage, sig_path_warnings: sig_path_warnings)
+        write_result(result, options.fetch(:format), coverage: coverage, config_warnings: config_warnings)
         emit_ci_detected_output(result, options)
         write_run_stats(result.stats) if result.stats
         write_trace_appendices
@@ -414,23 +414,24 @@ module Rigor
         options
       end
 
-      # Surfaces the silent failure mode where a configured
-      # `signature_paths:` entry resolves to nothing — a typo'd or moved
-      # path, or a directory with no `.rbs`. The loader filters such
-      # entries silently, and the downstream symptom is high-confidence
-      # `call.undefined-method` firings on every call the missing RBS was
-      # meant to cover, so a path typo can manufacture hundreds of
-      # plausible false positives with no hint of the real cause. Emitting
-      # the per-entry verdict to STDERR (not a hard error — partial /
-      # optional bundles are a valid setup) makes the cause visible, and
-      # the returned list rides into the `--format=json` payload so CI and
-      # framework consumers can assert on it. Only the explicitly
-      # configured `signature_paths:` are audited; the unset default
-      # (auto-detected `<root>/sig`) yields nil and is never warned about.
-      def warn_unresolved_signature_paths(configuration)
-        entries = SignaturePathAudit.warnings(configuration.signature_paths)
-        entries.each { |entry| @err.puts("rigor: #{entry.message}") }
-        entries
+      # Surfaces the class of mistake where a configured value resolves
+      # to nothing — a typo'd or moved `signature_paths:` / bundler /
+      # collection path, an unknown `libraries:` name, an inert
+      # `disable:` / `severity_overrides:` rule id ({ConfigAudit}). The
+      # loader filters each one silently, and the downstream symptom is
+      # confusing: missing signatures turn calls into high-confidence
+      # `call.undefined-method` firings, and an unrecognised suppression
+      # token leaves the rule firing as if the line were never written —
+      # so a one-character mistake can read as hundreds of real errors.
+      # Each finding is emitted to STDERR (a warning, not a hard error —
+      # partial / optional bundles are a valid setup) and the returned
+      # list rides into the `--format=json` payload under `config_warnings`
+      # so CI and framework consumers can assert on it. The audits only
+      # fire on explicit, working-setup-safe signals (see {ConfigAudit}).
+      def warn_unresolved_config(configuration)
+        warnings = ConfigAudit.warnings(configuration)
+        warnings.each { |warning| @err.puts("rigor: #{warning.message}") }
+        warnings
       end
 
       # ADR-32 WD10 carry-over — wraps `Configuration.load` so the
@@ -692,12 +693,12 @@ module Rigor
         format("%.1f MiB", bytes / (1024.0 * 1024.0))
       end
 
-      def write_result(result, format, coverage: nil, sig_path_warnings: [])
+      def write_result(result, format, coverage: nil, config_warnings: [])
         case format
         when "json"
           payload = enrich_json(result.to_h)
           payload["coverage"] = coverage_payload(coverage) if coverage
-          payload["signature_path_warnings"] = sig_path_warnings.map(&:to_h) unless sig_path_warnings.empty?
+          payload["config_warnings"] = config_warnings.map(&:to_h) unless config_warnings.empty?
           @out.puts(JSON.pretty_generate(payload))
         when "text"
           write_text_result(result)

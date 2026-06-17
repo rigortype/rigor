@@ -64,12 +64,16 @@ project-wide `disable:`, which also hides real instances.
 Before reporting, rule out a missing RBS source. A burst of
 `call.undefined-method` on calls you know exist usually means
 Rigor never loaded their signatures. Check `rigor check`'s
-STDERR for a `signature_paths: … does not exist` /
-`matched 0 signature files` warning — a typo'd or moved
-`signature_paths:` entry loads zero signatures silently, and
-every call into the types it was meant to cover then fires at
-`evidence_tier: high`. Correct the path and the false
-positives clear.
+STDERR for a `rigor: …` config-validation warning — a typo'd
+or moved `signature_paths:` / `libraries:` entry (or an
+explicit `bundler` / `rbs_collection` path that no longer
+exists) loads zero signatures silently, and every call into
+the types it was meant to cover then fires at
+`evidence_tier: high`. Correct the configured value and the
+false positives clear. (The same warnings cover an inert
+`disable:` / `severity_overrides:` rule id — a typo there
+leaves the rule firing as if you never suppressed it.) See
+[Configuration § Config validation warnings](03-configuration.md#config-validation-warnings).
 
 If the diagnostic is *correct* but you are not ready to fix
 it, a [baseline](06-baseline.md) is the right tool.

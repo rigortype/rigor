@@ -54,23 +54,34 @@ cache:
 | `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
 
-`rigor check` warns on STDERR when a `signature_paths:` entry resolves to
-nothing — a path that does not exist, points at a non-directory, or holds
-no `.rbs` file:
+### Config validation warnings
+
+`rigor check` warns on STDERR when a configured value silently resolves to
+nothing — the class of mistake where a typo loads zero signatures (or
+leaves a suppression inert) and the only symptom is downstream and
+confusing. A missing RBS path, for instance, turns every call into the
+types it was meant to describe into a high-confidence
+`call.undefined-method`, so a one-character mistake can look like hundreds
+of real type errors. The audit covers:
 
 ```
 rigor: signature_paths: "/path/to/sig" does not exist (no signatures loaded from it)
 rigor: signature_paths: "/path/to/sig" matched 0 signature files
+rigor: libraries: "csb" is not an available RBS library (no signatures loaded from it)
+rigor: disable: "call.undefined-methdo" is not a recognized rule id; the suppression has no effect
+rigor: severity_overrides: "flow.bogus" is not a recognized rule id; the override has no effect
+rigor: bundler.lockfile: "./missing/Gemfile.lock" does not exist
 ```
 
-This is a warning, not an error — partial or optional RBS bundles are a
-valid setup. It exists because a typo'd or moved path is otherwise
-*silent*: the missing signatures turn every call into the types they were
-meant to describe into a high-confidence `call.undefined-method`, so a
-one-character mistake can look like hundreds of real type errors. The
-unset default (auto-detected `<root>/sig`) is never warned about. The same
-entries appear in the `--format=json` payload under `signature_path_warnings`
-so CI can assert on them.
+These are warnings, not errors — partial or optional bundles and
+forward-looking config are valid setups. The audit only fires on explicit,
+working-setup-safe signals: an unset default (auto-detected `<root>/sig`,
+auto-detected bundle) is never warned about, and a `disable:` /
+`severity_overrides:` token under a *plugin* family (`rspec.…`,
+`rbs_extended.…`) is left alone, since its rule id cannot be enumerated
+statically and may resolve at run time. The same findings appear in the
+`--format=json` payload under `config_warnings` (each tagged with a
+`kind`), so CI can assert on them.
 
 ### Diagnostics
 

@@ -95,26 +95,61 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(err).to include("does not exist (no signatures loaded from it)")
   end
 
-  it "surfaces the same warning in --format=json run metadata for CI consumers" do
+  it "surfaces the signature_paths warning in --format=json config_warnings for CI consumers" do
     File.write("a.rb", "x = 1\n")
     File.write(".rigor.yml", "signature_paths:\n  - ./no_such_sig\n")
 
     _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--config", ".rigor.yml",
                          "a.rb"])
 
-    warnings = JSON.parse(out).fetch("signature_path_warnings")
-    expect(warnings.size).to eq(1)
-    expect(warnings.first).to include("status" => "missing")
-    expect(warnings.first.fetch("path")).to end_with("no_such_sig")
+    warnings = JSON.parse(out).fetch("config_warnings")
+    sig = warnings.find { |w| w["kind"] == "signature_path" }
+    expect(sig).to include("status" => "missing")
+    expect(sig.fetch("path")).to end_with("no_such_sig")
   end
 
-  it "stays silent (and omits the JSON key) when signature_paths is unset" do
+  it "warns when a configured libraries: entry is not an available RBS library" do
+    File.write("a.rb", "x = 1\n")
+    File.write(".rigor.yml", "libraries:\n  - this_library_does_not_exist_xyz\n")
+
+    _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--config", ".rigor.yml",
+                             "a.rb"])
+
+    expect(err).to include("is not an available RBS library")
+    lib = JSON.parse(out).fetch("config_warnings").find { |w| w["kind"] == "library" }
+    expect(lib.fetch("name")).to eq("this_library_does_not_exist_xyz")
+  end
+
+  it "warns when a disable: token under a built-in family names no rule" do
+    File.write("a.rb", "x = 1\n")
+    File.write(".rigor.yml", "disable:\n  - call.undefined-methdo\n")
+
+    _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--config", ".rigor.yml",
+                             "a.rb"])
+
+    expect(err).to include("the suppression has no effect")
+    rule = JSON.parse(out).fetch("config_warnings").find { |w| w["kind"] == "disabled_rule" }
+    expect(rule.fetch("token")).to eq("call.undefined-methdo")
+  end
+
+  it "does NOT warn on a disable: token under a non-built-in (plugin) family" do
+    File.write("a.rb", "x = 1\n")
+    File.write(".rigor.yml", "disable:\n  - rspec.let-binding\n")
+
+    _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--config", ".rigor.yml",
+                             "a.rb"])
+
+    expect(err).not_to include("the suppression has no effect")
+    expect(JSON.parse(out)).not_to have_key("config_warnings")
+  end
+
+  it "stays silent (and omits config_warnings) when nothing is misconfigured" do
     File.write("a.rb", "x = 1\n")
 
     _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "a.rb"])
 
-    expect(err).not_to include("signature_paths:")
-    expect(JSON.parse(out)).not_to have_key("signature_path_warnings")
+    expect(err).not_to include("rigor: ")
+    expect(JSON.parse(out)).not_to have_key("config_warnings")
   end
 
   it "prints a one-line coverage summary under --coverage in text mode" do

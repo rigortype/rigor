@@ -36,6 +36,10 @@ flag, key, or command that *acts* on it.
 5. [Inspecting inferred types](05-inspecting-types.md) — the
    `assert_type` / `dump_type` source helpers and the
    `rigor annotate` / `rigor type-of` commands.
+16. [RBS::Extended annotations](16-rbs-extended-annotations.md) —
+    the `%a{rigor:v1:…}` annotations you write in `*.rbs` files:
+    `return:` / `param:` overrides, predicate and assertion
+    narrowing, `conforms-to`, and the HKT directives.
 
 ### Adopting Rigor on a project
 

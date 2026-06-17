@@ -91,6 +91,7 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 | `rbs_collection.lockfile` | String | `nil` | Explicit `rbs_collection.lock.yaml` path. |
 | `dependencies.source_inference` | Array | `[]` | Per-gem source-inference modes (ADR-10). |
 | `dependencies.budget_per_gem` | Integer | `5000` | Per-gem source-walk cap, counted in **method definitions** (not time): the walker stops harvesting a gem's catalog once it reaches this many `def`s, then emits `dynamic.dependency-source.budget-exceeded` and degrades the rest to `Dynamic[top]`. Range 1250–20000. |
+| `dependencies.budget_overrun_strategy` | String | `"walker_cap"` | What happens to calls on a gem that hit `budget_per_gem` (ADR-10 § 5b). `walker_cap` (default) lets methods past the cap fall through to the engine's normal user-class resolution. `dependency_silence` instead resolves any call on a class from a budget-exceeded gem to `Dynamic[top]`, silencing `call.undefined-method` on that gem's unrecorded surface at the cost of weaker static checking there. |
 
 ### Execution
 

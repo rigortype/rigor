@@ -71,3 +71,22 @@ network. Those are gated by the `plugins_io:` config keys —
 the network is `disabled` by default, and a plugin can read
 only the paths you list. See
 [Configuration](03-configuration.md).
+
+### Isolation strategy
+
+A few plugins call into their target library directly (for
+example to ask ActiveSupport's real inflector how to pluralise a
+class name). That call runs under an **isolation strategy**, set
+with the `RIGOR_PLUGIN_ISOLATION` environment variable:
+
+| Value | Behaviour |
+| --- | --- |
+| `process` (default) | Run the call in a forked, crash-contained worker, so the target library's monkey-patches and any crash never contaminate Rigor. Falls back to `none` where `fork` is unavailable (Windows / JRuby). |
+| `none` | Load the library into Rigor's own process and call it directly. |
+| `ruby_box` | Run inside an experimental `Ruby::Box` sandbox. This needs the `RUBY_BOX=1` start flag, so the `rigor` launcher re-execs itself with it set when you select this strategy. |
+
+The legacy `RIGOR_BOX` environment variable is a back-compat
+alias for `RIGOR_PLUGIN_ISOLATION=ruby_box`. The default
+(`process`) is the right choice for almost everyone; the variable
+exists for the rare platform where forking is unavailable or
+where you want stronger containment.

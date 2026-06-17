@@ -78,7 +78,26 @@ behaviour, not a caching artefact.
 - Narrow `paths:` and widen `exclude:` so Rigor is not walking
   generated or vendored code.
 - For a large project, `rigor check --workers=N` spreads
-  per-file analysis across parallel worker processes.
+  per-file analysis across parallel worker processes (or set
+  `RIGOR_RACTOR_WORKERS=N`).
+
+## Advanced diagnostics
+
+When a class infers worse than you expect, or a run uses more
+memory than you expect, three environment variables make Rigor
+report on *itself*. They print to stderr after `rigor check`
+finishes and are no-ops when unset. They are process-global
+counters, so run single-process (`--workers 0`) for meaningful
+numbers.
+
+| Variable | Reports |
+| --- | --- |
+| `RIGOR_BUDGET_TRACE=1` | How often inference hit a built-in cutoff (recursion guard, ancestor-walk limit, HKT fuel, …) and silently degraded to `Dynamic[top]`, plus the union-size distribution. The fastest way to see *where* inference gave up. |
+| `RIGOR_HEAP_PROFILE=1` | A live-heap breakdown by class after a forced GC, ranked by memory — what the resident heap is actually made of (type carriers, RBS objects, Prism nodes, …). Walking the whole heap is slow; use it as a probe, not on every run. |
+| `RIGOR_HEAP_TRACE=1` | The top String allocation sites by `file:line`. Very high overhead — run it on a small file subset only. |
+
+These are intended for diagnosing Rigor itself or filing a
+detailed bug report, not for day-to-day use.
 
 ## Reporting a bug
 

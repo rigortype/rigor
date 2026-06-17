@@ -460,6 +460,24 @@ with its stable id, the severity it would impose, and whether your config
 adopts it. See [`docs/compatibility.md`](../compatibility.md) for how
 bleeding-edge fits the stability model.
 
+## Environment variables
+
+Most behaviour is driven by flags and `.rigor.yml`; a few
+operational knobs read the environment instead.
+
+| Variable | Effect |
+| --- | --- |
+| `NO_COLOR` | Disable coloured output (honoured by `rigor annotate`; `--no-color` does the same). |
+| `RIGOR_CI_DETECT=0` | Turn off CI auto-detection — the same as `--no-ci-detect`. See [Running Rigor in CI § auto-detection](11-ci.md). |
+| `RIGOR_RACTOR_WORKERS=N` | Worker count for parallel analysis. Sits between the CLI flag and the config key in precedence: `--workers=N` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > `0` (sequential). |
+| `RIGOR_POOL_BACKEND=ractor` | Opt back into the (off-by-default) Ractor worker pool instead of the active fork-based pool ([ADR-15](../adr/15-ractor-concurrency.md)). Only relevant with a non-zero worker count; the fork pool is the supported backend. |
+| `RIGOR_PLUGIN_ISOLATION=none\|process\|ruby_box` | How a plugin's direct calls into its target library are isolated. Default `process`. See [Using plugins § Isolation strategy](07-plugins.md). `RIGOR_BOX` is a legacy alias for `ruby_box`. |
+
+Three further variables (`RIGOR_BUDGET_TRACE`,
+`RIGOR_HEAP_PROFILE`, `RIGOR_HEAP_TRACE`) enable developer-facing
+diagnostics about Rigor's own inference cutoffs and memory — see
+[Troubleshooting § Advanced diagnostics](13-troubleshooting.md#advanced-diagnostics).
+
 ## Exit codes
 
 | Code | Meaning |

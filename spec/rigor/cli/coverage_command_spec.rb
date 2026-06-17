@@ -62,6 +62,63 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     expect(out).to include("No changed Ruby files")
   end
 
+  # ADR-70 — the fused static∪dynamic overlay. The TestSuiteOracle is stubbed so
+  # the orchestration / report / exit logic is exercised without shelling out.
+  describe "--with-tests (fused protection)" do
+    def fake_oracle(green:, kills:)
+      oracle = Object.new
+      oracle.define_singleton_method(:green?) { green }
+      oracle.define_singleton_method(:killed?) { |**| kills }
+      oracle
+    end
+
+    def stub_oracle(green:, kills:)
+      allow(Rigor::Protection::TestSuiteOracle).to receive(:new).and_return(fake_oracle(green: green, kills: kills))
+    end
+
+    it "rejects --with-tests without --mutation (usage error)" do
+      File.write("a.rb", "x = 1\n")
+      status, _out, err = run(["--protection", "--with-tests", "a.rb"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("--with-tests requires --mutation")
+    end
+
+    it "aborts when the test suite is not green on clean code" do
+      File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+      stub_oracle(green: false, kills: false)
+
+      status, _out, err = run(["--protection", "--mutation", "--with-tests", "greet.rb"])
+
+      expect(status).to eq(1)
+      expect(err).to include("test suite must pass on clean code")
+    end
+
+    it "reports the fused map and credits a type-survivor to the test axis" do
+      File.write("joins.rb", %(def j\n  File.join("a", "b")\nend\n))
+      stub_oracle(green: true, kills: true)
+
+      status, out, = run(["--protection", "--mutation", "--with-tests", "joins.rb"])
+
+      expect(status).to eq(0)
+      expect(out).to include("Fused protection")
+      expect(out).to include("by test:")
+    end
+
+    it "emits the fused JSON shape" do
+      File.write("joins.rb", %(def j\n  File.join("a", "b")\nend\n))
+      stub_oracle(green: true, kills: false)
+
+      status, out, = run(["--protection", "--mutation", "--with-tests", "--format", "json", "joins.rb"])
+
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      expect(payload["mode"]).to eq("protection-fused")
+      expect(payload).to have_key("protected_ratio")
+      expect(payload["unprotected"]).to be >= 1
+    end
+  end
+
   describe "#changed_path (git porcelain line parsing)" do
     def parse(line)
       described_class.new(argv: []).send(:changed_path, line)

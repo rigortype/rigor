@@ -3,6 +3,7 @@
 require "English"
 require "optionparser"
 require "prism"
+require "shellwords"
 
 require_relative "../configuration"
 require_relative "options"
@@ -11,6 +12,7 @@ require_relative "../inference/precision_scanner"
 require_relative "../inference/protection_scanner"
 require_relative "../inference/parameter_inference_collector"
 require_relative "../protection/mutation_scanner"
+require_relative "../protection/test_suite_oracle"
 require_relative "../language_server/project_context"
 require_relative "../scope"
 require_relative "coverage_report"
@@ -20,6 +22,8 @@ require_relative "protection_report"
 require_relative "protection_renderer"
 require_relative "mutation_protection_report"
 require_relative "mutation_protection_renderer"
+require_relative "fused_protection_report"
+require_relative "fused_protection_renderer"
 require_relative "command"
 
 module Rigor
@@ -40,10 +44,15 @@ module Rigor
     class CoverageCommand < Command
       USAGE = "Usage: rigor coverage [options] PATH..."
 
+      # ADR-70 — the default test runner hook for `--with-tests`. The
+      # conventional Ruby test task; override with `--test-command`.
+      DEFAULT_TEST_COMMAND = %w[bundle exec rake].freeze
+
       # @return [Integer] CLI exit status.
       def run
         options = parse_options
         return mutation_misuse_error if options[:mutation] && !options[:protection]
+        return with_tests_misuse_error if options[:with_tests] && !options[:mutation]
         return run_mutation_protection(options) if options[:mutation]
 
         paths = collect_paths(@argv, command_name: "coverage")
@@ -60,7 +69,8 @@ module Rigor
       private
 
       def parse_options
-        options = { format: "text", threshold: nil, config: nil, protection: false, mutation: false }
+        options = { format: "text", threshold: nil, config: nil, protection: false, mutation: false,
+                    with_tests: false, test_command: DEFAULT_TEST_COMMAND }
 
         OptionParser.new do |opts|
           opts.banner = USAGE
@@ -76,6 +86,14 @@ module Rigor
             "Scopes to git-changed files when no paths are given; explicit paths override."
           ) { options[:mutation] = true }
           opts.on(
+            "--with-tests",
+            "With --mutation: also measure dynamic (test-suite) protection (ADR-70). " \
+            "Runs --test-command against each type-survivor; reports the fused static∪dynamic map."
+          ) { options[:with_tests] = true }
+          opts.on(
+            "--test-command=CMD", "The test runner hook for --with-tests (default: #{DEFAULT_TEST_COMMAND.join(' ')})"
+          ) { |v| options[:test_command] = Shellwords.split(v) }
+          opts.on(
             "--threshold=RATIO", Float,
             "Exit 1 when the precision (or, with --protection, protection/effectiveness) ratio is below RATIO (0.0–1.0)"
           ) { |v| options[:threshold] = v }
@@ -86,6 +104,12 @@ module Rigor
 
       def mutation_misuse_error
         @err.puts("coverage: --mutation requires --protection")
+        @err.puts(USAGE)
+        CLI::EXIT_USAGE
+      end
+
+      def with_tests_misuse_error
+        @err.puts("coverage: --with-tests requires --mutation (and --protection)")
         @err.puts(USAGE)
         CLI::EXIT_USAGE
       end
@@ -148,9 +172,50 @@ module Rigor
           return 0
         end
 
+        return run_fused_protection(target_files, options) if options[:with_tests]
+
         report = scan_mutation_protection(target_files, options)
         MutationProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_protection_exit(report, options)
+      end
+
+      # ADR-70 — the fused static∪dynamic deep dive. The type pass is the ADR-63
+      # Tier 2 warm loop; each type-survivor is then run against the project's
+      # test suite (the runner hook). The suite MUST pass on clean code first, or
+      # "a mutant survived" is meaningless — abort with a clear message if not.
+      def run_fused_protection(paths, options)
+        configuration = Configuration.load(options.fetch(:config))
+        test_oracle = Protection::TestSuiteOracle.new(command: options.fetch(:test_command))
+        return suite_not_green_error(options) unless test_oracle.green?
+
+        context = LanguageServer::ProjectContext.new(configuration: configuration)
+        scanner = Protection::MutationScanner.new(
+          configuration: configuration, environment: context.environment, project_scan: context.project_scan
+        )
+        accumulator = FusedProtectionAccumulator.new
+        paths.each { |path| scan_fused_one(path, scanner, accumulator, test_oracle, configuration) }
+        report = accumulator.to_report
+        FusedProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
+        determine_protection_exit(report, options)
+      end
+
+      def scan_fused_one(path, scanner, accumulator, test_oracle, configuration)
+        source = File.read(path)
+        parse_result = Prism.parse(source, filepath: path, version: configuration.target_ruby)
+        if parse_result.errors.any?
+          accumulator.record_parse_error(path, parse_result.errors)
+          return
+        end
+
+        accumulator.absorb(scanner.scan_file_fused(path, source: source, test_oracle: test_oracle))
+      end
+
+      def suite_not_green_error(options)
+        @err.puts(
+          "coverage: the test suite must pass on clean code to measure test protection " \
+          "(ran: #{options.fetch(:test_command).join(' ')})"
+        )
+        1
       end
 
       def scan_mutation_protection(paths, options)

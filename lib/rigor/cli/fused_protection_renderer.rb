@@ -1,0 +1,67 @@
+# frozen_string_literal: true
+
+require "json"
+
+module Rigor
+  class CLI
+    # Renders a {FusedProtectionReport} (ADR-70) as text or JSON. The text form
+    # leads with the fused protected ratio (caught by *either* a type or a test),
+    # splits it into the two axes, then lists the unprotected breakages ("add a
+    # type or a test here") and the least-protected files. The framing is always
+    # *where to add protection*, never "your code is broken".
+    class FusedProtectionRenderer
+      TOP_CALLS = 15
+      TOP_FILES = 10
+
+      def initialize(out:)
+        @out = out
+      end
+
+      def render(report, format:)
+        format == "json" ? render_json(report) : render_text(report)
+      end
+
+      private
+
+      def render_json(report)
+        @out.puts(JSON.pretty_generate(report.to_h))
+      end
+
+      def render_text(report)
+        pct = (report.ratio * 100).round(1)
+        @out.puts "Fused protection (static type ∪ dynamic test)"
+        @out.puts "  protected: #{report.protected_total} / #{report.grand_total}  (#{pct}%)"
+        @out.puts "    by type:  #{report.total_type_killed}"
+        @out.puts "    by test:  #{report.total_test_killed}  (type-survivors a test caught)"
+        @out.puts "  unprotected: #{report.total_unprotected}  (neither — add a type or a test)"
+        render_unprotected(report)
+        render_files(report)
+      end
+
+      def render_unprotected(report)
+        unprotected = report.unprotected
+        return if unprotected.empty?
+
+        @out.puts "\nAdd protection here — breakages neither a type nor a test caught:"
+        unprotected.first(TOP_CALLS).each do |call|
+          @out.puts format("  %<count>-5d #%<method>s   e.g. %<sites>s",
+                           count: call.count, method: call.method_name, sites: call.examples.join("  "))
+        end
+        @out.puts "  (#{unprotected.size - TOP_CALLS} more)" if unprotected.size > TOP_CALLS
+      end
+
+      def render_files(report)
+        worst = report.files.reject { |f| f.unprotected.zero? }.sort_by(&:ratio).first(TOP_FILES)
+        return if worst.empty?
+
+        @out.puts "\nLeast-protected files:"
+        worst.each do |file|
+          total = file.type_killed + file.test_killed + file.unprotected
+          protected_n = file.type_killed + file.test_killed
+          @out.puts format("  %<pct>5.1f%%  %<path>s  (%<n>d/%<total>d protected)",
+                           pct: file.ratio * 100, path: file.path, n: protected_n, total: total)
+        end
+      end
+    end
+  end
+end

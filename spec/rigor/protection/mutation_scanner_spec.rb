@@ -55,4 +55,48 @@ RSpec.describe Rigor::Protection::MutationScanner do
     expect(result.total).to eq(0)
     expect(result.ratio).to eq(1.0)
   end
+
+  # ADR-70 — the fused static∪dynamic measurement. A fake oracle stands in for
+  # the real test suite so the classification logic is exercised deterministically.
+  def fake_test_oracle(verdict)
+    oracle = Object.new
+    oracle.define_singleton_method(:killed?) { |**| verdict }
+    oracle
+  end
+
+  it "credits a type-survivor to the test axis when a test catches it (ADR-70)" do
+    # `File.join` survives the type pass (any args ok) — a type-survivor the test
+    # oracle then catches → test_killed, zero unprotected, fully protected.
+    File.write("joins.rb", %(def j\n  File.join("a", "b")\nend\n))
+
+    result = scanner.scan_file_fused("joins.rb", test_oracle: fake_test_oracle(true))
+
+    expect(result.test_killed).to be >= 1
+    expect(result.unprotected).to eq(0)
+    expect(result.ratio).to eq(1.0)
+  end
+
+  it "marks a site unprotected when neither a type nor a test catches it (ADR-70)" do
+    File.write("joins.rb", %(def j\n  File.join("a", "b")\nend\n))
+
+    result = scanner.scan_file_fused("joins.rb", test_oracle: fake_test_oracle(false))
+
+    expect(result.unprotected).to be >= 1
+    expect(result.test_killed).to eq(0)
+    expect(result.sites.first.protection).to eq(:none)
+  end
+
+  it "never reaches the suite when the type checker already kills the mutant (gradual short-circuit)" do
+    # `"hello".upcase` mutants are all type-killed → the test oracle is never
+    # consulted; an oracle that would raise if called proves the short-circuit.
+    File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+    never = Class.new { def killed?(**) = raise("suite should not run on a type-killed mutant") }.new
+
+    result = scanner.scan_file_fused("greet.rb", test_oracle: never)
+
+    expect(result.type_killed).to be >= 1
+    expect(result.test_killed).to eq(0)
+    expect(result.unprotected).to eq(0)
+    expect(result.ratio).to eq(1.0)
+  end
 end

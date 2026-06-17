@@ -1,14 +1,20 @@
 # ADR-70 — Fused static∪dynamic protection coverage
 
-Status: **Proposed — not yet implemented; actionable now (a thin slice over
-[ADR-63](63-type-protection-coverage.md) + [ADR-69](69-pluggable-mutation-substrate.md)).**
-Add an optional **dynamic overlay** to `coverage --protection --mutation`: for each mutant
-the *type* checker fails to kill, ask whether a *test* kills it (via the ADR-69
-`TestSuiteOracle`), and classify each site by **both** axes — type-protected /
-test-protected / doubly-protected / **unprotected**. The artifact is the fusion: a line is
-truly unprotected only when **neither** a type nor a test guards it, and the report names
-the **cheaper missing axis** ("add a type here" vs "add a test here"). No existing tool
-fuses static type-protection and dynamic test-protection into one map.
+Status: **Accepted — implemented 2026-06-17 (`coverage --protection --mutation --with-tests`),
+co-landed with [ADR-69](69-pluggable-mutation-substrate.md) Seam 1, over
+[ADR-63](63-type-protection-coverage.md).** Adds an optional **dynamic overlay**: for each
+mutant the *type* checker fails to kill, it asks whether a *test* kills it (via the ADR-69
+`Protection::TestSuiteOracle`, the runner hook = `--test-command`, default `bundle exec
+rake`) and classifies each site by **both** axes. The artifact is the fusion: a line is truly
+unprotected only when **neither** a type nor a test guards it, and the report names the
+**cheaper missing axis** ("add a type" vs "add a test"). No existing tool fuses static
+type-protection and dynamic test-protection into one map.
+
+Implemented: `Protection::MutationScanner#scan_file_fused` (the gradual short-circuit +
+three-bucket classification), `Protection::TestSuiteOracle` (`test_suite_oracle.rb`, the
+injectable-runner kill oracle that restores the file in an `ensure`), and the
+`CoverageCommand#run_fused_protection` wiring (`coverage_command.rb`) + `FusedProtectionReport`
+/ `FusedProtectionRenderer` (text + `mode: "protection-fused"` JSON).
 
 Grounding: [`docs/notes/20260617-type-guided-mutation-testing-strategy.md`](../notes/20260617-type-guided-mutation-testing-strategy.md)
 (judgement step 2 — the cheap, on-mission, novel move), ADR-63 (the protection-coverage
@@ -47,10 +53,14 @@ the mutants Rigor did not kill**, then reports a fused per-site classification.
   suite run is paid only for *type-survivors*, so the overlay's cost is proportional to the
   protection hole, not the file. This is the honest, cheap framing: *"of mutants the type
   checker passes, what fraction do your tests catch?"*
-- **Four-way per-site classification.** type-protected (ADR-63 killed) · test-protected
-  (type-survived, suite red) · doubly-protected · **unprotected** (both survived — the
-  ranked "add protection here" list). `--format json` carries the four counts + the
-  attributed sites; `--threshold` gates on the **fused** protected ratio.
+- **Three observed buckets (the short-circuit collapses the fourth).** type-protected
+  (ADR-63 killed) · test-protected (type-survived, suite red) · **unprotected** (both
+  survived — the ranked "add protection here" list). The conceptual *doubly-protected* bucket
+  is collapsed **into type-protected**: a type-killed mutant never reaches the suite, so
+  whether a test *would also* catch it is deliberately not paid for (the static net already
+  suffices). `--format json` carries the three counts (`type_killed` / `test_killed` /
+  `unprotected`) + the attributed sites; `--threshold` gates on the **fused** protected
+  ratio.
 - **Selection is the suite's job, never the dependency graph.** The overlay runs the user's
   suite (or their chosen subset) as-is. It MUST NOT use Rigor's type dependency graph to
   pick which tests to run: that graph records *type* reads, not the *runtime* call graph, so
@@ -96,8 +106,9 @@ the mutants Rigor did not kill**, then reports a fused per-site classification.
   ADR-62 deliberately avoided) — hence opt-in, survivor-scoped, and behind the ADR-69 seam;
   the WD2 unknowability means the dynamic axis is softer than the static one, and the report
   must teach that.
-- **Carry-over** — co-lands with ADR-69. Whole-project affordability and coverage-based
-  suite selection are ADR-46 / ADR-71 follow-ups, not v1 of this overlay.
+- **Carry-over** — co-landed with ADR-69 Seam 1. Whole-project affordability and
+  coverage-based suite selection are ADR-46 / ADR-71 follow-ups, not v1 of this overlay;
+  `--with-tests` inherits the changed-files default (no path = git-changed only).
 
 ## Relationship to other ADRs
 

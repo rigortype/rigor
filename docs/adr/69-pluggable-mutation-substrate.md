@@ -1,13 +1,19 @@
 # ADR-69 — Pluggable mutation substrate (kill-oracle + operator seam)
 
-Status: **Proposed — not yet implemented; actionable now (a refactor, no new user surface).**
-Generalize the ADR-62/63 mutation machinery so the **kill oracle** and the **site-selection
-strategy** are parameters, not assumptions baked into `Protection::MutationScanner`. Today
-the only oracle is "a new Rigor diagnostic appeared" and the only selector is "keep sites
-Rigor can bite"; both are hard-wired. This ADR makes the substrate carry a second oracle
-(*"the test suite went red"*) and the inverted selector a test-oriented consumer needs —
-the prerequisite for [ADR-70](70-fused-protection-coverage.md) and the optionality
-[ADR-71](71-type-guided-external-mutation-testing.md) wants — without re-architecture.
+Status: **Accepted — Seam 1 (kill oracle) implemented 2026-06-17, co-landed with
+[ADR-70](70-fused-protection-coverage.md); Seam 2 (site selector) deferred to its only
+consumer ([ADR-71](71-type-guided-external-mutation-testing.md)).** Generalize the ADR-62/63
+mutation machinery so the **kill oracle** and the **site-selection strategy** are parameters,
+not assumptions baked into `Protection::MutationScanner`. Today the only oracle is "a new
+Rigor diagnostic appeared" and the only selector is "keep sites Rigor can bite"; both were
+hard-wired. Seam 1 now lets the substrate carry a second oracle (*"the test suite went
+red"*, `Protection::TestSuiteOracle`); Seam 2 (the inverted "mutate `Dynamic` sites too"
+selector) is held until ADR-71 builds the external tool that needs it — landing it now would
+be the dead abstraction this ADR warns against.
+
+Implemented: `lib/rigor/protection/diagnostic_oracle.rb` (Seam 1, the extracted ADR-62/63
+behaviour), `Protection::MutationScanner#initialize(oracle:)` + `#scan_file_fused`
+(`mutation_scanner.rb`) consuming it. ADR-70's `TestSuiteOracle` is the first second-oracle.
 
 Grounding: [`docs/notes/20260617-type-guided-mutation-testing-strategy.md`](../notes/20260617-type-guided-mutation-testing-strategy.md)
 (the strategy split this enables) and the current code:
@@ -37,16 +43,20 @@ Factor the substrate along two seams, leaving the Prism splicer oracle-agnostic.
 > capability the substrate cannot express by swapping an oracle/selector is a seam gap, not
 > a reason to copy the mutator.
 
-- **Seam 1 — the kill oracle.** Extract today's logic into a `DiagnosticOracle` (a mutant
-  is killed iff `Runner#run_source` yields a diagnostic absent from the clean baseline) and
-  define the interface a `TestSuiteOracle` (ADR-70) will implement (run the suite, killed
-  iff it goes red). The scanner takes an oracle; `classify` calls `oracle.killed?(clean,
-  mutant)`. The `DiagnosticOracle` path stays **byte-identical** to today.
-- **Seam 2 — the site selector.** The type-aware filter (`filter_by_type`) becomes one
-  strategy (`BiteableSites` — keep concrete-anchor sites, FP-safe), separable from the
-  `Mutator` so a consumer can pass `AllSites` / a `Dynamic`-preferring selector instead.
-  The mutator still *records* the anchor + its type for reporting; it no longer *decides*
-  to drop on it.
+- **Seam 1 — the kill oracle. Implemented.** Today's logic is extracted into a
+  `DiagnosticOracle` (a mutant is killed iff `Runner#run_source` yields a diagnostic absent
+  from the clean baseline); the interface (`#baseline`, `#killed?`) is what `TestSuiteOracle`
+  (ADR-70) implements. The scanner takes `oracle:` and routes its `classify` through it; the
+  `DiagnosticOracle` default is **byte-identical** to today (the ADR-63 Tier 2 scanner spec
+  is unchanged).
+- **Seam 2 — the site selector. Deferred (its consumer is deferred).** The plan is to make
+  the type-aware filter (`filter_by_type`) one swappable strategy (`BiteableSites` — keep
+  concrete-anchor sites, FP-safe) so a consumer can pass an `AllSites` / `Dynamic`-preferring
+  selector. But the *only* consumer of an inverted selector is the external tool ADR-71
+  defers; ADR-70's fused overlay reuses the **biteable** sites (it runs tests on the
+  type-survivors of the existing filter), so it does not exercise Seam 2. Landing `AllSites`
+  now would be exactly the dead abstraction the criterion forbids — so Seam 2 lands **with**
+  ADR-71, not before.
 - **No new user surface.** This is internal restructuring under ADR-50 (the frozen contract
   is the CLI vocabulary + JSON keys, not the `Protection::*` class shapes). `tool/mutation/`
   and the ADR-63 `coverage --protection --mutation` command observe no behavioural change.
@@ -67,9 +77,10 @@ Factor the substrate along two seams, leaving the Prism splicer oracle-agnostic.
 - **Negative** — a small indirection cost (an interface where there was a method) for value
   that only materializes once ADR-70 lands; if ADR-70 were abandoned the seam would be
   dead abstraction (so land them together).
-- **Carry-over** — implement alongside ADR-70's first dynamic consumer so the
-  `TestSuiteOracle` interface is exercised, not speculative. Gate: the `DiagnosticOracle`
-  path is byte-identical on the ADR-63 `coverage --protection --mutation` measurement.
+- **Carry-over** — Seam 1 co-landed with ADR-70's `TestSuiteOracle`, so the interface is
+  exercised, not speculative; the `DiagnosticOracle` default kept the ADR-63 scanner spec
+  green (the byte-identical gate). **Seam 2 (the site selector) is the remaining slice**, due
+  with ADR-71's external consumer.
 
 ## Relationship to other ADRs
 

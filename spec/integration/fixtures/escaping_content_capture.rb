@@ -67,3 +67,21 @@ end
 handed = { mode: "print" }
 build_opts(handed).tap { |_| nil }
 assert_type("Hash[Dynamic[top], Dynamic[top]]", handed)
+
+# The CLI `parse_options` idiom: the escape-mutating block hangs off
+# `OptionParser.new` (RECEIVER position) AND its body is a bare self-call
+# `define_opts(opts, routed)` that escape-mutates the `routed` argument inside
+# ITS nested `opts.on { routed[:k] = v }` blocks. The capture is mutated through
+# TWO indirections — a receiver-chain block plus a callee boundary — so neither
+# the direct content-mutation collector (the block body holds no `routed[:k] =
+# v`) nor the call-site receiver-chain floor (`define_opts` is not in the outer
+# `.parse!` chain) catches it alone. Without the floor, `routed` keeps its
+# literal-false seed and the caller's `routed[:mutation]` guard folds to an
+# always-falsey constant.
+def define_opts(opts, routed)
+  opts.on("--mode=M") { |v| routed[:mode] = v }
+end
+
+routed = { mode: "print", mutation: false }
+OptionParser.new { |opts| define_opts(opts, routed) }.parse!([])
+assert_type("Hash[Dynamic[top], Dynamic[top]]", routed)

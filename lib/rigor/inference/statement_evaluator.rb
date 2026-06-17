@@ -2274,6 +2274,11 @@ module Rigor
         body = block_node.body
         return post_scope if body.nil?
 
+        # Transitive case first: the body may content-mutate a captured local
+        # through a self-call rather than a direct `local[k] = v` write, which
+        # `collect_content_mutations` cannot see (see below).
+        post_scope = floor_block_body_callee_escaped_args(body, post_scope)
+
         mutations = collect_content_mutations(body)
         return post_scope if mutations.empty?
 
@@ -2281,6 +2286,28 @@ module Rigor
           floored = content_floor_for(acc.local(name))
           floored.nil? ? acc : acc.with_local(name, floored)
         end
+      end
+
+      # Inside an ESCAPING block body, a captured outer local can be content-
+      # mutated transitively: the body is (or contains) a self-call that
+      # escape-mutates one of its arguments. The canonical shape is the CLI's
+      # own `OptionParser.new { |opts| define_options(opts, options) }` — the
+      # block body is a bare `define_options(opts, options)` whose `options`
+      # parameter is escape-mutated inside ITS nested `opts.on { options[:k] =
+      # v }` blocks. `collect_content_mutations` only sees direct `local[k] =
+      # v` writes in THIS body, so it misses the transitive write and the
+      # captured Hash keeps its literal-false seed (folding the caller's
+      # `options[:mutation]` guard to an always-falsey constant). Reuse the
+      # cross-method-boundary callee-escaped-argument floor (the same gate the
+      # receiver-chain path uses at the call site) on every self-call in the
+      # body. Sound — only ever floors a captured local passed as an argument
+      # to a callee that demonstrably escape-mutates the matching parameter.
+      def floor_block_body_callee_escaped_args(body, post_scope)
+        acc = post_scope
+        Source::NodeWalker.each(body) do |descendant|
+          acc = floor_callee_escaped_args_for_call(descendant, acc) if descendant.is_a?(Prism::CallNode)
+        end
+        acc
       end
 
       # The Dynamic-floor carrier for a content-mutated escaping capture, or

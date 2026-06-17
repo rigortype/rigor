@@ -29,6 +29,7 @@ cycles live in dedicated archives:
 
 ### Fixed
 
+- **[inference]** An option hash mutated through a helper inside an escaping block — the `OptionParser.new { |opts| define_options(opts, options) }` idiom, where the per-flag `options[:k] = v` writes live in the helper rather than the block — no longer keeps its literal default values, so a later guard like `if options[:mutation] && !options[:protection]` stops folding to a false `flow.always-truthy-condition` ("condition is always falsey") warning. The escaping-block content floor ([ADR-57](docs/adr/57-self-call-return-adoption.md)) now also follows a self-call in the block body that escape-mutates one of its arguments, not just direct `options[:k] = v` writes in the block itself.
 - **[packaging]** The published gem now ships Rigor's bundled RBS data — the `data/vendored_gem_sigs/` per-gem stubs (nokogiri, pg, redis, mysql2, …) and the `data/core_overlay/` core reopenings (including the v0.2.0 StringScanner fix). The gemspec's `spec.files` glob only matched `data/builtins/**/*.yml`, so an installed `rigortype` gem silently lacked these `.rbs` files and produced extra `call.undefined-method` false positives that a from-source checkout did not.
 
 ## [0.2.0] - 2026-06-17

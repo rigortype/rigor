@@ -6,4 +6,5 @@ locals:
   handed: '{ mode: "print" }'
   nested: Hash[Dynamic[top], Dynamic[top]]
   options: Hash[Dynamic[top], Dynamic[top]]
+  routed: '{ mode: "print", mutation: false }'
   seen: "{}"

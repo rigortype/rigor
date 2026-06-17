@@ -58,6 +58,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | Date | Note |
 | --- | --- |
 | 2026-06-13 | [Mutation-testing the analyzer — a teeth / false-negative harness + `lib/rigor` sweep backlog](20260613-mutation-teeth-harness.md) |
+| 2026-06-17 | [Type-guided mutation testing — internal teeth vs. an external test-suite tool (strategy)](20260617-type-guided-mutation-testing-strategy.md) |
 
 ## Outside research & essay reviews
 

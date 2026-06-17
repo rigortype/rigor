@@ -290,6 +290,45 @@ deep-dive, not an interactive check.
 rigor coverage --protection --mutation [paths]
 ```
 
+Adding `--with-tests` (with `--protection --mutation`) turns
+that into the **fused static∪dynamic** view: for each breakage
+the type checker does *not* catch, it runs your test suite to see
+whether a **test** catches it. Each site is then classified
+`type-protected` (the type checker caught it), `test-protected`
+(a test caught what the type checker missed), or `unprotected`
+(neither — the actionable "add a type **or** a test here" list),
+and the report names the cheaper missing axis. A type-killed
+mutant never reaches the suite (a gradual short-circuit), so the
+cost is proportional to the protection hole. `--format=json`
+carries `mode` (`protection-fused`), `type_killed`,
+`test_killed`, `unprotected`, `protected_ratio`, per-file rows,
+and `add_protection_here`; `--threshold` gates on the fused
+ratio.
+
+`--test-command=CMD` is the runner hook (default
+`bundle exec rake`). The suite must pass on clean code first, or
+the run aborts — point it at a plain pass/fail runner (a coverage
+floor that exits non-zero on a passing suite trips this). It runs
+with Bundler's environment stripped, so a `bundle exec` command
+resolves your project's bundle even when Rigor itself was
+launched under its own — no env wrapper needed.
+
+`--include-dynamic` extends the overlay to `Dynamic`-receiver
+(untyped) sites, where a test is the only possible protection —
+completing the map to *every* dispatch site rather than only the
+ones Rigor can type-check. Every such site is a type-survivor, so
+it runs the suite far more; it is an explicit opt-in.
+
+`--limit=N` (with `--seed=N`, default `1`) caps the measurement
+to a deterministic sample of `N` mutations per file, bounding the
+cost on large files. Per-file ratios then become estimates, noted
+on stderr so `--format=json` stdout stays clean.
+
+```sh
+rigor coverage --protection --mutation --with-tests \
+  --test-command "bundle exec rspec" --include-dynamic [paths]
+```
+
 ## `rigor mcp`
 
 Run the Rigor MCP (Model Context Protocol) server over stdio,

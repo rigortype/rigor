@@ -38,8 +38,9 @@ tool, not a library — installing it standalone keeps its Ruby version
 and its dependencies out of your application's resolution. See
 [Installing Rigor § Recommended — a runtime version manager](01-installation.md#recommended--a-runtime-version-manager).
 
-The LSP server runs as `rigor lsp`. No separate gem, no addon
-registration — same binary as `rigor check` / `rigor type-of`.
+The LSP server runs as `rigor lsp`, using the same binary as
+`rigor check` / `rigor type-of`. There is no separate gem and no
+addon registration.
 
 ## CLI
 

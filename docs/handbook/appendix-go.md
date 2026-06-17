@@ -7,7 +7,7 @@ two have a real point of contact that surprises people: Go's
 structural typing works. The single most-misunderstood feature
 in Rigor — "where do I declare that this class implements the
 interface?" — is the one a Go programmer already understands by
-reflex. You don't. You never did in Go either.
+reflex, the way you always did in Go.
 
 This is a translation table plus a discussion of where the two
 diverge. Go is small, compiled, and deliberately spare —
@@ -29,10 +29,10 @@ Go needs as a compiled language (the build gate itself).
 
 Go and Rigor share the structural-typing instinct and the
 `any`-as-escape-hatch instinct. They part ways on the build
-model — Go's checker is a gate the program passes before it
-exists; Rigor's is an advisor over a program that already runs —
-and on richness: Go is intentionally minimal where Rigor adds
-unions, literal types, and refinements.
+model: Go's checker is a gate the program passes before it
+exists, while Rigor's is an advisor over a program that already
+runs. They also part ways on richness, where Go is intentionally
+minimal and Rigor adds unions, literal types, and refinements.
 
 ## Type vocabulary mapping
 
@@ -54,7 +54,7 @@ unions, literal types, and refinements.
 | `*T` (pointer, nil-able) | `T?` (i.e. `T \| nil`) | A nil-able pointer narrows like `T?`. |
 | `iota` const group | `Constant<…>` union | Go's enum idiom; Rigor uses a union of constants or symbols. |
 | `[T any]` (generics, 1.18+) | RBS `[T]` type parameter | |
-| (no sum types) | `T \| U` | Go has no unions at all — a Rigor addition. |
+| (no sum types) | `T \| U` | Go has no unions at all; a Rigor addition. |
 | (no literal types) | `Constant<42>` / `Constant<"hi">` | Go has no literal types; a Rigor novelty. |
 
 ## Structural interfaces — the part you already know
@@ -317,7 +317,7 @@ is deliberately minimal:
   object shapes and capability roles, not just satisfaction of a
   declared `interface`.
 - **No-false-positives stance.** Silent on `Dynamic[Top]`
-  receivers rather than complaining — the `interface{}` you
+  receivers rather than complaining; the `interface{}` you
   haven't narrowed yet costs you nothing.
 - **No annotation tax beyond `:=`.** Go infers `:=` locals;
   Rigor infers whole method bodies *and* across `def`

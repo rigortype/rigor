@@ -87,8 +87,8 @@ parameter typed as `Array[T]`. The widening is deterministic
 and documented in
 [`docs/type-specification/inference-budgets.md`](../type-specification/inference-budgets.md).
 
-Widening is safe — `Array[T]` is a strictly less precise view
-of the same value — but you lose the per-position information.
+Widening is safe (`Array[T]` is a strictly less precise view
+of the same value), but you lose the per-position information.
 If you find yourself writing code where `[a, b, c]` should
 type-check precisely but does not, look for a method
 in the chain that takes `Array[T]` rather than a tuple, or a
@@ -232,7 +232,7 @@ shape that keeps some fields, drops others, or flips the
 required-ness, Rigor exposes five **shape-projection type
 functions** on `Type::Combinator`. They mirror TypeScript's
 `Pick` / `Omit` / `Partial` / `Required` / `Readonly` utility
-types but are first-class Rigor operations — not a TS bolt-on.
+types but are first-class Rigor operations, not a TS bolt-on.
 Each preserves the source's existing classification (required /
 optional / read-only / extra-keys policy) on the entries it
 keeps.

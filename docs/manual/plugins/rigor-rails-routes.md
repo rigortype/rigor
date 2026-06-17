@@ -1,7 +1,7 @@
 # rigor-rails-routes
 
-Statically interprets `config/routes.rb` with Prism — no Rails
-runtime dependency — builds the route-helper table Rails would
+Statically interprets `config/routes.rb` with Prism (no Rails
+runtime dependency), builds the route-helper table Rails would
 generate, and validates every `*_path` / `*_url` call site against
 it: an unknown helper is flagged (with a did-you-mean suggestion),
 as is a wrong argument count. Model↔route inflection uses the real

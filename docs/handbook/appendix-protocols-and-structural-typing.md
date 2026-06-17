@@ -30,8 +30,8 @@ This appendix untangles the two so you reach for the right one.
 | "static duck typing" — a class fits if it has the methods (Python `Protocol`) | **interface** | A structural *type* in the type lattice. | RBS `interface _Foo`, read from `sig/` |
 | "every action under `app/actions/` must define `#handle`" — a framework convention enforced by tooling | **protocol contract** | A *behavioural contract* bound to classes by file path, declared by a plugin. | A plugin's `protocol_contracts:` manifest field (ADR-28) |
 
-The two are genuinely different axes — not two flavours of one
-thing — and the rest of this page is mostly about keeping them
+The two are different axes, not two flavours of one
+thing, and the rest of this page is mostly about keeping them
 apart. The one-line discriminator:
 
 - An **interface** is a *type* you name in a signature. The check
@@ -114,14 +114,14 @@ structural-typing surface. None of it is spelled "protocol."
 
 Why does Rigor spell its structural type `interface` and reserve
 `protocol` for something else? Because the *word* "protocol" and the
-*semantics* "structural typing" have drifted apart across languages —
+*semantics* "structural typing" have drifted apart across languages,
 and Rigor picks the spelling that least surprises a Ruby reader (RBS
 already says `interface`).
 
 The term itself is old. **Smalltalk** (1970s) called the set of
 messages an object understands its *protocol* — grouped into "message
 protocols" in the class browser. It was never a static-checking
-construct; it just named "what you can send this object," the direct
+construct; it named "what you can send this object," the direct
 ancestor of Ruby's duck typing. Every later use inherits that core
 idea — "a set of methods a conforming object provides" — and then
 adds its own rules about *how conformance is established*.
@@ -135,7 +135,7 @@ Two such rules matter, and they are independent of the spelling:
   (Java / PHP `interface ... implements`, Swift / Objective-C
   `protocol` with explicit adoption.)
 
-The spelling does **not** track the rule — the two crossed long ago:
+The spelling does **not** track the rule; the two crossed long ago:
 
 | Language | Spelling | Conformance | Same as Rigor? |
 | --- | --- | --- | --- |

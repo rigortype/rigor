@@ -1,9 +1,9 @@
 # Everyday types
 
 This is the most important chapter. Once you have a feel for
-the carriers below, the rest of the handbook is just rules
+the carriers below, the rest of the handbook is rules
 operating on them. This is also the page to come back to as a
-glossary — the table below is the whole carrier zoo at a
+glossary; the table below is the whole carrier zoo at a
 glance.
 
 ## Why "type" is too coarse a word

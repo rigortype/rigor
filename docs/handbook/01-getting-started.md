@@ -6,7 +6,7 @@ By the end of this chapter you will be able to:
   by hand);
 - run `rigor check` and read the diagnostics it prints;
 - understand the "no annotations needed" stance that sets
-  Rigor apart from most checkers — and the escape hatches for
+  Rigor apart from most checkers, and the escape hatches for
   when inference falls short.
 
 It is the only chapter you must read top to bottom. The rest
@@ -20,7 +20,7 @@ it to your application's `Gemfile`.** Install it on its own and
 point it at your project.
 
 Rigor itself runs on Ruby 4.0, independently of the Ruby your own
-code targets — the [`target_ruby:` config key](#the-config-file)
+code targets. The [`target_ruby:` config key](#the-config-file)
 tells Rigor which Ruby *your* project runs.
 
 ### The fast path: let an AI agent set it up
@@ -81,9 +81,9 @@ catalogue of bugs:
 - a few more, all listed in
   [Chapter 8 — Understanding errors](08-understanding-errors.md).
 
-Critically, Rigor does **not** ask you to write type
-annotations in your Ruby source. It infers as much as it can,
-and stays silent everywhere it cannot prove a narrower type.
+Rigor does **not** ask you to write type annotations in
+your Ruby source. It infers as much as it can, and stays
+silent everywhere it cannot prove a narrower type.
 A diagnostic only fires when Rigor has enough static
 information to be confident.
 
@@ -169,7 +169,7 @@ for each suppression mechanism, is in
 ## The "no annotations" stance
 
 Most static checkers ask the user to annotate types. Rigor
-does the opposite — it looks at what your Ruby code does and
+does the opposite: it looks at what your Ruby code does and
 **proves** types from the values themselves. Three quick
 examples:
 

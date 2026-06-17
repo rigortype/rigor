@@ -3,7 +3,7 @@
 This chapter is the catalogue of diagnostics Rigor ships, the
 families they belong to, and how to suppress one when it is
 wrong (or move its severity around). It is the page to land on
-when a diagnostic surprises you — in either direction.
+when a diagnostic surprises you, in either direction.
 
 ## Anatomy of a diagnostic
 
@@ -333,8 +333,8 @@ Almost always one of:
    discovery; if both miss, the call goes through
    `Dynamic[Top]` and you see no diagnostic, but a sibling
    call against the wrong class might fire.
-4. **A diagnostic is genuinely false-positive.** Rare —
-   Rigor's design priority is no-false-positives — but
+4. **A diagnostic is genuinely false-positive.** Rare
+   (Rigor's design priority is no-false-positives) but
    possible. File an issue with the smallest reproducer you
    can extract.
 

@@ -148,8 +148,7 @@ A few rules:
   separator prevents cross-plugin collisions per ADR-20 WD1.
 - **The payload format is space-separated `key=value` pairs.**
   RBS's `%a{...}` annotation grammar rejects quotes, so JSON
-  payload won't work — the kv-form is what RBS will actually
-  deliver.
+  payload won't work — the kv-form is what RBS will deliver.
 - **`body=` is special-cased to gobble everything to the end** of
   the payload, so the body string can contain spaces, `|`, `[]`
   etc. without escaping.

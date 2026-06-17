@@ -26,7 +26,7 @@ You probably do **not** need RBS when:
 
 - The method is private to your project, the body is short,
   and Rigor already infers the right return type.
-- The method is just a wrapper around a method that already
+- The method is a wrapper around a method that already
   has a sig (Rigor walks the body and propagates).
 
 ## A first sig

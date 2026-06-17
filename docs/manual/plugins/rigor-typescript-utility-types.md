@@ -5,7 +5,7 @@ shape-projection type functions, so a codebase migrating from
 TypeScript / Sorbet RBI can write the familiar names inside
 `RBS::Extended` annotations. It registers five
 [ADR-13](../../adr/13-typenode-resolver-plugin.md) `TypeNodeResolver`s
-— a pure translation layer; the shape *semantics* live in core, where
+as a pure translation layer; the shape *semantics* live in core, where
 they have one spec-owned definition shared by every consumer.
 
 It ships bundled in `rigortype`. Activate it under `plugins:`:

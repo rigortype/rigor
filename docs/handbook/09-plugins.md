@@ -3,12 +3,12 @@
 Plugins exist for one reason: some methods' types depend on
 the **shape of their arguments at runtime** in ways that no
 RBS sig can express. This chapter helps you decide when that
-is worth a plugin — and, just as often, when it is not.
+is worth a plugin, and when it is not.
 
 It does **not** teach plugin *authoring*. That lives in
 [`examples/`](../../examples/README.md) — sixteen tutorial
-walkthroughs, each spotlighting one extension surface — while
-ready-to-install gems for real frameworks live in
+walkthroughs, each spotlighting one extension surface.
+Ready-to-install gems for real frameworks live in
 [`plugins/`](../../plugins/README.md). Read on to decide
 whether you need a plugin; go to `examples/` once you want to
 write one, or `plugins/` to install an existing one.
@@ -56,8 +56,7 @@ return-type contributions, …) and recommends a reading order.
 > Still here? Most readers should jump to
 > [Should you write one?](#should-you-write-one) first — the
 > answer is usually "no, RBS and `RBS::Extended` get you
-> there." The surfaces below are for when it is genuinely
-> "yes."
+> there." The surfaces below are for when it is "yes."
 
 The v0.1.0+ plugin contract — pinned at
 [`docs/internal-spec/plugin.md`](../internal-spec/plugin.md)

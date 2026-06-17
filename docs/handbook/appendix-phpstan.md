@@ -26,13 +26,13 @@ unchanged. This appendix maps the vocabulary.
 | Custom return shape | Dynamic Return Type Extensions | Plugin `flow_contribution_for` |
 
 The two tools agree on most of the foundational decisions. The
-biggest differences are surface — Ruby's syntax and runtime
-shape — not philosophy.
+biggest differences are surface (Ruby's syntax and runtime
+shape), not philosophy.
 
 ## Type vocabulary mapping
 
-PHPStan and Rigor have an overlapping refinement vocabulary —
-this is the closest match of any peer.
+PHPStan and Rigor have an overlapping refinement vocabulary; this
+is the closest match of any peer.
 
 | PHPStan PHPDoc | Rigor representation | Notes |
 | --- | --- | --- |
@@ -159,8 +159,8 @@ play.
 
 PHPStan reads PHP stub files (`.stub`) for libraries that ship
 no PHPDoc. Rigor reads `.rbs` files for the same purpose. The
-dispatch is similar — both tools layer "stub-declared
-contract beats inferred-from-body" — and both use the stub
+dispatch is similar: both tools layer "stub-declared
+contract beats inferred-from-body," and both use the stub
 files as the canonical place to attach refinements via
 PHPDoc / `RBS::Extended` annotations.
 
@@ -189,7 +189,7 @@ PHPStan's levels are a numeric ladder (0 = "shapes only," 10 =
 | 3 – 6 | `balanced` (default) | Most rules → `:error`. |
 | 7 – 10 | `strict` | Everything → `:error`, including `:warning` rules in `balanced`. |
 
-The mapping is approximate — the rule sets are not 1:1 — but
+The mapping is approximate (the rule sets are not 1:1), but
 the practical advice is the same: start with the default,
 tighten over time. Chapter 8's "helpful workflow" matches the
 PHPStan onboarding pattern.

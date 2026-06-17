@@ -8,7 +8,7 @@ If you have used TypeProf, the most important thing to know is
 that **Rigor and TypeProf share TypeProf's headline promise**:
 neither one asks you to write `.rbs` first. Where the Steep
 appendix opens with "both consume the same RBS," this one opens
-with the inverse — both *produce* type information from plain
+with the inverse: both *produce* type information from plain
 Ruby. The interesting differences are in *how* they infer and
 *what they do with the result*.
 
@@ -36,7 +36,7 @@ TypeProf's CLI was built for.
 
 ## Both infer without annotations — that is the common ground
 
-This is the headline. TypeProf and Rigor are the two Ruby
+TypeProf and Rigor are the two Ruby
 tools that give you something useful on a `lib/` directory
 with **zero `.rbs` files**. Steep, by contrast, expects the
 signatures up front. So if you came to Rigor from TypeProf,
@@ -104,7 +104,7 @@ Rigor produces from it.)
 
 ## Analysis model — the largest conceptual difference
 
-This is where the tools genuinely part ways.
+This is where the tools part ways.
 
 **TypeProf is a whole-program abstract interpreter.** It walks
 the program from its entry points and *executes it at the type
@@ -143,7 +143,7 @@ a whole codebase and across runs.
 | Bounded? | By practical blow-up limits | By explicit inference budgets |
 | Incremental / cached? | TypeProf 2 / `--lsp` improves this | Per-file cache across runs + machines |
 
-The trade is real and intentional: TypeProf buys precision on
+The trade is intentional: TypeProf buys precision on
 small inputs with whole-program interpretation; Rigor buys
 scale and silence with local inference and a catalog.
 
@@ -177,7 +177,7 @@ the inference."
 A natural follow-on to the analysis-model section: if TypeProf
 learns parameter types from call sites, and tests are nothing
 *but* call sites, how do the two tools use your `spec/` (or
-`test/`) suite? There are really two directions, and the tools
+`test/`) suite? There are two directions, and the tools
 differ on each.
 
 ### Direction 1 — tests → method types
@@ -227,7 +227,7 @@ The reverse flow: once signatures land in `sig/`, they make
 the *spec itself* checkable. `rigor check` (and the
 `rigor-rspec` plugin) types `subject` / `let` bodies against
 the real return types and checks matchers, which sharpens the
-next `sig-gen` run — a genuine loop. (Note the two RSpec
+next `sig-gen` run, closing the loop. (Note the two RSpec
 machines are separate: sig-gen's collector is built in and
 needs no plugin; `rigor-rspec` is the standalone diagnostic
 analyser. They run side by side, not shared.)
@@ -355,7 +355,7 @@ points in the lifecycle:
 
 The standing rule when their RBS disagrees: TypeProf may infer
 a *narrower parameter* from a call site that Rigor reports as
-`untyped`. That is not a Rigor bug — it is the local-vs-whole-
+`untyped`. That is not a Rigor bug; it is the local-vs-whole-
 program trade. If you want Rigor to honour that narrower
 parameter, write it into `sig/` (both tools then read it) or
 add a guard the engine can narrow on.
@@ -402,8 +402,8 @@ section sequentially. Three useful pointers:
   — the feature that does TypeProf's job inside Rigor, with
   the no-overwrite classification model.
 - [Chapter 8 — Understanding errors](08-understanding-errors.md)
-  for the diagnostic gate that is Rigor's actual product —
-  the thing TypeProf does not set out to be.
+  for the diagnostic gate that is Rigor's product, the thing
+  TypeProf does not set out to be.
 - [`docs/type-specification/inference-budgets.md`](../type-specification/inference-budgets.md)
   for the budget model that lets local inference scale where
   whole-program interpretation does not.

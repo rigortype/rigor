@@ -7,7 +7,7 @@ a structural interface as a checked contract. Rigor reads that
 extra information from **`RBS::Extended` annotations** — ordinary
 RBS `%a{...}` annotations under a reserved `rigor:v1:` key — so
 you can sharpen a signature without leaving RBS and without
-breaking any other RBS tool, which simply preserves or ignores
+breaking any other RBS tool, which preserves or ignores
 the annotation.
 
 You write these in your `*.rbs` files, on the method or class
@@ -19,7 +19,7 @@ def read_name: () -> String
 ```
 
 The plain `() -> String` stays the compatibility contract; the
-annotation tells Rigor the return is actually a non-empty string.
+annotation tells Rigor the return is a non-empty string.
 This page is the *operational* reference — the directives you can
 write and their syntax. For the normative rules (conflict
 handling, merging, provenance) see
@@ -188,5 +188,3 @@ This is an advanced authoring surface; the worked walkthrough is
 - [Inspecting inferred types](05-inspecting-types.md) — the
   `assert_type` / `dump_type` source helpers, the Ruby-side
   counterpart to these RBS-side annotations.
-</content>
-</invoke>

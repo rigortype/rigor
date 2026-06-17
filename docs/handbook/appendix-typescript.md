@@ -7,7 +7,7 @@ from "I get TypeScript" to "I get Rigor."
 
 This page is not a tutorial. It is a translation table plus a
 short discussion of the places where the two systems make
-genuinely different choices — those are the places where your
+different choices, which are the places where your
 TypeScript reflexes will mislead you.
 
 ## The five-second pitch
@@ -222,9 +222,8 @@ Be honest about what you give up:
   variants (`Uppercase<S>` / `Lowercase<S>` / `Capitalize<S>`)
   remain outside Rigor's surface.
 - **Type-level computation.** TypeScript's type system is
-  Turing-complete; Rigor's deliberately is not. This is a
-  feature, not a limitation — the analyzer has to be fast
-  on real Ruby projects.
+  Turing-complete; Rigor's deliberately is not, so the
+  analyzer stays fast on real Ruby projects.
 - **Inferred return type from method body in source.** `tsc`
   infers return types from a function's body and exposes them
   to callers. Rigor does the same for in-source `def`, but

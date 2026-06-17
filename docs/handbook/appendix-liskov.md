@@ -2,8 +2,8 @@
 
 A bridge between the **Liskov Substitution Principle (LSP)** — the
 classical statement of what it *means* for one type to substitute
-for another — and Rigor's design. The thesis of this page is small
-and, once seen, hard to un-see:
+for another — and Rigor's design. The thesis of this page is small,
+and once seen it is hard to un-see:
 
 > Rigor's robustness principle (Postel's law for types, strict on
 > returns, lenient on parameters) **is** the LSP signature rule,
@@ -16,10 +16,9 @@ and, once seen, hard to un-see:
 
 That convergence matters because it answers a worry a Ruby
 programmer reasonably has about any type checker: *will this thing
-fight my idioms?* The answer here is no — the discipline Rigor
-quietly applies is the same discipline the Ruby community already
-teaches under the "L" of SOLID, and the same one a careful duck-
-typer follows by instinct.
+fight my idioms?* It will not. The discipline Rigor applies is the
+same discipline the Ruby community already teaches under the "L" of
+SOLID, and the same one a careful duck-typer follows by instinct.
 
 > **A note on the acronym.** Everywhere else in this repository
 > "LSP" means the **Language Server Protocol**
@@ -97,7 +96,7 @@ strengthen, `invariant` clauses accumulate.
 
 A claim surfaces occasionally: *"Ruby is dynamically typed, so LSP
 is a static-typing rule that does not strictly apply."* This gets
-the principle backwards, and it is worth saying why plainly.
+the principle backwards.
 
 LSP is not a rule *about* type checkers. It is a rule about
 **observable behaviour under substitution** — Liskov's own framing
@@ -105,8 +104,8 @@ quantifies over "all programs `P` defined in terms of `T`" and asks
 that their *behaviour* be unchanged when an `S` is substituted. The
 1994 paper's title is deliberate: *A **Behavioral** Notion of
 Subtyping*. The signature rule is only the type-system-shaped half;
-the load-bearing half is the behavioral rule — preconditions,
-postconditions, invariants, history — and those are statements about
+the load-bearing half is the behavioral rule (preconditions,
+postconditions, invariants, history), and those are statements about
 what code *does at runtime*, not about what a compiler accepts.
 
 That behavioral focus is exactly what makes LSP **more** applicable
@@ -121,7 +120,7 @@ to a language like Ruby, not less:
   substitutability of *messages and behaviour* (duck typing), which
   is precisely the relation LSP is stated over. A language that is
   hard to formalise is the case where a behavioural substitutability
-  discipline earns the most — it is the only safety net available
+  discipline earns the most: it is the only safety net available
   when a static one is not.
 
 So "Ruby is not statically typed" is an argument *for* taking LSP
@@ -193,12 +192,12 @@ adoption problem, not a substitutability proof
   tightens returns to "the most specific thing the body provably
   produces."
 
-Two completely different starting points — a 1994 substitutability
+Two completely different starting points (a 1994 substitutability
 theorem and a 2020s "please don't make Ruby programmers write
-`.to_s` everywhere" ergonomics concern — and they land on the
+`.to_s` everywhere" ergonomics concern) land on the
 *identical* rule. That convergence is the reassurance: Rigor's
 pragmatic, Ruby-first defaults are not a departure from classical
-OO type discipline. They re-derive it.
+OO type discipline, they re-derive it.
 
 ```ruby
 # Clause 2 / contravariant parameters: the body uses only #upcase,
@@ -248,7 +247,7 @@ RBS declares these containers invariant; Rigor honours the
 declaration and so never offers the unsound substitution. The
 signature rule, applied to the *mutating* methods (`push` takes the
 element in a contravariant position; `[]` returns it in a covariant
-one), forces invariance — and Rigor gets this for free by trusting
+one), forces invariance, and Rigor gets this for free by trusting
 RBS rather than re-deriving variance.
 
 **Self types** are the signature rule's covariant-return case made
@@ -257,7 +256,7 @@ self`) means "I return *my own* class," so a subtype's inherited
 method returns the subtype — covariant return, honoured
 automatically. See [§ "F-bounded polymorphism and self
 types"](appendix-type-theory.md#f-bounded-polymorphism-and-self-types)
-for the deeper treatment; the LSP reading is just that `self` is the
+for the deeper treatment; the LSP reading is that `self` is the
 mechanism that keeps `Sub#dup` returning `Sub`, never widening back
 to the ancestor and thereby weakening the postcondition.
 
@@ -343,7 +342,7 @@ behaviour the *only* behaviour expressible.
 ## Invariants and the history constraint
 
 The third and fourth behavioral rules — **invariants preserved** and
-the **history constraint** — are where Rigor's coverage is genuinely
+the **history constraint** — are where Rigor's coverage is
 *partial*, and it is worth being precise about what is and is not
 modelled.
 
@@ -401,7 +400,7 @@ Sandi Metz's *Practical Object-Oriented Design in Ruby* frames the
 superclasses**, and the practical test is that callers written
 against the superclass keep working unchanged. That is Liskov's 1987
 sentence in plain Ruby. Rigor's contribution is to make the
-*signature half* of that discipline machine-checkable — and to do so
+*signature half* of that discipline machine-checkable, and to do so
 without asking the programmer to write a single annotation, because
 the robustness principle infers the LSP-correct parameter and return
 shapes automatically.

@@ -94,8 +94,8 @@ form; `--trace` records fail-soft fallbacks. The editor-mode
 ## `rigor trace`
 
 Replay HOW the engine typed a file, step by step, as a
-terminal animation — a teaching probe over the same inference
-`rigor check` runs.
+terminal animation. It is a teaching probe over the same
+inference `rigor check` runs.
 
 ```sh
 rigor trace [--delay=SECONDS] [--line=N] [--verbose] [--format=json] FILE
@@ -261,12 +261,12 @@ rigor coverage [paths]
 exits `1` when the precision ratio falls below `RATIO`
 (`0.0`–`1.0`), making it a CI gate.
 
-`--protection` switches to **type-protection coverage**: instead
-of "how precise are my types", it reports "if I introduce a bug,
-would Rigor catch it". Each dispatch site (a call with an
+`--protection` switches to **type-protection coverage**: it
+reports "if I introduce a bug, would Rigor catch it" rather than
+"how precise are my types". Each dispatch site (a call with an
 explicit receiver) is *protected* when the receiver types to a
-concrete class — a site where Rigor's call rules can catch a
-wrong method or argument — and *unprotected* when the receiver is
+concrete class (a site where Rigor's call rules can catch a
+wrong method or argument) and *unprotected* when the receiver is
 `Dynamic`. The report leads with the protected ratio, then a
 ranked "add a type here" list (the methods most often called on
 an untyped receiver), then the least-protected files;
@@ -275,8 +275,8 @@ upper bound on real protection — a concrete receiver is necessary
 but not sufficient for a diagnostic to fire.
 
 Adding `--mutation` (with `--protection`) switches to the
-**effectiveness** tier: instead of "could Rigor catch a bug
-here", it measures whether Rigor *actually does*. It introduces
+**effectiveness** tier: it measures whether Rigor *does* catch a
+bug, rather than whether it *could*. It introduces
 type-visible breakages at each dispatch site — dropping a
 call-argument to `nil`, swapping its type, renaming a call to a
 missing method — re-analyses the mutated source against a clean
@@ -316,8 +316,8 @@ the run aborts — point it at a plain pass/fail runner (a coverage
 floor that exits non-zero on a passing suite trips this). It runs
 with Bundler's environment stripped, so a `bundle exec` command
 resolves your project's bundle even when Rigor itself was
-launched under its own — no env wrapper needed. The command runs
-**without a shell** (it is split into an argv and executed
+launched under its own, with no env wrapper needed. The command
+runs **without a shell** (it is split into an argv and executed
 directly), so shell constructs are not interpreted — including an
 inline `BUNDLE_GEMFILE=… ` prefix. For a non-default Gemfile, set
 it with `bundle config set --local gemfile PATH` (it persists in

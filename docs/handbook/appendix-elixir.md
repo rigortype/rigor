@@ -7,8 +7,8 @@ vocabulary onto it. Of every page in this series, this is the
 one whose *philosophy* matches Rigor most closely: both are
 dynamic languages at heart, both add types gradually, both
 refuse to cry wolf. Elixir's type checker only flags what it can
-prove will fail; so does Rigor. That instinct — never frighten
-working code — is shared DNA, not coincidence.
+prove will fail; so does Rigor. That instinct (never frighten
+working code) is shared DNA, not coincidence.
 
 There is even a direct lineage: Rigor's clause-reachability rule
 ([ADR-47](../adr/47-narrowing-driven-clause-reachability.md)) was
@@ -16,8 +16,8 @@ modelled on Elixir's own work on detecting impossible `case`
 clauses. You are coming from one of Rigor's design influences.
 
 This is a translation table plus a discussion of where the two
-diverge — Elixir is functional, immutable, and process-oriented;
-Rigor analyses an object-oriented, mutable language — and where
+diverge (Elixir is functional, immutable, and process-oriented;
+Rigor analyses an object-oriented, mutable language) and where
 they line up better than you would guess.
 
 ## The five-second pitch
@@ -115,8 +115,7 @@ The gradual story is nearly identical in spirit: a value typed
 `dynamic()` in Elixir, like a `Dynamic[Top]` receiver in Rigor,
 is the point where the checker steps back and stays silent
 rather than guess. Both systems lean on this to stay practical
-on real code, and both treat reaching for it as ordinary, not a
-failure.
+on real code, and both treat reaching for it as ordinary.
 
 Where Elixir goes further: it lets you *author* intersections
 and negations as ordinary `@type` expressions, and its inference

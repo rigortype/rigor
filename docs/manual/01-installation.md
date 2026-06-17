@@ -1,6 +1,6 @@
 # Installing Rigor
 
-Rigor is a tool, not a library — like a linter or a compiler, it
+Rigor is a tool, not a library. Like a linter or a compiler, it
 analyses your project but is not part of its runtime. **Do not add
 it to your application's `Gemfile`.** A `Gemfile` entry would tie
 your whole project to Rigor's Ruby version and pull Rigor's

@@ -126,8 +126,8 @@ def shout(name)
 end
 ```
 
-This rule is one of the highest-value diagnostics Rigor ships
-— it catches the entire family of `NoMethodError on nil`
+This rule is one of the highest-value diagnostics Rigor ships.
+It catches the entire family of `NoMethodError on nil`
 crashes that pepper any non-trivial Ruby code base.
 
 ## Return-type inference for in-source methods

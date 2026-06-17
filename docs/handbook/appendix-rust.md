@@ -2,11 +2,11 @@
 
 If your mental model of "types" was set by Rust, this appendix
 maps Rigor's vocabulary onto the concepts you already know.
-Rust and Rigor sit at opposite ends of one axis — Rust is
+Rust and Rigor sit at opposite ends of one axis: Rust is
 ahead-of-time, sound, and refuses to compile anything it cannot
 prove safe; Rigor analyses Ruby that already runs and stays
-silent on anything it cannot prove *wrong* — but they meet
-surprisingly often on the others: sum types, exhaustive
+silent on anything it cannot prove *wrong*. But they meet
+often on the others: sum types, exhaustive
 matching, the absence of a billion-dollar null.
 
 This is a translation table plus a discussion of the places
@@ -15,7 +15,7 @@ are where your Rust reflexes will mislead you. The biggest one:
 Rust's type checker is a gate the program must pass before it
 exists; Rigor's is an advisor over a program that already runs.
 There is no borrow checker, no ownership, and no "it does not
-compile" — the Ruby ran, and Rigor tells you where it can prove
+compile." The Ruby ran, and Rigor tells you where it can prove
 a type goes wrong.
 
 ## The five-second pitch
@@ -115,7 +115,7 @@ signature — there is no typed `throws` and no `?` operator. If
 you want to keep Rust's value-returning style, you *can* return
 a tagged tuple (`[:ok, value]` / `[:error, reason]`) and pattern-
 match it with `case`/`in`, and Rigor will type the `Tuple` and
-the union precisely — but that is a deliberate port of the Rust
+the union precisely. That is a deliberate port of the Rust
 idiom, not the idiomatic Ruby.
 
 ## Narrowing — `match` / `if let`
@@ -236,7 +236,7 @@ See [Chapter 6](06-classes.md).
 
 Rust traits and Rigor's structural interfaces both describe "a
 type that has these methods," but they differ on *how
-membership is decided* — and the difference is the same one
+membership is decided*, and the difference is the same one
 Go programmers feel from the other side.
 
 A Rust trait is **nominal with coherence**: a type has the trait
@@ -280,7 +280,7 @@ by narrowing.
 
 If you have ever written a newtype purely to encode an invariant
 the compiler could not express on the base type, this is the
-part of Rigor that earns its keep — no wrapper allocation, the
+part of Rigor that earns its keep: no wrapper allocation, the
 invariant narrowed from a plain `if`.
 
 ## Generics
@@ -312,7 +312,7 @@ modest so the analyzer stays fast on real Ruby.
 | crate-level `#![allow(…)]` | `# rigor:disable-file all` |
 | `cargo check` (the gate) | `rigor check lib` (the advisor) |
 
-The mental shift: `cargo check` is part of the build — code does
+The mental shift: `cargo check` is part of the build, so code does
 not ship until it passes. `rigor check` is not a gate the
 program must clear; it is a diagnostic surface you tune with
 severity profiles and adopt incrementally via baselines. The

@@ -7,7 +7,7 @@ auto-discovered when an agent works inside a project that has
 Rigor available.
 
 Skills are optional. Everything they do, you can do by hand
-with the commands in this manual; a skill just drives the
+with the commands in this manual; a skill drives the
 workflow end to end.
 
 ## `rigor-project-init`

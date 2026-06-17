@@ -93,8 +93,8 @@ model of "static type checker" was set by another tool.
 Each page maps Rigor's vocabulary onto the concepts you
 already know — type carriers, narrowing primitives,
 configuration shape, severity model, suppression — and
-calls out the places where the two systems make genuinely
-different choices.
+calls out the places where the two systems make different
+choices.
 
 - [**Coming from TypeScript**](appendix-typescript.md) —
   the structural-vs-nominal-with-refinements split, `unknown`
@@ -146,7 +146,7 @@ different choices.
   the one a Go reader already has by reflex. Covers
   `interface{}` / `any` ↔ `Dynamic[Top]`, type switch ↔
   `case`/`in`, errors-as-values ↔ raising, and the unions /
-  literal types / refinements Go simply does not have.
+  literal types / refinements Go does not have.
 - [**Coming from Elixir**](appendix-elixir.md) — the closest
   *philosophical* match: dynamic origin, gradual typing, and a
   success-typing / no-false-positives stance shared with

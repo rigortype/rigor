@@ -97,10 +97,10 @@ in **Castagna's 2024 textbook *Programming with Union,
 Intersection, and Negation Types***, the current canonical
 reference for the area.
 
-The headline result: under semantic subtyping, the lattice
-operators are *exactly* the set-theoretic ones, and a decidable
-subtyping algorithm exists for the resulting fragment — much
-richer than HM but still tractable.
+Under semantic subtyping, the lattice operators are *exactly*
+the set-theoretic ones, and a decidable subtyping algorithm
+exists for the resulting fragment — much richer than HM but
+still tractable.
 
 ### Industrial uptake
 
@@ -149,12 +149,12 @@ system in the Castagna sense. Three reasons:
    that walks an AST per file under a per-file budget
    ([`inference-budgets.md`](../type-specification/inference-budgets.md)).
 
-The takeaway: Rigor's `T | U` / `T & U` / `T - U` operators are
-best read with the set-theoretic interpretation in mind, even
-though Rigor's algorithms do not formally lean on it. A reader
-coming from Elixir's set-theoretic types or from Castagna's
-textbook will find the surface familiar; the gap is in the
-formalisation depth, not the surface design.
+Rigor's `T | U` / `T & U` / `T - U` operators are best read
+with the set-theoretic interpretation in mind, even though
+Rigor's algorithms do not formally lean on it. A reader coming
+from Elixir's set-theoretic types or from Castagna's textbook
+will find the surface familiar; the gap is in the formalisation
+depth, not the surface design.
 
 ## Subtyping and gradual consistency
 
@@ -164,8 +164,8 @@ Static type theory uses one relation: **subtyping (`<:`)**.
 Gradual typing adds a second relation: **consistency (`~`)**.
 `Dynamic[T] ~ U` means "I do not statically know whether the
 runtime value will satisfy `U`, but it is permitted to."
-Consistency is reflexive and symmetric but **not transitive** —
-this is the key technical move that distinguishes gradual typing
+Consistency is reflexive and symmetric but **not transitive**.
+This is the key technical move that distinguishes gradual typing
 from "just add an `Any` type to the lattice."
 
 Rigor exposes both relations through a **trinary certainty**:
@@ -324,8 +324,8 @@ Rigor honours the RBS `self` keyword in method signatures. The
 walker substitutes the actual receiver type for `self` when
 synthesising the return type — so `Array[Integer]#dup` (declared
 as `def dup: () -> self`) returns `Array[Integer]`, not the
-ancestor's `Object`. This is the small mechanism that quietly
-removes a major source of unwanted widening in OO Ruby code:
+ancestor's `Object`. This is the small mechanism that removes a
+major source of unwanted widening in OO Ruby code:
 
 ```ruby
 arr = [1, 2, 3]
@@ -342,8 +342,8 @@ unresolved F-bounded constraints conservatively (`Dynamic[Top]`
 fallback when the bound cannot be solved locally). This matches
 the no-false-positives stance: an over-precise F-bounded
 inference would spread `T`-mention errors through the codebase,
-and the practical Ruby idiom — declare `self` rather than
-quantify over `T <: C[T]` — sidesteps the harder cases anyway.
+and the practical Ruby idiom (declare `self` rather than
+quantify over `T <: C[T]`) sidesteps the harder cases anyway.
 
 The type-theoretic family extends further (G-bounded polymorphism;
 parameterised self-types; ML-style first-class modules with
@@ -383,8 +383,8 @@ framework directly to Ruby — 多相レコード型に基づくRuby
 "duck typing" surface admits a row-polymorphic reading: a method
 `def shout(x); x.upcase; end` infers as roughly
 `∀α, ρ. {upcase: () -> α | ρ} -> α`. The inference algorithm
-works, but the inferred types — together with the kind constraints
-they drag along — are dense for everyday Ruby code, where users
+works, but the inferred types (together with the kind constraints
+they drag along) are dense for everyday Ruby code, where users
 overwhelmingly reason in nominal classes rather than structural
 rows.
 
@@ -454,13 +454,13 @@ Two specific choices stand out:
    it." This matches the Psalm / PHPStan emphasis more closely
    than Hack's declaration-first design.
 
-The combination — inferred-from-literal + Hack/Psalm-shaped
-surface + nominal-first ecosystem — is what makes `HashShape` a
+The combination (inferred-from-literal + Hack/Psalm-shaped
+surface + nominal-first ecosystem) makes `HashShape` a
 **precision carrier** (§ "Beyond pure inference") rather than a
 *modelling primitive*. It exists to sharpen the type of a hash
 literal that would otherwise widen to
 `Hash[Symbol, A | B | C]`. It is not the unit a Rigor user
-reaches for to describe a domain object — that role belongs to
+reaches for to describe a domain object; that role belongs to
 `class User; end` plus the surrounding RBS, exactly as the
 Matsumoto retrospective recommends.
 
@@ -475,7 +475,7 @@ join discards.
 
 ### Why not full row polymorphism in Rigor?
 
-The temptation — surface row variables for users who want them —
+The temptation to surface row variables for users who want them
 is real, and the question is open at the ADR level. The reasons
 it has not landed at the user surface in v0.1.x:
 
@@ -486,8 +486,8 @@ it has not landed at the user surface in v0.1.x:
   would have to accommodate global row-constraint solving.
 - **Readability.** The Matsumoto experiment found that inferred
   row-polymorphic types for everyday Ruby code are dense and hard
-  to skim — a problem amplified by Rigor's no-false-positives
-  stance, which makes the inferred type a thing the user actually
+  to skim. Rigor's no-false-positives stance amplifies the
+  problem, since it makes the inferred type a thing the user
   reads in `rigor annotate`.
 - **Empirical demand.** Hash literals in real Ruby code are
   typically per-call ad-hoc dictionaries, not polymorphic-record
@@ -495,9 +495,9 @@ it has not landed at the user surface in v0.1.x:
   per-call structural type matches the observed use; the row
   quantification rarely earns its complexity.
 
-If row variables ever become genuinely needed — for a typed
+If row variables ever become needed (for a typed
 `merge` / `transform_keys` / `slice` story that benefits from
-quantifying over rows — the question opens through an ADR rather
+quantifying over rows), the question opens through an ADR rather
 than at the user surface by default.
 
 ## Variance
@@ -535,7 +535,7 @@ refinements with reserved names:
 | `non-empty-hash[K, V]` | `h : Hash[K, V], h.size >= 1` | refinement on `Hash[K, V]` |
 
 The refinements compose with subtyping the way you would expect:
-`positive-int <: non-zero-int <: Integer <: Numeric`. Crucially,
+`positive-int <: non-zero-int <: Integer <: Numeric`.
 **Rigor narrows into refinement carriers automatically** when the
 control-flow analysis proves the predicate:
 
@@ -604,9 +604,9 @@ data types** (ADTs) or **tagged unions**: **exhaustiveness
 checking**.
 
 A `case` that does not cover every value the scrutinee can take
-*should*, under exhaustiveness, be a type error — not a runtime
-fallthrough. The compiler verifies that for every possible shape
-of the scrutinee, some arm matches.
+*should*, under exhaustiveness, be a type error rather than a
+runtime fallthrough. The compiler verifies that for every
+possible shape of the scrutinee, some arm matches.
 
 ### Academic root
 
@@ -997,11 +997,11 @@ Rigor's surface **already contains the features HM excludes**.
 Subtyping is the foundation of the lattice (`<:`); intersection
 (`&`) is in the algebra; refinements add predicate subtyping;
 generics + occurrence typing + capability roles cover the
-polymorphism uses Ruby programmers actually have. An HM-style
+polymorphism uses Ruby programmers have. An HM-style
 "infer a principal type for every expression by global
 unification" architecture is therefore not available to Rigor in
-principle — not a missing feature, but a structural consequence of
-the type language Ruby authors expect.
+principle. This is a structural consequence of the type language
+Ruby authors expect, not a missing feature.
 
 Rigor's inference is instead **local and walker-driven**:
 
@@ -1016,8 +1016,8 @@ The same expression appearing at two program points may yield two
 different types (narrowing, flow merges, mutation, plugin
 contributions can all enter). This is closer in spirit to
 TypeScript's contextual / flow-sensitive typing than to HM's
-unification, and it matches how Ruby authors actually reason about
-their code — `arr` after `arr.compact!` is not "the same type" as
+unification, and it matches how Ruby authors reason about
+their code: `arr` after `arr.compact!` is not "the same type" as
 `arr` before it.
 
 ### Property ledger
@@ -1030,7 +1030,7 @@ The three properties laid against Rigor and HM:
 | **Decidability** | Yes (DEXPTIME worst-case, near-linear in practice) | Decidable per local walk; whatever the walker cannot decide, it returns `maybe` (§ "Decidability of inference"). |
 | **Principal type property** | Yes | **No** — subtyping + intersection break it. Rigor reports a *per-occurrence* type, not a canonical most-general one. |
 
-The headline observation: HM trades expressiveness for the
+HM trades expressiveness for the
 trinity (soundness + decidability + principal types). Rigor
 trades the trinity for expressiveness, and recovers what it can
 through the trinary certainty and the no-false-positives stance.
@@ -1166,8 +1166,8 @@ complete description of the program's runtime behaviour:
   the AST.
 
 None of these is "undecidable" in the sense of the previous two
-sections. The semantics are perfectly well-defined; the walker
-simply cannot *read* them from the AST. This is the **reach**
+sections. The semantics are well-defined; the walker
+cannot *read* them from the AST. This is the **reach**
 problem, distinct from the decidability problem:
 
 | Problem class | Example | Rigor's response |
@@ -1203,7 +1203,7 @@ produce types so wide they tell the user nothing useful:
 | A DSL-managed accessor (`has_many`, `attribute`) | `Dynamic[Top]` | `Relation[Model]`, a model-specific shape | Plugin `flow_contribution_for` + macro substrate |
 
 These are not undecidability cases — the inference can decide a
-type, it just decides a *useless* one. A type like
+type, it decides a *useless* one. A type like
 `Hash[Symbol, Foo | Bar | Buz]` or
 `true | false | String | Integer | Float` is technically the
 correct join of observed values, but its consumer cannot do
@@ -1217,8 +1217,8 @@ goal, not "the smallest type that covers every observed exit."
 Naive join-widening fails that test in nearly every case where
 the inputs are heterogeneous.
 
-This is also why `HashShape` and `Tuple` are not "exotic
-refinements" but **foundational carriers** — without them every
+This is also why `HashShape` and `Tuple` are **foundational
+carriers** rather than exotic refinements: without them every
 hash literal would degrade to a `Hash`-with-union and the
 inferred type language would describe almost nothing useful in
 practice.
@@ -1229,15 +1229,15 @@ The plugin contract and the `RBS::Extended` directive family
 therefore serve two complementary roles. They extend *where*
 Rigor can produce a type at all (reach), and they raise *how
 specific* that type is when produced (precision). The two roles
-share a substrate but answer different limitations — one of
-static-analysis scope, one of useful-type design — and neither
+share a substrate but answer different limitations (one of
+static-analysis scope, one of useful-type design), and neither
 is the same as the decidability question that the trinary
 `maybe` answers.
 
 ## The expression problem and Rigor's plugin contract
 
 A theoretical framing for one of Rigor's central design choices
-— the plugin contract — comes from a paper that gave the framing
+(the plugin contract) comes from a paper that gave the framing
 its name.
 
 ### The problem
@@ -1325,9 +1325,9 @@ This framing also retroactively explains several design choices:
   directory of user-authored classes without the classes
   opting in — the operation-extension axis made tool-side.
 
-The plugin contract is therefore not an ad-hoc Rigor design
-choice but **the expression problem solved at the analyser layer
-rather than the language layer**. The same theoretical pressure
+The plugin contract is therefore **the expression problem solved
+at the analyser layer rather than the language layer**, not an
+ad-hoc Rigor design choice. The same theoretical pressure
 that drove Haskell to type classes and Clojure to protocols
 drives Rigor to a structured plugin substrate.
 

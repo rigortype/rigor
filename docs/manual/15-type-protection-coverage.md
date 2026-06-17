@@ -1,17 +1,16 @@
 # Type-protection coverage
 
-Most quality metrics tell you how *much* of something you have —
+Most quality metrics tell you how *much* of something you have:
 lines covered, expressions typed. They rarely answer the question
-you actually care about: **if I introduce a bug, would anything
-catch it?**
+that matters most: **if I introduce a bug, would anything catch
+it?**
 
-Rigor's type-protection coverage answers exactly that. And it does
-something no other tool does: it measures your **types and your
-tests as one safety net**. A call site is safe when *either* the
-type checker would reject a wrong call *or* a test would go red —
-and it is genuinely unguarded only when **neither** would. That
-union is the picture this command draws, with the cheaper missing
-half named at every gap.
+Rigor's type-protection coverage answers that by measuring your
+**types and your tests as one safety net**. A call site is safe
+when *either* the type checker would reject a wrong call *or* a
+test would go red, and it is unguarded only when **neither**
+would. That union is the picture this command draws, with the
+cheaper missing half named at every gap.
 
 ## Precision is not protection
 
@@ -26,9 +25,8 @@ rigor coverage [paths]
 That tells you how much Rigor is inferring, which is useful, but
 precision is not protection. A precisely-typed expression you
 never call the wrong way buys you nothing; an untyped one a test
-hammers is perfectly safe. To measure *protection* — would a bug
-be caught — add `--protection`. It comes in three tiers, cheapest
-first.
+hammers is safe. To measure *protection* (would a bug be caught)
+add `--protection`. It comes in three tiers, cheapest first.
 
 ## Tier 1 — could a bug be caught here? (static, instant)
 
@@ -70,11 +68,10 @@ It runs many analyses, so it defaults to the **git-changed** `.rb`
 files (pass explicit paths to widen — whole-project is minutes) and
 is an opt-in CI deep-dive, not an interactive check. The framing is
 always *effectiveness / where to add a type*, never "your code is
-broken": a surviving breakage at a `Dynamic` site is simply a place
+broken": a surviving breakage at a `Dynamic` site is a place
 the type net does not reach.
 
-Which raises the obvious question — what *does* reach it? Your
-tests.
+What *does* reach it is your tests.
 
 ## The fused view — types **and** tests (`--with-tests`)
 
@@ -97,8 +94,8 @@ three buckets:
 The report names the **cheaper missing axis** at every gap: a
 `Dynamic`-receiver hole says *add a type*; a typed-but-untested
 hole says *add a test*. A site is reported unprotected only when
-**both** halves miss — which is where real risk actually lives, and
-what no types-only or tests-only tool can show you.
+**both** halves miss, which is where the real risk lives, and what
+no types-only or tests-only tool can show you.
 
 Cost stays proportional to the hole. A breakage the type checker
 already kills **never reaches the suite** (a gradual short-circuit),
@@ -205,4 +202,3 @@ into a pipeline reuses the same machinery as `rigor check`. See
   receiver is `Dynamic` and you want to know why.
 - [Provided skills](08-skills.md) — the agent skills that turn an
   "add a type here" list into annotations.
-</content>

@@ -15,11 +15,11 @@ sealed types, pattern-matching `switch`, record patterns) and
 feature is newer than that, the page says so.
 
 This is a translation table plus a discussion of the places
-where Rigor makes a genuinely different choice. Those are where
-your Java / C# reflexes will mislead you — and for these two
-languages the single biggest one is the direction of the
-default: you annotate first and the compiler infers locally;
-Rigor infers first and asks for annotations only at the edges.
+where Rigor makes a different choice. Those are where your
+Java / C# reflexes will mislead you, and for these two languages
+the single biggest one is the direction of the default: you
+annotate first and the compiler infers locally; Rigor infers
+first and asks for annotations only at the edges.
 
 ## The five-second pitch
 
@@ -222,7 +222,7 @@ call site, not a wrapper object.
 
 One difference from C#: Rigor's nullability is **always on** and
 **never forces** you. C#'s NRT warnings can be silenced with
-`!`; Rigor simply will not fire `possible-nil` unless it can
+`!`; Rigor will not fire `possible-nil` unless it can
 prove the receiver is `nil` on some path — there is no nullable-
 context to enable and no forgiving operator to reach for.
 
@@ -253,7 +253,7 @@ where you would reach for a wildcard in Java.
 ## Sealed types and exhaustiveness
 
 Java's `sealed interface … permits` and C#'s sealed hierarchies
-let the compiler prove a `switch` is exhaustive — and *error* if
+let the compiler prove a `switch` is exhaustive, and *error* if
 it is not. Rigor approaches the same shape from the other side.
 
 A closed set of subtypes is a union in Rigor, and the flow
@@ -271,7 +271,7 @@ in Circle    then "…"   # flow.unreachable-clause — Circle already covered
 end
 ```
 
-The crucial difference in *direction*: Java and C# **require**
+The difference in *direction*: Java and C# **require**
 exhaustiveness and reject a `switch` that misses a case. Rigor
 does the dual — it reports clauses that can never run, but it
 does **not** force you to handle every variant. A non-exhaustive

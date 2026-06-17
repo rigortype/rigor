@@ -26,7 +26,7 @@ If Steep's slogan is "Ruby with optional manifest types,"
 Rigor's is "Ruby with proven facts." The two are designed for
 overlapping but distinct workflows.
 
-## Both consume RBS — that is the common ground
+## Both consume RBS: the common ground
 
 This is the headline. RBS is Ruby's standard signature
 language; both Steep and Rigor read it as their canonical
@@ -308,7 +308,7 @@ Steps:
    `.rbs` file produces stricter Rigor output and unchanged
    Steep output.
 
-The migration is genuinely low-friction because the
+The migration is low-friction because the
 foundational assumption (RBS as the contract language) is
 shared.
 

@@ -2,9 +2,9 @@
 
 If your static-typing baseline is Python's mypy or Pyright,
 this appendix maps the vocabulary onto Rigor's. The two
-ecosystems share more than they look like at first — gradual
+ecosystems share more than they look like at first (gradual
 typing, a "do not break the runtime" philosophy, separate
-type-stub files (`.pyi` / `.rbs`) — but they make different
+type-stub files `.pyi` / `.rbs`), but they make different
 choices about where annotations live and how aggressive
 inference is.
 

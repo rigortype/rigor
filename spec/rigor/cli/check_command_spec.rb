@@ -85,6 +85,38 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(JSON.parse(out)).not_to have_key("coverage")
   end
 
+  it "warns on STDERR when a configured signature_paths entry resolves to nothing" do
+    File.write("a.rb", "x = 1\n")
+    File.write(".rigor.yml", "signature_paths:\n  - ./no_such_sig\n")
+
+    _status, _out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--config", ".rigor.yml", "a.rb"])
+
+    expect(err).to include("signature_paths:")
+    expect(err).to include("does not exist (no signatures loaded from it)")
+  end
+
+  it "surfaces the same warning in --format=json run metadata for CI consumers" do
+    File.write("a.rb", "x = 1\n")
+    File.write(".rigor.yml", "signature_paths:\n  - ./no_such_sig\n")
+
+    _status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "--config", ".rigor.yml",
+                         "a.rb"])
+
+    warnings = JSON.parse(out).fetch("signature_path_warnings")
+    expect(warnings.size).to eq(1)
+    expect(warnings.first).to include("status" => "missing")
+    expect(warnings.first.fetch("path")).to end_with("no_such_sig")
+  end
+
+  it "stays silent (and omits the JSON key) when signature_paths is unset" do
+    File.write("a.rb", "x = 1\n")
+
+    _status, out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--format=json", "a.rb"])
+
+    expect(err).not_to include("signature_paths:")
+    expect(JSON.parse(out)).not_to have_key("signature_path_warnings")
+  end
+
   it "prints a one-line coverage summary under --coverage in text mode" do
     File.write("sample.rb", "x = 1\n")
 

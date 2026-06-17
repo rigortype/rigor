@@ -50,9 +50,27 @@ cache:
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `libraries` | Array | `[]` | Standard-library / gem names whose bundled RBS to load. |
-| `signature_paths` | Array | `nil` | Extra directories of `.rbs` files. |
+| `signature_paths` | Array | `nil` | Extra directories of `.rbs` files. Relative entries resolve against the config file's directory. |
 | `pre_eval` | Array | `[]` | Files (or globs) walked before per-file analysis, to register project monkey-patches. |
 | `plugins` | Array | `[]` | Plugins to activate — see [Using plugins](07-plugins.md). |
+
+`rigor check` warns on STDERR when a `signature_paths:` entry resolves to
+nothing — a path that does not exist, points at a non-directory, or holds
+no `.rbs` file:
+
+```
+rigor: signature_paths: "/path/to/sig" does not exist (no signatures loaded from it)
+rigor: signature_paths: "/path/to/sig" matched 0 signature files
+```
+
+This is a warning, not an error — partial or optional RBS bundles are a
+valid setup. It exists because a typo'd or moved path is otherwise
+*silent*: the missing signatures turn every call into the types they were
+meant to describe into a high-confidence `call.undefined-method`, so a
+one-character mistake can look like hundreds of real type errors. The
+unset default (auto-detected `<root>/sig`) is never warned about. The same
+entries appear in the `--format=json` payload under `signature_path_warnings`
+so CI can assert on them.
 
 ### Diagnostics
 

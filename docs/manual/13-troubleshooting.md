@@ -61,6 +61,16 @@ the single site with a `# rigor:disable <rule>` comment (see
 [Diagnostics](04-diagnostics.md)) — prefer that over a
 project-wide `disable:`, which also hides real instances.
 
+Before reporting, rule out a missing RBS source. A burst of
+`call.undefined-method` on calls you know exist usually means
+Rigor never loaded their signatures. Check `rigor check`'s
+STDERR for a `signature_paths: … does not exist` /
+`matched 0 signature files` warning — a typo'd or moved
+`signature_paths:` entry loads zero signatures silently, and
+every call into the types it was meant to cover then fires at
+`evidence_tier: high`. Correct the path and the false
+positives clear.
+
 If the diagnostic is *correct* but you are not ready to fix
 it, a [baseline](06-baseline.md) is the right tool.
 

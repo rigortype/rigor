@@ -74,7 +74,8 @@ module Rigor
 
       def parse_options
         options = { format: "text", threshold: nil, config: nil, protection: false, mutation: false,
-                    with_tests: false, test_command: DEFAULT_TEST_COMMAND, include_dynamic: false }
+                    with_tests: false, test_command: DEFAULT_TEST_COMMAND, include_dynamic: false,
+                    limit: nil, seed: 1 }
         OptionParser.new { |opts| define_options(opts, options) }.parse!(@argv)
         options
       end
@@ -86,6 +87,14 @@ module Rigor
         opts.on("--protection", "Report type-protection coverage (ADR-63 Tier 1) instead of type precision") do
           options[:protection] = true
         end
+        define_mutation_options(opts, options)
+        opts.on("--threshold=RATIO", Float, "Exit 1 when the precision (or, with --protection, " \
+                                            "protection/effectiveness) ratio is below RATIO (0.0–1.0)") do |v|
+          options[:threshold] = v
+        end
+      end
+
+      def define_mutation_options(opts, options)
         opts.on("--mutation", "With --protection: measure actual mutation effectiveness (ADR-63 Tier 2). " \
                               "Scopes to git-changed files when no paths are given; explicit paths override.") do
           options[:mutation] = true
@@ -102,10 +111,11 @@ module Rigor
                                      "test is the only protection (ADR-69 Seam 2). Completes the map, runs more.") do
           options[:include_dynamic] = true
         end
-        opts.on("--threshold=RATIO", Float, "Exit 1 when the precision (or, with --protection, " \
-                                            "protection/effectiveness) ratio is below RATIO (0.0–1.0)") do |v|
-          options[:threshold] = v
+        opts.on("--limit=N", Integer,
+                "Sample at most N mutations/file under --mutation (caps cost; ratios become estimates)") do |v|
+          options[:limit] = v
         end
+        opts.on("--seed=N", Integer, "RNG seed for --limit sampling (default 1)") { |v| options[:seed] = v }
       end
 
       def mutation_misuse_error

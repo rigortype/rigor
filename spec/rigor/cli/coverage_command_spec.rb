@@ -142,6 +142,16 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     end
   end
 
+  it "samples under --limit and keeps JSON stdout clean (the note goes to stderr)" do
+    File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+
+    status, out, err = run(["--protection", "--mutation", "--limit", "2", "--format", "json", "greet.rb"])
+
+    expect(status).to eq(0)
+    expect { JSON.parse(out) }.not_to raise_error
+    expect(err).to include("sampling at most 2 mutations")
+  end
+
   describe "#changed_path (git porcelain line parsing)" do
     def parse(line)
       described_class.new(argv: []).send(:changed_path, line)

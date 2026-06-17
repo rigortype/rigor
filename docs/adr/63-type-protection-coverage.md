@@ -136,10 +136,11 @@ so "report + gate" is satisfied without new surface.
 - **Negative** — Tier 1 over-estimates (concrete receiver ≠ a diagnostic actually fires);
   the report must teach that it is an upper bound. Tier 2 adds a supported, perf-sensitive
   surface (the maintenance ADR-62 deliberately avoided) — hence phased and scoped.
-- **Carry-over** — both tiers have landed. Remaining demand-gated polish: an optional
-  per-file mutation cap for pathological files (the scanner already accepts a seeded
-  `limit:`, unused by the CLI — the changed-files default bounds cost), and an
-  ADR-46-incremental-backed cheaper whole-project Tier 2. **WD5 (proposed)** — the
+- **Carry-over** — both tiers have landed. The optional per-file mutation cap is now wired
+  as `--limit N` / `--seed` (2026-06-17, with [ADR-70](70-fused-protection-coverage.md)'s
+  `--include-dynamic` cost), bounding pathological files via a deterministic sample (ratios
+  become estimates, noted on stderr). Remaining demand-gated: an ADR-46-incremental-backed
+  cheaper whole-project Tier 2. **WD5 (proposed)** — the
   act-on-coverage skill that authors the residual type and verifies, downstream of the
   shipped command; design parked here, may graduate to its own ADR + `SKILL.md`.
 

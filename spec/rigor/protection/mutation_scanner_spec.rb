@@ -16,12 +16,12 @@ RSpec.describe Rigor::Protection::MutationScanner do
     Dir.mktmpdir { |dir| Dir.chdir(dir) { example.run } }
   end
 
-  def scanner(site_selector: :biteable)
+  def scanner(site_selector: :biteable, limit: nil)
     config = Rigor::Configuration.load(nil)
     context = Rigor::LanguageServer::ProjectContext.new(configuration: config)
     described_class.new(
       configuration: config, environment: context.environment, project_scan: context.project_scan,
-      site_selector: site_selector
+      site_selector: site_selector, limit: limit
     )
   end
 
@@ -46,6 +46,13 @@ RSpec.describe Rigor::Protection::MutationScanner do
     site = result.sites.first
     expect(site.method_name).to eq("join")
     expect(site.receiver).to be_a(String)
+  end
+
+  it "caps the measured mutations at `limit` (cost control via deterministic sampling)" do
+    File.write("joins.rb", %(def j\n  File.join("a", "b", "c")\nend\n))
+
+    expect(scanner.scan_file("joins.rb").total).to be > 2
+    expect(scanner(limit: 2).scan_file("joins.rb").total).to be <= 2
   end
 
   it "is vacuously fully effective for a file with no type-relevant mutations" do

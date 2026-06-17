@@ -106,9 +106,12 @@ the mutants Rigor did not kill**, then reports a fused per-site classification.
   ADR-62 deliberately avoided) — hence opt-in, survivor-scoped, and behind the ADR-69 seam;
   the WD2 unknowability means the dynamic axis is softer than the static one, and the report
   must teach that.
-- **Carry-over** — co-landed with ADR-69 Seam 1. Whole-project affordability and
-  coverage-based suite selection are ADR-46 / ADR-71 follow-ups, not v1 of this overlay;
-  `--with-tests` inherits the changed-files default (no path = git-changed only).
+- **Carry-over** — co-landed with ADR-69 Seam 1. `--with-tests` inherits the changed-files
+  default (no path = git-changed only), and `--limit N` / `--seed` (landed 2026-06-17) caps
+  the per-file mutation count to a deterministic sample — the cost knob `--include-dynamic`
+  needs, resolving ADR-63's "unused by the CLI" carry-over. Whole-project affordability and
+  coverage-based suite selection (run only the tests covering the file) remain ADR-46 / ADR-71
+  follow-ups, not v1 of this overlay.
 - **Validated on real projects (2026-06-17, faraday / liquid / mail).** The test axis fires
   on genuine type-survivors, FP-free, with byte-for-byte file restore; the type/test/unprotected
   split reconciles exactly against the type-only baseline. Two frictions surfaced: a

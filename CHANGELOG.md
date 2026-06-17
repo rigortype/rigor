@@ -21,6 +21,7 @@ cycles live in dedicated archives:
   - The test runner is the `--test-command` hook (default `bundle exec rake`); the suite must pass on clean code first, or the run aborts. The expensive suite run is paid only for the mutants the type checker did not already kill (a gradual short-circuit), and `--format json` carries `{type_killed, test_killed, unprotected, protected_ratio, …}` with `--threshold` gating on the fused ratio.
   - The test command runs with Bundler's environment stripped (`with_unbundled_env`), so a `bundle exec` runner resolves your project's bundle even when Rigor itself was launched under its own — no env wrapper needed.
   - `--include-dynamic` extends the overlay to `Dynamic`-receiver (untyped) call sites, where a test is the only possible protection — completing the map to *every* dispatch site, not just the ones Rigor can type-check. It runs the suite far more (every such site is a type-survivor), so it is an explicit opt-in on top of `--with-tests`.
+  - `--limit N` (with `--seed`) caps the measurement to a deterministic sample of N mutations per file, bounding the cost of `--mutation` / `--include-dynamic` on large files; per-file ratios then become estimates, noted on stderr so `--format json` stdout stays clean.
 
 ## [0.2.0] - 2026-06-17
 

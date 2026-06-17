@@ -28,11 +28,23 @@ module Rigor
           return 0
         end
 
+        note_sampling(options)
         return run_fused_protection(target_files, options) if options[:with_tests]
 
         report = scan_mutation_protection(target_files, options)
         MutationProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_protection_exit(report, options)
+      end
+
+      # A `--limit` sample makes the report an estimate (per-file ratios over a
+      # random N of the mutations). Say so on stderr — stdout stays clean for JSON.
+      def note_sampling(options)
+        return unless options[:limit]
+
+        @err.puts(
+          "coverage: sampling at most #{options[:limit]} mutations/file " \
+          "(seed #{options[:seed]}); ratios are estimates."
+        )
       end
 
       # ADR-70 — the fused static∪dynamic deep dive. The type pass is the ADR-63
@@ -47,6 +59,7 @@ module Rigor
         context = LanguageServer::ProjectContext.new(configuration: configuration)
         scanner = Protection::MutationScanner.new(
           configuration: configuration, environment: context.environment, project_scan: context.project_scan,
+          limit: options[:limit], seed: options[:seed],
           site_selector: options[:include_dynamic] ? :all : :biteable
         )
         accumulator = FusedProtectionAccumulator.new
@@ -84,7 +97,8 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         context = LanguageServer::ProjectContext.new(configuration: configuration)
         scanner = Protection::MutationScanner.new(
-          configuration: configuration, environment: context.environment, project_scan: context.project_scan
+          configuration: configuration, environment: context.environment, project_scan: context.project_scan,
+          limit: options[:limit], seed: options[:seed]
         )
         accumulator = MutationProtectionAccumulator.new
 

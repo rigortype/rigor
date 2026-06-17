@@ -79,8 +79,12 @@ Factor the substrate along two seams, leaving the Prism splicer oracle-agnostic.
   dead abstraction (so land them together).
 - **Carry-over** — Seam 1 co-landed with ADR-70's `TestSuiteOracle`, so the interface is
   exercised, not speculative; the `DiagnosticOracle` default kept the ADR-63 scanner spec
-  green (the byte-identical gate). **Seam 2 (the site selector) is the remaining slice**, due
-  with ADR-71's external consumer.
+  green (the byte-identical gate). **Seam 2 (the site selector) is the remaining slice.** The
+  2026-06-17 ADR-70 validation gave it *empirical demand earlier than expected*: because the
+  fused overlay reuses the biteable filter, it never mutates `Dynamic` sites, so it cannot
+  show "a `Dynamic` site guarded only by a test" — the fused map's most valuable cell. Seam 2
+  is the bridge there, though mutating `Dynamic` sites + running tests is the expensive path
+  ADR-71 defers — so it is a real scope decision, not a free win.
 
 ## Relationship to other ADRs
 

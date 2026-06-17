@@ -61,4 +61,20 @@ RSpec.describe Rigor::Protection::TestSuiteOracle do
       expect(File.read(path)).to eq("original")
     end
   end
+
+  # The default (shelling) runner must strip Bundler's env, or a `bundle exec`
+  # test command resolves Rigor's own bundle instead of the target's — which
+  # makes a green suite look red and aborts the run (found validating ADR-70).
+  it "runs the default command inside a cleaned bundler env" do
+    oracle = described_class.new(command: %w[true]) # default runner (no injection)
+    cleaned = false
+    allow(Bundler).to receive(:with_unbundled_env) do |&blk|
+      cleaned = true
+      blk.call
+    end
+    allow(oracle).to receive(:system).and_return(true)
+
+    expect(oracle.green?).to be(true)
+    expect(cleaned).to be(true)
+  end
 end

@@ -215,6 +215,11 @@ module Rigor
           "coverage: the test suite must pass on clean code to measure test protection " \
           "(ran: #{options.fetch(:test_command).join(' ')})"
         )
+        @err.puts(
+          "  the command must exit 0 on a clean tree. A non-zero exit on otherwise-passing " \
+          "tests also trips this — e.g. a SimpleCov coverage floor on a file-scoped run; " \
+          "point --test-command at a plain pass/fail runner."
+        )
         1
       end
 

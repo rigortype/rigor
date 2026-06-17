@@ -19,6 +19,7 @@ cycles live in dedicated archives:
 - **[cli]** `rigor coverage --protection --mutation --with-tests` adds a *dynamic* protection axis on top of the static one: for every type-visible mutation Rigor's own analysis fails to catch, it runs your test suite and reports whether a test catches it — fusing static type-protection and dynamic test-protection into one map ([ADR-70](docs/adr/70-fused-protection-coverage.md)).
   - Each dispatch site is classified **type-protected** (the type checker caught the breakage), **test-protected** (a test caught what the type checker missed), or **unprotected** (neither — the ranked "add a type or a test here" list). The report names the cheaper missing axis instead of a single number.
   - The test runner is the `--test-command` hook (default `bundle exec rake`); the suite must pass on clean code first, or the run aborts. The expensive suite run is paid only for the mutants the type checker did not already kill (a gradual short-circuit), and `--format json` carries `{type_killed, test_killed, unprotected, protected_ratio, …}` with `--threshold` gating on the fused ratio.
+  - The test command runs with Bundler's environment stripped (`with_unbundled_env`), so a `bundle exec` runner resolves your project's bundle even when Rigor itself was launched under its own — no env wrapper needed.
 
 ## [0.2.0] - 2026-06-17
 

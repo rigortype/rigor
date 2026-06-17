@@ -166,5 +166,61 @@ prepare the seam, demand-gate the rest.
   ADR-69's first consumer. Actionable now (thin slice).
 - **ADR-71 — Type-guided external incremental mutation testing.** Evaluation / proposal;
   records the wedge, the rejected oversells, and the demand × ADR-46 gate. Deferred.
+
+## Validation on real projects (2026-06-17)
+
+After landing ADR-69 Seam 1 + ADR-70 (`coverage --protection --mutation --with-tests`),
+three subagents validated it against `rigor-survey` targets (faraday / liquid / mail; rgl
+and kramdown were rejected as targets — see friction below). Recipe: isolated
+`bundle install`, a matched `(source file, single green test file)` pair, and the fused
+overlay scoped to that pair.
+
+**The feature works and is FP-free.** The dynamic (test) axis genuinely fires on real
+type-survivors: faraday `nested_params_encoder.rb` (test_killed 3), liquid `lexer.rb:152`
+`output.last&.first` (1), mail `utilities.rb` (11) / `parts_list` (2) / `field_list` (2).
+The mail run reconciled exactly against the type-only baseline (9 type-killed + 11
+test-killed + 7 unprotected = 27 survivors), **proving the test axis is consulted only on
+type-survivors** (the gradual short-circuit is real). Every `unprotected` site hand-checked
+was a genuine coverage gap (zero FPs); files were restored byte-for-byte after every run
+(the `ensure` holds); JSON shape correct. Per-run cost = `type_survivors × scoped-test-run`
+(~2–9 s on these small suites).
+
+**Two real frictions found — one a genuine bug, now fixed:**
+
+1. **Bundler-env leak (BUG — FIXED).** Running Rigor via `bundle exec exe/rigor` leaks
+   `RUBYOPT=-rbundler/setup` + `GEM_HOME` / `BUNDLE_*` into the process; the oracle's plain
+   `system` passed them to the test subprocess, which then resolved the *target's* Gemfile
+   against *Rigor's* gems and failed → a green suite read as red → the run aborted before
+   doing any work. A bare `env -u BUNDLE_GEMFILE` is **not** enough (the `BUNDLER_ORIG_*`
+   preservers defeat it). Fixed by wrapping the runner in `Bundler.with_unbundled_env`
+   (`test_suite_oracle.rb` `shell_run`); users no longer need any env wrapper in
+   `--test-command`. Re-validated: liquid `lexer.rb` with a plain `bundle exec` command now
+   runs (was a hard fail).
+2. **Non-zero exit on a passing suite (documented).** A SimpleCov per-suite coverage floor
+   (faraday) exits non-zero even when all tests pass, so a file-scoped run trips the
+   green-precondition. The exit code is the only signal, so this is partly inherent; the
+   `suite_not_green_error` message now hints at it (point `--test-command` at a plain
+   pass/fail runner).
+
+**Empirical confirmation of the Seam-2 gap (the load-bearing finding).** The overlay reuses
+the **biteable** site filter, so it only ever mutates concrete-type sites and the type axis
+short-circuits the vast majority (liquid: 92 of 100 sites type-killed; the denominator is
+*biteable* sites, not *all* dispatch sites). The test axis is consulted only on the residual
+handful of concrete-site type-survivors — so the fused map's headline cell, *"a `Dynamic`
+site guarded only by a test"*, is **never reached**, because `Dynamic` sites generate no
+mutations at all. This is the critical-analysis point #4 ("type pruning is blind where value
+is highest") manifesting in the implementation, now measured rather than predicted. It is
+the strongest argument for **pulling ADR-69 Seam 2 (`AllSites`) forward** — without it the
+overlay shows where types protect and where the residual concrete survivors land, but not
+the most interesting thing a user wants from a *test*-protection view. (Tension: mutating
+`Dynamic` sites and running tests on them *is* the expensive test-suite mutation testing
+ADR-71 defers — so Seam 2 is the bridge between this overlay and ADR-71, and pulling it
+forward is a real scope decision, not a free win.)
+
+**Completeness caveat (document for users).** A `--test-command` scoped to one test file
+*over-reports* `unprotected` versus the full suite (a mutation a different test would catch
+shows as unprotected). Correct-by-construction — the verdict is only as complete as the test
+command's coverage — but for an accurate map the command should run all tests covering the
+file, trading cost for completeness.
 </content>
 </invoke>

@@ -48,8 +48,20 @@ module Rigor
 
       private
 
+      # Run the suite with Bundler's environment stripped, so a `bundle exec`
+      # test command resolves the **target** project's Gemfile — not whatever
+      # bundle Rigor itself was launched under. Running Rigor via `bundle exec`
+      # leaks `RUBYOPT=-rbundler/setup` + `GEM_HOME` / `BUNDLE_*` into a plain
+      # `system` subprocess, which then resolves the target's Gemfile against
+      # Rigor's gems and fails — so a green suite looks red and the run aborts.
+      # `with_unbundled_env` restores the pre-bundler env (a bare `env -u
+      # BUNDLE_GEMFILE` is not enough — the `BUNDLER_ORIG_*` preservers defeat
+      # it). Found validating ADR-70 on real projects (2026-06-17).
       def shell_run(command)
-        system(*command, out: File::NULL, err: File::NULL)
+        run = -> { system(*command, out: File::NULL, err: File::NULL) }
+        return run.call unless defined?(Bundler) && Bundler.respond_to?(:with_unbundled_env)
+
+        Bundler.with_unbundled_env(&run)
       end
     end
   end

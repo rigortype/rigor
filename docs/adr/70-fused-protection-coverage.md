@@ -109,6 +109,20 @@ the mutants Rigor did not kill**, then reports a fused per-site classification.
 - **Carry-over** — co-landed with ADR-69 Seam 1. Whole-project affordability and
   coverage-based suite selection are ADR-46 / ADR-71 follow-ups, not v1 of this overlay;
   `--with-tests` inherits the changed-files default (no path = git-changed only).
+- **Validated on real projects (2026-06-17, faraday / liquid / mail).** The test axis fires
+  on genuine type-survivors, FP-free, with byte-for-byte file restore; the type/test/unprotected
+  split reconciles exactly against the type-only baseline. Two frictions surfaced: a
+  **bundler-env leak** (`bundle exec exe/rigor` leaked `RUBYOPT`/`GEM_HOME` into the suite
+  subprocess → green read as red) — **fixed**, `TestSuiteOracle#shell_run` now wraps the
+  runner in `Bundler.with_unbundled_env`; and a **non-zero-exit-on-pass** case (a SimpleCov
+  coverage floor) the green precondition can't distinguish from red — surfaced in the error
+  message. The **load-bearing finding**: because the overlay reuses the biteable-site filter,
+  the type axis short-circuits the vast majority and the test axis is only ever consulted on
+  concrete-site survivors — the fused map's headline cell (*a `Dynamic` site guarded only by
+  a test*) is unreachable without **ADR-69 Seam 2 (`AllSites`)**, which the validation
+  re-prioritizes from "with ADR-71" toward sooner. See
+  [`docs/notes/20260617-type-guided-mutation-testing-strategy.md`](../notes/20260617-type-guided-mutation-testing-strategy.md)
+  § Validation.
 
 ## Relationship to other ADRs
 

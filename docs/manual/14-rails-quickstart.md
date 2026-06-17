@@ -188,7 +188,9 @@ plugins:
   - rigor-rails-i18n
   - rigor-actionmailer
   - rigor-activejob
-  # Always include for Rails — covers ActiveSupport core_ext methods
+  # Optional — the ActiveSupport core_ext RBS is now auto-applied when
+  # activesupport is in your Gemfile.lock (ADR-72); add this plugin only
+  # for the fuller, opt-in surface (it stands in for the auto overlay).
   - rigor-activesupport-core-ext
   # Testing — keep the ones that match your project
   - rigor-rspec
@@ -203,12 +205,19 @@ Adjust `target_ruby:` to match your project's Ruby version (the
 value in your `Gemfile` or `.ruby-version`) and trim the
 `plugins:` list to what you actually use.
 
-> **Why `rigor-activesupport-core-ext` matters.** Without it,
-> every ActiveSupport extension call (`3.days`, `"x".squish`,
-> `Time.current`, …) produces a `call.undefined-method`
-> diagnostic. On a real Rails app this is reliably the single
-> largest cluster — a Mastodon measurement found ~365 of 489
-> diagnostics were exactly this source. Always include it.
+> **ActiveSupport core_ext is covered automatically.** When
+> `activesupport` is in your `Gemfile.lock` but ships no RBS,
+> Rigor auto-loads a bundled core-ext RBS overlay
+> ([ADR-72](../adr/72-gemfile-lock-gated-rbs-overlays.md)), so
+> extension calls (`3.days`, `"x".squish`, `Time.current`, …)
+> resolve without any plugin or config — on a real Rails app this
+> is reliably the single largest false-positive cluster (a
+> Mastodon measurement found ~365 of 489 `call.undefined-method`
+> diagnostics were exactly this source). The
+> `rigor-activesupport-core-ext` plugin above is now optional: add
+> it for the fuller, opt-in surface, and the auto overlay stands
+> down for it. A plain-Ruby project without `activesupport` still
+> gets the genuine diagnostic.
 
 Other plugins to consider depending on your stack:
 

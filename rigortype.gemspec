@@ -30,6 +30,7 @@ Gem::Specification.new do |spec|
       lib/**/*.rb
       sig/**/*.rbs
       data/builtins/**/*.yml
+      data/**/*.rbs
       skills/*/SKILL.md
       skills/*/references/*.md
     ]

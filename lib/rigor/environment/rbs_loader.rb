@@ -323,6 +323,33 @@ module Rigor
           [Pathname(CORE_OVERLAY_SIGS_ROOT)]
         end
 
+        # Rigor-owned per-gem RBS overlays (`data/gem_overlay/<gem>/`),
+        # ADR-72. Unlike the unconditional `core_overlay`, each gem's
+        # overlay is loaded ONLY when that gem is locked in the
+        # project's Gemfile.lock but ships no RBS of its own —
+        # {Environment.for_project} decides eligibility and passes the
+        # already-filtered gem-name set here. One directory per gem name
+        # keeps the membership check a cheap `File.directory?`.
+        GEM_OVERLAY_SIGS_ROOT = File.expand_path(
+          "../../../data/gem_overlay",
+          __dir__
+        ).freeze
+
+        # @param gem_names [Enumerable<String>] overlay-eligible
+        #   Gemfile.lock gem names (the caller filters to the
+        #   `:missing`-coverage, no-conflicting-plugin set).
+        # @return [Array<Pathname>] the bundled overlay directory for
+        #   each gem that ships one; empty when none match or the
+        #   overlay root is absent.
+        def gem_overlay_sig_paths(gem_names)
+          return [] unless File.directory?(GEM_OVERLAY_SIGS_ROOT)
+
+          gem_names.filter_map do |name|
+            dir = File.join(GEM_OVERLAY_SIGS_ROOT, name.to_s)
+            Pathname(dir) if File.directory?(dir)
+          end
+        end
+
         def vendored_gem_sig_paths
           return [] unless File.directory?(VENDORED_GEM_SIGS_ROOT)
 

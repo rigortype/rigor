@@ -22,6 +22,16 @@ That is the whole setup — Rigor resolves the bundled `sig/`
 automatically ([ADR-25](../../adr/25-plugin-contributed-rbs.md)); no
 path, no vendoring, no `signature_paths:` wiring.
 
+> **You may not need this plugin.** As of
+> [ADR-72](../../adr/72-gemfile-lock-gated-rbs-overlays.md), Rigor
+> auto-loads a bundled core-ext RBS overlay whenever `activesupport` is
+> in your `Gemfile.lock` but ships no RBS — so the most common
+> ActiveSupport false positives are already suppressed with zero config.
+> This plugin is the **opt-in, fuller twin** of that overlay (and the
+> authoring home for the signatures); load it when you want the complete
+> surface. When it is loaded, the auto overlay stands down so the two
+> never double-declare.
+
 ## What it covers
 
 Roughly the top ~40 selectors plus their close neighbours, across:

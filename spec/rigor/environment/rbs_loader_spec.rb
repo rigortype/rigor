@@ -36,6 +36,25 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe ".gem_overlay_sig_paths" do
+    it "returns the bundled overlay directory for a gem that ships one" do
+      paths = described_class.gem_overlay_sig_paths(["activesupport"])
+      expect(paths.size).to eq(1)
+      expect(paths.first).to be_a(Pathname)
+      expect(paths.first.to_s).to end_with("data/gem_overlay/activesupport")
+      expect(paths.first.join("core_ext.rbs")).to be_file
+    end
+
+    it "ignores gems with no bundled overlay" do
+      expect(described_class.gem_overlay_sig_paths(%w[rake no_such_gem])).to be_empty
+    end
+
+    it "returns paths only for the gems that have an overlay, in input order" do
+      paths = described_class.gem_overlay_sig_paths(%w[rake activesupport])
+      expect(paths.map { |p| p.basename.to_s }).to eq(["activesupport"])
+    end
+  end
+
   describe "with stdlib library opt-in" do
     let(:custom_loader) { described_class.new(libraries: ["pathname"]) }
 

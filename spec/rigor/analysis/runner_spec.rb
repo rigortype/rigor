@@ -436,6 +436,58 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # ADR-72 — Gemfile.lock-gated bundled RBS overlays.
+    def write_duration_project(tmpdir, lock_gem:)
+      File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            #{lock_gem} (7.1.3)
+
+        PLATFORMS
+          ruby
+
+        DEPENDENCIES
+          #{lock_gem}
+
+        BUNDLED WITH
+           2.5.6
+      LOCK
+      File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
+        ttl  = 3.minutes
+        miss = 5.minuets
+        [ttl, miss]
+      RUBY
+    end
+
+    def undefined_methods_for(tmpdir)
+      Dir.chdir(tmpdir) do
+        configuration = Rigor::Configuration.new(
+          "paths" => [File.join(tmpdir, "code.rb")],
+          "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
+        )
+        result = described_class.new(configuration: configuration, cache_store: nil).run
+        result.diagnostics.select { |d| d.rule == "call.undefined-method" }.map(&:method_name)
+      end
+    end
+
+    it "auto-loads the activesupport core-ext overlay so `3.minutes` resolves when activesupport is locked" do
+      Dir.mktmpdir("rigor-as-overlay-") do |tmpdir|
+        write_duration_project(tmpdir, lock_gem: "activesupport")
+        names = undefined_methods_for(tmpdir)
+        # `minutes` resolves via the overlay; the genuine typo still fires.
+        expect(names).to contain_exactly("minuets")
+      end
+    end
+
+    it "does NOT load the overlay when activesupport is absent — `3.minutes` is a genuine undefined-method" do
+      Dir.mktmpdir("rigor-as-overlay-absent-") do |tmpdir|
+        write_duration_project(tmpdir, lock_gem: "rake")
+        names = undefined_methods_for(tmpdir)
+        expect(names).to contain_exactly("minutes", "minuets")
+      end
+    end
+
     it "emits `rbs.coverage.synthesized-namespace` :info when project RBS omits its namespace" do
       Dir.mktmpdir("rigor-synth-namespace-") do |tmpdir|
         FileUtils.mkdir_p(File.join(tmpdir, "sig"))

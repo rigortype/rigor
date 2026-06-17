@@ -22,6 +22,14 @@ cycles live in dedicated archives:
   - The test command runs with Bundler's environment stripped (`with_unbundled_env`), so a `bundle exec` runner resolves your project's bundle even when Rigor itself was launched under its own — no env wrapper needed.
   - `--include-dynamic` extends the overlay to `Dynamic`-receiver (untyped) call sites, where a test is the only possible protection — completing the map to *every* dispatch site, not just the ones Rigor can type-check. It runs the suite far more (every such site is a type-survivor), so it is an explicit opt-in on top of `--with-tests`.
   - `--limit N` (with `--seed`) caps the measurement to a deterministic sample of N mutations per file, bounding the cost of `--mutation` / `--include-dynamic` on large files; per-file ratios then become estimates, noted on stderr so `--format json` stdout stays clean.
+- **[inference]** Rigor now auto-loads a bundled ActiveSupport core-ext RBS overlay when `activesupport` is in your `Gemfile.lock` but ships no RBS, so core-extension call sites like `3.minutes`, `6.days`, `"x".underscore`, and `hash.symbolize_keys` stop firing a false `call.undefined-method` on a Rails project — no plugin or config needed ([ADR-72](docs/adr/72-gemfile-lock-gated-rbs-overlays.md)).
+  - It is gated on the gem actually being locked, so a plain-Ruby project with no `activesupport` still gets the genuine `undefined method 'minutes' for 3`; a real typo on a core type (e.g. `5.minuets`) keeps firing at `evidence_tier: high`.
+  - This resolves the v0.2.0 `evidence_tier` calibration report at its source — the systematic ActiveSupport false positives no longer fire, so `evidence_tier: high` keeps meaning "real type error" — rather than relabelling them (a down-tier would not have helped: the tier never feeds severity, so the error would stay on screen).
+  - The overlay stands down automatically when the opt-in [`rigor-activesupport-core-ext`](plugins/rigor-activesupport-core-ext/) plugin is loaded, and is bypassed if you supply ActiveSupport RBS yourself (via `rbs collection install` or `signature_paths:`). The bundled set is curated, not exhaustive — the `rbs.coverage.missing-gem` notice still points you at fuller RBS.
+
+### Fixed
+
+- **[packaging]** The published gem now ships Rigor's bundled RBS data — the `data/vendored_gem_sigs/` per-gem stubs (nokogiri, pg, redis, mysql2, …) and the `data/core_overlay/` core reopenings (including the v0.2.0 StringScanner fix). The gemspec's `spec.files` glob only matched `data/builtins/**/*.yml`, so an installed `rigortype` gem silently lacked these `.rbs` files and produced extra `call.undefined-method` false positives that a from-source checkout did not.
 
 ## [0.2.0] - 2026-06-17
 

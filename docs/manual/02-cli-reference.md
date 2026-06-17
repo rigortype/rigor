@@ -311,7 +311,12 @@ the run aborts — point it at a plain pass/fail runner (a coverage
 floor that exits non-zero on a passing suite trips this). It runs
 with Bundler's environment stripped, so a `bundle exec` command
 resolves your project's bundle even when Rigor itself was
-launched under its own — no env wrapper needed.
+launched under its own — no env wrapper needed. The command runs
+**without a shell** (it is split into an argv and executed
+directly), so shell constructs are not interpreted — including an
+inline `BUNDLE_GEMFILE=… ` prefix. For a non-default Gemfile, set
+it with `bundle config set --local gemfile PATH` (it persists in
+`.bundle/config`) or wrap the command in `bash -c '…'`.
 
 `--include-dynamic` extends the overlay to `Dynamic`-receiver
 (untyped) sites, where a test is the only possible protection —

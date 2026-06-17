@@ -242,6 +242,11 @@ aggregated) grouping.
 
 ## `rigor coverage`
 
+> For the value proposition and a workflow guide to the
+> `--protection` tiers, see
+> [Type-protection coverage](15-type-protection-coverage.md). This
+> section is the flag reference.
+
 Report type-precision coverage — the ratio of call sites that
 resolve to a precise type versus those that fall back to
 `Dynamic`. A quality gate for "how much is Rigor actually

@@ -46,6 +46,10 @@ flag, key, or command that *acts* on it.
    user docs live under [Plugin reference](plugins/README.md).
 8. [Provided skills](08-skills.md) — the bundled Agent Skills
    for onboarding and baseline reduction.
+15. [Type-protection coverage](15-type-protection-coverage.md) —
+    measuring whether a bug would be *caught*, fusing your types
+    and your tests into one safety net (`rigor coverage
+    --protection [--mutation --with-tests --include-dynamic]`).
 
 ### Integration and operations
 

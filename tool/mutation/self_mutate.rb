@@ -96,14 +96,50 @@ module RigorSelfMutation
       @ctx.project_scan
       @config = config
       @runner = BundledRunner.new(verbose: options[:verbose])
+      @coverage = options[:coverage_gap] ? JSON.parse(File.read(options[:coverage_gap])) : nil
     end
 
     def run(paths)
       files = expand(paths)
+      return coverage_gap_sweep(files) if @coverage
+
       guard_clean!(files)
       install_restore_trap(files)
       outcomes = files.map { |f| measure(f) }
       report(outcomes)
+    end
+
+    # Whole-tree backlog without a per-mutant suite run (the efficient pass).
+    # For each file, the cheap in-process TYPE axis over EVERY dispatch site
+    # (`:all`); a type-survivor whose line the suite never executed (per the
+    # `--coverage-gap` index) is provably test-unprotected — a high-confidence
+    # implementation hole. A type-survivor on a covered line is only *maybe*
+    # killed (covered ≠ asserted), so it is reported separately as needing the
+    # expensive fused verification.
+    def coverage_gap_sweep(files)
+      holes = []
+      needs_check = 0
+      out = @options[:out] ? File.open(@options[:out], "w") : nil
+      files.each_with_index do |path, i|
+        warn "[#{i + 1}/#{files.size}] #{path}"
+        executed = (@coverage[path.delete_prefix("lib/")] || []).to_set
+        file_holes = []
+        scanner(:all).scan_file(path).sites.each do |s|
+          if executed.include?(s.line)
+            needs_check += 1
+          else
+            file_holes << survivor(path, s.line, s.receiver, s.method_name, s.operator, :none)
+          end
+        end
+        holes.concat(file_holes)
+        # Stream a per-file JSONL line, flushed, so a killed run keeps its
+        # partial backlog (the sweep is the slow part).
+        out&.puts(JSON.generate(path: path, holes: file_holes))
+        out&.flush
+      end
+    ensure
+      out&.close
+      report_coverage_gap(holes, needs_check)
     end
 
     private
@@ -241,6 +277,34 @@ module RigorSelfMutation
       puts "  … and #{type_only.size - 20} more" if type_only.size > 20
     end
 
+    # Backlog from the coverage-gap pass: the high-confidence holes (type-blind
+    # sites no spec executes), clustered by file and by (operator, receiver).
+    def report_coverage_gap(holes, needs_check)
+      if @options[:json]
+        puts JSON.pretty_generate(
+          summary: { holes: holes.size, needs_verification: needs_check },
+          by_file: holes.group_by { |h| h[:path] }.transform_values(&:size).sort_by { |_, n| -n }.to_h,
+          holes: holes
+        )
+        return
+      end
+
+      puts "\nCoverage-gap backlog — type-blind sites no spec executes (high-confidence holes)"
+      puts "  holes:              #{holes.size}"
+      puts "  needs-verification: #{needs_check}  (type-survivors on covered lines — covered ≠ asserted)"
+
+      puts "\nBy file (top 25):"
+      holes.group_by { |h| h[:path] }.transform_values(&:size).sort_by { |_, n| -n }.first(25).each do |path, n|
+        puts "  #{format('%4d', n)}  #{path}"
+      end
+
+      puts "\nBy (operator, receiver) cluster (top 20):"
+      holes.group_by { |h| [h[:operator], h[:receiver]] }.transform_values(&:size)
+           .sort_by { |_, n| -n }.first(20).each do |(op, recv), n|
+        puts "  #{format('%4d', n)}  #{op}  #{recv}"
+      end
+    end
+
     def totals(outcomes)
       tk = outcomes.sum(&:type_killed)
       sk = outcomes.sum(&:test_killed)
@@ -253,7 +317,8 @@ module RigorSelfMutation
   end
 end
 
-options = { config: nil, limit: nil, seed: 1, site: :all, type_only: false, json: false, verbose: false }
+options = { config: nil, limit: nil, seed: 1, site: :all, type_only: false, json: false, verbose: false,
+            coverage_gap: nil, out: nil }
 parser = OptionParser.new do |o|
   o.banner = "Usage: ruby tool/mutation/self_mutate.rb [options] <lib paths…>"
   o.on("--config PATH") { |v| options[:config] = v }
@@ -261,6 +326,12 @@ parser = OptionParser.new do |o|
   o.on("--seed N", Integer) { |v| options[:seed] = v }
   o.on("--site SEL", %i[all biteable]) { |v| options[:site] = v }
   o.on("--type-only") { options[:type_only] = true }
+  o.on("--coverage-gap PATH", "Whole-tree backlog: classify type-survivors against a suite " \
+                              "line-coverage index (COVERAGE_JSON). No per-mutant suite run.") do |v|
+    options[:coverage_gap] = v
+  end
+  o.on("--out PATH", "Stream per-file holes as JSONL (flushed per file) under --coverage-gap, " \
+                     "so a killed run keeps its partial backlog.") { |v| options[:out] = v }
   o.on("--json") { options[:json] = true }
   o.on("--verbose") { options[:verbose] = true }
 end

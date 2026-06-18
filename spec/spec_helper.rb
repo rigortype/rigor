@@ -15,6 +15,21 @@ if ENV["COVERAGE"]
     end
     report = rows.sort_by { |_, total, hit| hit.to_f / [total, 1].max }
 
+    # Opt-in structured dump for the self-mutation harness (tool/mutation/
+    # self_mutate.rb --coverage-gap): {lib-relative path => [executed line
+    # numbers]}. A mutation site on a line absent here is run by no spec, so it
+    # is provably test-unprotected without a per-mutant suite run.
+    if ENV["COVERAGE_JSON"]
+      require "json"
+      covered = lib_files.to_h do |path, data|
+        lines = data[:lines]
+        executed = (0...lines.size).select { |i| lines[i]&.positive? }.map { |i| i + 1 }
+        [path.delete_prefix("#{lib_root}/"), executed]
+      end
+      File.write(ENV["COVERAGE_JSON"], JSON.generate(covered))
+      warn "Coverage line-index written to #{ENV['COVERAGE_JSON']}"
+    end
+
     out = File.expand_path("../coverage_report.txt", __dir__)
     File.open(out, "w") do |f|
       f.puts "# Coverage report — #{Time.now.strftime('%Y-%m-%d %H:%M')}"

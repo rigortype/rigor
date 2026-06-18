@@ -32,8 +32,9 @@ so nothing is lost by installing it separately.
 
 The prompt above is plain natural language — your agent follows the
 same linked instructions regardless of the language you ask in, so
-the whole setup conversation can happen in your mother tongue.
-Ready-made prompts:
+the whole setup conversation can happen in your mother tongue. Each
+ready-made prompt below explicitly asks the agent to work through the
+setup with you interactively in that language:
 
 <details data-lang-details>
 <summary>Set up in your language</summary>
@@ -41,7 +42,7 @@ Ready-made prompts:
 <details lang="ja"><summary>[ja] 日本語</summary>
 
 ```
-次の手順に従って、このプロジェクトに Rigor をインストールしてください:
+日本語でやり取りしながら、このプロジェクトに Rigor をインストールする作業を対話的に進めてください。次の手順に従ってください:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -50,7 +51,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="zh-Hans"><summary>[zh-Hans] 简体中文</summary>
 
 ```
-请按照以下地址的说明在此项目中安装 Rigor:
+请用简体中文和我交互，一步步地在此项目中安装 Rigor。请按照以下地址的说明操作:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -59,7 +60,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="zh-Hant"><summary>[zh-Hant] 繁體中文</summary>
 
 ```
-請依照以下網址的說明在此專案中安裝 Rigor:
+請用繁體中文與我互動，一步步地在此專案中安裝 Rigor。請依照以下網址的說明操作:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -68,7 +69,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="ko"><summary>[ko] 한국어</summary>
 
 ```
-다음 주소의 안내에 따라 이 프로젝트에 Rigor를 설치해 주세요:
+한국어로 대화하면서 이 프로젝트에 Rigor를 설치하는 작업을 단계별로 함께 진행해 주세요. 다음 주소의 안내를 따라 주세요:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -77,7 +78,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="pt-BR"><summary>[pt-BR] Português (Brasil)</summary>
 
 ```
-Instale o Rigor neste projeto seguindo as instruções em:
+Vamos trabalhar juntos de forma interativa, em português (Brasil), para instalar o Rigor neste projeto. Siga as instruções em:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -86,7 +87,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="pt"><summary>[pt] Português</summary>
 
 ```
-Utilizando o português de Portugal, instala o Rigor neste projeto seguindo as instruções em:
+Vamos trabalhar juntos de forma interativa, em português de Portugal, para instalar o Rigor neste projeto. Segue as instruções em:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -95,7 +96,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="es"><summary>[es] Español</summary>
 
 ```
-Instala Rigor en este proyecto siguiendo las instrucciones en:
+Trabajemos juntos de forma interactiva, en español, para instalar Rigor en este proyecto. Sigue las instrucciones en:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -104,7 +105,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="vi"><summary>[vi] Tiếng Việt</summary>
 
 ```
-Hãy cài đặt Rigor vào dự án này theo hướng dẫn tại:
+Hãy trao đổi với tôi bằng tiếng Việt và cùng nhau cài đặt Rigor vào dự án này theo từng bước. Làm theo hướng dẫn tại:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -113,7 +114,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="fr"><summary>[fr] Français</summary>
 
 ```
-Installez Rigor dans ce projet en suivant les instructions à l'adresse :
+Travaillons ensemble de manière interactive, en français, pour installer Rigor dans ce projet. Suivez les instructions à l'adresse :
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -122,7 +123,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="de"><summary>[de] Deutsch</summary>
 
 ```
-Installieren Sie Rigor in diesem Projekt, indem Sie den Anweisungen unter diesem Link folgen:
+Lassen Sie uns interaktiv auf Deutsch zusammenarbeiten, um Rigor in diesem Projekt zu installieren. Folgen Sie den Anweisungen unter diesem Link:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -131,7 +132,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="it"><summary>[it] Italiano</summary>
 
 ```
-Installa Rigor in questo progetto seguendo le istruzioni a questo link:
+Lavoriamo insieme in modo interattivo, in italiano, per installare Rigor in questo progetto. Segui le istruzioni a questo link:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -140,7 +141,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="th"><summary>[th] ภาษาไทย</summary>
 
 ```
-ติดตั้ง Rigor ในโปรเจกต์นี้โดยทำตามคำแนะนำที่:
+มาทำงานร่วมกันแบบโต้ตอบเป็นภาษาไทย เพื่อติดตั้ง Rigor ในโปรเจกต์นี้ โปรดทำตามคำแนะนำที่:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -149,7 +150,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="id"><summary>[id] Bahasa Indonesia</summary>
 
 ```
-Instal Rigor di proyek ini dengan mengikuti instruksi di:
+Mari bekerja sama secara interaktif dalam Bahasa Indonesia untuk memasang Rigor di proyek ini. Ikuti instruksi di:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -158,7 +159,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="pl"><summary>[pl] Polski</summary>
 
 ```
-Zainstaluj Rigor w tym projekcie, postępując zgodnie z instrukcjami pod adresem:
+Pracujmy razem interaktywnie po polsku, aby zainstalować Rigor w tym projekcie. Postępuj zgodnie z instrukcjami pod adresem:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -167,7 +168,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="uk"><summary>[uk] Українська</summary>
 
 ```
-Встановіть Rigor у цей проєкт, дотримуючись інструкцій за посиланням:
+Працюймо разом інтерактивно українською мовою, щоб встановити Rigor у цей проєкт. Дотримуйтеся інструкцій за посиланням:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -176,7 +177,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="ru"><summary>[ru] Русский</summary>
 
 ```
-Установите Rigor в этот проект, следуя инструкциям по ссылке:
+Давайте работать вместе в интерактивном режиме на русском языке, чтобы установить Rigor в этот проект. Следуйте инструкциям по ссылке:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -185,7 +186,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="ro"><summary>[ro] Română</summary>
 
 ```
-Instalați Rigor în acest proiect urmând instrucțiunile de la adresa:
+Hai să lucrăm împreună în mod interactiv, în limba română, pentru a instala Rigor în acest proiect. Urmează instrucțiunile de la adresa:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -194,7 +195,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="tr"><summary>[tr] Türkçe</summary>
 
 ```
-Bu projeye Rigor'u şu adresteki talimatları izleyerek kurun:
+Türkçe konuşarak ve etkileşimli bir şekilde, bu projeye Rigor'u birlikte kuralım. Şu adresteki talimatları izleyin:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -203,7 +204,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="ar" dir="rtl"><summary>[ar] العربية</summary>
 
 ```
-قم بتثبيت Rigor في هذا المشروع باتباع التعليمات الموجودة في:
+لنعمل معًا بشكل تفاعلي وباللغة العربية لتثبيت Rigor في هذا المشروع. اتبع التعليمات الموجودة في:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
@@ -212,7 +213,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 <details lang="fa" dir="rtl"><summary>[fa] فارسی</summary>
 
 ```
-Rigor را با دنبال کردن دستورالعمل‌های موجود در این آدرس در این پروژه نصب کنید:
+بیایید به‌صورت تعاملی و به زبان فارسی با هم کار کنیم تا Rigor را در این پروژه نصب کنیم. دستورالعمل‌های موجود در این آدرس را دنبال کنید:
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 

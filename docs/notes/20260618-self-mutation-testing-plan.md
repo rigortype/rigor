@@ -254,3 +254,57 @@ like its `mutate.rb` sibling.
 set is runnable but diagnostic-shaped), the `{line → specs}` coverage index (Phase 4 tier 1,
 to replace convention selection and fix the completeness caveat), the independent subprocess
 oracle (Phase 2), and the diff-scoped advisory CI job (Phase 5).
+
+## Whole-tree coverage-gap backlog sweep (2026-06-18)
+
+The per-mutant fused mode cannot scale to the whole tree (each type-survivor boots a fresh
+`rspec`; process startup dominates). The efficient pass — `self_mutate.rb --coverage-gap` —
+classifies the cheap in-process type-survivors against a one-shot **suite line-coverage
+index** (`COVERAGE_JSON` from `spec_helper`, full sequential suite once: 309 files, 23,530
+executed lib lines). A type-survivor whose code the suite never ran is a high-confidence hole
+with **zero** `rspec` runs. Scope: the 276 `lib/rigor` files ≤ 400 LOC (the 34 larger engine
+files deferred — `:all` re-analysis cost ∝ dispatch-site count).
+
+**Adjudication de-noised the metric twice — the load-bearing methodology lesson.** The raw
+result was alarming and wrong:
+
+| classifier | "holes" | what it was |
+| --- | --- | --- |
+| raw line-coverage | **1,969** | mostly false |
+| + method-coldness | 214 | def-level artifact removed |
+| + class-body exclusion (def-anchored) | **22** | trustworthy |
+
+Two coverage artifacts, both found by *reading the top survivors* rather than trusting the
+count (the ADR-62 "adjudicate, don't assume" discipline):
+
+1. **Multi-line expression attribution.** Ruby line-coverage credits a multi-line
+   expression's execution to its *first* line, so continuation lines read as uncovered even
+   when the expression runs — `Diagnostic#to_h` is tested, yet its hash-literal entry lines
+   (144–149) were all flagged. Fixed by anchoring on **method coldness**: a hole only when
+   the enclosing `def` is *entirely* uncovered (a never-run method), so every site in a warm
+   method is covered.
+2. **Class-body data constants.** `bundle_sig_discovery`'s frozen `Set[…]` of stdlib names,
+   `method_parameter_binder`'s `RBS_TYPE_PROVIDERS` hash-of-lambdas, the builtin catalogs'
+   `for_topic` constant — all suffer (1) with no `def` to anchor on, and are *data* not
+   logic. Excluded: a site with no enclosing `def` is never a high-confidence hole. (The
+   signal is trustworthy only inside method bodies — the precision/recall trade for a backlog
+   we act on; cold *branches* inside warm methods live in the `needs-verification` tier.)
+
+**Result — the small-file core is method-level complete.** All 22 trustworthy holes were in a
+**single** file, `lib/rigor/cli/mcp_command.rb` (the ADR-33 MCP command): its
+`#run` / `#parse_options` had no unit spec at all. Every other ≤400-LOC `lib/rigor` file has
+no entirely-cold type-blind method — Rigor's unit suite exercises essentially every method
+(the `trinary` gaps above were among the few, now closed). **Loop closed**: a 5-example
+`spec/rigor/cli/mcp_command_spec.rb` (option parsing + the transport-validation / usage-error
+branches of `run`; the long-running stdio server loop is integration territory, deliberately
+not unit-tested) drove `mcp_command.rb` to **0 cold-method holes**.
+
+**The `needs-verification` frontier (~10.5k).** Type-survivors on *covered* lines —
+covered ≠ asserted. This is the larger test-*effectiveness* gap (a spec runs the line but no
+assertion catches the mutation), but it is a mix of real cold-branch gaps and the same
+multi-line artifacts, and adjudicating it needs the expensive per-file fused `rspec` pass
+(the `trinary` pattern, run file-by-file). Deferred to targeted fused runs rather than a
+whole-tree blast.
+
+**Deferred:** the 34 engine files > 400 LOC (own scoped run), the `needs-verification`
+adjudication, and the Phase 2/3/4-tier1/5 items above.

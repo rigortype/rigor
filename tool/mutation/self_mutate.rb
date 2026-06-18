@@ -151,15 +151,18 @@ module RigorSelfMutation
     # uncovered. Method-level coldness removes that artifact: every site inside
     # a warm method is treated as covered. (Trade-off: a cold branch inside a
     # warm method is not flagged — accepted, this favours precision over recall
-    # for a trustworthy backlog.) Top-level / class-body sites fall back to the
-    # raw line check.
+    # for a trustworthy backlog.) Class-body / constant sites have no enclosing
+    # def to anchor on, suffer the same artifact, and are data not logic — they
+    # are never high-confidence holes.
     def cold_site_classifier(source, executed)
       defs = method_ranges(source).map { |r| [r, r.none? { |ln| executed.include?(ln) }] }
       lambda do |line|
         enclosing = defs.select { |r, _| r.cover?(line) }.min_by { |r, _| r.size }
-        next enclosing.last if enclosing
-
-        !executed.include?(line)
+        # A site with no enclosing def is class-body/constant data — not a
+        # high-confidence hole (it suffers the multi-line attribution artifact
+        # with no method to anchor on). The signal is trustworthy only inside
+        # a def, where coldness means the whole method never ran.
+        enclosing ? enclosing.last : false
       end
     end
 

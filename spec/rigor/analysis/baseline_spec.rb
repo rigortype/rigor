@@ -104,6 +104,68 @@ RSpec.describe Rigor::Analysis::Baseline do
         )
       end
     end
+
+    it "raises LoadError when the top level is not a Hash" do
+      Tempfile.create(["baseline", ".yml"]) do |f|
+        f.write("- just\n- a\n- list\n")
+        f.flush
+        expect { described_class.load(f.path) }.to raise_error(
+          described_class::LoadError, /expected a Hash at top level/
+        )
+      end
+    end
+
+    it "raises LoadError when `ignored:` is not an Array" do
+      Tempfile.create(["baseline", ".yml"]) do |f|
+        f.write("version: 1\nignored: nope\n")
+        f.flush
+        expect { described_class.load(f.path) }.to raise_error(
+          described_class::LoadError, /`ignored:` must be an Array/
+        )
+      end
+    end
+
+    it "raises LoadError when a row is not a Hash" do
+      Tempfile.create(["baseline", ".yml"]) do |f|
+        f.write("version: 1\nignored:\n  - just a string\n")
+        f.flush
+        expect { described_class.load(f.path) }.to raise_error(
+          described_class::LoadError, /ignored\[0\] must be a Hash/
+        )
+      end
+    end
+
+    it "raises LoadError on a missing `rule:` in a row" do
+      Tempfile.create(["baseline", ".yml"]) do |f|
+        f.write(<<~YAML)
+          version: 1
+          ignored:
+            - file: app/foo.rb
+              count: 1
+        YAML
+        f.flush
+        expect { described_class.load(f.path) }.to raise_error(
+          described_class::LoadError, /missing `rule:`/
+        )
+      end
+    end
+
+    it "raises LoadError when a `message:` pattern is not a valid Regexp" do
+      Tempfile.create(["baseline", ".yml"]) do |f|
+        f.write(<<~YAML)
+          version: 1
+          ignored:
+            - file: app/foo.rb
+              rule: call.undefined-method
+              message: "[unterminated"
+              count: 1
+        YAML
+        f.flush
+        expect { described_class.load(f.path) }.to raise_error(
+          described_class::LoadError, /not a valid Regexp/
+        )
+      end
+    end
   end
 
   describe ".from_diagnostics" do
@@ -148,7 +210,8 @@ RSpec.describe Rigor::Analysis::Baseline do
     end
 
     it "raises ArgumentError on an unknown match_mode" do
-      expect { described_class.from_diagnostics([], match_mode: :line) }.to raise_error(ArgumentError)
+      expect { described_class.from_diagnostics([], match_mode: :line) }
+        .to raise_error(ArgumentError, /match_mode must be/)
     end
   end
 
@@ -340,6 +403,19 @@ RSpec.describe Rigor::Analysis::Baseline do
         loaded = described_class.load(f.path)
         expect(loaded.size).to eq(2)
         expect(loaded.buckets.map(&:count).sort).to eq([1, 2])
+      end
+    end
+
+    it "emits and round-trips a message-mode bucket's pattern" do
+      diagnostics = [diagnostic(path: "a.rb", rule: "call.undefined-method", message: "boom [x]")]
+      yaml = described_class.from_diagnostics(diagnostics, match_mode: :message).to_yaml
+      expect(yaml).to include("message:")
+
+      Tempfile.create(["baseline", ".yml"]) do |f|
+        f.write(yaml)
+        f.flush
+        reloaded = described_class.load(f.path)
+        expect(reloaded.buckets.first.message_regex.match?("boom [x]")).to be(true)
       end
     end
   end

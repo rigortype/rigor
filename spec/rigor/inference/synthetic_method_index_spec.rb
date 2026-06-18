@@ -65,6 +65,29 @@ RSpec.describe Rigor::Inference::SyntheticMethodIndex do
     end
   end
 
+  describe "knows_class?" do
+    let(:idx) { described_class.new(entries: [user_avatar], class_names: ["User::ActiveStorage_Attached_Avatar"]) }
+
+    it "is true for a recorded synthesised class name" do
+      expect(idx.knows_class?("User::ActiveStorage_Attached_Avatar")).to be(true)
+    end
+
+    it "coerces a non-String name argument via to_s" do
+      expect(idx.knows_class?(:"User::ActiveStorage_Attached_Avatar")).to be(true)
+    end
+
+    it "is false for a name the index does not synthesise" do
+      expect(idx.knows_class?("User")).to be(false)
+    end
+  end
+
+  describe "to_h" do
+    it "serialises entries and class_names" do
+      idx = described_class.new(entries: [user_avatar], class_names: ["VariantSubclass"])
+      expect(idx.to_h).to eq("entries" => [user_avatar.to_h], "class_names" => ["VariantSubclass"])
+    end
+  end
+
   describe "EMPTY" do
     it "is empty and frozen" do
       expect(described_class::EMPTY).to be_empty

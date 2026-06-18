@@ -371,3 +371,38 @@ just to move a metric). `dependency_recorder` was already 0.
 empty; the effectiveness tier is a per-file, adjudicate-each workflow — most survivors are
 equivalent mutants (message/inspect text), covered-by-a-broader-spec, or genuine gaps now
 closed. Each tier converges on an equivalent-mutant floor, not zero.
+
+## Effectiveness-tier adjudication — second per-file batch (2026-06-18)
+
+A further pass over six logic-bearing files; same find → adjudicate → fix → re-measure loop,
+all six spec-only (no `lib/` change), `make verify` green:
+
+- `analysis/run_stats` (6 → 0): the Linux `/proc/self/status` `VmHWM:` parser
+  (`read_vmhwm_from_proc`) — the existing `.peak_rss_bytes` test only asserts a non-negative
+  integer, so the line filter, digit extraction, and kB→byte scale survived even on Linux CI.
+  Closed with stubbed-`File` unit tests asserting the *exact* parsed value (and the not-readable
+  / no-`VmHWM` nil paths).
+- `analysis/fact_store` (11 → 0): three untested validation branches (`Fact.new` bad bucket,
+  `join` non-FactStore guard, `normalize` non-`Fact` element — a mutated `.class`/`.inspect` in
+  the raise path throws `NoMethodError` ≠ `ArgumentError`, so a bare `raise_error(ArgumentError)`
+  kills them), the entirely-untested `with_local_fact`, the `==`/`eql?`/`hash` value-equality
+  contract, and the deliberate string-bucket `to_sym`/`map(&:to_sym)` coercion leniency.
+- `type/app` (2 → 0): `accepts` (delegates to `bound` — pinned against
+  `Inference::Acceptance.accepts`) and `reduce` (delegates to a registry with a default-fuel
+  wiring — pinned with a minimal fake registry recording the fuel).
+- `inference/synthetic_method_index` (4 → 0): `knows_class?` (incl. the `name.to_s` coercion,
+  exercised with a Symbol argument) and `to_h` serialisation — both untested.
+- `inference/indexed_narrowing` (6 → 0): `.lookup_for_call` and `.invalidate_chain_after_call`
+  were only exercised via the integration fixture, not the unit spec; added direct unit cases
+  (stable `receiver[key]` lookup + the non-`[]` / multi-arg / no-narrowing nils; chain-narrowing
+  drop on a stable receiver + the unstable-outer-receiver no-op).
+- `inference/multi_target_binder` (4 → 1-equivalent): the ADR-57 optional-slot softening
+  (`X | nil` slot → non-nil constituent) was untested. The residual `:111` `slot_type` site is a
+  **confirmed equivalent mutant** — it lives in the no-rest `backs` block, but `back_count =
+  rights.size` and post-splat `rights` are non-empty only when `rest_present`, so that block is
+  `Array.new(0){…}` and never runs.
+
+`inference/{budget_trace,struct_fold_safety}` and `type/intersection` were measured and left at
+their floor (already 100 %, or only the `percentile` `hist.keys.max` defensive fallback — reached
+only when the nearest-rank loop fails to return, which `rank = ceil(fraction·total) ≤ total`
+makes impossible — and the `inspect`/`describe(:short)` debug-format residual).

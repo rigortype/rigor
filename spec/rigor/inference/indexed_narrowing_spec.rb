@@ -64,6 +64,47 @@ RSpec.describe Rigor::Inference::IndexedNarrowing do
     end
   end
 
+  describe ".lookup_for_call" do
+    it "returns the recorded narrowing for a stable `receiver[key]` read" do
+      scope2 = scope.with_indexed_narrowing(:local, :params, :f, tuple_empty)
+      node = Prism.parse("params = {}\nparams[:f]\n").value.statements.body.last
+      expect(described_class.lookup_for_call(node, scope2)).to eq(tuple_empty)
+    end
+
+    it "returns nil for a non-`[]` call" do
+      node = Prism.parse("params.foo\n").value.statements.body.first
+      expect(described_class.lookup_for_call(node, scope)).to be_nil
+    end
+
+    it "returns nil for a multi-argument `[]` (not a single-key read)" do
+      node = Prism.parse("params[:a, :b]\n").value.statements.body.first
+      expect(described_class.lookup_for_call(node, scope)).to be_nil
+    end
+
+    it "returns nil when no narrowing is recorded for the address" do
+      node = Prism.parse("params = {}\nparams[:f]\n").value.statements.body.last
+      expect(described_class.lookup_for_call(node, scope)).to be_nil
+    end
+  end
+
+  describe ".invalidate_chain_after_call" do
+    let(:scope_with_chain) do
+      scope.with_method_chain_narrowing(:local, :x, :last, tuple_empty)
+    end
+
+    it "drops chain narrowings rooted at the call's stable receiver" do
+      call = Prism.parse("x = []\nx << 1\n").value.statements.body.last
+      post = described_class.invalidate_chain_after_call(call_node: call, current_scope: scope_with_chain)
+      expect(post.method_chain_narrowing(:local, :x, :last)).to be_nil
+    end
+
+    it "is a no-op when the outer receiver is not stable (`x.last << y`)" do
+      call = Prism.parse("x.last << 1\n").value.statements.body.first
+      post = described_class.invalidate_chain_after_call(call_node: call, current_scope: scope_with_chain)
+      expect(post.method_chain_narrowing(:local, :x, :last)).to eq(tuple_empty)
+    end
+  end
+
   describe ".invalidate_after_call" do
     let(:scope_with_narrowing) do
       scope.with_indexed_narrowing(:local, :params, :f, tuple_empty)

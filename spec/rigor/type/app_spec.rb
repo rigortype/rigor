@@ -82,6 +82,46 @@ RSpec.describe Rigor::Type::App do
     end
   end
 
+  describe "accepts (delegates to bound)" do
+    it "answers exactly as the bound's acceptance of the same argument" do
+      app = described_class.new(:"json::value", [str_nominal], bound: int_nominal)
+      expect(app.accepts(int_nominal, mode: :gradual))
+        .to eq(Rigor::Inference::Acceptance.accepts(int_nominal, int_nominal, mode: :gradual))
+      expect(app.accepts(str_nominal, mode: :gradual))
+        .to eq(Rigor::Inference::Acceptance.accepts(int_nominal, str_nominal, mode: :gradual))
+    end
+  end
+
+  describe "reduce (delegates to a registry)" do
+    # A minimal registry stand-in: records the fuel it was handed and
+    # returns a sentinel, so the test pins the delegation + the default-fuel
+    # wiring without depending on a real reduction rule.
+    let(:fake_registry) do
+      Class.new do
+        attr_reader :received_app, :received_fuel
+
+        def reduce(app, fuel:)
+          @received_app = app
+          @received_fuel = fuel
+          :reduced
+        end
+      end.new
+    end
+
+    it "delegates to the registry with the default fuel" do
+      app = described_class.new(:"json::value", [str_nominal], bound: untyped)
+      expect(app.reduce(fake_registry)).to eq(:reduced)
+      expect(fake_registry.received_app).to be(app)
+      expect(fake_registry.received_fuel).to eq(Rigor::Inference::HktReducer::DEFAULT_FUEL)
+    end
+
+    it "passes an explicit fuel through unchanged" do
+      app = described_class.new(:"json::value", [str_nominal], bound: untyped)
+      app.reduce(fake_registry, fuel: 7)
+      expect(fake_registry.received_fuel).to eq(7)
+    end
+  end
+
   describe "structural equality" do
     it "is equal across independent constructions of the same uri/args/bound" do
       a = described_class.new(:"json::value", [str_nominal], bound: untyped)

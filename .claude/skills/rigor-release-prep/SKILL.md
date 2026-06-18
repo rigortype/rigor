@@ -268,22 +268,51 @@ git push -u origin release/x.y.z
 This triggers two workflows:
 
 - **`ci.yml`** (base gate, required) — test / lint / self-check warm+cold /
-  warm==cold diff. MUST be green before publishing.
+  warm==cold diff. MUST be green before the PR merge below.
 - **`release-gate.yml`** (comprehensive, advisory during the v0.2.0 trial) —
   the perf benchmark (`make bench-perf`, [ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)
   WD4), gem-build validation, and the OSS-corpus sweep. It reports but does
-  not block while the baselines calibrate; a perf or sweep regression here
-  is still a release-quality signal worth investigating before publishing.
+  not block while the baselines calibrate; a regression here is still a
+  release-quality signal worth reviewing.
+  - A **`wall_s`-only** perf failure is CI wall-time noise — the deterministic
+    `allocations` / `peak_rss_kb` bands are the real signal. Clear it with
+    `gh run rerun --failed <run-id>`; recalibrate `bench/baseline.json` only
+    when allocations or RSS actually breach their band, never for wall alone.
+  - An OSS-sweep diagnostic-count change needs a false-positive diff before it
+    is blessed into `data/oss-sweep/*-thresholds.json`.
 
-Do not publish until the base gate is green and the advisory gate has been
-reviewed.
+Do not merge until the base gate is green and the advisory gate is reviewed.
+
+## Open the release PR and merge it on green
+
+Land the release on `master` through a CI-gated PR — not a direct push — so the
+version bump, sealed CHANGELOG, and archive reach the mainline only once the
+required gate is green:
+
+```sh
+gh pr create --base master --head release/x.y.z \
+  --title "Bump up version to x.y.z" --body "<short release summary>"
+gh pr checks <pr> --watch        # wait for the required ci.yml gate
+gh pr merge <pr> --rebase --delete-branch
+```
+
+- **Merge on the required gate; review the advisory one.** `ci.yml` is the
+  merge gate; `release-gate.yml` is advisory (apply the wall-noise / sweep
+  notes above). Merge once `ci.yml` is green and any advisory failure is
+  explained.
+- **Rebase- or merge-commit, never squash.** Keep the `Bump up version to
+  x.y.z` commit intact so the tag in "Publish" lands on it. If `master`
+  advanced, rebase the branch first and re-push.
+- The PR merge **is** the merge-back to `master`; publish runs from `master`
+  afterward, so there is no separate merge-back step.
 
 ## Publish
 
-After the version-bump commit lands on the release branch, publish via the
+After the release PR merges, publish from an up-to-date `master` via the
 `bundler/gem_tasks` release task wired into `Rakefile`:
 
 ```sh
+git switch master && git pull
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake release
 ```
 
@@ -292,7 +321,7 @@ pushes the tag to `origin`, publishes the gem to RubyGems, AND creates the
 matching GitHub Release (the post-publish hook in `Rakefile` invokes
 `rake release:github`). It requires:
 
-- A clean working tree on the release branch.
+- A clean working tree on `master` (the merged release commit at `HEAD`).
 - A RubyGems API key with MFA configured — `rigortype.gemspec` sets
   `rubygems_mfa_required => "true"`, so non-MFA pushes will be rejected.
 - Push access to `origin`.
@@ -327,20 +356,6 @@ In the split-publish case, push the `vx.y.z` tag manually after the gem is
 accepted by RubyGems, then run `rake release:github` once the tag is on
 `origin` to create the GitHub Release.
 
-## Merge back to `master`
-
-After the tag is pushed and the gem is published, bring the version bump +
-CHANGELOG back onto the mainline:
-
-```sh
-git switch master && git pull
-git merge --ff-only release/x.y.z   # or a PR / merge commit if master moved
-git push
-```
-
-If `master` advanced during the release, rebase the release branch (or merge
-with a merge commit) and keep the `Bump up version to x.y.z` commit intact.
-
 ## Quick Checklist
 
 - Working tree starts clean or every pending change is understood.
@@ -360,6 +375,10 @@ with a merge commit) and keep the `Bump up version to x.y.z` commit intact.
 - The final commit message follows `Bump up version to x.y.z`.
 - Release work happened on a `release/x.y.z` branch (not directly on
   `master`).
-- After push: `ci.yml` base gate is green; `release-gate.yml` (advisory) was
-  reviewed — no unexplained perf or sweep regression.
-- After publish: the release branch is merged back into `master`.
+- Before merge: `ci.yml` base gate is green; `release-gate.yml` (advisory) was
+  reviewed — no unexplained perf or sweep regression (a `wall_s`-only perf
+  failure is noise, rerun it).
+- The release PR merged to `master` on a green `ci.yml`, keeping the `Bump up
+  version to x.y.z` commit intact (rebase / merge, not squash).
+- After publish: the `vx.y.z` tag, the RubyGems push, and the GitHub Release
+  all exist; the release branch is deleted.

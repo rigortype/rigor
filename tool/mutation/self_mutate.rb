@@ -122,13 +122,14 @@ module RigorSelfMutation
       out = @options[:out] ? File.open(@options[:out], "w") : nil
       files.each_with_index do |path, i|
         warn "[#{i + 1}/#{files.size}] #{path}"
-        executed = (@coverage[path.delete_prefix("lib/")] || []).to_set
+        source = File.read(path, encoding: Encoding::UTF_8)
+        cold = cold_site_classifier(source, (@coverage[path.delete_prefix("lib/")] || []).to_set)
         file_holes = []
-        scanner(:all).scan_file(path).sites.each do |s|
-          if executed.include?(s.line)
-            needs_check += 1
-          else
+        scanner(:all).scan_file(path, source: source).sites.each do |s|
+          if cold.call(s.line)
             file_holes << survivor(path, s.line, s.receiver, s.method_name, s.operator, :none)
+          else
+            needs_check += 1
           end
         end
         holes.concat(file_holes)
@@ -140,6 +141,39 @@ module RigorSelfMutation
     ensure
       out&.close
       report_coverage_gap(holes, needs_check)
+    end
+
+    # A type-survivor is a high-confidence hole only when its ENCLOSING METHOD
+    # is entirely uncovered (a never-executed def). Ruby line-coverage
+    # attributes a multi-line expression's execution to its first line, so a
+    # bare "line ∉ covered set" check false-flags the continuation lines of a
+    # covered expression — e.g. a tested `to_h`'s hash-literal entries read as
+    # uncovered. Method-level coldness removes that artifact: every site inside
+    # a warm method is treated as covered. (Trade-off: a cold branch inside a
+    # warm method is not flagged — accepted, this favours precision over recall
+    # for a trustworthy backlog.) Top-level / class-body sites fall back to the
+    # raw line check.
+    def cold_site_classifier(source, executed)
+      defs = method_ranges(source).map { |r| [r, r.none? { |ln| executed.include?(ln) }] }
+      lambda do |line|
+        enclosing = defs.select { |r, _| r.cover?(line) }.min_by { |r, _| r.size }
+        next enclosing.last if enclosing
+
+        !executed.include?(line)
+      end
+    end
+
+    # The line ranges (start..end) of every `def` in the source, via Prism.
+    def method_ranges(source)
+      ranges = []
+      collect = lambda do |node|
+        return unless node.is_a?(Prism::Node)
+
+        ranges << (node.location.start_line..node.location.end_line) if node.is_a?(Prism::DefNode)
+        node.compact_child_nodes.each { |c| collect.call(c) }
+      end
+      collect.call(Prism.parse(source).value)
+      ranges
     end
 
     private

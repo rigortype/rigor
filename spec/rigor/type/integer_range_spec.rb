@@ -163,4 +163,27 @@ RSpec.describe Rigor::Type::IntegerRange do
       expect(str.accepts(Rigor::Type::Combinator.positive_int).no?).to be(true)
     end
   end
+
+  describe "finiteness and cardinality" do
+    it "is #finite? only when both bounds are concrete Integers" do
+      expect(described_class.new(0, 10).finite?).to be(true)
+      expect(described_class.new(described_class::NEG_INFINITY, 10).finite?).to be(false)
+      expect(described_class.new(0, described_class::POS_INFINITY).finite?).to be(false)
+    end
+
+    it "counts the integers of a finite range inclusively" do
+      expect(described_class.new(0, 10).cardinality).to eq(11)
+      expect(described_class.new(3, 3).cardinality).to eq(1)
+    end
+
+    it "has infinite #cardinality when a bound is unbounded" do
+      expect(Rigor::Type::Combinator.positive_int.cardinality).to eq(Float::INFINITY)
+    end
+  end
+
+  describe "#inspect" do
+    it "wraps the described range" do
+      expect(described_class.new(0, 10).inspect).to eq("#<Rigor::Type::IntegerRange int<0, 10>>")
+    end
+  end
 end

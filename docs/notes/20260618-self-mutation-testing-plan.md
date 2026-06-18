@@ -306,5 +306,43 @@ multi-line artifacts, and adjudicating it needs the expensive per-file fused `rs
 (the `trinary` pattern, run file-by-file). Deferred to targeted fused runs rather than a
 whole-tree blast.
 
-**Deferred:** the 34 engine files > 400 LOC (own scoped run), the `needs-verification`
-adjudication, and the Phase 2/3/4-tier1/5 items above.
+**Whole-tree completion.** The 34 engine files > 400 LOC (incl. the 3,387-LOC
+`statement_evaluator`, `scope_indexer`, `scope`, the plugin core) were then swept the same
+way: **0 cold-method holes**. So across all 310 `lib/rigor` files the only def-anchored
+cold-method gaps were `cli/mcp_command.rb` and `trinary.rb` — both now closed. **Rigor's unit
+suite is method-level complete**: every method in `lib/rigor` is executed by some spec. (The
+type-blind-method backlog is the cheap, high-confidence tier; it is now drained.)
+
+**Deferred:** the `needs-verification` adjudication (the covered-but-not-asserted
+effectiveness frontier — per-file fused runs, demonstrated below), and the Phase 2/3/4-tier1/5
+items above.
+
+## Effectiveness-tier adjudication — fused per-file (2026-06-18)
+
+With the cold-method tier drained, the remaining signal is the `needs-verification` frontier:
+type-survivors on *covered* lines — a spec runs the line but no assertion catches the
+mutation. The fused per-file mode adjudicates it directly (type pass, then the covering spec
+on each type-survivor; a survivor of both is a real effectiveness gap). First worked example,
+`type/integer_range.rb` (a clean value object) vs `integer_range_spec.rb`:
+
+- **11 unprotected** initially (type-killed 8, test-killed 34, **79.2 %** fused).
+- Adjudicated: `#finite?` (L54) and `#cardinality` (L58) were genuinely unasserted public
+  logic methods — the spec built ranges and tested construction / `describe` / `covers?` /
+  acceptance but never asserted finiteness or the integer count. `#inspect` (L116) likewise.
+  The `validate_bound!` survivors (L35–36) are the **label string argument** (`"min"` /
+  `"max"`) — mutating only the *error-message text*, which Rigor's own discipline treats as
+  presentation, not contract — i.e. **equivalent mutants**, correctly left.
+- Closed the three genuine gaps (`finite?` / `cardinality` / `inspect` examples) →
+  **4 unprotected, 92.5 %** (test-killed 34 → 41). The 4 residual are exactly the
+  message-text label mutations — the effectiveness tier converges on a clean equivalent-mutant
+  floor, not a zero.
+
+This is the same find → adjudicate → fix → re-measure loop as the cold-method tier, but the
+adjudication is sharper: most `needs-verification` survivors are either equivalent mutants
+(message text, commutative reorderings) or covered-by-a-broader-spec, so the tier is worked
+**per file on demand**, not swept whole-tree (which would mostly count noise). The harness
+gives the per-file unprotected list; a human decides genuine vs equivalent.
+
+**Cumulative this session:** `trinary` (9 → 0), `cli/mcp_command` (22 → 0, new spec),
+`type/integer_range` (11 → 4-equivalent). Whole-tree cold-method backlog empty; the
+effectiveness tier is now a per-file workflow with a demonstrated loop.

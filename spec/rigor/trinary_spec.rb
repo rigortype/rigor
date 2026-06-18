@@ -91,4 +91,29 @@ RSpec.describe Rigor::Trinary do
       expect { described_class.from_symbol(:wat) }.to raise_error(ArgumentError)
     end
   end
+
+  describe "#initialize" do
+    it "raises for an unknown value" do
+      expect { described_class.new(:wat) }.to raise_error(ArgumentError, /unknown trinary value/)
+    end
+  end
+
+  describe "value-object protocol" do
+    it "hashes by value (so equal values share a hash bucket)" do
+      expect(described_class.yes.hash).to eq(described_class.new(:yes).hash)
+      expect({ described_class.yes => 1 }[described_class.new(:yes)]).to eq(1)
+    end
+
+    it "renders #to_s and #inspect from the value" do
+      expect(described_class.maybe.to_s).to eq("maybe")
+      expect(described_class.maybe.inspect).to eq("#<Rigor::Trinary maybe>")
+    end
+  end
+
+  describe "coercion" do
+    it "raises TypeError when #and / #or receives a non-Trinary" do
+      expect { described_class.yes.and(:no) }.to raise_error(TypeError, /expected Rigor::Trinary/)
+      expect { described_class.yes.or(true) }.to raise_error(TypeError, /expected Rigor::Trinary/)
+    end
+  end
 end

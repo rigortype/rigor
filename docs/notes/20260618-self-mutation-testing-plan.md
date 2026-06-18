@@ -216,3 +216,41 @@ fused-inward map proves its keep, it feeds a future ADR ("self-mutation testing 
 One-line takeaway: **the type half already ships; the new work is the RSpec axis +
 coverage-guided selection + an independent (mise/clean-HEAD) type oracle, fused into a
 per-site "add a spec / add a type" map of Rigor's own implementation holes.**
+
+## First implementation + run (2026-06-18)
+
+Phases 1, 3 (existing operators), and 4 (tier-0 selection) landed as a first cut:
+`tool/mutation/self_mutate.rb` — a thin driver over `Protection::{MutationScanner,
+TestSuiteOracle}` adding exactly the two Product-C-specific pieces (an **in-bundle** test
+runner; **convention** spec selection `lib/rigor/a/b.rb → spec/rigor/a/b_spec.rb`), plus the
+disk-restore safety (dirty-tree guard + `at_exit`/signal `git checkout`). The type oracle is
+the in-process worktree engine — reconsidered and confirmed sound here: the engine is loaded
+clean once and a mutation is only ever analysed *input* (the type axis never writes to disk),
+so the bootstrap hazard does not bite this fused measure. The independent (mise/clean-HEAD)
+oracle remains the right move for the broad-fuzz/robustness variant.
+
+**Type-axis backlog refreshed** (`mutate.rb sweep lib/rigor --per-file 8`): 310 files, 1,751
+mutants, **teeth 73.4 %** (was 71.4 % on 2026-06-13), 465 survivors — top clusters still the
+deferred ADR-24 self-dogfood ones (`Type::Constant#value` 37, the `MethodCatalog` singleton).
+
+**Fused axis works and finds real holes.** `ci_detector.rb`: type-killed 3, test-killed 14,
+**0 holes** (100 % fused) — the test axis genuinely kills the `Dynamic`-site mutations the
+type checker cannot. `trinary.rb`: surfaced **9 unprotected sites** the dedicated
+`trinary_spec.rb` did not exercise — `#hash` / `#to_s` / `#inspect`, the `new(:invalid)`
+`ArgumentError`, and `coerce`'s `TypeError` branch (reached via `#and`/`#or` with a
+non-Trinary). All adjudicated as genuine missing tests, not dead code; the harness correctly
+did **not** flag `.from_symbol(:wat)` (already tested). **Loop demonstrated**: adding the four
+missing `trinary_spec.rb` examples drove `trinary.rb` to **0 holes / 100 %** (test-killed
+12 → 21) — find → fix → re-measure-kill.
+
+Confirmed in passing: the **bundler-env divergence** is real and load-bearing (a
+`with_unbundled_env` runner makes `bundle exec rspec` fail on Rigor's own suite — the
+in-bundle runner is required), and the **scoped-spec completeness caveat** holds (a hole is
+relative to the *convention* spec; the broader suite may cover it — tier-1 coverage indexing
+is the refinement). `tool/**` is rubocop-excluded, so the dev harness is off the lint gate
+like its `mutate.rb` sibling.
+
+**Remaining (unchanged from the plan):** semantic operators (Phase 3 proper — the current
+set is runnable but diagnostic-shaped), the `{line → specs}` coverage index (Phase 4 tier 1,
+to replace convention selection and fix the completeness caveat), the independent subprocess
+oracle (Phase 2), and the diff-scoped advisory CI job (Phase 5).

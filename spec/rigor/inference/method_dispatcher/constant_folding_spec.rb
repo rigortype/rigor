@@ -282,6 +282,40 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  describe "scalar / structural completeness additions (coverage uplift)" do
+    it "folds Symbol#name / #id2name to Constant[String] and #intern to Constant[Symbol]" do
+      expect(fold(:foo, :name).value).to eq("foo")
+      expect(fold(:foo, :id2name).value).to eq("foo")
+      expect(fold(:foo, :intern).value).to eq(:foo)
+    end
+
+    it "folds the Integer predicate family finite? / infinite? / nonzero?" do
+      expect(fold(42, :finite?).value).to be(true)
+      expect(fold(42, :infinite?).value).to be_nil
+      expect(fold(42, :nonzero?).value).to eq(42)
+      expect(fold(0, :nonzero?).value).to be_nil
+    end
+
+    it "folds the Float predicates nonzero? / integer?" do
+      expect(fold(3.14, :nonzero?).value).to eq(3.14)
+      expect(fold(0.0, :nonzero?).value).to be_nil
+      # Float#integer? is always false (even for 3.0), so the fold is exact.
+      expect(fold(3.14, :integer?).value).to be(false)
+      expect(fold(3.0, :integer?).value).to be(false)
+    end
+
+    it "lifts String#grapheme_clusters to a per-grapheme Tuple (distinct from #chars)" do
+      # "e" + a combining acute accent (U+0301): one extended grapheme
+      # cluster, but two #chars. Built from codepoints so the source stays
+      # ASCII and the decomposed (not precomposed) form is unambiguous.
+      e_acute = [0x65, 0x301].pack("U*") # "e" + combining acute accent
+      g = fold(e_acute, :grapheme_clusters)
+      expect(g).to be_a(Rigor::Type::Tuple)
+      expect(g.elements.map(&:value)).to eq([e_acute])
+      expect(fold(e_acute, :chars).elements.size).to eq(2)
+    end
+  end
+
   # Methods unlocked by the offline numeric.yml catalog: methods
   # whose CRuby implementation the catalog classifies as `leaf`
   # (no Ruby-level callout) or `leaf_when_numeric` (callout only on

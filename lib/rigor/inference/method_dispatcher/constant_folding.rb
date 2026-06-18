@@ -114,14 +114,19 @@ module Rigor
         # siblings `:inspect` / `:to_s` remain folded.
         INTEGER_UNARY = Set[
           :odd?, :even?, :zero?, :positive?, :negative?,
+          # `finite?` / `infinite?` are total on Integer (`true` / `nil`
+          # always) and round out the numeric predicate family — the Float
+          # sibling already folds them. `nonzero?` returns `self` (non-zero)
+          # or `nil`, both foldable Constants.
+          :finite?, :infinite?, :nonzero?,
           :succ, :pred, :next, :abs, :magnitude,
           :bit_length, :to_s, :to_i, :to_int, :to_f,
           :floor, :ceil, :round, :truncate, :chr,
           :inspect, :-@, :+@, :~, :to_r, :to_c
         ].freeze
         FLOAT_UNARY = Set[
-          :zero?, :positive?, :negative?,
-          :nan?, :finite?, :infinite?,
+          :zero?, :positive?, :negative?, :nonzero?,
+          :nan?, :finite?, :infinite?, :integer?,
           :abs, :magnitude, :floor, :ceil, :round, :truncate,
           :next_float, :prev_float,
           :to_s, :to_i, :to_int, :to_f, :to_r, :rationalize,
@@ -138,7 +143,11 @@ module Rigor
         SYMBOL_UNARY = Set[
           :to_s, :to_sym, :to_proc, :length, :size,
           :empty?, :upcase, :downcase, :capitalize,
-          :swapcase, :succ, :next, :inspect
+          :swapcase, :succ, :next, :inspect,
+          # `name` (the frozen-string accessor), `id2name` (alias of
+          # `to_s`), and `intern` (alias of `to_sym`) are pure reads of the
+          # symbol's text — siblings of the already-folded `to_s` / `to_sym`.
+          :name, :id2name, :intern
         ].freeze
         BOOL_UNARY = Set[:!, :to_s, :inspect, :&, :|, :^].freeze
         NIL_UNARY  = Set[:nil?, :!, :to_s, :to_a, :to_h, :inspect].freeze
@@ -542,14 +551,15 @@ module Rigor
           build_constant_type(results, source: receiver_values + arg_values)
         end
         # v0.0.7 — `Constant<String>#chars` / `bytes` / `codepoints` /
-        # `lines` / `split` (no-arg) return a Ruby Array of foldable
-        # scalars; `foldable_constant_value?` rejects Array
+        # `grapheme_clusters` / `lines` / `split` (no-arg) return a Ruby
+        # Array of foldable scalars; `foldable_constant_value?` rejects Array
         # results, so the standard unary path declines. Lift the
         # Array to a per-position `Tuple[Constant…]` directly,
         # capped at `STRING_ARRAY_LIFT_LIMIT` to keep the result
         # bounded for long strings. (`codepoints` yields per-character
-        # Integer codepoints, the sibling of the byte-valued `bytes`.)
-        STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :codepoints, :lines, :split].freeze
+        # Integer codepoints, the sibling of the byte-valued `bytes`;
+        # `grapheme_clusters` is the extended-grapheme sibling of `chars`.)
+        STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :codepoints, :grapheme_clusters, :lines, :split].freeze
         # `partition` / `rpartition` always return a fixed 3-element
         # `[head, separator, tail]` Array whose members are substrings of
         # the receiver (bounded by the input), so they lift to a precise

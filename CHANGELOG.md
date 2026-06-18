@@ -33,6 +33,11 @@ cycles live in dedicated archives:
   - It is gated on the gem actually being locked, so a plain-Ruby project with no `activesupport` still gets the genuine `undefined method 'minutes' for 3`; a real typo on a core type (e.g. `5.minuets`) keeps firing at `evidence_tier: high`.
   - This resolves the v0.2.0 `evidence_tier` calibration report at its source — the systematic ActiveSupport false positives no longer fire, so `evidence_tier: high` keeps meaning "real type error" — rather than relabelling them (a down-tier would not have helped: the tier never feeds severity, so the error would stay on screen).
   - The overlay stands down automatically when the opt-in [`rigor-activesupport-core-ext`](plugins/rigor-activesupport-core-ext/) plugin is loaded, and is bypassed if you supply ActiveSupport RBS yourself (via `rbs collection install` or `signature_paths:`). The bundled set is curated, not exhaustive — the `rbs.coverage.missing-gem` notice still points you at fuller RBS.
+- **[inference]** A few more pure, deterministic methods on literal receivers now fold to a precise `Constant` / `Tuple` instead of the widened RBS type:
+  - **`Symbol#name` / `#id2name` / `#intern`** on a literal symbol → `Constant[String]` (`name` / `id2name`) and `Constant[Symbol]` (`intern`) — the natural siblings of the already-folded `to_s` / `to_sym` (`Symbol#name` is the increasingly idiomatic frozen-string accessor).
+  - **`Integer#finite?` / `#infinite?` / `#nonzero?`** → `Constant[true]` / `Constant[nil]` / `Constant[self-or-nil]`, closing the consistency gap with `Float` (which already folded `finite?` / `infinite?`).
+  - **`Float#nonzero?` / `#integer?`** → `Constant[self-or-nil]` and `Constant[false]` (a `Float` is never `integer?`, not even `3.0`).
+  - **`String#grapheme_clusters`** on a literal string → a per-grapheme `Tuple[Constant[String], …]`, the extended-grapheme-cluster sibling of the already-folded `chars` (capped at the same array-lift limit as `chars` / `codepoints`).
 
 ### Fixed
 

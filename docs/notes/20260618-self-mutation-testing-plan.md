@@ -343,6 +343,31 @@ adjudication is sharper: most `needs-verification` survivors are either equivale
 **per file on demand**, not swept whole-tree (which would mostly count noise). The harness
 gives the per-file unprotected list; a human decides genuine vs equivalent.
 
+A second batch fused eight core files at once (`type/{tuple,hash_shape,difference,
+accepts_result,bound_method}`, `inference/synthetic_method`, `analysis/{baseline,
+dependency_recorder}`): type-killed 111, test-killed 381, **35 unprotected**. Adjudicated and
+closed the genuine logic gaps:
+
+- `analysis/baseline.rb` (13 → 1): the user-facing `.rigor-baseline.yml` loader's malformed
+  -input surface — non-Hash top level, non-Array `ignored:`, non-Hash row, missing `rule:`,
+  invalid `message:` regex, message-mode `to_yaml` round-trip. The pass also caught an
+  *under-asserted existing test* (unknown `match_mode` checked only the error class, leaving
+  the message-text mutation alive) — strengthened in place rather than duplicated. Residual 1
+  = the message-mode `bucket_key` branch in `#filter`/`#audit`.
+- `inference/synthetic_method.rb` (4 → 0): the `method_name` and `provenance` validation
+  branches (`class_name`/`return_type`/`kind` were already tested).
+- `type/difference.rb` (4 → 1): `#dynamic` (the lattice delegate) had no caller; residual 1
+  is the `#inspect` debug-format site.
+
+Left as documented low-value residual (not closed): the carrier `#inspect` / `describe(:short)`
+debug-format sites (`tuple`, `bound_method`, `accepts_result`, `difference`) and the
+`hash_shape` raise branches — pinning a debug string is brittle and inspect/message text is
+not contract (the same FP-discipline, applied to test-writing: don't add low-value assertions
+just to move a metric). `dependency_recorder` was already 0.
+
 **Cumulative this session:** `trinary` (9 → 0), `cli/mcp_command` (22 → 0, new spec),
-`type/integer_range` (11 → 4-equivalent). Whole-tree cold-method backlog empty; the
-effectiveness tier is now a per-file workflow with a demonstrated loop.
+`type/integer_range` (11 → 4-equivalent), `analysis/baseline` (13 → 1),
+`inference/synthetic_method` (4 → 0), `type/difference` (4 → 1). Whole-tree cold-method backlog
+empty; the effectiveness tier is a per-file, adjudicate-each workflow — most survivors are
+equivalent mutants (message/inspect text), covered-by-a-broader-spec, or genuine gaps now
+closed. Each tier converges on an equivalent-mutant floor, not zero.

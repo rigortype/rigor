@@ -401,8 +401,15 @@ all six spec-only (no `lib/` change), `make verify` green:
   **confirmed equivalent mutant** — it lives in the no-rest `backs` block, but `back_count =
   rights.size` and post-splat `rights` are non-empty only when `rest_present`, so that block is
   `Array.new(0){…}` and never runs.
+- `inference/hkt_body` (16 → 0): the `HktBody` `Data.define` node constructors had partial
+  validation coverage — the happy path + the `*-non-empty` / namespaced guards were tested, but
+  the `*-must-be-an-Array` / `*-must-be-a-Symbol` / `*-must-not-be-nil` guards were not, and
+  `TestEquality` had no describe block at all. Added the missing guard cases (matching the file's
+  existing message-fragment style — user-facing validation messages, a defensible contract); the
+  message-fragment assertions also kill the `type_swap`-on-raise message-argument mutants.
 
-`inference/{budget_trace,struct_fold_safety}` and `type/intersection` were measured and left at
+`inference/{budget_trace,struct_fold_safety,closure_escape_analyzer,rbs_type_translator}`,
+`analysis/incremental`, and `type/intersection` were measured and left at
 their floor (already 100 %, or only the `percentile` `hist.keys.max` defensive fallback — reached
 only when the nearest-rank loop fails to return, which `rank = ceil(fraction·total) ≤ total`
 makes impossible — and the `inspect`/`describe(:short)` debug-format residual).

@@ -51,6 +51,16 @@ RSpec.describe Rigor::Inference::HktBody do
         .to raise_error(ArgumentError, /must be namespaced/)
     end
 
+    it "rejects a non-Symbol uri" do
+      expect { described_class.new(uri: "json::value", args: [Rigor::Inference::HktBody::Param.new(name: :K)]) }
+        .to raise_error(ArgumentError, /uri must be a Symbol/)
+    end
+
+    it "rejects non-Array args" do
+      expect { described_class.new(uri: :"json::value", args: Rigor::Inference::HktBody::Param.new(name: :K)) }
+        .to raise_error(ArgumentError, /args must be an Array/)
+    end
+
     it "rejects empty args" do
       expect { described_class.new(uri: :"json::value", args: []) }
         .to raise_error(ArgumentError, /args must be non-empty/)
@@ -68,6 +78,11 @@ RSpec.describe Rigor::Inference::HktBody do
     it "freezes its arms" do
       union = described_class.new(arms: [leaf])
       expect(union.arms).to be_frozen
+    end
+
+    it "rejects non-Array arms" do
+      expect { described_class.new(arms: leaf) }
+        .to raise_error(ArgumentError, /arms must be an Array/)
     end
 
     it "rejects empty arms" do
@@ -114,6 +129,24 @@ RSpec.describe Rigor::Inference::HktBody do
     end
   end
 
+  describe Rigor::Inference::HktBody::TestEquality do
+    let(:left) { Rigor::Inference::HktBody::Param.new(name: :K) }
+    let(:right) { Rigor::Inference::HktBody::TypeLeaf.new(type: str_nominal) }
+
+    it "stores left and right" do
+      test = described_class.new(left: left, right: right)
+      expect(test.left).to eq(left)
+      expect(test.right).to eq(right)
+    end
+
+    it "rejects nil sides" do
+      expect { described_class.new(left: nil, right: right) }
+        .to raise_error(ArgumentError, %r{left/right must not be nil})
+      expect { described_class.new(left: left, right: nil) }
+        .to raise_error(ArgumentError, %r{left/right must not be nil})
+    end
+  end
+
   describe Rigor::Inference::HktBody::TestMembership do
     let(:left) { Rigor::Inference::HktBody::Param.new(name: :K) }
     let(:option) { Rigor::Inference::HktBody::TypeLeaf.new(type: Rigor::Type::Constant.new(:foo)) }
@@ -121,6 +154,16 @@ RSpec.describe Rigor::Inference::HktBody do
     it "stores left and options" do
       test = described_class.new(left: left, options: [option, option])
       expect(test.options.size).to eq(2)
+    end
+
+    it "rejects nil left" do
+      expect { described_class.new(left: nil, options: [option]) }
+        .to raise_error(ArgumentError, /left must not be nil/)
+    end
+
+    it "rejects non-Array options" do
+      expect { described_class.new(left: left, options: option) }
+        .to raise_error(ArgumentError, /options must be an Array/)
     end
 
     it "rejects empty options" do
@@ -146,6 +189,11 @@ RSpec.describe Rigor::Inference::HktBody do
     it "rejects empty class_name" do
       expect { described_class.new(class_name: "", args: [param_k]) }
         .to raise_error(ArgumentError, /class_name must be/)
+    end
+
+    it "rejects non-Array args" do
+      expect { described_class.new(class_name: "Array", args: param_k) }
+        .to raise_error(ArgumentError, /args must be an Array/)
     end
 
     it "rejects empty args" do

@@ -60,6 +60,18 @@ RSpec.describe Rigor::Inference::SyntheticMethod do
         described_class.new(class_name: "X", method_name: :y, return_type: "Z", kind: :class)
       end.to raise_error(ArgumentError, /kind/)
     end
+
+    it "rejects a method_name that is neither a Symbol nor a non-empty String" do
+      expect do
+        described_class.new(class_name: "X", method_name: 42, return_type: "Z")
+      end.to raise_error(ArgumentError, /method_name/)
+    end
+
+    it "rejects a non-Hash provenance" do
+      expect do
+        described_class.new(class_name: "X", method_name: :y, return_type: "Z", provenance: "nope")
+      end.to raise_error(ArgumentError, /provenance/)
+    end
   end
 
   describe "equality + #to_h" do

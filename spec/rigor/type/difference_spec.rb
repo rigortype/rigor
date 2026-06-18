@@ -108,4 +108,11 @@ RSpec.describe Rigor::Type::Difference do
       expect(nes.accepts(nominal_of("String")).no?).to be(true)
     end
   end
+
+  describe "#dynamic" do
+    it "delegates to the base's dynamic verdict (a Trinary)" do
+      d = described_class.new(nominal_of("String"), constant_of(""))
+      expect(d.dynamic).to be_a(Rigor::Trinary)
+    end
+  end
 end

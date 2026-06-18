@@ -5,8 +5,9 @@ planned next, what's deliberately out of scope.
 
 This file is **planning material**, not a release log. For the
 "what shipped" record, see [`CHANGELOG.md`](../CHANGELOG.md)
-(active `0.1.x` cycle) and
-[`docs/CHANGELOG-0.0.x.md`](CHANGELOG-0.0.x.md) (archived `0.0.x`).
+(active `0.2.x` cycle) and the archives
+[`docs/CHANGELOG-0.1.x.md`](CHANGELOG-0.1.x.md) (`0.1.x`) and
+[`docs/CHANGELOG-0.0.x.md`](CHANGELOG-0.0.x.md) (`0.0.x`).
 
 When this file disagrees with an ADR or spec, the ADR / spec
 binds and this file is out of date.
@@ -39,21 +40,23 @@ that shaped each cut are preserved in git history (see
 | v0.1.18 | 2026-06-11 | CI-environment support (ADR-51): six `rigor check --format` CI-native renderings (SARIF, GitHub Actions, GitLab Code Quality, Checkstyle, JUnit, TeamCity) + runtime CI auto-detection (WD7) + copy-paste CI setup templates + the bundled `rigor-ci-setup` skill. See `CHANGELOG.md` § `[0.1.18]`. |
 | v0.1.19 | 2026-06-13 | Precision-and-trust cycle for procedural Ruby — and the **effective release candidate for v0.2.0** (final `0.1.x` preview cut). Method-call results flow through user-defined helpers (ADR-57) backed by recursive-return (ADR-55) and block/loop captured-mutation (ADR-56) precision; a large real-world false-positive batch on data-structure / parsing / networking code (ADR-58 + the CRuby-stdlib and 16-repo realistic-usecase sweeps); a run-scoped return memo removing a superlinear whole-`lib` slowdown the new inference would otherwise cost; pre-1.0 plugin-contract consolidation (ADR-60, with BC breaks); agent-friendly structured diagnostic fields (ADR-61); the ADR-50 WD1 compatibility surface doc + WD2 bleeding-edge opt-in foundation; and ADR-54 cache slimming (~33.7 MB → ~2 MB per project). See `CHANGELOG.md` § `[0.1.19]`. |
 | v0.2.0 | 2026-06-17 | **First publicly-announced (general / evaluation) release** ([ADR-50](adr/50-release-engineering-and-stability-strategy.md)): publishes the enumerated compatibility surface ([`docs/compatibility.md`](compatibility.md)) as a minor-non-break trial toward the v1.0.0 freeze. Detection **"teeth"** + protection coverage — `call.undefined-method` / `call.argument-type-mismatch` now fire on union / refinement / multi-overload receivers (ADR-62 mutation harness, ADR-63 `coverage --protection`); wider constant folding; predefined-constant refinement; `Struct.new` value folding (ADR-48); `evidence_tier` + `documentation_url` diagnostic metadata (ADR-65). See `CHANGELOG.md` § `[0.2.0]`. |
+| v0.2.1 | 2026-06-19 | **Second `0.2.x` evaluation cut** — detection + configuration polish. `Gemfile.lock`-gated ActiveSupport core-ext RBS overlay ([ADR-72](adr/72-gemfile-lock-gated-rbs-overlays.md)) resolving the v0.2.0 `evidence_tier` Rails false-positive feedback at its source (`3.minutes` and friends); `rigor check` config-resolves-to-nothing warnings (`config_warnings`); fused static∪dynamic protection map (`rigor coverage --protection --mutation --with-tests`, [ADR-70](adr/70-fused-protection-coverage.md)); more pure scalar/structural literal folds; fixes (bare-`off` severity crash, an escaping-block option-hash false positive, a gem-packaging bug that shipped installed gems without their bundled RBS data). First release landed via the new CI-gated release PR (`rigor-release-prep` update). See `CHANGELOG.md` § `[0.2.1]`. |
 | v0.1.16 | 2026-06-03 | Plugin architecture overhaul and internal mechanism re-documentation. ADR-37/38/39/40 fully landed: all 14 bundled diagnostic-emitting plugins migrated onto `node_rule` (engine-owned walk, PHPStan-style); `dynamic_return` / `type_specifier` Slice 2; `rigor plugins --capabilities` AI-legible catalogue (Slice 3); `additional_initializers:` (ADR-38 def-form); `config_schema` declared defaults (ADR-40, 13 plugins migrated); `Source::Literals` grid complete + 10 plugins migrated; `Plugin::Inflector` over real `ActiveSupport::Inflector` + selectable isolation strategy (`process` default, `Plugin::Isolation`). ADR-43 RBS-complete ancestor resolution (`Plugin::Base` allow-list) + `make check-plugins` gate in `verify` + CI. Plugin contract structural guards: conformance spec, all-plugins-load spec, demos-run spec, external-plugin fixture (v0.2.0 gate 1 executable evidence). `Plugin::Base` + `Manifest` RBS surface completed. RBS robustness: synthesised namespaces + stub types for malformed/stale project `signature_paths:` sigs. `rigor-activerecord` missing-schema memoization fix (Redmine −86% memory, −51% wall time). Inference-budget survey + `RIGOR_BUDGET_TRACE` instrumentation. See `CHANGELOG.md` § `[0.1.16]`. |
 
 ## Release strategy — the road to v1.0.0
 
 The `0.1.x` line was the **preview** line. **v0.2.0 (2026-06-17) opened the
 `0.2.x` evaluation line** — the first publicly-announced version, meant for
-trial deployment in real products and to solicit outside feedback. It is still
-not a formal / GA release; the road now points at **v1.0.0**, the hard
-contract freeze.
+trial deployment in real products and to solicit outside feedback;
+**v0.2.1 (2026-06-19) is the current cut** along that line (detection +
+configuration polish — see the milestones table). It is still not a formal /
+GA release; the road now points at **v1.0.0**, the hard contract freeze.
 
 | Line | Role |
 | --- | --- |
 | `0.1.x` | **Preview (closed).** v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / GitLab FOSS extended it through v0.1.19 with false-positive-reduction, onboarding, feature, architecture, and performance cycles. v0.1.19 (2026-06-13) was the final preview cut / effective RC. |
 | `v0.2.0` | **First evaluation release (RELEASED 2026-06-17).** Publicly announced as the first version intended for real-product trial deployment; opens the evaluation period. See `CHANGELOG.md` § `[0.2.0]`. |
-| `0.2.x` | **Evaluation line (current).** Not yet a formal version; the goal is to bring every planned feature — **except the Ractor concurrency track** — to high completion / production quality, and to gather outside feedback. |
+| `0.2.x` | **Evaluation line (current; v0.2.0 + v0.2.1 shipped).** Not yet a formal version; the goal is to bring every planned feature — **except the Ractor concurrency track** — to high completion / production quality, and to gather outside feedback. |
 | `v1.0.0` | **Hard contract freeze (target).** The enumerated public surface ([`docs/compatibility.md`](compatibility.md)) becomes binding; a change invalidating a conforming user's config / plugin / suppression is major-version-only from here. |
 
 ### What the road to v0.2.0 settled (now complete)

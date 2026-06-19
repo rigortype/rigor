@@ -391,7 +391,11 @@ AscDesc.new.ascdesc(:bad)
           basicSetup, StreamLanguage.define(ruby),
           Prec.highest(syntaxHighlighting(rigorHighlight)),
           lintGutter(), annoField,
-          EditorView.updateListener.of(u => { if (!u.docChanged) return; if (typesVisible) clearAnnotations(); scheduleCheck(); scheduleUrlSync() }),
+          // Don't clear the type overlay on each keystroke. The existing
+          // annotations stay on screen (mapped through the edit) and the
+          // debounced background analysis refreshes them in place once it has a
+          // new result — so the overlay updates without a per-keystroke flicker.
+          EditorView.updateListener.of(u => { if (!u.docChanged) return; scheduleCheck(); scheduleUrlSync() }),
           EditorView.theme({
             "&": { backgroundColor: "var(--bg)", color: "var(--text)", height: "100%" },
             ".cm-content": { caretColor: "var(--accent)", fontFamily: MONO, padding: "8px 0" },

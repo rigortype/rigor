@@ -787,9 +787,12 @@ AscDesc.new.ascdesc(:bad)
           lintGutter(),
           annoField,
           typeHover,
+          // Don't clear the type overlay on each keystroke. The existing
+          // annotations stay on screen (mapped through the edit) and the
+          // debounced background /annotate-lines refreshes them in place once
+          // it returns — so the overlay updates without a per-keystroke flicker.
           EditorView.updateListener.of(update => {
             if (!update.docChanged) return
-            if (typesVisible) clearAnnotations()
             scheduleCheck()
             scheduleUrlSync()
           }),

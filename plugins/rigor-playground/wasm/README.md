@@ -114,8 +114,12 @@ rubygems-disabled, which otherwise leaves the RBS type universe empty),
 
 - **Main-thread analysis.** `vm.eval` runs synchronously; a slow keystroke
   blocks typing. WD9's responsiveness follow-up moves analysis to a Web Worker
-  (paired with WD8's persistent-`Runner` warm env). v1 surfaces a boot overlay
-  and a "Checking…" status instead.
+  (paired with WD8's persistent-`Runner` warm env). Until then the page surfaces
+  the engine boot non-blockingly: the CodeMirror editor renders and is editable
+  immediately (the ruby.wasm glue is a lazy dynamic import, off the editor's
+  critical path), while the wasm download (with live progress), VM boot, and
+  first analysis are reported in the diagnostics panel + a "Checking…" status —
+  no full-screen overlay gating the page.
 
 - **`type-of` hover** is omitted from this v1 page (each hover would trigger a
   blocking full analysis). It returns from `boot.rb` already; add it once the

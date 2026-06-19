@@ -42,7 +42,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://kit.fontawesome.com/ca9a253b70.js" crossorigin="anonymous"></script>
+  <script src="https://kit.fontawesome.com/ca9a253b70.js" crossorigin="anonymous" async></script>
 
   <style>
     :root {
@@ -144,30 +144,23 @@
     .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionIcon { color: var(--sev-fg); }
     .cm-completionInfo { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 4px; }
 
-    /* Boot overlay — the wasm VM download + first env build can take several
-       seconds; surfacing the phase is the key UX difference vs the backend. */
-    #boot {
-      position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 16px; background: var(--bg); color: var(--text);
-    }
-    #boot.hidden { display: none; }
-    #boot .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-    #boot-msg { font-family: var(--rigor-font-mono); font-size: 13px; color: var(--muted); }
-    #boot-note { font-size: 12px; color: var(--muted); max-width: 32ch; text-align: center; line-height: 1.5; }
+    /* Engine-loading state — the editor renders and is editable immediately;
+       the wasm VM download + first env build (several seconds) is surfaced
+       NON-blockingly in the diagnostics panel + the header status, so the page
+       never feels gated behind a full-screen overlay. */
+    .diag-loading { padding: 16px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+    .diag-loading .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .diag-loading-msg { font-family: var(--rigor-font-mono); font-size: 12px; color: var(--text); }
+    .diag-loading-msg.failed { color: var(--c-error); }
+    .diag-loading-note { font-size: 12px; color: var(--muted); line-height: 1.5; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { #boot .spinner { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
   </style>
 </head>
 <body>
-  <div id="boot">
-    <div class="spinner" aria-hidden="true"></div>
-    <div id="boot-msg">Starting…</div>
-    <div id="boot-note">Loading the Rigor engine into a Ruby&nbsp;4.0 WebAssembly VM. The first analysis builds the type environment and is slower; subsequent edits reuse it.</div>
-  </div>
-
   <header>
     <span class="brand">Rigor <span class="product">Playground</span> <span class="wasm-tag">WASM</span></span>
-    <span id="status" aria-live="polite">Booting</span>
+    <span id="status" aria-live="polite">Loading…</span>
     <div class="toolbar">
       <button class="btn" id="theme-btn" title="Cycle theme">Dark</button>
       <button class="btn" id="type-btn" aria-pressed="false"><i class="fa-solid fa-eye" aria-hidden="true"></i><span>Show types</span></button>
@@ -178,7 +171,13 @@
     <div id="editor-wrap"><div id="editor"></div></div>
     <aside id="sidebar" aria-label="Diagnostics">
       <div id="sidebar-header"><span>Diagnostics</span><span id="diag-count">0</span></div>
-      <div id="diagnostics"><p class="diag-empty">No diagnostics</p></div>
+      <div id="diagnostics">
+        <div class="diag-loading">
+          <div class="spinner" aria-hidden="true"></div>
+          <div class="diag-loading-msg" id="engine-load-msg">Loading the Rigor engine…</div>
+          <div class="diag-loading-note">Compiling Rigor into a Ruby&nbsp;4.0 WebAssembly VM. The first analysis builds the type environment and is slower; later edits reuse it.</div>
+        </div>
+      </div>
     </aside>
   </main>
 
@@ -190,8 +189,12 @@
     import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
     import { tags as t }                           from "https://esm.sh/@lezer/highlight@1.1.6"
-    import { DefaultRubyVM }                       from "https://cdn.jsdelivr.net/npm/@ruby/wasm-wasi@2.7.1/dist/browser/+esm"
     import LZString                               from "https://esm.sh/lz-string@1.5.0"
+
+    // The ruby.wasm glue is imported lazily inside bootEngine() (dynamic import)
+    // — NOT statically — so it stays off the editor's critical path. The editor
+    // renders and is interactive before any wasm machinery is even fetched.
+    const RUBY_WASM_WASI = "https://cdn.jsdelivr.net/npm/@ruby/wasm-wasi@2.7.1/dist/browser/+esm"
 
     // ADR-29 WD10 — the docs-site sync step injects the R2 URL into the
     // <meta name="rigor-wasm-url"> tag in production; local `rake serve` keeps
@@ -232,17 +235,75 @@ AscDesc.new.ascdesc(:bad)
 
     let vm = null
 
-    function setBoot(msg) { document.getElementById("boot-msg").textContent = msg }
+    // ── Engine-loading UI (non-blocking) ──────────────────────────────────
+    // Mirrors the boot phase into the header status + the diagnostics-panel
+    // placeholder. No overlay: the editor stays visible and editable throughout.
 
-    async function bootVM() {
-      setBoot("Downloading Ruby 4.0 WASM…")
-      const response = await fetch(WASM_URL)
-      if (!response.ok) throw new Error(`could not fetch ${WASM_URL} (HTTP ${response.status})`)
-      const module = await WebAssembly.compileStreaming(response)
-      setBoot("Booting the Ruby VM…")
+    const mb = b => (b / 1048576).toFixed(1) + " MB"
+
+    function setEnginePhase(short, detail) {
+      setStatus("checking", short)
+      const el = document.getElementById("engine-load-msg")
+      if (el) el.textContent = detail || short
+    }
+
+    function engineFailed(message) {
+      setStatus("error", "Engine failed")
+      const c = document.getElementById("diagnostics")
+      c.innerHTML = `
+        <div class="diag-loading">
+          <div class="diag-loading-msg failed">Failed to load the Rigor engine</div>
+          <div class="diag-loading-note">${escHtml(message)}</div>
+        </div>`
+    }
+
+    // Stream the wasm body through a byte counter so the multi-MB download shows
+    // live progress, while still letting compileStreaming compile incrementally.
+    let lastProgress = -1
+    async function compileWasmWithProgress(url) {
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`could not fetch ${url} (HTTP ${response.status})`)
+      if (!response.body || typeof ReadableStream === "undefined") {
+        return WebAssembly.compileStreaming(response)
+      }
+      const total  = Number(response.headers.get("content-length")) || 0
+      const reader = response.body.getReader()
+      let loaded   = 0
+      const tracked = new ReadableStream({
+        async pull(controller) {
+          const { done, value } = await reader.read()
+          if (done) { controller.close(); return }
+          loaded += value.byteLength
+          if (total) {
+            const pct = Math.min(100, Math.floor(loaded / total * 100))
+            if (pct !== lastProgress) { lastProgress = pct; setEnginePhase(`Downloading ${pct}%`, `Downloading the engine… ${pct}%  (${mb(loaded)} / ${mb(total)})`) }
+          } else {
+            const step = Math.floor(loaded / (2 * 1048576))
+            if (step !== lastProgress) { lastProgress = step; setEnginePhase("Downloading…", `Downloading the engine… ${mb(loaded)}`) }
+          }
+          controller.enqueue(value)
+        },
+        cancel(reason) { return reader.cancel(reason) }
+      })
+      return WebAssembly.compileStreaming(new Response(tracked, { headers: { "content-type": "application/wasm" } }))
+    }
+
+    async function bootEngine() {
+      setEnginePhase("Loading…", "Downloading the engine…")
+      // Fetch+compile the wasm and download the VM glue in parallel; the glue is
+      // a dynamic import so it never blocked the editor render above.
+      const [{ DefaultRubyVM }, module] = await Promise.all([
+        import(RUBY_WASM_WASI),
+        compileWasmWithProgress(WASM_URL),
+      ])
+      setEnginePhase("Booting VM…", "Booting the Ruby 4.0 VM…")
       const result = await DefaultRubyVM(module)
       vm = result.vm
-      setBoot("Loading the Rigor engine…")
+      setEnginePhase("Loading engine…", "Loading the Rigor engine…")
+      // Yield a macrotask so the "Loading engine…" paint lands before the
+      // synchronous, main-thread-blocking engine require below. setTimeout
+      // (not requestAnimationFrame) so it still fires in a background tab.
+      await new Promise(r => setTimeout(r, 0))
       // Activate the packed bundle (ruby_wasm's generated load-path setup —
       // NOT bundler/setup, which hits a rubygems path that is disabled in the
       // ruby.wasm build) and load the in-VM adapter. boot.rb itself does the
@@ -465,14 +526,17 @@ AscDesc.new.ascdesc(:bad)
     function escHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
 
     // ── Boot ──────────────────────────────────────────────────────────────
-    bootVM().then(() => {
-      document.getElementById("boot").classList.add("hidden")
-      setStatus("checking", "Ready")
+    // The editor is already constructed (synchronously, above), so it paints
+    // and is interactive as soon as this module finishes. bootEngine() suspends
+    // at its first `await` (the parallel glue import + wasm fetch), which yields
+    // control back to the browser for that first paint — so calling it directly
+    // (NOT behind requestAnimationFrame, which is starved in background tabs)
+    // both starts the download immediately and keeps the editor rendering first.
+    bootEngine().then(() => {
+      setEnginePhase("Checking…", "Running the first analysis…")
       runCheck()
     }).catch(e => {
-      setBoot(`Failed to start: ${e.message}`)
-      document.getElementById("boot-msg").style.color = "var(--c-error)"
-      setStatus("error", "Boot failed")
+      engineFailed(e.message)
     })
   </script>
 </body>

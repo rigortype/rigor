@@ -86,8 +86,10 @@ now produces both the discovered-methods existence table and the instance def-no
 table; the cross-file pre-pass had additionally walked the def-node tree *twice*
 (`merge_discovered_defs` + `record_class_sources`), now threaded once. Cold
 `--no-cache` allocations: `mail` 20.6M → 18.9M (**−8.0%**), kramdown −1.3%, redmine
-−1.1%, mastodon −0.7%; diagnostics byte-identical across the survey corpus, `make
-verify` green. The remaining descents (the rvalue-typing ivar/cvar/global/constant
+−1.1%, mastodon −0.7%. The **warm** benefit is larger, as predicted — the seed pass is
+a bigger fraction of a cache-hit run: `mail` warm allocations dropped 6.60M → 5.36M
+(**−18.8%**), wall ~1.13 s → ~0.93 s. Diagnostics byte-identical across the survey
+corpus, `make verify` green. The remaining descents (the rvalue-typing ivar/cvar/global/constant
 walks have a `seeded_scope` data dependency; the visibility and `module_function`
 walks thread statement-order state) are left as separate, gated follow-ups — they do
 not share a clean traversal skeleton with the def family.

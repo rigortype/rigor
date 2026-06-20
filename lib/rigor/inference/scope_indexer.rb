@@ -118,10 +118,12 @@ module Rigor
         # table to suppress false positives for methods the
         # user has defined but no RBS sig describes. Merged
         # UNDER the cross-file pre-pass seed; details: merge_project_method_indexes.
-        discovered_methods = deep_merge_class_methods(
-          default_scope.discovered_methods, build_discovered_methods(root)
-        )
-        seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(discovered_methods: discovered_methods))
+        # One combined descent yields both the discovered-methods existence
+        # table and the instance def-node table — see
+        # {#build_methods_and_def_nodes}. `seed_discovered_methods` seeds the
+        # former onto the scope and returns the def-node table for
+        # `merge_project_method_indexes` below.
+        seeded_scope, file_def_nodes = seed_discovered_methods(seeded_scope, default_scope, root)
 
         # v0.0.2 #5 + ADR-24 slice 2 — record per-instance-method
         # def nodes, the class -> superclass map, and the
@@ -134,7 +136,7 @@ module Rigor
         # table. Seeded inside `merge_project_method_indexes` so the
         # per-file visibilities merge OVER the cross-file project seed
         # rather than overwriting it.
-        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root)
+        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes)
 
         table = {}.compare_by_identity
         table.default = seeded_scope
@@ -160,6 +162,19 @@ module Rigor
         table
       end
 
+      # Runs the combined methods/def-nodes descent (one walk of the file),
+      # seeds the discovered-methods existence table onto `seeded_scope`
+      # (merged UNDER the cross-file pre-pass seed `default_scope` carries),
+      # and returns `[scope, file_def_nodes]` so the caller can thread the
+      # def-node table into {#merge_project_method_indexes} without walking
+      # the file a second time.
+      def seed_discovered_methods(seeded_scope, default_scope, root)
+        file_methods, file_def_nodes = build_methods_and_def_nodes(root)
+        discovered_methods = deep_merge_class_methods(default_scope.discovered_methods, file_methods)
+        scope = seeded_scope.with_discovery(seeded_scope.discovery.with(discovered_methods: discovered_methods))
+        [scope, file_def_nodes]
+      end
+
       # ADR-48 Struct slice 3 — installs the top-level fold-safe-local set
       # ({Inference::StructFoldSafety}). Struct member layouts of constant
       # receivers are resolved through the side-table the seeded scope carries.
@@ -179,9 +194,9 @@ module Rigor
       # `discovered_def_index_for_paths` seed carried on
       # `default_scope` — same-file declarations win per entry,
       # the cross-file seed supplies sibling-file ancestors.
-      def merge_project_method_indexes(seeded_scope, default_scope, root)
+      def merge_project_method_indexes(seeded_scope, default_scope, root, file_def_nodes)
         def_nodes = default_scope.discovered_def_nodes.merge(
-          build_discovered_def_nodes(root)
+          file_def_nodes
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
         singleton_def_nodes = default_scope.discovered_singleton_def_nodes.merge(
           build_discovered_singleton_def_nodes(root)
@@ -1406,16 +1421,29 @@ module Rigor
         Type::Combinator.singleton_of(full)
       end
 
-      # Slice 7 phase 12 — in-source method discovery pre-pass.
-      # Walks every class/module body and records the methods
-      # introduced via `Prism::DefNode` (instance + singleton)
-      # and via recognised `define_method(:name) { ... }` calls.
-      # The returned table maps qualified class name to a
-      # `Hash[Symbol, :instance | :singleton]`.
-      def build_discovered_methods(root)
-        accumulator = {}
-        walk_methods(root, [], false, accumulator)
-        accumulator.transform_values(&:freeze).freeze
+      # Slice 7 phase 12 — in-source method discovery pre-pass, fused with
+      # the instance-method def-node pre-pass (v0.0.2 #5). One descent
+      # produces BOTH tables the per-file `index` and the cross-file
+      # pre-pass each need together:
+      #
+      #   - `methods`   : `{class_name => {method => :instance | :singleton}}`
+      #     for every `def` / `define_method(:name)` / `attr_*` / `alias` /
+      #     Data/Struct-member reader (the undefined-method existence table).
+      #   - `def_nodes` : `{class_name => {method => Prism::DefNode}}` for
+      #     every instance-side `def` (the inter-procedural return-inference
+      #     table; singleton defs and `define_method` are intentionally
+      #     skipped — `record_def_node` filters them).
+      #
+      # `walk_methods` and `walk_def_nodes` had byte-identical class /
+      # module / singleton / meta-block descents (both stop at `DefNode`),
+      # so a single combined walk records both accumulators at once instead
+      # of traversing every file twice.
+      def build_methods_and_def_nodes(root)
+        methods = {}
+        def_nodes = {}
+        walk_methods_and_def_nodes(root, [], false, methods, def_nodes)
+        apply_alias_def_nodes(root, def_nodes)
+        [methods.transform_values(&:freeze).freeze, def_nodes.transform_values(&:freeze).freeze]
       end
 
       # Merges two `class_name => { method => kind }` tables, unioning
@@ -1431,7 +1459,14 @@ module Rigor
       end
 
       # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
-      def walk_methods(node, qualified_prefix, in_singleton_class, accumulator)
+      # Combined `walk_methods` + `walk_def_nodes` descent. The two walks
+      # had identical class / module / singleton-class / meta-block
+      # traversals and both stopped at `DefNode`; the only divergences are
+      # leaf actions (recorded into the right accumulator) and the original
+      # `walk_methods` returning at `AliasMethodNode` (its symbol-only
+      # children carry no def / class node, so not descending them is
+      # byte-identical for `def_nodes` too). See {#build_methods_and_def_nodes}.
+      def walk_methods_and_def_nodes(node, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -1439,40 +1474,40 @@ module Rigor
           name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
-            record_meta_superclass_members(node, child_prefix, accumulator) if node.is_a?(Prism::ClassNode)
-            walk_methods(node.body, child_prefix, false, accumulator) if node.body
+            record_meta_superclass_members(node, child_prefix, methods_acc) if node.is_a?(Prism::ClassNode)
+            walk_methods_and_def_nodes(node.body, child_prefix, false, methods_acc, def_nodes_acc) if node.body
             return
           end
         when Prism::SingletonClassNode
           if node.body
             singleton_prefix = singleton_class_prefix(node, qualified_prefix)
             if singleton_prefix
-              walk_methods(node.body, singleton_prefix, true, accumulator)
+              walk_methods_and_def_nodes(node.body, singleton_prefix, true, methods_acc, def_nodes_acc)
               return
             end
           end
         when Prism::ConstantWriteNode
           if meta_new_block_body(node)
             child_prefix = qualified_prefix + [node.name.to_s]
-            walk_methods(meta_new_block_body(node), child_prefix, false, accumulator)
+            walk_methods_and_def_nodes(meta_new_block_body(node), child_prefix, false, methods_acc, def_nodes_acc)
             return
           end
         when Prism::DefNode
-          record_def_method(node, qualified_prefix, in_singleton_class, accumulator)
+          record_def_method(node, qualified_prefix, in_singleton_class, methods_acc)
+          record_def_node(node, qualified_prefix, in_singleton_class, def_nodes_acc)
           return
         when Prism::AliasMethodNode
-          record_alias_method(node, qualified_prefix, in_singleton_class, accumulator)
+          record_alias_method(node, qualified_prefix, in_singleton_class, methods_acc)
           return
         when Prism::CallNode
-          record_define_method(node, qualified_prefix, in_singleton_class, accumulator) if node.name == :define_method
+          record_define_method(node, qualified_prefix, in_singleton_class, methods_acc) if node.name == :define_method
           if ATTR_MACROS.include?(node.name)
-            record_attr_methods(node, qualified_prefix, in_singleton_class,
-                                accumulator)
+            record_attr_methods(node, qualified_prefix, in_singleton_class, methods_acc)
           end
         end
 
         node.compact_child_nodes.each do |child|
-          walk_methods(child, qualified_prefix, in_singleton_class, accumulator)
+          walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc)
         end
       end
 
@@ -1606,57 +1641,6 @@ module Rigor
         end
       end
 
-      # v0.0.2 #5 — instance-side def-node recording. Walks
-      # class bodies the same way as `build_discovered_methods`
-      # but records the actual `Prism::DefNode` for each
-      # **instance** method so `ExpressionTyper` can re-type
-      # the body at the call site for inter-procedural return
-      # inference. Singleton methods and `define_method` calls
-      # are intentionally skipped: the inference path needs a
-      # statically introspectable body, and singleton dispatch
-      # has its own complications (Class / Module ancestry)
-      # the first-iteration rule does not yet model.
-      def build_discovered_def_nodes(root)
-        accumulator = {}
-        walk_def_nodes(root, [], false, accumulator)
-        apply_alias_def_nodes(root, accumulator)
-        accumulator.transform_values(&:freeze).freeze
-      end
-
-      def walk_def_nodes(node, qualified_prefix, in_singleton_class, accumulator)
-        return unless node.is_a?(Prism::Node)
-
-        case node
-        when Prism::ClassNode, Prism::ModuleNode
-          name = Source::ConstantPath.qualified_name(node.constant_path)
-          if name
-            child_prefix = qualified_prefix + [name]
-            walk_def_nodes(node.body, child_prefix, false, accumulator) if node.body
-            return
-          end
-        when Prism::SingletonClassNode
-          if node.body
-            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
-            if singleton_prefix
-              walk_def_nodes(node.body, singleton_prefix, true, accumulator)
-              return
-            end
-          end
-        when Prism::ConstantWriteNode
-          if meta_new_block_body(node)
-            child_prefix = qualified_prefix + [node.name.to_s]
-            walk_def_nodes(meta_new_block_body(node), child_prefix, false, accumulator)
-            return
-          end
-        when Prism::DefNode
-          record_def_node(node, qualified_prefix, in_singleton_class, accumulator)
-          return
-        end
-
-        node.compact_child_nodes.each do |child|
-          walk_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
-        end
-      end
       # v0.0.3 A — sentinel key under which `record_def_node`
       # files DefNodes that live outside any class / module
       # body (top-level helpers, `def`s nested inside DSL
@@ -2385,7 +2369,13 @@ module Rigor
       # the override-visibility-reduced rule can read an ancestor's
       # visibility declared in a sibling file.
       def accumulate_project_index(acc, path, root)
-        merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, root)
+        # One combined descent yields both the methods existence table and
+        # the def-node table; the latter is also consumed by
+        # `record_class_sources`, so a def-dense file is walked once here
+        # instead of three times (methods + def-nodes ×2). See
+        # {#build_methods_and_def_nodes}.
+        file_methods, file_def_nodes = build_methods_and_def_nodes(root)
+        merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
         build_discovered_singleton_def_nodes(root).each do |class_name, methods|
           (acc[:singleton_def_nodes][class_name] ||= {}).merge!(methods)
         end
@@ -2395,20 +2385,28 @@ module Rigor
         includes.each do |class_name, mods|
           acc[:includes][class_name] = ((acc[:includes][class_name] || []) + mods).uniq
         end
-        record_class_sources(acc[:class_sources], path, root, superclasses, includes)
-        merge_class_keyed_index_tables(acc, root)
+        record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes)
+        merge_class_keyed_index_tables(acc, root, file_methods)
+        merge_member_layout_tables(acc, root)
+      end
+
+      # Folds one file's Data + Struct member-layout tables into the
+      # cross-file accumulator (kept out of {#accumulate_project_index} to
+      # hold its ABC budget).
+      def merge_member_layout_tables(acc, root)
         acc[:data_member_layouts].merge!(build_data_member_layouts(root))
         acc[:struct_member_layouts].merge!(build_struct_member_layouts(root))
       end
 
       # Folds the per-class method-visibility and method-existence tables of
       # one file into the cross-file accumulator (kept out of
-      # {#accumulate_project_index} to hold its ABC budget).
-      def merge_class_keyed_index_tables(acc, root)
+      # {#accumulate_project_index} to hold its ABC budget). `file_methods`
+      # is the existence table from the combined methods/def-nodes descent.
+      def merge_class_keyed_index_tables(acc, root, file_methods)
         build_discovered_method_visibilities(root).each do |class_name, table|
           (acc[:method_visibilities][class_name] ||= {}).merge!(table)
         end
-        build_discovered_methods(root).each do |class_name, table|
+        file_methods.each do |class_name, table|
           (acc[:methods][class_name] ||= {}).merge!(table)
         end
       end
@@ -2423,13 +2421,13 @@ module Rigor
       # dependency recording (ADR-46). The class-declaration walk
       # (`collect_class_decls`) catches bodyless / def-less reopenings the
       # other three builders miss.
-      def record_class_sources(class_sources, path, root, superclasses, includes)
+      def record_class_sources(class_sources, path, root, superclasses, includes, file_def_nodes)
         names = Set.new
         collect_class_decls(root, [], decls = {})
         names.merge(decls.keys)
         names.merge(superclasses.keys)
         names.merge(includes.keys)
-        names.merge(build_discovered_def_nodes(root).keys)
+        names.merge(file_def_nodes.keys)
         names.each { |name| (class_sources[name] ||= Set.new) << path }
       end
 
@@ -2438,8 +2436,8 @@ module Rigor
       # seen `"path:line"` definition site in `def_sources` (ADR-17 —
       # the un-registered-project-patch signal `call.undefined-method`
       # and `rigor triage` key on).
-      def merge_discovered_defs(def_nodes, def_sources, path, root)
-        build_discovered_def_nodes(root).each do |class_name, methods|
+      def merge_discovered_defs(def_nodes, def_sources, path, file_def_nodes)
+        file_def_nodes.each do |class_name, methods|
           (def_nodes[class_name] ||= {}).merge!(methods)
           sources = (def_sources[class_name] ||= {})
           methods.each do |method_name, def_node|

@@ -79,6 +79,19 @@ contribution keyed by the digest the cache already computes — the real warm fi
 Gate it with ADR-53 Track B's mandatory shadow-run equivalence harness (byte-identical
 diagnostics).
 
+**Update (2026-06-20, same day — first slice landed):** the most-mergeable pair was
+consolidated. `walk_methods` and `walk_def_nodes` had byte-identical class / module /
+singleton descents (both stop at `DefNode`), so a single `walk_methods_and_def_nodes`
+now produces both the discovered-methods existence table and the instance def-node
+table; the cross-file pre-pass had additionally walked the def-node tree *twice*
+(`merge_discovered_defs` + `record_class_sources`), now threaded once. Cold
+`--no-cache` allocations: `mail` 20.6M → 18.9M (**−8.0%**), kramdown −1.3%, redmine
+−1.1%, mastodon −0.7%; diagnostics byte-identical across the survey corpus, `make
+verify` green. The remaining descents (the rvalue-typing ivar/cvar/global/constant
+walks have a `seeded_scope` data dependency; the visibility and `module_function`
+walks thread statement-order state) are left as separate, gated follow-ups — they do
+not share a clean traversal skeleton with the def family.
+
 ## Two red herrings eliminated by measurement
 
 kramdown's profile *looked* like the headline: `Combinator.union` cumulative **20 %**,

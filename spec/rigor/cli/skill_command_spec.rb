@@ -188,6 +188,17 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(catalogue).not_to include("- rigor-next-steps —")
     end
 
+    it "lists the catalogue-only maintenance / validation skills too" do
+      _status, out, = describe_in({})
+      catalogue = out.split("## All skills you can run next", 2).last.to_s
+      %w[
+        rigor-rbs-setup rigor-monkeypatch-resolve rigor-editor-setup rigor-mcp-setup
+        rigor-plugin-tune rigor-upgrade rigor-doctor
+      ].each do |name|
+        expect(catalogue).to include("rigor skill print #{name}"), "expected catalogue to list #{name}"
+      end
+    end
+
     it "accepts the --describe flag spelling identically to the describe subcommand" do
       Dir.mktmpdir do |dir|
         sub = Dir.chdir(dir) { run(["describe"]) }

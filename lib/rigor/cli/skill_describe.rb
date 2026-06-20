@@ -38,10 +38,14 @@ module Rigor
         rigor-rbs-setup
         rigor-ci-setup
         rigor-baseline-reduce
+        rigor-monkeypatch-resolve
         rigor-editor-setup
         rigor-mcp-setup
         rigor-protection-uplift
+        rigor-plugin-tune
         rigor-plugin-author
+        rigor-upgrade
+        rigor-doctor
       ].freeze
 
       # @param skills [Array<Hash>] discovered skills, each `{name:, path:}`.

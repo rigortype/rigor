@@ -41,10 +41,14 @@ your installed version rather than being frozen into a SKILL file — see
 | [`rigor-rbs-setup`](rigor-rbs-setup/SKILL.md) | Install community RBS for the project's gems (`rbs collection install`) so Rigor stops typing RBS-less dependencies as `Dynamic`. |
 | [`rigor-ci-setup`](rigor-ci-setup/SKILL.md) | Wire Rigor into CI and surface diagnostics inline on the PR / MR (SARIF, GitHub Actions, GitLab Code Quality, reviewdog, …). |
 | [`rigor-baseline-reduce`](rigor-baseline-reduce/SKILL.md) | Work an existing `.rigor-baseline.yml` down rule by rule — classify, fix or suppress, regenerate. |
+| [`rigor-monkeypatch-resolve`](rigor-monkeypatch-resolve/SKILL.md) | Resolve `undefined-method` clusters from the project's own monkey-patches by wiring the defining files into `pre_eval:`. |
 | [`rigor-editor-setup`](rigor-editor-setup/SKILL.md) | Wire `rigor lsp` into the editor (Neovim, VS Code, Helix, Emacs) for live diagnostics, hover types, and completion. |
 | [`rigor-mcp-setup`](rigor-mcp-setup/SKILL.md) | Wire `rigor mcp` into an AI agent (Claude Code, Cursor, Cline, …) so it can call Rigor's read-only analysis tools. |
 | [`rigor-protection-uplift`](rigor-protection-uplift/SKILL.md) | Close the type-protection holes `rigor coverage --protection` surfaces, under a double gate that keeps `rigor check` clean. |
+| [`rigor-plugin-tune`](rigor-plugin-tune/SKILL.md) | Re-match `Gemfile.lock` against the bundled plugin catalogue and enable the plugins for the project's current stack; verify with `rigor plugins --strict`. |
 | [`rigor-plugin-author`](rigor-plugin-author/SKILL.md) | Author a Rigor plugin (in your own repo) to teach Rigor an application DSL, framework, or metaprogramming pattern. |
+| [`rigor-upgrade`](rigor-upgrade/SKILL.md) | Adopt a new Rigor version cleanly — diff diagnostics against the baseline, sort genuine new catches from sig-quality FPs, regenerate. |
+| [`rigor-doctor`](rigor-doctor/SKILL.md) | Validate the setup is healthy — config resolves, plugins load, baseline is fresh, the analysis sees your code. |
 
 ## Installing the skills
 

@@ -1,6 +1,6 @@
 # ADR-73 — SKILL-driven Rigor user experience (the `rigor-next-steps` entry point + live `rigor skill --describe`)
 
-Status: **Accepted — WD1–WD5 implemented 2026-06-20.** Establishes a single SKILL-driven entry point — `rigor-next-steps` — for "what should we do next with Rigor on this project," backed by a live, version-current `rigor skill --describe` so the distributed guidance never goes stale. Promotes the parked `rigor-protection-uplift` skill into the shipped set and settles where the user-facing SKILLs are distributed (vercel-labs/skills + the bundled gem). The `describe` catalogue is designed to **grow** (see "Extending the catalogue"); `rigor-rbs-setup` is the first such addition, landed the same day.
+Status: **Accepted — WD1–WD5 implemented 2026-06-20.** Establishes a single SKILL-driven entry point — `rigor-next-steps` — for "what should we do next with Rigor on this project," backed by a live, version-current `rigor skill --describe` so the distributed guidance never goes stale. Promotes the parked `rigor-protection-uplift` skill into the shipped set and settles where the user-facing SKILLs are distributed (vercel-labs/skills + the bundled gem). The `describe` catalogue is designed to **grow** (see "Extending the catalogue"); a first wave of seven additions — `rigor-rbs-setup`, `rigor-editor-setup`, `rigor-mcp-setup`, `rigor-monkeypatch-resolve`, `rigor-plugin-tune`, `rigor-upgrade`, `rigor-doctor` — landed the same day.
 
 Grounding: the existing `rigor skill` command ([`lib/rigor/cli/skill_command.rb`](../../lib/rigor/cli/skill_command.rb), shipped v0.1.13 per [ADR-22](22-baseline-and-project-onboarding.md) WD8), the parked act-on-coverage skeleton ([`docs/design/20260616-act-on-coverage-skill.md`](../design/20260616-act-on-coverage-skill.md), [ADR-63](63-type-protection-coverage.md) WD5, pilot-validated), and [`docs/install.md`](../install.md)'s agent-facing install flow.
 
@@ -105,13 +105,13 @@ redundant suggestion, never a diagnostic.
 
 | Skill | Routing signal (presence-only) | Built on | Status |
 | --- | --- | --- | --- |
-| `rigor-rbs-setup` | `Gemfile.lock` present ∧ no `rbs_collection.lock.yaml` | `rbs collection install` (auto-detected, see [`rbs_collection_discovery.rb`](../../lib/rigor/environment/rbs_collection_discovery.rb)) | **Landed 2026-06-20** |
-| `rigor-editor-setup` | committed `.vscode/` without a `rigor` reference (catalogue-only for user-local Neovim / Emacs / Helix configs) | `rigor lsp` ([ADR-19](19-language-server-packaging.md)), routing to the manual's editor chapter | **Landed 2026-06-20** |
-| `rigor-upgrade` | baseline's recorded Rigor version < installed | `rigor diff` / `rigor baseline regenerate` | Queued (needs the baseline to record its generation version) |
-| `rigor-doctor` | (deeper validation than the presence probe) | a new additive `rigor doctor` command | Proposed |
-| `rigor-plugin-tune` | `Gemfile.lock` deps not all matched to enabled plugins | `rigor plugins --strict` | Proposed |
-| `rigor-mcp-setup` | committed `.mcp.json` / `.cursor/mcp.json` without a `rigor` reference (catalogue-only for user-local client configs) | `rigor mcp` ([ADR-33](33-mcp-server.md)), routing to the manual's MCP chapter | **Landed 2026-06-20** |
-| `rigor-monkeypatch-resolve` | `triage` shows a `call.unresolved-toplevel` cluster | `pre_eval:` ([ADR-17](17-monkey-patch-pre-evaluation.md)) | Proposed |
+| `rigor-rbs-setup` | `Gemfile.lock` present ∧ no `rbs_collection.lock.yaml` (headline branch) | `rbs collection install` (auto-detected, see [`rbs_collection_discovery.rb`](../../lib/rigor/environment/rbs_collection_discovery.rb)) | **Landed 2026-06-20** |
+| `rigor-editor-setup` | committed `.vscode/` without a `rigor` reference (headline branch; catalogue-only for user-local Neovim / Emacs / Helix configs) | `rigor lsp` ([ADR-19](19-language-server-packaging.md)), routing to the manual's editor chapter | **Landed 2026-06-20** |
+| `rigor-mcp-setup` | committed `.mcp.json` / `.cursor/mcp.json` without a `rigor` reference (headline branch; catalogue-only for user-local client configs) | `rigor mcp` ([ADR-33](33-mcp-server.md)), routing to the manual's MCP chapter | **Landed 2026-06-20** |
+| `rigor-monkeypatch-resolve` | catalogue-only — the signal needs a `triage` run, not a presence check | `pre_eval:` ([ADR-17](17-monkey-patch-pre-evaluation.md)) + `rigor triage` | **Landed 2026-06-20** |
+| `rigor-plugin-tune` | catalogue-only — re-matching `Gemfile.lock` to the plugin catalogue is an on-demand pass, not a cheap presence signal | `rigor plugins --strict` + the bundled plugin catalogue | **Landed 2026-06-20** |
+| `rigor-upgrade` | catalogue-only — the baseline records only a schema version, not the generating Rigor version, so the "older than installed" check is unavailable (a future baseline `generated_with:` field would let it earn a headline branch) | `rigor diff` / `rigor baseline regenerate` | **Landed 2026-06-20** |
+| `rigor-doctor` | catalogue-only — it *runs* validators rather than reading a presence signal | `rigor check` config-audit (`config_warnings`) + `rigor plugins --strict` + `rigor baseline drift` (no new command needed) | **Landed 2026-06-20** |
 
 `rigor-rbs-setup` sits **right after `rigor-project-init`** in the
 journey order: community RBS removes the dominant `Dynamic` source (the
@@ -126,8 +126,14 @@ are *catalogue-first* — they are listed for the agent
 to offer via the "what would you like to do?" path, and fire a headline
 recommendation only on a strong, repo-visible signal (a committed
 `.vscode/` without `rigor`), because their real config is user-local and
-not detectable. A skill that cannot expose a reliable presence signal is
-a catalogue entry, never a forced recommendation.
+not detectable. The same holds for **maintenance / validation** skills
+(`rigor-plugin-tune`, `rigor-upgrade`, `rigor-doctor`,
+`rigor-monkeypatch-resolve`): their trigger is an *event* (a new gem, a
+version bump) or a *run-time check* (a `triage` / validator pass), not a
+file the probe can stat, so they are catalogue entries the agent offers
+when the user's goal or the diagnostics call for them. A skill that
+cannot expose a reliable presence signal is a catalogue entry, never a
+forced recommendation.
 
 ## Relationship to other ADRs
 

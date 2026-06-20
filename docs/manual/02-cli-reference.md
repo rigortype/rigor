@@ -453,6 +453,31 @@ It reports a presence-only project-state probe (does a `.rigor.yml`,
 recommended next skill. It is read-only and side-effect-free — it never
 runs `rigor check`. Identical output to `rigor skill describe`.
 
+## `rigor docs`
+
+Print the User Manual bundled inside the `rigortype` gem **offline**, so
+once Rigor is installed an AI coding agent (or you) can read the
+drive-Rigor guidance the SKILL-driven UX routes to without the network
+([ADR-74](../adr/74-offline-doc-access-and-llms-txt.md)). It is the doc
+twin of [`rigor skill`](#rigor-skill): the gem ships `docs/install.md`,
+`docs/llms.txt`, and the full [`docs/manual/`](README.md); the
+contributor-facing ADR / spec / notes corpus stays web-only on the site.
+
+```sh
+rigor docs [<name> | list | path <name>]
+```
+
+| Subcommand | Purpose |
+| --- | --- |
+| (none) | Print the bundled `llms.txt` offline doc index — the map of what `rigor docs <name>` can serve. |
+| `<name>` | Print a manual page to stdout, prefixed with a provenance comment. Accepts the chapter's prefixed name (`02-cli-reference`), its stripped name (`cli-reference`), `install`, or a `docs/`-relative path. |
+| `list` | Table of every bundled doc (name + absolute path). |
+| `path <name>` | Print the single-line absolute path of a doc, suitable as input to a file-reading tool. |
+
+The canonical web copy of the index is
+<https://rigor.typedduck.fail/llms.txt>; `rigor docs` serves the same
+pages from the installed gem with no HTTP request.
+
 ## `rigor show-bleedingedge`
 
 Print the **bleeding-edge overlay** — the Rigor-maintained set of

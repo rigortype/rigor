@@ -33,6 +33,9 @@ Gem::Specification.new do |spec|
       data/**/*.rbs
       skills/*/SKILL.md
       skills/*/references/*.md
+      docs/install.md
+      docs/llms.txt
+      docs/manual/**/*.md
     ]
   ) + Dir.glob("plugins/*/lib/**/*.rb").reject { |f| f.include?("/rigor-playground/") } \
     + Dir.glob("plugins/*/sig/**/*.rbs").reject { |f| f.include?("/rigor-playground/") }

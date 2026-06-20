@@ -16,8 +16,10 @@ require_relative "cli/ci_detector"
 module Rigor
   # The CLI class is a dispatcher: each `run_*` method delegates to a
   # command-specific class once the command grows beyond a few lines (see
-  # {CLI::TypeOfCommand} and {CLI::CheckCommand}).
-  class CLI
+  # {CLI::TypeOfCommand} and {CLI::CheckCommand}). It necessarily grows by
+  # one delegator + one help line per command, so — like the command
+  # classes it fans out to — it carries an explicit ClassLength exemption.
+  class CLI # rubocop:disable Metrics/ClassLength
     EXIT_USAGE = 64
 
     HANDLERS = {
@@ -40,6 +42,7 @@ module Rigor
       "playground" => :run_playground,
       "skill" => :run_skill,
       "describe" => :run_describe,
+      "docs" => :run_docs,
       "show-bleedingedge" => :run_show_bleedingedge
     }.freeze
 
@@ -296,6 +299,12 @@ module Rigor
       CLI::SkillCommand.new(argv: ["describe", *@argv], out: @out, err: @err).run
     end
 
+    def run_docs
+      require_relative "cli/docs_command"
+
+      CLI::DocsCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def run_plugin
       require_relative "cli/plugin_command"
 
@@ -331,6 +340,7 @@ module Rigor
           playground Start the browser playground (requires rigor-playground gem)
           describe   Recommend the next skill for this project (alias for `skill describe`)
           skill      Recommend the next skill + list/print bundled Agent Skills (skill describe, ...)
+          docs       Print the bundled manual offline (docs <name>, docs list)
           show-bleedingedge  Show the bleeding-edge overlay + what your config adopts (ADR-50)
           version    Print the Rigor version
           help       Print this help

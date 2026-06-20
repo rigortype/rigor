@@ -1,0 +1,51 @@
+# Rigor — offline doc index
+
+> Rigor is a Ruby static analyzer that reports real bugs — undefined methods on
+> typed receivers, wrong argument counts, provable nil dereferences — from
+> ordinary Ruby with no type annotations in source. Every type is inferred from
+> the values your code actually produces.
+
+This is the **offline** doc index served by an installed Rigor. You do not need
+the network: read any page below with `rigor docs <name>`, and any bundled Agent
+Skill with `rigor skill print <name>`. (The canonical web copy is
+<https://rigor.typedduck.fail/llms.txt>.)
+
+## Start here (AI coding agents)
+
+- **Run the `rigor-next-steps` skill** — the single entry point for "what should
+  we do next with Rigor on this project?". It resolves the `rigor` command,
+  onboards an unconfigured project, then asks `rigor skill describe` for the next
+  step and routes to the matching skill. `rigor skill print rigor-next-steps`.
+- `rigor skill describe` (alias `rigor describe`) — probe the project's state and
+  recommend the next skill. The driving command behind `rigor-next-steps`.
+- `rigor skill list` — every bundled skill; `rigor skill print <name>` — its body.
+- The full workflow narrative: `rigor docs 17-driving-improvement`.
+
+## Manual (read with `rigor docs <name>`)
+
+- `install` — install Rigor (mise / asdf / gem). The one doc that precedes a
+  local `rigor`, so an agent reads it from the web until Rigor is installed.
+- `01-installation` — installation channels and the tool-not-a-library rule.
+- `02-cli-reference` — every command and flag.
+- `03-configuration` — `.rigor.yml` keys, discovery, `includes:` layering.
+- `04-diagnostics` — the rule-ID catalogue and severity profiles.
+- `05-inspecting-types` — `rigor annotate` / `rigor type-of`, `assert_type`.
+- `06-baseline` — `.rigor-baseline.yml` and the `rigor baseline` subcommands.
+- `07-plugins` — activating framework / gem plugins via `plugins:`.
+- `08-skills` — the bundled Agent Skills (the catalogue this index links to).
+- `09-editor-integration` — wiring `rigor lsp` into Neovim / VS Code / Helix / Emacs.
+- `10-mcp-server` — exposing Rigor to AI agents via `rigor mcp`.
+- `11-ci` — running Rigor in CI with inline PR/MR diagnostics.
+- `12-caching` — where the cache lives and what invalidates it.
+- `13-troubleshooting` — common problems and fixes.
+- `14-rails-quickstart` — the fast path for Rails apps.
+- `15-type-protection-coverage` — `rigor coverage --protection`.
+- `16-rbs-extended-annotations` — the `%a{rigor:v1:…}` annotations.
+- `17-driving-improvement` — the `rigor-next-steps`-driven improvement loop.
+
+## More (web only)
+
+The contributor-facing corpus is not bundled in the gem; read it on the site:
+the type specification, internal specification, architecture decisions (ADRs),
+design notes, and development notes are linked from
+<https://rigor.typedduck.fail/llms.txt>.

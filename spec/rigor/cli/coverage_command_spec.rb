@@ -6,10 +6,11 @@ require "tmpdir"
 
 require "rigor/cli/coverage_command"
 
-# Focused coverage for the `rigor coverage` command object. The type-precision
-# and Tier 1 protection paths are exercised through the dispatcher; this spec is
-# the safety net for the ADR-63 Tier 2 mutation-effectiveness mode (`--protection
-# --mutation`) and its git-changed-files default.
+# Focused coverage for the `rigor coverage` command object: the ADR-63 Tier 2
+# mutation-effectiveness mode (`--protection --mutation`) and its git-changed-
+# files default, plus unit safety nets for the default type-precision mode and
+# the static Tier 1 protection mode (`--protection`), which are otherwise only
+# exercised through the dispatcher / `make coverage`.
 RSpec.describe Rigor::CLI::CoverageCommand do
   def run(argv)
     out = StringIO.new
@@ -60,6 +61,57 @@ RSpec.describe Rigor::CLI::CoverageCommand do
 
     expect(status).to eq(0)
     expect(out).to include("No changed Ruby files")
+  end
+
+  describe "type-precision mode (the default)" do
+    it "renders a precision report and exits 0 with no threshold" do
+      File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+
+      status, out, = run(["greet.rb"])
+
+      expect(status).to eq(0)
+      expect(out).not_to be_empty
+    end
+
+    it "errors with a usage message when given no paths and no git changes" do
+      status, _out, err = run([])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("at least one path is required")
+    end
+
+    it "exits 1 when the precision ratio is below --threshold, 0 when it meets it" do
+      # An untyped-parameter receiver dispatch is imprecise (Dynamic),
+      # so the ratio is below 1.0 and above 0.0.
+      File.write("dyn.rb", "def f(x)\n  x.whatever\nend\n")
+
+      below, = run(["--threshold", "1.0", "dyn.rb"])
+      meets, = run(["--threshold", "0.0", "dyn.rb"])
+
+      expect(below).to eq(1)
+      expect(meets).to eq(0)
+    end
+  end
+
+  describe "static protection mode (--protection without --mutation)" do
+    it "renders the Tier 1 protection report and exits 0" do
+      File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+
+      status, out, = run(["--protection", "greet.rb"])
+
+      expect(status).to eq(0)
+      expect(out).not_to be_empty
+    end
+
+    it "exits 1 when the protection ratio is below --threshold, 0 when it meets it" do
+      File.write("dyn.rb", "def f(x)\n  x.whatever\nend\n")
+
+      below, = run(["--protection", "--threshold", "1.0", "dyn.rb"])
+      meets, = run(["--protection", "--threshold", "0.0", "dyn.rb"])
+
+      expect(below).to eq(1)
+      expect(meets).to eq(0)
+    end
   end
 
   # ADR-70 — the fused static∪dynamic overlay. The TestSuiteOracle is stubbed so

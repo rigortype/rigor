@@ -81,6 +81,48 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
       end
     end
 
+    it "descends a body-less class via the children fallback without aborting the file" do
+      # `class Empty; end` has a nil body, so descend_class_or_module
+      # takes the walk_children branch; the sibling class in the same
+      # file must still be harvested (the fallback must not crash).
+      with_fake_gem do |gem_dir|
+        File.write(File.join(gem_dir, "lib", "fake.rb"), <<~RUBY)
+          class Empty; end
+          class Real
+            def m; end
+          end
+        RUBY
+
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
+
+        expect(catalog).to eq(
+          ["Real", :m] => Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(kind: :instance)
+        )
+      end
+    end
+
+    it "treats `class << expr` (non-self) as opaque, recording its defs under the surrounding class" do
+      # The singleton receiver is a constant, not `self`, so
+      # descend_singleton_class takes the walk_children fallback: the
+      # inner def is recorded as an ordinary instance method of Outer,
+      # NOT a per-instance singleton.
+      with_fake_gem do |gem_dir|
+        File.write(File.join(gem_dir, "lib", "fake.rb"), <<~RUBY)
+          module Outer
+            class << Helper
+              def on_x; end
+            end
+          end
+        RUBY
+
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
+
+        expect(catalog).to eq(
+          ["Outer", :on_x] => Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(kind: :instance)
+        )
+      end
+    end
+
     it "walks every .rb file under nested subdirectories" do
       with_fake_gem do |gem_dir|
         FileUtils.mkdir_p(File.join(gem_dir, "lib", "fake", "sub"))

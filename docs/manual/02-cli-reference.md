@@ -426,14 +426,32 @@ Rigor can discover and follow them without a project-side
 source checkout. See [Skills](08-skills.md).
 
 ```sh
-rigor skill <list|print|path> [name]
+rigor skill <list|describe|print|path> [name]
 ```
 
 | Subcommand | Purpose |
 | --- | --- |
 | `list` | Table of every bundled skill (name + absolute path); the default when no subcommand is given. |
+| `describe` | Probe the project's state (config / baseline / `sig/` / CI — presence only, never runs `rigor check`) and recommend the next skill to run. Also spelled `--describe`. See [`rigor describe`](#rigor-describe) below. |
 | `print <name>` | Print the `SKILL.md` body to stdout, with a header pointing at the skill's `references/` directory. |
 | `path <name>` | Print the single-line absolute `SKILL.md` path, suitable as input to a file-reading tool. |
+
+## `rigor describe`
+
+Top-level alias for [`rigor skill describe`](#rigor-skill) — the
+onboarding entry point that recommends the next skill for this project.
+A bare `rigor describe` is the intuitive guess most users reach for
+first, so it is surfaced as its own command ([ADR-73](../adr/73-skill-driven-user-experience.md)
+§ WD2).
+
+```sh
+rigor describe
+```
+
+It reports a presence-only project-state probe (does a `.rigor.yml`,
+`.rigor-baseline.yml`, `sig/` directory, or CI integration exist?) and a
+recommended next skill. It is read-only and side-effect-free — it never
+runs `rigor check`. Identical output to `rigor skill describe`.
 
 ## `rigor show-bleedingedge`
 

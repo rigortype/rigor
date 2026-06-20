@@ -94,6 +94,17 @@ module Rigor
         # delegates to operand `==`); ordering is undefined for Complex.
         COMPLEX_BINARY = Set[:+, :-, :*, :/, :**].freeze
 
+        # `Set#&` and its alias `Set#intersection` are leaf-pure for a
+        # concrete Set operand exactly like their siblings `|` / `-` / `^`
+        # (all `:leaf` in the catalog), but the catalog flags
+        # `set_i_intersection`'s C body `block_dependent` — it drives Set's
+        # own internal iterator — so the catalog tier declines and the
+        # intersection alone fails to fold. A concrete Set argument's `each`
+        # is the pure core method, so the fold is sound; the hand-rolled
+        # allow-list is the right tool, mirroring the bit-test predicates.
+        # (The other binary set ops keep folding through the catalog.)
+        SET_BINARY = Set[:&, :intersection].freeze
+
         # v0.0.3 C — pure unary catalogue. Each method must:
         # - take zero arguments,
         # - have no side effects,
@@ -1531,6 +1542,7 @@ module Rigor
           when nil            then NIL_BINARY
           when Rational       then RATIONAL_BINARY
           when Complex        then COMPLEX_BINARY
+          when ::Set          then SET_BINARY
           else                     Set.new
           end
         end

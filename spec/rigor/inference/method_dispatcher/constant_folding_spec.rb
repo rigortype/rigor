@@ -324,6 +324,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(3.5, :nobits?, [2])).to be_nil
     end
 
+    it "folds Set#& / #intersection to a Constant[Set] (the catalog flags them block-dependent)" do
+      # The siblings | / - / ^ fold through the catalog; & alone was the gap.
+      expect(fold(Set[1, 2, 3], :&, [Set[2, 4]]).value).to eq(Set[2])
+      expect(fold(Set[1, 2, 3], :intersection, [Set[2, 4]]).value).to eq(Set[2])
+    end
+
+    it "declines Set#& on a non-enumerable argument" do
+      # Set[1,2,3] & 5 raises at fold time; invoke_binary rescues to nil.
+      expect(fold(Set[1, 2, 3], :&, [5])).to be_nil
+    end
+
     it "folds the Float predicates nonzero? / integer?" do
       expect(fold(3.14, :nonzero?).value).to eq(3.14)
       expect(fold(0.0, :nonzero?).value).to be_nil

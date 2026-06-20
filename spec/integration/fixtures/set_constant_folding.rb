@@ -50,3 +50,11 @@ assert_type("true", _s2.member?(:a))
 assert_type("false", _s2.member?(:z))
 _union = _s2 + Set[:d]
 assert_type("Set[:a, :b, :c, :d]", _union)
+
+# Binary set operations fold to a precise `Constant[Set]`. `&` /
+# `intersection` join their leaf-pure siblings `|` / `-` / `^` despite
+# the catalog flagging `set_i_intersection`'s C body block-dependent.
+assert_type("Set[:b, :c]", _s2 & Set[:b, :c, :z])
+assert_type("Set[:b, :c]", _s2.intersection(Set[:b, :c, :z]))
+assert_type("Set[:a]", _s2 - Set[:b, :c])
+assert_type("Set[:a, :z]", _s2 ^ Set[:b, :c, :z])

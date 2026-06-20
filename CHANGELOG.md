@@ -30,6 +30,7 @@ cycles live in dedicated archives:
   - `Array#slice` on an array literal now folds exactly like `[]` across the index, start-length, and Range forms (it is the same method), so `[10, 20, 30].slice(1, 2)` yields `Tuple[20, 30]`.
   - `Pathname#/` (the idiomatic path-join operator, `dir / "file"`) folds like its exact alias `Pathname#+`, and `Pathname#basename(suffix)` folds the extension-stripping form (`Pathname.new("x.rb").basename(".rb")` → `Constant[#<Pathname:x>]`) — both pure `@path` manipulation, no filesystem read.
   - The n-arg `min(n)` / `max(n)` forms on an array literal or integer Range lift to a `Tuple` in Ruby's order (`min(n)` ascending, `max(n)` descending) — e.g. `[3, 1, 4].max(2)` → `Tuple[4, 3]`, `(1..10).min(3)` → `Tuple[1, 2, 3]` — the n-arg siblings of the already-folded `first(n)` / `last(n)`.
+  - `Set#&` and its alias `Set#intersection` between two literal sets now fold to a `Constant[Set]` (e.g. `Set[1, 2, 3] & Set[2, 4]` → `Constant[Set[2]]`), joining their already-folding siblings `|` / `-` / `^` — the intersection was the lone gap because the catalog conservatively flags its C body block-dependent.
 
 ### Changed
 

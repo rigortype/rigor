@@ -763,7 +763,7 @@ module Rigor
       # cleanly with no output, which silently masked typos.
       def expand_paths(paths)
         files = []
-        errors = []
+        bad = []
         Array(paths).each do |path|
           if File.directory?(path)
             files.concat(reject_excluded(Dir.glob(File.join(path, RUBY_GLOB))))
@@ -774,12 +774,25 @@ module Rigor
           elsif accept_as_ruby_file?(path)
             files << path
           elsif File.exist?(path)
-            errors << path_error(path, "not a Ruby file (expected `.rb` or a directory)")
+            bad << [path, "not a Ruby file (expected `.rb` or a directory)"]
           else
-            errors << path_error(path, "no such file or directory")
+            bad << [path, "no such file or directory"]
           end
         end
-        { files: files, errors: errors }
+        { files: files, errors: path_expansion_errors(bad, any_files: files.any?) }
+      end
+
+      # A bad path *among valid ones* is a warn-and-skip — the run still
+      # does useful work, so `rigor check app lib` with no `lib/` (the
+      # 20260620 field trial's strap case) analyses `app` instead of
+      # aborting on exit 1. A bad path that leaves NOTHING to analyse
+      # stays an error so a lone typo (`rigor check typo.rb`) is not
+      # silently masked (the regression the path-error check was added
+      # to catch in the first place).
+      def path_expansion_errors(bad, any_files:)
+        severity = any_files ? :warning : :error
+        suffix = any_files ? " (skipped)" : ""
+        bad.map { |path, message| path_error(path, "#{message}#{suffix}", severity: severity) }
       end
 
       def accept_as_ruby_file?(path)
@@ -807,13 +820,13 @@ module Rigor
         @configuration.exclude_patterns.any? { |pattern| File.fnmatch?(pattern, path) }
       end
 
-      def path_error(path, message)
+      def path_error(path, message, severity: :error)
         Diagnostic.new(
           path: path,
           line: 1,
           column: 1,
           message: message,
-          severity: :error
+          severity: severity
         )
       end
 

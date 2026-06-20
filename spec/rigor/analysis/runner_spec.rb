@@ -58,6 +58,22 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  it "warns and skips a missing path when another path yields files" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "real.rb"), "x = 1\n")
+      missing = File.join(dir, "ghost.rb")
+      configuration = Rigor::Configuration.new("paths" => [File.join(dir, "real.rb"), missing])
+      Dir.chdir(dir) do
+        result = described_class.new(configuration: configuration).run
+        skipped = result.diagnostics.find { |d| d.path == missing }
+        expect(skipped).not_to be_nil
+        # Warn-and-skip, not an error that aborts the whole run.
+        expect(skipped.severity).to eq(:warning)
+        expect(skipped.message).to include("skipped")
+      end
+    end
+  end
+
   it "emits a diagnostic for a non-Ruby file path" do
     Dir.mktmpdir do |dir|
       txt = File.join(dir, "notes.txt")

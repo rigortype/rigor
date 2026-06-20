@@ -88,15 +88,16 @@ source checkout. The `rigor skill` command surfaces them:
 
 ```sh
 rigor skill describe        # probe the project + recommend the next skill (alias: rigor describe)
-rigor skill list            # name + absolute path for each bundled skill
-rigor skill print <name>    # print the SKILL.md body (with a references/ header)
-rigor skill path  <name>    # one-line absolute SKILL.md path, for a file-reading tool
+rigor skill --list          # name + absolute path for each bundled skill
+rigor skill <name>          # print the SKILL.md body (with a references/ header)
+rigor skill --path <name>   # one-line absolute SKILL.md path, for a file-reading tool
 ```
 
 `rigor skill describe` is the recommendation engine driven by
-`rigor-next-steps`; `rigor skill print rigor-project-init` is the
+`rigor-next-steps`; `rigor skill rigor-project-init` is the
 canonical way to hand an agent the onboarding workflow without pointing
-it at the repository. See [CLI reference](02-cli-reference.md#rigor-skill).
+it at the repository. The `list` / `print` / `path` verb spellings are
+deprecated (removed in v0.3.0). See [CLI reference](02-cli-reference.md#rigor-skill).
 
 ## Installing skills into a project
 
@@ -118,7 +119,7 @@ and are not installed by a bulk `npx skills add`.)
 
 In an agent that supports Agent Skills, invoke the skill by name (in
 Claude Code, `/rigor-next-steps`). The agent reads the skill definition
-(from `skills/` in a source checkout, or via `rigor skill print <name>`
+(from `skills/` in a source checkout, or via `rigor skill <name>`
 otherwise) and follows it. If your tool does not support skills, each
 skill's `SKILL.md` still reads as a plain checklist you can follow
 yourself.

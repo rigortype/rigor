@@ -54,7 +54,7 @@ rigor skill describe        # or the alias: rigor describe
 
 ## Recommended next step
 → rigor-ci-setup — Rigor is configured but not wired into CI — lock in the regression guard.
-  Load it: rigor skill print rigor-ci-setup
+  Load it: rigor skill rigor-ci-setup
 
 ## All skills you can run next
   …the full catalogue, each with its current one-line description…

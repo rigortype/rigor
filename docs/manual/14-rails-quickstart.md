@@ -118,7 +118,7 @@ Say one of the following to your AI coding agent:
 The agent should respond by running:
 
 ```sh
-rigor skill print rigor-project-init
+rigor skill rigor-project-init
 ```
 
 That prints the SKILL definition to stdout — a short header
@@ -128,18 +128,18 @@ those instructions, reading the `references/NN-*.md` files in
 turn from the directory the header points at.
 
 If the agent does not pick the command up on its own, ask
-explicitly: **"Run `rigor skill print rigor-project-init` and
+explicitly: **"Run `rigor skill rigor-project-init` and
 follow the instructions it prints."**
 
 The same flow works against any bundled skill:
 
-- `rigor skill list` — list every bundled skill with its path.
-- `rigor skill print <name>` — print the SKILL body.
-- `rigor skill path <name>` — print just the absolute SKILL.md
+- `rigor skill --list` — list every bundled skill with its path.
+- `rigor skill <name>` — print the SKILL body.
+- `rigor skill --path <name>` — print just the absolute SKILL.md
   path (handy if your agent prefers to read the file directly).
 
 The skill lives inside the installed `rigortype` gem at
-the path printed by `rigor skill path rigor-project-init`. The
+the path printed by `rigor skill --path rigor-project-init`. The
 source-of-truth copy is
 [`skills/rigor-project-init/SKILL.md`](../../skills/rigor-project-init/SKILL.md).
 

@@ -173,10 +173,10 @@ step` it prints — for a project with no `.rigor.yml` yet that is
 `rigor-project-init`:
 
 ```sh
-rigor skill print rigor-project-init
+rigor skill rigor-project-init
 ```
 
-`rigor skill print <name>` prints the SKILL definition — a header with
+`rigor skill <name>` prints the SKILL definition — a header with
 file paths followed by the skill body. Follow it from top to bottom.
 The project-init skill detects your project's stack, proposes plugins,
 writes `.rigor.dist.yml`, and snapshots a baseline if needed; once the
@@ -186,4 +186,4 @@ that.
 If `rigor skill describe` is not recognised, your Rigor version predates
 it. Run `rigor --version` and upgrade with `mise use gem:rigortype` (or
 `gem update rigortype` for Case C/B); on an older version, run
-`rigor skill print rigor-project-init` directly.
+`rigor skill rigor-project-init` directly.

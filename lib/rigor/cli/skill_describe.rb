@@ -38,6 +38,7 @@ module Rigor
         rigor-rbs-setup
         rigor-ci-setup
         rigor-baseline-reduce
+        rigor-editor-setup
         rigor-protection-uplift
         rigor-plugin-author
       ].freeze
@@ -81,7 +82,8 @@ module Rigor
           sig: File.directory?(File.join(@root, "sig")),
           gems: File.file?(File.join(@root, "Gemfile.lock")),
           rbs_collection: File.file?(File.join(@root, RBS_COLLECTION_LOCKFILE)),
-          ci: ci_state
+          ci: ci_state,
+          editor: editor_state
         }
       end
 
@@ -91,10 +93,25 @@ module Rigor
         files = ci_config_files
         return :none if files.empty?
 
-        files.any? { |path| ci_file_mentions_rigor?(path) } ? :wired : :unwired
+        files.any? { |path| file_mentions_rigor?(path) } ? :wired : :unwired
       end
 
-      def ci_file_mentions_rigor?(path)
+      # Editor-LSP signal — `:wired` (a committed `.vscode/` config names
+      # `rigor`), `:unwired` (a `.vscode/` is present but does not), or
+      # `:none`. Only VS Code is detectable here: Neovim / Emacs / Helix
+      # configs live in the user's home, not the repo, so editor-setup is
+      # otherwise a catalogue-only destination.
+      def editor_state
+        vscode = File.join(@root, ".vscode")
+        return :none unless File.directory?(vscode)
+
+        files = Dir.glob(File.join(vscode, "*.json"))
+        return :unwired if files.empty?
+
+        files.any? { |path| file_mentions_rigor?(path) } ? :wired : :unwired
+      end
+
+      def file_mentions_rigor?(path)
         File.read(path).include?("rigor")
       rescue StandardError
         false
@@ -124,6 +141,9 @@ module Rigor
           ["rigor-ci-setup", "Rigor is configured but not wired into CI — lock in the regression guard."]
         elsif state.fetch(:baseline)
           ["rigor-baseline-reduce", "a baseline is in place — work it down rule by rule."]
+        elsif state.fetch(:editor) == :unwired
+          ["rigor-editor-setup",
+           "you have an editor config but no Rigor LSP — wire `rigor lsp` for live diagnostics and hover types."]
         else
           ["rigor-protection-uplift", "the basics are in place — raise how much of your code Rigor can catch bugs in."]
         end
@@ -149,6 +169,11 @@ module Rigor
               else
                 "no Gemfile.lock"
               end
+        editor = case state.fetch(:editor)
+                 when :wired then "Rigor LSP wired (.vscode)"
+                 when :unwired then ".vscode present, Rigor LSP not wired"
+                 else "not detected"
+                 end
         <<~STATE
           ## Project state
           - Config file:    #{state.fetch(:config) || 'none (no .rigor.yml / .rigor.dist.yml)'}
@@ -156,6 +181,7 @@ module Rigor
           - Project sig/:   #{state.fetch(:sig) ? 'present' : 'none'}
           - Community RBS:  #{rbs}
           - CI integration: #{ci}
+          - Editor LSP:     #{editor}
         STATE
       end
 

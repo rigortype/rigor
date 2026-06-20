@@ -106,7 +106,7 @@ redundant suggestion, never a diagnostic.
 | Skill | Routing signal (presence-only) | Built on | Status |
 | --- | --- | --- | --- |
 | `rigor-rbs-setup` | `Gemfile.lock` present ∧ no `rbs_collection.lock.yaml` | `rbs collection install` (auto-detected, see [`rbs_collection_discovery.rb`](../../lib/rigor/environment/rbs_collection_discovery.rb)) | **Landed 2026-06-20** |
-| `rigor-editor-setup` | no editor LSP config referencing `rigor` | `rigor lsp` ([ADR-19](19-language-server-packaging.md)) | Queued |
+| `rigor-editor-setup` | committed `.vscode/` without a `rigor` reference (catalogue-only for user-local Neovim / Emacs / Helix configs) | `rigor lsp` ([ADR-19](19-language-server-packaging.md)), routing to the manual's editor chapter | **Landed 2026-06-20** |
 | `rigor-upgrade` | baseline's recorded Rigor version < installed | `rigor diff` / `rigor baseline regenerate` | Queued (needs the baseline to record its generation version) |
 | `rigor-doctor` | (deeper validation than the presence probe) | a new additive `rigor doctor` command | Proposed |
 | `rigor-plugin-tune` | `Gemfile.lock` deps not all matched to enabled plugins | `rigor plugins --strict` | Proposed |
@@ -118,6 +118,16 @@ journey order: community RBS removes the dominant `Dynamic` source (the
 RBS-less external gem the protection-uplift "honest bounds" named as its
 ceiling) before baseline or CI work, so doing it early avoids
 re-baselining against a noisier diagnostic set later.
+
+Not every destination earns a headline branch. The decision tree gates
+the **linear correctness journey** on reliable project-file signals;
+**DX / integration** skills (`rigor-editor-setup`, the queued
+`rigor-mcp-setup`) are *catalogue-first* — they are listed for the agent
+to offer via the "what would you like to do?" path, and fire a headline
+recommendation only on a strong, repo-visible signal (a committed
+`.vscode/` without `rigor`), because their real config is user-local and
+not detectable. A skill that cannot expose a reliable presence signal is
+a catalogue entry, never a forced recommendation.
 
 ## Relationship to other ADRs
 

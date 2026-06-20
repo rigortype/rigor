@@ -123,6 +123,34 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("Community RBS:  collection installed")
     end
 
+    it "recommends rigor-editor-setup when an editor config lacks Rigor LSP wiring" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          "Gemfile.lock" => "GEM\n  specs:\n",
+          "rbs_collection.lock.yaml" => "sources: []\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n",
+          ".vscode/settings.json" => "{ \"editor.tabSize\": 2 }\n"
+        }
+      )
+      expect(out).to include("→ rigor-editor-setup —")
+      expect(out).to include(".vscode present, Rigor LSP not wired")
+    end
+
+    it "stops recommending rigor-editor-setup once the editor config references rigor" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          "Gemfile.lock" => "GEM\n  specs:\n",
+          "rbs_collection.lock.yaml" => "sources: []\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n",
+          ".vscode/settings.json" => "{ \"rigor.enable\": true }\n"
+        }
+      )
+      expect(out).not_to include("→ rigor-editor-setup —")
+      expect(out).to include("→ rigor-protection-uplift —")
+    end
+
     it "lists the downstream skills with a load command, excluding the entry point itself" do
       _status, out, = describe_in({})
       expect(out).to include("rigor skill print rigor-project-init")

@@ -413,3 +413,33 @@ all six spec-only (no `lib/` change), `make verify` green:
 their floor (already 100 %, or only the `percentile` `hist.keys.max` defensive fallback — reached
 only when the nearest-rank loop fails to return, which `rank = ceil(fraction·total) ≤ total`
 makes impossible — and the `inspect`/`describe(:short)` debug-format residual).
+
+## Effectiveness-tier adjudication — third per-file batch (2026-06-21)
+
+A fused batch over eight more logic-bearing files (`builtins/regex_refinement`,
+`analysis/self_call_resolution_recorder`, `config_audit`, `configuration/severity_profile`,
+`environment/lockfile_resolver`, `environment/rbs_coverage_report`, `flow_contribution/fact`,
+`inference/coverage_scanner`). Six were already 100 %; the eight survivors clustered in two
+files, both spec-only fixes, `make verify` green:
+
+- `config_audit` (6 → 0): `explicit_path_warnings`'s three `add_missing_dir`/`add_missing_file`
+  call sites. The tests asserted each warning's `kind` and the descriptor substring
+  (`is not a directory` / `does not exist`) but not the config-key label embedded in the
+  message, so the `:bundler_bundle_path` / `:bundler_lockfile` / `:rbs_collection_lockfile`
+  KEY argument (the human-readable `"bundler.bundle_path"` etc.) survived `nil_inject` /
+  `type_swap` — the `kind` symbol was already pinned by the `find { kind == … }` lookup, the
+  message key was not. The three assertions now also `include` the key label (+ the missing
+  message assertion on the `rbs_collection.lockfile` case).
+- `environment/lockfile_resolver` (2 → 0): the two `warn` sites in the defensive rescue
+  branches — `parse`'s `rescue LoadError` (bundler unavailable) and `do_parse`'s
+  `rescue StandardError` (parser raises). Neither was driven deterministically: bundler is
+  always loadable in the test env, and a corrupt body's failure mode is Bundler-version-
+  dependent (the existing "truly corrupt lockfile" case parses without raising on the current
+  Bundler, never reaching the `warn`). Two stubbed tests now force each branch
+  (`Bundler::LockfileParser.new` raising; `described_class.require("bundler")` raising
+  `LoadError`) and assert the stderr warning (path + error class), killing the
+  `undefined_method` mutants on the `warn` calls.
+
+`builtins/regex_refinement`, `analysis/self_call_resolution_recorder`,
+`configuration/severity_profile`, `environment/rbs_coverage_report`, `flow_contribution/fact`,
+and `inference/coverage_scanner` measured at their floor (already fully protected).

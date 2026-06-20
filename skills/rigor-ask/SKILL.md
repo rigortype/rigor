@@ -124,9 +124,9 @@ the analyzer and plugin code under `lib/`. For a detail no doc page spells
 out (a plugin's exact rule, a default baked into the code), reading the
 bundled file directly is a perfectly good way to ground the answer, and
 beats a guess. The rule that never bends: **never invent a flag, rule id,
-config key, or behaviour** — read the page, read the source, or run the
-command. A confident wrong answer about a type checker is worse than "let
-me check."
+config key, behaviour, or command output** — read the page, read the
+source, or run the command, and quote only output you actually saw. A
+confident wrong answer about a type checker is worse than "let me check."
 
 ## Examples
 

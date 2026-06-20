@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "tempfile"
 
 RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
   describe "string/array singleton instances" do
@@ -104,6 +105,73 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
 
     it "blocks bang selectors universally" do
       expect(catalog.safe_for_folding?("Foo", :baz!)).to be(false)
+    end
+  end
+
+  describe "alias resolution and reset!" do
+    # A real catalog ships an `aliases` section mapping an alias
+    # selector to its canonical target; `method_entry` resolves the
+    # alias to the target's entry. Exercise it from a temp YAML so the
+    # whole resolve_alias_entry path (and `reset!`) is covered.
+    let(:catalog_yaml) do
+      <<~YAML
+        classes:
+          Foo:
+            instance_methods:
+              real_method:
+                purity: leaf
+              trivial_method:
+                purity: trivial
+              numeric_method:
+                purity: leaf_when_numeric
+              dispatch_method:
+                purity: dispatch
+            aliases:
+              aliased_method:
+                old: real_method
+              dangling_alias:
+                old: missing_method
+      YAML
+    end
+    let(:catalog) { described_class.new(path: @path) }
+
+    around do |example|
+      Tempfile.create(["method-catalog", ".yml"]) do |f|
+        f.write(catalog_yaml)
+        f.flush
+        @path = f.path
+        example.run
+      end
+    end
+
+    it "resolves an instance-method alias to its target's entry" do
+      expect(catalog.method_entry("Foo", :aliased_method)).to eq("purity" => "leaf")
+      expect(catalog.safe_for_folding?("Foo", :aliased_method)).to be(true)
+    end
+
+    it "returns nil for an alias whose target does not exist" do
+      expect(catalog.method_entry("Foo", :dangling_alias)).to be_nil
+      expect(catalog.safe_for_folding?("Foo", :dangling_alias)).to be(false)
+    end
+
+    it "folds exactly the leaf / trivial / leaf_when_numeric purities" do
+      # Pins the FOLDABLE_PURITIES membership: each foldable purity folds,
+      # and a non-foldable one (`dispatch`) does not.
+      expect(catalog.safe_for_folding?("Foo", :real_method)).to be(true)     # leaf
+      expect(catalog.safe_for_folding?("Foo", :trivial_method)).to be(true)  # trivial
+      expect(catalog.safe_for_folding?("Foo", :numeric_method)).to be(true)  # leaf_when_numeric
+      expect(catalog.safe_for_folding?("Foo", :dispatch_method)).to be(false)
+    end
+
+    it "does not resolve aliases for singleton-method lookups" do
+      # resolve_alias_entry only consults the instance_methods bucket.
+      expect(catalog.method_entry("Foo", :aliased_method, kind: :singleton)).to be_nil
+    end
+
+    it "reset! reloads the catalog from disk and keeps resolving" do
+      expect { catalog.reset! }.not_to raise_error
+      expect(catalog.safe_for_folding?("Foo", :real_method)).to be(true)
+      expect(catalog.safe_for_folding?("Foo", :aliased_method)).to be(true)
     end
   end
 end

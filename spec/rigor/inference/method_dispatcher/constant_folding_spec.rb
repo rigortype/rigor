@@ -1229,6 +1229,24 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
           .to eq(constant_of(Pathname.new("/usr/bin/ruby/lib")))
       end
 
+      it "folds / (the alias of +) with a String or Pathname operand" do
+        expect(fold_types(p, :/, [constant_of("lib")]))
+          .to eq(constant_of(Pathname.new("/usr/bin/ruby/lib")))
+        expect(fold_types(p, :/, [constant_of(Pathname.new("lib"))]))
+          .to eq(constant_of(Pathname.new("/usr/bin/ruby/lib")))
+        # An absolute operand wins, exactly as `+` does.
+        expect(fold_types(p, :/, [constant_of("/etc")]))
+          .to eq(constant_of(Pathname.new("/etc")))
+      end
+
+      it "folds basename(suffix) — the extension-stripping binary form" do
+        q = constant_of(Pathname.new("/a/b/c.rb"))
+        expect(fold_types(q, :basename, [constant_of(".rb")]))
+          .to eq(constant_of(Pathname.new("c")))
+        expect(fold_types(q, :basename, [constant_of(".*")]))
+          .to eq(constant_of(Pathname.new("c")))
+      end
+
       it "folds <=> against another Constant<Pathname>" do
         expect(fold_types(p, :<=>, [constant_of(Pathname.new("/usr/bin/ruby"))]))
           .to eq(constant_of(0))

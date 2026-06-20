@@ -631,7 +631,13 @@ module Rigor
         ].freeze
         PATHNAME_PURE_BINARY = Set[
           :+, :join, :sub_ext, :<=>, :==, :eql?, :===,
-          :relative_path_from
+          :relative_path_from,
+          # `/` is the exact alias of `+` (`def /(other) = self + other`),
+          # the idiomatic path-join operator (`dir / "file"`). `basename`'s
+          # 1-arg suffix-stripping form (`path.basename(".rb")` → the stem)
+          # is the binary sibling of the already-folded no-arg `basename` —
+          # both are pure `@path` string manipulation, no filesystem read.
+          :/, :basename
         ].freeze
         private_constant :PATHNAME_PURE_UNARY, :PATHNAME_PURE_BINARY
 

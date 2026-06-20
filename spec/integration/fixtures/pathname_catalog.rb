@@ -1,4 +1,3 @@
-require "pathname"
 require "rigor/testing"
 include Rigor::Testing
 
@@ -36,8 +35,12 @@ assert_type("false", p1.relative?)
 
 # Pure path-manipulation binary folds.
 assert_type("#<Pathname:/usr/bin/ruby/lib>", p1 + "lib")
+# `/` is the exact alias of `+` — the idiomatic path-join operator.
+assert_type("#<Pathname:/usr/bin/ruby/lib>", p1 / "lib")
 assert_type("#<Pathname:/usr/bin/ruby.rbx>", p1.sub_ext(".rbx"))
 assert_type("#<Pathname:/usr/bin>", p1.join(".."))
+# `basename(suffix)` strips the suffix from the final component.
+assert_type("#<Pathname:ruby>", Pathname.new("/usr/bin/ruby.rb").basename(".rb"))
 
 # Comparable folds.
 assert_type("0", p1 <=> Pathname.new("/usr/bin/ruby"))

@@ -243,8 +243,20 @@ module Rigor
         <<~PROMPT
           ## For the agent
           #{opener}, then run `rigor skill print <name>` for the chosen skill and
-          follow its body top to bottom. Re-run `rigor skill describe` whenever you
-          need the next step — it always reflects the project's current state.
+          follow its body top to bottom.
+
+          The recommendation above is from a presence-only probe — it does not run
+          `rigor check`. If you have run (or now run) `rigor check`, let its findings
+          refine the choice:
+          - errors present and no baseline yet → rigor-baseline-reduce
+          - a `call.unresolved-toplevel` / `call.undefined-method` cluster on the
+            project's own monkey-patches → rigor-monkeypatch-resolve
+          - framework calls (ActiveRecord, routes, i18n …) typing as Dynamic with no
+            matching plugins enabled → rigor-plugin-tune
+          - `RBS classes available: 0` or a `configuration-error` diagnostic → rigor-doctor
+
+          Re-run `rigor skill describe` whenever you need the next step — it always
+          reflects the project's current state.
         PROMPT
       end
 

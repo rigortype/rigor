@@ -39,6 +39,7 @@ module Rigor
       "plugin" => :run_plugin,
       "playground" => :run_playground,
       "skill" => :run_skill,
+      "describe" => :run_describe,
       "show-bleedingedge" => :run_show_bleedingedge
     }.freeze
 
@@ -285,6 +286,16 @@ module Rigor
       CLI::SkillCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    # `rigor describe` — a top-level alias for `rigor skill describe`,
+    # the entry point most users reach for first. Surfaced because a
+    # bare `rigor describe` is the intuitive guess (the onboarding field
+    # trial saw it tried and met "Unknown command").
+    def run_describe
+      require_relative "cli/skill_command"
+
+      CLI::SkillCommand.new(argv: ["describe", *@argv], out: @out, err: @err).run
+    end
+
     def run_plugin
       require_relative "cli/plugin_command"
 
@@ -318,6 +329,7 @@ module Rigor
           plugins    Report activation status of every configured plugin
           plugin     Browse bundled plugin source as worked examples (list/path/print/root)
           playground Start the browser playground (requires rigor-playground gem)
+          describe   Recommend the next skill for this project (alias for `skill describe`)
           skill      Recommend the next skill + list/print bundled Agent Skills (skill describe, ...)
           show-bleedingedge  Show the bleeding-edge overlay + what your config adopts (ADR-50)
           version    Print the Rigor version

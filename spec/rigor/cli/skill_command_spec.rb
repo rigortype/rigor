@@ -65,6 +65,21 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("## Recommended next step")
       expect(out).to include("## All skills you can run next")
       expect(out).to include("## For the agent")
+      # P1-C: the agent prompt teaches check-aware routing (describe itself
+      # stays presence-only — it never runs `rigor check`).
+      expect(out).to include("refine the choice")
+      expect(out).to include("→ rigor-baseline-reduce")
+    end
+
+    it "is reachable as the top-level `rigor describe` alias" do
+      Dir.mktmpdir do |dir|
+        sub = StringIO.new
+        Dir.chdir(dir) { Rigor::CLI.new(%w[skill describe], out: sub, err: StringIO.new).run }
+        aliased = StringIO.new
+        Dir.chdir(dir) { Rigor::CLI.new(%w[describe], out: aliased, err: StringIO.new).run }
+        expect(aliased.string).to eq(sub.string)
+        expect(aliased.string).to include("# Rigor — next steps for this project")
+      end
     end
 
     it "recommends rigor-project-init when there is no Rigor config" do

@@ -133,6 +133,22 @@ RSpec.describe Rigor::Analysis::RunStats do
       expect(out).to include("Memory peak: 245.0 MB")
     end
 
+    it "warns loudly when the RBS environment is empty (failed to build)" do
+      io = StringIO.new
+      described_class.new(
+        wall_seconds: 0.5, peak_rss_bytes: 10 * 1024 * 1024,
+        target_files: 80,
+        rbs_classes_total: 0, rbs_classes_project_sig: 0, rbs_classes_bundled: 0,
+        gem_walk_classes: 0, gem_walk_gems: 0
+      ).format(io)
+
+      expect(io.string).to include("RBS classes available: 0")
+      expect(io.string).to include("WARNING: the RBS environment is empty")
+      expect(io.string).to include("signature_paths")
+      # The empty-env banner replaces the attribution rows.
+      expect(io.string).not_to include("project sig/:")
+    end
+
     it "elides the gem source-walk row when no opt-in gems contributed" do
       io = StringIO.new
       described_class.new(

@@ -144,7 +144,19 @@ module Rigor
         out.puts("#{prefix}  Ruby source files: #{@target_files}")
         out.puts("#{prefix}Type universe (symbol discovery; not analyzed for diagnostics)")
         out.puts("#{prefix}  RBS classes available: #{@rbs_classes_total}")
-        if @rbs_attribution_available
+        if @rbs_classes_total.zero?
+          # A normal run always loads the bundled core+stdlib RBS (~1300+
+          # classes), so zero means the environment failed to build (most
+          # often a duplicate declaration in `signature_paths:`) and fell
+          # back to empty — type coverage is then near-useless but the run
+          # still "succeeds". Surface it loudly so a broken setup is not
+          # read as a clean analysis (the 20260620 field trial: redmine
+          # would otherwise wire a 0-coverage check into CI).
+          out.puts("#{prefix}  WARNING: the RBS environment is empty — it failed to build or loaded no")
+          out.puts("#{prefix}           signatures, so type coverage is severely limited (most diagnostics")
+          out.puts("#{prefix}           and coverage cannot fire). Usually a duplicate declaration in")
+          out.puts("#{prefix}           `signature_paths:` — fix it and re-run; the rigor-doctor skill helps.")
+        elsif @rbs_attribution_available
           out.puts("#{prefix}    project sig/:        #{@rbs_classes_project_sig}")
           out.puts("#{prefix}    bundled (core+stdlib+gems): #{@rbs_classes_bundled}")
         elsif @rbs_classes_total.positive?

@@ -161,7 +161,12 @@ RSpec.describe Rigor::Plugin::Loader do
       registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
 
       expect(registry.plugins).to be_empty
-      expect(registry.load_errors.first.message).to include("registered multiple plugins")
+      # The error must be actionable: name the meta-gem nature and how to
+      # list the individual plugins (the onboarding field-trial trap).
+      message = registry.load_errors.first.message
+      expect(message).to include("convenience meta-gem")
+      expect(message).to match(/list the individual plugin gems/i)
+      expect(message).to include("`id:`")
     end
 
     it "resolves an explicit `id:` even when the gem registers multiple plugins" do

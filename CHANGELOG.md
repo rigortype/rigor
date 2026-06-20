@@ -29,6 +29,7 @@ cycles live in dedicated archives:
 ### Changed
 
 - **[cli]** The `target_ruby` configuration-error diagnostic now names the supported floor and where to read the right value. When a configured `target_ruby` is below Prism's minimum (e.g. `"3.0"`), the message reads *"is not supported by this Rigor build (Prism accepts 3.3.0 and newer). Set target_ruby to your project's Ruby version (>= 3.3.0) — read it from Gemfile.lock's `RUBY VERSION` or .ruby-version"* instead of a bare *"not accepted by Prism"*, so the fix is obvious without a guess-and-retry loop (the floor is probed live, not hard-coded). Surfaced by the 2026-06-20 onboarding field trial.
+- **[plugins]** The plugin load error for a convenience meta-gem (e.g. listing `plugins: [rigor-rails]`) is now actionable. Instead of a bare *"registered multiple plugins; disambiguate with an explicit `id:` field"*, it explains the gem is a meta-gem, lists the bundled plugins, and tells you to list the individual `rigor-*` plugin gems in `plugins:` (with an example) — so the intuitive-but-wrong `plugins: [rigor-rails]` no longer dead-ends. Surfaced by the 2026-06-20 onboarding field trial.
 
 ## [0.2.1] - 2026-06-19
 

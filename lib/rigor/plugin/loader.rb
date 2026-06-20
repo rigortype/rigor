@@ -183,8 +183,10 @@ module Rigor
           Plugin.registered_for(newly_registered.first)
         else
           raise LoadError.new(
-            "plugin gem #{entry[:gem].inspect} registered multiple plugins " \
-            "(#{newly_registered.sort.inspect}); disambiguate with an explicit `id:` field",
+            "plugin gem #{entry[:gem].inspect} bundles #{newly_registered.size} plugins " \
+            "(#{newly_registered.sort.inspect}) and cannot be activated as a single `plugins:` entry — " \
+            "it is a convenience meta-gem. List the individual plugin gems you want in `plugins:` " \
+            "(e.g. `rigor-#{newly_registered.min}`), or select one with an explicit `id:` field.",
             plugin_ref: entry[:gem]
           )
         end

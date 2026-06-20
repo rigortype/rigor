@@ -1,0 +1,97 @@
+# ADR-73 — SKILL-driven Rigor user experience (the `rigor-next-steps` entry point + live `rigor skill --describe`)
+
+Status: **Accepted — design ratified 2026-06-20; implementation queued (WD1–WD5 below), no code landed yet.** Establishes a single SKILL-driven entry point — `rigor-next-steps` — for "what should we do next with Rigor on this project," backed by a live, version-current `rigor skill --describe` so the distributed guidance never goes stale. Promotes the parked `rigor-protection-uplift` skill into the shipped set and settles where the user-facing SKILLs are distributed (vercel-labs/skills + the bundled gem).
+
+Grounding: the existing `rigor skill` command ([`lib/rigor/cli/skill_command.rb`](../../lib/rigor/cli/skill_command.rb), shipped v0.1.13 per [ADR-22](22-baseline-and-project-onboarding.md) WD8), the parked act-on-coverage skeleton ([`docs/design/20260616-act-on-coverage-skill.md`](../design/20260616-act-on-coverage-skill.md), [ADR-63](63-type-protection-coverage.md) WD5, pilot-validated), and [`docs/install.md`](../install.md)'s agent-facing install flow.
+
+## Context
+
+Rigor ships a small set of Agent Skills under `skills/` — `rigor-project-init`, `rigor-baseline-reduce`, `rigor-ci-setup`, `rigor-plugin-author` — and serves them, once installed, via `rigor skill list/print/path` (`SkillCommand`, `SKILLS_ROOT = <gem_root>/skills`). Three gaps keep this from being a usable, self-serve experience:
+
+1. **No single entry point.** A user (or their coding agent) who knows nothing about Rigor has no "start here." `docs/install.md` hard-codes one destination — it always hands off to `rigor-project-init` (Step 4) — and the other skills are invisible until the user already knows their names.
+2. **The guidance goes stale (陳腐化).** Any "what to do next" advice baked into a *distributed* SKILL is frozen at publish time. As Rigor grows skills and sharpens its recommendations, a copy installed into a user's repo months ago silently rots — the exact failure the maintainer flagged.
+3. **No public distribution channel for the SKILLs themselves.** They ride inside the `rigortype` gem, so an agent can reach them only *after* Ruby + the gem are installed. There is no way to drop the "start here" skill into a project that has not adopted Rigor yet — which is precisely where onboarding begins.
+
+The standing value at stake is **self-serve onboarding** (ROADMAP § "Onboarding self-serve"): a user should be able to point any coding agent at their repo and have it drive Rigor adoption end to end, with advice that is current to the installed version.
+
+## Decision
+
+Split the experience into a **thin, distributable SKILL** and a **live, gem-resident brain**, divided by one rule:
+
+> **Distribution criterion.** A piece of guidance is frozen into the distributed SKILL *only if it must run before `rigor` exists* (resolving the command, installing it). Everything that changes as Rigor evolves — the catalog of downstream skills, their descriptions, and the project-state → next-step recommendation — is emitted **live** by `rigor skill --describe` and is never copied into the SKILL.
+
+Concretely:
+
+- **`rigor-next-steps`** is the new entry-point SKILL (gem-bundled *and* vercel-labs/skills-installable). It carries only the bootstrap chain the chicken-and-egg forces into the SKILL, then delegates all routing to `rigor skill --describe`.
+- **`rigor skill --describe`** is the live brain: a cheap project-state probe → a recommended next skill → the catalog of downstream skills with their *current* frontmatter descriptions → an agent action-prompt. It ships and updates with the gem, so the routing intelligence is always version-current.
+
+### WD1 — The thin-wrapper / live-brain split (the load-bearing rule)
+
+`rigor-next-steps`'s body is the five-step bootstrap chain the maintainer specified, and nothing version-coupled:
+
+1. Resolve `rigor` on PATH (`which rigor` / `rigor --version`).
+2. If absent → follow [`docs/install.md`](../install.md) (the SKILL points at the raw GitHub URL — see WD3 for why this one step cannot be `--describe`-driven).
+3. If the project has no Rigor config (`.rigor.yml` / `.rigor.dist.yml`) → run `rigor skill print rigor-project-init` and follow it.
+4. Otherwise → run `rigor skill --describe` and route on its output: present its recommended next step, or ask the user "what would you like to do next?" and `rigor skill print <name>` the choice.
+5. Ideally, present the `--describe` recommendation proactively ("you should use `<skill>` to do X") rather than only asking.
+
+Steps 1–2 (and the presence checks in 3) are the *only* logic that may live in the distributed SKILL, because they must execute when `rigor` — and therefore `rigor skill --describe` — is unavailable. Steps 3b–5 are intentionally *delegations*, not embedded logic.
+
+### WD2 — `rigor skill --describe` contract
+
+A new mode on `SkillCommand` (a `describe` subcommand, plus the `--describe` flag spelling the maintainer requested; `run` in `lib/rigor/cli/skill_command.rb` dispatches it alongside `list` / `print` / `path`). It emits, to stdout, for a calling agent:
+
+- **Project state** — presence-only probes of the cwd: config (`.rigor.yml` / `.rigor.dist.yml`), baseline (`.rigor-baseline.yml`), `sig/`, CI wiring (`.github/workflows/*`, `.gitlab-ci.yml`). **It never runs `rigor check`** — the recommendation needs only presence signals, and a full analysis is the *downstream* skill's job.
+- **A recommended next step** — a small decision tree over those signals (no config → `rigor-project-init`; config + no CI → `rigor-ci-setup`; config + baseline → `rigor-baseline-reduce`; protection goal → `rigor-protection-uplift`; unresolved project DSL → `rigor-plugin-author`).
+- **The catalog** — every bundled skill with its frontmatter `description` (so the text is always current; `discover_skills` is extended to parse the YAML frontmatter) and the `rigor skill print <name>` to load it.
+- **An agent action-prompt** — the closing instruction that turns the report into action (the same `# `-prefixed-header convention `print` already uses, so the combined output stays markdown-parseable).
+
+Guardrail: `--describe` is **read-only and side-effect-free** — it touches no project files beyond stat-ing for presence, so an agent may run it freely at any point.
+
+### WD3 — `rigor-next-steps`'s install branch points at `docs/install.md`; install.md defers back
+
+The install step (WD1 step 2) is the one branch that cannot be `--describe`-driven — if `rigor` is not installed there is no binary to ask. So `rigor-next-steps` embeds a pointer to the raw `docs/install.md` URL (install mechanics change rarely; this is the minimal stale-able surface, accepted by necessity). Conversely, `docs/install.md` Step 4 — which today always hands off to `rigor-project-init` — is rewritten to defer to the same `rigor skill --describe` routing, so `install.md` and `rigor-next-steps` cannot diverge on "what comes after install."
+
+### WD4 — Promote `rigor-protection-uplift` into the shipped set
+
+The parked act-on-coverage skeleton ([`docs/design/20260616-act-on-coverage-skill.md`](../design/20260616-act-on-coverage-skill.md), ADR-63 WD5 — pilot-validated at +4.7pp mean protection / zero diagnostic regressions across 5 OSS repos) graduates to `skills/rigor-protection-uplift/SKILL.md` with sibling frontmatter (`license`, `metadata`). This settles the open packaging question the design doc deferred to "ADR-31's v0.2.0 external-author path": the answer is the same dual channel as every other user-facing skill (WD5) — there is no separate external-author artifact to build. The pilot record stays in the design note as grounding.
+
+### WD5 — Distribution hygiene: two channels, contributor skills hidden
+
+- **Two channels, one source.** The user-facing skills are distributed (a) via **vercel-labs/skills** — `npx skills add rigortype/rigor` (or per-skill, with `rigor-next-steps` as the documented entry), which discovers `skills/<name>/SKILL.md` straight from the repo and works *before* the gem is installed — and (b) **bundled in the `rigortype` gem**, served by `rigor skill` after install. Both read the same `skills/` tree; no second gem or repo (consistent with [ADR-31](31-contribution-and-supply-chain-policy.md)'s single-gem decision and the gemspec's existing `skills/*/SKILL.md` glob, which auto-includes the two new dirs).
+- **Hide contributor workflows.** vercel-labs/skills also discovers `.claude/skills/` — Rigor's *contributor* workflows (release-prep, ADR-author, …). Each gets `metadata.internal: true` so a bulk `npx skills add rigortype/rigor` does not ship release tooling to end users.
+- **`skills/README.md`** documents both channels, the `rigor skill --describe` entry, and the contributor/user split.
+
+## Rejected / deferred alternatives
+
+| Candidate | Status | Reason |
+| --- | --- | --- |
+| Embed the routing + recommendation logic in the distributed `rigor-next-steps` SKILL | Rejected | Freezes version-coupled advice at publish time → the staleness this ADR exists to prevent. The whole split is to keep that logic in the gem. |
+| `rigor skill --describe` runs `rigor check` / `coverage` to recommend | Rejected | Slow and side-effectful for a routing hint that needs only presence signals; the deep analysis belongs to the downstream skill the recommendation routes to. |
+| Make the entry point a `rigor` subcommand instead of a SKILL | Rejected | The entry point must work *before* `rigor` is installed (the install branch). A binary subcommand cannot bootstrap its own absence; a distributable SKILL can. |
+| A separate `rigor-skills` gem / git repo for the SKILLs | Rejected | The skills already ride in `rigortype`, and vercel-labs/skills installs from the same repo — a second artifact duplicates the source for no gain (ADR-31 single-gem). |
+| Leave `.claude/skills/` discoverable by vercel-labs/skills | Rejected | Bulk install would ship contributor-only workflows (release, ADR authoring) to end users. `metadata.internal: true` is the tool's sanctioned hide. |
+| Keep `rigor-protection-uplift` parked until a v0.2.0 external-author path is built | Superseded | This ADR *is* that decision — the external-author path is the existing dual channel; no further packaging work blocks promotion. |
+
+## Consequences
+
+Positive:
+
+- One "start here" for any agent, and a recommendation that stays current to the installed Rigor — onboarding advice can sharpen every release without re-publishing a single SKILL.
+- The SKILLs become genuinely installable (vercel-labs/skills) into projects that have not adopted Rigor yet, closing the pre-install discoverability gap.
+- `rigor-protection-uplift` finally ships; the completeness-raising loop is reachable from the entry point.
+
+Negative / carry-over:
+
+- The raw `docs/install.md` URL inside `rigor-next-steps` (WD3) is a small stale-able surface — accepted because install must precede the gem; mitigated by keeping it a pointer, not a copy.
+- `rigor skill --describe`'s output text + the new skill names become **public vocabulary frozen at v1.0 under [ADR-50](50-release-engineering-and-stability-strategy.md) WD1** — the recommendation *logic* stays free to evolve, but the command name and the skill ids are a compatibility commitment once 1.0 ships.
+- The state → skill decision tree (WD2) is a heuristic; as the skill set grows it will need tuning. It is deliberately small and additive — a wrong recommendation costs a redundant suggestion, never a false diagnostic (it is outside the FP envelope entirely).
+
+## Relationship to other ADRs
+
+- **[ADR-22](22-baseline-and-project-onboarding.md)** (baseline + project onboarding) — introduced the onboarding SKILL trio and the `rigor skill` command (WD8); this ADR puts an entry point in front of them and makes the routing live.
+- **[ADR-27](27-tool-distribution-model.md)** (tool distribution model) — governs how `rigor` itself is distributed; this ADR adds the *SKILL* distribution channel (vercel-labs/skills) on top, without a second artifact.
+- **[ADR-31](31-contribution-and-supply-chain-policy.md)** (contribution + supply-chain) — the external-author path the protection-uplift skill was queued behind; WD4/WD5 resolve it to the existing dual channel.
+- **[ADR-63](63-type-protection-coverage.md)** (type-protection coverage) — WD5's act-on-coverage layer; this ADR ships it as `rigor-protection-uplift` (WD4).
+- **[ADR-19](19-language-server-packaging.md) / [ADR-33](33-mcp-server.md)** — sibling "new `rigor` subcommand packaging" ADRs; `rigor skill --describe` follows their CLI-surface pattern.
+- **[ADR-50](50-release-engineering-and-stability-strategy.md)** (release engineering) — freezes the new CLI output + skill ids as public vocabulary at 1.0 (see Consequences).

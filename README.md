@@ -4,20 +4,25 @@
 [![GitHub License](https://img.shields.io/github/license/rigortype/rigor)](https://github.com/rigortype/rigor/blob/master/LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rigortype/rigor)
 
-**Type-aware bug finding for Ruby — zero annotations, and a
-zero-false-positive bar enforced against real codebases.** Run one
-command over the code you already have, and trust every line of
-output.
+**Type-aware bug finding for Ruby — no annotations required, and a
+zero-false-positive bar enforced against real codebases.** Built on
+RBS: Rigor infers types from the values your code produces, reads any
+RBS you write as an authoritative source, and generates more — but
+needs none to start. Run one command over the code you already have,
+and trust every line of output.
 
 ```sh
-gem install rigortype && rigor check app lib
+mise use -g ruby@4.0 gem:rigortype   # install the tool, globally, on Ruby 4.0
+rigor check app lib                  # find bugs in the code you already have
 ```
 
-(The tool itself runs on Ruby 4.0; your project can stay on whatever
-Ruby it targets — see [Get started](#get-started-in-one-prompt).)
+(The tool runs on Ruby 4.0 while your project keeps its own Ruby; the
+global `-g` install keeps it off your project's pins. See
+[Get started](#get-started-in-one-prompt).)
 
-No type annotations to write or maintain, no runtime dependency, no
-changes to your code. Rigor parses Ruby with
+No annotations required, no runtime dependency, no changes to your
+code — and any RBS you do add, Rigor reads and uses. Rigor parses Ruby
+with
 [Prism](https://github.com/ruby/prism) and runs a flow-sensitive
 inference engine that reasons about the *values* your expressions
 produce — not just their classes. It catches undefined methods (and
@@ -106,13 +111,14 @@ Bahasa Indonesia, Polski, Українська, Русский, Română, Türk�
 the [installation guide](https://rigor.typedduck.fail/reference/manual/01-installation/#set-up-in-your-language).
 
 **Manual install** — Rigor is a tool, not a library: install it
-independently, **not** in your project's `Gemfile`. It runs on Ruby
-4.0 regardless of which Ruby your project targets
-([`mise`](https://mise.jdx.dev/) provisions both, pinned per project):
+independently, **not** in your project's `Gemfile`. Install it
+**globally** so `rigor` is on your `PATH` everywhere, running on Ruby
+4.0 while each project keeps its own Ruby — the `-g` install lives in
+your global [`mise`](https://mise.jdx.dev/) config and never touches a
+project's pins:
 
 ```sh
-mise use ruby@4.0
-mise use gem:rigortype     # or: gem install rigortype
+mise use -g ruby@4.0 gem:rigortype     # or: gem install rigortype
 ```
 
 The gem is named `rigortype` (the name `rigor` was taken on RubyGems);
@@ -201,6 +207,27 @@ walks the whole type model; the
 [type specification](https://rigor.typedduck.fail/reference/type-specification/)
 and [user manual](https://rigor.typedduck.fail/reference/manual/) are
 the reference companions.
+
+**Stuck on Rigor — or just curious how it works? Ask your agent in
+plain language.** The whole skill surface collapses to two an agent (and
+you) need to remember: **`rigor-next-steps`** ("what should we do
+next?") and **`rigor-ask`** ("answer this about Rigor"). Rigor is niche
+and fast-moving, so a model's *remembered* answer is often stale —
+`rigor-ask` **investigates instead**: it reads Rigor's own handbook and
+manual (bundled in the gem, served **offline** by `rigor docs`, always
+matching your installed version) *and* runs Rigor over your actual code
+(`rigor check` / `annotate` / `type-of`), then answers from what it
+found — citing the page, or the inferred type. Ask *"why is this
+flagged?"*, *"how does narrowing work?"*, *"how is it different from
+Sorbet?"*, *"does it handle Sidekiq?"*, or *"how do I type this
+method?"* — you only have to remember the question, never the command.
+To browse the docs yourself:
+
+```sh
+rigor docs                        # the offline doc index
+rigor docs handbook/03-narrowing  # any handbook or manual page by name
+rigor docs --list                 # list every bundled page
+```
 
 ## Status
 

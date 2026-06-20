@@ -480,3 +480,37 @@ inputs (`"Ruby::VERSION"` etc.) `const_defined?` / `const_get` parse the `"::"` 
 resolution is identical; distinguishing it needs a contrived `inherit=false`-sensitive constant
 (a brittle, low-value test). `static_return_refinements`, `configuration/dependencies`, and
 `flow_contribution/merge_result` measured at their floor.
+
+## Fourth batch + the CLI-orchestration integration-blindness finding (2026-06-21)
+
+A fourth fused batch (eleven files: `analysis/.../walker`, six `cli/*_command`,
+`environment/{bundle_sig_discovery,rbs_collection_discovery}`, `flow_contribution`, …) returned
+**231 holes** — but **only two were genuine unit gaps**. The dominant finding is methodological:
+
+**The fused harness's per-file test axis runs only the convention-mapped *unit* spec
+(`lib/rigor/cli/X_command.rb → spec/rigor/cli/X_command_spec.rb`), never the integration / CLI-
+dispatcher specs.** CLI command objects are orchestration whose `run` paths are deliberately
+exercised *through the dispatcher* (and `make coverage` for the precision path), with their unit
+specs scoped to one mode. So a command's other-mode branches read as "unprotected" even though an
+integration spec drives them. The ~190 `cli/*_command` survivors (`#puts` / `#usage_error` help
+and message lines, mode-specific dispatch in `docs`/`plugin`/`skill`/`trace`/`triage`/
+`show_bleedingedge`) are **predominantly this integration-blindness, NOT genuine unit gaps** —
+closing them wholesale would duplicate integration coverage (the FP-discipline-applied-to-testing
+"don't add low-value assertions to move a metric"). The selective exception worth a unit safety
+net is a command's *default* mode:
+
+- `cli/coverage_command` (37 → 2): the **default type-precision** mode and the **static Tier 1
+  `--protection`** mode had no rspec safety net (only `--protection --mutation` / `--with-tests`
+  were unit-tested), so their whole run dispatch survived. Added precision + static-protection
+  cases incl. both `--threshold` exit paths. The 2 residual `.on` `nil_inject` survivors are flag
+  **help-text** mutations (flag *names* are pinned by the passing flag tests; descriptions are
+  not behaviourally asserted) — an equivalent-mutant floor.
+- `analysis/.../walker` (2 → 0): a pure-logic file (NOT orchestration), genuinely unit-testable —
+  the two opaque-receiver `walk_children` fallbacks (`descend_class_or_module` on a body-less /
+  dynamically-named class; `descend_singleton_class` on `class << expr` where expr ≠ self) were
+  untested. Added fake-gem cases.
+
+`environment/{bundle_sig_discovery,rbs_collection_discovery}` and `flow_contribution` measured at
+their floor. **Takeaway for future batches: triage `cli/*_command` survivors against the
+dispatcher/integration specs before treating them as gaps; add a unit test only for a command's
+untested *default* mode, not its message/help tail.**

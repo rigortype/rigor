@@ -1,7 +1,7 @@
 ---
 name: rigor-next-steps
 description: |
-  The starting point for using Rigor on a project: resolve the `rigor` command (install it if missing), set the project up if it has no Rigor config, then ask `rigor skill describe` what to do next and route to the matching skill. Triggers: "what should we do next with Rigor?", "I want to use Rigor on this project", "help me move this project forward with Rigor", "where do I start with Rigor?", or any Rigor request where the concrete next step is unclear. NOT a replacement for the task-specific skills it routes to (rigor-project-init, rigor-ci-setup, rigor-baseline-reduce, rigor-protection-uplift, rigor-plugin-author) — it hands off to them.
+  Route a project to its next Rigor step from a single entry point: resolve the `rigor` command (install it if missing), onboard the project if it has no Rigor config, then ask `rigor skill describe` what to do next and hand off to the matching skill. Triggers: "what should we do next with Rigor?", "I want to use Rigor on this project", "help me move this project forward with Rigor", "where do I start with Rigor?". NOT a replacement for the task-specific skills it routes to — it hands off to them.
 license: MPL-2.0
 metadata:
   version: 0.1.0

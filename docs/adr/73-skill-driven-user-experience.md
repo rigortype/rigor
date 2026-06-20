@@ -135,6 +135,56 @@ when the user's goal or the diagnostics call for them. A skill that
 cannot expose a reliable presence signal is a catalogue entry, never a
 forced recommendation.
 
+## Field-trial follow-ups (2026-06-20)
+
+The first real-project exercise of this UX — conference-app (Rails 8.1) +
+a 6-project rigor-survey Sonnet sweep, recorded in
+[`docs/notes/20260620-skill-driven-onboarding-dogfood.md`](../notes/20260620-skill-driven-onboarding-dogfood.md)
+— confirmed the design (the presence probe was accurate 7/7, the routing
+advanced, `coverage --protection` was the most-praised surface) and
+surfaced a set of UX fixes.
+
+**Landed from the trial** (engine/CLI UX, no WD change): the `target_ruby`
+diagnostic now names the supported floor + where to read the right value;
+the convenience-meta-gem (`rigor-rails`) load error is actionable; `rigor
+check` warn-and-skips a missing path among valid ones; `rigor describe` is
+a top-level alias; and **WD2's `describe` agent-prompt now teaches
+check-aware routing** — the recommendation stays presence-only, but the
+"For the agent" section tells the agent to refine the choice from the
+`rigor check` findings it already has (errors → `rigor-baseline-reduce`,
+a monkey-patch cluster → `rigor-monkeypatch-resolve`, Dynamic framework
+calls with no plugins → `rigor-plugin-tune`, `RBS classes available: 0` /
+a `configuration-error` → `rigor-doctor`). This is the trial's headline
+finding addressed **without breaking WD2** — the intelligence lives where
+the check result already is (the agent), not in a `describe` that runs
+analysis.
+
+**Open decisions** (recorded for ratification; the trial floated them):
+
+- **Headline check-awareness (revisits WD2).** Should the *recommendation
+  line itself* — not just the agent-prompt — factor in check results?
+  Two WD2-preserving shapes: (a) read the existing `.rigor/` cache's last
+  `check` result and route on its error clusters (no new analysis, still
+  side-effect-free); (b) a `rigor skill describe --deep` opt-in that runs
+  a scoped check first (default stays pure). Criterion if pursued: never
+  make the *default* `describe` run `check`. **Deferred** — the landed
+  agent-prompt routing may suffice; revisit if the headline itself proves
+  to mislead in practice.
+- **`rbs-setup` priority softening.** The trial found the `rbs-setup`
+  headline over-recommended: deprioritise it when the no-RBS gems are all
+  in the `development`/`test` groups, when a Rails app has unconfigured
+  Rails plugins (prefer `rigor-plugin-tune`), and on already-configured
+  projects (prefer `ci`/`baseline` before a network-bound `rbs collection
+  install`). A decision-tree refinement that overlaps the headline-routing
+  question above; **deferred** pending that direction.
+- **Broken-`sig/` blind spot (clear-win, queued).** `describe` reports
+  "sig/ present" even when the RBS env fails to build (a
+  `DuplicatedDeclarationError` → `RBS classes available: 0` → hollow
+  analysis; redmine). Queued: a `check`/`coverage` banner when the env is
+  empty, and promoting `rigor-doctor` when structural issues are
+  detectable. Does not revisit WD2 (it is a check-time surfacing, not a
+  describe-time analysis).
+
 ## Relationship to other ADRs
 
 - **[ADR-22](22-baseline-and-project-onboarding.md)** (baseline + project onboarding) — introduced the onboarding SKILL trio and the `rigor skill` command (WD8); this ADR puts an entry point in front of them and makes the routing live.

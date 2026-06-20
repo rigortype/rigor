@@ -443,3 +443,40 @@ files, both spec-only fixes, `make verify` green:
 `builtins/regex_refinement`, `analysis/self_call_resolution_recorder`,
 `configuration/severity_profile`, `environment/rbs_coverage_report`, `flow_contribution/fact`,
 and `inference/coverage_scanner` measured at their floor (already fully protected).
+
+A second 2026-06-21 batch over eight more files (`builtins/predefined_constant_refinements`,
+`builtins/static_return_refinements`, `configuration/dependencies`, `environment/class_registry`,
+`environment/reflection`, `flow_contribution/conflict`, `flow_contribution/merge_result`,
+`inference/builtins/method_catalog`) — four closed to zero, the rest at floor, all spec-only,
+`make verify` green:
+
+- `inference/builtins/method_catalog` (4-after-de-noise → 0): the whole `resolve_alias_entry`
+  path (the `aliases` section mapping an alias selector to its canonical target) and `reset!`
+  were unexercised, and the `FOLDABLE_PURITIES` Set gating `safe_for_folding?` was unpinned
+  (no test asserted leaf / trivial / leaf_when_numeric fold while a `dispatch` purity does not).
+  A temp-YAML catalog (via a `with_catalog` helper — NOT an `around`+`@path`, which trips
+  `RSpec/InstanceVariable`) drives the alias hits, the dangling-target and singleton-bucket
+  non-resolution, `reset!`, and one method per foldable purity plus a non-foldable one. The
+  line-27 `Set[...]` constant counts as data per the de-noising rule but DID gate behaviour,
+  so pinning the purity contract was worth it.
+- `environment/class_registry` (5 → 0): `register`'s two guard raises (non-Module naming the
+  class; anonymous name-less class) and the entire `class_ordering` / `normalize_name` path
+  (equal / subclass / superclass / disjoint / unknown, plus the leading-`::` strip and Symbol
+  coercion) were untested — the spec only covered `registered?` / `nominal_for_name`. `register`
+  tests use a fresh (non-frozen) `new` registry; ordering uses the `default` built-ins.
+- `flow_contribution/conflict` (1 → floor): `to_h` serialises each provenance as `p.to_h` when
+  it responds, else `p.to_s`; the to_s fallback (a provenance without `#to_h`) was untested.
+  Residual line-68 `require_relative "../analysis/diagnostic" unless defined?(…)` is an
+  equivalent mutant — Diagnostic is already loaded in-test, so the guard short-circuits and the
+  require never executes.
+- `environment/reflection` (1 → 0): `freeze_set`'s `else raise ArgumentError` guard (a
+  `known_class_names` that is not Set / Array / Hash) was never driven — `for_project` always
+  passes a Set. A direct-construction case asserts the raise (naming the type) plus the
+  Array→frozen-Set happy path.
+
+`predefined_constant_refinements`'s `inspect_runtime_string` line-114 `name.split("::")`
+`nil_inject` is an **equivalent mutant**: `split(nil)` splits on whitespace, but for the test
+inputs (`"Ruby::VERSION"` etc.) `const_defined?` / `const_get` parse the `"::"` themselves, so
+resolution is identical; distinguishing it needs a contrived `inherit=false`-sensitive constant
+(a brittle, low-value test). `static_return_refinements`, `configuration/dependencies`, and
+`flow_contribution/merge_result` measured at their floor.

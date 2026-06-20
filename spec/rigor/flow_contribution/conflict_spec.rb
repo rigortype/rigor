@@ -44,6 +44,17 @@ RSpec.describe Rigor::FlowContribution::Conflict do
       expect(h["sources"].first[:source_family]).to eq(:builtin)
       expect(h["message"]).to eq("boom")
     end
+
+    it "falls back to to_s for a provenance that does not respond to to_h" do
+      # A provenance without #to_h (a bare label) serialises via #to_s.
+      conflict = described_class.new(
+        target: :return, edge: :normal, kind: :return_type,
+        reason: :return_type_collapse,
+        provenances: ["raw-source"],
+        message: "boom"
+      )
+      expect(conflict.to_h["sources"]).to eq(["raw-source"])
+    end
   end
 
   describe "#to_diagnostic (v0.1.0 slice 5-C)" do

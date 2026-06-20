@@ -22,6 +22,24 @@ RSpec.describe Rigor::Environment::Reflection do
       expect(reflection.constant_types).to be_frozen
       expect(reflection.ancestor_names).to be_frozen
     end
+
+    it "accepts a Set / Array / Hash for known_class_names and freezes it to a Set" do
+      built = described_class.new(
+        known_class_names: %w[Foo Bar], instance_definitions: {}, singleton_definitions: {},
+        type_param_names: {}, constant_types: {}, ancestor_names: {}
+      )
+      expect(built.known_class_names).to eq(Set["Foo", "Bar"])
+      expect(built.known_class_names).to be_frozen
+    end
+
+    it "raises ArgumentError naming the type when known_class_names is not a Set / Array / Hash" do
+      expect do
+        described_class.new(
+          known_class_names: 42, instance_definitions: {}, singleton_definitions: {},
+          type_param_names: {}, constant_types: {}, ancestor_names: {}
+        )
+      end.to raise_error(ArgumentError, %r{expected Set / Array / Hash, got Integer})
+    end
   end
 
   describe "#class_known?" do

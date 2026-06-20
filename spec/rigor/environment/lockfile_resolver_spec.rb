@@ -108,6 +108,36 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
       expect(result).to eq({})
     end
+
+    it "warns to stderr (naming the path and error) when the parser raises" do
+      # Deterministically drive the malformed-lockfile rescue: a real
+      # corrupt body's failure mode is Bundler-version-dependent, so
+      # force the raise and assert the warning the user relies on to
+      # learn why their lockfile was ignored.
+      require "bundler"
+      path = write_lockfile(simple_lockfile_body)
+      allow(Bundler::LockfileParser).to receive(:new).and_raise(RuntimeError.new("boom"))
+
+      result = nil
+      expect do
+        result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      end.to output(/ignoring malformed .*Gemfile\.lock.*RuntimeError.*boom/).to_stderr
+      expect(result).to eq({})
+    end
+
+    it "warns to stderr and returns empty when bundler cannot be required" do
+      # The LoadError rescue: bundler is always present in the test
+      # env, so stub the require to drive the branch that tells the
+      # user their lockfile could not be read.
+      path = write_lockfile(simple_lockfile_body)
+      allow(described_class).to receive(:require).with("bundler").and_raise(LoadError.new("no bundler"))
+
+      result = nil
+      expect do
+        result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      end.to output(/cannot read .*Gemfile\.lock.*bundler is not available.*no bundler/).to_stderr
+      expect(result).to eq({})
+    end
   end
 
   describe ".locked_gems with platform-tagged entries" do

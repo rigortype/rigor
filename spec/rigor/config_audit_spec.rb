@@ -92,7 +92,9 @@ RSpec.describe Rigor::ConfigAudit do
 
       bp = warnings.find { |w| w.kind == :bundler_bundle_path }
       expect(bp).not_to be_nil
-      expect(bp.message).to include("is not a directory")
+      # Pin the config-key label, not just the descriptor, so the message
+      # names which setting to fix.
+      expect(bp.message).to include("bundler.bundle_path").and include("is not a directory")
     end
 
     it "flags an explicit bundler.lockfile that does not exist" do
@@ -100,7 +102,7 @@ RSpec.describe Rigor::ConfigAudit do
 
       lf = warnings.find { |w| w.kind == :bundler_lockfile }
       expect(lf).not_to be_nil
-      expect(lf.message).to include("does not exist")
+      expect(lf.message).to include("bundler.lockfile").and include("does not exist")
     end
 
     it "flags an explicit rbs_collection.lockfile that does not exist" do
@@ -108,6 +110,7 @@ RSpec.describe Rigor::ConfigAudit do
 
       clf = warnings.find { |w| w.kind == :rbs_collection_lockfile }
       expect(clf).not_to be_nil
+      expect(clf.message).to include("rbs_collection.lockfile").and include("does not exist")
     end
 
     it "does not flag an explicit bundler.lockfile that exists" do

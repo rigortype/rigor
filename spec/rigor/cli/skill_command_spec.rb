@@ -138,6 +138,30 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("Community RBS:  collection installed")
     end
 
+    # NB: assert on the recommendation *reason* (unique to the headline),
+    # not the bare skill name — the "For the agent" routing block also
+    # mentions `→ rigor-plugin-tune` as a conditional hint.
+    it "recommends rigor-plugin-tune for a configured Rails app with no Rails plugins enabled" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.4'\nplugins:\n  - rigor-rbs-inline\n",
+          "Gemfile.lock" => "GEM\n  specs:\n    railties (8.0.0)\n"
+        }
+      )
+      expect(out).to include("→ rigor-plugin-tune — Rails is in your Gemfile.lock")
+    end
+
+    it "does not recommend rigor-plugin-tune once a Rails plugin is enabled" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.4'\nplugins:\n  - rigor-activerecord\n",
+          "Gemfile.lock" => "GEM\n  specs:\n    railties (8.0.0)\n"
+        }
+      )
+      expect(out).not_to include("→ rigor-plugin-tune — Rails is in your Gemfile.lock")
+      expect(out).to include("→ rigor-rbs-setup —")
+    end
+
     it "recommends rigor-editor-setup when an editor config lacks Rigor LSP wiring" do
       _status, out, = describe_in(
         {

@@ -171,12 +171,16 @@ analysis.
   agent-prompt routing may suffice; revisit if the headline itself proves
   to mislead in practice.
 - **`rbs-setup` priority softening.** The trial found the `rbs-setup`
-  headline over-recommended: deprioritise it when the no-RBS gems are all
-  in the `development`/`test` groups, when a Rails app has unconfigured
-  Rails plugins (prefer `rigor-plugin-tune`), and on already-configured
-  projects (prefer `ci`/`baseline` before a network-bound `rbs collection
-  install`). A decision-tree refinement that overlaps the headline-routing
-  question above; **deferred** pending that direction.
+  headline over-recommended. **Landed 2026-06-20:** a configured Rails
+  project with no Rails plugins enabled now recommends `rigor-plugin-tune`
+  ahead of `rbs-setup` (presence-only — Rails in `Gemfile.lock` + no
+  `rigor-rails-*` plugin in the config; the strap case). The remaining
+  cases — deprioritise when the no-RBS gems are all `development`/`test`,
+  and prefer `ci`/`baseline` on a configured project before a
+  network-bound `rbs collection install` — need to know whether the
+  untyped gems actually hurt *this* project's analysis, so they fold into
+  the headline check-awareness work above rather than more presence
+  heuristics.
 - **Broken-`sig/` blind spot (clear-win, queued).** `describe` reports
   "sig/ present" even when the RBS env fails to build (a
   `DuplicatedDeclarationError` → `RBS classes available: 0` → hollow

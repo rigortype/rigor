@@ -4,93 +4,75 @@ require "yaml"
 
 module Rigor
   class CLI
-    # Builds the `rigor skill describe` report (ADR-73): a cheap,
-    # presence-only project-state probe, a recommended next skill, and
-    # the live catalogue of bundled skills with their current frontmatter
-    # descriptions. Extracted from {SkillCommand} so the command stays a
-    # thin dispatcher and this — the "live brain" — owns the routing.
-    #
-    # It runs no analysis: the recommendation needs only presence
-    # signals, and a full check is the downstream skill's job. The report
-    # is read-only (it stats files and opens only the CI configs), so an
-    # agent can run it freely at any point.
-    class SkillDescribe
-      # Config / baseline filenames the state probe stats for.
-      # `CONFIG_FILENAMES` mirrors `Configuration::DISCOVERY_ORDER`
-      # (developer-local override first, committed default second) so the
-      # probe agrees with what `rigor check` would auto-discover.
+    # The presence-only project-state probe behind `rigor skill describe`
+    # (ADR-73 WD2). It stats files and opens only config / CI / lockfiles
+    # — it runs no analysis — so it is cheap and side-effect-free, and an
+    # agent can run it freely at any point. Split from {SkillDescribe} so
+    # the routing/rendering class stays focused.
+    class ProjectStateProbe
+      # Config / baseline filenames the probe stats for. `CONFIG_FILENAMES`
+      # mirrors `Configuration::DISCOVERY_ORDER` (developer-local override
+      # first, committed default second) so the probe agrees with what
+      # `rigor check` would auto-discover.
       CONFIG_FILENAMES = %w[.rigor.yml .rigor.dist.yml].freeze
       BASELINE_FILENAME = ".rigor-baseline.yml"
-      # `rbs collection install`'s lockfile — Rigor auto-detects it at
-      # the project root and feeds each gem's community RBS into the
-      # signature paths, so its presence is the signal that the gem-RBS
-      # gap has been addressed.
+      # `rbs collection install`'s lockfile — Rigor auto-detects it at the
+      # project root and feeds each gem's community RBS into the signature
+      # paths, so its presence is the signal that the gem-RBS gap has been
+      # addressed.
       RBS_COLLECTION_LOCKFILE = "rbs_collection.lock.yaml"
 
-      # The entry-point SKILL itself — excluded from the catalogue
-      # because it is the skill being run, not a destination.
-      ENTRY_POINT_SKILL = "rigor-next-steps"
-
-      # Adoption-journey order for the catalogue and the order the
-      # recommendation decision tree walks.
-      CATALOG_ORDER = %w[
-        rigor-project-init
-        rigor-rbs-setup
-        rigor-ci-setup
-        rigor-baseline-reduce
-        rigor-monkeypatch-resolve
-        rigor-editor-setup
-        rigor-mcp-setup
-        rigor-protection-uplift
-        rigor-plugin-tune
-        rigor-plugin-author
-        rigor-upgrade
-        rigor-doctor
+      # `Gemfile.lock` substrings that mark a Rails app, and the bundled
+      # Rails-family plugin ids — used to spot a configured Rails project
+      # that has not enabled any Rails plugin (a `rigor-plugin-tune` cue).
+      RAILS_LOCK_MARKERS = %w[railties actionpack activerecord actioncable].freeze
+      RAILS_PLUGIN_MARKERS = %w[
+        rigor-activerecord rigor-actionpack rigor-actionmailer rigor-activejob
+        rigor-rails-routes rigor-rails-i18n rigor-actioncable rigor-activestorage rigor-rails
       ].freeze
 
-      # @param skills [Array<Hash>] discovered skills, each `{name:, path:}`.
-      # @param root [String] project root to probe (defaults to the cwd).
-      def initialize(skills:, root: Dir.pwd)
-        @skills = skills
+      def initialize(root)
         @root = root
       end
 
-      # @return [String] the full describe report.
-      def render
-        catalog = catalog_skills
-        state = project_state
-        recommendation = recommend(state, catalog)
-        [
-          title,
-          state_section(state),
-          recommendation_section(recommendation),
-          catalog_section(catalog),
-          agent_prompt(recommendation)
-        ].join("\n")
-      end
-
-      private
-
-      # The skills offered as "what to do next", in adoption-journey
-      # order. The entry-point skill is excluded, and unknown skills sort
-      # after the known journey, alphabetically.
-      def catalog_skills
-        @skills
-          .reject { |skill| skill.fetch(:name) == ENTRY_POINT_SKILL }
-          .sort_by { |skill| [CATALOG_ORDER.index(skill.fetch(:name)) || CATALOG_ORDER.size, skill.fetch(:name)] }
-      end
-
-      def project_state
+      # @return [Hash] the presence-only state the recommendation routes on.
+      def to_h
+        config = CONFIG_FILENAMES.find { |name| File.file?(File.join(@root, name)) }
         {
-          config: CONFIG_FILENAMES.find { |name| File.file?(File.join(@root, name)) },
+          config: config,
           baseline: File.file?(File.join(@root, BASELINE_FILENAME)),
           sig: File.directory?(File.join(@root, "sig")),
           gems: File.file?(File.join(@root, "Gemfile.lock")),
           rbs_collection: File.file?(File.join(@root, RBS_COLLECTION_LOCKFILE)),
+          rails_unconfigured: rails_unconfigured?(config),
           ci: ci_state,
           editor: editor_state,
           mcp: mcp_state
         }
+      end
+
+      private
+
+      # True when Rails is in `Gemfile.lock` but the (present) config
+      # enables no Rails plugin — so `rigor-plugin-tune` (wiring the
+      # ActiveRecord / routes / i18n plugins) buys more than community RBS
+      # would (the 20260620 field trial's strap case). Only fires on an
+      # already-configured project; an un-configured Rails app routes to
+      # `rigor-project-init`, which selects the plugins itself.
+      def rails_unconfigured?(config)
+        return false if config.nil?
+
+        lock = File.join(@root, "Gemfile.lock")
+        return false unless File.file?(lock) && file_mentions_any?(lock, RAILS_LOCK_MARKERS)
+
+        !file_mentions_any?(File.join(@root, config), RAILS_PLUGIN_MARKERS)
+      end
+
+      def file_mentions_any?(path, markers)
+        content = File.read(path)
+        markers.any? { |marker| content.include?(marker) }
+      rescue StandardError
+        false
       end
 
       # `:wired` (a CI config mentions `rigor`), `:unwired` (a CI config
@@ -143,6 +125,66 @@ module Rigor
         files << gitlab if File.file?(gitlab)
         files
       end
+    end
+
+    # Builds the `rigor skill describe` report (ADR-73): a {ProjectStateProbe}
+    # snapshot, a recommended next skill, and the live catalogue of bundled
+    # skills with their current frontmatter descriptions. Extracted from
+    # {SkillCommand} so the command stays a thin dispatcher and this — the
+    # "live brain" — owns the routing.
+    class SkillDescribe
+      # The entry-point SKILL itself — excluded from the catalogue because
+      # it is the skill being run, not a destination.
+      ENTRY_POINT_SKILL = "rigor-next-steps"
+
+      # Adoption-journey order for the catalogue and the order the
+      # recommendation decision tree walks.
+      CATALOG_ORDER = %w[
+        rigor-project-init
+        rigor-rbs-setup
+        rigor-ci-setup
+        rigor-baseline-reduce
+        rigor-monkeypatch-resolve
+        rigor-editor-setup
+        rigor-mcp-setup
+        rigor-protection-uplift
+        rigor-plugin-tune
+        rigor-plugin-author
+        rigor-upgrade
+        rigor-doctor
+      ].freeze
+
+      # @param skills [Array<Hash>] discovered skills, each `{name:, path:}`.
+      # @param root [String] project root to probe (defaults to the cwd).
+      def initialize(skills:, root: Dir.pwd)
+        @skills = skills
+        @root = root
+      end
+
+      # @return [String] the full describe report.
+      def render
+        catalog = catalog_skills
+        state = ProjectStateProbe.new(@root).to_h
+        recommendation = recommend(state, catalog)
+        [
+          title,
+          state_section(state),
+          recommendation_section(recommendation),
+          catalog_section(catalog),
+          agent_prompt(recommendation)
+        ].join("\n")
+      end
+
+      private
+
+      # The skills offered as "what to do next", in adoption-journey order.
+      # The entry-point skill is excluded, and unknown skills sort after
+      # the known journey, alphabetically.
+      def catalog_skills
+        @skills
+          .reject { |skill| skill.fetch(:name) == ENTRY_POINT_SKILL }
+          .sort_by { |skill| [CATALOG_ORDER.index(skill.fetch(:name)) || CATALOG_ORDER.size, skill.fetch(:name)] }
+      end
 
       # The decision tree (ADR-73 WD2). Returns `{ skill:, reason: }` for
       # the recommended next step, or nil when no catalogue skill matches.
@@ -155,6 +197,10 @@ module Rigor
       def recommended_name_and_reason(state)
         if state.fetch(:config).nil?
           ["rigor-project-init", "this project has no Rigor configuration yet — start here."]
+        elsif state.fetch(:rails_unconfigured)
+          ["rigor-plugin-tune",
+           "Rails is in your Gemfile.lock but no Rails plugins are enabled — wire them so " \
+           "ActiveRecord / routes / i18n calls resolve (a bigger win here than community RBS)."]
         elsif state.fetch(:gems) && !state.fetch(:rbs_collection)
           ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
         elsif state.fetch(:ci) != :wired
@@ -205,7 +251,7 @@ module Rigor
         <<~STATE
           ## Project state
           - Config file:    #{state.fetch(:config) || 'none (no .rigor.yml / .rigor.dist.yml)'}
-          - Baseline:       #{state.fetch(:baseline) ? BASELINE_FILENAME : 'none'}
+          - Baseline:       #{state.fetch(:baseline) ? '.rigor-baseline.yml' : 'none'}
           - Project sig/:   #{state.fetch(:sig) ? 'present' : 'none'}
           - Community RBS:  #{rbs}
           - CI integration: #{ci}
@@ -261,9 +307,9 @@ module Rigor
       end
 
       # The one-line essence of a skill's frontmatter `description`, read
-      # live from the SKILL.md so the catalogue can never go stale
-      # relative to the shipped skill. Drops the `Triggers:` / `NOT for`
-      # tail and caps the length.
+      # live from the SKILL.md so the catalogue can never go stale relative
+      # to the shipped skill. Drops the `Triggers:` / `NOT for` tail and
+      # caps the length.
       def catalog_blurb(path)
         text = frontmatter(path).fetch("description", "").to_s.strip.tr("\n", " ").squeeze(" ")
         head = text.split(/\s*Triggers?:/, 2).first.to_s.strip
@@ -277,9 +323,9 @@ module Rigor
         "#{(text[0, limit] || '').rstrip}…"
       end
 
-      # Parse a SKILL.md's leading `---`-delimited YAML frontmatter.
-      # Returns {} on any missing or malformed block so the catalogue
-      # degrades to a name-only entry rather than raising.
+      # Parse a SKILL.md's leading `---`-delimited YAML frontmatter. Returns
+      # {} on any missing or malformed block so the catalogue degrades to a
+      # name-only entry rather than raising.
       def frontmatter(path)
         text = File.read(path)
         return {} unless text.start_with?("---\n")

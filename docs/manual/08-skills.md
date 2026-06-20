@@ -8,20 +8,38 @@ agent works inside a project that has Rigor available.
 Skills are optional. Everything they do, you can do by hand with the
 commands in this manual; a skill drives the workflow end to end.
 
-## Start here — `rigor-next-steps`
+## Start here — two skills to remember
 
-`rigor-next-steps` is the single entry point: hand it to an agent and
-it resolves the `rigor` command (installing it if missing), onboards an
-unconfigured project, then asks `rigor skill describe` what to do next
-and routes to the matching skill below. The end-to-end workflow it
-drives is [Driving project improvement with `rigor-next-steps`](17-driving-improvement.md).
+You only ever need to remember two skills; the rest are reached through
+them.
 
-If you do not know which skill you need, start with this one.
+- **`rigor-next-steps`** — *"what should we do next?"* The single entry
+  point: hand it to an agent and it resolves the `rigor` command
+  (installing it if missing), onboards an unconfigured project, then asks
+  `rigor skill describe` what to do next and routes to the matching skill
+  in the catalogue below. The end-to-end workflow it drives is
+  [Driving project improvement with `rigor-next-steps`](17-driving-improvement.md).
+- **`rigor-ask`** — *"answer this about Rigor."* Ask anything in plain
+  language — why a diagnostic fired or whether it's a false positive, how
+  narrowing / refinements / shapes work, what a flag or config key does,
+  how Rigor compares to Sorbet / Steep / mypy / PHPStan, whether it
+  handles a given gem or framework, or how to type a method. Rigor is
+  niche and version-specific, so instead of answering from memory the
+  agent **investigates**: it reads the bundled handbook and manual
+  **offline** via [`rigor docs`](02-cli-reference.md#rigor-docs) (plus
+  `rigor explain` for a diagnostic id) *and*, for a question about your
+  code, runs `rigor check` / `annotate` / `type-of` — then answers from
+  the page or the inferred type. You never have to remember the command,
+  just the question. Available at any point.
+
+If you do not know which skill you need, start with `rigor-next-steps`.
 
 ## The catalogue
 
 Every skill below is a destination `rigor-next-steps` (via
-`rigor skill describe`) can route you to.
+`rigor skill describe`) can route you to. (`rigor-ask`, above, is the
+always-available question skill rather than a routed destination, so it
+is not repeated here.)
 
 ### Onboarding and foundation
 

@@ -14,12 +14,25 @@ demand. They reference only the public `rigor` CLI surface.
 > workflows under [`.claude/skills/`](../.claude/skills/), marked
 > `metadata.internal: true` so they are not installed for end users.
 
-## Start here — `rigor-next-steps`
+## Two skills to remember
 
-If you do not know which skill you need, start with **`rigor-next-steps`**.
-It is the entry point: it resolves the `rigor` command (installing it if
-missing), onboards the project if it has no config, then asks the live
-binary what to do next:
+You only ever need to remember two; the rest are reached through them.
+
+- **`rigor-next-steps`** — *"what should we do next?"* The entry point: it
+  resolves the `rigor` command (installing it if missing), onboards the
+  project if it has no config, then asks the live binary what to do next
+  and routes to the right skill below.
+- **`rigor-ask`** — *"answer this about Rigor."* Ask anything in plain
+  language — why a diagnostic fired or whether it's a false positive, how
+  the type model works, what a flag or config key does, how Rigor compares
+  to Sorbet / Steep / mypy, whether it handles your gem or framework, or
+  how to type a method. Rigor is niche and version-specific, so rather
+  than answer from memory it **investigates**: it reads Rigor's own
+  handbook and manual **offline** via `rigor docs` *and* runs Rigor over
+  your code (`rigor check` / `annotate` / `type-of`), then answers from
+  the page or the inferred type. You only have to remember the question.
+
+`rigor-next-steps` runs `rigor skill describe`:
 
 ```sh
 rigor skill describe
@@ -37,6 +50,7 @@ your installed version rather than being frozen into a SKILL file — see
 | Skill | Use it to |
 | --- | --- |
 | [`rigor-next-steps`](rigor-next-steps/SKILL.md) | **Start here.** Figure out the next step on this project and route to the right skill below. |
+| [`rigor-ask`](rigor-ask/SKILL.md) | **Ask anything about Rigor**, any time — a diagnostic, the type model, a flag, a comparison to another checker, whether it handles your stack, how to type something. It investigates from the bundled docs (`rigor docs`) *and* your actual code (`rigor check` / `annotate` / `type-of`) rather than answering from memory. |
 | [`rigor-project-init`](rigor-project-init/SKILL.md) | Onboard a project from scratch — detect the stack, choose an adoption mode, write `.rigor.dist.yml`, snapshot a baseline. |
 | [`rigor-rbs-setup`](rigor-rbs-setup/SKILL.md) | Install community RBS for the project's gems (`rbs collection install`) so Rigor stops typing RBS-less dependencies as `Dynamic`. |
 | [`rigor-ci-setup`](rigor-ci-setup/SKILL.md) | Wire Rigor into CI and surface diagnostics inline on the PR / MR (SARIF, GitHub Actions, GitLab Code Quality, reviewdog, …). |

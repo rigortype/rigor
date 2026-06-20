@@ -264,6 +264,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(1..3, :first, [20]).elements.map(&:value)).to eq([1, 2, 3])
     end
 
+    it "lifts Range#min(n) / #max(n) to a Tuple (min ascending, max descending)" do
+      expect(fold(1..10, :min, [3]).elements.map(&:value)).to eq([1, 2, 3])
+      expect(fold(1..10, :max, [3]).elements.map(&:value)).to eq([10, 9, 8])
+      # n >= size clamps to the whole range; n == 0 is the empty Tuple.
+      expect(fold(1..3, :max, [9]).elements.map(&:value)).to eq([3, 2, 1])
+      expect(fold(1..10, :min, [0]).elements).to eq([])
+    end
+
     it "declines a Range head/tail projection that would exceed the materialisation cap" do
       # 50 > RANGE_TO_A_LIMIT — defer to RBS rather than materialise.
       expect(fold(1..100, :first, [50])).to be_nil

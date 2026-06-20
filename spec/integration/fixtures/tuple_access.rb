@@ -35,3 +35,8 @@ assert_type("2", [1, 2, 2, 3].rindex(2))
 # Comparable all-Constant elements also fold `minmax` to a 2-slot
 # `Tuple[min, max]`, mirroring `Range#minmax`.
 assert_type("[10, 30]", xs.minmax)
+
+# The n-arg `min(n)` / `max(n)` forms fold to a Tuple in Ruby's order:
+# `min(n)` ascending, `max(n)` descending.
+assert_type("[10, 20]", xs.min(2))
+assert_type("[30, 20]", xs.max(2))

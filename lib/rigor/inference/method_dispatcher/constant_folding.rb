@@ -444,10 +444,13 @@ module Rigor
         RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length, :entries, :minmax,
                                  :sum].freeze
         # 1-arg head/tail projections on a `Constant<Range>`. `first(n)` /
-        # `take(n)` return the first `n` elements, `last(n)` the final `n` —
-        # each lifts to a per-position `Tuple[Constant[Integer]…]`. The
-        # no-arg `first` / `last` stay on the unary path (single Integer).
-        RANGE_FOLD_BINARY_METHODS = Set[:first, :last, :take].freeze
+        # `take(n)` return the first `n` elements, `last(n)` the final `n`,
+        # and `min(n)` / `max(n)` the n smallest / largest (for an ascending
+        # integer range `min(n) == first(n)` and `max(n) == last(n).reverse`)
+        # — each lifts to a per-position `Tuple[Constant[Integer]…]`. The
+        # no-arg `first` / `last` / `min` / `max` stay on the unary path
+        # (single Integer endpoint).
+        RANGE_FOLD_BINARY_METHODS = Set[:first, :last, :take, :min, :max].freeze
         RANGE_TO_A_LIMIT = 16
         private_constant :RANGE_FOLD_METHODS, :RANGE_FOLD_BINARY_METHODS, :RANGE_TO_A_LIMIT
 
@@ -526,15 +529,29 @@ module Rigor
 
         def range_take_tuple(range, method_name, count)
           return nil unless count.is_a?(Integer) && !count.negative?
-          # `first(n)`/`last(n)`/`take(n)` materialise at most `min(n, size)`
-          # elements; cap that count so a huge `n` (or range) never blows up
-          # the Constant. `Range#size` is O(1) for integer endpoints.
+          # `first(n)`/`last(n)`/`take(n)`/`min(n)`/`max(n)` materialise at
+          # most `min(n, size)` elements; cap that count so a huge `n` (or
+          # range) never blows up the Constant. `Range#size` and the head/
+          # tail projections are O(n) for integer endpoints (no full
+          # materialisation).
           return nil if [count, range.size].min > RANGE_TO_A_LIMIT
 
-          values = method_name == :last ? range.last(count) : range.first(count)
+          values = range_head_tail(range, method_name, count)
           return Type::Combinator.tuple_of if values.empty?
 
           Type::Combinator.tuple_of(*values.map { |v| Type::Combinator.constant_of(v) })
+        end
+
+        # The n elements a head/tail projection selects, in Ruby's order.
+        # For an ascending integer range `min(n)` is the leading `n`
+        # (`first(n)`) and `max(n)` the trailing `n` reversed (descending),
+        # so neither needs the full sort `Array#min`/`#max` would do.
+        def range_head_tail(range, method_name, count)
+          case method_name
+          when :last then range.last(count)
+          when :max  then range.last(count).reverse
+          else            range.first(count) # :first, :take, :min
+          end
         end
 
         def try_fold_binary_set(receiver_values, method_name, arg_values)

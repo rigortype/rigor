@@ -843,7 +843,10 @@ module Rigor
 
           # `tuple.min` / `tuple.max` — fold when every element is
           # a `Constant` whose values share a Ruby-comparable
-          # domain. Empty tuples fold to `Constant[nil]`.
+          # domain. Empty tuples fold to `Constant[nil]`. The 1-arg
+          # `min(n)` / `max(n)` form folds to a `Tuple` of the n
+          # edge-most values in Ruby's order (`min(n)` ascending,
+          # `max(n)` descending) — the n-arg sibling of `first(n)`.
           def tuple_min(tuple, _method_name, args)
             tuple_minmax(tuple, args, :min)
           end
@@ -853,7 +856,7 @@ module Rigor
           end
 
           def tuple_minmax(tuple, args, edge)
-            return nil unless args.empty?
+            return tuple_minmax_n(tuple, args.first, edge) unless args.empty?
             return Type::Combinator.constant_of(nil) if tuple.elements.empty?
 
             values = constant_values(tuple.elements)
@@ -861,6 +864,25 @@ module Rigor
 
             result = values.public_send(edge)
             Type::Combinator.constant_of(result)
+          rescue StandardError
+            nil
+          end
+
+          # `tuple.min(n)` / `tuple.max(n)` — a `Tuple` of the n
+          # edge-most element values, delegating to Ruby's
+          # `Array#min` / `#max` for the ordering. Declines on a
+          # non-static / negative count or non-Constant elements.
+          # The result is bounded by the tuple's known arity, so no
+          # extra size cap is needed.
+          def tuple_minmax_n(tuple, arg, edge)
+            return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
+            return nil if arg.value.negative?
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            picked = values.public_send(edge, arg.value)
+            Type::Combinator.tuple_of(*picked.map { |v| Type::Combinator.constant_of(v) })
           rescue StandardError
             nil
           end

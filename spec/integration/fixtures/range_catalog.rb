@@ -73,3 +73,7 @@ assert_type("[1, 2, 3]", (1..10).take(3))
 assert_type("[8, 9, 10]", (1..10).last(3))
 # An exclusive range stops before `end`.
 assert_type("[7, 8, 9]", (1...10).last(3))
+# `min(n)` / `max(n)` — the n smallest / largest, in Ruby's order
+# (`min(n)` ascending, `max(n)` descending).
+assert_type("[1, 2, 3]", (1..10).min(3))
+assert_type("[10, 9, 8]", (1..10).max(3))

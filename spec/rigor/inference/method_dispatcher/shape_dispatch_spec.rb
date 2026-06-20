@@ -196,6 +196,24 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         expect(dispatch(receiver: tuple, method_name: :max)).to eq(constant(nil))
       end
 
+      it "folds min(n) / max(n) to a Tuple in Ruby's order (min ascending, max descending)" do
+        unsorted = tuple(constant(3), constant(1), constant(4), constant(1), constant(5))
+        expect(dispatch(receiver: unsorted, method_name: :min, args: [constant(2)]))
+          .to eq(tuple(constant(1), constant(1)))
+        expect(dispatch(receiver: unsorted, method_name: :max, args: [constant(2)]))
+          .to eq(tuple(constant(5), constant(4)))
+        # n >= size returns every element sorted; n == 0 is the empty Tuple.
+        expect(dispatch(receiver: numeric_t, method_name: :min, args: [constant(9)]))
+          .to eq(tuple(constant(1), constant(2), constant(3)))
+        expect(dispatch(receiver: numeric_t, method_name: :max, args: [constant(0)])).to eq(tuple)
+      end
+
+      it "declines min(n) / max(n) on a non-static or negative count" do
+        expect(dispatch(receiver: numeric_t, method_name: :min, args: [constant(-1)])).to be_nil
+        expect(dispatch(receiver: numeric_t, method_name: :max, args: [Rigor::Type::Combinator.untyped]))
+          .to be_nil
+      end
+
       it "folds minmax to a Tuple[min, max] of comparable Constant elements" do
         unsorted = tuple(constant(3), constant(1), constant(2))
         expect(dispatch(receiver: unsorted, method_name: :minmax))

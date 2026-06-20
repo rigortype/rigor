@@ -149,6 +149,19 @@ module Rigor
           :abs, :magnitude, :floor, :ceil, :round, :truncate,
           :next_float, :prev_float,
           :to_s, :to_i, :to_int, :to_f, :to_r, :rationalize,
+          # `numerator` / `denominator` expose the rational
+          # decomposition of the float (`2.5.numerator → 5`,
+          # `.denominator → 2`) — pure arithmetic, the Float siblings
+          # of the already-folded Rational accessors. The non-finite
+          # edges stay sound: `Infinity.numerator → Infinity` /
+          # `.denominator → 1` fold to the same value Ruby returns, and
+          # `NaN.numerator → NaN` is declined by `foldable_constant_value?`.
+          :numerator, :denominator,
+          # `arg` / `angle` / `phase` (aliases) return the complex
+          # argument of the real number: `0` for `self >= 0`, `Math::PI`
+          # for `self < 0`. Pure sign test, deterministic; a NaN
+          # receiver yields NaN which `foldable_constant_value?` declines.
+          :arg, :angle, :phase,
           :inspect, :-@, :+@
         ].freeze
         STRING_UNARY = Set[
@@ -405,26 +418,8 @@ module Rigor
         end
 
         def try_fold_unary_set(receiver_values, method_name)
-          range_lift = try_fold_range_constant_unary(receiver_values, method_name)
-          return range_lift if range_lift
-
-          string_lift = try_fold_string_array_unary(receiver_values, method_name)
-          return string_lift if string_lift
-
-          pathname_lift = try_fold_pathname_unary(receiver_values, method_name)
-          return pathname_lift if pathname_lift
-
-          regexp_lift = try_fold_regexp_array_unary(receiver_values, method_name)
-          return regexp_lift if regexp_lift
-
-          set_lift = try_fold_set_array_unary(receiver_values, method_name)
-          return set_lift if set_lift
-
-          integer_lift = try_fold_integer_array_unary(receiver_values, method_name)
-          return integer_lift if integer_lift
-
-          numeric_lift = try_fold_numeric_array_unary(receiver_values, method_name)
-          return numeric_lift if numeric_lift
+          special = try_fold_unary_special(receiver_values, method_name)
+          return special if special
 
           # Type-level allow check on every receiver. If one member's
           # type does not have the method in its allow list (e.g.
@@ -438,6 +433,23 @@ module Rigor
             invoke_unary(rv, method_name) || []
           end
           build_constant_type(results, source: receiver_values)
+        end
+
+        # The carrier-specific unary lifts — Range-to-Tuple, the
+        # Array-returning String / Pathname / Regexp / Set / Integer /
+        # Numeric folds — that produce a precise structural type before
+        # the generic scalar `invoke_unary` path. The first match wins;
+        # nil means none applied and the caller falls through to the
+        # scalar allow-list path.
+        def try_fold_unary_special(receiver_values, method_name)
+          try_fold_range_constant_unary(receiver_values, method_name) ||
+            try_fold_string_array_unary(receiver_values, method_name) ||
+            try_fold_pathname_unary(receiver_values, method_name) ||
+            try_fold_pathname_array_unary(receiver_values, method_name) ||
+            try_fold_regexp_array_unary(receiver_values, method_name) ||
+            try_fold_set_array_unary(receiver_values, method_name) ||
+            try_fold_integer_array_unary(receiver_values, method_name) ||
+            try_fold_numeric_array_unary(receiver_values, method_name)
         end
         # v0.0.7 — `Constant<Range>#to_a` and the no-arg
         # `first` / `last` / `min` / `max` short-circuit through a
@@ -669,6 +681,16 @@ module Rigor
         ].freeze
         private_constant :PATHNAME_PURE_UNARY, :PATHNAME_PURE_BINARY
 
+        # `Constant<Pathname>#split` returns the fixed 2-element
+        # `[dirname, basename]` pair (both Pathname), the path-string
+        # split of `File.split`. Lifted to `Tuple[Constant[Pathname],
+        # Constant[Pathname]]`. Filesystem-independent — reads only
+        # `@path` — so it is deterministic at fold time, the
+        # Array-returning sibling of the scalar `basename` / `dirname`
+        # folds (which `try_fold_pathname_unary` already covers).
+        PATHNAME_ARRAY_UNARY_METHODS = Set[:split].freeze
+        private_constant :PATHNAME_ARRAY_UNARY_METHODS
+
         def try_fold_pathname_unary(receiver_values, method_name)
           return nil unless PATHNAME_PURE_UNARY.include?(method_name)
           return nil unless receiver_values.size == 1
@@ -697,6 +719,22 @@ module Rigor
           return nil unless foldable_constant_value?(result)
 
           Type::Combinator.constant_of(result)
+        rescue StandardError
+          nil
+        end
+
+        # `Constant<Pathname>#split` — lift the `[dirname, basename]`
+        # Pathname pair to a Tuple[Constant[Pathname], Constant[Pathname]].
+        # Pure path-string manipulation (no filesystem read); both
+        # elements are Pathname, a foldable Constant class.
+        def try_fold_pathname_array_unary(receiver_values, method_name)
+          return nil unless PATHNAME_ARRAY_UNARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          receiver = receiver_values.first
+          return nil unless receiver.is_a?(Pathname)
+
+          lift_array_result(receiver.split)
         rescue StandardError
           nil
         end

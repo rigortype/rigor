@@ -353,6 +353,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(g.elements.map(&:value)).to eq([e_acute])
       expect(fold(e_acute, :chars).elements.size).to eq(2)
     end
+
+    it "folds the Float rational accessors numerator / denominator" do
+      # The exact rational decomposition of the float — the Float
+      # siblings of the already-folded Rational accessors.
+      expect(fold(2.5, :numerator).value).to eq(5)
+      expect(fold(2.5, :denominator).value).to eq(2)
+      expect(fold(3.0, :numerator).value).to eq(3)
+      expect(fold(3.0, :denominator).value).to eq(1)
+    end
+
+    it "keeps the non-finite Float numerator / denominator folds sound" do
+      # Infinity folds to the same value Ruby returns at runtime;
+      # a NaN numerator is non-reflexive under == so the fold declines.
+      expect(fold(Float::INFINITY, :numerator).value).to eq(Float::INFINITY)
+      expect(fold(Float::INFINITY, :denominator).value).to eq(1)
+      expect(fold(Float::NAN, :numerator)).to be_nil
+    end
+
+    it "folds the Float complex-argument accessors arg / angle / phase" do
+      # 0 for self >= 0, Math::PI for self < 0 — the aliases agree.
+      expect(fold(2.5, :arg).value).to eq(0)
+      expect(fold(2.5, :angle).value).to eq(0)
+      expect(fold(2.5, :phase).value).to eq(0)
+      expect(fold(-2.5, :arg).value).to eq(Math::PI)
+      # A NaN receiver yields NaN, which the fold declines.
+      expect(fold(Float::NAN, :arg)).to be_nil
+    end
   end
 
   # Methods unlocked by the offline numeric.yml catalog: methods
@@ -1269,6 +1296,24 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       it "folds <=> against another Constant<Pathname>" do
         expect(fold_types(p, :<=>, [constant_of(Pathname.new("/usr/bin/ruby"))]))
           .to eq(constant_of(0))
+      end
+
+      it "lifts #split to a Tuple[dirname, basename] of Pathname constants" do
+        # `Pathname#split` is the Array-returning sibling of the scalar
+        # `dirname` / `basename` folds — pure `@path` string manipulation,
+        # no filesystem read.
+        result = fold_types(constant_of(Pathname.new("/a/b/c.rb")), :split)
+        expect(result).to be_a(Rigor::Type::Tuple)
+        expect(result.elements).to eq([
+                                        constant_of(Pathname.new("/a/b")),
+                                        constant_of(Pathname.new("c.rb"))
+                                      ])
+        # A relative path splits to ["." , basename].
+        relative = fold_types(constant_of(Pathname.new("rel.txt")), :split)
+        expect(relative.elements).to eq([
+                                          constant_of(Pathname.new(".")),
+                                          constant_of(Pathname.new("rel.txt"))
+                                        ])
       end
 
       it "declines on filesystem-touching methods (e.g. exist?)" do

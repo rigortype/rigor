@@ -41,6 +41,8 @@ assert_type("#<Pathname:/usr/bin/ruby.rbx>", p1.sub_ext(".rbx"))
 assert_type("#<Pathname:/usr/bin>", p1.join(".."))
 # `basename(suffix)` strips the suffix from the final component.
 assert_type("#<Pathname:ruby>", Pathname.new("/usr/bin/ruby.rb").basename(".rb"))
+# `split` lifts the `[dirname, basename]` pair to a Tuple of Pathnames.
+assert_type("[#<Pathname:/usr/bin>, #<Pathname:ruby>]", p1.split)
 
 # Comparable folds.
 assert_type("0", p1 <=> Pathname.new("/usr/bin/ruby"))

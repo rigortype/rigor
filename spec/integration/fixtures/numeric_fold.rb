@@ -29,3 +29,13 @@ assert_type("2.5", 5.fdiv(2))
 # Integer#digits — lifts the base-10 place values to a per-position
 # Tuple (little-endian: 123 -> [3, 2, 1]).
 assert_type("[3, 2, 1]", 123.digits)
+
+# Float#numerator / #denominator — the exact rational decomposition.
+assert_type("5", 2.5.numerator)
+assert_type("2", 2.5.denominator)
+
+# Float#arg / #angle / #phase — the complex argument of a real:
+# 0 for a non-negative receiver, Math::PI for a negative one.
+assert_type("0", 2.5.arg)
+assert_type("0", 2.5.angle)
+assert_type("3.141592653589793", -2.5.phase)

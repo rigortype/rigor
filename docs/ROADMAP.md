@@ -88,6 +88,37 @@ is the active backend. The Ractor pool stays parked behind
 `RIGOR_POOL_BACKEND=ractor` and ADR-15 § OQ1; completing it is
 NOT a `0.2.x` goal and waits on upstream CRuby fixes.
 
+### Scheduled CLI deprecations — `docs` / `skill` verb subcommands → flags (removal v0.3.0)
+
+`rigor docs` and `rigor skill` moved their discovery subcommands to
+flags so the positional slot is unambiguously a doc / skill *name* (the
+old `list` / `path` / `print` verbs shared that slot, able to shadow a
+same-named page). Canonical forms now:
+
+| Action | Canonical | Deprecated (still works, warns) |
+| --- | --- | --- |
+| docs index / list | `rigor docs` · `rigor docs --list [category]` | `rigor docs list` |
+| docs path | `rigor docs --path <name>` | `rigor docs path <name>` |
+| skill list | `rigor skill` · `rigor skill --list` | `rigor skill list` |
+| skill print | `rigor skill <name>` · `rigor skill --print <name>` | `rigor skill print <name>` |
+| skill path | `rigor skill --path <name>` | `rigor skill path <name>` |
+
+`rigor docs` also gained category-qualified addressing
+(`handbook/03-narrowing`) and now bundles the **handbook** alongside the
+manual. `rigor skill describe` / `--describe` (and the top-level
+`rigor describe`) are unchanged — `describe` is a no-argument action,
+not a name-slot verb, so it is not deprecated.
+
+The deprecated verb spellings emit a one-line stderr notice and are
+**removed in v0.3.0** (the next minor after the current `0.2.x`
+evaluation line); until then both spellings work. The bundled
+generators and docs already emit only the canonical forms, so the
+SKILL-driven UX never triggers the notice. The flag vocabulary freezes
+at v1.0 under [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
+WD1. Amends [ADR-74](adr/74-offline-doc-access-and-llms-txt.md) (docs
+grammar + handbook bundling) and [ADR-73](adr/73-skill-driven-user-experience.md)
+(skill grammar).
+
 ## Future cycles (not committed to a specific release)
 
 Items that have surfaced across v0.1.x work and that the next implementer benefits from seeing without re-reading the full thread.

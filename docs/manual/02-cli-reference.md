@@ -425,16 +425,23 @@ List or print the bundled Agent Skills shipped inside the
 Rigor can discover and follow them without a project-side
 source checkout. See [Skills](08-skills.md).
 
+The positional slot is a skill *name*; alternative outputs are flags,
+so a skill can never be shadowed by a verb.
+
 ```sh
-rigor skill <list|describe|print|path> [name]
+rigor skill [<name>] [--path <name>] [--list] [--describe]
 ```
 
-| Subcommand | Purpose |
+| Form | Purpose |
 | --- | --- |
-| `list` | Table of every bundled skill (name + absolute path); the default when no subcommand is given. |
-| `describe` | Probe the project's state (config / baseline / `sig/` / CI — presence only, never runs `rigor check`) and recommend the next skill to run. Also spelled `--describe`. See [`rigor describe`](#rigor-describe) below. |
-| `print <name>` | Print the `SKILL.md` body to stdout, with a header pointing at the skill's `references/` directory. |
-| `path <name>` | Print the single-line absolute `SKILL.md` path, suitable as input to a file-reading tool. |
+| (none) / `--list` | Table of every bundled skill (name + absolute path). |
+| `<name>` | Print the `SKILL.md` body to stdout, with a header pointing at the skill's `references/` directory. |
+| `--path <name>` | Print the single-line absolute `SKILL.md` path, suitable as input to a file-reading tool. |
+| `--describe` | Probe the project's state (config / baseline / `sig/` / CI — presence only, never runs `rigor check`) and recommend the next skill to run. Also spelled `describe`; surfaced top-level as [`rigor describe`](#rigor-describe) below. |
+
+The verb spellings `rigor skill list` / `print <name>` / `path <name>`
+are **deprecated** (a one-line stderr notice; removed in v0.3.0) — use
+the forms above. `describe` / `--describe` stay first-class.
 
 ## `rigor describe`
 
@@ -455,24 +462,30 @@ runs `rigor check`. Identical output to `rigor skill describe`.
 
 ## `rigor docs`
 
-Print the User Manual bundled inside the `rigortype` gem **offline**, so
-once Rigor is installed an AI coding agent (or you) can read the
-drive-Rigor guidance the SKILL-driven UX routes to without the network
-([ADR-74](../adr/74-offline-doc-access-and-llms-txt.md)). It is the doc
-twin of [`rigor skill`](#rigor-skill): the gem ships `docs/install.md`,
-`docs/llms.txt`, and the full [`docs/manual/`](README.md); the
+Print the documentation bundled inside the `rigortype` gem
+**offline**, so once Rigor is installed an AI coding agent (or you) can
+read the drive-Rigor guidance the SKILL-driven UX routes to without the
+network ([ADR-74](../adr/74-offline-doc-access-and-llms-txt.md)). It is
+the doc twin of [`rigor skill`](#rigor-skill): the gem ships
+`docs/install.md`, `docs/llms.txt`, and the full user-facing
+[manual](README.md) and [handbook](../handbook/README.md); the
 contributor-facing ADR / spec / notes corpus stays web-only on the site.
 
+The positional slot is a doc *name*; alternative outputs are flags.
+
 ```sh
-rigor docs [<name> | list | path <name>]
+rigor docs [<name>] [--path <name>] [--list [<category>]]
 ```
 
-| Subcommand | Purpose |
+| Form | Purpose |
 | --- | --- |
 | (none) | Print the bundled `llms.txt` offline doc index — the map of what `rigor docs <name>` can serve. |
-| `<name>` | Print a manual page to stdout, prefixed with a provenance comment. Accepts the chapter's prefixed name (`02-cli-reference`), its stripped name (`cli-reference`), `install`, or a `docs/`-relative path. |
-| `list` | Table of every bundled doc (name + absolute path). |
-| `path <name>` | Print the single-line absolute path of a doc, suitable as input to a file-reading tool. |
+| `<name>` | Print a doc page to stdout, prefixed with a provenance comment. Accepts a category-qualified path (`handbook/03-narrowing`), the chapter's prefixed name (`02-cli-reference`), its short name (`cli-reference`, when unique), or `install`. |
+| `--path <name>` | Print the single-line absolute path of a doc, suitable as input to a file-reading tool. |
+| `--list [<category>]` | Table of every bundled doc (name + absolute path); pass `manual` or `handbook` to filter. |
+
+The verb spellings `rigor docs list` / `path <name>` are **deprecated**
+(a one-line stderr notice; removed in v0.3.0) — use `--list` / `--path`.
 
 The canonical web copy of the index is
 <https://rigor.typedduck.fail/llms.txt>; `rigor docs` serves the same

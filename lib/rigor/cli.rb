@@ -339,8 +339,8 @@ module Rigor
           plugin     Browse bundled plugin source as worked examples (list/path/print/root)
           playground Start the browser playground (requires rigor-playground gem)
           describe   Recommend the next skill for this project (alias for `skill describe`)
-          skill      Recommend the next skill + list/print bundled Agent Skills (skill describe, ...)
-          docs       Print the bundled manual offline (docs <name>, docs list)
+          skill      Recommend the next skill + list/print bundled Agent Skills (skill describe, skill <name>)
+          docs       Print the bundled docs offline (docs <name>, docs --list)
           show-bleedingedge  Show the bleeding-edge overlay + what your config adopts (ADR-50)
           version    Print the Rigor version
           help       Print this help

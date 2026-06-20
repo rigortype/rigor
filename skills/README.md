@@ -61,9 +61,9 @@ The skills are bundled inside the gem. Browse and load them with the
 
 ```sh
 rigor skill describe              # recommend the next step for this project
-rigor skill list                  # name + absolute path of every bundled skill
-rigor skill print rigor-project-init   # print a skill's body to follow
-rigor skill path  rigor-ci-setup       # just the SKILL.md path (for a Read tool)
+rigor skill --list                # name + absolute path of every bundled skill
+rigor skill rigor-project-init    # print a skill's body to follow
+rigor skill --path rigor-ci-setup # just the SKILL.md path (for a Read tool)
 ```
 
 ### B. Via [vercel-labs/skills](https://github.com/vercel-labs/skills) (works before Rigor is installed)

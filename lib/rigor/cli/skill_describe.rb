@@ -267,14 +267,14 @@ module Rigor
         <<~REC
           ## Recommended next step
           → #{name} — #{recommendation.fetch(:reason)}
-            Load it: rigor skill print #{name}
+            Load it: rigor skill #{name}
         REC
       end
 
       def catalog_section(catalog)
         lines = catalog.map do |skill|
           name = skill.fetch(:name)
-          "- #{name} — #{catalog_blurb(skill.fetch(:path))}\n  rigor skill print #{name}"
+          "- #{name} — #{catalog_blurb(skill.fetch(:path))}\n  rigor skill #{name}"
         end
         "## All skills you can run next\n#{lines.join("\n")}\n"
       end
@@ -288,7 +288,7 @@ module Rigor
           end
         <<~PROMPT
           ## For the agent
-          #{opener}, then run `rigor skill print <name>` for the chosen skill and
+          #{opener}, then run `rigor skill <name>` for the chosen skill and
           follow its body top to bottom.
 
           The recommendation above is from a presence-only probe — it does not run

@@ -799,7 +799,7 @@ module Rigor
       end
 
       def ci_detected_hint(platform)
-        tail = "see `rigor skill print rigor-ci-setup`"
+        tail = "see `rigor skill rigor-ci-setup`"
         if platform.native_artifact?
           "rigor: #{platform.name} detected — for the inline report run " \
             "`rigor check --format #{platform.format}` and publish it as the platform's report artifact (#{tail})."

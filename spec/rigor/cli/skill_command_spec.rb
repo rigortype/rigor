@@ -20,9 +20,9 @@ RSpec.describe Rigor::CLI::SkillCommand do
     [status, out.string, err.string]
   end
 
-  describe "list" do
+  describe "--list" do
     it "lists every bundled skill with its absolute SKILL.md path" do
-      status, out, = run(["list"])
+      status, out, = run(["--list"])
       expect(status).to eq(0)
       expect(out).to include("rigor-project-init")
       expect(out).to include("rigor-baseline-reduce")
@@ -34,8 +34,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
       end
     end
 
-    it "is the default when no subcommand is given" do
-      status_list, out_list, = run(["list"])
+    it "is the default when no argument is given" do
+      status_list, out_list, = run(["--list"])
       status_default, out_default, = run([])
       expect(status_default).to eq(status_list)
       expect(out_default).to eq(out_list)
@@ -220,8 +220,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
 
     it "lists the downstream skills with a load command, excluding the entry point itself" do
       _status, out, = describe_in({})
-      expect(out).to include("rigor skill print rigor-project-init")
-      expect(out).to include("rigor skill print rigor-protection-uplift")
+      expect(out).to include("rigor skill rigor-project-init")
+      expect(out).to include("rigor skill rigor-protection-uplift")
       # The catalogue heading section must not advertise the entry point.
       catalogue = out.split("## All skills you can run next", 2).last.to_s
       expect(catalogue).not_to include("- rigor-next-steps —")
@@ -234,7 +234,7 @@ RSpec.describe Rigor::CLI::SkillCommand do
         rigor-rbs-setup rigor-monkeypatch-resolve rigor-editor-setup rigor-mcp-setup
         rigor-plugin-tune rigor-upgrade rigor-doctor
       ].each do |name|
-        expect(catalogue).to include("rigor skill print #{name}"), "expected catalogue to list #{name}"
+        expect(catalogue).to include("rigor skill #{name}"), "expected catalogue to list #{name}"
       end
     end
 
@@ -247,9 +247,9 @@ RSpec.describe Rigor::CLI::SkillCommand do
     end
   end
 
-  describe "print" do
+  describe "<name> (bare = print)" do
     it "prints a header followed by the SKILL.md body" do
-      status, out, = run(%w[print rigor-project-init])
+      status, out, = run(%w[rigor-project-init])
       expect(status).to eq(0)
       expect(out).to start_with("# Rigor skill: rigor-project-init\n")
       expect(out).to include("# Source:")
@@ -261,22 +261,16 @@ RSpec.describe Rigor::CLI::SkillCommand do
     end
 
     it "exits 1 with the available list on an unknown skill name" do
-      status, _out, err = run(%w[print no-such-skill])
+      status, _out, err = run(%w[no-such-skill])
       expect(status).to eq(1)
       expect(err).to include("Unknown skill: no-such-skill")
       expect(err).to include("rigor-project-init")
     end
-
-    it "is a usage error when no name is given" do
-      status, _out, err = run(["print"])
-      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-      expect(err).to include("requires a skill name")
-    end
   end
 
-  describe "path" do
+  describe "--path <name>" do
     it "prints the absolute SKILL.md path on a single line" do
-      status, out, = run(%w[path rigor-baseline-reduce])
+      status, out, = run(%w[--path rigor-baseline-reduce])
       expect(status).to eq(0)
       lines = out.strip.split("\n")
       expect(lines.size).to eq(1)
@@ -285,18 +279,42 @@ RSpec.describe Rigor::CLI::SkillCommand do
     end
 
     it "exits 1 on an unknown skill name" do
-      status, _out, err = run(%w[path no-such-skill])
+      status, _out, err = run(%w[--path no-such-skill])
       expect(status).to eq(1)
       expect(err).to include("Unknown skill: no-such-skill")
     end
+
+    it "is a usage error when no name is given" do
+      status, _out, err = run(["--path"])
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("requires a skill name")
+    end
   end
 
-  describe "unknown subcommand" do
-    it "writes usage to stderr and returns EXIT_USAGE" do
-      status, _out, err = run(["bogus"])
-      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-      expect(err).to include("Unknown subcommand: bogus")
-      expect(err).to include("Usage: rigor skill")
+  describe "deprecated verb forms (removed in v0.3.0)" do
+    it "still lists via `list` but warns on stderr" do
+      status, out, err = run(["list"])
+      expect(status).to eq(0)
+      expect(out).to include("rigor-project-init")
+      expect(err).to include("`list` is deprecated")
+      expect(err).to include("v0.3.0")
+      expect(err).to include("rigor skill --list")
+    end
+
+    it "still prints via `print <name>` but warns on stderr" do
+      status, out, err = run(%w[print rigor-project-init])
+      expect(status).to eq(0)
+      expect(out).to start_with("# Rigor skill: rigor-project-init\n")
+      expect(err).to include("`print <name>` is deprecated")
+      expect(err).to include("rigor skill <name>")
+    end
+
+    it "still resolves a path via `path <name>` but warns on stderr" do
+      status, out, err = run(%w[path rigor-baseline-reduce])
+      expect(status).to eq(0)
+      expect(out.strip).to end_with("rigor-baseline-reduce/SKILL.md")
+      expect(err).to include("`path <name>` is deprecated")
+      expect(err).to include("rigor skill --path <name>")
     end
   end
 
@@ -305,7 +323,7 @@ RSpec.describe Rigor::CLI::SkillCommand do
       status, out, = run(["help"])
       expect(status).to eq(0)
       expect(out).to include("Usage: rigor skill")
-      expect(out).to include("print <name>")
+      expect(out).to include("rigor skill <name>")
     end
   end
 end

@@ -2,8 +2,6 @@
 
 require_relative "command"
 
-require "optparse"
-
 module Rigor
   class CLI
     # `rigor skill` — discover and print the SKILL.md files
@@ -17,69 +15,111 @@ module Rigor
     # gem checkout — the project being analysed has no copy, so an
     # AI agent has no a priori way to find them.
     #
-    # This command exposes the bundled skills via four subcommands:
+    # Grammar (mirrors `rigor docs`): the positional slot is always a
+    # skill *name*; alternative outputs are flags, so a skill named
+    # `list` or `path` can never be shadowed by a verb.
     #
-    # - `rigor skill describe`     — ADR-73's live entry point: a
-    #                                cheap project-state probe + the
-    #                                recommended next skill + every
-    #                                skill's current description. The
-    #                                `rigor-next-steps` SKILL routes off
-    #                                this so no version-coupled guidance
-    #                                is frozen into the SKILL. Also
-    #                                spelled `rigor skill --describe`.
-    # - `rigor skill list`         — table of name + absolute path.
-    # - `rigor skill print <name>` — short header (paths + how to use)
-    #                                followed by the SKILL.md body. This
-    #                                is the form AI agents should call;
-    #                                the inline body plus the header's
-    #                                absolute paths together let the
-    #                                agent act with or without a file
-    #                                reading tool.
-    # - `rigor skill path <name>`  — one-line absolute path, suitable
-    #                                as input to a Read tool.
+    # - `rigor skill`              — list bundled skills (the default).
+    # - `rigor skill <name>`       — print the SKILL.md body (header + body).
+    #                                This is the form AI agents call; the
+    #                                inline body plus the header's absolute
+    #                                paths let the agent act with or without
+    #                                a file-reading tool.
+    # - `rigor skill --path <name>`— one-line absolute path, for a Read tool.
+    # - `rigor skill --list`       — table of name + absolute path.
+    # - `rigor skill --describe`   — ADR-73's live entry point: a cheap
+    #                                project-state probe + the recommended
+    #                                next skill + every skill's current
+    #                                description. The `rigor-next-steps`
+    #                                SKILL routes off this so no
+    #                                version-coupled guidance is frozen into
+    #                                the SKILL. Also spelled `describe`, and
+    #                                surfaced top-level as `rigor describe`.
     #
-    # `rigor skill` with no subcommand is an alias for `list`.
+    # The pre-v0.3.0 verb spellings `rigor skill list` / `print <name>` /
+    # `path <name>` still work but emit a stderr deprecation notice; they
+    # are removed in v0.3.0 (see docs/ROADMAP.md § "Scheduled CLI
+    # deprecations"). `describe` is a no-argument action, not a name-slot
+    # verb, so it stays first-class alongside `--describe`.
     class SkillCommand < Command
       USAGE = <<~USAGE
-        Usage: rigor skill <subcommand> [args]
+        Usage: rigor skill [<name>] [--path <name>] [--list] [--describe]
 
-        Subcommands:
-          list                  List bundled skills (default when no subcommand given)
-          describe              Report project state + recommend the next skill to run
-          print <name>          Print the SKILL.md body for <name> to stdout, with a header
-          path  <name>          Print the absolute path of the SKILL.md file for <name>
+        With no argument, lists the bundled skills.
+
+          rigor skill                List bundled skills
+          rigor skill <name>         Print the SKILL.md body for <name> (with a header)
+          rigor skill --path <name>  Print the absolute path of the SKILL.md file for <name>
+          rigor skill --list         List bundled skills (name + absolute path)
+          rigor skill --describe     Report project state + recommend the next skill to run
 
         Examples:
-          rigor skill list
-          rigor skill describe
-          rigor skill print rigor-project-init
-          rigor skill path  rigor-baseline-reduce
+          rigor skill
+          rigor skill rigor-project-init
+          rigor skill --path rigor-baseline-reduce
+          rigor skill --describe        (also: rigor describe)
+
+        Deprecated (removed in v0.3.0) — use the forms above:
+          rigor skill list           ->  rigor skill --list
+          rigor skill print <name>   ->  rigor skill <name>
+          rigor skill path <name>    ->  rigor skill --path <name>
       USAGE
 
       # The bundled skills live at `<gem_root>/skills/`. From
       # `lib/rigor/cli/skill_command.rb` that is three directories up.
       SKILLS_ROOT = File.expand_path("../../../skills", __dir__)
 
+      # The verb subcommands the flags superseded keep working with a
+      # stderr deprecation notice until this version drops them. Each maps
+      # to the canonical advice printed and the flag it rewrites to.
+      LEGACY_VERB_REMOVAL = "v0.3.0"
+      LEGACY_VERBS = {
+        "list" => { old: "list",         advice: "--list", flag: "--list" },
+        "print" => { old: "print <name>", advice: "<name>", flag: "--print" },
+        "path" => { old: "path <name>", advice: "--path <name>", flag: "--path" }
+      }.freeze
+
       # @return [Integer] CLI exit status.
       def run
-        subcommand = @argv.shift || "list"
+        rewrite_legacy_verb!
 
-        case subcommand
-        when "list" then run_list
-        when "describe", "--describe" then run_describe
-        when "print" then run_print
-        when "path" then run_path
+        case @argv.first
+        when nil
+          run_list
         when "-h", "--help", "help"
           print_usage(@out)
           0
+        when "describe", "--describe"
+          @argv.shift
+          run_describe
+        when "--list"
+          @argv.shift
+          run_list
+        when "--path"
+          @argv.shift
+          run_path(@argv.shift)
+        when "--print"
+          @argv.shift
+          run_print(@argv.shift)
         else
-          @err.puts("Unknown subcommand: #{subcommand}")
-          print_usage(@err)
-          Rigor::CLI::EXIT_USAGE
+          run_print(@argv.shift)
         end
       end
 
       private
+
+      # Translate a deprecated verb spelling into its flag form, warning
+      # once on stderr, so the dispatch above only handles canonical forms.
+      def rewrite_legacy_verb!
+        spec = LEGACY_VERBS[@argv.first]
+        return unless spec
+
+        @err.puts(
+          "rigor skill: `#{spec.fetch(:old)}` is deprecated and will be removed in " \
+          "#{LEGACY_VERB_REMOVAL}; use `rigor skill #{spec.fetch(:advice)}` instead."
+        )
+        @argv[0] = spec.fetch(:flag)
+      end
 
       def run_list
         skills = discover_skills
@@ -95,9 +135,8 @@ module Rigor
         0
       end
 
-      def run_print
-        name = @argv.shift
-        return usage_error("`print` requires a skill name") if name.nil?
+      def run_print(name)
+        return usage_error("a skill name is required") if name.nil?
 
         skill = find_skill(name)
         return name_error(name) if skill.nil?
@@ -108,9 +147,8 @@ module Rigor
         0
       end
 
-      def run_path
-        name = @argv.shift
-        return usage_error("`path` requires a skill name") if name.nil?
+      def run_path(name)
+        return usage_error("`--path` requires a skill name") if name.nil?
 
         skill = find_skill(name)
         return name_error(name) if skill.nil?
@@ -119,7 +157,7 @@ module Rigor
         0
       end
 
-      # `rigor skill describe` (also spelled `--describe`) — ADR-73's
+      # `rigor skill --describe` (also spelled `describe`) — ADR-73's
       # live "brain", delegated to {SkillDescribe}: it probes the current
       # project's state with cheap presence checks (it never runs `rigor
       # check`), recommends the next skill to run, and prints every
@@ -134,10 +172,9 @@ module Rigor
       end
 
       # The header that precedes the SKILL.md body when an agent
-      # runs `rigor skill print <name>`. Kept as `# `-prefixed
-      # comment lines so the combined output remains parseable as
-      # markdown — anything below `---` (the SKILL frontmatter
-      # marker) is unchanged.
+      # runs `rigor skill <name>`. Kept as `# `-prefixed comment lines
+      # so the combined output remains parseable as markdown — anything
+      # below `---` (the SKILL frontmatter marker) is unchanged.
       def render_print_header(skill)
         references_dir = File.join(File.dirname(skill.fetch(:path)), "references")
         ref_line = if File.directory?(references_dir)
@@ -172,7 +209,7 @@ module Rigor
 
       def name_error(name)
         @err.puts("Unknown skill: #{name}")
-        @err.puts("Available skills:")
+        @err.puts("Available skills (try `rigor skill --list`):")
         discover_skills.each { |s| @err.puts("  #{s.fetch(:name)}") }
         1
       end

@@ -53,7 +53,7 @@ Check the project root for `.rigor.yml` or `.rigor.dist.yml`. If
 first:
 
 ```sh
-rigor skill print rigor-project-init
+rigor skill rigor-project-init
 ```
 
 Follow that skill's body top to bottom (it detects the stack, picks
@@ -87,22 +87,24 @@ the `describe` output, then:
 - Then load the chosen skill and follow it:
 
   ```sh
-  rigor skill print <chosen-skill>
+  rigor skill <chosen-skill>
   ```
 
 Re-run `rigor skill describe` any time you want the next step again — it
 always reflects the project's current state, so this skill stays useful
 across the whole adoption journey, not just the first run.
 
-## Reading the manual offline
+## Reading the docs offline
 
-Once Rigor is installed (Step 1 succeeded), the full User Manual ships
-inside the gem — read any chapter **without the network**:
+Once Rigor is installed (Step 1 succeeded), the full manual **and
+handbook** ship inside the gem — read any chapter **without the
+network**:
 
 ```sh
 rigor docs                 # the offline doc index (what's available)
 rigor docs <name>          # a chapter, e.g. `rigor docs editor-integration`
-rigor docs list            # name + absolute path for every bundled doc
+rigor docs --list          # name + absolute path for every bundled doc
+rigor docs --list handbook # just the handbook chapters
 ```
 
 Prefer this over fetching the same page from the web: it is the exact

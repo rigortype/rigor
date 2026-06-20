@@ -7,7 +7,7 @@
 
 This is the **offline** doc index served by an installed Rigor. You do not need
 the network: read any page below with `rigor docs <name>`, and any bundled Agent
-Skill with `rigor skill print <name>`. (The canonical web copy is
+Skill with `rigor skill <name>`. (The canonical web copy is
 <https://rigor.typedduck.fail/llms.txt>.)
 
 ## Start here (AI coding agents)
@@ -15,10 +15,10 @@ Skill with `rigor skill print <name>`. (The canonical web copy is
 - **Run the `rigor-next-steps` skill** — the single entry point for "what should
   we do next with Rigor on this project?". It resolves the `rigor` command,
   onboards an unconfigured project, then asks `rigor skill describe` for the next
-  step and routes to the matching skill. `rigor skill print rigor-next-steps`.
+  step and routes to the matching skill. `rigor skill rigor-next-steps`.
 - `rigor skill describe` (alias `rigor describe`) — probe the project's state and
   recommend the next skill. The driving command behind `rigor-next-steps`.
-- `rigor skill list` — every bundled skill; `rigor skill print <name>` — its body.
+- `rigor skill --list` — every bundled skill; `rigor skill <name>` — its body.
 - The full workflow narrative: `rigor docs 17-driving-improvement`.
 
 ## Manual (read with `rigor docs <name>`)
@@ -42,6 +42,27 @@ Skill with `rigor skill print <name>`. (The canonical web copy is
 - `15-type-protection-coverage` — `rigor coverage --protection`.
 - `16-rbs-extended-annotations` — the `%a{rigor:v1:…}` annotations.
 - `17-driving-improvement` — the `rigor-next-steps`-driven improvement loop.
+
+## Handbook (read with `rigor docs <name>`)
+
+The end-user walkthrough of the type model — concepts rather than operations.
+List them with `rigor docs --list handbook`; a chapter whose short name also
+exists in the manual (`plugins`) needs its qualified path (`handbook/09-plugins`).
+
+- `01-getting-started` — first run, what Rigor infers with no annotations.
+- `02-everyday-types` — the carrier zoo (literals, unions, nil, Dynamic).
+- `03-narrowing` — control-flow narrowing and certainty.
+- `04-tuples-and-shapes` — tuples, hash shapes, object shapes.
+- `05-methods-and-blocks` — method signatures, blocks, yields.
+- `06-classes` — classes, ivars, inheritance, structural interfaces.
+- `07-rbs-and-extended` — RBS, inline RBS, `%a{rigor:v1:…}` annotations.
+- `08-understanding-errors` — reading diagnostics and why each fires.
+- `handbook/09-plugins` — what plugins add to inference.
+- `10-sorbet` — interoperating with Sorbet signatures.
+- `11-sig-gen` — generating RBS with `rigor sig-gen`.
+- `12-lightweight-hkt` — the `App[F, A]` lightweight higher-kinded encoding.
+- Appendices (`rigor docs --list handbook`) compare Rigor to TypeScript, mypy,
+  PHPStan, Steep, TypeProf, Go, Java/C#, Rust, Elixir, and type theory.
 
 ## More (web only)
 

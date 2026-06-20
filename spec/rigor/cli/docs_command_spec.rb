@@ -5,10 +5,11 @@ require "stringio"
 require "rigor/cli"
 require "rigor/cli/docs_command"
 
-# `rigor docs` serves the manual bundled with the gem OFFLINE (ADR-74).
+# `rigor docs` serves the docs bundled with the gem OFFLINE (ADR-74).
 # These examples exercise the real on-disk `docs/` tree so the contract
 # an installed Rigor + the SKILL-driven UX depend on is verified
-# end-to-end.
+# end-to-end. The grammar mirrors `rigor skill`: the positional slot is
+# a doc name; alternative outputs are flags (`--list` / `--path`).
 RSpec.describe Rigor::CLI::DocsCommand do
   def run(argv)
     out = StringIO.new
@@ -28,21 +29,36 @@ RSpec.describe Rigor::CLI::DocsCommand do
     end
   end
 
-  describe "list" do
+  describe "--list" do
     it "lists every bundled doc with an existing absolute path" do
-      status, out, = run(["list"])
+      status, out, = run(["--list"])
       expect(status).to eq(0)
       expect(out).to include("install")
-      expect(out).to include("02-cli-reference")
-      expect(out).to include("17-driving-improvement")
+      expect(out).to include("manual/02-cli-reference")
+      expect(out).to include("handbook/03-narrowing")
       out.each_line do |line|
         path = line.split("  ", 2).last.strip
         expect(File.file?(path)).to be(true), "expected #{path.inspect} to exist"
       end
     end
+
+    it "filters to a single category" do
+      status, out, = run(%w[--list handbook])
+      expect(status).to eq(0)
+      expect(out).to include("handbook/03-narrowing")
+      expect(out).not_to include("manual/02-cli-reference")
+    end
+
+    it "errors on an unknown category" do
+      status, _out, err = run(%w[--list bogus])
+      expect(status).to eq(1)
+      expect(err).to include("Unknown category: bogus")
+      expect(err).to include("manual")
+      expect(err).to include("handbook")
+    end
   end
 
-  describe "print <name>" do
+  describe "<name> (bare = print)" do
     it "prints the install guide with a provenance header" do
       status, out, = run(["install"])
       expect(status).to eq(0)
@@ -56,6 +72,21 @@ RSpec.describe Rigor::CLI::DocsCommand do
       expect(prefixed).to include("CLI command reference")
       # The numeric-prefixed and stripped names resolve to the same page.
       expect(stripped).to eq(prefixed)
+    end
+
+    it "serves a handbook chapter by its category-qualified path" do
+      status, out, = run(["handbook/03-narrowing"])
+      expect(status).to eq(0)
+      expect(out).to start_with("<!-- rigor docs 03-narrowing ")
+    end
+
+    it "errors with the qualified candidates on an ambiguous short name" do
+      # `plugins` is a chapter slug in BOTH manual and handbook.
+      status, _out, err = run(["plugins"])
+      expect(status).to eq(1)
+      expect(err).to include("Ambiguous doc name: plugins")
+      expect(err).to include("manual/07-plugins")
+      expect(err).to include("handbook/09-plugins")
     end
 
     it "resolves the new improvement-loop chapter" do
@@ -72,9 +103,9 @@ RSpec.describe Rigor::CLI::DocsCommand do
     end
   end
 
-  describe "path <name>" do
+  describe "--path <name>" do
     it "prints the absolute path on a single line" do
-      status, out, = run(%w[path editor-integration])
+      status, out, = run(%w[--path editor-integration])
       expect(status).to eq(0)
       lines = out.strip.split("\n")
       expect(lines.size).to eq(1)
@@ -83,9 +114,28 @@ RSpec.describe Rigor::CLI::DocsCommand do
     end
 
     it "is a usage error when no name is given" do
-      status, _out, err = run(["path"])
+      status, _out, err = run(["--path"])
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
       expect(err).to include("requires a doc name")
+    end
+  end
+
+  describe "deprecated verb forms (removed in v0.3.0)" do
+    it "still lists via `list` but warns on stderr" do
+      status, out, err = run(["list"])
+      expect(status).to eq(0)
+      expect(out).to include("install")
+      expect(err).to include("`list` is deprecated")
+      expect(err).to include("v0.3.0")
+      expect(err).to include("rigor docs --list")
+    end
+
+    it "still resolves a path via `path <name>` but warns on stderr" do
+      status, out, err = run(%w[path editor-integration])
+      expect(status).to eq(0)
+      expect(out.strip).to end_with("docs/manual/09-editor-integration.md")
+      expect(err).to include("`path <name>` is deprecated")
+      expect(err).to include("rigor docs --path <name>")
     end
   end
 
@@ -94,6 +144,7 @@ RSpec.describe Rigor::CLI::DocsCommand do
       status, out, = run(["help"])
       expect(status).to eq(0)
       expect(out).to include("Usage: rigor docs")
+      expect(out).to include("--list")
     end
   end
 end

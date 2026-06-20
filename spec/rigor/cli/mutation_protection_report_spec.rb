@@ -59,4 +59,11 @@ RSpec.describe Rigor::CLI::MutationProtectionReport do
     report = Rigor::CLI::MutationProtectionAccumulator.new.to_report
     expect(report.ratio).to eq(1.0)
   end
+
+  it "records a parse error as a path plus the error count" do
+    acc = Rigor::CLI::MutationProtectionAccumulator.new
+    acc.record_parse_error("broken.rb", %w[err-a err-b])
+
+    expect(acc.to_report.parse_errors).to eq([{ "path" => "broken.rb", "errors" => 2 }])
+  end
 end

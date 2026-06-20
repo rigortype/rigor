@@ -51,4 +51,16 @@ RSpec.describe Rigor::CLI::PrismColorizer do
 
     expect(colorize(source)).to eq(source)
   end
+
+  it "retags a US-ASCII-labelled source carrying UTF-8 bytes before lexing" do
+    # Sources read under a POSIX locale arrive tagged US-ASCII; the
+    # colorizer dups and retags to UTF-8 so the token regexes do not
+    # raise on the multibyte comment.
+    source = "x = 1  # コメント\n".dup.force_encoding(Encoding::US_ASCII)
+    stripped = colorize(source).gsub(/\e\[[0-9;]*m/, "")
+
+    expect(stripped).to include("コメント")
+    # The retag works on a dup — the caller's string is not mutated.
+    expect(source.encoding).to eq(Encoding::US_ASCII)
+  end
 end

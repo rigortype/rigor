@@ -103,6 +103,25 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       )
     end
 
+    it "degrades a gem to no contributions when the Walker raises (per-gem isolation)" do
+      resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+      walker = Rigor::Analysis::DependencySourceInference::Walker
+      allow(resolver).to receive(:resolve).with(have_attributes(gem: "alpha")).and_return(
+        resolver::Resolved.new(
+          gem_name: "alpha", version: "1.0.0",
+          gem_dir: "/fake/alpha", mode: :when_missing, roots: %w[lib]
+        )
+      )
+      allow(walker).to receive(:walk).and_raise(StandardError, "boom")
+
+      # walker_outcome_for rescues the raise and substitutes an empty,
+      # non-truncated Outcome rather than letting the whole build crash.
+      index = described_class.build(dependencies({ "gem" => "alpha" }))
+
+      expect(index.contribution_for(class_name: "Alpha", method_name: :one)).to be_nil
+      expect(index.budget_exceeded).to eq([])
+    end
+
     def stub_resolved_for(gem_name, method_catalog:, truncated: false)
       gem_dir = "/fake/#{gem_name}"
       resolver = Rigor::Analysis::DependencySourceInference::GemResolver

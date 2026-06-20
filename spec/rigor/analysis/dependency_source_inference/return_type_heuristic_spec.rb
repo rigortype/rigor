@@ -60,6 +60,21 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::ReturnTypeHeuristic d
       expect(type).to eq(Rigor::Type::Combinator.nominal_of("String"))
     end
 
+    it "digs past a begin/rescue wrapper to the protected body's tail" do
+      # The body is a BeginNode; tail_expression recurses into its
+      # protected statements rather than stopping at the wrapper.
+      type = extract_from(<<~RUBY)
+        def m
+          begin
+            42
+          rescue StandardError
+            nil
+          end
+        end
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(42))
+    end
+
     it "returns nil for non-literal tail expressions (method call)" do
       type = extract_from("def m; some_other_method; end")
       expect(type).to be_nil

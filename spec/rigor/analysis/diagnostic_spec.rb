@@ -175,4 +175,53 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       expect([via_node.line, via_node.column]).to eq([via_loc.line, via_loc.column])
     end
   end
+
+  describe ".from_message_loc" do
+    # A method call with a receiver: message_loc (the "foo" span) starts
+    # past the receiver, so it differs from the receiver-spanning location.
+    let(:call) { Prism.parse("receiver.foo(:bar)").value.statements.body.first }
+
+    it "positions at the call's message_loc (the method-name span)" do
+      diagnostic = described_class.from_message_loc(call, path: "d.rb", message: "m", rule: "x")
+      expect(diagnostic.line).to eq(call.message_loc.start_line)
+      expect(diagnostic.column).to eq(call.message_loc.start_column + 1)
+      expect(diagnostic.column).not_to eq(call.location.start_column + 1)
+    end
+
+    it "falls back to node.location when message_loc is nil" do
+      loc = Prism.parse("xyz").value.location
+      node = instance_double(Prism::CallNode, message_loc: nil, location: loc)
+      diagnostic = described_class.from_message_loc(node, path: "d.rb", message: "m")
+      expect(diagnostic.line).to eq(loc.start_line)
+      expect(diagnostic.column).to eq(loc.start_column + 1)
+    end
+  end
+
+  describe ".from_name_loc" do
+    # A def node: name_loc (the "foo" span) starts past the `def` keyword.
+    let(:defn) { Prism.parse("def foo; end").value.statements.body.first }
+
+    it "positions at the definition's name_loc (the declared-name span)" do
+      diagnostic = described_class.from_name_loc(defn, path: "d.rb", message: "m")
+      expect(diagnostic.line).to eq(defn.name_loc.start_line)
+      expect(diagnostic.column).to eq(defn.name_loc.start_column + 1)
+      expect(diagnostic.column).not_to eq(defn.location.start_column + 1)
+    end
+
+    it "falls back to node.location when name_loc is nil" do
+      loc = Prism.parse("xyz").value.location
+      node = instance_double(Prism::DefNode, name_loc: nil, location: loc)
+      diagnostic = described_class.from_name_loc(node, path: "d.rb", message: "m")
+      expect(diagnostic.line).to eq(loc.start_line)
+      expect(diagnostic.column).to eq(loc.start_column + 1)
+    end
+  end
+
+  describe "#error?" do
+    it "is true only for :error severity" do
+      base = { path: "f.rb", line: 1, column: 1, message: "m" }
+      expect(described_class.new(**base, severity: :error).error?).to be(true)
+      expect(described_class.new(**base, severity: :warning).error?).to be(false)
+    end
+  end
 end

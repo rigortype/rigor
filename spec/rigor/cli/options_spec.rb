@@ -7,6 +7,16 @@ require "tmpdir"
 require "rigor/cli/options"
 
 RSpec.describe Rigor::CLI::Options do
+  describe ".add_config" do
+    it "parses --config=PATH into options[:config]" do
+      options = {}
+      parser = OptionParser.new { |opts| described_class.add_config(opts, options) }
+      parser.parse!(["--config=custom.yml"])
+
+      expect(options[:config]).to eq("custom.yml")
+    end
+  end
+
   describe ".add_editor_mode" do
     it "parses the --tmp-file / --instead-of pair into the options hash" do
       options = {}

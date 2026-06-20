@@ -138,7 +138,9 @@ module Rigor
       ENTRY_POINT_SKILL = "rigor-next-steps"
 
       # Adoption-journey order for the catalogue and the order the
-      # recommendation decision tree walks.
+      # recommendation decision tree walks. `rigor-ask` sits last: it is
+      # the journey-agnostic "answer a question about Rigor" companion the
+      # agent can offer at any point, never a presence-recommended step.
       CATALOG_ORDER = %w[
         rigor-project-init
         rigor-rbs-setup
@@ -152,6 +154,7 @@ module Rigor
         rigor-plugin-author
         rigor-upgrade
         rigor-doctor
+        rigor-ask
       ].freeze
 
       # @param skills [Array<Hash>] discovered skills, each `{name:, path:}`.

@@ -11,6 +11,11 @@ rigor <command> [options] [arguments]
 the installed version. An unknown command, or a malformed
 option, exits `64` — the conventional "usage error" code.
 
+Every command that loads your project configuration also
+accepts `--config=PATH` to point at a specific config file
+instead of auto-discovery (it is called out below only where it
+has an additional effect).
+
 ## `rigor check`
 
 Analyse Ruby source for type errors and report diagnostics.
@@ -67,7 +72,7 @@ expression it evaluates to, as a trailing `#=>` comment. See
 [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor annotate [--[no-]color] [--[no-]bat] [--config=PATH] FILE
+rigor annotate [--[no-]color] [--[no-]bat] [--format=text|json] [--config=PATH] FILE
 ```
 
 `FILE` is required. Colour is auto-detected for a tty and
@@ -75,7 +80,9 @@ honours `NO_COLOR`; `--color` / `--no-color` override. When
 colour is on and [`bat`](https://github.com/sharkdp/bat) is on
 `PATH`, highlighting goes through bat (`--no-bat` opts out;
 `--bat` warns if bat is missing and falls back to the built-in
-colorizer). Exit `1` on a parse error or a missing file.
+colorizer). `--format=json` emits a `{ line => type }` map
+instead of the annotated source. Exit `1` on a parse error or a
+missing file.
 
 ## `rigor type-of`
 
@@ -123,9 +130,10 @@ rigor type-scan PATH...
 ```
 
 `--limit=N` caps the printed examples (default 10),
-`--show-recognized` includes fully-covered classes, and
+`--show-recognized` includes fully-covered classes,
 `--threshold=RATIO` makes the command exit non-zero when the
-unrecognized-node ratio exceeds `RATIO`.
+unrecognized-node ratio exceeds `RATIO`, and `--format=text|json`
+selects the output format.
 
 ## `rigor explain`
 
@@ -184,8 +192,10 @@ Run the Language Server over stdio. See
 rigor lsp [--transport=stdio] [--log=PATH] [--config=PATH]
 ```
 
-`stdio` is the only transport in v1. `--log=PATH` writes the
-wire log to a file instead of stderr.
+`stdio` is the only transport in v1. `--log=PATH` is accepted
+but not yet wired in this release — it is reserved for routing
+the server's wire log to a file; until then logging stays on
+stderr.
 
 ## `rigor baseline`
 
@@ -205,7 +215,8 @@ rigor baseline <generate|regenerate|dump|drift|prune> [options]
 | `prune` | Drop buckets that no longer match any diagnostic. `--dry-run` previews. |
 
 `generate` and `regenerate` accept `--output=PATH` and
-`--match-mode=rule|message`.
+`--match-mode=rule|message`; `dump`, `drift`, and `prune` accept
+`--baseline=PATH` to read a non-default baseline file.
 
 ## `rigor triage`
 

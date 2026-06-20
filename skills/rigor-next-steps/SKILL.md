@@ -93,3 +93,19 @@ the `describe` output, then:
 Re-run `rigor skill describe` any time you want the next step again — it
 always reflects the project's current state, so this skill stays useful
 across the whole adoption journey, not just the first run.
+
+## Reading the manual offline
+
+Once Rigor is installed (Step 1 succeeded), the full User Manual ships
+inside the gem — read any chapter **without the network**:
+
+```sh
+rigor docs                 # the offline doc index (what's available)
+rigor docs <name>          # a chapter, e.g. `rigor docs editor-integration`
+rigor docs list            # name + absolute path for every bundled doc
+```
+
+Prefer this over fetching the same page from the web: it is the exact
+copy that shipped with the installed `rigor`, so it always matches the
+binary's behaviour. (The web copy at <https://rigor.typedduck.fail/llms.txt>
+is for the contributor-facing corpus and for reading before install.)

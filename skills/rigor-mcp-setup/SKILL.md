@@ -18,12 +18,18 @@ project's diagnostics as review context. All tools are **read-only**
 (write-side commands like `rigor init` / `sig-gen --write` are
 deliberately excluded — modifying files stays the developer's call).
 
-The authoritative, per-client configuration lives in the manual —
-**[Rigor MCP Server — AI Agent Integration](https://github.com/rigortype/rigor/blob/master/docs/manual/10-mcp-server.md)**
-— and is kept current there. This skill is the *workflow* around it
-(identify the client → apply the manual's snippet → verify the
-handshake), so it does not duplicate (and cannot stale-out) the config
-details.
+The authoritative, per-client configuration lives in the manual. With
+Rigor installed, read it **offline** with no network round-trip:
+
+```sh
+rigor docs mcp-server
+```
+
+(Web fallback, only before Rigor is installed:
+**[Rigor MCP Server — AI Agent Integration](https://github.com/rigortype/rigor/blob/master/docs/manual/10-mcp-server.md)**.)
+This skill is the *workflow* around it (identify the client → apply the
+manual's snippet → verify the handshake), so it does not duplicate (and
+cannot stale-out) the config details.
 
 ## When to use
 
@@ -49,10 +55,10 @@ for inputs and outputs.
 Every client config simply launches **`rigor mcp`** (stdio) and needs
 **`rigor` on the agent's `PATH`** — the same executable `rigor check`
 uses. For agents that do not inherit your shell, the `mise` shim path is
-the most reliable channel (see
-[Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/install.md)).
-Do **not** add `rigortype` to the project's `Gemfile` — it is a tool,
-not a library.
+the most reliable channel (see `rigor docs install`, or
+[Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/install.md)
+on the web). Do **not** add `rigortype` to the project's `Gemfile` — it
+is a tool, not a library.
 
 ## Procedure
 
@@ -73,7 +79,12 @@ matching snippet from the manual's **Client wiring** section verbatim —
 it covers Claude Desktop, Claude Code CLI, Cursor, Cline, and a generic
 stdio client:
 
-<https://github.com/rigortype/rigor/blob/master/docs/manual/10-mcp-server.md>
+```sh
+rigor docs mcp-server
+```
+
+(or, pre-install, the web copy:
+<https://github.com/rigortype/rigor/blob/master/docs/manual/10-mcp-server.md>)
 
 Each snippet is the same shape — `{"command": "rigor", "args": ["mcp"]}`.
 If the project commits a shared MCP config, add the Rigor entry there and

@@ -16,11 +16,18 @@ into a live editor experience: diagnostics as you type, hover-to-type,
 an outline view, and type-aware completion. This skill wires it into the
 developer's editor.
 
-The authoritative, per-editor configuration lives in the manual —
-**[Rigor LSP — Editor Integration](https://github.com/rigortype/rigor/blob/master/docs/manual/09-editor-integration.md)**
-— and is kept current there. This skill is the *workflow* around it
-(identify the editor → apply the manual's snippet → verify), so it does
-not duplicate (and cannot stale-out) the config details.
+The authoritative, per-editor configuration lives in the manual. With
+Rigor installed, read it **offline** with no network round-trip:
+
+```sh
+rigor docs editor-integration
+```
+
+(Web fallback, only before Rigor is installed:
+**[Rigor LSP — Editor Integration](https://github.com/rigortype/rigor/blob/master/docs/manual/09-editor-integration.md)**.)
+This skill is the *workflow* around it (identify the editor → apply the
+manual's snippet → verify), so it does not duplicate (and cannot
+stale-out) the config details.
 
 ## When to use
 
@@ -40,10 +47,10 @@ not duplicate (and cannot stale-out) the config details.
 Every editor snippet simply launches **`rigor lsp`** (stdio) and needs
 **`rigor` on the editor's `PATH`** — the same executable `rigor check`
 uses. For GUI editors that do not inherit your shell, the `mise` shim
-path is the most reliable channel (see
-[Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/install.md)).
-Do **not** add `rigortype` to the project's `Gemfile` — it is a tool,
-not a library.
+path is the most reliable channel (see `rigor docs install`, or
+[Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/install.md)
+on the web). Do **not** add `rigortype` to the project's `Gemfile` — it
+is a tool, not a library.
 
 ## Procedure
 
@@ -73,7 +80,12 @@ The manual chapter covers:
 Open the manual's **Editor wiring** section and apply the snippet for
 the developer's editor verbatim:
 
-<https://github.com/rigortype/rigor/blob/master/docs/manual/09-editor-integration.md>
+```sh
+rigor docs editor-integration
+```
+
+(or, pre-install, the web copy:
+<https://github.com/rigortype/rigor/blob/master/docs/manual/09-editor-integration.md>)
 
 All snippets invoke `rigor lsp` directly. (Only if the project still
 uses a legacy bundler-local install do you swap in

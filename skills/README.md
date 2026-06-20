@@ -42,6 +42,7 @@ your installed version rather than being frozen into a SKILL file — see
 | [`rigor-ci-setup`](rigor-ci-setup/SKILL.md) | Wire Rigor into CI and surface diagnostics inline on the PR / MR (SARIF, GitHub Actions, GitLab Code Quality, reviewdog, …). |
 | [`rigor-baseline-reduce`](rigor-baseline-reduce/SKILL.md) | Work an existing `.rigor-baseline.yml` down rule by rule — classify, fix or suppress, regenerate. |
 | [`rigor-editor-setup`](rigor-editor-setup/SKILL.md) | Wire `rigor lsp` into the editor (Neovim, VS Code, Helix, Emacs) for live diagnostics, hover types, and completion. |
+| [`rigor-mcp-setup`](rigor-mcp-setup/SKILL.md) | Wire `rigor mcp` into an AI agent (Claude Code, Cursor, Cline, …) so it can call Rigor's read-only analysis tools. |
 | [`rigor-protection-uplift`](rigor-protection-uplift/SKILL.md) | Close the type-protection holes `rigor coverage --protection` surfaces, under a double gate that keeps `rigor check` clean. |
 | [`rigor-plugin-author`](rigor-plugin-author/SKILL.md) | Author a Rigor plugin (in your own repo) to teach Rigor an application DSL, framework, or metaprogramming pattern. |
 

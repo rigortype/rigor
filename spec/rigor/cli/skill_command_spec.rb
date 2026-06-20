@@ -151,6 +151,34 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("→ rigor-protection-uplift —")
     end
 
+    it "recommends rigor-mcp-setup when an MCP client config lacks Rigor" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          "Gemfile.lock" => "GEM\n  specs:\n",
+          "rbs_collection.lock.yaml" => "sources: []\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n",
+          ".mcp.json" => "{ \"mcpServers\": {} }\n"
+        }
+      )
+      expect(out).to include("→ rigor-mcp-setup —")
+      expect(out).to include("MCP config present, Rigor not wired")
+    end
+
+    it "stops recommending rigor-mcp-setup once the MCP config references rigor" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          "Gemfile.lock" => "GEM\n  specs:\n",
+          "rbs_collection.lock.yaml" => "sources: []\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n",
+          ".mcp.json" => "{ \"mcpServers\": { \"rigor\": { \"command\": \"rigor\" } } }\n"
+        }
+      )
+      expect(out).not_to include("→ rigor-mcp-setup —")
+      expect(out).to include("→ rigor-protection-uplift —")
+    end
+
     it "lists the downstream skills with a load command, excluding the entry point itself" do
       _status, out, = describe_in({})
       expect(out).to include("rigor skill print rigor-project-init")

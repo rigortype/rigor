@@ -110,7 +110,7 @@ redundant suggestion, never a diagnostic.
 | `rigor-upgrade` | baseline's recorded Rigor version < installed | `rigor diff` / `rigor baseline regenerate` | Queued (needs the baseline to record its generation version) |
 | `rigor-doctor` | (deeper validation than the presence probe) | a new additive `rigor doctor` command | Proposed |
 | `rigor-plugin-tune` | `Gemfile.lock` deps not all matched to enabled plugins | `rigor plugins --strict` | Proposed |
-| `rigor-mcp-setup` | no MCP-client config referencing `rigor` | `rigor mcp` ([ADR-33](33-mcp-server.md)) | Proposed |
+| `rigor-mcp-setup` | committed `.mcp.json` / `.cursor/mcp.json` without a `rigor` reference (catalogue-only for user-local client configs) | `rigor mcp` ([ADR-33](33-mcp-server.md)), routing to the manual's MCP chapter | **Landed 2026-06-20** |
 | `rigor-monkeypatch-resolve` | `triage` shows a `call.unresolved-toplevel` cluster | `pre_eval:` ([ADR-17](17-monkey-patch-pre-evaluation.md)) | Proposed |
 
 `rigor-rbs-setup` sits **right after `rigor-project-init`** in the
@@ -121,8 +121,8 @@ re-baselining against a noisier diagnostic set later.
 
 Not every destination earns a headline branch. The decision tree gates
 the **linear correctness journey** on reliable project-file signals;
-**DX / integration** skills (`rigor-editor-setup`, the queued
-`rigor-mcp-setup`) are *catalogue-first* — they are listed for the agent
+**DX / integration** skills (`rigor-editor-setup`, `rigor-mcp-setup`)
+are *catalogue-first* — they are listed for the agent
 to offer via the "what would you like to do?" path, and fire a headline
 recommendation only on a strong, repo-visible signal (a committed
 `.vscode/` without `rigor`), because their real config is user-local and

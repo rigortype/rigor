@@ -39,6 +39,7 @@ module Rigor
         rigor-ci-setup
         rigor-baseline-reduce
         rigor-editor-setup
+        rigor-mcp-setup
         rigor-protection-uplift
         rigor-plugin-author
       ].freeze
@@ -83,7 +84,8 @@ module Rigor
           gems: File.file?(File.join(@root, "Gemfile.lock")),
           rbs_collection: File.file?(File.join(@root, RBS_COLLECTION_LOCKFILE)),
           ci: ci_state,
-          editor: editor_state
+          editor: editor_state,
+          mcp: mcp_state
         }
       end
 
@@ -107,6 +109,20 @@ module Rigor
 
         files = Dir.glob(File.join(vscode, "*.json"))
         return :unwired if files.empty?
+
+        files.any? { |path| file_mentions_rigor?(path) } ? :wired : :unwired
+      end
+
+      # MCP-client signal — `:wired` (a committed project MCP config names
+      # `rigor`), `:unwired` (one is present but does not), or `:none`.
+      # Only the project-scoped configs are detectable (`.mcp.json`,
+      # `.cursor/mcp.json`); user-level client configs live in $HOME, so
+      # mcp-setup is otherwise a catalogue-only destination.
+      def mcp_state
+        files = [".mcp.json", File.join(".cursor", "mcp.json")]
+                .map { |rel| File.join(@root, rel) }
+                .select { |path| File.file?(path) }
+        return :none if files.empty?
 
         files.any? { |path| file_mentions_rigor?(path) } ? :wired : :unwired
       end
@@ -144,6 +160,9 @@ module Rigor
         elsif state.fetch(:editor) == :unwired
           ["rigor-editor-setup",
            "you have an editor config but no Rigor LSP — wire `rigor lsp` for live diagnostics and hover types."]
+        elsif state.fetch(:mcp) == :unwired
+          ["rigor-mcp-setup",
+           "an MCP client config is present without Rigor — wire `rigor mcp` so your AI agent can call Rigor's tools."]
         else
           ["rigor-protection-uplift", "the basics are in place — raise how much of your code Rigor can catch bugs in."]
         end
@@ -174,6 +193,11 @@ module Rigor
                  when :unwired then ".vscode present, Rigor LSP not wired"
                  else "not detected"
                  end
+        mcp = case state.fetch(:mcp)
+              when :wired then "Rigor MCP wired"
+              when :unwired then "MCP config present, Rigor not wired"
+              else "not detected"
+              end
         <<~STATE
           ## Project state
           - Config file:    #{state.fetch(:config) || 'none (no .rigor.yml / .rigor.dist.yml)'}
@@ -182,6 +206,7 @@ module Rigor
           - Community RBS:  #{rbs}
           - CI integration: #{ci}
           - Editor LSP:     #{editor}
+          - MCP server:     #{mcp}
         STATE
       end
 

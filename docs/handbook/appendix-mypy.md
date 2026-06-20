@@ -14,7 +14,7 @@ inference is.
 | --- | --- | --- |
 | Where do annotations live? | In source (`def f(x: int) -> str:`) | In `.rbs` files alongside `.rb` |
 | Stub format | `.pyi` files | `.rbs` files |
-| Default for unannotated code | `Any` everywhere (mypy) / inferred (Pyright) | Inferred precisely or `Dynamic[Top]` |
+| Default for unannotated code | `Any` everywhere (mypy) / inferred (Pyright) | Inferred precisely or `Dynamic[top]` |
 | Strict mode | `--strict` (mypy) / `strict: true` (Pyright) | `severity_profile: strict` |
 | Suppression | `# type: ignore[error-code]` | `# rigor:disable <rule>` |
 | Identity of types | Nominal + structural (Protocol) | Nominal + structural facets |
@@ -37,7 +37,7 @@ mypy got right.
 | `str` | `String` | |
 | `bytes` | `String` (with binary encoding) | Ruby has no separate `bytes` type. |
 | `None` | `Constant<nil>` | `nil` is Ruby's sole no-value. |
-| `Any` | `Dynamic[Top]` | "Stay silent" carrier. |
+| `Any` | `Dynamic[top]` | "Stay silent" carrier. |
 | `object` | `Object` (or `Top`) | `object` is Python's universal supertype (everything, `None` included); Rigor's nearest match is `Top`. |
 | `Never` / `NoReturn` | `Bot` | Empty type. |
 | `Optional[T]` / `T \| None` | `T?` (i.e., `T \| nil`) | |
@@ -95,7 +95,7 @@ have direct analogues:
 | `if isinstance(x, (int, str)):` | `if x.is_a?(Integer) \|\| x.is_a?(String)` |
 | `assert isinstance(x, T)` | `# rigor:assert-type` style via plugin OR `T.cast` via `rigor-sorbet` |
 | `match x: case ...` (PEP 634) | `case x; in ...` (Ruby's pattern matching) |
-| User-defined `TypeGuard[T]` (PEP 647) | `%a{rigor:v1:predicate-if-true: x is T}` directive |
+| User-defined `TypeGuard[T]` (PEP 647) | `%a{rigor:v1:predicate-if-true x is T}` directive |
 | User-defined `TypeIs[T]` (PEP 742) | Same directive — Rigor's narrowing is symmetric (truthy AND falsey) by default |
 | `assert x is not None; x.upper()` | Same idiom: `unless x.nil?; x.upcase; end` |
 | `cast(int, x)` | `T.cast(x, Integer)` via `rigor-sorbet`, or RBS-side `param:` directive |
@@ -290,7 +290,7 @@ draws the distinction in full.
   by the corresponding Ruby predicate methods.
 - **No-false-positives stance.** mypy will warn about dynamic
   code unless `--no-warn-unused-ignores` or `--ignore-missing-imports`
-  is set; Rigor stays silent on `Dynamic[Top]` without
+  is set; Rigor stays silent on `Dynamic[top]` without
   configuration.
 - **Plugin-side return-type variation by argument shape.**
   Pyright's "type alias narrowing" and mypy's overload stacks

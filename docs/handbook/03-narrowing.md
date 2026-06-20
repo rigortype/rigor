@@ -309,9 +309,12 @@ not chase mutation).
 A few forms you might expect that Rigor does **not** narrow
 today:
 
-- `respond_to?(:method_name)` — proving "this object responds
-  to that method" requires a structural facet the engine does
-  not yet expose.
+- `respond_to?(:method_name)` records only a non-nil
+  narrowing — a truthy check with a statically-known symbol
+  removes `nil` from the receiver (since `nil` does not
+  respond to most methods) — but it does **not** yet expose a
+  structural "this object responds to that method" capability
+  fact you could dispatch against.
 - `frozen?` and other mutation guards — Rigor does not track
   mutability as a narrowing fact yet.
 - Open-ended class-comparison via `===` against arbitrary

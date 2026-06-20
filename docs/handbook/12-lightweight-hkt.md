@@ -5,7 +5,7 @@ number, a string, an array of JSON values, or a hash of JSON
 values. RBS describes that as `untyped` because there is no way
 to spell a recursive sum type without quantifying over a type
 constructor. Most type checkers shrug and let `JSON.parse(str)`
-fade into `Dynamic[Top]`.
+fade into `Dynamic[top]`.
 
 Rigor models it precisely:
 
@@ -171,7 +171,7 @@ walks. The grammar covers ADR-20 § D3 in full:
 
 | Form | Example | Meaning |
 | --- | --- | --- |
-| Atom | `nil` / `true` / `false` / `bool` / `untyped` | Constants and the `Dynamic[Top]` carrier |
+| Atom | `nil` / `true` / `false` / `bool` / `untyped` | Constants and the `Dynamic[top]` carrier |
 | Nominal class | `Integer` / `String` / `Foo::Bar` / `::String` | `Nominal[class_name]` |
 | Param reference | `K`, `T`, `E` (when in `params`) | Substituted at reduction time |
 | Parameterised nominal | `Array[K]`, `Hash[K, V]` | `Nominal[..., type_args: [...]]` |
@@ -255,7 +255,7 @@ Union[ nil, true, false, Integer, Float, String,
 
 The nested `Type::App` is a normal Rigor type; downstream
 consumers (acceptance, narrowing, dispatch) handle it by
-delegating to its `bound` (default `Dynamic[Top]`). If they
+delegating to its `bound` (default `Dynamic[top]`). If they
 need one more level of unfolding, they call
 `app.reduce(env.hkt_registry)` again — but the typical
 consumer doesn't need to.
@@ -317,7 +317,7 @@ machinery:
   carrier zoo the reducer outputs.
 - [Chapter 7 — RBS and `RBS::Extended`](07-rbs-and-extended.md)
   for the broader annotation grammar (`%a{rigor:v1:return:}`,
-  `%a{rigor:v1:predicate-if-true:}`, …) the HKT directives
+  `%a{rigor:v1:predicate-if-true}`, …) the HKT directives
   sit alongside.
 - [Appendix — Connections to type theory](appendix-type-theory.md)
   § "What Rigor does NOT model" for the formal-type-theory

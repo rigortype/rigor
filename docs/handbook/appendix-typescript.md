@@ -16,9 +16,9 @@ TypeScript reflexes will mislead you.
 | --- | --- | --- |
 | Where do annotations live? | In source (`x: number`) | In `.rbs` files alongside `.rb` |
 | Who writes them? | The author of the code | The author OR inference |
-| What is the default? | `any` (TypeScript pre-strict) / `unknown` (strict) | Inferred precisely or `Dynamic[Top]` |
+| What is the default? | `any` (TypeScript pre-strict) / `unknown` (strict) | Inferred precisely or `Dynamic[top]` |
 | Identity of types | Structural | Nominal + structural facets |
-| Cost of "I do not know yet" | A red squiggle until annotated | Silence — `Dynamic[Top]` produces no diagnostic |
+| Cost of "I do not know yet" | A red squiggle until annotated | Silence — `Dynamic[top]` produces no diagnostic |
 | When do diagnostics fire? | Whenever a type is unsound | Only when Rigor can **prove** the unsoundness |
 
 The two systems share their goal — flag bugs before the program
@@ -38,8 +38,8 @@ inference cannot see further).
 | `boolean` | `bool` (`Constant<true> \| Constant<false>`) | `bool` is structurally a union of two constants. |
 | `null` | `nil` (`Constant<nil>`) | Ruby has only `nil`; TS distinguishes `null` and `undefined`. |
 | `undefined` | (no analogue) | An unset Ruby local raises `NameError`, not "undefined". |
-| `any` | `Dynamic[Top]` | The "be silent here" carrier. |
-| `unknown` | `Top` | Both refuse method dispatch until narrowed; `unknown` is closer to `Top` than to `Dynamic[Top]`. |
+| `any` | `Dynamic[top]` | The "be silent here" carrier. |
+| `unknown` | `Top` | Both refuse method dispatch until narrowed; `unknown` is closer to `Top` than to `Dynamic[top]`. |
 | `never` | `Bot` | Empty type — no inhabitants. Used for unreachable branches and `T.absurd` (Sorbet) / `raise`-only bodies. |
 | `void` | `void` | Same idea — caller must not consume the value. |
 | `T \| U` | `T \| U` | Same shape; same display. |
@@ -72,7 +72,7 @@ Rigor. The vocabulary is different; the behaviour is the same.
 | `x === null` | `x.nil?` (and `x == nil`) |
 | `if (x !== null && x !== undefined)` | `if x` (Ruby has only `nil`, no `undefined`) |
 | Discriminated union `switch (x.kind)` | `case x; in {kind: :foo}` or `case x.kind; when :foo` |
-| User-defined type guard `function isFoo(x): x is Foo` | `%a{rigor:v1:predicate-if-true: x is Foo}` directive |
+| User-defined type guard `function isFoo(x): x is Foo` | `%a{rigor:v1:predicate-if-true x is Foo}` directive |
 | `as` cast | (no equivalent in code) — Rigor has `T.cast` via `rigor-sorbet`, or `param:` directives |
 | `x!` (non-null assertion) | (no equivalent in code) — `T.must` via `rigor-sorbet`, or `unless x.nil?` narrowing |
 | `as const` | Constants fold automatically — no `as const` needed |
@@ -232,8 +232,10 @@ Be honest about what you give up:
   the robustness principle).
 - **Editor IntelliSense parity.** TypeScript's tooling has 20
   years of investment behind it. Rigor's editor integration is
-  young; today the analyzer ships diagnostics and `rigor
-  type-of`, and editor integration via LSP is on the roadmap.
+  younger: `rigor lsp` ships an in-process Language Server
+  (diagnostics, hover-to-type, outline, type-aware completion;
+  see the manual's editor-integration chapter), but its
+  tooling depth still trails TypeScript's.
 
 ## What Rigor has and TypeScript does not
 
@@ -246,13 +248,13 @@ The other direction:
   `Constant<"FOO">`, not just `string`. Rigor catalogues which
   built-in methods are pure and folds through them.
 - **No-false-positives stance.** Rigor stays silent on
-  `Dynamic[Top]` receivers rather than complaining. You will
+  `Dynamic[top]` receivers rather than complaining. You will
   never see a Rigor diagnostic where the right answer is "well,
   technically the checker cannot know."
 - **No annotation tax.** You can run `rigor check` on a Ruby
   project that has zero `.rbs` files and get useful diagnostics
   from inference alone. Adding `.rbs` files is incremental;
-  every file you skip is `Dynamic[Top]` at the boundary, not a
+  every file you skip is `Dynamic[top]` at the boundary, not a
   diagnostic.
 - **Severity-aware adoption.** TypeScript's "all or nothing"
   feel (you flip `strict` and a thousand errors appear) is

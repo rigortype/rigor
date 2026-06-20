@@ -69,7 +69,7 @@ Where they diverge:
   entry point (or a small harness that exercises the methods).
 - **Rigor** infers each method on its own terms against a
   catalog of core/stdlib/gem types, bounded by inference
-  budgets, and falls back to `Dynamic[Top]` for a parameter it
+  budgets, and falls back to `Dynamic[top]` for a parameter it
   cannot pin — no entry point or harness required.
 
 ## Type vocabulary — TypeProf output vs Rigor carriers
@@ -85,7 +85,7 @@ keeps a richer carrier and only erases at the boundary.
 | `"foo".upcase` | `String` | `Constant<"FOO">` (erases: `String`) |
 | `[1, "a"]` | `[Integer, String]` | `Tuple[Constant<1>, Constant<"a">]` |
 | `{name: "x", age: 1}` | `{name: String, age: Integer}` | `HashShape{name: …, age: …}` |
-| `x` unknown | `untyped` | `Dynamic[Top]` (display: `untyped`) |
+| `x` unknown | `untyped` | `Dynamic[top]` (display: `untyped`) |
 | `nil`-or-`Integer` | `Integer?` | `Integer \| Constant<nil>` (display: `Integer?`) |
 | a `> 0`-guarded int | `Integer` | `positive-int` refinement (erases: `Integer`) |
 
@@ -127,7 +127,7 @@ boundary.** It infers one method at a time. When that method
 calls another, Rigor consults a *catalog* of known return
 types (core, stdlib, gem RBS, plugin contributions) rather
 than re-interpreting the callee's body. Calls it cannot
-resolve become `Dynamic[Top]` and stop there. This is less
+resolve become `Dynamic[top]` and stop there. This is less
 precise than TypeProf on a self-contained toy program — Rigor
 will not deduce a parameter type from a single call site the
 way TypeProf can — but it is bounded by
@@ -139,7 +139,7 @@ a whole codebase and across runs.
 | --- | --- | --- |
 | Unit of analysis | Whole program from entry points | One method at a time |
 | Cross-method types | Re-interprets the callee body | Looks up the callee in a catalog |
-| Infers params from call sites? | Yes (its signature move) | No (params default to `Dynamic[Top]`) |
+| Infers params from call sites? | Yes (its signature move) | No (params default to `Dynamic[top]`) |
 | Bounded? | By practical blow-up limits | By explicit inference budgets |
 | Incremental / cached? | TypeProf 2 / `--lsp` improves this | Per-file cache across runs + machines |
 
@@ -199,7 +199,7 @@ where the analysis models show through most sharply.
   code, including a suite, helps), but TypeProf neither
   recognises nor privileges them as tests.
 - **Rigor does not read tests for `rigor check`.** Its local
-  model leaves un-narrowed parameters at `Dynamic[Top]`; the
+  model leaves un-narrowed parameters at `Dynamic[top]`; the
   bug-finding gate never consults `spec/` to tighten them.
   Tests become a parameter signal only in the opt-in
   `rigor sig-gen --params=observed --observe=spec/` path
@@ -300,7 +300,7 @@ mechanism, the same one Steep uses.
   whole-program interpretation lets it deduce a method's
   *parameter* types from how the method is called. Rigor does
   not — an un-annotated, un-narrowed parameter is
-  `Dynamic[Top]` until a `.rbs` or a guard says otherwise.
+  `Dynamic[top]` until a `.rbs` or a guard says otherwise.
 - **True inter-procedural body interpretation.** TypeProf
   re-interprets callee bodies; Rigor looks callees up in a
   catalog. On a small self-contained program TypeProf can
@@ -333,7 +333,7 @@ mechanism, the same one Steep uses.
   predicate / assertion grammar (Chapter 7) has no TypeProf
   analogue.
 - **The plugin ecosystem.** Sorbet-input adapter, Rails-side
-  narrowing, `flow_contribution_for` return-type
+  narrowing, `dynamic_return` return-type
   contributions — extension surfaces TypeProf does not model.
 
 ## A coexistence pattern

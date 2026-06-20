@@ -20,7 +20,7 @@ no config file was found, the run is empty. Confirm a
 `.rigor.yml` or `.rigor.dist.yml` exists at the project root,
 or pass paths explicitly: `rigor check lib app`.
 
-## Everything is `untyped` / `Dynamic[Top]`
+## Everything is `untyped` / `Dynamic[top]`
 
 Rigor has no type information for the code in question. The
 usual causes:

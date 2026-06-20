@@ -35,7 +35,7 @@ up the flag, key, or command that *acts* on it.
    needed" stance.
 2. [**Everyday types**](02-everyday-types.md) — the carrier
    zoo. Constants, integer ranges, refinements, unions,
-   `Dynamic[Top]`. The shortest path to "now I see what
+   `Dynamic[top]`. The shortest path to "now I see what
    Rigor sees."
 3. [**Narrowing**](03-narrowing.md) — how `if`, `case`, and
    predicate methods sharpen a variable's type along the
@@ -98,7 +98,7 @@ choices.
 
 - [**Coming from TypeScript**](appendix-typescript.md) —
   the structural-vs-nominal-with-refinements split, `unknown`
-  / `any` / `never` ↔ `Top` / `Dynamic[Top]` / `Bot`,
+  / `any` / `never` ↔ `Top` / `Dynamic[top]` / `Bot`,
   type guards ↔ `predicate-if-true` directives, what
   conditional / mapped types do not have a Rigor analogue.
 - [**Coming from PHPStan**](appendix-phpstan.md) — the
@@ -129,7 +129,7 @@ choices.
   Covers the inference-first vs annotate-first inversion,
   records ↔ `Data.define`, C#'s `string?` / Java's
   `Optional<T>` ↔ `T?`, declaration-site (C#) vs use-site
-  (Java) variance ↔ RBS, `dynamic` ↔ `Dynamic[Top]`, and why
+  (Java) variance ↔ RBS, `dynamic` ↔ `Dynamic[top]`, and why
   Rigor reports *unreachable* `case` clauses rather than
   enforcing sealed-type exhaustiveness.
 - [**Coming from Rust**](appendix-rust.md) — the sum-type and
@@ -144,7 +144,7 @@ choices.
   cousin. Go's implicitly satisfied `interface` *is* Rigor's
   RBS interface, so the feature Java/C# readers stumble on is
   the one a Go reader already has by reflex. Covers
-  `interface{}` / `any` ↔ `Dynamic[Top]`, type switch ↔
+  `interface{}` / `any` ↔ `Dynamic[top]`, type switch ↔
   `case`/`in`, errors-as-values ↔ raising, and the unions /
   literal types / refinements Go does not have.
 - [**Coming from Elixir**](appendix-elixir.md) — the closest

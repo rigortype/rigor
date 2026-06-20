@@ -18,7 +18,7 @@ Steep concept.
 | Source of types | `.rbs` files (mandatory at boundaries) | `.rbs` files (optional — inference fills gaps) |
 | Annotations in `.rb` | `# @type` comments, type assertions | Almost none — `assert_type` / `dump_type` are introspection helpers |
 | Coverage requirement | Steepfile's `check`/`signature` directives demand annotated targets | None — `rigor check lib` works with zero `.rbs` |
-| Default for unannotated code | Errors when you ask Steep to check it | Inferred precisely or `Dynamic[Top]` |
+| Default for unannotated code | Errors when you ask Steep to check it | Inferred precisely or `Dynamic[top]` |
 | Tool focus | Strong typing on opt-in surface | Best-effort precision on every file |
 | Diagnostic philosophy | Surface all type-shape mismatches | Stay silent unless the bug is provable |
 
@@ -52,7 +52,7 @@ The tools diverge on what they layer on top:
   "every method on the path must have a sig" expectation
   (configurable, but the default).
 - **Rigor** adds inference everywhere (so missing sigs
-  produce `Dynamic[Top]`, not errors), refinement carriers,
+  produce `Dynamic[top]`, not errors), refinement carriers,
   constant folding, and plugin-side narrowing.
 
 ## Type vocabulary — the RBS-level mapping is identity
@@ -68,7 +68,7 @@ declaration level is the same:
 | `[Integer, String]` (tuple) | tuple | `Tuple[Integer, String]` |
 | `{name: String, age: Integer}` (record) | record | `HashShape{name: String, age: Integer}` |
 | `_Comparable` (interface) | structural | structural facet |
-| `untyped` | `untyped` | `Dynamic[Top]` (display: `untyped`) |
+| `untyped` | `untyped` | `Dynamic[top]` (display: `untyped`) |
 | `bot` | `bot` | `Bot` |
 | `top` | `top` | `Top` |
 | `bool` | `bool` | `Constant<true> \| Constant<false>` (display: `bool`) |
@@ -236,7 +236,7 @@ adoption stages:
   resolves to `Constant<"FOO">`, not just `String`. Steep's
   literal types are narrower than Rigor's.
 - **Plugin-side return-type contributions.** Steep does not
-  have an equivalent to Rigor's `flow_contribution_for` —
+  have an equivalent to Rigor's `dynamic_return` —
   if a domain DSL's return type depends on the literal first
   argument, Rigor models it; Steep does not.
 - **Sorbet-input adapter.** A `rigor-sorbet` migration is

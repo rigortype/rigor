@@ -214,6 +214,12 @@ regex; on-disk attribution is unambiguous through
 - **Cross-machine cache sharing.** Per ADR-6 the cache is
   single-machine; plugin-side producers inherit that
   constraint.
-- **LRU eviction / size cap.** Plugin caches share the
-  unbounded layout described in ADR-6; users run
-  `--clear-cache` if needed.
+- **LRU eviction / size cap.** *(Superseded by ADR-54.)* As
+  of slice 6 plugin caches shared the unbounded ADR-6 layout;
+  ADR-54 WD3 gave the shared `Cache::Store` a `cache.max_bytes`
+  default of 256 MB and an LRU `#evict!` pass that runs after
+  every check. Plugin-side producer entries live in that same
+  Store and are reaped by mtime exactly like the built-in
+  `rbs.*` entries — they are no longer unbounded. Set
+  `cache.max_bytes: null` to restore the unbounded layout, or
+  run `--clear-cache` to purge.

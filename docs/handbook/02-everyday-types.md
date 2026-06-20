@@ -35,14 +35,14 @@ to prove `arr.first.upcase` is safe; `non-empty-array[String]`
 is.
 
 So: every value at every program point is described by a
-**carrier**. Carriers can be wide (`Integer`, `Dynamic[Top]`)
+**carrier**. Carriers can be wide (`Integer`, `Dynamic[top]`)
 or narrow (`Constant<3>`, `non-empty-string`). The rest of
 this chapter is the carrier zoo.
 
 One note on notation before the zoo: angle brackets hold a
 concrete value or bound — `Constant<3>`, `int<0, max>` —
 while square brackets hold type parameters, exactly as in RBS
-— `Nominal[String]`, `Hash[K, V]`, `Dynamic[Top]`.
+— `Nominal[String]`, `Hash[K, V]`, `Dynamic[top]`.
 
 ## Seeing carriers yourself — `rigor annotate`
 
@@ -115,7 +115,7 @@ under
 When folding is **not** safe (because a method has side
 effects, depends on the environment, or is not in a
 catalogued built-in class), Rigor declines and you get a
-nominal carrier or `Dynamic[Top]`.
+nominal carrier or `Dynamic[top]`.
 
 ## Integer ranges — bounded intervals
 
@@ -217,16 +217,16 @@ else
 end
 ```
 
-## `Dynamic[Top]` — the gradual carrier
+## `Dynamic[top]` — the gradual carrier
 
 Sometimes Rigor cannot prove anything tighter than "this
 could be any Ruby value" — a bare parameter, for instance,
-carries no calling-side information. That is `Dynamic[Top]`,
+carries no calling-side information. That is `Dynamic[top]`,
 often shortened to `untyped` for the RBS-erased view.
 
 ```ruby
 def foo(x)
-  x.bar   #=> dump_type: Dynamic[Top]
+  x.bar   #=> dump_type: Dynamic[top]
 end
 ```
 
@@ -236,7 +236,7 @@ value, but the static facet behaves like `T`." It pops up
 when an RBS-declared `untyped` boundary meets a class Rigor
 already knows something about.
 
-A diagnostic NEVER fires on a `Dynamic[Top]` receiver. That is
+A diagnostic NEVER fires on a `Dynamic[top]` receiver. That is
 the no-false-positives stance — Rigor stays silent rather
 than reporting on values it cannot characterise.
 

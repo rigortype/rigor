@@ -61,7 +61,7 @@ Shape::Circle.new(1.5).inner.no_such_float_method # error: undefined for Float
   deferred).** Narrowing a parent generic to a variant via `is_a?`
   doesn't yet carry the type arguments through the inheritance edge.
 - **Non-constant payload shapes degrade.** A variant whose payload
-  is a shape hash (`{ name: String }`) falls back to `Dynamic[Top]`.
+  is a shape hash (`{ name: String }`) falls back to `Dynamic[top]`.
 
 ## Plugin internals
 

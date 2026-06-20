@@ -50,7 +50,7 @@ ship `sorbet-runtime`, or enforce Sorbet's runtime guarantees.
 When an RBS sig and a Sorbet sig disagree, RBS wins (the Sorbet
 sig may refine but not contradict it). Forms outside the
 translation table (`T.proc`, `T.self_type`, `T::Struct` /
-`T::Enum` subclasses, …) degrade to `Dynamic[Top]`. Chapter 10
+`T::Enum` subclasses, …) degrade to `Dynamic[top]`. Chapter 10
 documents the full vocabulary and these edges.
 
 ## Plugin internals

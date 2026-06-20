@@ -96,7 +96,7 @@ One row of an emit table.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `name` | non-empty `String` | The synthetic method's name template; a `"#{name}"` placeholder is interpolated with the call-site literal symbol at `symbol_arg_position`. |
-| `returns` | non-empty `String` or `nil` | The declared return type name, resolved via `Environment#nominal_for_name`. When both `returns` and `returns_from_arg` are `nil`, the synthesised method's return falls back to `Dynamic[Top]` per the ADR-16 WD13 floor. |
+| `returns` | non-empty `String` or `nil` | The declared return type name, resolved via `Environment#nominal_for_name`. When both `returns` and `returns_from_arg` are `nil`, the synthesised method's return falls back to `Dynamic[top]` per the ADR-16 WD13 floor. |
 | `returns_from_arg` | `ReturnsFromArg` or `nil` | A per-call-site return type (ADR-18), coerced from a `Hash`. |
 
 ### `HeredocTemplate::ReturnsFromArg` (ADR-18)
@@ -156,7 +156,7 @@ carrying `#inner : <Type>`.
 | `block_method` | `Symbol` | The enclosing DSL block. Default `:variants`. |
 | `variant_method` | `Symbol` | Each declaration call inside the block. Default `:variant`. |
 | `symbol_arg_position` | `Integer >= 0` | Default `0`. The argument index whose literal constant names the nested subclass. |
-| `inner_arg_position` | `Integer >= 0` | Default `1`. The argument index whose type expression becomes the `#inner` reader's return type. A constant type argument resolves; a non-constant inner shape degrades to `Dynamic[Top]`. |
+| `inner_arg_position` | `Integer >= 0` | Default `1`. The argument index whose type expression becomes the `#inner` reader's return type. A constant type argument resolves; a non-constant inner shape degrades to `Dynamic[top]`. |
 | `inner_reader` | `Symbol` | The payload reader synthesised on each variant subclass. Default `:inner`. |
 
 The `sealed`-parent fact + `is_a?` cross-variant exhaustive narrowing

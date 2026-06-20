@@ -33,7 +33,7 @@ reader's return type resolves through the attribute's type argument
 (`attribute :city, Types::String` → `city` returns `String`). When
 dry-types isn't loaded, or for a shape it can't resolve (a
 `.constrained(...)` chain, an inline composition), the reader falls
-back to `Dynamic[Top]` — silently, no diagnostic.
+back to `Dynamic[top]` — silently, no diagnostic.
 
 ## No diagnostics, no config
 

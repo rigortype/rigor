@@ -209,7 +209,7 @@ values directly.
 > for the full snippet convention.
 
 When inference cannot prove a narrower type, the engine
-returns `Dynamic[Top]` (the gradual carrier — "could be any
+returns `Dynamic[top]` (the gradual carrier — "could be any
 Ruby value") and stays silent. Rigor never invents
 diagnostics it cannot prove.
 
@@ -218,7 +218,7 @@ diagnostics it cannot prove.
 *First read? Skip this section.* Out of the box, inference plus
 any RBS your gems already ship covers most code, and the next
 chapters teach you to read what it produces. Come back here when
-Rigor resolves something to `Dynamic[Top]` that you wish it knew
+Rigor resolves something to `Dynamic[top]` that you wish it knew
 more about. For most projects only escape hatches (1) and (2)
 ever come up.
 
@@ -229,7 +229,7 @@ will need them:
    Rigor picks it up automatically. This is the most common
    reason inference does not see further than the local
    `def` — by default the analyzer treats every external gem
-   as `Dynamic[Top]` unless the gem ships RBS or you
+   as `Dynamic[top]` unless the gem ships RBS or you
    opt in to gem-source inference per (4) below.
 2. **Tighten an existing RBS sig with `RBS::Extended`.** Add
    a `%a{rigor:v1:return: non-empty-string}` annotation
@@ -240,7 +240,7 @@ will need them:
    that no general-purpose analyzer can know about, a
    plugin teaches Rigor about it.
 4. **Opt in to gem-source inference.** When a no-RBS gem's
-   methods would otherwise resolve to `Dynamic[Top]`, list
+   methods would otherwise resolve to `Dynamic[top]`, list
    the gem under `dependencies.source_inference:` in
    `.rigor.dist.yml` and Rigor will walk its `lib/` the same way
    it walks project source. Returns are wrapped in

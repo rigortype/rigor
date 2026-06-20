@@ -27,7 +27,7 @@ first and asks for annotations only at the edges.
 | --- | --- | --- |
 | Where do annotations live? | In source, on every declaration | In `.rbs` files alongside `.rb` |
 | Who writes them? | The author (always) | The author OR inference |
-| Default for an unannotated value | There is no unannotated value (except `var` locals) | Inferred precisely or `Dynamic[Top]` |
+| Default for an unannotated value | There is no unannotated value (except `var` locals) | Inferred precisely or `Dynamic[top]` |
 | Identity of types | Nominal (a class `implements` / `: IFace`) | Nominal + structural facets |
 | Inference scope | Local only (`var` / `var`) | Whole-method body, across `def` boundaries |
 | When do diagnostics fire? | Whenever a type does not check | Only when Rigor can **prove** the unsoundness |
@@ -52,7 +52,7 @@ advisor that only speaks when it is sure.
 | `Object` | `object` | `Object` / `Top` | `Top` is the universal supertype when you mean "anything". |
 | `void` | `void` | `void` | Same idea — caller must not consume the value. |
 | (none) | (none) | `Bot` | Empty type — unreachable branches, `raise`-only bodies. Java's `Void` / C#'s `Never` (proposed) are the nearest spellings. |
-| `Object` (untyped boundary) | `dynamic` | `Dynamic[Top]` | C#'s `dynamic` is the closest analogue — the "be silent here" carrier. |
+| `Object` (untyped boundary) | `dynamic` | `Dynamic[top]` | C#'s `dynamic` is the closest analogue — the "be silent here" carrier. |
 | `T[]` / `List<T>` | `T[]` / `List<T>` / `IEnumerable<T>` | `Array[T]` | |
 | `Map<K, V>` | `Dictionary<K, V>` / `IDictionary<K, V>` | `Hash[K, V]` | |
 | `Set<T>` | `HashSet<T>` / `ISet<T>` | `Set[T]` | |
@@ -126,7 +126,7 @@ behaviour matches.
 | `switch (x) { case Foo f -> … }` | `switch (x) { case Foo f => … }` | `case x; in Foo => f` |
 | `(Foo) x` (cast) | `(Foo)x` (cast) | (no in-source cast) — `is_a?` guard, or `T.cast` via [`rigor-sorbet`](../../plugins/rigor-sorbet/) |
 | `Objects.requireNonNull(x)` | `x!` (null-forgiving) | (no in-source assertion) — `unless x.nil?`, or `T.must` via `rigor-sorbet` |
-| user method returning `boolean` | user method returning `bool` | `%a{rigor:v1:predicate-if-true: x is Foo}` directive on the predicate |
+| user method returning `boolean` | user method returning `bool` | `%a{rigor:v1:predicate-if-true x is Foo}` directive on the predicate |
 
 The reflex to drop is the **cast**. In Java/C# you reach for
 `(Foo) x` or C#'s null-forgiving `x!` whenever the compiler
@@ -330,7 +330,7 @@ do not, and which way each leans relative to Rigor:
   Java is use-site (wildcards). RBS readers from C# will find
   the variance markers familiar.
 - **`dynamic`**: C# has a genuine `dynamic` type — the direct
-  analogue of `Dynamic[Top]`. Java's nearest equivalent is an
+  analogue of `Dynamic[top]`. Java's nearest equivalent is an
   `Object` reference plus reflection, with no "silence the
   checker" semantics.
 - **Value types**: C#'s `struct` / `record struct` carry value
@@ -361,9 +361,10 @@ Be honest about what you give up:
   than RBS exposes. Rigor's generics are deliberately modest so
   the analyzer stays fast on real Ruby.
 - **IDE completeness.** Decades of IntelliJ / Visual Studio
-  investment back Java and C#. Rigor ships diagnostics and
-  `rigor type-of` today; LSP-based editor integration is on the
-  roadmap.
+  investment back Java and C#. Rigor ships diagnostics, `rigor
+  type-of`, and an in-process Language Server (`rigor lsp`)
+  today; its IDE tooling depth still trails the JetBrains /
+  Visual Studio ecosystems.
 
 ## What Rigor has and Java / C# do not
 
@@ -387,14 +388,14 @@ longer than you might expect, because neither has literal types:
   the shape. See the
   [structural-typing appendix](appendix-protocols-and-structural-typing.md).
 - **No-false-positives stance.** Rigor stays silent on
-  `Dynamic[Top]` receivers rather than complaining. You will
+  `Dynamic[top]` receivers rather than complaining. You will
   never see a Rigor diagnostic whose honest answer is "well,
   technically the checker cannot know."
 - **No annotation tax.** `rigor check` on a Ruby project with
   zero `.rbs` files still yields useful diagnostics from
   inference. Java and C# infer only `var` locals; everything
   else you author. Adding `.rbs` to Rigor is incremental — every
-  file you skip is `Dynamic[Top]` at the boundary, not an error.
+  file you skip is `Dynamic[top]` at the boundary, not an error.
 
 ## A migration vignette
 

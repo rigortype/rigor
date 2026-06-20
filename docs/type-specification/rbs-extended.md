@@ -132,7 +132,7 @@ Two declaration-level directives register and define defunctionalised type const
 
 | Directive | Effect |
 | --- | --- |
-| `rigor:v1:hkt_register: uri=<uri> arity=<int> variance=<v1>,<v2>,... bound=<class_or_untyped>` | Registers a type-constructor URI with its arity, per-position variance, and erasure `bound` (`untyped` → `Dynamic[Top]`, ADR-20 WD2 default). |
+| `rigor:v1:hkt_register: uri=<uri> arity=<int> variance=<v1>,<v2>,... bound=<class_or_untyped>` | Registers a type-constructor URI with its arity, per-position variance, and erasure `bound` (`untyped` → `Dynamic[top]`, ADR-20 WD2 default). |
 | `rigor:v1:hkt_define: uri=<uri> params=<P1>,<P2>,... body=<body_text>` | Binds the URI to a type-function body; `body=` gobbles the remainder of the payload and is parsed into a union tree. |
 
 ```rbs

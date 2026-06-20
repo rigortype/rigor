@@ -182,8 +182,10 @@ module Rigor
         @symbol_fingerprints = payload.symbol_fingerprints || {}
         # ADR-46 slice 3 — restore negative edges if present (absent in
         # pre-slice-3 snapshots → empty, which only loses the appeared-symbol
-        # re-check refinement; the fingerprint still drops the snapshot on a
-        # file add/remove, so it is never unsound).
+        # re-check refinement; such a snapshot is never loaded by a slice-3+
+        # engine because the engine version + schema is part of the snapshot
+        # fingerprint, and `--verify-incremental` backstops any residual
+        # under-capture, so it is never unsound).
         @missing           = payload.missing || {}
         @class_decls       = payload.class_decls || {}
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)

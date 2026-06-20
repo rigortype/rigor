@@ -12,13 +12,13 @@ module Rigor
     # `exe/rigor` launcher maps `.rigor.yml`'s `plugins_isolation:` onto it
     # before re-exec). Three backends behind one interface:
     #
-    # - `none` (**default**) — load into the main space and call directly.
-    #   Lowest cost; no isolation. Fine for the common case because the
-    #   invoked library is trusted + pure.
+    # - `none` — load into the main space and call directly.
+    #   Lowest cost; no isolation. Used as the fallback where fork is
+    #   unavailable; fine because the invoked library is trusted + pure.
     # - `ruby_box` — call inside a {Box} (`Ruby::Box`, `RUBY_BOX=1`). Isolates
     #   core-class monkey-patches + lets gem versions coexist, but a native
     #   crash in the boxed work still takes the process down (in-process).
-    # - `process` — call in a forked worker ({Process}); returns data over a
+    # - `process` (**default**) — call in a forked worker ({Process}); returns data over a
     #   pipe. The strongest: a child crash (even `SIGSEGV`) is contained —
     #   the parent survives and declines. Higher cost (fork + IPC).
     #
@@ -73,7 +73,7 @@ module Rigor
       end
 
       # `none` — load the trusted library into the main space and call it
-      # directly. No isolation; lowest cost; the current default behaviour.
+      # directly. No isolation; lowest cost; the fork-unavailable fallback.
       module Direct
         module_function
 

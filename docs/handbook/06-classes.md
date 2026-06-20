@@ -211,7 +211,7 @@ The hierarchy is read from:
 When the hierarchy is statically incomplete (a class
 references a parent Rigor cannot locate), the receiver type
 falls back to the deepest known ancestor — never to
-`Dynamic[Top]` for a class Rigor saw the declaration of.
+`Dynamic[top]` for a class Rigor saw the declaration of.
 
 ## `class` and `singleton(C)` types
 

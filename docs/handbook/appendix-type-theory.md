@@ -184,7 +184,7 @@ add_one(42)  # certainty: yes
 # no: Constant<"a"> <: Integer is provably false
 add_one("a")  # certainty: no — call.argument-type-mismatch fires
 
-# maybe: Dynamic[Top] ~ Integer holds; <: cannot be decided
+# maybe: Dynamic[top] ~ Integer holds; <: cannot be decided
 add_one(JSON.parse(input))  # certainty: maybe — silent
 ```
 
@@ -338,7 +338,7 @@ F-bounded polymorphism in its full generality is harder. The
 inference machinery has to solve a constraint that mentions the
 type variable on both sides of `<:`. Rigor's RBS surface accepts
 the constrained form `[T < C[T]]` but the walker treats
-unresolved F-bounded constraints conservatively (`Dynamic[Top]`
+unresolved F-bounded constraints conservatively (`Dynamic[top]`
 fallback when the bound cannot be solved locally). This matches
 the no-false-positives stance: an over-precise F-bounded
 inference would spread `T`-mention errors through the codebase,
@@ -706,7 +706,7 @@ Rigor maps onto this as:
 
 | Gradual concept | Rigor surface |
 | --- | --- |
-| Dynamic type `?` | **`Dynamic[T]`** — a carrier that *wraps* a "best-guess" type `T` while marking the value as not-statically-verified. `Dynamic[Top]` is the maximally-dynamic form. |
+| Dynamic type `?` | **`Dynamic[T]`** — a carrier that *wraps* a "best-guess" type `T` while marking the value as not-statically-verified. `Dynamic[top]` is the maximally-dynamic form. |
 | Consistency `~` | The `maybe` arm of the trinary certainty — `Dynamic[T] ~ U` holds whenever `T ~ U` does. |
 | Static/dynamic boundary | Per-method, per-file, per-plugin contribution — Rigor records *why* a value became `Dynamic[T]` in its dynamic-origin algebra. |
 | Casts | No in-source cast operator. The opt-in [`rigor-sorbet`](../../plugins/rigor-sorbet/) plugin reads `T.let` / `T.cast` / `T.must` as cast forms; `RBS::Extended` `assert_type` directives serve the same role from `.rbs`. |
@@ -1174,7 +1174,7 @@ problem, distinct from the decidability problem:
 | --- | --- | --- |
 | Theoretical undecidability of inference | Rank-3 polymorphism; subtyping + intersection | The trinary `maybe` |
 | Reach — the AST does not contain the semantics | `define_method`, Rails DSL, `attr_*` | Plugin contributions + `RBS::Extended` + the [ADR-16](../adr/16-macro-expansion.md) macro substrate |
-| Genuine runtime opacity | `eval(user_input)` | `Dynamic[Top]`, then `maybe` at use sites |
+| Genuine runtime opacity | `eval(user_input)` | `Dynamic[top]`, then `maybe` at use sites |
 
 Plugins are written in Ruby because the reach problem cannot be
 solved in the type language alone — it needs a Ruby-side
@@ -1200,7 +1200,7 @@ produce types so wide they tell the user nothing useful:
 | A provably-constant value (e.g. `42`, `"ok"`) | `Integer`, `String` | `Constant<42>`, `Constant<"ok">` | `Constant<T>` carrier |
 | `JSON.parse(input)` | `Hash[String, untyped] \| Array[untyped] \| String \| Integer \| Float \| true \| false \| nil` | `App[json::value, K]` per option `K` | [ADR-20](../adr/20-lightweight-hkt.md) Lightweight HKT + `METHOD_RETURN_OVERRIDES` |
 | A method whose return depends on its arguments | A wide union of every observed exit | A per-call-site discriminated return | `RBS::Extended` `return_override` directive |
-| A DSL-managed accessor (`has_many`, `attribute`) | `Dynamic[Top]` | `Relation[Model]`, a model-specific shape | Plugin `flow_contribution_for` + macro substrate |
+| A DSL-managed accessor (`has_many`, `attribute`) | `Dynamic[top]` | `Relation[Model]`, a model-specific shape | Plugin `dynamic_return` + macro substrate |
 
 These are not undecidability cases — the inference can decide a
 type, it decides a *useless* one. A type like

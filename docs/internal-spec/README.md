@@ -28,7 +28,7 @@ Ruby identifiers (`Rigor::Type`, `Rigor::Trinary`, `Rigor::Type::Combinator`, �
 | --- | --- |
 | [implementation-expectations.md](implementation-expectations.md) | Engine surface — `Scope`, fact store, effect model, capability-role inference, normalization, RBS-erasure routing, public stability rules. |
 | [internal-type-api.md](internal-type-api.md) | Type-object public contract — method surface, identity and equality, immutability, normalization routing through factories, diagnostics-display routing. |
-| [inference-engine.md](inference-engine.md) | `Rigor::Scope#type_of(node)` query — purity, immutable Scope discipline, fail-soft `Dynamic[Top]` policy, environment-loading boundaries. |
+| [inference-engine.md](inference-engine.md) | `Rigor::Scope#type_of(node)` query — purity, immutable Scope discipline, fail-soft `Dynamic[top]` policy, environment-loading boundaries. |
 | [reflection.md](reflection.md) | `Rigor::Reflection` read-side facade — unified read shape over `ClassRegistry` + `RbsLoader` + `Scope` discovered facts. Public read shape for v0.1.0 plugin-API readiness. |
 | [cache.md](cache.md) | `Rigor::Cache` layer — descriptor schema, filesystem-backed Store, first cached producer (`RbsConstantTable`), CLI observability, diagnostic provenance. |
 | [flow-contribution.md](flow-contribution.md) | `Rigor::FlowContribution` bundle — the public packaging plugins, `RBS::Extended` annotations, and built-in narrowing rules use to hand the analyzer facts and effects at a single call edge. |

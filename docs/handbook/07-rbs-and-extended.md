@@ -108,9 +108,9 @@ The per-method directives:
 | --- | --- |
 | `%a{rigor:v1:return: <type>}` | Tighten the method's return type. |
 | `%a{rigor:v1:param: <name> is <type>}` | Tighten a parameter's accepted type at the call site, AND narrow the local in the body. |
-| `%a{rigor:v1:assert: <name> is <type>}` | After this method returns, the named local in the caller's scope is `<type>`. |
-| `%a{rigor:v1:predicate-if-true: <name> is <type>}` | When this method returns truthy, the named local in the caller's scope is `<type>`. (Symmetric `predicate-if-false`.) |
-| `%a{rigor:v1:assertion-on: <name>}` | Mark the method as an assertion gate — the body's last expression's type becomes a fact about `<name>`. |
+| `%a{rigor:v1:assert <name> is <type>}` | After this method returns, the named local in the caller's scope is `<type>`. |
+| `%a{rigor:v1:predicate-if-true <name> is <type>}` | When this method returns truthy, the named local in the caller's scope is `<type>`. (Symmetric `predicate-if-false`.) |
+| `%a{rigor:v1:assert-if-true <name> is <type>}` | When this method returns a truthy value, the named local in the caller's scope is `<type>`. (Symmetric `assert-if-false` for `false` / `nil` returns.) |
 
 The `<type>` slot accepts:
 
@@ -165,7 +165,7 @@ without it.
 
 ```rbs
 class Validator
-  %a{rigor:v1:assert: x is non-empty-string}
+  %a{rigor:v1:assert x is non-empty-string}
   def assert_non_empty: (String x) -> void
 end
 ```
@@ -185,7 +185,7 @@ on empty, log, ...) — Rigor only reads the directive.
 
 ```rbs
 class Range
-  %a{rigor:v1:predicate-if-true: value is Integer}
+  %a{rigor:v1:predicate-if-true value is Integer}
   def integer?: (untyped value) -> bool
 end
 ```
@@ -354,15 +354,15 @@ identical:
 > "After this method returns, the named argument is `T`."
 
 That is `@phpstan-assert` in PHPStan and
-`%a{rigor:v1:assert:}` in Rigor.
+`%a{rigor:v1:assert}` in Rigor.
 
 | PHPStan PHPDoc | Rigor RBS::Extended | Effect |
 | --- | --- | --- |
-| `@phpstan-assert T $x` | `%a{rigor:v1:assert: x is T}` | After this method returns normally, the caller's `x` is `T`. |
-| `@phpstan-assert-if-true T $x` | `%a{rigor:v1:predicate-if-true: x is T}` | If this method returns truthy, the caller's `x` is `T`. |
-| `@phpstan-assert-if-false T $x` | `%a{rigor:v1:predicate-if-false: x is T}` | If this method returns falsey, the caller's `x` is `T`. |
-| `@phpstan-assert !T $x` | `%a{rigor:v1:assert: x is ~T}` | After this method returns, the caller's `x` is **not** `T` (negation form). |
-| `@phpstan-assert-if-true !T $x` | `%a{rigor:v1:predicate-if-true: x is ~T}` | Conditional negation. Symmetric with `predicate-if-false`. |
+| `@phpstan-assert T $x` | `%a{rigor:v1:assert x is T}` | After this method returns normally, the caller's `x` is `T`. |
+| `@phpstan-assert-if-true T $x` | `%a{rigor:v1:predicate-if-true x is T}` | If this method returns truthy, the caller's `x` is `T`. |
+| `@phpstan-assert-if-false T $x` | `%a{rigor:v1:predicate-if-false x is T}` | If this method returns falsey, the caller's `x` is `T`. |
+| `@phpstan-assert !T $x` | `%a{rigor:v1:assert x is ~T}` | After this method returns, the caller's `x` is **not** `T` (negation form). |
+| `@phpstan-assert-if-true !T $x` | `%a{rigor:v1:predicate-if-true x is ~T}` | Conditional negation. Symmetric with `predicate-if-false`. |
 
 Worked example — the canonical "assertNotNull" pattern from
 PHPStan's docs:
@@ -370,7 +370,7 @@ PHPStan's docs:
 ```rbs
 # sig/asserts.rbs
 class Asserts
-  %a{rigor:v1:assert: x is ~nil}
+  %a{rigor:v1:assert x is ~nil}
   def self.not_nil: (untyped x) -> void
 end
 ```
@@ -390,7 +390,7 @@ analogue would be a method on `$this` that narrows
 
 ```rbs
 class Connection
-  %a{rigor:v1:assert: self is Connected}
+  %a{rigor:v1:assert self is Connected}
   def assert_connected!: () -> void
 end
 ```

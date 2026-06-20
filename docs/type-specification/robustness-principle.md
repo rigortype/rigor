@@ -84,7 +84,7 @@ A clause-2 candidate MUST NOT be adopted if it would let a value reach the body 
 ### Concrete patterns
 
 - **Capability roles over nominal classes.** When a method uses only `:write` on its argument, the parameter type SHOULD be `_Writable` (a structural role) rather than `IO`. This frees `StringIO`, `Tempfile`, custom mock objects, and any future class to satisfy the contract.
-- **Structural interfaces via `RBS::Extended`.** When a method's argument needs to expose a small set of methods, an `interface _Foo` declaration in RBS plus a `%a{rigor:v1:conforms-to: _Foo}` annotation on the parameter is preferred over enumerating concrete classes in a union.
+- **Structural interfaces via `RBS::Extended`.** When a method's argument needs to expose a small set of methods, an `interface _Foo` declaration in RBS plus a `%a{rigor:v1:conforms-to _Foo}` annotation on the parameter is preferred over enumerating concrete classes in a union.
 - **Nilable parameter when the body checks.** When the body has a `return if x.nil?` guard or equivalent narrowing, the parameter SHOULD be `T | nil` rather than `T`. The narrowing tier recovers the precise non-nil type inside the body.
 - **Numeric supertypes.** A method that uses only `+`, `-`, `*`, `<=>` on its arguments SHOULD parameter-type as `Numeric` rather than `Integer`, even if the test suite happens to pass only integers.
 

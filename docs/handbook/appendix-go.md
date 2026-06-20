@@ -22,7 +22,7 @@ Go needs as a compiled language (the build gate itself).
 | --- | --- | --- |
 | Interface membership | Implicit — have the methods, satisfy the interface | Implicit — same structural rule |
 | When does the checker run? | At compile time; nothing runs until it passes | After the fact, on code that already runs |
-| The "I don't know" type | `interface{}` / `any` | `Dynamic[Top]` — direct analogue |
+| The "I don't know" type | `interface{}` / `any` | `Dynamic[top]` — direct analogue |
 | Where do annotations live? | In source; `:=` infers locals | In `.rbs` files; whole bodies inferred |
 | Sum types | None — Go has no union types | First-class `T \| U` unions |
 | Errors | Returned as values (`(T, error)`) | Raised; not tracked in the signature |
@@ -44,7 +44,7 @@ minimal and Rigor adds unions, literal types, and refinements.
 | `string` | `String` | |
 | `byte` / `rune` | `Integer` | Ruby has no distinct byte/rune type. |
 | `nil` | `nil` (`Constant<nil>`) | Go's typed-nil subtleties have no Ruby analogue — there is one `nil`. |
-| `interface{}` / `any` | `Dynamic[Top]` | The "be silent here" carrier — a direct match. |
+| `interface{}` / `any` | `Dynamic[top]` | The "be silent here" carrier — a direct match. |
 | `error` | (no type — Ruby raises) | See [Errors as values](#errors-as-values-vs-raising). |
 | `[]T` (slice) | `Array[T]` | |
 | `[N]T` (array) | `Tuple[…]` or `Array[T]` | A fixed-length literal gets a `Tuple`; otherwise `Array[T]`. |
@@ -106,7 +106,7 @@ type switches. Rigor has direct analogues.
 | `v, ok := x.(string)` (comma-ok assertion) | `x.is_a?(String)` narrowing in an `if` |
 | `switch v := x.(type) { case string: … }` | `case x; in String => v` |
 | `x.(T)` (assertion, panics on fail) | (no panicking assertion) — `is_a?` guard, or `T.cast` via [`rigor-sorbet`](../../plugins/rigor-sorbet/) |
-| user func returning `bool` | `%a{rigor:v1:predicate-if-true: x is Foo}` directive |
+| user func returning `bool` | `%a{rigor:v1:predicate-if-true x is Foo}` directive |
 
 Go's type switch is *not* exhaustive — you can omit cases and
 fall through `default` — and neither is Rigor's `case`. Both
@@ -316,7 +316,7 @@ is deliberately minimal:
 - **Inferred shapes beyond interfaces.** Rigor infers anonymous
   object shapes and capability roles, not just satisfaction of a
   declared `interface`.
-- **No-false-positives stance.** Silent on `Dynamic[Top]`
+- **No-false-positives stance.** Silent on `Dynamic[top]`
   receivers rather than complaining; the `interface{}` you
   haven't narrowed yet costs you nothing.
 - **No annotation tax beyond `:=`.** Go infers `:=` locals;

@@ -25,7 +25,7 @@ a type goes wrong.
 | When does the checker run? | At compile time; nothing runs until it passes | After the fact, on code that already runs |
 | Soundness stance | Sound — a type error is a hard stop | No-false-positives — silent unless it can prove the error |
 | Where do annotations live? | In source; locals inferred, signatures explicit | In `.rbs` files; whole bodies inferred |
-| The "I don't know" type | (none — Rust has no escape hatch) | `Dynamic[Top]` — silent at the boundary |
+| The "I don't know" type | (none — Rust has no escape hatch) | `Dynamic[top]` — silent at the boundary |
 | Null | Does not exist (`Option<T>` instead) | `nil` exists; narrowed away like Rust narrows `Option` |
 | Identity of types | Nominal, with trait coherence | Nominal + structural facets |
 
@@ -58,7 +58,7 @@ Rigor is an advisor, not a gate.
 | `trait T { … }` | RBS `interface` (structural) | Nominal in Rust, structural in Rigor — see below. |
 | `<T: Trait>` / `where T: Trait` | RBS `[T < Bound]` bounded parameter | |
 | `dyn Trait` | a structural interface type | Dynamic dispatch over the method set. |
-| `Box<dyn Any>` | `Dynamic[Top]` | The closest Rust has to "silence the checker"; Rigor reaches for it routinely, Rust almost never. |
+| `Box<dyn Any>` | `Dynamic[top]` | The closest Rust has to "silence the checker"; Rigor reaches for it routinely, Rust almost never. |
 | (no literal types) | `Constant<42>` / `Constant<"hi">` | Rust has no literal types (const generics aside); a Rigor novelty. |
 
 ## Option and Result
@@ -359,13 +359,13 @@ The other direction:
   declaration of intent — and Rigor infers anonymous shapes and
   capability roles besides.
 - **No-false-positives stance.** Rigor stays silent on
-  `Dynamic[Top]` receivers rather than complaining. You will
+  `Dynamic[top]` receivers rather than complaining. You will
   never see a diagnostic whose honest answer is "well, the
   checker cannot know."
 - **No annotation tax.** `rigor check` on a Ruby project with
   zero `.rbs` files still yields useful diagnostics from
   inference. Adding `.rbs` is incremental — every file you skip
-  is `Dynamic[Top]` at the boundary, not an error.
+  is `Dynamic[top]` at the boundary, not an error.
 
 ## A migration vignette
 

@@ -8,7 +8,7 @@
 # alias) we re-exec the same command with the flag set before anything
 # else loads. The `RUBY_BOX` guard prevents an infinite re-exec, and the
 # inherited environment (RUBYOPT / BUNDLE_*) preserves the Bundler
-# context across the exec. The `none` (default) and `process` strategies
+# context across the exec. The `none` and `process` (default) strategies
 # need no flag, so this is a no-op for them — behaviour is unchanged
 # unless a project opts into `ruby_box`.
 rigor_isolation = ENV["RIGOR_PLUGIN_ISOLATION"].to_s

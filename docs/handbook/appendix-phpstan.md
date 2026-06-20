@@ -20,10 +20,10 @@ unchanged. This appendix maps the vocabulary.
 | Default behaviour | Inference, fall back silent | Inference, fall back silent |
 | "Levels" | 0 – 10 (numeric) | `lenient` / `balanced` / `strict` (named) |
 | Per-rule control | `ignoreErrors:` regex, level demotion | `disable:`, `severity_overrides:` |
-| Baseline | `phpstan-baseline.neon` | `rigor.baseline.json` |
+| Baseline | `phpstan-baseline.neon` | `.rigor-baseline.yml` (managed) / `rigor.baseline.json` (ad-hoc) |
 | Stub format | PHP stub files | RBS files |
 | Custom narrowing | Type-Specifying Extensions | Plugins (Chapter 9) |
-| Custom return shape | Dynamic Return Type Extensions | Plugin `flow_contribution_for` |
+| Custom return shape | Dynamic Return Type Extensions | Plugin `dynamic_return` |
 
 The two tools agree on most of the foundational decisions. The
 biggest differences are surface (Ruby's syntax and runtime
@@ -77,12 +77,12 @@ the table in depth; here it is again for reference:
 
 | PHPStan PHPDoc | Rigor RBS::Extended | Effect |
 | --- | --- | --- |
-| `@phpstan-assert T $x` | `%a{rigor:v1:assert: x is T}` | After return, caller's `x` is `T`. |
-| `@phpstan-assert-if-true T $x` | `%a{rigor:v1:predicate-if-true: x is T}` | If method returns truthy, caller's `x` is `T`. |
-| `@phpstan-assert-if-false T $x` | `%a{rigor:v1:predicate-if-false: x is T}` | If method returns falsey, caller's `x` is `T`. |
-| `@phpstan-assert !T $x` | `%a{rigor:v1:assert: x is ~T}` | After return, caller's `x` is **not** `T`. |
+| `@phpstan-assert T $x` | `%a{rigor:v1:assert x is T}` | After return, caller's `x` is `T`. |
+| `@phpstan-assert-if-true T $x` | `%a{rigor:v1:predicate-if-true x is T}` | If method returns truthy, caller's `x` is `T`. |
+| `@phpstan-assert-if-false T $x` | `%a{rigor:v1:predicate-if-false x is T}` | If method returns falsey, caller's `x` is `T`. |
+| `@phpstan-assert !T $x` | `%a{rigor:v1:assert x is ~T}` | After return, caller's `x` is **not** `T`. |
 | `@phpstan-assert =T $x` (assert-and-narrow) | (covered by `assert:`) | Same effect. |
-| `@phpstan-self-out T` | `%a{rigor:v1:assert: self is T}` | `self` narrows in caller scope. |
+| `@phpstan-self-out T` | `%a{rigor:v1:assert self is T}` | `self` narrows in caller scope. |
 | `@phpstan-impure` | (no analogue) | Rigor does not yet model purity for fold-through-method-call. |
 
 Every directive Rigor's grammar ships has a PHPStan PHPDoc
@@ -96,16 +96,16 @@ When the assertion is recognised by **call shape** rather than
 by signature — PHPStan's `TypeSpecifyingExtension` interface,
 where you write a class that the framework instantiates and
 asks "given this call, what narrowings does it produce?" —
-Rigor's analogue is a plugin's `#flow_contribution_for` and
+Rigor's analogue is a plugin's `type_specifier` / `dynamic_return` and
 `#diagnostics_for_file` hooks plus the engine's
 `post_return_facts` substrate.
 
 | PHPStan extension type | Rigor analogue |
 | --- | --- |
-| `MethodTypeSpecifyingExtension` | Plugin's `Fact(target_kind: :parameter)` returned from `flow_contribution_for` |
+| `MethodTypeSpecifyingExtension` | Plugin's `Fact(target_kind: :parameter)` returned from `type_specifier` |
 | `StaticMethodTypeSpecifyingExtension` | Same, with `Fact(target_kind: :receiver-class)` |
 | `FunctionTypeSpecifyingExtension` | Same, with `Fact(target_kind: :argument)` |
-| `DynamicMethodReturnTypeExtension` | Plugin's `flow_contribution_for(call_node:, scope:)` |
+| `DynamicMethodReturnTypeExtension` | Plugin's `dynamic_return(methods:) { |call_node, scope, ...| ... }` |
 | `DynamicStaticMethodReturnTypeExtension` | Same, varying by receiver-class branch in plugin code |
 | `DynamicFunctionReturnTypeExtension` | Same, for module-level methods |
 
@@ -138,14 +138,18 @@ severity controls, and includes.
 | `ignoreErrors:` (regex / pattern) | `disable:` (rule identifier or wildcard) |
 | `parameters: ignoreErrors:` per-path | `# rigor:disable-file <rule>` at the file head |
 | `includes:` | `includes:` |
-| `phpstan-baseline.neon` | `rigor.baseline.json` |
-| `phpstan analyse --generate-baseline` | `rigor check --format=json > rigor.baseline.json` |
+| `phpstan-baseline.neon` | `.rigor-baseline.yml` (managed) — or `rigor.baseline.json` (ad-hoc) |
+| `phpstan analyse --generate-baseline` | `rigor baseline generate` (managed) — or `rigor check --format=json > rigor.baseline.json` (ad-hoc) |
 | `phpstan analyse` | `rigor check` |
-| `phpstan analyse --baseline` | `rigor diff rigor.baseline.json` |
+| `phpstan analyse --baseline` | `rigor check` with `baseline: .rigor-baseline.yml` configured (managed) — or `rigor diff rigor.baseline.json` (ad-hoc) |
 | Path resolution: relative to declaring file | Path resolution: relative to declaring file (same rule). |
 
-The baseline workflow is identical. Chapter 8 has the
-walkthrough.
+Rigor has two baseline mechanisms: a **managed** baseline
+(`rigor baseline generate` → `.rigor-baseline.yml`, read on
+the next `rigor check` via the `baseline:` config key — the
+closest match to PHPStan's `--baseline`), and a **lightweight**
+ad-hoc snapshot (`rigor diff` over a `--format=json` dump).
+Chapter 8 has the walkthrough.
 
 The `includes:` semantics also match PHPStan's: declaration
 order, later overrides earlier, the current file's keys win
@@ -303,7 +307,7 @@ class Slug
   %a{rigor:v1:return: non-empty-lowercase-string}
   def normalise: (String name) -> String
 
-  %a{rigor:v1:assert: value is non-empty-string}
+  %a{rigor:v1:assert value is non-empty-string}
   def assert_not_empty: (String value) -> void
 end
 ```

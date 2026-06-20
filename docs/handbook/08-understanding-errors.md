@@ -69,7 +69,7 @@ Fire when a method call's shape is wrong.
 | `call.undefined-method` | The receiver class is statically known and the method is not defined on it (RBS or in-source). | error |
 | `call.wrong-arity` | The number of positional arguments does not satisfy any overload's arity. | error |
 | `call.argument-type-mismatch` | An argument's type provably does not satisfy the parameter contract (RBS or `RBS::Extended` `param:`). | error |
-| `call.possible-nil-receiver` | The receiver type is `T \| nil` and the method is not defined on `NilClass`. | warning |
+| `call.possible-nil-receiver` | The receiver type is `T \| nil` and the method is not defined on `NilClass`. | error (warning under `lenient`) |
 | `call.unresolved-toplevel` | An implicit-self call at the top level (outside any `def` / `class` / `module`) resolves against no same-file `def`, `pre_eval:` monkey-patch, or `Kernel` / `Object` method — surfacing typos in standalone scripts. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
 
 `call.*` rules are the highest-volume diagnostics on
@@ -107,7 +107,7 @@ contract.
 | Rule | Fires when | Default severity |
 | --- | --- | --- |
 | `def.return-type-mismatch` | The body's last expression's inferred type cannot satisfy the RBS-declared return type. Honors `%a{rigor:v1:return: <refinement>}` overrides. | warning under `balanced` profile, error under `strict` |
-| `def.ivar-write-mismatch` | A later `@var = ...` write's concrete class disagrees with the first write's class in the same class body (NilClass-to-clear is allowlisted). | error |
+| `def.ivar-write-mismatch` | A later `@var = ...` write's concrete class disagrees with the first write's class in the same class body (NilClass-to-clear is allowlisted). | warning under `balanced` profile, error under `strict` |
 | `def.method-visibility-mismatch` | An explicit-receiver call targets a `Nominal[X]` whose discovered method is `:private` in the surrounding class body. | error |
 | `def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor (public → protected/private, protected → private), breaking a caller that holds the supertype. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
 | `def.override-return-widened` | An override's declared return widens the inherited return (covariance). Fires only on a proven violation when both sides carry an authored RBS signature. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
@@ -282,7 +282,7 @@ for the design).
 
 The most common reasons:
 
-1. **The receiver is `Dynamic[Top]`.** Rigor stays silent on
+1. **The receiver is `Dynamic[top]`.** Rigor stays silent on
    gradual receivers. Run `rigor type-of <file>:<line>:<col>`
    to confirm what the engine sees.
 2. **The method exists somewhere in the hierarchy.** Even one
@@ -311,7 +311,7 @@ rigor check --explain lib
 ```
 
 This adds an `:info` diagnostic for every fail-soft fallback
-the engine took — every place it widened to `Dynamic[Top]`
+the engine took — every place it widened to `Dynamic[top]`
 because it could not see further. The output is noisy on
 realistic code but invaluable when "I expected a diagnostic
 here" debugging.
@@ -331,7 +331,7 @@ Almost always one of:
 3. **A constant is being looked up wrong.** Constant
    resolution can fall back to RBS-core or in-source class
    discovery; if both miss, the call goes through
-   `Dynamic[Top]` and you see no diagnostic, but a sibling
+   `Dynamic[top]` and you see no diagnostic, but a sibling
    call against the wrong class might fire.
 4. **A diagnostic is genuinely false-positive.** Rare
    (Rigor's design priority is no-false-positives) but

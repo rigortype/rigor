@@ -27,7 +27,7 @@ they line up better than you would guess.
 | Origin | Dynamic; types added gradually | Dynamic; types added gradually |
 | Soundness stance | Success typing — flag only provable failures | No-false-positives — silent unless it can prove the error |
 | Where do annotations live? | `@spec` / `@type` in source | `.rbs` files alongside `.rb` |
-| The "I don't know" type | `dynamic()` / `term()` | `Dynamic[Top]` / `Top` |
+| The "I don't know" type | `dynamic()` / `term()` | `Dynamic[top]` / `Top` |
 | Narrowing engine | Pattern matching + guards | Pattern matching + guards + predicate methods |
 | Type algebra | Set-theoretic (union / intersection / negation) | Union + type operators (`~T`, `T - U`) |
 
@@ -49,7 +49,7 @@ you will recognise Rigor immediately.
 | `:foo` (atom) | `Constant<:foo>` (Symbol) | Atoms ↔ symbols — a direct match. See [Atoms ↔ symbols](#atoms--symbols). |
 | `nil` | `nil` (`Constant<nil>`) | Elixir's `nil` is the atom `nil`; Ruby's is its own singleton. Both falsy. |
 | `binary()` / `String.t()` | `String` | |
-| `term()` / `any()` | `Top` / `Dynamic[Top]` | `any()` for "anything"; `dynamic()` for the gradual escape hatch. |
+| `term()` / `any()` | `Top` / `Dynamic[top]` | `any()` for "anything"; `dynamic()` for the gradual escape hatch. |
 | `none()` | `Bot` | Empty type — no inhabitants. |
 | `[t]` (list) | `Array[T]` | |
 | `{a, b}` (tuple) | `Tuple[A, B]` | Same per-position model. |
@@ -58,7 +58,7 @@ you will recognise Rigor immediately.
 | `%User{}` (struct) | `User = Data.define(...)` | A named, member-shaped value. |
 | `[key: t]` (keyword list) | `Hash[Symbol, T]` or `Array[Tuple]` | Ruby's keyword-ish data is a `Hash`. |
 | `t \| u` (set-theoretic union) | `T \| U` | Same display; same idea. |
-| `dynamic()` | `Dynamic[Top]` | The "be silent here" gradual carrier. |
+| `dynamic()` | `Dynamic[top]` | The "be silent here" gradual carrier. |
 | `(integer() -> binary())` | `^(Integer) -> String` (RBS proc syntax) | |
 
 ## Pattern matching & guards ↔ narrowing
@@ -109,10 +109,10 @@ the operator vocabulary to match the common cases:
 | intersection `t and u` | `Intersection[T, U]` |
 | negation `not t` | `~T` (complement) |
 | difference (set minus) | `T - U` (type difference) |
-| `dynamic()` | `Dynamic[Top]` |
+| `dynamic()` | `Dynamic[top]` |
 
 The gradual story is nearly identical in spirit: a value typed
-`dynamic()` in Elixir, like a `Dynamic[Top]` receiver in Rigor,
+`dynamic()` in Elixir, like a `Dynamic[top]` receiver in Rigor,
 is the point where the checker steps back and stays silent
 rather than guess. Both systems lean on this to stay practical
 on real code, and both treat reaching for it as ordinary.

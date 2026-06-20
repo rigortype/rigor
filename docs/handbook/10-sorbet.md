@@ -51,13 +51,13 @@ return type at the matching call sites.
 
 The plugin translates the dense middle of Sorbet's type DSL.
 Most everyday sigs land precisely; rare or
-class-introspection-heavy forms degrade to `Dynamic[Top]`.
+class-introspection-heavy forms degrade to `Dynamic[top]`.
 
 | Sorbet form              | Rigor representation                     |
 | ------------------------ | ---------------------------------------- |
 | `Integer` etc.           | `Nominal["Integer"]`                     |
 | `::Foo::Bar`             | `Nominal["Foo::Bar"]`                    |
-| `T.untyped`              | `Dynamic[Top]`                           |
+| `T.untyped`              | `Dynamic[top]`                           |
 | `T.anything`             | `Top`                                    |
 | `T.noreturn`             | `Bot`                                    |
 | `T.nilable(X)`           | `Union[X, Constant<nil>]`                |
@@ -76,7 +76,7 @@ class-introspection-heavy forms degrade to `Dynamic[Top]`.
 
 Anything outside this table — `T.proc`, `T.attached_class`,
 `T.self_type`, `T.type_parameter`, `T::Struct` / `T::Enum`
-subclasses — silently degrades to `Dynamic[Top]` for now.
+subclasses — silently degrades to `Dynamic[top]` for now.
 
 ## Inline type assertions
 
@@ -94,7 +94,7 @@ maybe = T.let(nil, T.nilable(Integer))
 T.must(maybe).bit_length            # ✓ nil stripped → Integer
                                      #   then Integer#bit_length resolves
 
-T.unsafe(opaque).any_method_at_all  # ✓ silenced — return is Dynamic[Top]
+T.unsafe(opaque).any_method_at_all  # ✓ silenced — return is Dynamic[top]
 ```
 
 `T.must_because(expr, "explanation")` is recognised as an
@@ -118,7 +118,7 @@ check. The call returns the asserted type so chained calls
 resolve through it; if the inferred type is provably
 incompatible (`Inference::Acceptance.accepts(...)` returns
 `:no`), the plugin emits `plugin.sorbet.assert-type-mismatch`
-as `:error`. Gradual consistency rules apply — `Dynamic[Top]`
+as `:error`. Gradual consistency rules apply — `Dynamic[top]`
 inferred types and `:maybe`-compatible shapes are silenced
 because the runtime check covers them.
 

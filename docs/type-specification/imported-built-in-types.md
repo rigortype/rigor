@@ -15,7 +15,7 @@ This document defines the reserved built-in **names** Rigor uses for refinements
 - Type functions avoid `-` because `-` is also the difference operator in Rigor's type syntax; `int_mask[1, 2, 4]` is less ambiguous than `int-mask[1, 2, 4]`.
 - Compatibility aliases MUST NOT be accepted unless they solve a concrete migration or readability problem.
 - RBS names remain canonical when they already express the concept. `bot` is the bottom type; `never`, `noreturn`, `never-return`, `never-returns`, `no-return`, `Never`, and `NoReturn` MUST NOT be added as initial aliases.
-- Integer ranges use Rigor's range notation, such as `Integer[1..10]`. PHPStan-style `int<1, 10>` MUST NOT be added as an alias initially.
+- Bounded integer ranges use the reserved refinement name `int<min, max>`, such as `int<1, 10>` (erases to `Integer`). It is parsed through `Builtins::ImportedRefinements` and displayed by the `IntegerRange` carrier; it is a Rigor-reserved refinement name, not generic-bracket syntax applied to an arbitrary type.
 
 ## Initial scalar refinements
 
@@ -40,6 +40,7 @@ This document defines the reserved built-in **names** Rigor uses for refinements
 | `non-positive-int` | `Integer` less than or equal to `0` | `Integer` |
 | `non-negative-int` | `Integer` greater than or equal to `0` | `Integer` |
 | `non-zero-int` | `Integer` except `0` | `Integer` |
+| `int<min, max>` | `Integer` within the inclusive bounded range `min..max` | `Integer` |
 
 The canonical lowercase string name is `lowercase-string`; `lower-string` MUST NOT be accepted as a separate alias unless a concrete usability problem appears.
 
@@ -61,6 +62,7 @@ Non-integer numeric precision is therefore opt-in through future built-ins, trus
 | Rigor type | Meaning | RBS erasure |
 | --- | --- | --- |
 | `non-empty-array[T]` | `Array[T]` with at least one element | `Array[T]` |
+| `non-empty-hash[K, V]` | `Hash[K, V]` with at least one entry | `Hash[K, V]` |
 | hash shape with optional keys | Hash with known required and optional keys | RBS record when exact, otherwise `Hash[K, V]` |
 | hash shape with extra-key policy | Hash shape that is open, closed, or open only for extra keys of a known value type | RBS record when exact and closed, otherwise `Hash[K, V]` |
 | read-only hash shape entry | Key whose value may be read but should not be written through the current reference | Entry mutability marker erased |

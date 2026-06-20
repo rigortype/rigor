@@ -1,6 +1,6 @@
 # Rigor production plugins
 
-Thirty entries targeting real Ruby gems, frameworks, and DSLs.
+Thirty-one entries targeting real Ruby gems, frameworks, and DSLs.
 Each keeps a self-contained layout (`lib/` + README + demo +
 integration spec), and the set **ships bundled inside the single
 `rigortype` gem** (v0.1.11) — you do not add them to your

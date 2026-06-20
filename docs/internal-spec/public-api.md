@@ -82,7 +82,7 @@ pins instance and singleton method sets for:
   `#node_rule_diagnostics`, and the `#diagnostic(node, …)` builder.
   v0.1.0 slice 1 + ADR-37.
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
-  `protocols`, `config_schema`, `validate_config(config)`.
+  `protocol_contracts`, `config_schema`, `validate_config(config)`.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,
   `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`.
 - `Rigor::Plugin::Registry` — `plugins`, `ids`, `find(id)`,

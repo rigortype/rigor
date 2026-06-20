@@ -206,7 +206,7 @@ The engine then does **provide-and-check**:
 
 - **Provide** (engine-side). When binding a `def call(record)` in a
   matching file, the contract's `param_types` *replace* the usual
-  `Dynamic[Top]` the un-annotated parameter would get. The body is
+  `Dynamic[top]` the un-annotated parameter would get. The body is
   then analysed as if `record` carried its real type — so a misuse
   inside the body (`record.no_such_column`) surfaces as an ordinary
   `call.undefined-method`, and the inferred return type is precise.
@@ -216,8 +216,8 @@ The engine then does **provide-and-check**:
   (else `protocol-return-mismatch`).
 
 The provision half is the load-bearing one: without it, `request`
-is `Dynamic[Top]`, which answers every method, so any return built
-from it is also `Dynamic[Top]` and the return check is vacuous.
+is `Dynamic[top]`, which answers every method, so any return built
+from it is also `Dynamic[top]` and the return check is vacuous.
 
 Two things to note as an *application* developer (not a plugin
 author):

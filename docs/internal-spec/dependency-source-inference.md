@@ -461,7 +461,7 @@ Tracked on [ADR-10](../adr/10-dependency-source-inference.md)
   defined in a `mode: :full` opt-in gem. The dispatcher
   records the crossing via
   `Environment#boundary_cross_reporter` whenever RBS
-  resolves to a non-`Dynamic[Top]` carrier AND the gem-source
+  resolves to a non-`Dynamic[top]` carrier AND the gem-source
   catalog has the same `(class_name, method_name)` AND the
   owning gem is `mode: :full`. RBS still wins on dispatch;
   the `:info` diagnostic is purely advisory and deduped per

@@ -179,7 +179,7 @@ works. The initialization sequence:
 
 ```
 →  {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-agent","version":"1.0"}}}
-←  {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"rigor","version":"0.1.15"}}}
+←  {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"rigor","version":"0.2.1"}}}
 →  {"jsonrpc":"2.0","method":"notifications/initialized"}
 →  {"jsonrpc":"2.0","id":1,"method":"tools/list"}
 ←  {"jsonrpc":"2.0","id":1,"result":{"tools":[...]}}
@@ -330,7 +330,7 @@ the method's inferred return type.
 
 ```ruby
 module Rigor
-  VERSION = "0.1.15"  #=> "0.1.15"
+  VERSION = "0.2.1"  #=> "0.2.1"
 end
 ```
 
@@ -421,7 +421,7 @@ finding is a real bug.
 
 Report type-precision coverage: the ratio of expressions Rigor types
 as `Constant` / `Nominal` / shaped / refined (precise) versus
-`Dynamic[Top]` or `top` (opaque).
+`Dynamic[top]` or `top` (opaque).
 
 **Input:**
 

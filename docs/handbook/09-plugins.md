@@ -6,7 +6,7 @@ RBS sig can express. This chapter helps you decide when that
 is worth a plugin, and when it is not.
 
 It does **not** teach plugin *authoring*. That lives in
-[`examples/`](../../examples/README.md) — sixteen tutorial
+[`examples/`](../../examples/README.md) — six tutorial
 walkthroughs, each spotlighting one extension surface.
 Ready-to-install gems for real frameworks live in
 [`plugins/`](../../plugins/README.md). Read on to decide
@@ -46,7 +46,7 @@ Other shapes that fit the plugin niche:
 Each of these has a worked example in
 [`examples/`](../../examples/README.md). The
 [`examples/README.md`](../../examples/README.md) page
-compares the sixteen worked examples on architectural axes
+compares the six worked examples on architectural axes
 (config schema, file I/O, cache producers,
 engine-collaboration via `Scope#type_of`, cross-plugin facts,
 return-type contributions, …) and recommends a reading order.
@@ -67,12 +67,15 @@ directory — gives a plugin five primary surfaces:
    per-file emission hook. Walk the parsed AST, return an
    array of `Rigor::Analysis::Diagnostic` rows. The runner
    stamps each with `source_family: "plugin.<your-id>"`.
-2. **`#flow_contribution_for(call_node:, scope:)`** — the
-   per-call-site return-type contribution hook (v0.1.1
-   Track 2 slice 7). Plugins return a `Rigor::FlowContribution`
-   bundle naming the inferred return type at the call site;
-   the analyzer's dispatcher merges the contributions and
-   uses the merged return as if it were RBS-declared.
+2. **`dynamic_return(receivers:, methods:, file_methods:)` /
+   `type_specifier(methods:)`** — the per-call-site return-type
+   and flow-narrowing contribution surface (ADR-37 Slice 2).
+   A `dynamic_return` block names the inferred return type at a
+   matching call site; the analyzer's dispatcher merges the
+   contribution and uses it as if it were RBS-declared. A
+   `type_specifier` block contributes branch-narrowing facts.
+   (These replaced the removed `flow_contribution_for` hook —
+   ADR-52 WD3; a plugin that still defines it raises at load.)
 3. **`Plugin::IoBoundary#read_file`** / **`#open_url`** —
    sandboxed file and (since v0.1.2) HTTPS reads under the
    active `TrustPolicy`. Use this when the plugin needs to
@@ -91,14 +94,13 @@ directory — gives a plugin five primary surfaces:
    reused by every consumer (controller-side validators,
    factory-side validators, …).
 
-The v0.1.2 release migrated four worked examples
-(`rigor-lisp-eval`, `rigor-pattern`, `rigor-units`,
-`rigor-activerecord`) from "diagnostic-only" to "narrowed
-return type via `flow_contribution_for`", so chained calls
-on plugin-typed values resolve through the analyzer's
-normal dispatch rather than the RBS-level `untyped`
-envelope. See the per-plugin README for which surface each
-one demonstrates.
+Several worked examples (`rigor-lisp-eval`, `rigor-pattern`,
+`rigor-units`, `rigor-activerecord`) contribute a narrowed
+return type via `dynamic_return` rather than only emitting
+diagnostics, so chained calls on plugin-typed values resolve
+through the analyzer's normal dispatch rather than the
+RBS-level `untyped` envelope. See the per-plugin README for
+which surface each one demonstrates.
 
 ## Macro / DSL expansion substrate (ADR-16)
 
@@ -178,7 +180,7 @@ is the **ceiling**, demand-driven. The substrate never
 | `class-level call with literal symbol args + registry-driven module include` | ✓ Tier B | — |
 | `class-level call with do…end block running as an instance method` | ✓ Tier A | — |
 | `external Ruby files instance_eval'd under a declared self` | ✓ Tier D (contract only as of v0.1.x) | — |
-| `domain DSL whose return type depends on argument shape` | — | `flow_contribution_for` ([`rigor-lisp-eval`](../../examples/rigor-lisp-eval/)) |
+| `domain DSL whose return type depends on argument shape` | — | `dynamic_return` ([`rigor-lisp-eval`](../../examples/rigor-lisp-eval/)) |
 | `cross-file validation (collect declarations, then validate uses)` | — | Two-pass walker ([`rigor-statesman`](../../plugins/rigor-statesman/)) |
 | `parsing an external project file (routes, schema, locale)` | — | `IoBoundary` + cache producer ([`rigor-routes`](../../examples/rigor-routes/)) |
 | `schema-graph recorder (GraphQL-Ruby-style)` | — | Schema-resolution pass (no plugin authored yet) |

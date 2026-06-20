@@ -93,9 +93,13 @@ fails if they disagree on a single diagnostic.
 The snapshot lives under the cache directory (`.rigor/cache`)
 and is keyed by a fingerprint of your configuration, your locked
 gems, your project's own `sig/` RBS, and the Rigor version.
-Change any of those — or add or remove a file — and the snapshot
-is dropped and the next run is a full one, so an incremental run
-can never serve a stale result. As with the rest of the cache, a
+Change any of those and the snapshot is dropped and the next run
+is a full one, so an incremental run can never serve a stale
+result. (The fingerprint keys on the analysis *roots* — e.g.
+`["lib"]` — not the expanded file list, so adding or removing a
+file *under* those roots does **not** drop the snapshot: the
+incremental session re-analyzes the added files and the
+dependents of removed ones.) As with the rest of the cache, a
 missing or corrupt snapshot is simply a full run; it can never
 wedge analysis.
 

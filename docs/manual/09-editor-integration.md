@@ -196,7 +196,7 @@ For a legacy bundler-based install, swap the connection list to
 **Completion popup is empty.**
 
 - Completion only fires on a node with a known type. Receivers
-  whose type collapses to `Dynamic[Top]` produce no completions.
+  whose type collapses to `Dynamic[top]` produce no completions.
   Look at `rigor type-of <file>:<line>:<col>` to see what type the
   analyzer assigns the receiver.
 - Mid-edit buffer support is best-effort. If parse fails AND the

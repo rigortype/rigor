@@ -32,7 +32,7 @@ first one that produces a result:
    project. Parameter types are not checked (no contract);
    the return type is inferred from the method body.
 5. **Fallback.** None of the above — the call returns
-   `Dynamic[Top]` and stays silent.
+   `Dynamic[top]` and stays silent.
 
 The cascading "first match wins" structure is why a method
 with a tight RBS sig + an `RBS::Extended` directive overrides
@@ -102,7 +102,7 @@ not in any of (RBS sig, in-source `def`, in-source attr,
 
 The rule is **deliberately conservative**: a call only fires
 when the receiver type is statically known and the method
-catalogue is enumerable. `Dynamic[Top]` receivers, implicit-
+catalogue is enumerable. `Dynamic[top]` receivers, implicit-
 self calls inside method bodies, and constant-decl alias
 classes (`YAML` → `Psych`) are silenced.
 
@@ -168,7 +168,7 @@ that branch from the union (a `bot` carrier internally).
 ### Recursive methods
 
 A recursive method infers a precise return type rather than
-collapsing to `Dynamic[Top]`. When the recursive call has
+collapsing to `Dynamic[top]`. When the recursive call has
 fully-constant arguments, Rigor unrolls it (under a hard frame
 budget) and folds the result:
 
@@ -195,7 +195,7 @@ last_step(some_int)   # Constant<:done>
 Both paths are hard-capped and degrade to the previous
 base-type behaviour when they cannot converge. Mutual
 recursion across two methods terminates, degrading to a safe
-`Dynamic[Top]` floor where a precise summary is unavailable.
+`Dynamic[top]` floor where a precise summary is unavailable.
 
 ## `def.return-type-mismatch`
 
@@ -252,7 +252,7 @@ ranges. When the receiver is widened (`Array[T]` instead of
 `Tuple[…]`), the block parameter is the element type `T`.
 
 When the receiving method does not have a per-method rule,
-the block parameter falls back to `Dynamic[Top]`. Custom
+the block parameter falls back to `Dynamic[top]`. Custom
 block-using methods you write in your project's source are
 seen by the in-source dispatch tier — Rigor walks the body to
 infer the parameter type from `yield` calls — but that

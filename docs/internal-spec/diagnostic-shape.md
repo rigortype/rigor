@@ -2,14 +2,17 @@
 
 ## Status
 
-**Descriptive, not yet locked.** This documents the *current* shape of the
-diagnostic carrier so consumers (triage, baseline, plugins reading the
-JSON stream) can rely on a written contract. It does **not** pin the
-surface: per [`public-api.md`](public-api.md) the per-rule identifiers and
-the structured-field set may still change before v0.1.0 locks them, so
-`Rigor::Analysis::Diagnostic` is intentionally absent from the public-API
-drift spec. The *identifier taxonomy*, severity resolution, and
-suppression semantics are normative in
+**Descriptive, stabilizing toward the v1.0 freeze.** This documents the
+*current* shape of the diagnostic carrier so consumers (triage, baseline,
+plugins reading the JSON stream) can rely on a written contract. The
+per-rule identifiers and the structured-field set are scheduled to freeze
+as public vocabulary at v1.0 under
+[ADR-50](../adr/50-release-engineering-and-stability-strategy.md); until
+then the field set MAY still gain fields (additive — e.g. `evidence_tier`
+and `documentation_url` were added per ADR-65), so per
+[`public-api.md`](public-api.md) `Rigor::Analysis::Diagnostic` stays out
+of the public-API drift spec. The *identifier taxonomy*, severity
+resolution, and suppression semantics are normative in
 [`diagnostic-policy.md`](../type-specification/diagnostic-policy.md); this
 page is only about the object's field shape.
 

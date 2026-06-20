@@ -16,6 +16,13 @@ assert_type('"A"', 65.chr)
 assert_type("4", 12.gcd(8))
 assert_type("12", 4.lcm(6))
 
+# Integer bit-test predicates — pure against a concrete Integer mask
+# (0b1010 == 10).
+assert_type("true", 0b1010.allbits?(0b1000))
+assert_type("false", 0b1010.allbits?(0b0100))
+assert_type("true", 0b1010.anybits?(0b0010))
+assert_type("true", 0b1010.nobits?(0b0101))
+
 # fdiv — float division, available on both Integer and Float.
 assert_type("2.5", 5.fdiv(2))
 

@@ -296,6 +296,26 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(0, :nonzero?).value).to be_nil
     end
 
+    it "folds the Integer bit-test predicates allbits? / anybits? / nobits?" do
+      # 0b1010 = 10. allbits?(mask) ⇔ (self & mask) == mask.
+      expect(fold(0b1010, :allbits?, [0b1000]).value).to be(true)
+      expect(fold(0b1010, :allbits?, [0b0100]).value).to be(false)
+      # anybits?(mask) ⇔ (self & mask) != 0.
+      expect(fold(0b1010, :anybits?, [0b0010]).value).to be(true)
+      expect(fold(0b1010, :anybits?, [0b0100]).value).to be(false)
+      # nobits?(mask) ⇔ (self & mask) == 0.
+      expect(fold(0b1010, :nobits?, [0b0101]).value).to be(true)
+      expect(fold(0b1010, :nobits?, [0b0010]).value).to be(false)
+    end
+
+    it "declines the bit-test predicates on a Float receiver (no such method)" do
+      # Listing them in the shared NUMERIC_BINARY set is Float-safe: the
+      # method does not exist on Float, so invoke_binary rescues to nil.
+      expect(fold(3.5, :allbits?, [2])).to be_nil
+      expect(fold(3.5, :anybits?, [2])).to be_nil
+      expect(fold(3.5, :nobits?, [2])).to be_nil
+    end
+
     it "folds the Float predicates nonzero? / integer?" do
       expect(fold(3.14, :nonzero?).value).to eq(3.14)
       expect(fold(0.0, :nonzero?).value).to be_nil

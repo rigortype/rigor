@@ -88,6 +88,7 @@ module Rigor
           to_h: :tuple_to_h,
           zip: :tuple_zip,
           :[] => :tuple_index,
+          slice: :tuple_index,
           fetch: :tuple_index,
           dig: :tuple_dig,
           values_at: :tuple_values_at,
@@ -1201,6 +1202,13 @@ module Rigor
           # indices still fall through because the same handler serves
           # `fetch`, while statically nil slices can be represented
           # precisely for `[]`.
+          # `[]` and its exact alias `slice` share the index / Range /
+          # start-length folding. `fetch` routes here too but stays
+          # integer-index-only: the Range and start-length branches gate
+          # on this selector set, which `fetch` is deliberately not in.
+          SLICE_SELECTORS = Set[:[], :slice].freeze
+          private_constant :SLICE_SELECTORS
+
           def tuple_index(tuple, method_name, args)
             case args.size
             when 1 then tuple_single_index(tuple, method_name, args.first)
@@ -1211,17 +1219,18 @@ module Rigor
           def tuple_single_index(tuple, method_name, arg)
             return nil unless arg.is_a?(Type::Constant)
 
-            return tuple_range_slice(tuple, arg.value) if method_name == :[] && arg.value.is_a?(Range)
-            return nil unless arg.value.is_a?(Integer)
+            value = arg.value
+            return tuple_range_slice(tuple, value) if SLICE_SELECTORS.include?(method_name) && value.is_a?(Range)
+            return nil unless value.is_a?(Integer)
 
-            idx = normalise_index(arg.value, tuple.elements.size)
+            idx = normalise_index(value, tuple.elements.size)
             return nil unless idx
 
             tuple.elements[idx]
           end
 
           def tuple_start_length_slice(tuple, method_name, args)
-            return nil unless method_name == :[]
+            return nil unless SLICE_SELECTORS.include?(method_name)
 
             start, length = args
             return nil unless start.is_a?(Type::Constant) && length.is_a?(Type::Constant)

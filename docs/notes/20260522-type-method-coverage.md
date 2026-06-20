@@ -178,6 +178,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `-@`, `+@` | ✅ | INTEGER_UNARY。 |
 | `abs` / `magnitude` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
 | `bit_length` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
+| `allbits?` / `anybits?` / `nobits?` | ✅ | NUMERIC_BINARY 追加 → `Constant[bool]`（具体整数マスクに対して純粋）。 |
 | `between?` | ✅ | `try_fold_ternary`（catalog 経由）→ `Constant[bool]`。 |
 | `ceil` | ✅ | INTEGER_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `chr` | ✅ | INTEGER_UNARY → `Constant[String]`。 |
@@ -189,7 +190,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `fdiv` | ✅ | NUMERIC_BINARY → `Constant[Float]`。 |
 | `floor` | ✅ | INTEGER_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `gcd` | ✅ | NUMERIC_BINARY → `Constant[Integer]`。 |
-| `gcdlcm` | 🔲 | INTEGER_BINARY 追加で `Tuple[Constant[Integer], Constant[Integer]]`。低優先度。 |
+| `gcdlcm` | ✅ | `try_fold_integer_array_binary` → `Tuple[Constant[Integer], Constant[Integer]]`。 |
 | `hash` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
 | `inspect` / `to_s` | ✅ | INTEGER_UNARY → `Constant[String]`。 |
 | `integer?` | 🔲 | INTEGER_UNARY 追加で `Constant[true]`。低優先度（常に true）。 |
@@ -228,10 +229,11 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [x] fdiv          → NUMERIC_BINARY → Constant[Float]
 [x] between?      → try_fold_ternary（catalog 経由）→ Constant[bool]
 [x] clamp         → try_fold_ternary（catalog 経由）→ Constant[Integer]
+[x] allbits? / anybits? / nobits? → NUMERIC_BINARY → Constant[bool]
 
 低優先度:
 [ ] rationalize / to_r  → INTEGER_UNARY
-[ ] gcdlcm              → INTEGER_BINARY
+[x] gcdlcm              → try_fold_integer_array_binary → Tuple[Constant[Integer], Constant[Integer]]
 [ ] pow(exp, mod)       → 専用ハンドラ（3 引数形式）
 ```
 
@@ -392,7 +394,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `reverse!` | 🚫 | 破壊的変更。 |
 | `rotate` | 🔲 | `rotate(n)` → 回転後の Tuple。中優先度。 |
 | `sample` / `shuffle` | 🚫 | 非決定論的。 |
-| `slice` | 🔲 | `values_at` と類似。専用ハンドラ。中優先度。 |
+| `slice` | ✅ | `[]` の別名。`tuple_index`（整数 / Range / start-length 形式）。 |
 | `sort` | ✅ | `tuple_sort` → 要素型でソートした Tuple。 |
 | `sort!` | 🚫 | 破壊的変更。 |
 | `sort_by` | 🔲 | ブロックあり。低優先度。 |
@@ -422,7 +424,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [ ] rotate(n) → TUPLE_HANDLERS → 回転後 Tuple
 [ ] flatten   → TUPLE_HANDLERS → 1 段ネスト展開（depth=1 限定で実用十分）
 [ ] join      → TUPLE_HANDLERS → すべて Constant のとき Constant[String]
-[ ] slice     → TUPLE_HANDLERS → values_at の Range / 2 引数形式
+[x] slice     → TUPLE_HANDLERS → `[]` の別名（整数 / Range / start-length 形式）
 
 低優先度:
 [x] uniq      → TUPLE_HANDLERS → `tuple_uniq`（Constant 要素の重複除去 Tuple）

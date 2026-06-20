@@ -19,6 +19,13 @@ assert_type("[20, 30]", xs.drop(1))
 assert_type("[20, 30, 10]", xs.rotate)
 assert_type("[30, 10, 20]", xs.rotate(2))
 
+# `slice` is an exact alias of `[]`, so it folds the same across the
+# index / start-length / Range forms.
+assert_type("20", xs.slice(1))
+assert_type("30", xs.slice(-1))
+assert_type("[20, 30]", xs.slice(1, 2))
+assert_type("[10, 20]", xs.slice(0..1))
+
 # Over all-Constant elements, equality is decidable: `uniq` folds to the
 # distinct sub-Tuple and `index` / `rindex` to the precise position.
 assert_type("[1, 2, 3]", [1, 2, 2, 3].uniq)

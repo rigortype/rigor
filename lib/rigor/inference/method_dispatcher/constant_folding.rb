@@ -51,7 +51,15 @@ module Rigor
         NUMERIC_BINARY = Set[
           :+, :-, :*, :/, :%, :**, :&, :|, :^, :<<, :>>,
           :<, :<=, :>, :>=, :==, :!=, :<=>,
-          :gcd, :lcm, :fdiv, :quo, :ceildiv, :[]
+          :gcd, :lcm, :fdiv, :quo, :ceildiv, :[],
+          # Integer bit-test predicates (`(self & mask) <=> mask|0`). The
+          # catalog marks them `:dispatch` only because a non-Integer mask
+          # would route through `to_int`; a concrete Integer literal never
+          # does, so the fold is pure here — the sibling of the already-folded
+          # bit-reference `:[]`. Integer-only, but Float-safe to list: a Float
+          # receiver has no such method, so `invoke_binary` rescues the
+          # `NoMethodError` to nil and the RBS tier answers.
+          :allbits?, :anybits?, :nobits?
         ].freeze
         STRING_BINARY  = Set[
           :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,

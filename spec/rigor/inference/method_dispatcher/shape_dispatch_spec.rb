@@ -68,6 +68,24 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: t, method_name: :fetch, args: [constant(99)])).to be_nil
     end
 
+    # `Array#slice` is an exact alias of `Array#[]`, so it folds identically
+    # across the integer / Range / start-length forms.
+    it "folds `tuple.slice(i)` like `tuple[i]`, including negative indices" do
+      expect(dispatch(receiver: t, method_name: :slice, args: [constant(0)])).to eq(constant(1))
+      expect(dispatch(receiver: t, method_name: :slice, args: [constant(-1)])).to eq(constant(3))
+    end
+
+    it "folds `tuple.slice(start, length)` and `tuple.slice(range)`" do
+      expect(dispatch(receiver: t, method_name: :slice, args: [constant(1), constant(2)]))
+        .to eq(tuple(constant(2), constant(3)))
+      expect(dispatch(receiver: t, method_name: :slice, args: [constant(0..1)]))
+        .to eq(tuple(constant(1), constant(2)))
+    end
+
+    it "falls through for `slice(out_of_range)` like `[]`" do
+      expect(dispatch(receiver: t, method_name: :slice, args: [constant(3)])).to be_nil
+    end
+
     it "returns the first element for `tuple.first`" do
       expect(dispatch(receiver: t, method_name: :first)).to eq(constant(1))
     end

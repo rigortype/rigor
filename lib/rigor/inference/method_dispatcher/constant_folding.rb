@@ -170,7 +170,12 @@ module Rigor
           :empty?, :strip, :lstrip, :rstrip, :chomp, :chop, :squeeze,
           :to_s, :to_str, :to_sym, :intern,
           :to_i, :to_f, :ord, :chr, :hex, :oct, :succ, :next,
-          :sum, :inspect
+          :sum, :inspect,
+          # `shellescape` is the String-receiver twin of the already-folded
+          # `Shellwords.escape` — deterministic shell-quoting, no global
+          # state. The `shellwords` library is loaded process-wide via
+          # `shellwords_folding`, so the method is always defined here.
+          :shellescape
         ].freeze
         SYMBOL_UNARY = Set[
           :to_s, :to_sym, :to_proc, :length, :size,
@@ -607,7 +612,13 @@ module Rigor
         # bounded for long strings. (`codepoints` yields per-character
         # Integer codepoints, the sibling of the byte-valued `bytes`;
         # `grapheme_clusters` is the extended-grapheme sibling of `chars`.)
-        STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :codepoints, :grapheme_clusters, :lines, :split].freeze
+        # `shellsplit` is the String-receiver twin of the already-folded
+        # `Shellwords.split` — lifts the token Array to a Tuple. Raises
+        # `ArgumentError` on unmatched quotes, which `try_fold_string_array_unary`
+        # rescues to nil (RBS tier widens). `shellwords` is loaded process-wide
+        # via `shellwords_folding`.
+        STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :codepoints, :grapheme_clusters,
+                                         :lines, :split, :shellsplit].freeze
         # `partition` / `rpartition` always return a fixed 3-element
         # `[head, separator, tail]` Array whose members are substrings of
         # the receiver (bounded by the input), so they lift to a precise

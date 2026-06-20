@@ -380,6 +380,20 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       # A NaN receiver yields NaN, which the fold declines.
       expect(fold(Float::NAN, :arg)).to be_nil
     end
+
+    it "folds String#shellescape (the String-receiver Shellwords.escape twin)" do
+      expect(fold("foo bar", :shellescape).value).to eq("foo\\ bar")
+      # Shellwords.escape("") is always the non-empty "''".
+      expect(fold("", :shellescape).value).to eq("''")
+    end
+
+    it "lifts String#shellsplit to a per-token Tuple and declines on bad quotes" do
+      result = fold("ls -la", :shellsplit)
+      expect(result).to be_a(Rigor::Type::Tuple)
+      expect(result.elements.map(&:value)).to eq(["ls", "-la"])
+      # An unmatched quote raises ArgumentError at fold time → RBS tier.
+      expect(fold("a 'unmatched", :shellsplit)).to be_nil
+    end
   end
 
   # Methods unlocked by the offline numeric.yml catalog: methods

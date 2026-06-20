@@ -35,6 +35,7 @@ cycles live in dedicated archives:
   - `Set#&` and its alias `Set#intersection` between two literal sets now fold to a `Constant[Set]` (e.g. `Set[1, 2, 3] & Set[2, 4]` → `Constant[Set[2]]`), joining their already-folding siblings `|` / `-` / `^` — the intersection was the lone gap because the catalog conservatively flags its C body block-dependent.
   - `Float#numerator` / `#denominator` fold to the float's exact rational decomposition (`2.5.numerator` → `Constant[5]`, `2.5.denominator` → `Constant[2]`), and `Float#arg` / `#angle` / `#phase` to its complex argument (`Constant[0]` for a non-negative receiver, `Constant[Math::PI]` for a negative one) — the Float siblings of the already-folded Rational accessors. Non-finite edges stay sound (an `Infinity` receiver folds to the value Ruby returns; a `NaN` result declines to the RBS tier).
   - `Pathname#split` lifts the `[dirname, basename]` pair to a `Tuple` of `Pathname` constants (`Pathname.new("/usr/bin/ruby").split` → `Tuple[#<Pathname:/usr/bin>, #<Pathname:ruby>]`) — the Array-returning sibling of the already-folded scalar `dirname` / `basename`, pure `@path` manipulation with no filesystem read.
+  - `String#shellescape` folds to a `Constant[String]` and `String#shellsplit` lifts its token list to a `Tuple` (`"ls -la".shellsplit` → `Tuple["ls", "-la"]`) — the String-receiver twins of the already-folded `Shellwords.escape` / `Shellwords.split`. An unmatched quote raises at fold time and declines to the RBS tier.
 
 ### Changed
 

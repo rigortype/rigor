@@ -52,6 +52,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-05-29 | [ADR-35 override-rules — Mastodon false-positive verification](20260529-adr35-mastodon-fp-verification.md) |
 | 2026-05-29 | [rigor-survey project-init baseline sweep](20260529-rigor-survey-project-init-baseline.md) |
 | 2026-06-05 | [ADR-47 `flow.unreachable-clause` — corpus FP sweep (WD4)](20260605-adr47-unreachable-clause-corpus-sweep.md) |
+| 2026-06-20 | [SKILL-driven onboarding (`rigor-next-steps`) — conference-app dogfood + rigor-survey field trial](20260620-skill-driven-onboarding-dogfood.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

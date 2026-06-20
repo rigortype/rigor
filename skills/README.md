@@ -38,6 +38,7 @@ your installed version rather than being frozen into a SKILL file — see
 | --- | --- |
 | [`rigor-next-steps`](rigor-next-steps/SKILL.md) | **Start here.** Figure out the next step on this project and route to the right skill below. |
 | [`rigor-project-init`](rigor-project-init/SKILL.md) | Onboard a project from scratch — detect the stack, choose an adoption mode, write `.rigor.dist.yml`, snapshot a baseline. |
+| [`rigor-rbs-setup`](rigor-rbs-setup/SKILL.md) | Install community RBS for the project's gems (`rbs collection install`) so Rigor stops typing RBS-less dependencies as `Dynamic`. |
 | [`rigor-ci-setup`](rigor-ci-setup/SKILL.md) | Wire Rigor into CI and surface diagnostics inline on the PR / MR (SARIF, GitHub Actions, GitLab Code Quality, reviewdog, …). |
 | [`rigor-baseline-reduce`](rigor-baseline-reduce/SKILL.md) | Work an existing `.rigor-baseline.yml` down rule by rule — classify, fix or suppress, regenerate. |
 | [`rigor-protection-uplift`](rigor-protection-uplift/SKILL.md) | Close the type-protection holes `rigor coverage --protection` surfaces, under a double gate that keeps `rigor check` clean. |

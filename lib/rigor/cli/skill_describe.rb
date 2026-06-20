@@ -21,6 +21,11 @@ module Rigor
       # probe agrees with what `rigor check` would auto-discover.
       CONFIG_FILENAMES = %w[.rigor.yml .rigor.dist.yml].freeze
       BASELINE_FILENAME = ".rigor-baseline.yml"
+      # `rbs collection install`'s lockfile — Rigor auto-detects it at
+      # the project root and feeds each gem's community RBS into the
+      # signature paths, so its presence is the signal that the gem-RBS
+      # gap has been addressed.
+      RBS_COLLECTION_LOCKFILE = "rbs_collection.lock.yaml"
 
       # The entry-point SKILL itself — excluded from the catalogue
       # because it is the skill being run, not a destination.
@@ -30,6 +35,7 @@ module Rigor
       # recommendation decision tree walks.
       CATALOG_ORDER = %w[
         rigor-project-init
+        rigor-rbs-setup
         rigor-ci-setup
         rigor-baseline-reduce
         rigor-protection-uplift
@@ -73,6 +79,8 @@ module Rigor
           config: CONFIG_FILENAMES.find { |name| File.file?(File.join(@root, name)) },
           baseline: File.file?(File.join(@root, BASELINE_FILENAME)),
           sig: File.directory?(File.join(@root, "sig")),
+          gems: File.file?(File.join(@root, "Gemfile.lock")),
+          rbs_collection: File.file?(File.join(@root, RBS_COLLECTION_LOCKFILE)),
           ci: ci_state
         }
       end
@@ -110,6 +118,8 @@ module Rigor
       def recommended_name_and_reason(state)
         if state.fetch(:config).nil?
           ["rigor-project-init", "this project has no Rigor configuration yet — start here."]
+        elsif state.fetch(:gems) && !state.fetch(:rbs_collection)
+          ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
         elsif state.fetch(:ci) != :wired
           ["rigor-ci-setup", "Rigor is configured but not wired into CI — lock in the regression guard."]
         elsif state.fetch(:baseline)
@@ -134,11 +144,17 @@ module Rigor
              when :unwired then "CI present, Rigor not wired"
              else "not detected"
              end
+        rbs = if state.fetch(:gems)
+                state.fetch(:rbs_collection) ? "collection installed" : "gems present, no collection"
+              else
+                "no Gemfile.lock"
+              end
         <<~STATE
           ## Project state
           - Config file:    #{state.fetch(:config) || 'none (no .rigor.yml / .rigor.dist.yml)'}
           - Baseline:       #{state.fetch(:baseline) ? BASELINE_FILENAME : 'none'}
           - Project sig/:   #{state.fetch(:sig) ? 'present' : 'none'}
+          - Community RBS:  #{rbs}
           - CI integration: #{ci}
         STATE
       end

@@ -99,6 +99,30 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("\u2192 rigor-protection-uplift \u2014")
     end
 
+    it "recommends rigor-rbs-setup when gems are present without community RBS" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          "Gemfile.lock" => "GEM\n  specs:\n"
+        }
+      )
+      expect(out).to include("\u2192 rigor-rbs-setup \u2014")
+      expect(out).to include("Community RBS:  gems present, no collection")
+    end
+
+    it "stops recommending rigor-rbs-setup once the collection lockfile exists" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          "Gemfile.lock" => "GEM\n  specs:\n",
+          "rbs_collection.lock.yaml" => "sources: []\n"
+        }
+      )
+      expect(out).not_to include("\u2192 rigor-rbs-setup \u2014")
+      expect(out).to include("\u2192 rigor-ci-setup \u2014")
+      expect(out).to include("Community RBS:  collection installed")
+    end
+
     it "lists the downstream skills with a load command, excluding the entry point itself" do
       _status, out, = describe_in({})
       expect(out).to include("rigor skill print rigor-project-init")

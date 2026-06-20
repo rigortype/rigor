@@ -1,6 +1,6 @@
 # ADR-73 — SKILL-driven Rigor user experience (the `rigor-next-steps` entry point + live `rigor skill --describe`)
 
-Status: **Accepted — design ratified 2026-06-20; implementation queued (WD1–WD5 below), no code landed yet.** Establishes a single SKILL-driven entry point — `rigor-next-steps` — for "what should we do next with Rigor on this project," backed by a live, version-current `rigor skill --describe` so the distributed guidance never goes stale. Promotes the parked `rigor-protection-uplift` skill into the shipped set and settles where the user-facing SKILLs are distributed (vercel-labs/skills + the bundled gem).
+Status: **Accepted — WD1–WD5 implemented 2026-06-20.** Establishes a single SKILL-driven entry point — `rigor-next-steps` — for "what should we do next with Rigor on this project," backed by a live, version-current `rigor skill --describe` so the distributed guidance never goes stale. Promotes the parked `rigor-protection-uplift` skill into the shipped set and settles where the user-facing SKILLs are distributed (vercel-labs/skills + the bundled gem). The `describe` catalogue is designed to **grow** (see "Extending the catalogue"); `rigor-rbs-setup` is the first such addition, landed the same day.
 
 Grounding: the existing `rigor skill` command ([`lib/rigor/cli/skill_command.rb`](../../lib/rigor/cli/skill_command.rb), shipped v0.1.13 per [ADR-22](22-baseline-and-project-onboarding.md) WD8), the parked act-on-coverage skeleton ([`docs/design/20260616-act-on-coverage-skill.md`](../design/20260616-act-on-coverage-skill.md), [ADR-63](63-type-protection-coverage.md) WD5, pilot-validated), and [`docs/install.md`](../install.md)'s agent-facing install flow.
 
@@ -86,6 +86,38 @@ Negative / carry-over:
 - The raw `docs/install.md` URL inside `rigor-next-steps` (WD3) is a small stale-able surface — accepted because install must precede the gem; mitigated by keeping it a pointer, not a copy.
 - `rigor skill --describe`'s output text + the new skill names become **public vocabulary frozen at v1.0 under [ADR-50](50-release-engineering-and-stability-strategy.md) WD1** — the recommendation *logic* stays free to evolve, but the command name and the skill ids are a compatibility commitment once 1.0 ships.
 - The state → skill decision tree (WD2) is a heuristic; as the skill set grows it will need tuning. It is deliberately small and additive — a wrong recommendation costs a redundant suggestion, never a false diagnostic (it is outside the FP envelope entirely).
+
+## Extending the catalogue — additional mechanical, describe-routed skills
+
+The `describe` decision tree (WD2) and catalogue are deliberately
+**open**: most of Rigor's adoption-and-operation journey is mechanical
+work an agent can drive over the *existing* CLI, and each such workflow
+becomes a new skill plus one branch in the decision tree. Because the
+routing logic lives in the gem (WD1), adding a destination sharpens
+`describe` for every installed copy without touching the distributed
+`rigor-next-steps`.
+
+A candidate qualifies when it (a) is drivable from existing CLI (or a
+small *additive* command), (b) routes on a **cheap presence-only
+signal** so `describe` stays side-effect-free (WD2's guardrail), and
+(c) lives outside the FP envelope — a wrong recommendation costs a
+redundant suggestion, never a diagnostic.
+
+| Skill | Routing signal (presence-only) | Built on | Status |
+| --- | --- | --- | --- |
+| `rigor-rbs-setup` | `Gemfile.lock` present ∧ no `rbs_collection.lock.yaml` | `rbs collection install` (auto-detected, see [`rbs_collection_discovery.rb`](../../lib/rigor/environment/rbs_collection_discovery.rb)) | **Landed 2026-06-20** |
+| `rigor-editor-setup` | no editor LSP config referencing `rigor` | `rigor lsp` ([ADR-19](19-language-server-packaging.md)) | Queued |
+| `rigor-upgrade` | baseline's recorded Rigor version < installed | `rigor diff` / `rigor baseline regenerate` | Queued (needs the baseline to record its generation version) |
+| `rigor-doctor` | (deeper validation than the presence probe) | a new additive `rigor doctor` command | Proposed |
+| `rigor-plugin-tune` | `Gemfile.lock` deps not all matched to enabled plugins | `rigor plugins --strict` | Proposed |
+| `rigor-mcp-setup` | no MCP-client config referencing `rigor` | `rigor mcp` ([ADR-33](33-mcp-server.md)) | Proposed |
+| `rigor-monkeypatch-resolve` | `triage` shows a `call.unresolved-toplevel` cluster | `pre_eval:` ([ADR-17](17-monkey-patch-pre-evaluation.md)) | Proposed |
+
+`rigor-rbs-setup` sits **right after `rigor-project-init`** in the
+journey order: community RBS removes the dominant `Dynamic` source (the
+RBS-less external gem the protection-uplift "honest bounds" named as its
+ceiling) before baseline or CI work, so doing it early avoids
+re-baselining against a noisier diagnostic set later.
 
 ## Relationship to other ADRs
 

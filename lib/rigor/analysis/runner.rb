@@ -483,19 +483,48 @@ module Rigor
       end
       private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result
 
+      # Ruby versions probed (ascending) to discover the lowest one this
+      # Prism build accepts for `version:`. Prism exposes no version
+      # list, so the floor is found empirically — only when a
+      # misconfigured `target_ruby` is rejected — so the diagnostic can
+      # name it instead of leaving the user to guess (the dogfood field
+      # trial, 20260620-skill-driven-onboarding-dogfood.md, burned cycles
+      # on exactly this).
+      PRISM_VERSION_LADDER = %w[
+        3.0.0 3.1.0 3.2.0 3.3.0 3.4.0 3.5.0 4.0.0 4.1.0 4.2.0
+      ].freeze
+
+      # @return [String, nil] the lowest `target_ruby` this Prism build
+      #   accepts, or nil if none of the ladder parses. Memoised per
+      #   process (the value is constant for a given Prism).
+      def self.prism_supported_floor
+        @prism_supported_floor ||= PRISM_VERSION_LADDER.find do |candidate|
+          Prism.parse("nil", version: candidate)
+          true
+        rescue ArgumentError
+          false
+        end
+      end
+
       # `target_ruby` flows through to Prism's `version:` option.
-      # Prism enforces the supported range and raises
-      # `ArgumentError` for versions it does not recognise. Run a
-      # one-time smoke parse here so a misconfigured target_ruby
-      # surfaces as a single project-level diagnostic instead of
-      # crashing the whole run on the first file.
+      # Prism enforces the supported range and raises `ArgumentError`
+      # for versions it does not recognise. Run a one-time smoke parse
+      # here so a misconfigured target_ruby surfaces as a single
+      # project-level diagnostic instead of crashing the whole run on
+      # the first file — and name the supported floor + where to read
+      # the right value, so the fix is obvious without a guess-and-retry
+      # loop.
       def validate_target_ruby
         Prism.parse("nil", version: @configuration.target_ruby)
         nil
       rescue ArgumentError => e
+        floor = self.class.prism_supported_floor
         Diagnostic.new(
           path: ".rigor.yml", line: 1, column: 1,
-          message: "target_ruby #{@configuration.target_ruby.inspect} is not accepted by Prism: #{e.message}",
+          message: "target_ruby #{@configuration.target_ruby.inspect} is not supported by this Rigor build " \
+                   "(Prism accepts #{floor} and newer). Set target_ruby to your project's Ruby version " \
+                   "(>= #{floor}) — read it from Gemfile.lock's `RUBY VERSION` or .ruby-version. " \
+                   "(Prism: #{e.message})",
           severity: :error,
           rule: "configuration-error",
           source_family: :builtin

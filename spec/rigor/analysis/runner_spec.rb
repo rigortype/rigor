@@ -982,6 +982,14 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag).not_to be_nil
       expect(diag.path).to eq(".rigor.yml")
       expect(diag.message).to include('"3.0"')
+      # The message must name the supported floor and where to read the
+      # right value, so the fix is obvious without a guess-and-retry loop.
+      expect(diag.message).to include(described_class.prism_supported_floor)
+      expect(diag.message).to match(/Gemfile\.lock|\.ruby-version/)
+    end
+
+    it "probes a non-nil Prism-supported floor" do
+      expect(described_class.prism_supported_floor).to match(/\A\d+\.\d+\.\d+\z/)
     end
   end
 

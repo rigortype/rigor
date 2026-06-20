@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "stringio"
+require "tmpdir"
 
 require "rigor/cli"
 require "rigor/cli/skill_command"
@@ -37,6 +39,81 @@ RSpec.describe Rigor::CLI::SkillCommand do
       status_default, out_default, = run([])
       expect(status_default).to eq(status_list)
       expect(out_default).to eq(out_list)
+    end
+  end
+
+  describe "describe" do
+    # `describe` probes the *current working directory*, so each
+    # example sets up a throwaway project root and runs from inside it.
+    def describe_in(files, argv = ["describe"])
+      Dir.mktmpdir do |dir|
+        files.each do |relative, contents|
+          path = File.join(dir, relative)
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, contents)
+        end
+        Dir.chdir(dir) { run(argv) }
+      end
+    end
+
+    it "reports project state, a recommendation, the catalogue, and an agent prompt" do
+      status, out, = describe_in({})
+      expect(status).to eq(0)
+      expect(out).to include("# Rigor — next steps for this project")
+      expect(out).to include("rigortype #{Rigor::VERSION}")
+      expect(out).to include("## Project state")
+      expect(out).to include("## Recommended next step")
+      expect(out).to include("## All skills you can run next")
+      expect(out).to include("## For the agent")
+    end
+
+    it "recommends rigor-project-init when there is no Rigor config" do
+      _status, out, = describe_in({})
+      expect(out).to include("\u2192 rigor-project-init \u2014")
+      expect(out).to include("Config file:    none")
+    end
+
+    it "recommends rigor-ci-setup when configured but CI is not wired" do
+      _status, out, = describe_in({ ".rigor.dist.yml" => "target_ruby: '3.3'\n" })
+      expect(out).to include("\u2192 rigor-ci-setup \u2014")
+    end
+
+    it "recommends rigor-baseline-reduce when a baseline exists and CI is wired" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          ".rigor-baseline.yml" => "version: 1\n",
+          ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n"
+        }
+      )
+      expect(out).to include("\u2192 rigor-baseline-reduce \u2014")
+    end
+
+    it "recommends rigor-protection-uplift when configured + CI-wired with no baseline" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.3'\n",
+          ".gitlab-ci.yml" => "rigor:\n  script: rigor check\n"
+        }
+      )
+      expect(out).to include("\u2192 rigor-protection-uplift \u2014")
+    end
+
+    it "lists the downstream skills with a load command, excluding the entry point itself" do
+      _status, out, = describe_in({})
+      expect(out).to include("rigor skill print rigor-project-init")
+      expect(out).to include("rigor skill print rigor-protection-uplift")
+      # The catalogue heading section must not advertise the entry point.
+      catalogue = out.split("## All skills you can run next", 2).last.to_s
+      expect(catalogue).not_to include("- rigor-next-steps —")
+    end
+
+    it "accepts the --describe flag spelling identically to the describe subcommand" do
+      Dir.mktmpdir do |dir|
+        sub = Dir.chdir(dir) { run(["describe"]) }
+        flag = Dir.chdir(dir) { run(["--describe"]) }
+        expect(flag).to eq(sub)
+      end
     end
   end
 

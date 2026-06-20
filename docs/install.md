@@ -4,7 +4,9 @@ These instructions are written for an AI coding agent. Follow each
 step in order. Run the shell commands exactly as shown. If a step
 fails, stop and report the error before continuing.
 
-The goal is to install Rigor and hand off to the project-init skill.
+The goal is to install Rigor and hand off to `rigor skill describe`,
+which reports the project's state and routes to the right next-step
+skill (`rigor-project-init` for a project that has never run Rigor).
 **Do not add Rigor to the project's `Gemfile`** — Rigor is a
 standalone tool, not a library.
 
@@ -155,19 +157,33 @@ If the command is not found, revisit Step 2 for your case.
 
 ---
 
-## Step 4 — Set up Rigor in this project
+## Step 4 — Ask Rigor what to do next
 
-Now that `rigor` is on your PATH, run the project-init skill:
+Now that `rigor` is on your PATH, let it pick the next step for this
+project:
+
+```sh
+rigor skill describe
+```
+
+This reports the project's current state (config / baseline / `sig/` /
+CI), recommends the next skill to run with a reason, and lists every
+skill with its current description. Follow the `## Recommended next
+step` it prints — for a project with no `.rigor.yml` yet that is
+`rigor-project-init`:
 
 ```sh
 rigor skill print rigor-project-init
 ```
 
-This prints the SKILL definition — a header with file paths followed
-by the skill body. Follow the printed instructions from top to
-bottom. The skill detects your project's stack, proposes plugins,
-writes `.rigor.dist.yml`, and snapshots a baseline if needed.
+`rigor skill print <name>` prints the SKILL definition — a header with
+file paths followed by the skill body. Follow it from top to bottom.
+The project-init skill detects your project's stack, proposes plugins,
+writes `.rigor.dist.yml`, and snapshots a baseline if needed; once the
+project is set up, re-run `rigor skill describe` for the step after
+that.
 
-If the skill command is not recognised, your Rigor version may be
-older than 0.1.9. Run `rigor --version` and upgrade with
-`mise use gem:rigortype` (or `gem update rigortype` for Case C/B).
+If `rigor skill describe` is not recognised, your Rigor version predates
+it. Run `rigor --version` and upgrade with `mise use gem:rigortype` (or
+`gem update rigortype` for Case C/B); on an older version, run
+`rigor skill print rigor-project-init` directly.

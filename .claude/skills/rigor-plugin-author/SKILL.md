@@ -4,6 +4,7 @@ description: |
   Author a new Rigor plugin end-to-end: decide `plugins/` (production) vs `examples/` (tutorial), then run requirements → template → scaffold → demo → spec → verify. Triggers: "Create a Rigor plugin for X", "Extend Rigor for our DSL", "Plugin similar to rigor-units for currency". NOT for edits to existing plugins or analyser-engine work in `lib/rigor/`.
 license: MPL-2.0
 metadata:
+  internal: true
   version: 0.1.0
   homepage: https://github.com/rigortype/rigor
 ---

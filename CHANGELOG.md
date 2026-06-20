@@ -15,6 +15,13 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[cli]** `rigor skill describe` (also spelled `rigor skill --describe`) recommends what to do next on the current project: it probes the project's state — config / baseline / `sig/` / CI, all from cheap presence checks without running `rigor check` — prints a recommended next skill with a one-line reason, and lists every bundled skill with its current description ([ADR-73](docs/adr/73-skill-driven-user-experience.md)).
+- **[skills]** New `rigor-next-steps` Agent Skill — the single "what should we do next with Rigor?" entry point. It resolves the `rigor` command (installing it via the guide if missing), onboards an unconfigured project, then routes through `rigor skill describe`, so its guidance stays current to your installed Rigor instead of being frozen into the skill file.
+- **[skills]** New `rigor-protection-uplift` Agent Skill — closes the type-protection holes `rigor coverage --protection` surfaces, sig-gen first and minimal hand-authored residuals, under a double gate that keeps `rigor check` clean (productizes [ADR-63](docs/adr/63-type-protection-coverage.md) WD5).
+- **[skills]** The bundled user-facing skills are now installable via [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx skills add rigortype/rigor`, or per-skill) in addition to `rigor skill`. A new `skills/README.md` catalogues them and documents both install channels; the contributor-only skills under `.claude/skills/` are marked `metadata.internal: true` so a bulk install does not ship them.
+
 ## [0.2.1] - 2026-06-19
 
 v0.2.1 continues the 0.2.x evaluation line with detection and configuration polish. The headline is a `Gemfile.lock`-gated ActiveSupport RBS overlay that silences the systematic core-extension false positives a Rails project saw on `3.minutes` and friends, resolving the v0.2.0 evidence-tier feedback at its source ([ADR-72](docs/adr/72-gemfile-lock-gated-rbs-overlays.md)). `rigor check` now warns when a configuration value silently resolves to nothing, and `rigor coverage` gains a fused static-plus-dynamic protection map ([ADR-70](docs/adr/70-fused-protection-coverage.md)). Constant folding reaches a few more pure scalar and structural methods, and fixes include a gem-packaging bug that left installed gems without their bundled RBS data.

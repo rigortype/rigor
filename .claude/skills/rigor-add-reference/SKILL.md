@@ -2,6 +2,8 @@
 name: rigor-add-reference
 description: |
   Add a new git submodule under references/ for vendored upstream source. Use when the user asks to "vendor X as a reference", "add a submodule under references/", or when a new ADR / feature needs a reference checkout. Covers the three-file change — .gitmodules, Makefile (REFERENCE_SUBMODULES + init-submodules), and the submodule pointer — committed together.
+metadata:
+  internal: true
 ---
 
 # Add a Reference Submodule

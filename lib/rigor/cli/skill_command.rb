@@ -17,8 +17,16 @@ module Rigor
     # gem checkout — the project being analysed has no copy, so an
     # AI agent has no a priori way to find them.
     #
-    # This command exposes the bundled skills via three subcommands:
+    # This command exposes the bundled skills via four subcommands:
     #
+    # - `rigor skill describe`     — ADR-73's live entry point: a
+    #                                cheap project-state probe + the
+    #                                recommended next skill + every
+    #                                skill's current description. The
+    #                                `rigor-next-steps` SKILL routes off
+    #                                this so no version-coupled guidance
+    #                                is frozen into the SKILL. Also
+    #                                spelled `rigor skill --describe`.
     # - `rigor skill list`         — table of name + absolute path.
     # - `rigor skill print <name>` — short header (paths + how to use)
     #                                followed by the SKILL.md body. This
@@ -37,11 +45,13 @@ module Rigor
 
         Subcommands:
           list                  List bundled skills (default when no subcommand given)
+          describe              Report project state + recommend the next skill to run
           print <name>          Print the SKILL.md body for <name> to stdout, with a header
           path  <name>          Print the absolute path of the SKILL.md file for <name>
 
         Examples:
           rigor skill list
+          rigor skill describe
           rigor skill print rigor-project-init
           rigor skill path  rigor-baseline-reduce
       USAGE
@@ -56,6 +66,7 @@ module Rigor
 
         case subcommand
         when "list" then run_list
+        when "describe", "--describe" then run_describe
         when "print" then run_print
         when "path" then run_path
         when "-h", "--help", "help"
@@ -105,6 +116,20 @@ module Rigor
         return name_error(name) if skill.nil?
 
         @out.puts(skill.fetch(:path))
+        0
+      end
+
+      # `rigor skill describe` (also spelled `--describe`) — ADR-73's
+      # live "brain", delegated to {SkillDescribe}: it probes the current
+      # project's state with cheap presence checks (it never runs `rigor
+      # check`), recommends the next skill to run, and prints every
+      # bundled skill's current frontmatter description, so the
+      # `rigor-next-steps` SKILL can route without copying any
+      # version-coupled guidance into itself.
+      def run_describe
+        require_relative "skill_describe"
+
+        @out.puts(SkillDescribe.new(skills: discover_skills).render)
         0
       end
 

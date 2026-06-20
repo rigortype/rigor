@@ -2,6 +2,8 @@
 name: rigor-adr-author
 description: |
   Author a new Architecture Decision Record under docs/adr/. Use when the user asks to "write an ADR", "record this decision as an ADR", "add ADR-N for X", or when a design discussion reaches a decision worth recording. Covers the quality bar (defers to ADR-49's rubric — archetype, stakes, eight axes) and the mechanical wiring (next number, the file, the docs/adr/README.md index row in ascending order, the CLAUDE.md ADR list row, verification). NOT for editing the type spec or internal-spec corpus, and NOT a substitute for reading ADR-49 — this skill is the procedure; ADR-49 is the binding quality contract.
+metadata:
+  internal: true
 ---
 
 # Author an ADR

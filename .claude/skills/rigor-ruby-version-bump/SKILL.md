@@ -2,6 +2,8 @@
 name: rigor-ruby-version-bump
 description: |
   Bump the development Ruby version across the markers that record it — flake.nix (including the Nix fake-hash derivation trick), .ruby-version, .tool-versions, and the AGENTS.md target-Ruby line. Use when the user asks to "update Ruby to x.y.z", "bump the Ruby version", or after a new Ruby release lands. Explains the development-Ruby vs supported-range split: a patch bump touches only the four development markers and deliberately leaves the Gemfile `ruby` directive, Gemfile.lock's RUBY VERSION, the gemspec range, and the ci.yml matrix alone.
+metadata:
+  internal: true
 ---
 
 # Bump the Ruby Version

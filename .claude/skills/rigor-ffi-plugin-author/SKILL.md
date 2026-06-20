@@ -4,6 +4,7 @@ description: |
   Decide whether an FFI-binding gem needs a Rigor sub-plugin at all (core `rigor-ffi` covers the literal-`attach_function` + thin-wrapper case), then author one if needed. Triggers: "Create a rigor-<gem> FFI plugin", "Our internal libfoo gem types as Dynamic", "FFI bindings in our project don't infer", "Write a plugin like rigor-rbnacl for our crypto wrapper". NOT for edits to bundled rigor-rbnacl / rigor-ethon / rigor-ffi-rzmq / rigor-sassc — those follow the general rigor-plugin-author SKILL.
 license: MPL-2.0
 metadata:
+  internal: true
   version: 0.1.0
   homepage: https://github.com/rigortype/rigor
 ---

@@ -2,6 +2,8 @@
 name: rigor-type-coverage-uplift
 description: |
   Audit and systematically expand the set of methods and module functions that Rigor can fold to precise types (`Constant[T]`, `Tuple`, `Refined`). Use when tasked with "cover more methods on String / Hash / Array / …", "fold Math / CGI / URI / Shellwords module functions", or any session whose goal is closing gaps in `ConstantFolding`, `ShapeDispatch`, or the singleton-folding tier. Produces an intermediate coverage doc (parallelisation artifact) and implements per-tier. Triggers: "add coverage for X type", "implement Y method fold", "audit what Hash / String / Integer / Float / Array / Tuple / Set / Regexp / Math / CGI / URI folds are missing".
+metadata:
+  internal: true
 ---
 
 # Rigor Type-Coverage Uplift

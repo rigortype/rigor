@@ -1,11 +1,12 @@
 # Act-on-coverage skill — skeleton draft (ADR-63 WD5)
 
-Status: **Draft / parked.** This is the SKILL.md skeleton for the
-[ADR-63 WD5](../adr/63-type-protection-coverage.md) act-on-coverage layer. It is **not** a
-live skill — it is deliberately kept out of `.claude/skills/` (which Claude Code
-auto-discovers in this repo as *contributor* workflows) because WD5 scopes it to **user
-projects** via the ADR-31 external-author / v0.2.0-queued path, not Rigor's own tree.
-Promote it to a real `SKILL.md` under whatever external-author packaging v0.2.0 settles on.
+Status: **Promoted (2026-06-20).** This skeleton shipped as the live skill
+[`skills/rigor-protection-uplift/SKILL.md`](../../skills/rigor-protection-uplift/SKILL.md)
+under [ADR-73](../adr/73-skill-driven-user-experience.md) WD4 — the user-facing-skill
+dual channel (gem-bundled + vercel-labs/skills) settled the "external-author packaging"
+question this draft deferred. The procedure below is preserved as the skill's source of
+record; the **dry-run findings + multi-repo pilot** sections remain the grounding for
+[ADR-63 WD5](../adr/63-type-protection-coverage.md).
 
 The skeleton encodes the WD5 discipline as an executable procedure so the design can be
 dry-run and the friction fed back into the WD before it graduates.

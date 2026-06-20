@@ -18,6 +18,10 @@ flag, key, or command that *acts* on it.
 1. [Installing Rigor](01-installation.md) — `mise`, `asdf`,
    `gem install`, Nix, and the dev-container guidance. Rigor
    is a tool, not a project dependency.
+17. [Driving project improvement with `rigor-next-steps`](17-driving-improvement.md) —
+    the single-entry-point loop: onboard, see what Rigor finds,
+    raise type-protection, guard it in CI — driven by
+    `rigor skill describe`.
 14. [Rigor for Rails — step-by-step setup with mise](14-rails-quickstart.md) —
     install Ruby 4.0 + Rigor via `mise`, activate the Rails
     plugin set, run `rigor check`, and share the config with
@@ -49,7 +53,9 @@ flag, key, or command that *acts* on it.
    gem plugins through the `plugins:` config key. Per-plugin
    user docs live under [Plugin reference](plugins/README.md).
 8. [Provided skills](08-skills.md) — the bundled Agent Skills
-   for onboarding and baseline reduction.
+   the `rigor-next-steps` loop routes to: onboarding, RBS /
+   plugin setup, protection uplift, baseline reduction, CI /
+   editor / MCP wiring, and plugin authoring.
 15. [Type-protection coverage](15-type-protection-coverage.md) —
     measuring whether a bug would be *caught*, fusing your types
     and your tests into one safety net (`rigor coverage

@@ -30,6 +30,7 @@ RSpec.describe "Data.define value folding", type: :runner do
         dump_type(p[-1])
         dump_type(p.to_h)
         dump_type(p.deconstruct)
+        dump_type(p.deconstruct_keys([:x]))
         dump_type(p.members)
       RUBY
 
@@ -40,6 +41,7 @@ RSpec.describe "Data.define value folding", type: :runner do
                             "1", "\"two\"", "\"two\"", # p[:x], p[1], p[-1]
                             "{ x: 1, y: \"two\" }",
                             "[1, \"two\"]",
+                            "{ x: 1, y: \"two\" }",
                             "[:x, :y]"
                           ])
     end

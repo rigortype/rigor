@@ -414,4 +414,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
       end
     end
   end
+
+  describe "known_zero_integer? (private helper)" do
+    it "recognises an IntegerRange [0, 0] as zero" do
+      range = Rigor::Type::IntegerRange.new(0, 0)
+      result = described_class.send(:known_zero_integer?, range)
+      expect(result).to be(true)
+    end
+
+    it "rejects an IntegerRange [1, 5] as non-zero" do
+      range = Rigor::Type::IntegerRange.new(1, 5)
+      result = described_class.send(:known_zero_integer?, range)
+      expect(result).to be(false)
+    end
+  end
 end

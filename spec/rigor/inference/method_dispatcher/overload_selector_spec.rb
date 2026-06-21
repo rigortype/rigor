@@ -296,4 +296,35 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       end
     end
   end
+
+  describe "strict-nominal resolution helpers" do
+    it "recurses strict_nominal_names_for through an Optional to the wrapped class" do
+      inner = RBS::Types::ClassInstance.new(name: RBS::TypeName.parse("::String"), args: [], location: nil)
+      optional = RBS::Types::Optional.new(type: inner, location: nil)
+
+      expect(described_class.send(:strict_nominal_names_for, optional)).to eq(["String"])
+    end
+
+    it "treats a Union of Constants as value-pinning, a mixed Union as not" do
+      pinned = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(2)
+      )
+      mixed = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.nominal_of("String")
+      )
+
+      expect(described_class.send(:value_pinning?, pinned)).to be(true)
+      expect(described_class.send(:value_pinning?, mixed)).to be(false)
+    end
+  end
+
+  describe "positional param binding" do
+    it "absorbs surplus actual args into a rest positional" do
+      # `Array#push: (*Elem) -> self` has a rest positional and no fixed
+      # params, so binding 3 actual args fills three rest slots.
+      fun = loader.instance_definition("Array").methods[:push].method_types.first.type
+
+      expect(described_class.send(:positional_params_for, fun, 3).size).to eq(3)
+    end
+  end
 end

@@ -67,7 +67,7 @@ RSpec.describe Rigor::Inference::HktReducer do
       end
     end
 
-    context "argument validation" do
+    context "with an invalid argument" do
       let(:registry) { registry_class.new }
 
       it "rejects a non-App argument, naming its class" do

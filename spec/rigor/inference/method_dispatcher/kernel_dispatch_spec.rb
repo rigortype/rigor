@@ -141,4 +141,38 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(kernel_dispatch(:Float, constant_of("abc"))).to be_nil
     end
   end
+
+  describe ".try_dispatch on Kernel#Rational / #Complex" do
+    def numeric_kernel(method_name, *args)
+      described_class.try_dispatch(
+        cc(receiver: receiver, method_name: method_name, args: args.map { |a| constant_of(a) })
+      )
+    end
+
+    it "folds Rational(num, den) with Ruby normalisation (2/4 -> 1/2)" do
+      expect(numeric_kernel(:Rational, 2, 4).value).to eq(Rational(1, 2))
+    end
+
+    it "folds Complex(re, im) and the single-arg form" do
+      expect(numeric_kernel(:Complex, 1, 2).value).to eq(Complex(1, 2))
+      expect(numeric_kernel(:Complex, 3).value).to eq(Complex(3))
+    end
+
+    it "accepts Float / Rational / Complex constant args, not only Integer" do
+      # Exercises each arm of numeric_constant?'s value-class `||` chain;
+      # the Integer args above short-circuit before reaching them.
+      expect(numeric_kernel(:Complex, 1.5, 2.5).value).to eq(Complex(1.5, 2.5))
+      expect(numeric_kernel(:Complex, Rational(1, 2), Rational(3, 4)).value)
+        .to eq(Complex(Rational(1, 2), Rational(3, 4)))
+      expect(numeric_kernel(:Complex, Complex(1, 2)).value).to eq(Complex(1, 2))
+    end
+
+    it "declines when an argument is not a numeric Constant" do
+      expect(numeric_kernel(:Rational, "x")).to be_nil
+    end
+
+    it "declines arities other than 1 or 2" do
+      expect(numeric_kernel(:Rational, 1, 2, 3)).to be_nil
+    end
+  end
 end

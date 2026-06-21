@@ -49,6 +49,11 @@ RSpec.describe Rigor::Inference::HktRegistry do
       expect { described_class.new(uri: :"json::value", arity: 1, variance: [:out], bound: nil) }
         .to raise_error(ArgumentError, /bound must not be nil/)
     end
+
+    it "rejects a non-Array variance" do
+      expect { described_class.new(uri: :"json::value", arity: 1, variance: :out, bound: untyped) }
+        .to raise_error(ArgumentError, /variance must be an Array/)
+    end
   end
 
   describe Rigor::Inference::HktRegistry::Definition do
@@ -80,6 +85,45 @@ RSpec.describe Rigor::Inference::HktRegistry do
     it "rejects non-String body" do
       expect { described_class.new(uri: :"json::value", params: [:K], body: :something) }
         .to raise_error(ArgumentError, /body must be a String/)
+    end
+
+    it "rejects a non-Symbol uri" do
+      expect { described_class.new(uri: "json::value", params: [:K], body: "_") }
+        .to raise_error(ArgumentError, /uri must be a Symbol/)
+    end
+
+    it "rejects a non-Array params" do
+      expect { described_class.new(uri: :"json::value", params: :K, body: "_") }
+        .to raise_error(ArgumentError, /params must be an Array/)
+    end
+  end
+
+  describe ".definition_with_body_tree" do
+    it "builds a Definition carrying the pre-parsed body tree" do
+      tree = Rigor::Inference::HktBody::Param.new(name: :K)
+      defn = described_class.definition_with_body_tree(uri: :"box::it", params: [:K], body_tree: tree)
+
+      expect(defn.uri).to eq(:"box::it")
+      expect(defn.params).to eq([:K])
+      expect(defn.body_tree).to eq(tree)
+    end
+  end
+
+  describe "#reduce" do
+    it "delegates to HktReducer over this registry (box::it[K] = K)" do
+      str_nominal = Rigor::Type::Combinator.nominal_of(String)
+      registry = described_class.new(
+        registrations: [described_class::Registration.new(uri: :"box::it", arity: 1, variance: [:out],
+                                                          bound: untyped)],
+        definitions: [
+          described_class.definition_with_body_tree(
+            uri: :"box::it", params: [:K], body_tree: Rigor::Inference::HktBody::Param.new(name: :K)
+          )
+        ]
+      )
+      app = Rigor::Type::App.new(:"box::it", [str_nominal], bound: untyped)
+
+      expect(registry.reduce(app)).to eq(str_nominal)
     end
   end
 
@@ -144,6 +188,41 @@ RSpec.describe Rigor::Inference::HktRegistry do
     it "is a frozen empty registry" do
       expect(described_class::EMPTY).to be_empty
       expect(described_class::EMPTY).to be_frozen
+    end
+  end
+
+  describe ".scan_rbs_loader" do
+    # A minimal loader exposing the one method the scan consumes:
+    # `each_class_decl_annotation` yields `(annotation_string,
+    # source_location)` for every `%a{rigor:v1:…}` directive.
+    def loader_yielding(*annotations)
+      Class.new do
+        define_method(:each_class_decl_annotation) do |&block|
+          annotations.each { |a| block.call(a, nil) }
+        end
+      end.new
+    end
+
+    it "returns the base registry when the loader is nil" do
+      expect(described_class.scan_rbs_loader(nil)).to equal(described_class::EMPTY)
+    end
+
+    it "parses hkt_register / hkt_define annotations into a merged registry" do
+      loader = loader_yielding(
+        "rigor:v1:hkt_register: uri=fake::box arity=1 variance=out bound=untyped",
+        "rigor:v1:hkt_define: uri=fake::box params=K body=K"
+      )
+
+      registry = described_class.scan_rbs_loader(loader)
+
+      expect(registry).to be_registered(:"fake::box")
+      expect(registry.definition(:"fake::box")).not_to be_nil
+    end
+
+    it "returns the base registry when no annotation parses to a directive" do
+      loader = loader_yielding("rigor:v1:assert: String", "not a directive at all")
+
+      expect(described_class.scan_rbs_loader(loader)).to equal(described_class::EMPTY)
     end
   end
 end

@@ -586,3 +586,37 @@ not touch the check / check-plugins gates):
 
 **Two reusable killing techniques recorded:** (a) absent-key tests for `fetch(_, default)` defaults;
 (b) message-text assertions to distinguish two paths that share a structured field.
+
+## Seventh batch — remaining LSP providers + mcp + plugin (2026-06-21)
+
+Seven files; **30 holes closed across two** (`folding_range_provider` / `selection_range_provider` /
+`hover_provider` / `project_context` / `plugin` at floor). Spec-only; rspec + rubocop verified:
+
+- `language_server/signature_help_provider` (16 → 0): the private rendering / resolution helpers
+  were only reached through the full `#provide` flow. Unit-tested via `.send`:
+  `parameter_information` / `format_param` across every param kind (required / optional / rest /
+  trailing / required+optional+rest keywords, RBS via `RBS::Parser.parse_method_type`), the
+  unnamed-param type-only form, `nominal_class_name`, `rbs_documentation`'s comment join,
+  `byte_offset_for` (a **multibyte first line** bites a `bytesize`→length mutation), and
+  `lookup_method` for a singleton receiver + a Difference-unwrap (real scope from the project
+  context's environment + `Reflection`).
+- `mcp/server` (14 → 0): `build_argv`'s per-tool `args[...]` reads (the existing tests asserted
+  end-to-end behaviour and config flags via loose `include`, never pinning the paths/file/top/
+  params reads) — **exact-argv `eq` assertions** bite a nil-injected/swapped key dropping a
+  flag/path. Plus the `call_tool` StandardError rescue (`CLI.new` stubbed to raise): the
+  internal-error result, the stderr log, and the newline-joined backtrace (a **line-count
+  assertion** bites the `join(nil)` separator collapsing it to one line).
+
+**Two more reusable techniques:** (c) exact-`eq` (not `include`) assertions on a built array/argv to
+pin each element-source read; (d) for a `join("\n")` whose nil-separator mutant still concatenates,
+assert the **line count** of the output, not just substring membership. A multibyte fixture bites
+`bytesize`-vs-length.
+
+**Self-mutation session totals (2026-06-21):** batches 1–7 closed genuine holes in ~28 `lib/rigor`
+files to their equivalent-mutant floor (config_audit, lockfile_resolver, class_registry,
+reflection, method_catalog, conflict, diagnostic, options, mutation_protection_report,
+prism_colorizer, return_type_heuristic, builder, walker, coverage_command, hkt_reducer,
+hkt_registry, kernel_dispatch, overload_selector, precision_scanner, protection_scanner,
+project_patched_scanner, debouncer, document_symbol_provider, signature_help_provider, mcp/server,
+…). Remaining frontier: the `cli/*_command` integration-blindness tail (batch 4), overload_selector's
+2 all-block-overload residuals, ~50 still-unmeasured 60–300 LOC files, and the >300 LOC engine tier.

@@ -514,3 +514,24 @@ net is a command's *default* mode:
 their floor. **Takeaway for future batches: triage `cli/*_command` survivors against the
 dispatcher/integration specs before treating them as gaps; add a unit test only for a command's
 untested *default* mode, not its message/help tail.**
+
+## Fifth batch — inference-engine files (2026-06-21)
+
+Nine inference-engine files; 41 holes, the genuine richest in the HKT (ADR-20) cluster. Closed
+the user-facing ones, left the defensive floor:
+
+- `inference/hkt_reducer` (8 → 5): closed `reduce`'s non-App argument guard and `walk`'s
+  undeclared-param guard (the message pins `node.name.inspect` / `bindings.keys`). The 5 residual
+  are the defensive floor — the `walk || app.bound` fallback (walk never returns nil for a valid
+  HktBody node) and the two "unknown body/test node" guards (need a fabricated non-HktBody node to
+  reach).
+
+**Remaining batch-5 holes are the next frontier (NOT yet closed):** `inference/hkt_registry`
+(~16 — `register`/`define` raise guards + `parse_register`/`parse_define`/
+`each_class_decl_annotation` dispatch, plus a `require_relative` equivalent), `method_dispatcher/
+kernel_dispatch` (~8 — `try_numeric_constructor` + the `Type::Constant#value` reads in the
+numeric-constructor arm), `method_dispatcher/overload_selector` (`first`, `strict_nominal_names_for`
+and more), and `inference/flow_tracer:168` `#inspect` (debug-format floor). Same protocol applies —
+the raise-guard / dispatch holes are genuine unit gaps (bad-input + dispatch-branch tests close
+them); the `#inspect` / fabricated-node ones are floor. **~60 unmeasured 60–300 LOC logic files
+remain after this batch; the >300 LOC engine-file tier is still deferred.**

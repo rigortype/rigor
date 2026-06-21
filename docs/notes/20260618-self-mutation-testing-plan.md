@@ -526,12 +526,31 @@ the user-facing ones, left the defensive floor:
   HktBody node) and the two "unknown body/test node" guards (need a fabricated non-HktBody node to
   reach).
 
-**Remaining batch-5 holes are the next frontier (NOT yet closed):** `inference/hkt_registry`
-(~16 — `register`/`define` raise guards + `parse_register`/`parse_define`/
-`each_class_decl_annotation` dispatch, plus a `require_relative` equivalent), `method_dispatcher/
-kernel_dispatch` (~8 — `try_numeric_constructor` + the `Type::Constant#value` reads in the
-numeric-constructor arm), `method_dispatcher/overload_selector` (`first`, `strict_nominal_names_for`
-and more), and `inference/flow_tracer:168` `#inspect` (debug-format floor). Same protocol applies —
-the raise-guard / dispatch holes are genuine unit gaps (bad-input + dispatch-branch tests close
-them); the `#inspect` / fabricated-node ones are floor. **~60 unmeasured 60–300 LOC logic files
-remain after this batch; the >300 LOC engine-file tier is still deferred.**
+Then closed the rest of the batch-5 genuine cluster:
+
+- `inference/hkt_registry` (16 → 0): the `Registration` non-Array-variance guard, the `Definition`
+  non-Symbol-uri / non-Array-params guards, `definition_with_body_tree`, the `#reduce` convenience
+  delegate, and the whole `scan_rbs_loader` RBS-annotation scan (a fake loader yielding
+  `hkt_register` / `hkt_define` directive strings, plus the nil-loader and no-directive-parses
+  paths — exercising the scan body also killed the `require_relative` "equivalent", so it reached 0).
+- `method_dispatcher/kernel_dispatch` (8 → 0): the `Rational` / `Complex` numeric constructors
+  (`try_numeric_constructor` + `numeric_constant?`) were untested — the spec covered only
+  `Array` / `Integer` / `Float`. Added folds incl. Float / Rational / Complex constant args so
+  every arm of `numeric_constant?`'s value-class `||` chain is reached (the Integer args
+  short-circuit the rest).
+- `method_dispatcher/overload_selector` (4 → 2): `strict_nominal_names_for`'s Optional recursion
+  and `value_pinning?`'s Union arm (unit-tested via `.send` on the private module-funcs), and
+  `positional_params_for`'s rest-param absorption (`Array#push`'s `*Elem` binding 3 args → 3 rest
+  slots). The 2 residual (`#first` at line 157 — the `|| overloads.first` fallback reached only
+  when *every* overload requires a block, and the `#concat` trailing-arg path) need a fabricated
+  all-block method-type — the documented harder tail.
+
+`inference/flow_tracer:168` `#inspect` is the debug-format floor.
+
+**Lesson reconfirmed:** a "defensive / equivalent" classification is worth re-testing — `hkt_registry`'s
+`require_relative` looked like the guarded-lazy-load floor but a test that simply *enters* the
+method executes it and kills the mutant. **~60 unmeasured 60–300 LOC logic files remain; the
+>300 LOC engine-file tier is still deferred.** Heed the CPU-contention gotcha: do NOT run the
+fused harness concurrently with `make verify` (or with other harness invocations) — each does a
+cold env+scan and they starve each other; a stray 6-hour-hung `parallel_rspec` leftover compounded
+it this session (kill obviously-hung multi-hour test processes).

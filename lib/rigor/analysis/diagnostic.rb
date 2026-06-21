@@ -47,6 +47,9 @@ module Rigor
       def initialize(path:, line:, column:, message:, severity: :error, rule: nil, # rubocop:disable Metrics/ParameterLists
                      source_family: DEFAULT_SOURCE_FAMILY,
                      receiver_type: nil, method_name: nil, project_definition_site: nil)
+        raise ArgumentError, "line must be >= 1, got #{line}" if line < 1
+        raise ArgumentError, "column must be >= 1, got #{column}" if column < 1
+
         @path = path
         @line = line
         @column = column

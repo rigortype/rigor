@@ -6,7 +6,7 @@ require "tmpdir"
 # ADR-46 — the incremental analyzer's cross-process per-file state store.
 RSpec.describe Rigor::Cache::IncrementalSnapshot do
   def diagnostic(path)
-    Rigor::Analysis::Diagnostic.new(path: path, line: 1, column: 0, message: "m", severity: :warning, rule: "x")
+    Rigor::Analysis::Diagnostic.new(path: path, line: 1, column: 1, message: "m", severity: :warning, rule: "x")
   end
 
   def sample_payload

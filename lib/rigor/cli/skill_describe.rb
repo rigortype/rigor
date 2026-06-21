@@ -208,8 +208,14 @@ module Rigor
           ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
         elsif state.fetch(:ci) != :wired
           ["rigor-ci-setup", "Rigor is configured but not wired into CI — lock in the regression guard."]
-        elsif state.fetch(:baseline)
-          ["rigor-baseline-reduce", "a baseline is in place — work it down rule by rule."]
+        # A present baseline is deliberately NOT a recommendation trigger.
+        # A baseline is a healthy, finished onboarding state, not a problem to
+        # work off; pushing every baselined project to "reduce it" turns a
+        # working build into a chore and tempts scattering `# rigor:disable`
+        # through the code to make a number go down — means over ends.
+        # `rigor-baseline-reduce` stays in the catalogue for the intermediate
+        # user who *chooses* to invest in it; the headline routes to genuinely
+        # additive steps instead.
         elsif state.fetch(:editor) == :unwired
           ["rigor-editor-setup",
            "you have an editor config but no Rigor LSP — wire `rigor lsp` for live diagnostics and hover types."]
@@ -297,7 +303,6 @@ module Rigor
           The recommendation above is from a presence-only probe — it does not run
           `rigor check`. If you have run (or now run) `rigor check`, let its findings
           refine the choice:
-          - errors present and no baseline yet → rigor-baseline-reduce
           - a `call.unresolved-toplevel` / `call.undefined-method` cluster on the
             project's own monkey-patches → rigor-monkeypatch-resolve
           - framework calls (ActiveRecord, routes, i18n …) typing as Dynamic with no

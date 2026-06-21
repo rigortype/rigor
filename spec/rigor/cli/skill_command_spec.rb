@@ -68,7 +68,7 @@ RSpec.describe Rigor::CLI::SkillCommand do
       # P1-C: the agent prompt teaches check-aware routing (describe itself
       # stays presence-only — it never runs `rigor check`).
       expect(out).to include("refine the choice")
-      expect(out).to include("→ rigor-baseline-reduce")
+      expect(out).to include("→ rigor-monkeypatch-resolve")
     end
 
     it "is reachable as the top-level `rigor describe` alias" do
@@ -93,7 +93,11 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("\u2192 rigor-ci-setup \u2014")
     end
 
-    it "recommends rigor-baseline-reduce when a baseline exists and CI is wired" do
+    it "does not push rigor-baseline-reduce as the headline when a baseline exists" do
+      # A present baseline is a healthy onboarding-complete state, not a chore
+      # to grind down \u2014 the headline routes to an additive step instead, while
+      # baseline-reduce stays available in the catalogue for the user who
+      # chooses it.
       _status, out, = describe_in(
         {
           ".rigor.dist.yml" => "target_ruby: '3.3'\n",
@@ -101,7 +105,10 @@ RSpec.describe Rigor::CLI::SkillCommand do
           ".github/workflows/rigor.yml" => "jobs:\n  rigor:\n    steps:\n      - run: rigor check\n"
         }
       )
-      expect(out).to include("\u2192 rigor-baseline-reduce \u2014")
+      expect(out).to include("\u2192 rigor-protection-uplift \u2014")
+      expect(out).not_to include("\u2192 rigor-baseline-reduce")
+      # still discoverable in the catalogue, just not pushed
+      expect(out).to include("- rigor-baseline-reduce \u2014")
     end
 
     it "recommends rigor-protection-uplift when configured + CI-wired with no baseline" do

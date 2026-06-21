@@ -554,3 +554,35 @@ method executes it and kills the mutant. **~60 unmeasured 60–300 LOC logic fil
 fused harness concurrently with `make verify` (or with other harness invocations) — each does a
 cold env+scan and they starve each other; a stray 6-hour-hung `parallel_rspec` leftover compounded
 it this session (kill obviously-hung multi-hour test processes).
+
+## Sixth batch — scanners + LSP providers (2026-06-21)
+
+Eight files; **39 holes closed across five** (`project_patched_methods` / `buffer_table` /
+`hover_provider` measured at floor). All spec-only; verified with rspec + rubocop on the changed
+specs (full `make verify` was unreliable on this load-saturated machine, and spec-only changes do
+not touch the check / check-plugins gates):
+
+- `inference/precision_scanner` (17 → 0): `FileResult`'s per-tier accessors
+  (`precise_count` / `dynamic_top_count` / `dynamic_specific_count` / `opaque_count`) read via
+  `tier_counts.fetch(tier, 0)`. **KEY LESSON: a `fetch(key, DEFAULT)` default-arg mutation is only
+  killed by an *absent-key* test** — a present key never reaches the default, so the existing
+  exact-/ratio-/self-referential-sum tests left it alive. Pinned exact per-tier counts AND an empty
+  count map. Plus `classify`'s Intersection (`best_of` = most precise member) and Difference
+  (`base`) arms, via `.send` on the private with `Combinator.intersection` / `.difference`.
+- `inference/protection_scanner` (4 → 0): `safe_describe`'s three branches — `#describe(:short)`,
+  the `#to_s` fallback for a non-describable object, and the rescue's `class.name` when describe
+  raises.
+- `inference/project_patched_scanner` (12 → 0): the opaque-class `walk_children` fallbacks (same
+  shape as `walker` — body-less class, `class << expr` non-self → recorded as an *instance* method
+  of the surrounding class), the parse-error diagnostic, the read-failure rescue, and the
+  editor-mode buffer overlay (`scan(paths, buffer:)` with a binding resolving the entry elsewhere).
+  **KEY LESSON: when two error paths share a diagnostic field (both `rule: "pre-eval.parse-error"`,
+  both naming the path), assert the path-specific MESSAGE text** ("has a parse error" vs "failed to
+  read") — else a mutation that bypasses one path to the other still satisfies the weaker assertion.
+- `language_server/debouncer` (4 → 0): the threaded rescue's `warn` (a scheduled block that raises
+  → assert the stderr warning names key + error class).
+- `language_server/document_symbol_provider` (2 → 0): `qualified_name_of`'s nil-parent arm
+  (top-level `::Foo`) and the else source-slice fallback, via `.send`.
+
+**Two reusable killing techniques recorded:** (a) absent-key tests for `fetch(_, default)` defaults;
+(b) message-text assertions to distinguish two paths that share a structured field.

@@ -123,5 +123,61 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
       # The OrNode itself (a union of two constants) should be constant.
       expect(result.tier_counts.fetch(:constant)).to be >= 1
     end
+
+    it "classifies an Intersection by its most precise member (best_of)" do
+      scanner = described_class.new
+      inter = Rigor::Type::Combinator.intersection(
+        Rigor::Type::Combinator.nominal_of("String"), Rigor::Type::Combinator.constant_of(1)
+      )
+      expect(scanner.send(:classify, inter)).to eq(:constant)
+    end
+
+    it "classifies a Difference by its base type" do
+      scanner = described_class.new
+      diff = Rigor::Type::Combinator.difference(
+        Rigor::Type::Combinator.nominal_of("String"), Rigor::Type::Combinator.constant_of(1)
+      )
+      expect(scanner.send(:classify, diff)).to eq(:nominal)
+    end
+  end
+
+  describe "FileResult tier accessors (exact per-tier counts)" do
+    # The existing helper tests assert ratios and self-referential sums,
+    # so the per-tier `tier_counts.fetch` reads survive mutation. Pin the
+    # exact counts to bite a wrong key / default.
+    let(:result) do
+      described_class::FileResult.new(
+        total: 9,
+        tier_counts: {
+          constant: 2, nominal: 1, shaped: 1, refined: 1, bot: 1,
+          dynamic_top: 1, dynamic_specific: 1, top: 1
+        }
+      )
+    end
+
+    it "precise_count sums exactly the precise tiers (constant/nominal/shaped/refined/bot)" do
+      expect(result.precise_count).to eq(6)
+    end
+
+    it "reads dynamic_top_count and dynamic_specific_count from their own tiers" do
+      expect(result.dynamic_top_count).to eq(1)
+      expect(result.dynamic_specific_count).to eq(1)
+    end
+
+    it "opaque_count sums the dynamic_top and top tiers" do
+      expect(result.opaque_count).to eq(2)
+    end
+
+    it "defaults absent tiers to zero across every accessor" do
+      # An empty count map exercises each `fetch(tier, 0)` default — the
+      # present-key cases above never reach it, so the default survives
+      # mutation unless a key is genuinely absent.
+      empty = described_class::FileResult.new(total: 0, tier_counts: {})
+
+      expect(empty.precise_count).to eq(0)
+      expect(empty.dynamic_top_count).to eq(0)
+      expect(empty.dynamic_specific_count).to eq(0)
+      expect(empty.opaque_count).to eq(0)
+    end
   end
 end

@@ -57,4 +57,24 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(result.protected_count).to eq(2)
     expect(result.unprotected_count).to eq(0)
   end
+
+  describe "safe_describe (private)" do
+    let(:scanner) { described_class.new(scope: Rigor::Scope.empty) }
+
+    it "uses #describe(:short) for a type that responds to it" do
+      nominal = Rigor::Type::Combinator.nominal_of("String")
+      expect(scanner.send(:safe_describe, nominal)).to eq(nominal.describe(:short))
+    end
+
+    it "falls back to #to_s for an object without #describe" do
+      obj = Object.new
+      expect(scanner.send(:safe_describe, obj)).to eq(obj.to_s)
+    end
+
+    it "falls back to the class name when #describe raises" do
+      bad = Object.new
+      def bad.describe(_level) = raise("boom")
+      expect(scanner.send(:safe_describe, bad)).to eq("Object")
+    end
+  end
 end

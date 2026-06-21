@@ -31,6 +31,11 @@ RSpec.describe Rigor::Type::DataInstance do
       expect(di.members).to be_frozen
       expect(di).to be_frozen
     end
+
+    it "rejects an invalid class_name" do
+      expect { described_class.new(members, "") }.to raise_error(ArgumentError, /non-empty String or nil/)
+      expect { described_class.new(members, 123) }.to raise_error(ArgumentError, /non-empty String or nil/)
+    end
   end
 
   describe "member access helpers" do

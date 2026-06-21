@@ -7,6 +7,13 @@ require "rigor/analysis/diagnostic"
 # the aggregation and the six-recogniser catalogue are covered here
 # with synthetic `Diagnostic` arrays (no Runner / no analysis pass).
 RSpec.describe Rigor::Triage do
+  # normalize_receiver is a private module_function — exercised
+  # indirectly through selectors and directly via .send for the
+  # patterns that build_selectors does not reach with synthetic data.
+  def normalize_receiver(token)
+    described_class.send(:normalize_receiver, token)
+  end
+
   def diag(path: "a.rb", rule: "call.undefined-method", message: "boom", severity: :error,
            receiver_type: nil, method_name: nil, project_definition_site: nil)
     Rigor::Analysis::Diagnostic.new(
@@ -193,6 +200,37 @@ RSpec.describe Rigor::Triage do
     it "sorts selectors by descending count" do
       diags = [diag(method_name: "a")] + ([diag(method_name: "b")] * 3)
       expect(described_class.analyze(diags).selectors.map(&:method_name)).to eq(%w[b a])
+    end
+
+    describe "normalize_receiver (private helper)" do
+      it "folds singleton(Name) to Name" do
+        expect(normalize_receiver("singleton(Integer)")).to eq("Integer")
+      end
+
+      it "keeps a generic Array[...] form intact" do
+        expect(normalize_receiver("Array[String]")).to eq("Array[String]")
+      end
+
+      it "extracts the nominal from Name[...]" do
+        expect(normalize_receiver("Hash[Symbol, String]")).to eq("Hash")
+      end
+
+      it "returns nil for an unrecognised token" do
+        expect(normalize_receiver(nil)).to be_nil
+        expect(normalize_receiver("String | Integer")).to be_nil
+      end
+    end
+  end
+
+  describe "build_summary — absent severity keys" do
+    it "defaults to zero for severities not present in the diagnostics" do
+      report = described_class.analyze([diag(severity: :warning)])
+      expect([report.summary.error, report.summary.info]).to all(eq(0))
+    end
+
+    it "kills a nil-injected default by asserting zero on an absent-key fetch" do
+      report = described_class.analyze([diag(severity: :error)])
+      expect(report.summary.warning).to eq(0)
     end
   end
 

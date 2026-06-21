@@ -127,6 +127,61 @@ RSpec.describe Rigor::Reflection do
     end
   end
 
+  describe ".rbs_class_known?" do
+    it "returns true for an RBS-known class with an explicit scope" do
+      expect(described_class.rbs_class_known?("Integer")).to be(true)
+    end
+
+    it "returns false when the loader cannot resolve the name" do
+      env = Rigor::Environment.new
+      expect(described_class.rbs_class_known?("Frobinator", environment: env)).to be(false)
+    end
+  end
+
+  describe ".instance_definition" do
+    it "returns an RBS::Definition for a known class" do
+      result = described_class.instance_definition("Integer")
+      expect(result).to be_a(RBS::Definition)
+    end
+
+    it "returns nil for an unknown class" do
+      env = Rigor::Environment.new
+      scope = Rigor::Scope.empty(environment: env)
+      expect(described_class.instance_definition("Frobinator", scope: scope)).to be_nil
+    end
+  end
+
+  describe ".singleton_definition" do
+    it "returns an RBS::Definition for a known class" do
+      result = described_class.singleton_definition("String")
+      expect(result).to be_a(RBS::Definition)
+    end
+
+    it "returns nil for an unknown class" do
+      env = Rigor::Environment.new
+      scope = Rigor::Scope.empty(environment: env)
+      expect(described_class.singleton_definition("Frobinator", scope: scope)).to be_nil
+    end
+  end
+
+  describe ".class_type_param_names" do
+    it "returns the type parameter names for a generic class" do
+      result = described_class.class_type_param_names("Array")
+      expect(result).to eq([:Elem])
+    end
+
+    it "returns an empty array for a non-generic class" do
+      result = described_class.class_type_param_names("String")
+      expect(result).to eq([])
+    end
+
+    it "returns an empty array when the loader is unavailable" do
+      env = Rigor::Environment.new
+      scope = Rigor::Scope.empty(environment: env)
+      expect(described_class.class_type_param_names("Frobinator", scope: scope)).to eq([])
+    end
+  end
+
   describe ".discovered_class? / .discovered_method?" do
     let(:scope) do
       index = Rigor::Scope::DiscoveryIndex::EMPTY.with(

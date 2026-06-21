@@ -240,6 +240,15 @@ RSpec.describe Rigor::Type::Refined do
     end
   end
 
+  describe "capability predicates" do
+    it "answers top / bot / dynamic through the base type" do
+      r = described_class.new(nominal_of("String"), :lowercase)
+      expect(r.top).to eq(Rigor::Trinary.no)
+      expect(r.bot).to eq(Rigor::Trinary.no)
+      expect(r.dynamic).to eq(Rigor::Trinary.no)
+    end
+  end
+
   describe ":literal_string predicate (v0.0.9 F)" do
     let(:lit) { Rigor::Type::Combinator.literal_string }
 

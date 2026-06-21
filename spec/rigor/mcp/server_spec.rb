@@ -3,6 +3,7 @@
 require "json"
 require "stringio"
 require "rigor/mcp"
+require "rigor/cli"
 
 RSpec.describe Rigor::MCP::Server do
   subject(:server) { described_class.new(err: StringIO.new) }
@@ -262,6 +263,49 @@ RSpec.describe Rigor::MCP::Server do
 
       expect(argv).to include("--config=/tmp/call.yml")
       expect(argv).not_to include("--config=/tmp/session.yml")
+    end
+  end
+
+  describe "build_argv exact argv (pins each args[...] read)" do
+    it "builds the full rigor_check argv including config and every path" do
+      expect(server.send(:build_argv, "rigor_check", { "config" => "custom.yml", "paths" => %w[lib app] }))
+        .to eq(["check", "--format=json", "--no-stats", "--config=custom.yml", "lib", "app"])
+    end
+
+    it "builds rigor_type_of from file:line:col, nil when any is missing" do
+      expect(server.send(:build_argv, "rigor_type_of", { "file" => "a.rb", "line" => 3, "col" => 5 }))
+        .to eq(["type-of", "--format=json", "a.rb:3:5"])
+      expect(server.send(:build_argv, "rigor_type_of", { "file" => "a.rb" })).to be_nil
+    end
+
+    it "builds the full rigor_triage argv including --top and every path" do
+      expect(server.send(:build_argv, "rigor_triage", { "top" => 10, "paths" => ["lib"] }))
+        .to eq(["triage", "--format=json", "--top=10", "lib"])
+    end
+
+    it "builds the full rigor_sig_gen argv including --params and every path" do
+      expect(server.send(:build_argv, "rigor_sig_gen", { "params" => "observed", "paths" => ["lib"] }))
+        .to eq(["sig-gen", "--print", "--format=json", "--params=observed", "lib"])
+    end
+  end
+
+  describe "call_tool error handling" do
+    it "returns an internal-error result and logs when the CLI raises" do
+      err = StringIO.new
+      s = described_class.new(err: err)
+      allow(Rigor::CLI).to receive(:new).and_raise(StandardError.new("kaboom"))
+
+      resp = JSON.parse(JSON.generate(s.handle(
+                                        "id" => 1, "method" => "tools/call",
+                                        "params" => { "name" => "rigor_check", "arguments" => { "paths" => ["lib"] } }
+                                      )))
+
+      expect(resp["result"]["isError"]).to be(true)
+      expect(resp.dig("result", "content", 0, "text")).to include("kaboom")
+      expect(err.string).to include("rigor mcp:").and include("kaboom")
+      # The backtrace is logged on its own lines (newline-joined), so the
+      # error output spans more than just the one "rigor mcp:" line.
+      expect(err.string.lines.count).to be > 2
     end
   end
 end

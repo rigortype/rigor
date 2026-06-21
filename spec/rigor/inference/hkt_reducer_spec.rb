@@ -67,6 +67,38 @@ RSpec.describe Rigor::Inference::HktReducer do
       end
     end
 
+    context "argument validation" do
+      let(:registry) { registry_class.new }
+
+      it "rejects a non-App argument, naming its class" do
+        expect { described_class.new(registry).reduce(:not_an_app) }
+          .to raise_error(ArgumentError, /expected a Rigor::Type::App, got Symbol/)
+      end
+    end
+
+    context "with a body referencing an undeclared param" do
+      # box::it[K] = J — the body names J, which is not a declared param.
+      let(:registry) do
+        registry_class.new(
+          registrations: [registry_class::Registration.new(uri: :"box::it", arity: 1, variance: [:out],
+                                                           bound: untyped)],
+          definitions: [
+            registry_class.definition_with_body_tree(
+              uri: :"box::it",
+              params: [:K],
+              body_tree: body::Param.new(name: :J)
+            )
+          ]
+        )
+      end
+
+      it "raises naming the unknown param and the declared ones" do
+        app = make_app(:"box::it", [str_nominal])
+        expect { described_class.new(registry).reduce(app) }
+          .to raise_error(ArgumentError, /unknown param :J; declared: \[:K\]/)
+      end
+    end
+
     context "with a Union body" do
       # union::it[K] = K | Integer
       let(:registry) do

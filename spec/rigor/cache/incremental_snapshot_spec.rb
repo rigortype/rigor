@@ -67,4 +67,68 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
     snapshot = described_class.new(root: "/proc/nonexistent-rigor-root-#{Process.pid}")
     expect(snapshot.save(fingerprint: "fp1", payload: sample_payload)).to be(false)
   end
+
+  describe ".fingerprint" do
+    it "returns a SHA256 hex string" do
+      conf = Rigor::Configuration.new("paths" => [])
+      fp = described_class.fingerprint(configuration: conf, roots: ["lib"])
+      expect(fp).to be_a(String)
+      expect(fp.size).to eq(64)
+    end
+
+    it "returns nil on error (e.g. roots containing an object that raises on to_s)" do
+      bad_root = Object.new
+      bad_root.define_singleton_method(:to_s) { raise "oops" }
+      conf = Rigor::Configuration.new("paths" => [])
+      expect(described_class.fingerprint(configuration: conf, roots: [bad_root])).to be_nil
+    end
+  end
+
+  describe ".digest_file_if_present" do
+    it "returns 'absent' for a nonexistent file" do
+      result = described_class.send(:digest_file_if_present, "/rigor-test-nonexistent-file")
+      expect(result).to eq("absent")
+    end
+  end
+
+  describe ".digest_signature_paths" do
+    it "returns a hex string for nil paths" do
+      result = described_class.send(:digest_signature_paths, nil)
+      expect(result).to be_a(String)
+      expect(result.size).to eq(64)
+    end
+
+    it "returns a hex string for empty array paths" do
+      result = described_class.send(:digest_signature_paths, [])
+      expect(result).to be_a(String)
+      expect(result.size).to eq(64)
+    end
+
+    it "digests actual RBS files under a real directory" do
+      Dir.mktmpdir("rigor-rbs-test-") do |dir|
+        File.write(File.join(dir, "foo.rbs"), "class Foo; end")
+        File.write(File.join(dir, "bar.rbs"), "class Bar; end")
+        sub = File.join(dir, "sub")
+        Dir.mkdir(sub)
+        File.write(File.join(sub, "baz.rbs"), "class Baz; end")
+        result = described_class.send(:digest_signature_paths, [dir])
+        expect(result).to be_a(String)
+        expect(result.size).to eq(64)
+        # Deterministic: same files produce same hash
+        result2 = described_class.send(:digest_signature_paths, [dir])
+        expect(result2).to eq(result)
+      end
+    end
+
+    it "includes a non-directory entry as a literal path" do
+      Dir.mktmpdir("rigor-rbs-lit-") do |dir|
+        rbs = File.join(dir, "single.rbs")
+        File.write(rbs, "class Single; end")
+        # Pass the file path directly, not its directory
+        result = described_class.send(:digest_signature_paths, [rbs])
+        expect(result).to be_a(String)
+        expect(result.size).to eq(64)
+      end
+    end
+  end
 end

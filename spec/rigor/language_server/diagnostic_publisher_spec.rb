@@ -126,6 +126,35 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
     end
   end
 
+  describe "#to_lsp_diagnostic" do
+    it "converts 1-based Rigor positions to 0-based LSP positions" do
+      diag = Rigor::Analysis::Diagnostic.new(
+        path: "/a.rb", line: 3, column: 7, message: "test",
+        severity: :error, rule: "x"
+      )
+      result = publisher.send(:to_lsp_diagnostic, diag, "/a.rb")
+      expect(result[:range][:start][:line]).to eq(2)
+      expect(result[:range][:start][:character]).to eq(6)
+    end
+
+    it "returns nil when the diagnostic path does not match buffer_path" do
+      diag = Rigor::Analysis::Diagnostic.new(
+        path: "/other.rb", line: 1, column: 1, message: "test",
+        severity: :error, rule: "x"
+      )
+      expect(publisher.send(:to_lsp_diagnostic, diag, "/a.rb")).to be_nil
+    end
+
+    it "uses SEVERITY_MAP and falls back to :info (3) for unmapped severities" do
+      diag = Rigor::Analysis::Diagnostic.new(
+        path: "/a.rb", line: 1, column: 1, message: "test",
+        severity: :unknown_tier, rule: "x"
+      )
+      result = publisher.send(:to_lsp_diagnostic, diag, "/a.rb")
+      expect(result[:severity]).to eq(3)
+    end
+  end
+
   describe "#cancel_pending" do
     let(:debouncer) { Rigor::LanguageServer::Debouncer.new }
     let(:debounced_publisher) do

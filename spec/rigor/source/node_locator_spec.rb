@@ -105,5 +105,12 @@ RSpec.describe Rigor::Source::NodeLocator do
       expect(locator.position_to_offset(1, 3)).to eq(2)
       expect(locator.position_to_offset(2, 3)).to eq(6) # "abc\n" is 4 bytes; +2 -> column 3 of line 2
     end
+
+    it "raises ArgumentError when source is nil" do
+      locator = described_class.new(source: nil, root: nil)
+      expect do
+        locator.position_to_offset(1, 1)
+      end.to raise_error(ArgumentError, /source buffer required/)
+    end
   end
 end

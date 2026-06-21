@@ -22,6 +22,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MemberShapeProjection do
     it "returns false when scope is nil" do
       expect(projector.reader_overridden?(instance, :x, nil)).to be(false)
     end
+
+    it "returns false when scope has no user_def for the method" do
+      scope = instance_double(Rigor::Scope, user_def_for: nil)
+      expect(projector.reader_overridden?(instance, :x, scope)).to be(false)
+    end
+
+    it "returns true when scope has a user def for the method" do
+      scope = instance_double(Rigor::Scope, user_def_for: instance_double(Prism::DefNode))
+      expect(projector.reader_overridden?(instance, :x, scope)).to be(true)
+    end
   end
 
   describe "#instance_index" do
@@ -37,6 +47,31 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MemberShapeProjection do
 
     it "returns nil for wrong arg count" do
       expect(projector.instance_index(instance, [])).to be_nil
+    end
+
+    it "returns the member type for a non-negative Integer key" do
+      arg = Rigor::Type::Combinator.constant_of(0)
+      expect(projector.instance_index(instance, [arg])).to eq(one)
+    end
+
+    it "returns the member type for a positive Integer key" do
+      arg = Rigor::Type::Combinator.constant_of(1)
+      expect(projector.instance_index(instance, [arg])).to eq(two)
+    end
+
+    it "returns nil for an out-of-bounds positive Integer key" do
+      arg = Rigor::Type::Combinator.constant_of(99)
+      expect(projector.instance_index(instance, [arg])).to be_nil
+    end
+
+    it "handles negative Integer key relative from end" do
+      arg = Rigor::Type::Combinator.constant_of(-1)
+      expect(projector.instance_index(instance, [arg])).to eq(two)
+    end
+
+    it "returns nil for out-of-bounds negative Integer key" do
+      arg = Rigor::Type::Combinator.constant_of(-99)
+      expect(projector.instance_index(instance, [arg])).to be_nil
     end
   end
 
@@ -80,6 +115,28 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MemberShapeProjection do
     it "returns nil for non-HashShape arg" do
       arg = Rigor::Type::Combinator.nominal_of("String")
       expect(projector.instance_with(instance, [arg])).to be_nil
+    end
+
+    it "yields merged members and class_name for a valid closed HashShape" do
+      shape = Rigor::Type::HashShape.new(x: one)
+      merged = nil
+      class_name = nil
+      projector.instance_with(instance, [shape]) do |m, c|
+        merged = m
+        class_name = c
+      end
+      expect(merged).to eq(members.merge(x: one))
+      expect(class_name).to eq("Point")
+    end
+
+    it "returns nil when HashShape has optional keys" do
+      shape = Rigor::Type::HashShape.new({ y: two }, optional_keys: [:y])
+      expect(projector.instance_with(instance, [shape])).to be_nil
+    end
+
+    it "returns nil when HashShape has keys not in members" do
+      shape = Rigor::Type::HashShape.new(z: one)
+      expect(projector.instance_with(instance, [shape])).to be_nil
     end
   end
 end

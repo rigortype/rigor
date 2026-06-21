@@ -1,6 +1,26 @@
 # frozen_string_literal: true
 
 RSpec.describe Rigor::Analysis::Diagnostic do
+  describe "position validation" do
+    it "raises ArgumentError when line is below 1" do
+      expect do
+        described_class.new(path: "f.rb", line: 0, column: 1, message: "x")
+      end.to raise_error(ArgumentError, /line must be >= 1/)
+    end
+
+    it "raises ArgumentError when column is below 1" do
+      expect do
+        described_class.new(path: "f.rb", line: 1, column: 0, message: "x")
+      end.to raise_error(ArgumentError, /column must be >= 1/)
+    end
+
+    it "accepts line 1 and column 1 as valid" do
+      diagnostic = described_class.new(path: "f.rb", line: 1, column: 1, message: "x")
+      expect(diagnostic.line).to eq(1)
+      expect(diagnostic.column).to eq(1)
+    end
+  end
+
   it "formats a stable human-readable diagnostic" do
     diagnostic = described_class.new(
       path: "lib/example.rb",

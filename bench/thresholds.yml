@@ -8,6 +8,12 @@
 #
 # Rationale (ADR-50 WD4): wall is widest (runner noise), allocations is
 # tightest (the deterministic signal), RSS sits between (Linux CI only).
-wall_pct: 10
+#
+# wall_pct is deliberately loose: the baseline is a single cold in-process
+# run and shared GitHub runners spike wall time by well over 10% under
+# contention (a +16.3% false fail on the v0.2.2 gate prompted the widen).
+# The real regression teeth are the deterministic allocations / RSS bands,
+# so wall stays only a coarse backstop rather than a flaky gate.
+wall_pct: 20
 allocations_pct: 5
 rss_pct: 10

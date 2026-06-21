@@ -15,9 +15,19 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-21
+
+v0.2.3 is a focused `rigor triage` usability fix. On a Rails project the
+report was dominated by plugin recognition trace, which buried the genuine
+error/warning signal and ranked the most *working* files as the top hotspots;
+triage now counts only the actionable diagnostics by default
+([ADR-23 WD6](docs/adr/23-diagnostic-triage-command.md)).
+
 ### Changed
 
-- **[cli]** `rigor triage` now counts only **actionable** diagnostics (`error` + `warning`) in its distribution, selectors, and hotspot sections; `info` diagnostics are excluded from these volume views by default. On a Rails project `info` is dominated by plugin *recognition trace* (`plugin.activerecord.model-call`, `plugin.rails-routes.helper`, …) — positive "Rigor resolved this call" records that previously buried the genuine error/warning signal (a field trip read 257 of 267 diagnostics as such trace) and inverted the hotspot ranking toward the files with the most *working* code. The summary line still reports the full `info` count, and the heuristic hints still see every diagnostic — so the useful `gem-without-rbs` notice survives, while the count-based "systemic cluster" / "genuine bugs" hints no longer mistake recognition trace for a problem. Pass `--include-info` to restore the previous behaviour ([ADR-23 WD6](docs/adr/23-diagnostic-triage-command.md)). **This is a behaviour change to the default `triage` text and JSON output** — the volume views no longer sum to `summary.total` by default, and `--format json` carries a new top-level `include_info` boolean.
+- **[rigor triage]** The distribution, selectors, and hotspot sections now count only the actionable diagnostics (`error` + `warning`); `info` is excluded from these volume views by default ([ADR-23 WD6](docs/adr/23-diagnostic-triage-command.md)).
+  - On a Rails project `info` is dominated by plugin recognition trace (`plugin.activerecord.model-call`, `plugin.rails-routes.helper`) — positive "Rigor resolved this call" records that previously buried the genuine error/warning signal and ranked the files with the most *working* code as the top hotspots. The summary line still reports the full `info` count and the heuristic hints still see every diagnostic, so the useful `gem-without-rbs` notice survives.
+  - This is a behaviour change to the default `triage` text and `--format json` output: the volume views no longer sum to `summary.total`, and the JSON gains a top-level `include_info` boolean. Pass `--include-info` to restore the previous behaviour.
 
 ## [0.2.2] - 2026-06-21
 
@@ -177,7 +187,8 @@ v0.2.0 is Rigor's first publicly-announced (general / evaluation) release, gover
 - **[cli]** `rigor explain call.unresolved-toplevel` now resolves — the [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) rule was missing from the catalogue despite being live since v0.1.14 — and a completeness spec now asserts every rule has a catalogue entry.
 - **[packaging]** The Docker build-context ignore file is scoped to the Dockerfile (`Dockerfile.dockerignore`) instead of a repo-wide `.dockerignore`, so external tools embedding the rigor source via BuildKit `--build-context` no longer get an empty context.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/rigortype/rigor/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/rigortype/rigor/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/rigortype/rigor/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/rigortype/rigor/compare/v0.1.19...v0.2.0

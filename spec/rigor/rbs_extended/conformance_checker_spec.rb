@@ -5,7 +5,7 @@ require "rigor/rbs_extended/conformance_checker"
 
 RSpec.describe Rigor::RbsExtended::ConformanceChecker do
   let(:stub_loader) do
-    loader = double("RbsLoader")
+    loader = instance_double(Rigor::Environment::RbsLoader)
     allow(loader).to receive(:each_class_decl_annotation_with_name)
     loader
   end

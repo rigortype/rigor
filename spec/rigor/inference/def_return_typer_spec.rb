@@ -71,14 +71,14 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
     describe ".safe_type_of" do
       it "returns the type when scope.type_of succeeds" do
         scope = instance_double(Rigor::Scope, type_of: :some_type)
-        node = double("node")
+        node = instance_double(Prism::Node)
         expect(described_class.safe_type_of(scope, node)).to eq(:some_type)
       end
 
       it "returns nil when scope.type_of raises" do
         scope = instance_double(Rigor::Scope)
         allow(scope).to receive(:type_of).and_raise(StandardError)
-        node = double("node")
+        node = instance_double(Prism::Node)
         expect(described_class.safe_type_of(scope, node)).to be_nil
       end
     end

@@ -1,13 +1,16 @@
 # frozen_string_literal: true
 
+require "rbs"
+
 RSpec.describe Rigor::Inference::MethodDispatcher::ReceiverAffinity do
   let(:env) { instance_double(Rigor::Environment) }
   let(:nominal_string) { Rigor::Type::Combinator.nominal_of("String") }
   let(:nominal_integer) { Rigor::Type::Combinator.nominal_of("Integer") }
 
   def stub_method_type(param_class: "::String")
-    type_name = double("TypeName", to_s: param_class)
-    param_type = instance_double(RBS::Types::ClassInstance, name: type_name)
+    param_type = RBS::Types::ClassInstance.new(
+      name: RBS::TypeName.parse(param_class), args: [], location: nil
+    )
     param = instance_double(RBS::Types::Function::Param, type: param_type, name: :x)
     func = instance_double(RBS::Types::Function)
     allow(func).to receive_messages(required_positionals: [param], optional_positionals: [], trailing_positionals: [])
@@ -25,6 +28,35 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ReceiverAffinity do
       overloads = [:a]
       untyped = Rigor::Type::Combinator.untyped
       expect(described_class.reorder(overloads, self_type: untyped, environment: env)).to eq([:a])
+    end
+
+    it "promotes affinity-matching overloads before disjoint ones" do
+      allow(env).to receive(:class_ordering).with("Integer", "Integer").and_return(:same)
+      allow(env).to receive(:class_ordering).with("Integer", "BigDecimal").and_return(:disjoint)
+
+      int_overload = stub_method_type(param_class: "::Integer")
+      bd_overload  = stub_method_type(param_class: "::BigDecimal")
+
+      result = described_class.reorder(
+        [bd_overload, int_overload],
+        self_type: nominal_integer,
+        environment: env
+      )
+      expect(result).to eq([int_overload, bd_overload])
+    end
+
+    it "preserves order within each partition (stable sort)" do
+      allow(env).to receive(:class_ordering).with("Integer", "Integer").and_return(:same)
+
+      a = stub_method_type(param_class: "::Integer")
+      b = stub_method_type(param_class: "::Integer")
+
+      result = described_class.reorder(
+        [a, b],
+        self_type: nominal_integer,
+        environment: env
+      )
+      expect(result).to eq([a, b])
     end
   end
 

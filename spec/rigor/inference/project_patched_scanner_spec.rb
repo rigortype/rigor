@@ -150,5 +150,65 @@ RSpec.describe Rigor::Inference::ProjectPatchedScanner do
         expect(outcome.registry.lookup(class_name: "Hash", method_name: :b_thing, kind: :instance)).not_to be_nil
       end
     end
+
+    it "walks a body-less class via the children fallback without dropping its siblings" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "ext.rb")
+        File.write(path, "class Empty; end\nclass Real\n  def helper; end\nend\n")
+
+        outcome = described_class.scan([path])
+        expect(outcome.registry.lookup(class_name: "Real", method_name: :helper, kind: :instance)).not_to be_nil
+      end
+    end
+
+    it "treats `class << expr` (non-self) as opaque, recording its defs under the surrounding class" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "ext.rb")
+        File.write(path, "module Outer\n  class << Helper\n    def on_x; end\n  end\nend\n")
+
+        outcome = described_class.scan([path])
+        # Recorded as an ordinary instance method of Outer, not a singleton.
+        expect(outcome.registry.lookup(class_name: "Outer", method_name: :on_x, kind: :instance)).not_to be_nil
+      end
+    end
+
+    it "emits a parse-error diagnostic naming the unparseable file" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "broken.rb")
+        File.write(path, "class Foo\n  def bad(\n")
+
+        outcome = described_class.scan([path])
+        diag = outcome.diagnostics.first
+        expect(diag[:rule]).to eq("pre-eval.parse-error")
+        # The parse-error message is distinct from the read-failure one
+        # below — assert the specific text so a bypass to the rescue
+        # (which also names the path) does not satisfy this.
+        expect(diag[:message]).to include("has a parse error").and include("broken.rb")
+      end
+    end
+
+    it "emits a read-failure diagnostic when a pre_eval entry cannot be read" do
+      outcome = described_class.scan(["/no/such/pre_eval_entry.rb"])
+
+      diag = outcome.diagnostics.first
+      expect(diag[:rule]).to eq("pre-eval.parse-error")
+      expect(diag[:message]).to include("failed to read")
+    end
+
+    it "reads a buffer binding's physical bytes when it resolves the entry elsewhere" do
+      Dir.mktmpdir do |dir|
+        logical = File.join(dir, "ext.rb")
+        physical = File.join(dir, "ext.buffer.rb")
+        File.write(logical, "class String; def on_disk; end; end\n")
+        File.write(physical, "class String; def in_buffer; end; end\n")
+        buffer = Object.new
+        buffer.define_singleton_method(:resolve) { |p| p == logical ? physical : p }
+
+        outcome = described_class.scan([logical], buffer: buffer)
+        # The buffer's bytes win, recorded under the logical path.
+        expect(outcome.registry.lookup(class_name: "String", method_name: :in_buffer, kind: :instance)).not_to be_nil
+        expect(outcome.registry.lookup(class_name: "String", method_name: :on_disk, kind: :instance)).to be_nil
+      end
+    end
   end
 end

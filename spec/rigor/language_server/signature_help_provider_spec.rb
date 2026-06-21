@@ -134,4 +134,58 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
       end
     end
   end
+
+  describe "parameter rendering (private helpers)" do
+    def labels_for(method_type)
+      provider.send(:parameter_information, RBS::Parser.parse_method_type(method_type)).map { |p| p[:label] }
+    end
+
+    it "renders each param kind with its prefix (required / optional / rest / keywords)" do
+      expect(labels_for("(Integer x, ?String y, *Object z, foo: bool, ?bar: Integer, **untyped k) -> void"))
+        .to eq(["Integer x", "?String y", "*Object z", "foo: bool", "?bar: Integer", "**untyped k"])
+    end
+
+    it "renders an unnamed param as just its type" do
+      expect(labels_for("(Integer) -> void")).to eq(["Integer"])
+    end
+
+    it "renders a trailing positional that follows a rest param" do
+      expect(labels_for("(*Integer nums, String tail) -> void")).to eq(["*Integer nums", "String tail"])
+    end
+
+    it "nominal_class_name maps a Nominal to its class name" do
+      expect(provider.send(:nominal_class_name, Rigor::Type::Combinator.nominal_of("String"))).to eq("String")
+    end
+
+    it "lookup_method resolves a singleton-receiver method via Reflection" do
+      scope = Rigor::Scope.empty(environment: project_context.environment)
+      defn = provider.send(:lookup_method, Rigor::Type::Combinator.singleton_of("String"), :try_convert, scope)
+      expect(defn).not_to be_nil
+    end
+
+    it "lookup_method unwraps a Difference receiver to its base type" do
+      scope = Rigor::Scope.empty(environment: project_context.environment)
+      diff = Rigor::Type::Combinator.difference(
+        Rigor::Type::Combinator.nominal_of("String"), Rigor::Type::Combinator.constant_of("x")
+      )
+      expect(provider.send(:lookup_method, diff, :upcase, scope)).not_to be_nil
+    end
+
+    it "byte_offset_for accumulates byte (not character) lengths across lines" do
+      # Line 0 ("あ\n") is 4 bytes but 2 characters, so a char-length
+      # mutation would compute the wrong offset for line 1.
+      expect(provider.send(:byte_offset_for, "あ\ncd\n", 1, 1)).to eq(5)
+    end
+
+    it "rbs_documentation joins comment strings with a blank line, nil when empty" do
+      comment = ->(text) { Object.new.tap { |o| o.define_singleton_method(:string) { text } } }
+      with_docs = Object.new
+      with_docs.define_singleton_method(:comments) { [comment.call("First."), comment.call("Second.")] }
+      expect(provider.send(:rbs_documentation, with_docs)).to eq("First.\n\nSecond.")
+
+      blank = Object.new
+      blank.define_singleton_method(:comments) { [] }
+      expect(provider.send(:rbs_documentation, blank)).to be_nil
+    end
+  end
 end

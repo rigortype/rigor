@@ -104,5 +104,23 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FileFolding do
                                             ))
       expect(result).to be_nil
     end
+
+    describe "constant_string_arg? (private helper)" do
+      it "recognises a Constant[String] argument as a constant string" do
+        result = described_class.send(:constant_string_arg?, constant_of("hello"))
+        expect(result).to be(true)
+      end
+
+      it "recognises a Constant[Symbol] argument as a constant string" do
+        result = described_class.send(:constant_string_arg?, constant_of(:ext))
+        expect(result).to be(true)
+      end
+
+      it "rejects a Nominal argument (not a Constant)" do
+        result = described_class.send(:constant_string_arg?,
+                                      Rigor::Type::Combinator.nominal_of("String"))
+        expect(result).to be(false)
+      end
+    end
   end
 end

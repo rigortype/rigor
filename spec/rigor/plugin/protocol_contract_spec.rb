@@ -87,6 +87,15 @@ RSpec.describe Rigor::Plugin::ProtocolContract do
     it "rejects a non-Array param_types argument" do
       expect { build(param_types: {}) }.to raise_error(ArgumentError, /param_types/)
     end
+
+    it "rejects an invalid method_name" do
+      expect { build(method_name: "") }.to raise_error(ArgumentError, /method_name/)
+      expect { build(method_name: 42) }.to raise_error(ArgumentError, /method_name/)
+    end
+
+    it "rejects a non-Hash entry in param_types" do
+      expect { build(param_types: ["string"]) }.to raise_error(ArgumentError, /param_types/)
+    end
   end
 
   describe "#with_path_glob" do

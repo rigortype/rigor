@@ -52,6 +52,14 @@ RSpec.describe Rigor::Plugin::Isolation do
     end
   end
 
+  describe "direct (no isolation) — error path" do
+    it "raises Unavailable when a resolved constant is not found" do
+      expect do
+        described_class::Direct.call(feature: feature, receiver: "NonExistentConst", method: :x, args: [])
+      end.to raise_error(described_class::Unavailable)
+    end
+  end
+
   describe "process (fork)", if: Process.respond_to?(:fork) do
     it "calls the library in a forked worker and returns the result" do
       with_strategy("process") do
@@ -81,7 +89,7 @@ RSpec.describe Rigor::Plugin::Isolation do
     it "raises Unavailable when the worker call errors (no crash)" do
       with_strategy("process") do
         expect { described_class.call(feature: feature, receiver: "Nonexistent::Const", method: :x, args: []) }
-          .to raise_error(described_class::Unavailable)
+          .to raise_error(described_class::Unavailable, /worker error/)
       end
     end
 

@@ -92,6 +92,29 @@ RSpec.describe Rigor::FlowContribution::Merger do
       expect(conflict.kind).to eq(:return_type)
       expect(conflict.reason).to eq(:return_type_collapse)
       expect(conflict.provenances).to include(plugin_alpha, plugin_beta)
+      # The conflict message uses type#describe(:short); asserting the
+      # exact message kills the undefined_method mutant that renames the
+      # describe call to a fallback type.inspect (which would wrap names
+      # in a #<...> carrier prefix).
+      expect(conflict.message).to match(/\Areturn-type intersection collapses to bot: String vs Integer\z/)
+    end
+
+    it "flags a lower-tier contradiction with the correct message format" do
+      string_type = Rigor::Type::Combinator.nominal_of("String")
+      integer_type = Rigor::Type::Combinator.nominal_of("Integer")
+
+      builtin_contribution = Rigor::FlowContribution.new(
+        return_type: string_type, provenance: builtin
+      )
+      plugin_contribution = Rigor::FlowContribution.new(
+        return_type: integer_type, provenance: plugin_alpha
+      )
+      result = described_class.merge([builtin_contribution, plugin_contribution])
+
+      conflict = result.conflicts.first
+      expect(conflict.message).to match(
+        /\Alower-tier return-type Integer contradicts higher-tier proof String\z/
+      )
     end
 
     it "flags a lower-tier contradiction when a plugin disagrees with builtin" do
@@ -160,6 +183,30 @@ RSpec.describe Rigor::FlowContribution::Merger do
       conflict = result.conflicts.first
       expect(conflict.kind).to eq(:exception)
       expect(conflict.reason).to eq(:exceptional_disagreement)
+    end
+
+    describe "describe (private helper — fallback branches)" do
+      it "calls describe(:short) on a type that responds to describe" do
+        type = Rigor::Type::Combinator.nominal_of("String")
+        result = described_class.send(:describe, type)
+        expect(result).to eq("String")
+      end
+
+      it "falls back to inspect for a type without describe" do
+        # The else branch: when `respond_to?(:describe)` is false,
+        # `type.inspect` is returned directly.
+        plain = "untyped"
+        result = described_class.send(:describe, plain)
+        expect(result).to eq(plain.inspect)
+      end
+
+      it "rescues and falls back to inspect when describe raises" do
+        bad = Object.new
+        bad.define_singleton_method(:respond_to?) { |*| true }
+        bad.define_singleton_method(:describe) { |*| raise StandardError, "transient" }
+        result = described_class.send(:describe, bad)
+        expect(result).to eq(bad.inspect)
+      end
     end
 
     it "orders contributions by tier, then plugin id, then input position" do

@@ -69,4 +69,21 @@ RSpec.describe Rigor::SigGen::TypeElaborator do
 
     expect(result.erase_to_rbs).to eq("UnknownThing")
   end
+
+  it "passes a HashShape through unchanged (no nested elaboration yet)" do
+    shape = Rigor::Type::HashShape.new(
+      { x: Rigor::Type::Combinator.nominal_of("String") },
+      extra_keys: :closed
+    )
+    result = elaborate(shape)
+    expect(result).to be(shape)
+  end
+
+  it "recovers from a class_type_param_names error by caching zero arity" do
+    allow(Rigor::Reflection).to receive(:class_type_param_names)
+      .and_raise(StandardError, "transient failure")
+
+    type = Rigor::Type::Combinator.nominal_of("Array")
+    expect(elaborate(type).erase_to_rbs).to eq("Array")
+  end
 end

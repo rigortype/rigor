@@ -9,6 +9,64 @@ require "spec_helper"
 # (non-box) behaviour is unchanged. To exercise the box path:
 #   RUBY_BOX=1 bundle exec rspec spec/rigor/plugin/box_spec.rb
 RSpec.describe Rigor::Plugin::Box do
+  # Helper to reset memoized ivars between examples when the box
+  # is active, since module_function stores them on the module.
+  def reset_box!
+    described_class.remove_instance_variable(:@shared) if described_class.instance_variable_defined?(:@shared)
+    described_class.remove_instance_variable(:@required) if described_class.instance_variable_defined?(:@required)
+  end
+
+  let(:box_instance) { instance_double(Ruby::Box, require: true, eval: "mocked-result") }
+
+  context "when Ruby::Box is stubbed as active" do
+    before do
+      box_class = Class.new
+      stub_const("Ruby::Box", box_class)
+      allow(Ruby::Box).to receive_messages(new: box_instance, enabled?: true)
+      allow(Ruby::Box).to receive(:respond_to?).with(:enabled?).and_return(true)
+      reset_box!
+    end
+
+    after { reset_box! }
+
+    describe ".shared" do
+      it "creates and returns a new box" do
+        expect(described_class.shared).to eq(box_instance)
+      end
+
+      it "memoizes the shared box reference" do
+        described_class.shared
+        described_class.shared
+        expect(Ruby::Box).to have_received(:new).once
+      end
+    end
+
+    describe ".require_feature" do
+      it "loads a feature through the shared box" do
+        expect(described_class.require_feature("my_gem")).to be(true)
+        expect(box_instance).to have_received(:require).with("my_gem")
+      end
+
+      it "memoizes the load result" do
+        described_class.require_feature("my_gem")
+        expect(box_instance).to have_received(:require).once
+        described_class.require_feature("my_gem")
+        expect(box_instance).to have_received(:require).once
+      end
+
+      it "caches a failed load as false" do
+        allow(box_instance).to receive(:require).and_raise(StandardError, "load failed")
+        expect(described_class.require_feature("missing")).to be(false)
+      end
+    end
+
+    describe ".eval" do
+      it "evaluates code in the shared box" do
+        expect(described_class.eval("1+1")).to eq("mocked-result")
+      end
+    end
+  end
+
   describe ".enabled?" do
     it "reflects whether the Ruby::Box feature is active for this process" do
       expected = defined?(Ruby::Box) && Ruby::Box.respond_to?(:enabled?) && Ruby::Box.enabled?

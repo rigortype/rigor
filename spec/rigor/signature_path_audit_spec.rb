@@ -58,6 +58,7 @@ RSpec.describe Rigor::SignaturePathAudit do
       expect(entry.status).to eq(:ok)
       expect(entry).not_to be_warning
       expect(entry.rbs_file_count).to eq(2)
+      expect(entry.message).to include("loaded 2 signature file")
     end
   end
 

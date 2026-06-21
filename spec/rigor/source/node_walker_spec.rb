@@ -46,4 +46,45 @@ RSpec.describe Rigor::Source::NodeWalker do
       expect(visited).to include(an_instance_of(Prism::NilNode))
     end
   end
+
+  describe ".each_with_ancestors" do
+    it "yields each node alongside its lexical ancestor chain" do
+      root = parse("class Foo; def bar; 1 + 2; end; end\n")
+
+      pairs = []
+      described_class.each_with_ancestors(root) { |node, ancestors| pairs << [node.class, ancestors.size] }
+
+      expect(pairs).to include([Prism::IntegerNode, a_value >= 3]) # deeply nested
+    end
+
+    it "returns an Enumerator when no block is given" do
+      root = parse("x = 1\n")
+
+      enumerator = described_class.each_with_ancestors(root)
+
+      expect(enumerator).to be_a(Enumerator)
+    end
+
+    it "skips non-Prism children" do
+      root = parse(":sym\n")
+
+      visited = described_class.each_with_ancestors(root).to_a
+
+      expect(visited).to all(be_a(Array))
+      expect(visited.map(&:first)).to all(be_a(Prism::Node))
+    end
+
+    it "tracks the ancestor chain correctly through nested nodes" do
+      root = parse("1 + 2\n")
+
+      integer_nodes = []
+      described_class.each_with_ancestors(root) do |node, ancestors|
+        integer_nodes << [node, ancestors.dup] if node.is_a?(Prism::IntegerNode)
+      end
+
+      expect(integer_nodes.size).to eq(2)
+      # Each IntegerNode's ancestors should include the CallNode
+      expect(integer_nodes.map { |_, a| a.map(&:class) }).to all(include(Prism::CallNode))
+    end
+  end
 end

@@ -95,4 +95,18 @@ RSpec.describe Rigor::LanguageServer::DocumentSymbolProvider do
       expect(class_sym[:selectionRange][:start][:line]).to eq(0)
     end
   end
+
+  describe "qualified_name_of (private)" do
+    def name_of(source)
+      provider.send(:qualified_name_of, Prism.parse(source).value.statements.body.first)
+    end
+
+    it "renders a top-level ::Foo constant path (nil parent) as the bare name" do
+      expect(name_of("::Foo")).to eq("Foo")
+    end
+
+    it "falls back to the node's source slice for an unexpected node type" do
+      expect(name_of("foo + bar")).to eq("foo + bar")
+    end
+  end
 end

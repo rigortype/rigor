@@ -45,6 +45,13 @@ RSpec.describe Rigor::LanguageServer::Debouncer do
 
       expect(calls).to contain_exactly(:a, :b)
     end
+
+    it "warns to stderr (naming the key and error) when a scheduled block raises" do
+      expect do
+        debouncer.schedule(:bad, delay: 0) { raise "boom" }
+        debouncer.flush!
+      end.to output(/Debouncer task :bad.*RuntimeError.*boom/).to_stderr
+    end
   end
 
   describe "#cancel_all" do

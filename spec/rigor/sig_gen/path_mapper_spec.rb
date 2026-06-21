@@ -44,4 +44,37 @@ RSpec.describe Rigor::SigGen::PathMapper do
 
     expect(target.to_s).to eq(File.join(tmpdir, "sig/vendor/extra.rbs"))
   end
+
+  describe "layout-index integration" do
+    let(:layout_index) do
+      dir = File.join(tmpdir, "sig")
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, "foo.rbs"), "class MyClass\nend\n")
+      Rigor::SigGen::LayoutIndex.new(signature_paths: [dir], project_root: tmpdir)
+    end
+
+    def mapper_with_index(**)
+      described_class.new(configuration: configuration(**), project_root: tmpdir, layout_index: layout_index)
+    end
+
+    it "resolves a mapped file through the layout index" do
+      m = mapper_with_index
+      result = m.existing_target_for("MyClass")
+      expect(result).not_to be_nil
+      expect(result.to_s).to match(%r{sig/foo\.rbs$})
+    end
+
+    it "returns nil for class names not in the index" do
+      m = mapper_with_index
+      expect(m.existing_target_for("NoSuchClass")).to be_nil
+    end
+  end
+
+  describe "strip_source_root (private helper)" do
+    it "returns a bare Pathname when the entire path is the source root" do
+      m = mapper
+      result = m.send(:strip_source_root, Pathname(m.send(:source_root_name)))
+      expect(result).to eq(Pathname(""))
+    end
+  end
 end

@@ -73,4 +73,16 @@ RSpec.describe Rigor::SigGen::LayoutIndex do
 
     expect(index(File.join(tmpdir, "sig")).file_for("Same")).to eq(Pathname(path_a))
   end
+
+  it "reports empty? as true when no sig paths contain declarations" do
+    FileUtils.mkdir_p(File.join(tmpdir, "empty_sig"))
+    idx = described_class.new(signature_paths: [File.join(tmpdir, "empty_sig")], project_root: tmpdir)
+    expect(idx.empty?).to be(true)
+  end
+
+  it "reports empty? as false when declarations exist" do
+    write_sig("sig/foo.rbs", "class Foo\nend\n")
+    idx = index(File.join(tmpdir, "sig"))
+    expect(idx.empty?).to be(false)
+  end
 end

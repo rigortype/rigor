@@ -85,6 +85,27 @@ RSpec.describe Rigor::LanguageServer::Loop do
   end
 
   describe "error envelope" do
+    it "writes a JSON parse error response for malformed input" do
+      server_in_r, server_in_w = IO.pipe
+      server_out_r, server_out_w = IO.pipe
+
+      server_in_w.write("Content-Length: 4\r\n\r\n{NOT")
+      server_in_w.close
+
+      server = Rigor::LanguageServer::Server.new
+      described_class.new(
+        reader: LanguageServer::Protocol::Transport::Io::Reader.new(server_in_r),
+        writer: LanguageServer::Protocol::Transport::Io::Writer.new(server_out_w),
+        server: server
+      ).run
+      server_out_w.close
+
+      frames = read_frames(server_out_r)
+      expect(frames.first[:error]).to include(
+        code: Rigor::LanguageServer::Server::ERROR_PARSE_ERROR
+      )
+    end
+
     it "returns ServerNotInitialized for non-lifecycle requests before initialize" do
       _server, frames = run_loop([
                                    { jsonrpc: "2.0", id: 1, method: "textDocument/hover", params: {} },

@@ -87,12 +87,27 @@ module Rigor
       GENUINE_BUG_MAX_COUNT = 5    # rule total ≤ N → "likely genuine bug"
       private_constant :SYSTEMIC_THRESHOLD, :MONKEY_PATCH_MIN_FILES, :GENUINE_BUG_MAX_COUNT
 
+      # WD6 (ADR-23): H5 (systemic cluster) and H6 (genuine bugs) are
+      # the only count-based, severity-agnostic recognisers, so they
+      # alone risk reading plugin recognition trace (`:info`
+      # `*.model-call` / `*.helper`, …) as a "systemic cluster" or a
+      # "genuine bug" — frightening working code. They are guarded
+      # against `:info` unless `include_info` restores the pre-v0.2.3
+      # behaviour. Every other recogniser keys on an error/warning rule
+      # (H1/H2/H2K/H4/H7) or intentionally reads an info notice
+      # (H3 — the `gem-without-rbs` `rbs.coverage.missing-gem`), so the
+      # full pool is correct for them.
+      INFO_GUARDED = %i[h5_systemic_cluster h6_genuine_bugs].freeze
+      private_constant :INFO_GUARDED
+
       # @param diagnostics [Array<Analysis::Diagnostic>]
+      # @param include_info [Boolean] let H5/H6 see `:info` diagnostics
       # @return [Array<Hint>]
-      def recognise(diagnostics)
+      def recognise(diagnostics, include_info: false)
         claimed = {}.compare_by_identity
         recognisers.filter_map do |recogniser|
           pool = diagnostics.reject { |d| claimed[d] }
+          pool = pool.reject { |d| d.severity == :info } if INFO_GUARDED.include?(recogniser) && !include_info
           hint, matched = send(recogniser, pool)
           next unless hint
 

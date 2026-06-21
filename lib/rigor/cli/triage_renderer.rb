@@ -37,6 +37,10 @@ module Rigor
         max = @report.distribution.map(&:count).max || 1
         lines = ["Diagnostic distribution — #{s.total} total " \
                  "(#{s.error} error / #{s.warning} warning#{" / #{s.info} info" if s.info.positive?})"]
+        if !@report.include_info && s.info.positive?
+          lines << "  #{s.info} info diagnostic(s) hidden below " \
+                   "(mostly plugin recognition trace) — pass --include-info to route them"
+        end
         @report.distribution.each do |row|
           lines << format("  %<rule>-32s %<count>5d  %<bar>s",
                           rule: row.rule, count: row.count, bar: bar(row.count, max))

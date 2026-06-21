@@ -79,7 +79,7 @@ ADRs record design rationale and rejected / deferred alternatives. **The canonic
 - [ADR-20](docs/adr/20-lightweight-hkt.md) — Lightweight HKT (`App[F, A]`)
 - [ADR-21](docs/adr/21-rubydex-evaluation.md) — Rubydex evaluation (proposed; reject / defer / conditional-accept)
 - [ADR-22](docs/adr/22-baseline-and-project-onboarding.md) — Baseline + project onboarding (`.rigor-baseline.yml`)
-- [ADR-23](docs/adr/23-diagnostic-triage-command.md) — `rigor triage` diagnostic triage
+- [ADR-23](docs/adr/23-diagnostic-triage-command.md) — `rigor triage` diagnostic triage (WD6, v0.2.3: the distribution/selectors/hotspots volume views exclude `:info` by default — a Rails project's info is dominated by plugin recognition trace that buried the genuine signal and inverted the hotspot ranking toward the most *working* code; summary keeps the full count, hints still see the full stream so `gem-without-rbs` survives, the count-based H5/H6 guard against info, `--include-info` restores; BC-bearing default-output change shipped in v0.2.3)
 - [ADR-24](docs/adr/24-self-method-call-resolution.md) — Implicit-self method-call resolution (WD3 in-body adoption gate opened by ADR-57, 2026-06-12)
 - [ADR-25](docs/adr/25-plugin-contributed-rbs.md) — Plugin-contributed RBS (`signature_paths:`)
 - [ADR-26](docs/adr/26-activerecord-relation-typing.md) — ActiveRecord relation typing (`open_receivers:`)

@@ -31,7 +31,8 @@ module Rigor
         diagnostics = analyze(configuration)
 
         report = Triage.analyze(diagnostics, top: options.fetch(:top),
-                                             hints: options.fetch(:sections).include?(:hints))
+                                             hints: options.fetch(:sections).include?(:hints),
+                                             include_info: options.fetch(:include_info))
         renderer = TriageRenderer.new(report, sections: options.fetch(:sections))
         @out.puts(options.fetch(:format) == "json" ? renderer.json : renderer.text)
         0
@@ -40,12 +41,17 @@ module Rigor
       private
 
       def parse_options
-        options = { config: nil, format: "text", top: 10, sections: DEFAULT_SECTIONS }
+        options = { config: nil, format: "text", top: 10, sections: DEFAULT_SECTIONS, include_info: false }
         OptionParser.new do |opts|
           opts.banner = USAGE
           Options.add_config(opts, options)
           opts.on("--format=FORMAT", "Output format: text (default) or json") { |v| options[:format] = v }
           opts.on("--top=N", Integer, "Hotspot-file count (default 10)") { |v| options[:top] = v }
+          opts.on("--include-info",
+                  "Route info diagnostics into distribution / selectors / hotspots " \
+                  "(excluded by default — mostly plugin recognition trace)") do
+            options[:include_info] = true
+          end
           opts.on("--hints-only", "Print only the heuristic-hints section") { options[:sections] = %i[hints] }
           opts.on("--no-hints", "Print distribution + selectors + hotspots only") do
             options[:sections] = %i[distribution selectors hotspots]

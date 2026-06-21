@@ -33,8 +33,15 @@ RSpec.describe Rigor::CLI::TriageCommand do
     status, out, = run(["code.rb", "--format", "json"])
     expect(status).to eq(0)
     parsed = JSON.parse(out)
-    expect(parsed.keys).to contain_exactly("summary", "distribution", "selectors", "hotspots", "hints")
+    expect(parsed.keys).to contain_exactly("summary", "distribution", "selectors", "hotspots",
+                                           "hints", "include_info")
     expect(parsed["summary"]["total"]).to be >= 1
+    expect(parsed["include_info"]).to be(false)
+  end
+
+  it "reports include_info true under --include-info" do
+    _, out, = run(["code.rb", "--include-info", "--format", "json"])
+    expect(JSON.parse(out)["include_info"]).to be(true)
   end
 
   it "exposes the class/method selector built from structured fields (no message parsing)" do

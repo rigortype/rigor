@@ -1,6 +1,8 @@
 # ADR-23 — Diagnostic triage command (`rigor triage`)
 
-Status: **Accepted, 2026-05-20; slices 1+2+3+4 implemented in v0.1.9.**
+Status: **Accepted, 2026-05-20; slices 1+2+3+4 implemented in v0.1.9.
+WD6 (info excluded from the volume views by default) implemented in
+v0.2.3.**
 
 `lib/rigor/triage/` carries the catalogue; `rigor triage` is a
 production subcommand. Plugin-contributed recognisers (WD2 extension
@@ -163,6 +165,73 @@ the raw stream themselves. ADR-22's `rigor-project-init` phase 7
 become thin wrappers over the triage JSON — deterministic and
 spec-covered, rather than ad-hoc LLM arithmetic.
 
+### WD6 — Triage's volume views route only actionable diagnostics
+
+The distribution, selector, and hotspot sections — the **volume
+views** — count only `:error` + `:warning` diagnostics by default.
+`:info` is excluded; `--include-info` restores it. The summary line
+still reports the full `:info` count, and the text report names how
+many were hidden.
+
+This decision came from a 2026-06-21 onboarding field trip (a real
+Rails app, `conference-app`). Its `rigor triage` read **267 total —
+9 error / 1 warning / 257 info**, and the info was almost entirely
+*plugin recognition trace*:
+
+```
+plugin.activerecord.model-call:      68   ← "Account.find resolves to Account"
+plugin.rails-routes.helper:          67   ← "users_path → GET /users"
+plugin.actionpack.helper-call:       62   ← arity-checked route helper
+plugin.actionpack.permit-call:       34   ← permit key is a real column
+plugin.rails-i18n.translation-call:  13   ← key resolves in en, ja
+plugin.actionpack.filter-call:       12   ← before_action method is defined
+```
+
+These are positive "Rigor resolved this call" records, not problems.
+Emitted at `:info` deliberately, they are valuable in `rigor explain`
+/ hover / a cross-plugin fact (the plugins document them as the value
+they add). But aggregated into triage they:
+
+- **Bury the signal.** The 10 actionable diagnostics (the real work)
+  sit under 257 trace rows; the "main breakdown" reads as plugin
+  noise.
+- **Invert the hotspot ranking.** A controller ranks as a top hotspot
+  because it has the *most successfully-resolved* model / route / i18n
+  calls — i.e. the most *working* Rails code, not the most bugs. The
+  ranking points away from what to fix.
+- **Waste an agent's attention.** In the field trip the agent spent
+  three exploration rounds answering "why `model-call: 68`?" only to
+  conclude "nothing — that's just Rigor resolving your models."
+
+`:info` carries no `evidence_tier` ([ADR-65 WD2](65-diagnostic-evidence-tier-and-doc-url.md)):
+it is not a confidence-bearing true-positive claim, so it does not
+belong in the views that route attention. This is re-evaluation
+trigger #1 ("the heuristic hints prove more misleading than useful →
+reduce") generalised from the hints to the whole volume surface.
+
+Scope decisions:
+
+- **Hints see the full stream**, not the actionable subset. The
+  `gem-without-rbs` recogniser (H3) intentionally reads an
+  info-severity `rbs.coverage.missing-gem` *notice* (categorically a
+  project-level notice, not per-call trace) — a genuinely useful
+  onboarding hint that must survive the default. The other
+  recognisers key on an error/warning rule.
+- **H5 (systemic cluster) and H6 (genuine bugs)** are the only
+  count-based, severity-agnostic recognisers, so they alone could read
+  recognition trace as a "systemic cluster, one fix clears many" or a
+  "likely genuine bug" — frightening working code, the cardinal
+  false-positive sin. They are guarded against `:info` unless
+  `--include-info` is set.
+- **The summary keeps the full counts.** Hiding info from the *views*
+  must not hide its *existence*; an onboarding user still learns
+  "257 info" and that `--include-info` reveals them.
+
+This is technically a behaviour change to the default `rigor triage`
+text and `--format json` output (a new `include_info` JSON field; the
+volume views no longer sum to `summary.total` by default), shipped as
+the BC-bearing part of v0.2.3.
+
 ## Heuristic catalogue (v1)
 
 Six recognisers. Each scans the diagnostic stream, and — when its
@@ -203,6 +272,8 @@ $ rigor triage [paths...]
   --hints-only         print only the heuristic-hints section
   --top N              hotspot-file count (default 10)
   --no-hints           distribution + hotspots only
+  --include-info       route :info into the volume views (WD6;
+                       excluded by default — mostly plugin trace)
 ```
 
 `rigor triage` exits 0 regardless of diagnostic count — it is an
@@ -242,9 +313,15 @@ Hints — heuristics, verify before acting
     { "id": "activesupport-core-ext", "confidence": "likely",
       "diagnostics": 287, "evidence": { "...": "..." },
       "action": "Wire rigor-activesupport-core-ext via signature_paths:" }
-  ]
+  ],
+  "include_info": false
 }
 ```
+
+When `include_info` is `false` (the default, WD6), the
+`distribution` / `selectors` / `hotspots` counts exclude `:info` and
+so do not sum to `summary.total`; `summary.info` still reports the
+full count.
 
 ## Consequences
 

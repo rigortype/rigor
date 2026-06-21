@@ -232,6 +232,18 @@ rigor triage [paths]
 `--selectors-only`, and `--no-hints` select which sections print.
 `triage` is advisory and always exits `0` — it never gates a build.
 
+By default the distribution, selectors, and hotspots sections count
+only the **actionable** diagnostics (`error` + `warning`). `info`
+diagnostics are excluded from these volume views — on a Rails project
+they are dominated by plugin *recognition trace* (`Account.find
+resolves to Account`, `users_path → GET /users`), positive "Rigor
+resolved this" records that would otherwise bury the genuine signal
+and skew the hotspot ranking toward the files with the most *working*
+code. The summary line still reports the full `info` count, and
+heuristic hints still see every diagnostic (so the `gem-without-rbs`
+notice survives). Pass `--include-info` to route `info` into the
+volume views as well.
+
 The **`selectors`** section is the by-(class, method) axis: it
 aggregates the structured `receiver_type` / `method_name` fields the
 diagnostics carry into `{receiver, method, count, files, rules}`

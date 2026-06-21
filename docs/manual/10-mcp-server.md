@@ -295,9 +295,16 @@ the most common error clusters.
   "hints": [
     { "id": "activesupport-core-ext", "confidence": "likely",
       "diagnostic_count": 365, "summary": "...", "action": "..." }
-  ]
+  ],
+  "include_info": false
 }
 ```
+
+By default the `distribution` / `selectors` / `hotspots` arrays count
+only the actionable diagnostics (`error` + `warning`); `info` (mostly
+plugin recognition trace) is excluded, so those counts do not sum to
+`summary.total` and `include_info` is `false`. `summary.info` still
+reports the full info count, and the hints still see every diagnostic.
 
 The `selectors` array is the by-(class, method) axis: each row is a
 dispatch target with its `count`, distinct-`files` spread, and

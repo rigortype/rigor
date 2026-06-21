@@ -26,21 +26,40 @@ module Rigor
     # receiver); `files` is the distinct-file count (a systemic vs.
     # localised signal); `rules` is the per-rule breakdown.
     Selector = Data.define(:receiver, :method_name, :count, :files, :rules)
-    Report = Data.define(:summary, :distribution, :selectors, :hotspots, :hints)
+    Report = Data.define(:summary, :distribution, :selectors, :hotspots, :hints, :include_info)
 
     module_function
 
+    # WD6 (ADR-23): the volume views — distribution / selectors /
+    # hotspots — route only the *actionable* diagnostics (error +
+    # warning) by default. Plugin-emitted `:info` diagnostics are
+    # overwhelmingly recognition trace (`plugin.activerecord.model-call`,
+    # `plugin.rails-routes.helper`, …) — positive "Rigor resolved this
+    # call" records, not problems — and on a real Rails app they swamp
+    # the genuine error/warning signal (the field trip: 257 of 267
+    # diagnostics were such trace) and invert the hotspot ranking
+    # towards the files with the *most working* code. The summary still
+    # reports the full info count, and `include_info: true` (the
+    # `--include-info` flag) restores the pre-v0.2.3 behaviour. Hints
+    # always see the full stream so the `gem-without-rbs` notice (an
+    # info-severity `rbs.coverage.missing-gem`) survives; the
+    # count-based H5/H6 recognisers guard against info themselves so
+    # recognition trace never reads as a bug.
+    #
     # @param diagnostics [Array<Analysis::Diagnostic>]
     # @param top [Integer] hotspot-file cap
     # @param hints [Boolean] run the heuristic catalogue
+    # @param include_info [Boolean] route info into the volume views
     # @return [Report]
-    def analyze(diagnostics, top: 10, hints: true)
+    def analyze(diagnostics, top: 10, hints: true, include_info: false)
+      routed = include_info ? diagnostics : diagnostics.reject { |d| d.severity == :info }
       Report.new(
         summary: build_summary(diagnostics),
-        distribution: build_distribution(diagnostics),
-        selectors: build_selectors(diagnostics),
-        hotspots: build_hotspots(diagnostics, top),
-        hints: hints ? Catalogue.recognise(diagnostics) : []
+        distribution: build_distribution(routed),
+        selectors: build_selectors(routed),
+        hotspots: build_hotspots(routed, top),
+        hints: hints ? Catalogue.recognise(diagnostics, include_info: include_info) : [],
+        include_info: include_info
       )
     end
 
@@ -150,7 +169,11 @@ module Rigor
         "hotspots" => report.hotspots.map do |h|
           { "file" => h.file, "count" => h.count, "by_rule" => h.by_rule }
         end,
-        "hints" => report.hints.map(&:to_h)
+        "hints" => report.hints.map(&:to_h),
+        # WD6: false means distribution / selectors / hotspots above
+        # exclude `:info` (their counts will not sum to summary.total);
+        # the summary's `info` field still reports the full count.
+        "include_info" => report.include_info
       }
     end
   end

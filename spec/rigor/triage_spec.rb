@@ -60,6 +60,64 @@ RSpec.describe Rigor::Triage do
     end
   end
 
+  describe "WD6 — info excluded from the volume views by default" do
+    # A real Rails project's info is dominated by plugin recognition
+    # trace (model-call / helper / …) — positive "resolved this call"
+    # records, not problems. The volume views must route only the
+    # actionable error/warning signal by default.
+    def trace(rule, path: "a.rb", method_name: nil)
+      diag(rule: rule, severity: :info, method_name: method_name, path: path)
+    end
+
+    it "excludes info from the distribution by default but keeps it in the summary" do
+      report = described_class.analyze(([diag, trace("plugin.activerecord.model-call")] * 1) +
+                                       ([trace("plugin.activerecord.model-call")] * 4))
+      expect(report.summary.info).to eq(5)
+      expect(report.distribution.map(&:rule)).to eq(["call.undefined-method"])
+      expect(report.include_info).to be(false)
+    end
+
+    it "routes info into the distribution under include_info: true" do
+      report = described_class.analyze([diag, trace("plugin.activerecord.model-call")],
+                                       include_info: true)
+      expect(report.distribution.map(&:rule))
+        .to contain_exactly("call.undefined-method", "plugin.activerecord.model-call")
+      expect(report.include_info).to be(true)
+    end
+
+    it "keeps info off the hotspot ranking so working code does not rank as a hotspot" do
+      diags = ([trace("plugin.rails-routes.helper", path: "busy.rb")] * 9) +
+              [diag(path: "buggy.rb")]
+      hotspots = described_class.analyze(diags).hotspots
+      expect(hotspots.map(&:file)).to eq(["buggy.rb"])
+    end
+
+    it "keeps info out of the selectors axis by default" do
+      diags = [trace("plugin.actionpack.helper-call", method_name: "users_path")] * 3
+      expect(described_class.analyze(diags).selectors).to be_empty
+      expect(described_class.analyze(diags, include_info: true).selectors).not_to be_empty
+    end
+
+    it "still fires the gem-without-rbs hint from the info notice (hints see the full stream)" do
+      notice = diag(rule: "rbs.coverage.missing-gem", severity: :info,
+                    message: "3 gem(s) in Gemfile.lock have no RBS available: a, b, c")
+      expect(hint(described_class.analyze([notice]), "gem-without-rbs")).not_to be_nil
+    end
+
+    it "does not let recognition-trace info read as a systemic cluster (H5) or genuine bug (H6)" do
+      cluster = Array.new(9) { trace("plugin.activerecord.model-call", path: "models.rb") }
+      report = described_class.analyze(cluster)
+      expect(hint(report, "systemic-file-cluster")).to be_nil
+      expect(hint(report, "genuine-bugs")).to be_nil
+    end
+
+    it "lets H5/H6 see info again under include_info: true" do
+      cluster = Array.new(9) { trace("plugin.activerecord.model-call", path: "models.rb") }
+      report = described_class.analyze(cluster, include_info: true)
+      expect(hint(report, "systemic-file-cluster")).not_to be_nil
+    end
+  end
+
   describe "heuristic catalogue" do
     it "H1 — flags ActiveSupport core_ext selectors on core classes" do
       report = described_class.analyze([udm("days", "5"), udm("minutes", "10"), udm("squish", '"x"')])
@@ -237,7 +295,8 @@ RSpec.describe Rigor::Triage do
   describe ".report_to_h" do
     it "serialises the report to a JSON-ready Hash" do
       h = described_class.report_to_h(described_class.analyze([udm("days", "5")] * 3))
-      expect(h.keys).to contain_exactly("summary", "distribution", "selectors", "hotspots", "hints")
+      expect(h.keys).to contain_exactly("summary", "distribution", "selectors", "hotspots",
+                                        "hints", "include_info")
       expect(h["hints"].first["id"]).to eq("activesupport-core-ext")
     end
 

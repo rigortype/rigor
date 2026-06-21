@@ -15,6 +15,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Changed
+
+- **[cli]** `rigor triage` now counts only **actionable** diagnostics (`error` + `warning`) in its distribution, selectors, and hotspot sections; `info` diagnostics are excluded from these volume views by default. On a Rails project `info` is dominated by plugin *recognition trace* (`plugin.activerecord.model-call`, `plugin.rails-routes.helper`, …) — positive "Rigor resolved this call" records that previously buried the genuine error/warning signal (a field trip read 257 of 267 diagnostics as such trace) and inverted the hotspot ranking toward the files with the most *working* code. The summary line still reports the full `info` count, and the heuristic hints still see every diagnostic — so the useful `gem-without-rbs` notice survives, while the count-based "systemic cluster" / "genuine bugs" hints no longer mistake recognition trace for a problem. Pass `--include-info` to restore the previous behaviour ([ADR-23 WD6](docs/adr/23-diagnostic-triage-command.md)). **This is a behaviour change to the default `triage` text and JSON output** — the volume views no longer sum to `summary.total` by default, and `--format json` carries a new top-level `include_info` boolean.
+
 ## [0.2.2] - 2026-06-21
 
 v0.2.2 centres on a SKILL-driven onboarding experience. A new `rigor docs`

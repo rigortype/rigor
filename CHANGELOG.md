@@ -2,13 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Older release notes are archived under [`docs/`](docs/) when the leading
-version digit moves up. The active file holds the current `[Unreleased]`
-section plus the most recent leading-digit cycle (currently `0.2.x`); past
-cycles live in dedicated archives:
+Older release notes are archived under [`docs/`](docs/) when the leading version digit moves up. The active file holds the current `[Unreleased]` section plus the most recent leading-digit cycle (currently `0.2.x`); past cycles live in dedicated archives:
 
 - [`docs/CHANGELOG-0.0.x.md`](docs/CHANGELOG-0.0.x.md) — `0.0.1` through `0.0.9`.
 - [`docs/CHANGELOG-0.1.x.md`](docs/CHANGELOG-0.1.x.md) — `0.1.0` through `0.1.19`.
@@ -23,11 +19,7 @@ cycles live in dedicated archives:
 
 ## [0.2.3] - 2026-06-21
 
-v0.2.3 is a focused `rigor triage` usability fix. On a Rails project the
-report was dominated by plugin recognition trace, which buried the genuine
-error/warning signal and ranked the most *working* files as the top hotspots;
-triage now counts only the actionable diagnostics by default
-([ADR-23 WD6](docs/adr/23-diagnostic-triage-command.md)).
+v0.2.3 is a focused `rigor triage` usability fix. On a Rails project the report was dominated by plugin recognition trace, which buried the genuine error/warning signal and ranked the most *working* files as the top hotspots; triage now counts only the actionable diagnostics by default ([ADR-23 WD6](docs/adr/23-diagnostic-triage-command.md)).
 
 ### Changed
 
@@ -37,18 +29,7 @@ triage now counts only the actionable diagnostics by default
 
 ## [0.2.2] - 2026-06-21
 
-v0.2.2 centres on a SKILL-driven onboarding experience. A new `rigor docs`
-command serves the documentation bundled with the gem offline, `rigor skill
-describe` recommends what to do next on a project, and a family of new Agent
-Skills — led by `rigor-next-steps` and `rigor-ask` — give an AI coding agent
-(or you) a current, version-coupled entry point into Rigor
-([ADR-73](docs/adr/73-skill-driven-user-experience.md),
-[ADR-74](docs/adr/74-offline-doc-access-and-llms-txt.md)). A 2026-06-20
-onboarding field trial drove a round of clearer diagnostics and configuration
-warnings so a broken setup no longer reads as a clean run. Constant folding
-reaches several more pure scalar and structural methods, the analyzer's seed
-pass allocates less on definition-dense projects, and a cross-tree
-documentation audit fixes a batch of spec and handbook contradictions.
+v0.2.2 centres on a SKILL-driven onboarding experience. A new `rigor docs` command serves the documentation bundled with the gem offline, `rigor skill describe` recommends what to do next on a project, and a family of new Agent Skills — led by `rigor-next-steps` and `rigor-ask` — give an AI coding agent (or you) a current, version-coupled entry point into Rigor ([ADR-73](docs/adr/73-skill-driven-user-experience.md), [ADR-74](docs/adr/74-offline-doc-access-and-llms-txt.md)). A 2026-06-20 onboarding field trial drove a round of clearer diagnostics and configuration warnings so a broken setup no longer reads as a clean run. Constant folding reaches several more pure scalar and structural methods, the analyzer's seed pass allocates less on definition-dense projects, and a cross-tree documentation audit fixes a batch of spec and handbook contradictions.
 
 ### Added
 

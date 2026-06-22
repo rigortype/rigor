@@ -196,13 +196,19 @@ jobs:
       # analysis result; a partial match restores the closest ancestor
       # cache and Rigor fills any missing slices on the fly.
       # Skipped entirely for the cold variant — no restore, no save.
+      #
+      # The restore-keys are scoped to the current Gemfile.lock hash so
+      # that a lockfile change (e.g. adding a gem) never restores a cache
+      # built under the old lockfile.  A stale-lockfile restore would make
+      # the gem-without-rbs count diverge between warm and cold, failing
+      # the warm==cold diff gate even when the analysis is correct.
       - name: Restore Rigor analysis cache
         if: matrix.cache == 'warm'
         uses: actions/cache@v5
         with:
           path: .rigor/cache
-          key: rigor-cache-${{ runner.os }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml', 'Gemfile.lock') }}
-          restore-keys: rigor-cache-${{ runner.os }}-
+          key: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml') }}
+          restore-keys: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-
 
       # Run once with --format json so we get both structured output for
       # the warm-vs-cold diff and a human-readable summary in the CI log.

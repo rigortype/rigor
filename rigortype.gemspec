@@ -65,6 +65,7 @@ Gem::Specification.new do |spec|
   # exercises the real catalogue; the production dep belongs on the
   # plugin gem (rspec-rails apps already pull rack via actionpack).
   spec.add_development_dependency "rack", ">= 2.0", "< 4.0"
+  spec.add_development_dependency "binpacker", ">= 0.0.3", "< 1.0"
   spec.add_development_dependency "parallel_tests", ">= 4.0", "< 6.0"
   spec.add_development_dependency "rake", ">= 13.0", "< 15.0"
   # ADR-32 — the `rigor-rbs-inline` plugin under `plugins/`

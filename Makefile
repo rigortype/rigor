@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel test-binpacker test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -96,6 +96,16 @@ test-ractor-pool:
 test-parallel:
 	bundle exec rake spec_parallel
 
+# Spec suite via `binpacker`, distributing files across worker
+# processes using LPT scheduling driven by measured per-file
+# runtimes (tmp/binpacker.timings). On a cold start (no timings
+# file) binpacker falls back to filesize weighting automatically.
+# `PARALLEL_TEST_PROCESSORS=N` is honoured by parallel_tests;
+# binpacker uses `workers: auto` from binpacker.yml (CPU count)
+# or override via the config profile.
+test-binpacker:
+	bundle exec binpacker run
+
 lint:
 	bundle exec rubocop lib/ spec/ plugins/ examples/
 
@@ -164,16 +174,16 @@ bench-perf:
 # `verify` chains the spec suite, the gated pool-runner spec (its
 # own rspec process — see `test-ractor-pool`), rubocop, `rigor check
 # lib`, and the plugin-tree contract check. The spec phase runs in
-# parallel by default (3-4× faster on multi-core hosts than the
-# sequential rspec invocation). `lint` is already process-parallel
-# via rubocop's built-in worker pool; `check` / `check-plugins` are
-# short rigor invocations.
+# parallel by default via binpacker (3-4× faster on multi-core hosts
+# than the sequential rspec invocation). `lint` is already
+# process-parallel via rubocop's built-in worker pool; `check` /
+# `check-plugins` are short rigor invocations.
 #
 # Total wall time on a 12-core laptop: ~60s (vs ~200s for the
 # sequential variant below). Use `verify-sequential` when chasing
 # parallel-only flakes — the worker isolation hides certain
 # ordering bugs that surface only in a single-process run.
-verify: test-parallel test-ractor-pool lint check check-plugins
+verify: test-binpacker test-ractor-pool lint check check-plugins
 
 # Sequential variant. Identical phases as `verify` but `test`
 # runs single-process. Slower but bit-for-bit reproducible

@@ -105,10 +105,11 @@ GEM
 PLATFORMS
   arm64-darwin-25
   ruby
+  x86_64-linux
 
 DEPENDENCIES
   activesupport (>= 7.0, < 9.0)
-  binpacker (>= 0.0.1, < 1.0)
+  binpacker (>= 0.0.3, < 1.0)
   parallel_tests (>= 4.0, < 6.0)
   rack (>= 2.0, < 4.0)
   rake (>= 13.0, < 15.0)

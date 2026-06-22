@@ -3,7 +3,13 @@
 require "spec_helper"
 
 RSpec.describe Rigor::Environment::Reflection do
-  let(:reflection) { Rigor::Environment.for_project.reflection }
+  # Reflection is immutable and the examples below only query it, so build the
+  # expensive RBS-backed surface once for the file instead of once per example.
+  before(:all) do # rubocop:disable RSpec/BeforeAfterAll
+    @reflection = Rigor::Environment.for_project.reflection
+  end
+
+  let(:reflection) { @reflection } # rubocop:disable RSpec/InstanceVariable
 
   describe "construction" do
     it "is built lazily and memoised by the loader" do

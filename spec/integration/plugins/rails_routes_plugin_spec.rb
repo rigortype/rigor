@@ -31,6 +31,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
   after { Rigor::Plugin.unregister! }
 
   let(:plugin_class) { Rigor::Plugin::RailsRoutes }
+  let(:default_run_plugin_cache_store) { :shared }
 
   describe "recognised helpers" do
     it "surfaces an info diagnostic for a top-level resources index helper" do

@@ -14,8 +14,19 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     Rigor::Configuration.new("paths" => [dir])
   end
 
+  def shared_environment
+    @shared_environment ||= Rigor::Environment.for_project
+  end
+
   def full_run(dir)
-    Rigor::Analysis::Runner.new(configuration: configuration(dir), cache_store: nil).run.diagnostics
+    config = configuration(dir)
+    Rigor::Analysis::Runner.new(
+      configuration: config, cache_store: nil, environment: shared_environment
+    ).run.diagnostics
+  end
+
+  def session_for(config, paths: nil)
+    described_class.new(configuration: config, paths: paths, environment: shared_environment)
   end
 
   def sorted(diagnostics)
@@ -52,7 +63,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       write_unit(a, prefix: "A")
       write_unit(b, prefix: "B")
 
-      session = described_class.new(configuration: configuration(dir))
+      session = session_for(configuration(dir))
       session.baseline
 
       # Body edit to a.rb only — erase its diagnostic. b.rb is untouched.
@@ -75,7 +86,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       a = File.join(dir, "a.rb")
       write_unit(a, prefix: "A")
 
-      session = described_class.new(configuration: configuration(dir))
+      session = session_for(configuration(dir))
       session.baseline
       recheck = session.recheck
 
@@ -92,7 +103,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       write_unit(a, prefix: "A")
       write_unit(b, prefix: "B")
 
-      session = described_class.new(configuration: configuration(dir))
+      session = session_for(configuration(dir))
       session.baseline
 
       # Round 1: erase a.rb's diagnostic.
@@ -121,7 +132,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "helper()\n")
         File.write(b, "class Placeholder\nend\n")
 
-        session = described_class.new(configuration: configuration(dir))
+        session = session_for(configuration(dir))
         baseline = session.baseline
         # Baseline: a.rb fires call.unresolved-toplevel for the undefined helper.
         expect(baseline.map(&:rule)).to include("call.unresolved-toplevel")
@@ -147,7 +158,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "class ASub < NewBase\n  private\n\n  def tag\n    \"y\"\n  end\nend\n")
         File.write(b, "class Placeholder\nend\n")
 
-        session = described_class.new(configuration: configuration(dir))
+        session = session_for(configuration(dir))
         baseline = session.baseline
         expect(baseline.map(&:rule)).not_to include("def.override-visibility-reduced")
 
@@ -169,7 +180,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "missing_helper()\n")
         File.write(b, "class Thing\n  def existing\n    1\n  end\nend\n")
 
-        session = described_class.new(configuration: configuration(dir))
+        session = session_for(configuration(dir))
         session.baseline
         # Add an unrelated top-level method — a.rb missed `missing_helper`,
         # not `other`, so it must stay served from cache.
@@ -192,7 +203,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         a = File.join(dir, "a.rb")
         File.write(a, "helper()\n")
 
-        session = described_class.new(configuration: configuration(dir))
+        session = session_for(configuration(dir))
         session.baseline
 
         File.write(File.join(dir, "b.rb"), "def helper\n  1\nend\n")
@@ -209,7 +220,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         a = File.join(dir, "a.rb")
         File.write(a, "class ASub < NewBase\n  private\n\n  def tag\n    \"y\"\n  end\nend\n")
 
-        session = described_class.new(configuration: configuration(dir))
+        session = session_for(configuration(dir))
         session.baseline
 
         File.write(File.join(dir, "b.rb"), "class NewBase\n  def tag\n    \"x\"\n  end\nend\n")
@@ -227,7 +238,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(a, "helper()\n")
         File.write(b, "def helper\n  1\nend\n")
 
-        session = described_class.new(configuration: configuration(dir))
+        session = session_for(configuration(dir))
         session.baseline
 
         File.delete(b)
@@ -247,7 +258,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         a = File.join(dir, "a.rb")
         File.write(a, "x = 1\nputs x\n")
 
-        session = described_class.new(configuration: configuration(dir))
+        session = session_for(configuration(dir))
         session.baseline
 
         added = File.join(dir, "b.rb")
@@ -269,15 +280,15 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         fp = fingerprint(config, dir)
 
         # Process 1 — cold baseline.
-        _d1, warm1 = described_class.new(configuration: config, paths: [dir])
-                                    .run_incremental(snapshot: snapshot, fingerprint: fp)
+        _d1, warm1 = session_for(config, paths: [dir])
+                     .run_incremental(snapshot: snapshot, fingerprint: fp)
         expect(warm1).to be(false)
 
         # A new file appears between processes; the roots-keyed fingerprint is
         # unchanged, so the snapshot still loads.
         File.write(File.join(dir, "b.rb"), "def helper\n  1\nend\n")
-        diags2, warm2 = described_class.new(configuration: config, paths: [dir])
-                                       .run_incremental(snapshot: snapshot, fingerprint: fp)
+        diags2, warm2 = session_for(config, paths: [dir])
+                        .run_incremental(snapshot: snapshot, fingerprint: fp)
         expect(warm2).to be(true)
         expect(sorted(diags2)).to eq(sorted(full_run(dir)))
       end
@@ -297,8 +308,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         fp = fingerprint(config, dir)
 
         # Process 1 — cold: no snapshot yet, full analysis, persists.
-        _diags, warm1 = described_class.new(configuration: config, paths: [dir])
-                                       .run_incremental(snapshot: snapshot, fingerprint: fp)
+        _diags, warm1 = session_for(config, paths: [dir])
+                        .run_incremental(snapshot: snapshot, fingerprint: fp)
         expect(warm1).to be(false)
 
         # An edit between "processes" — erase a.rb's diagnostic. Content is
@@ -307,8 +318,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
 
         # Process 2 — warm: a fresh session restores the snapshot and
         # re-analyzes only the changed closure.
-        diags2, warm2 = described_class.new(configuration: config, paths: [dir])
-                                       .run_incremental(snapshot: snapshot, fingerprint: fp)
+        diags2, warm2 = session_for(config, paths: [dir])
+                        .run_incremental(snapshot: snapshot, fingerprint: fp)
         expect(warm2).to be(true)
         expect(sorted(diags2)).to eq(sorted(full_run(dir)))
       end
@@ -320,11 +331,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         config = configuration(dir)
         snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
 
-        described_class.new(configuration: config, paths: [dir])
-                       .run_incremental(snapshot: snapshot, fingerprint: "fp-original")
+        session_for(config, paths: [dir])
+          .run_incremental(snapshot: snapshot, fingerprint: "fp-original")
         # A different fingerprint (config / gem / version drift) → cold.
-        _diags, warm = described_class.new(configuration: config, paths: [dir])
-                                      .run_incremental(snapshot: snapshot, fingerprint: "fp-changed")
+        _diags, warm = session_for(config, paths: [dir])
+                       .run_incremental(snapshot: snapshot, fingerprint: "fp-changed")
         expect(warm).to be(false)
       end
     end

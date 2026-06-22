@@ -11,6 +11,13 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Performance
+
+- **[spec suite]** Targeted profiling pass removes repeated per-example setup in three of the slowest spec groups, cutting roughly 50 seconds off the sequential suite run.
+  - `spec/rigor/environment/reflection_spec.rb` builds the immutable, frozen `Environment::Reflection` once per file via `before(:all)` instead of once per example. Every example only queries it, so the group drops from ~22s to ~2s across 22 examples.
+  - `spec/integration/plugins/rails_routes_plugin_spec.rb` opts its 84-example group into the existing process-wide shared plugin cache (`let(:default_run_plugin_cache_store) { :shared }`), reusing one env build instead of one per example. The rails-routes producer descriptor already tracks the routes file, its `draw` partials, and every helper file, so no stale cache output leaks between examples. The group drops from ~25s to ~4s.
+  - `spec/rigor/analysis/incremental_session_spec.rb` threads one shared `Environment` through the session's internal runs via a new optional `IncrementalSession.new(environment:)` parameter, so baseline / recheck / oracle runs stop rebuilding the same RBS universe; the group drops from ~16s to ~6s. The parameter defaults to `nil`, leaving the `rigor check` incremental path byte-identical.
+
 ## [0.2.4] - 2026-06-22
 
 v0.2.4 is a targeted compatibility fix. Analysis was crashing on the lower end of the declared `rbs >= 3.0, < 5.0` range due to API divergences in the environment-loading surface; v0.2.4 corrects both crash paths and adds a CI job that exercises the RBS-loading surface against both RBS 3.x and 4.x on every push. Thanks to https://github.com/aki77 for the report (https://github.com/rigortype/rigor/issues/21).

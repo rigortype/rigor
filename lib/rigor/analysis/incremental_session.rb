@@ -35,9 +35,14 @@ module Rigor
 
       # @param paths [Array<String>, nil] explicit analysis roots; nil
       #   (the default) uses the configuration's `paths:`.
-      def initialize(configuration:, paths: nil)
+      # @param environment [Rigor::Environment, nil] optional shared
+      #   environment to thread into each internal Runner. Long-lived
+      #   callers and specs can use this to avoid rebuilding the same
+      #   RBS universe for every baseline / recheck / oracle run.
+      def initialize(configuration:, paths: nil, environment: nil)
         @configuration = configuration
         @paths = paths
+        @environment = environment
         @cache = {}              # analyzed path => [Diagnostic]
         @sources = {}            # analyzed path => Set<source path it read from>
         @digests = {}            # analyzed path => content digest at last analysis
@@ -312,7 +317,7 @@ module Rigor
       end
 
       def build_runner(**)
-        Runner.new(configuration: @configuration, cache_store: nil, **)
+        Runner.new(configuration: @configuration, cache_store: nil, environment: @environment, **)
       end
 
       # Run the runner over the session's explicit paths (or, when none were

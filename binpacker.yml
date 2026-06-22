@@ -1,0 +1,14 @@
+profiles:
+  default:
+    test_runner: rspec
+    workers: auto
+    timing_file: tmp/binpacker.timings
+    test_pattern: spec/**/*_spec.rb
+    test_exclude:
+      - spec/rigor/analysis/runner_pool_spec.rb
+    scheduler:
+      strategy: static
+      algorithm: lpt
+
+  ci:
+    extends: default

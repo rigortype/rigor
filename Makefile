@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel test-binpacker test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -95,6 +95,16 @@ test-ractor-pool:
 # pins the worker count; default is the CPU count.
 test-parallel:
 	bundle exec rake spec_parallel
+
+# Spec suite via `binpacker`, distributing files across worker
+# processes using LPT scheduling driven by measured per-file
+# runtimes (tmp/binpacker.timings). On a cold start (no timings
+# file) binpacker falls back to filesize weighting automatically.
+# `PARALLEL_TEST_PROCESSORS=N` is honoured by parallel_tests;
+# binpacker uses `workers: auto` from binpacker.yml (CPU count)
+# or override via the config profile.
+test-binpacker:
+	bundle exec binpacker run
 
 lint:
 	bundle exec rubocop lib/ spec/ plugins/ examples/

@@ -11,11 +11,15 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-06-22
+
+v0.2.4 is a targeted compatibility fix. Analysis was crashing on the lower end of the declared `rbs >= 3.0, < 5.0` range due to API divergences in the environment-loading surface; v0.2.4 corrects both crash paths and adds a CI job that exercises the RBS-loading surface against both RBS 3.x and 4.x on every push. Thanks to https://github.com/aki77 for the report (https://github.com/rigortype/rigor/issues/21).
+
 ### Fixed
 
-- **[rigor check]** Fixed crashes under RBS 3.x (e.g. `undefined method 'primary_decl'`, `uninitialized constant RBS::Source`) so the whole supported RBS range (`rbs >= 3.0, < 5.0`) works again, not just RBS 4.x. (Fixes [#21](https://github.com/rigortype/rigor/issues/21), thank you [@aki77](https://github.com/aki77)!)
-  - Rigor now reads a class entry's representative declaration, populates synthesized RBS into the environment, and walks an entry's declarations through accessors that exist on both the RBS 3.x and 4.x environment APIs.
-  - A new CI job exercises the RBS-loading surface against both an RBS 3.x and an RBS 4.x bundle so the supported range stays honest.
+- **[rigor check]** Fixed two crashes on RBS 3.x — `undefined method 'primary_decl'` and `uninitialized constant RBS::Source` — so the full supported range `rbs >= 3.0, < 5.0` works again, not just RBS 4.x.
+  - Rigor now reads a class entry's representative declaration and walks its declarations through accessors present on both the RBS 3.x and 4.x environment APIs.
+  - A new CI job runs the RBS-loading surface against both an RBS 3.x and an RBS 4.x bundle so the supported range stays honest going forward.
 
 ## [0.2.3] - 2026-06-21
 
@@ -174,7 +178,8 @@ v0.2.0 is Rigor's first publicly-announced (general / evaluation) release, gover
 - **[cli]** `rigor explain call.unresolved-toplevel` now resolves — the [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) rule was missing from the catalogue despite being live since v0.1.14 — and a completeness spec now asserts every rule has a catalogue entry.
 - **[packaging]** The Docker build-context ignore file is scoped to the Dockerfile (`Dockerfile.dockerignore`) instead of a repo-wide `.dockerignore`, so external tools embedding the rigor source via BuildKit `--build-context` no longer get an empty context.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/rigortype/rigor/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/rigortype/rigor/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/rigortype/rigor/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/rigortype/rigor/compare/v0.2.0...v0.2.1

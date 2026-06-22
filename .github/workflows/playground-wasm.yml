@@ -51,7 +51,7 @@ jobs:
         working-directory: plugins/rigor-playground/wasm
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: false
 

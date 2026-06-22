@@ -342,6 +342,36 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "#class_decl_paths" do
+    # Regression: `class_decl_paths` called `entry.primary_decl`
+    # unguarded, which only exists on RBS 4.x. Under RBS 3.x (allowed
+    # by the gemspec `rbs >= 3.0, < 5.0`, which exposes `entry.primary`
+    # instead) `rigor check` crashed with
+    # `undefined method 'primary_decl'`. The shared `primary_decl_for`
+    # helper normalises both shapes, so this maps every loaded class to
+    # the file its first declaration came from across the whole range.
+    it "maps core classes to the RBS source file of their first declaration" do
+      paths = loader.class_decl_paths
+      expect(paths).not_to be_empty
+      expect(paths).to be_frozen
+      expect(paths["::Integer"]).to be_a(String)
+      expect(paths["::Integer"]).to end_with(".rbs")
+    end
+
+    it "attributes a project signature_paths class to its own sig file" do
+      tmpdir = Dir.mktmpdir("rigor-rbs-loader-decl-paths-spec-")
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n"
+      )
+      project_loader = described_class.new(signature_paths: [tmpdir])
+      expect(project_loader.class_decl_paths["::Acme::Widget"])
+        .to eq(File.join(tmpdir, "widget.rbs"))
+    ensure
+      FileUtils.rm_rf(tmpdir) if tmpdir
+    end
+  end
+
   describe "env build failure short-circuit (O7)" do
     # Open item O7 (real-world Rails survey, 2026-05-15):
     # when a `signature_paths:` entry redeclares a constant or

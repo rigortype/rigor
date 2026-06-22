@@ -15,6 +15,12 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **[rigor check]** Fixed crashes under RBS 3.x (e.g. `undefined method 'primary_decl'`, `uninitialized constant RBS::Source`) so the whole supported RBS range (`rbs >= 3.0, < 5.0`) works again, not just RBS 4.x. (Fixes [#21](https://github.com/rigortype/rigor/issues/21), thank you [@aki77](https://github.com/aki77)!)
+  - Rigor now reads a class entry's representative declaration, populates synthesized RBS into the environment, and walks an entry's declarations through accessors that exist on both the RBS 3.x and 4.x environment APIs.
+  - A new CI job exercises the RBS-loading surface against both an RBS 3.x and an RBS 4.x bundle so the supported range stays honest.
+
 ## [0.2.3] - 2026-06-21
 
 v0.2.3 is a focused `rigor triage` usability fix. On a Rails project the

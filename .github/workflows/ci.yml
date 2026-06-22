@@ -50,7 +50,72 @@ jobs:
       - name: Run pool-runner spec
         run: make test-ractor-pool
 
-  # ── 2. RuboCop ───────────────────────────────────────────────────
+  # ── 2. RBS compatibility (3.x + 4.x) ────────────────────────────
+  rbs-compat:
+    name: RBS compatibility (RBS ${{ matrix.rbs }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rbs: "3.x"
+            constraint: "~> 3.10"
+            expected_major: "3"
+          - rbs: "4.x"
+            constraint: "~> 4.0"
+            expected_major: "4"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+
+      # The public gemspec supports `rbs >= 3.0, < 5.0`, but RBS 3.x and
+      # 4.x diverge on the env-population API (`add_signature` /
+      # `MultiEntry::D` wrappers vs `add_source` / `RBS::Source` + bare
+      # decls) — a divergence that crashed `rigor check` under RBS 3.x.
+      # This job exercises both lines against the RBS-loading surface so
+      # that range stays honest.
+      #
+      # The normal development bundle cannot take an `rbs` matrix axis:
+      # it includes rbs-inline, whose upstream gem pins `rbs (~> 4.0)`.
+      # So this focused compatibility bundle installs Rigor as a path gem
+      # — only runtime dependencies, rspec, and the requested RBS line
+      # are resolved, with no rbs-inline to constrain it — and never
+      # rewrites the repo's Gemfile.lock.
+      - name: Install RBS compatibility bundle
+        env:
+          RBS_CONSTRAINT: ${{ matrix.constraint }}
+        run: |
+          cat > Gemfile.rbs-compat <<GEMFILE
+          source "https://rubygems.org"
+          ruby ">= 4.0.0", "< 4.1"
+          gem "rigortype", path: "."
+          gem "rspec", ">= 3.13", "< 4.0"
+          gem "rbs", "$RBS_CONSTRAINT"
+          GEMFILE
+          BUNDLE_GEMFILE=Gemfile.rbs-compat bundle install --jobs 4 --retry 3
+
+      - name: Assert selected RBS version
+        env:
+          EXPECTED_RBS_MAJOR: ${{ matrix.expected_major }}
+        run: |
+          BUNDLE_GEMFILE=Gemfile.rbs-compat bundle exec ruby -e '
+            require "rbs"
+            expected = ENV.fetch("EXPECTED_RBS_MAJOR")
+            abort "expected RBS #{expected}.x, got #{RBS::VERSION}" unless RBS::VERSION.start_with?("#{expected}.")
+            puts "RBS #{RBS::VERSION}"
+          '
+
+      - name: Run RBS environment compatibility specs
+        run: BUNDLE_GEMFILE=Gemfile.rbs-compat bundle exec rspec spec/rigor/environment
+
+  # ── 3. RuboCop ───────────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -80,7 +145,7 @@ jobs:
       - name: Run lint
         run: make lint
 
-  # ── 3. Rigor self-check (warm + cold) ───────────────────────────
+  # ── 4. Rigor self-check (warm + cold) ───────────────────────────
   # Two matrix variants run in parallel:
   #   warm — restores .rigor/cache from the previous run so Rigor
   #           exercises the cache read/write path and skips slices
@@ -191,7 +256,7 @@ jobs:
         if: matrix.cache == 'cold'
         run: make check-incremental
 
-  # ── 4. Warm-vs-cold diagnostic diff ─────────────────────────────
+  # ── 5. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
   # difference means the cache is altering analysis results — a bug.
   # Runs whenever self-check was not outright cancelled (so the diff
@@ -230,19 +295,20 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [test, lint, self-check, self-check-diff]
+    needs: [test, rbs-compat, lint, self-check, self-check-diff]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: All checks passed
         env:
           TEST_RESULT: ${{ needs.test.result }}
+          RBS_COMPAT_RESULT: ${{ needs.rbs-compat.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           SELF_CHECK_RESULT: ${{ needs.self-check.result }}
           SELF_CHECK_DIFF_RESULT: ${{ needs.self-check-diff.result }}
         run: |
           failed=0
-          for job_result in "$TEST_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT"; do
+          for job_result in "$TEST_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT"; do
             if [[ "$job_result" != "success" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

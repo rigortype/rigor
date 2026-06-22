@@ -12,16 +12,23 @@ RSpec::Core::RakeTask.new(:spec)
 # Plugin registry is process-global; the parallel runner
 # uses separate processes, so registry state stays isolated.
 #
-# `--group-by filesize` is a better default than the
-# upstream `found` (file-discovery order) because the spec
-# distribution here is skewed: `runner_spec.rb` is ~2× the
-# next-largest spec file. The filesize grouping at least
-# keeps the big file on its own worker rather than
-# bundling it with other slow files.
+# `--group-by default` uses measured per-file runtimes from a
+# previous run (written by ParallelTests::RSpec::RuntimeLogger to
+# tmp/parallel_runtime.log) and falls back to filesize when no log
+# exists. This is self-correcting: a spec that grows in file size but
+# shrinks in runtime (e.g. after shared-setup work) is re-balanced
+# automatically on the following run rather than staying mis-weighted
+# permanently. The log is written by every worker under a file lock
+# so concurrent writes are safe.
 desc "Run the spec suite in parallel across processes"
 task :spec_parallel do
+  require "fileutils"
+  FileUtils.mkdir_p "tmp"
+  runtime_log = "tmp/parallel_runtime.log"
   count = ENV.fetch("PARALLEL_TEST_PROCESSORS", "")
-  args = ["bundle", "exec", "parallel_rspec", "--group-by", "filesize"]
+  args = ["bundle", "exec", "parallel_rspec",
+          "--group-by", "default",
+          "--runtime-log", runtime_log]
   args.push("-n", count) unless count.empty?
   # ADR-15 Phase 4b — `runner_pool_spec.rb` is excluded by the
   # sequential `make test` path via `RSpec.config.exclude_pattern`
@@ -31,6 +38,9 @@ task :spec_parallel do
   # `RIGOR_INCLUDE_RACTOR_POOL=1` opts the pool spec back in,
   # mirroring the sequential exclusion's opt-out shape.
   args.push("--exclude-pattern", "spec/rigor/analysis/runner_pool_spec.rb") unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
+  # Record per-file runtimes so the next run can distribute by actual
+  # measured time rather than filesize.
+  args.push("-o", "--format ParallelTests::RSpec::RuntimeLogger --out #{runtime_log}")
   args.push("spec")
   exec(*args)
 end

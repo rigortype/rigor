@@ -39,6 +39,21 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
 
+      # Cache the parallel-rspec runtime log between runs so that
+      # `--group-by default` can use measured per-file runtimes to
+      # balance groups. On a cache miss (first run, or after the key
+      # space is evicted) parallel_rspec falls back to filesize
+      # automatically — no cold-start breakage. The log is written at
+      # the end of each successful run and picked up by the next.
+      # Key is unique per run-id so the post-step always saves fresh
+      # timing data; restore-keys prefix-matches the most recent entry.
+      - name: Restore parallel-rspec runtime log
+        uses: actions/cache@v5
+        with:
+          path: tmp/parallel_runtime.log
+          key: parallel-runtime-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}
+          restore-keys: parallel-runtime-${{ runner.os }}-ruby${{ matrix.ruby }}-
+
       - name: Run tests
         run: make test-parallel
 

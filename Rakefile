@@ -26,8 +26,11 @@ task :spec_parallel do
   FileUtils.mkdir_p "tmp"
   runtime_log = "tmp/parallel_runtime.log"
   count = ENV.fetch("PARALLEL_TEST_PROCESSORS", "")
+  # Omitting --group-by triggers the `when nil` path in
+  # ParallelTests::Test::Runner#tests_with_size: runtime sorting when
+  # the log has enough entries (size * 1.5 > file count), filesize
+  # otherwise. --group-by default raises ArgumentError in 5.7.0.
   args = ["bundle", "exec", "parallel_rspec",
-          "--group-by", "default",
           "--runtime-log", runtime_log]
   args.push("-n", count) unless count.empty?
   # ADR-15 Phase 4b — `runner_pool_spec.rb` is excluded by the

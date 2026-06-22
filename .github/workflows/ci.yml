@@ -18,61 +18,9 @@ permissions:
   contents: read
 
 jobs:
-  # ── 1. RSpec suite ───────────────────────────────────────────────
+  # ── 1. RSpec suite (via binpacker) ──────────────────────────────
   test:
     name: Tests (Ruby ${{ matrix.ruby }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        ruby:
-          - "4.0"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          submodules: false
-
-      - name: Set up Ruby ${{ matrix.ruby }}
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: ${{ matrix.ruby }}
-          bundler-cache: true
-
-      # Cache the parallel-rspec runtime log between runs so that
-      # `--group-by default` can use measured per-file runtimes to
-      # balance groups. On a cache miss (first run, or after the key
-      # space is evicted) parallel_rspec falls back to filesize
-      # automatically — no cold-start breakage. The log is written at
-      # the end of each successful run and picked up by the next.
-      # Key is unique per run-id so the post-step always saves fresh
-      # timing data; restore-keys prefix-matches the most recent entry.
-      - name: Restore parallel-rspec runtime log
-        uses: actions/cache@v5
-        with:
-          path: tmp/parallel_runtime.log
-          key: parallel-runtime-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}
-          restore-keys: parallel-runtime-${{ runner.os }}-ruby${{ matrix.ruby }}-
-
-      - name: Run tests
-        run: make test-parallel
-
-      # The pool-runner spec is excluded from the default suite (see
-      # spec/spec_helper.rb) and runs as its own rspec process. Without
-      # this step the gated file has no CI coverage at all — a
-      # deterministic failure in it once rotted unnoticed for three
-      # weeks (fork-backend default 86ed9129 → fixed 7ebeac08).
-      - name: Run pool-runner spec
-        run: make test-ractor-pool
-
-  # ── 1b. binpacker parallel suite (trial, not required) ──────────
-  # Runs the spec suite via binpacker alongside the parallel_tests job
-  # to validate correctness and measure scheduling quality during the
-  # trial period. Intentionally excluded from the `required` fan-in
-  # so a binpacker regression never blocks a merge while it is still
-  # under observation. Promote to `required` once the trial passes.
-  test-binpacker:
-    name: Tests via binpacker (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -94,7 +42,10 @@ jobs:
       # Cache the binpacker timing file between runs so that LPT
       # scheduling can use measured per-file runtimes to balance
       # workers. On a cache miss binpacker falls back to filesize
-      # weighting automatically — no cold-start breakage.
+      # weighting automatically — no cold-start breakage. The file is
+      # written at the end of each successful run and picked up by the
+      # next. Key is unique per run-id so the post-step always saves
+      # fresh timing data; restore-keys prefix-matches the most recent.
       - name: Restore binpacker timing file
         uses: actions/cache@v5
         with:
@@ -102,8 +53,16 @@ jobs:
           key: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}
           restore-keys: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-
 
-      - name: Run tests via binpacker
+      - name: Run tests
         run: make test-binpacker
+
+      # The pool-runner spec is excluded from the default suite (see
+      # spec/spec_helper.rb) and runs as its own rspec process. Without
+      # this step the gated file has no CI coverage at all — a
+      # deterministic failure in it once rotted unnoticed for three
+      # weeks (fork-backend default 86ed9129 → fixed 7ebeac08).
+      - name: Run pool-runner spec
+        run: make test-ractor-pool
 
   # ── 2. RBS compatibility (3.x + 4.x) ────────────────────────────
   rbs-compat:

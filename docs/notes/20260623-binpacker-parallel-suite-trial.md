@@ -125,11 +125,43 @@ identical output.
 
 ---
 
-## Next steps
+## binpacker 0.1.0 — parallel worker fix confirmed (PR #27)
 
-1. **Fix the sequential-worker bug in binpacker** (signal all workers
-   before collecting any results).  After the fix the expected CI
-   makespan is ~4 min, comparable to or faster than parallel_tests.
-2. Once the fix ships and CI confirms the speedup, promote
-   `test-binpacker` to the `required` fan-in and retire `test` /
-   `make test-parallel`.
+Reference run: `27976146417` (PR #27, binpacker bumped to 0.1.0).
+
+| Runner | Examples | Failures | Makespan (CI, 4 workers) |
+|---|---|---|---|
+| parallel_tests (`make test-parallel`) | 7019 | 0 | 6:08 (368 s) |
+| binpacker 0.1.0 (`make test-binpacker`) | 7019 | 0 | **4:47** |
+
+### Worker timings (binpacker 0.1.0)
+
+```
+W0: 4:15  (1507 examples)
+W1: 4:19  (1855 examples)
+W2: 4:21  (1427 examples)
+W3: 4:44  (2230 examples, 2 pending)
+```
+
+Makespan = max(worker durations) + small orchestration overhead = **4:47**
+(start 18:49:21 → end 18:54:08 UTC).  Workers now run in true parallel.
+
+### Root cause confirmed resolved
+
+The fix (`Orchestrator#run` separates `workers.each(&:signal_done)` from
+`workers.each { |w| w.collect_results }`) lets all workers start RSpec
+simultaneously.  The 4-worker parallel makespan of **4:47** is
+**~22 % faster** than parallel_tests (6:08) and well within the expected
+max-worker-time bound.
+
+---
+
+## Outcome
+
+Trial passed.  From PR #27 onward:
+
+- `make verify` uses `test-binpacker` (was `test-parallel`).
+- The CI `test` job runs `make test-binpacker` with the binpacker timing
+  cache; the `test-binpacker` trial job is retired.
+- `make test-parallel` and the `parallel_tests` gem remain available for
+  manual comparison or rollback.

@@ -170,7 +170,7 @@ module Rigor
           source = missing.map { |name| "module #{name}\nend\n" }.join
           buffer = ::RBS::Buffer.new(name: SYNTHETIC_NAMESPACE_BUFFER, content: source)
           _, directives, decls = ::RBS::Parser.parse_signature(buffer)
-          env.add_source(::RBS::Source::RBS.new(buffer, directives || [], decls || []))
+          add_parsed_decls(env, buffer, directives, decls)
         rescue ::RBS::BaseError
           # Fail-soft: synthesis is an opportunistic uplift, never a
           # hard requirement. A parse failure here just leaves the env
@@ -232,11 +232,52 @@ module Rigor
           missing.uniq
         end
 
+        # Normalises a `class_decls` entry's representative declaration
+        # across the gemspec's supported RBS range (`rbs >= 3.0, < 5.0`).
+        # RBS 4.x exposes it as `entry.primary_decl` (the AST declaration
+        # directly); RBS 3.x exposes `entry.primary` (a wrapper whose
+        # `#decl` is the AST declaration). Returns the AST declaration, or
+        # nil when neither accessor is present. Without this guard,
+        # `class_decl_paths` crashed under RBS 3.x with
+        # `undefined method 'primary_decl'`.
+        def primary_decl_for(entry)
+          if entry.respond_to?(:primary_decl)
+            entry.primary_decl
+          elsif entry.respond_to?(:primary)
+            primary = entry.primary
+            primary.respond_to?(:decl) ? primary.decl : primary
+          end
+        end
+
+        # Appends freshly-parsed declarations to an `RBS::Environment`
+        # across the gemspec's supported RBS range (`rbs >= 3.0, < 5.0`).
+        # RBS 4.x wraps the declarations in an `RBS::Source::RBS` and
+        # takes them through `env.add_source`; RBS 3.x has neither
+        # `RBS::Source` nor `add_source` and instead registers them with
+        # `env.add_signature(buffer:, directives:, decls:)` (a bare
+        # `env << decl` is NOT enough — it skips the `signatures` table
+        # that `resolve_type_names` rebuilds from, so the synthesized
+        # declarations silently vanish on resolve). Without this guard
+        # the synthesis paths (`synthesize_missing_namespaces`,
+        # `append_stub_declarations`, `add_virtual_rbs`) crashed under
+        # RBS 3.x with `uninitialized constant RBS::Source`.
+        def add_parsed_decls(env, buffer, directives, decls)
+          decls ||= []
+          directives ||= []
+          if env.respond_to?(:add_source)
+            env.add_source(::RBS::Source::RBS.new(buffer, directives, decls))
+          elsif env.respond_to?(:add_signature)
+            env.add_signature(buffer: buffer, directives: directives, decls: decls)
+          else
+            decls.each { |decl| env << decl }
+          end
+        end
+
         # True when a `class_decls` entry was declared in one of the
         # project's own signature files (by declaration location), so
         # the sweep skips the bundled stdlib / vendored universe.
         def project_entry?(entry, project_files)
-          decl = entry.respond_to?(:primary_decl) ? entry.primary_decl : nil
+          decl = primary_decl_for(entry)
           location = decl&.location
           buffer_name = location&.buffer&.name
           return false unless buffer_name
@@ -262,7 +303,7 @@ module Rigor
           end.join
           buffer = ::RBS::Buffer.new(name: SYNTHETIC_STUB_BUFFER, content: source)
           _, directives, decls = ::RBS::Parser.parse_signature(buffer)
-          base_env.add_source(::RBS::Source::RBS.new(buffer, directives || [], decls || []))
+          add_parsed_decls(base_env, buffer, directives, decls)
         rescue ::RBS::BaseError
           nil
         end
@@ -284,8 +325,7 @@ module Rigor
 
             buffer = ::RBS::Buffer.new(name: filename.to_s, content: content.to_s)
             _, directives, decls = ::RBS::Parser.parse_signature(buffer)
-            source = ::RBS::Source::RBS.new(buffer, directives || [], decls || [])
-            env.add_source(source)
+            add_parsed_decls(env, buffer, directives, decls)
           rescue ::RBS::BaseError
             # WD6 fail-soft: a single broken virtual RBS contribution
             # does not pull the whole env down. The plugin layer
@@ -589,7 +629,7 @@ module Rigor
 
         result = {}
         env.class_decls.each do |rbs_name, entry|
-          decl = entry.primary_decl
+          decl = self.class.primary_decl_for(entry)
           next if decl.nil?
 
           location = decl.location
@@ -911,12 +951,17 @@ module Rigor
       end
 
       # Collects the AST declaration nodes behind a `class_decls`
-      # entry. RBS 4's `ModuleEntry` / `ClassEntry` expose `each_decl`;
-      # the older single-`decl` shape is handled defensively so the
-      # loader survives an rbs-gem minor bump.
+      # entry across the supported RBS range (`rbs >= 3.0, < 5.0`).
+      # RBS 4's `ModuleEntry` / `ClassEntry` expose `each_decl` yielding
+      # bare AST declarations; RBS 3.x exposes `decls`, an array of
+      # `MultiEntry::D` wrappers whose `#decl` is the AST declaration.
+      # The single-`decl` shape is handled defensively so the loader
+      # survives an rbs-gem minor bump.
       def entry_declarations(entry)
         if entry.respond_to?(:each_decl)
           [].tap { |acc| entry.each_decl { |decl| acc << decl } }
+        elsif entry.respond_to?(:decls)
+          entry.decls.map { |d| d.respond_to?(:decl) ? d.decl : d }
         elsif entry.respond_to?(:decl)
           [entry.decl]
         else

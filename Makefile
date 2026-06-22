@@ -174,16 +174,16 @@ bench-perf:
 # `verify` chains the spec suite, the gated pool-runner spec (its
 # own rspec process — see `test-ractor-pool`), rubocop, `rigor check
 # lib`, and the plugin-tree contract check. The spec phase runs in
-# parallel by default via binpacker (3-4× faster on multi-core hosts
-# than the sequential rspec invocation). `lint` is already
-# process-parallel via rubocop's built-in worker pool; `check` /
-# `check-plugins` are short rigor invocations.
+# parallel by default (3-4× faster on multi-core hosts than the
+# sequential rspec invocation). `lint` is already process-parallel
+# via rubocop's built-in worker pool; `check` / `check-plugins` are
+# short rigor invocations.
 #
 # Total wall time on a 12-core laptop: ~60s (vs ~200s for the
 # sequential variant below). Use `verify-sequential` when chasing
 # parallel-only flakes — the worker isolation hides certain
 # ordering bugs that surface only in a single-process run.
-verify: test-binpacker test-ractor-pool lint check check-plugins
+verify: test-parallel test-ractor-pool lint check check-plugins
 
 # Sequential variant. Identical phases as `verify` but `test`
 # runs single-process. Slower but bit-for-bit reproducible

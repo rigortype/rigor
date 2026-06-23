@@ -88,6 +88,11 @@ view templates containing lazy `t('.key')` calls.
   may come from controller instance variables not visible in the
   template source. Configure `view_search_paths:` to override the
   default `["app/views"]`.
+- **View diagnostics duplicate under `--workers`** — the view
+  scan is a project-wide pass surfaced through the per-file
+  diagnostic hook, so each fork-pool worker re-emits the full set
+  (the same once-per-run limitation the `load-error` diagnostics
+  carry). Default `rigor check` (sequential) is unaffected.
 - **Pluralization is recognised but not validated** — `count:` is
   treated as a reserved option; whether the locale defines
   `:zero` / `:one` / `:other` is not checked.

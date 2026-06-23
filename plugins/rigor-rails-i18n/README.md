@@ -72,6 +72,12 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
   not parsed. A Prism-AST-based ERB walker would let the plugin
   validate `t('.key', **opts)` interpolation variables in views
   the same way it validates controller calls.
+- **Once-per-run diagnostic channel**: the view scan is a
+  project-wide pass emitted through the per-file diagnostic hook,
+  so under `--workers` each fork-pool worker re-emits the full set
+  (the same limitation the `load-error` path carries). A deduped
+  once-per-run plugin project-diagnostic channel would let both
+  surface exactly once regardless of the worker count.
 
 ## License
 

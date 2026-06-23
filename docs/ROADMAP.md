@@ -119,6 +119,60 @@ WD1. Amends [ADR-74](adr/74-offline-doc-access-and-llms-txt.md) (docs
 grammar + handbook bundling) and [ADR-73](adr/73-skill-driven-user-experience.md)
 (skill grammar).
 
+### Compatibility-safe strengthening backlog (0.2.x) — classified by BC risk
+
+The [2026-06-22 compatibility-safe strengthening survey](notes/20260622-rigor-0.2.x-compatibility-safe-strengthening-survey.md)
+catalogued where Rigor can get stronger during the `0.2.x` evaluation line
+without violating the [`docs/compatibility.md`](compatibility.md) /
+[ADR-50](adr/50-release-engineering-and-stability-strategy.md) discipline. The
+survey's eleven opportunities + P0–P7 backlog are classified below by their
+backwards-compatibility cost (the survey binds where this summary disagrees; it
+chooses no implementation task and authorizes no version bump / baseline
+migration / default severity promotion / commit). Several items **split** across
+buckets — the precision-additive core is safe now, but a louder default or a new
+discipline built on it is not.
+
+**(1) No BC cost — implementable immediately** (Route A internal, or Route B
+additive-default-off; the only gate is empirical false-positive risk, not a
+formal API break):
+
+- **Self-mutation / teeth batches** (survey §1, P1) — dev-only `tool/mutation/`, off the ADR-50 frozen surface; improves the analyzer's own oracle with zero public-surface change. Already a [Future cycles § Analyzer self-testing](#analyzer-self-testing--teeth-measurement--type-protection-coverage-adr-62--adr-63) track.
+- **Deterministic builtin / stdlib precision — FP-safe folds** (survey §2, P3) — `MethodDispatcher.dispatch` folds on concrete receivers that reduce `Dynamic` without firing new diagnostics; decline folds routing through user-overridable `coerce`. (Folds that *widen a real diagnostic* are bucket 3.)
+- **`Dynamic[T]` provenance labels** (survey §3, P2) — carry dynamic-origin cause facts internally, surface them additively through `coverage --protection` labels / `--format json` metadata; preserves `untyped = Dynamic[top]` relation semantics. The highest-value explanatory lever (turns a generic hole into a next action). (A strict-dynamic *policy* is bucket 2.)
+- **Cache / incremental / perf** (survey §5) — non-contract internals; bump `Cache::Descriptor::SCHEMA_VERSION` / `Cache::Store::FORMAT_VERSION` (marker `4.2`) on any serialized-meaning change so stale entries *miss*, never mis-read; validate from deterministic allocation signals, not wall-time noise.
+- **Configurable inference budgets, current-behavior defaults** (survey §6) — wire the spec [`budgets:`](type-specification/inference-budgets.md) table with defaults equal to today's hard-coded guards, exhaustion-as-explanation first (extend `RIGOR_BUDGET_TRACE`); name the new `.rigor.yml` keys deliberately (public vocabulary once documented), never leak internal fuel constants.
+- **Additive CLI helpers** (survey §7, P5) — `rigor doctor` / `rigor upgrade` / `rigor skill describe --deep` reusing existing check/baseline/plugin evidence with no default-`check` change; design any JSON output as a stable contract from day one, keep deep probes opt-in. (`describe --deep` + coverage-tractability labels are already tracked under [SKILL-driven onboarding UX](#skill-driven-onboarding-ux-adr-73-landed-2026-06-20--deferred-follow-ups).)
+- **Additive plugin precision** (survey §8, P6) — bundled-plugin recognizers, `config_schema` defaults, *optional* hooks; new recognizers must not turn positive recognition trace into default errors. (New public plugin *services* are bucket 2; required-hook changes are bucket 4.)
+- **Structured diagnostic metadata** (survey §9) — more `evidence_tier`-shaped additive JSON fields (omit-when-nil, per `rule_catalog.rb`) so agents/CI branch on data not `message` prose; each new field ships with frozen documented semantics, never a presentation mirror.
+- **Off / info-first new rules** (survey §10) — a new diagnostic shipping `:off` / `:info` with a stable id (`CheckRules::ALL_RULES`, aliases preserved) changes no default run; promote only after external-corpus FP sweeps. (A rule imposing a new *authoring discipline* is bucket 2.)
+
+**(2) BC-bearing but shippable behind a `bleeding_edge:` card** (a new authoring
+expectation, off by default, user `severity_overrides:` still winning; the
+overlay `BleedingEdge::FEATURES` is empty today):
+
+- **First `BleedingEdge::FEATURES` entry** (survey §11, P7) — a single data row behind the wired overlay; reserve it for a genuine next-major discipline with a stable id + migration note, never a dumping ground for ordinary precision fixes. Sets the style for every future feature id.
+- **Strict-dynamic discipline** (survey §3 tail) — any policy that *fails* previously-clean code for an unexplained `Dynamic` value, built on the bucket-1 provenance facts.
+- **New-discipline rules** (survey §10 tail) — a diagnostic that makes idiomatic Ruby fail by demanding a different authoring style ships via `bleeding_edge:`, not a silent default promotion.
+- **New public plugin-service / read-side additions** (survey §8) — additive but a contract expansion: ships with matching RBS + an intentional `public_api_drift_spec.rb` update, designed against the v1.0 freeze.
+
+**(3) BC-bearing, large semantic / engine work — separate-branch prep**
+(needs an external-corpus false-positive sweep before it is trustworthy; `make
+verify` alone is insufficient — P0):
+
+- **Default-widening receiver-typing / nilability / flow / override diagnostics** (survey P0) — the precision exists internally, but promoting it into the default profile requires the Rails / ActiveSupport / DSL / monkey-patch / RBS-gap corpus sweep that Rigor's own code can't supply.
+- **Precision folds that widen a real diagnostic** (survey §2 tail) — a sharper fold that flips a `Dynamic` receiver concrete can then fire `always-truthy` / possible-nil / undefined-method on working code (the liquid StringScanner / `||`-`&&` edge-narrowing precedents); gate on a corpus diff.
+- **`freeze` / `dup` shape-carrier preservation** (survey §4 tail) — deferred until the known reflexive `always-truthy` interaction is resolved; conservative invalidation (the rest of §4) is bucket 1.
+- **Baseline-format migration** (survey "artifact format" + Non-goals) — more user-visible than a cache bump; `Analysis::Baseline::CURRENT_VERSION` raises on mismatch by design, so a format change is public-surface work needing a migration path and guidance, on its own branch.
+
+**(4) Forbidden under the compat discipline / not realistically doable in a
+minor** (major-version-only; the survey's "compatibility traps to avoid"):
+
+- **Incompatible `rigor:v1:` annotation grammar / semantics** — introduce a *new* version prefix; never reinterpret `v1:` meanings.
+- **Changing `untyped = Dynamic[top]` semantics** — a relation-contract change; the §3 provenance work is explicitly required to preserve it.
+- **Renaming a diagnostic id without a legacy alias** — a rename *plus* a `LEGACY_RULE_ALIASES` entry is compatible; the alias-less rename is the trap.
+- **Making a plugin hook mandatory in a minor** — only optional hooks are additive; a required-hook change invalidates existing manifests.
+- **Silently mis-reading a changed artifact schema** — schema changes must invalidate (raise / miss), never reinterpret stale bytes as the current format.
+
 ## Future cycles (not committed to a specific release)
 
 Items that have surfaced across v0.1.x work and that the next implementer benefits from seeing without re-reading the full thread.

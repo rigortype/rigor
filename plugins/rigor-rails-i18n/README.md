@@ -66,10 +66,12 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 - **Pluralization branches**: enrich the index with
   `:zero` / `:one` / `:other` keys and validate
   `t(..., count: …)` against them.
-- **View interpolation validation**: once the engine can walk
-  ERB templates as Ruby ASTs (via the `node_rule` walk),
-  validate `t('.key', name: @user.name)` interpolation hashes
-  inside view templates.
+- **View interpolation validation**: the current scanner uses a
+  regex to extract `t('.key')` calls, so interpolation hashes
+  inside templates (e.g. `t('.greeting', name: @user.name)`) are
+  not parsed. A Prism-AST-based ERB walker would let the plugin
+  validate `t('.key', **opts)` interpolation variables in views
+  the same way it validates controller calls.
 
 ## License
 

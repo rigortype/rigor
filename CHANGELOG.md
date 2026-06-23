@@ -11,17 +11,17 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
-### Plugins
+## [0.2.5] - 2026-06-24
 
-- **[rigor-rails-i18n]** View-template lazy keys are now validated. `t('.title')` inside `app/views/setting/index.html.erb` expands to `setting.index.title` (the Rails virtual-path convention — partial `_`-prefixes and `+variant` suffixes are stripped) and is checked for key existence and per-locale coverage against `config/locales/*.yml`. ERB, Haml, and Slim templates under the configurable `view_search_paths` (default `["app/views"]`) are scanned; the results are cached and invalidated when templates change. Interpolation validation is skipped for templates — the hash may come from controller instance variables not visible in the template source. Plugin bumped to `0.3.0`.
+v0.2.5 adds i18n validation for view-template lazy keys in `rigor-rails-i18n`, so `t('.title')` calls inside ERB, Haml, and Slim templates are now expanded using the Rails virtual-path convention and checked against `config/locales/*.yml` for key existence and per-locale coverage.
+
+### Added
+
+- **[rigor-rails-i18n]** View-template lazy `t('.title')` calls are now validated against `config/locales/*.yml`.
+  - The key is expanded using the Rails virtual-path convention (partial `_`-prefixes and `+variant` suffixes are stripped) and checked for existence and per-locale coverage across ERB, Haml, and Slim templates under the configurable `view_search_paths`; results are cached and invalidated when templates change.
+  - Interpolation validation is skipped — the hash may come from controller instance variables not visible in the template source.
   - Known limitation: the view scan is a project-wide pass surfaced through the per-file diagnostic hook, so under `--workers` each fork-pool worker re-emits the full set (the same once-per-run limitation the `load-error` diagnostics already carry). Default sequential `rigor check` is unaffected.
-
-### Performance
-
-- **[spec suite]** Targeted profiling pass removes repeated per-example setup in three of the slowest spec groups, cutting roughly 50 seconds off the sequential suite run.
-  - `spec/rigor/environment/reflection_spec.rb` builds the immutable, frozen `Environment::Reflection` once per file via `before(:all)` instead of once per example. Every example only queries it, so the group drops from ~22s to ~2s across 22 examples.
-  - `spec/integration/plugins/rails_routes_plugin_spec.rb` opts its 84-example group into the existing process-wide shared plugin cache (`let(:default_run_plugin_cache_store) { :shared }`), reusing one env build instead of one per example. The rails-routes producer descriptor already tracks the routes file, its `draw` partials, and every helper file, so no stale cache output leaks between examples. The group drops from ~25s to ~4s.
-  - `spec/rigor/analysis/incremental_session_spec.rb` threads one shared `Environment` through the session's internal runs via a new optional `IncrementalSession.new(environment:)` parameter, so baseline / recheck / oracle runs stop rebuilding the same RBS universe; the group drops from ~16s to ~6s. The parameter defaults to `nil`, leaving the `rigor check` incremental path byte-identical.
+  - Plugin bumped to `0.3.0`.
 
 ## [0.2.4] - 2026-06-22
 
@@ -190,7 +190,8 @@ v0.2.0 is Rigor's first publicly-announced (general / evaluation) release, gover
 - **[cli]** `rigor explain call.unresolved-toplevel` now resolves — the [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) rule was missing from the catalogue despite being live since v0.1.14 — and a completeness spec now asserts every rule has a catalogue entry.
 - **[packaging]** The Docker build-context ignore file is scoped to the Dockerfile (`Dockerfile.dockerignore`) instead of a repo-wide `.dockerignore`, so external tools embedding the rigor source via BuildKit `--build-context` no longer get an empty context.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/rigortype/rigor/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/rigortype/rigor/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/rigortype/rigor/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/rigortype/rigor/compare/v0.2.1...v0.2.2

@@ -135,7 +135,12 @@ module Rigor
         diagnostics.concat(consume_load_error_diagnostics(path)) unless @load_errors.empty?
         diagnostics << runtime_error_diagnostic(path) if index.nil? && producer_error(:locale_index)
         unless @view_diagnostics_emitted
-          diagnostics.concat(producer_value(:view_diagnostics) || [])
+          view_diags = producer_value(:view_diagnostics) || []
+          if (view_err = producer_error(:view_diagnostics))
+            diagnostics << view_runtime_error_diagnostic(path, view_err)
+          else
+            diagnostics.concat(view_diags)
+          end
           @view_diagnostics_emitted = true
         end
         diagnostics
@@ -162,16 +167,27 @@ module Rigor
 
       def scan_view_files(index)
         view_files.flat_map do |view_path|
-          content = read_view_template(view_path) or next []
-          scope = Analyzer.view_scope_from_path(view_path) or next []
-
-          Analyzer.extract_lazy_keys_from_erb(content).flat_map do |key|
-            full_key = "#{scope}.#{key}"
-            Analyzer.validate_view_key(
-              full_key, locale_index: index, configured_locales: @configured_locales
-            ).map { |v| view_diagnostic(view_path, v) }
-          end
+          scan_view_file(view_path, index)
         end
+      end
+
+      def scan_view_file(view_path, index)
+        content = read_view_template(view_path) or return []
+        scope = Analyzer.view_scope_from_path(view_path) or return []
+
+        Analyzer.extract_lazy_keys_from_erb(content).flat_map do |key|
+          full_key = "#{scope}.#{key}"
+          Analyzer.validate_view_key(
+            full_key, locale_index: index, configured_locales: @configured_locales
+          ).map { |v| view_diagnostic(view_path, v) }
+        end
+      rescue StandardError => e
+        [Rigor::Analysis::Diagnostic.new(
+          path: view_path, line: 1, column: 1,
+          message: "rigor-rails-i18n: failed to scan view template: #{e.class}: #{e.message}",
+          severity: :warning,
+          rule: "load-error"
+        )]
       end
 
       def view_files
@@ -223,6 +239,15 @@ module Rigor
         Rigor::Analysis::Diagnostic.new(
           path: path, line: 1, column: 1,
           message: "rigor-rails-i18n: failed to load locales: #{error.class}: #{error.message}",
+          severity: :warning,
+          rule: "load-error"
+        )
+      end
+
+      def view_runtime_error_diagnostic(path, error)
+        Rigor::Analysis::Diagnostic.new(
+          path: path, line: 1, column: 1,
+          message: "rigor-rails-i18n: failed to scan view templates: #{error.class}: #{error.message}",
           severity: :warning,
           rule: "load-error"
         )

@@ -43,9 +43,14 @@ errors_demo.rb:25:1: warning: `t('errors.messages.blank')` is missing from local
 with a literal first argument. **Lazy keys** — `t('.title')` in a
 controller — are expanded to `<controller_scope>.<action>.<key>`
 from the file path and the innermost enclosing `def`, matching
-Rails' convention; lazy keys in non-controller files are skipped
-(the scope can't be determined statically). Calls with a
-non-literal key (`t(some_variable)`) pass through unchecked.
+Rails' convention; lazy keys in non-controller Ruby files (models,
+helpers, mailers) are skipped (the scope can't be determined
+statically at that point). **View template lazy keys** —
+`t('.title')` inside `app/views/setting/index.html.erb` expands
+to `setting.index.title` and is validated for key existence and
+per-locale coverage; ERB, Haml, and Slim templates under
+`view_search_paths` (default `app/views`) are scanned. Calls with
+a non-literal key (`t(some_variable)`) pass through unchecked.
 
 Keys under the prefixes Rails and the `rails-i18n` gem ship
 themselves (`date.` / `time.` / `datetime.` / `number.` /
@@ -62,11 +67,14 @@ plugins:
     config:
       locale_search_paths: ["config/locales"]   # default
       configured_locales: ["en"]                # default
+      view_search_paths: ["app/views"]          # default
 ```
 
 `configured_locales` is the set of locales the project ships;
 setting it to `["en", "ja"]` turns on `missing-locale` warnings
 whenever a key resolves in one but not the other.
+`view_search_paths` controls which directories are scanned for
+view templates containing lazy `t('.key')` calls.
 
 ## Limitations
 
@@ -74,6 +82,12 @@ whenever a key resolves in one but not the other.
 - **Lazy keys outside controllers are skipped** — the
   controller/action scope `t('.x')` depends on isn't derivable in
   a model / helper / mailer.
+- **View template lazy keys** (`t('.key')` inside ERB / Haml /
+  Slim) are validated for key existence and per-locale coverage.
+  Interpolation validation is skipped for templates — the hash
+  may come from controller instance variables not visible in the
+  template source. Configure `view_search_paths:` to override the
+  default `["app/views"]`.
 - **Pluralization is recognised but not validated** — `count:` is
   treated as a reserved option; whether the locale defines
   `:zero` / `:one` / `:other` is not checked.

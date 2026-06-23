@@ -28,7 +28,7 @@ plugins/rigor-rails-i18n/
 │       └── rails_i18n/
 │           ├── locale_index.rb     ← frozen `dotted_key => Entry` value object
 │           ├── locale_loader.rb    ← walks config/locales, parses YAML, builds the index
-│           └── analyzer.rb         ← per-call validation
+│           └── analyzer.rb         ← per-call validation + view template lazy-key scanning
 └── demo/
     ├── .rigor.yml
     ├── .gitignore
@@ -52,9 +52,10 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 
 | Surface | Used for |
 | --- | --- |
-| `manifest(... config_schema:)` | `locale_search_paths` / `configured_locales` knobs (ADR-40 declared defaults). |
+| `manifest(... config_schema:)` | `locale_search_paths` / `configured_locales` / `view_search_paths` knobs (ADR-40 declared defaults). |
 | `Plugin::Base.producer :locale_index` | Caches the discovered locale index across runs (cache invalidates via `producer watch:`). |
-| `Plugin::Base#io_boundary` (`read_file`) | Reads each `.yml` / `.yaml` under `locale_search_paths` through the trusted scope. |
+| `Plugin::Base.producer :view_diagnostics` | Scans view templates under `view_search_paths` for lazy `t('.key')` calls; caches across runs. |
+| `Plugin::Base#io_boundary` (`read_file`) | Reads each `.yml` / `.yaml` under `locale_search_paths` and each `.erb` / `.haml` / `.slim` under `view_search_paths` through the trusted scope. |
 | `node_rule` + `NodeContext` (ADR-37) | Per-call validation over the engine-owned walk; the lexical ancestor chain resolves a lazy `t('.key')` to its enclosing controller action. |
 
 ## Future direction
@@ -65,6 +66,10 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 - **Pluralization branches**: enrich the index with
   `:zero` / `:one` / `:other` keys and validate
   `t(..., count: …)` against them.
+- **View interpolation validation**: once the engine can walk
+  ERB templates as Ruby ASTs (via the `node_rule` walk),
+  validate `t('.key', name: @user.name)` interpolation hashes
+  inside view templates.
 
 ## License
 

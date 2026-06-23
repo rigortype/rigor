@@ -295,6 +295,7 @@ RSpec.describe "plugins/rigor-rails-i18n" do
               index:
                 title: "Settings"
                 push_notification: "Push Notification"
+                greeting: "Hello, %{name}"
             home:
               index:
                 title: "Welcome"
@@ -302,7 +303,19 @@ RSpec.describe "plugins/rigor-rails-i18n" do
               users:
                 new:
                   heading: "New User"
-        YAML
+            users:
+              form:
+                label: "Label"
+            profiles:
+              index:
+                mobile_title: "Mobile Welcome"
+            talks:
+              card:
+                title: "Talk Title"
+                nested:
+                  deep:
+                    key: "Deep"
+      YAML
       }
     end
 
@@ -397,6 +410,66 @@ RSpec.describe "plugins/rigor-rails-i18n" do
       )
       diags = plugin_diagnostics(result)
       expect(diags.select { |d| d.rule == "translation-call" }).to be_empty
+    end
+
+    it "strips the leading underscore from partial templates" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/users/_form.html.erb" => "<%= t('.label') %>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("users.form.label") }
+      expect(info).not_to be_nil
+    end
+
+    it "strips the variant suffix from view paths" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/profiles/index.html+mobile.erb" => "<%= t('.mobile_title') %>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("profiles.index.mobile_title") }
+      expect(info).not_to be_nil
+    end
+
+    it "scans Slim templates for lazy keys" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/talks/_card.html.slim" => "= t('.title')\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("talks.card.title") }
+      expect(info).not_to be_nil
+    end
+
+    it "extracts lazy keys from calls with interpolation arguments" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/setting/index.html.erb" => "<%= t('.greeting', name: @user.name) %>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("setting.index.greeting") }
+      expect(info).not_to be_nil
+    end
+
+    it "expands nested dotted lazy keys" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/talks/_card.html.erb" => "<%= t('.nested.deep.key') %>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("talks.card.nested.deep.key") }
+      expect(info).not_to be_nil
     end
   end
 

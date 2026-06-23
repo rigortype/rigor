@@ -194,9 +194,7 @@ module Rigor
 
           violations = [translation_call_info(key, entry)]
           missing = locale_index.missing_locales_for(key, configured_locales: configured_locales)
-          unless missing.empty?
-            violations << missing_locale_violation(key, missing)
-          end
+          violations << missing_locale_violation(key, missing) unless missing.empty?
           violations
         end
 

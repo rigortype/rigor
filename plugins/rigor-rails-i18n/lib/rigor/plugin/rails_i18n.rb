@@ -62,6 +62,11 @@ module Rigor
     #   coverage. Interpolation variable validation is skipped
     #   for view templates (the hash may come from controller
     #   instance variables not visible in the template).
+    #   The view scan is a project-wide pass surfaced through the
+    #   per-file diagnostic hook, so under `--workers` each
+    #   fork-pool worker re-emits the full set (the same
+    #   once-per-run limitation the `load-error` path carries);
+    #   sequential `rigor check` is unaffected.
     # - Pluralization (`t('errors.messages.too_short',
     #   count: n)`) is recognised at the call site but the
     #   `count` key is not used to validate the locale's
@@ -175,15 +180,16 @@ module Rigor
         content = read_view_template(view_path) or return []
         scope = Analyzer.view_scope_from_path(view_path) or return []
 
+        display_path = relative_view_path(view_path)
         Analyzer.extract_lazy_keys_from_erb(content).flat_map do |key|
           full_key = "#{scope}.#{key}"
           Analyzer.validate_view_key(
             full_key, locale_index: index, configured_locales: @configured_locales
-          ).map { |v| view_diagnostic(view_path, v) }
+          ).map { |v| view_diagnostic(display_path, v) }
         end
       rescue StandardError => e
         [Rigor::Analysis::Diagnostic.new(
-          path: view_path, line: 1, column: 1,
+          path: relative_view_path(view_path), line: 1, column: 1,
           message: "rigor-rails-i18n: failed to scan view template: #{e.class}: #{e.message}",
           severity: :warning,
           rule: "load-error"
@@ -197,6 +203,18 @@ module Rigor
 
           Dir.glob(File.join(absolute, "**", "*.{erb,haml,slim}"))
         end.sort
+      end
+
+      # Diagnostics anchor on a path relative to the working
+      # directory — the same base `File.expand_path` globbed the
+      # view files against — so view diagnostics render and match
+      # baselines like every other diagnostic (which carry
+      # project-relative paths). Falls back to the absolute path
+      # for a view outside the working tree.
+      def relative_view_path(absolute_path)
+        Pathname.new(absolute_path).relative_path_from(Pathname.pwd).to_s
+      rescue ArgumentError
+        absolute_path
       end
 
       def read_view_template(path)

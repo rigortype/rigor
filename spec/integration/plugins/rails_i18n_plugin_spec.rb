@@ -287,6 +287,7 @@ RSpec.describe "plugins/rigor-rails-i18n" do
     # different tmpdir-based tests).
     let(:default_run_plugin_cache_store) { nil }
 
+    # rubocop:disable Style/FormatStringToken
     let(:view_locales) do
       {
         "config/locales/en.yml" => <<~YAML
@@ -315,9 +316,10 @@ RSpec.describe "plugins/rigor-rails-i18n" do
                 nested:
                   deep:
                     key: "Deep"
-      YAML
+        YAML
       }
     end
+    # rubocop:enable Style/FormatStringToken
 
     it "expands `t('.title')` in a view to `<scope>.<key>`" do
       result = run_plugin(

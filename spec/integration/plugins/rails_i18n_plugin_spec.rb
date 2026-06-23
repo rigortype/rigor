@@ -280,6 +280,126 @@ RSpec.describe "plugins/rigor-rails-i18n" do
     end
   end
 
+  describe "view template lazy key expansion" do
+    # Use per-test cache to avoid cross-test pollution from the
+    # shared cache store (view_diagnostics is a new producer and
+    # the shared cache doesn't know how to invalidate it across
+    # different tmpdir-based tests).
+    let(:default_run_plugin_cache_store) { nil }
+
+    let(:view_locales) do
+      {
+        "config/locales/en.yml" => <<~YAML
+          en:
+            setting:
+              index:
+                title: "Settings"
+                push_notification: "Push Notification"
+            home:
+              index:
+                title: "Welcome"
+            admin:
+              users:
+                new:
+                  heading: "New User"
+        YAML
+      }
+    end
+
+    it "expands `t('.title')` in a view to `<scope>.<key>`" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/setting/index.html.erb" => "<%= t('.title') %>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("setting.index.title") }
+      expect(info).not_to be_nil
+    end
+
+    it "flags a lazy key in a view that does not exist in any locale" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/setting/index.html.erb" => "<h1><%= t('.nonexistent') %></h1>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      err = diags.find { |d| d.rule == "unknown-key" && d.message.include?("setting.index.nonexistent") }
+      expect(err).not_to be_nil
+    end
+
+    it "scans Haml templates for lazy keys" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/home/index.html.haml" => "= t('.title')\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("home.index.title") }
+      expect(info).not_to be_nil
+    end
+
+    it "expands lazy keys in namespaced view paths" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/admin/users/new.html.erb" => "<h2><%= t('.heading') %></h2>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("admin.users.new.heading") }
+      expect(info).not_to be_nil
+    end
+
+    it "recognises `I18n.t('.key')` in view templates" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/setting/index.html.erb" => "<%= I18n.t('.push_notification') %>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      info = diags.find { |d| d.rule == "translation-call" && d.message.include?("setting.index.push_notification") }
+      expect(info).not_to be_nil
+    end
+
+    it "scans multiple view files for lazy keys" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/setting/index.html.erb" => "<%= t('.title') %>\n",
+          "app/views/home/index.html.erb" => "<%= t('.title') %>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      infos = diags.select { |d| d.rule == "translation-call" }
+      expect(infos.size).to eq(2)
+    end
+
+    it "silently skips view files with no lazy keys" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales.merge(
+          "app/views/home/index.html.erb" => "<h1>Static content</h1>\n"
+        )
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "translation-call" }).to be_empty
+    end
+
+    it "silently skips view files outside view_search_paths" do
+      result = run_plugin(
+        source: "# noop\n",
+        files: view_locales
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "translation-call" }).to be_empty
+    end
+  end
+
   describe "load errors" do
     it "emits a `load-error` warning for a malformed YAML file" do
       malformed_yaml = "en:\n  bad:\n :: oops"

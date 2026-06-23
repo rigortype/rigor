@@ -42,6 +42,32 @@ module Rigor
         # `_controller.rb` (e.g. `users`, `admin/users`).
         CONTROLLER_PATH_RE = %r{(?:^|/)controllers/(.+)_controller\.rb$}
 
+        # Matches Rails view-template file paths to derive the
+        # I18n "virtual path" — the scope that Rails uses for
+        # lazy `t('.key')` lookups inside a template.
+        #
+        # Captures the path segment between `views/` and the
+        # format+variant+handler suffix, then strips a leading
+        # underscore from each segment — Rails templates resolve
+        # `_form.html.erb` as "form", not "_form".
+        #
+        #   app/views/setting/index.html.erb      → setting.index
+        #   app/views/admin/users/new.html.erb    → admin.users.new
+        #   app/views/home/index.html+mobile.erb  → home.index
+        #   app/views/users/_form.html.erb        → users.form
+        #
+        # The view-scope lazy expansion replaces the action
+        # part with the view's virtual path:
+        #   `<%= t('.title') %>` → `setting.index.title`
+        VIEW_SCOPE_RE = %r{views/(.+?)\.(?:\w+)(?:\+\w+)?\.\w+\z}
+
+        # Regex to extract lazy-key arguments from ERB / HTML
+        # template content. Matches `t('.key')`, `t(".key")`,
+        # `I18n.t('.key')`, and `I18n.translate('.key')` with a
+        # leading dot on the key string. Captures only the key
+        # part after the dot.
+        LAZY_T_KEY_RE = /\b(?:I18n\.)?(?:t|translate)\s*\(\s*(?:"\.([^"\\]*)"|'\.([^'\\]*)')/
+
         # Reserved option keys — these are recognised by I18n
         # itself and not treated as interpolation variables.
         RESERVED_OPTION_KEYS = %i[
@@ -144,6 +170,34 @@ module Rigor
           return nil unless m
 
           m[1].tr("/", ".")
+        end
+
+        def view_scope_from_path(path)
+          m = VIEW_SCOPE_RE.match(path.to_s)
+          return nil unless m
+
+          m[1].split("/").map { |seg| seg.sub(/\A_/, "") }.join(".")
+        end
+
+        def extract_lazy_keys_from_erb(content)
+          content.scan(LAZY_T_KEY_RE).map { |dq, sq| dq || sq }.uniq
+        end
+
+        def validate_view_key(key, locale_index:, configured_locales:)
+          entry = locale_index.find(key)
+          if entry.nil?
+            return [] if locale_index.pluralization_namespace?(key)
+            return [] if rails_shipped_key?(key)
+
+            return [unknown_key_violation(key, locale_index)]
+          end
+
+          violations = [translation_call_info(key, entry)]
+          missing = locale_index.missing_locales_for(key, configured_locales: configured_locales)
+          unless missing.empty?
+            violations << missing_locale_violation(key, missing)
+          end
+          violations
         end
 
         # Expands a lazy key (starting with `.`) to its full

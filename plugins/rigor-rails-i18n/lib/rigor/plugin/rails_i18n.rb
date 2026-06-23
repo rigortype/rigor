@@ -26,6 +26,7 @@ module Rigor
     #         config:
     #           locale_search_paths: ["config/locales"]   # default; optional
     #           configured_locales: ["en"]                # default; optional — locales the project ships
+    #           view_search_paths: ["app/views"]          # default; optional — view template search roots
     #
     # ## What it checks
     #
@@ -39,6 +40,11 @@ module Rigor
     #    `%{var}` placeholders must match the call's keyword
     #    arguments. Missing placeholders are errors; extra
     #    arguments are warnings.
+    # 4. **View template lazy keys** — `t('.title')` inside
+    #    `app/views/setting/index.html.erb` expands to
+    #    `setting.index.title` and is validated against the
+    #    locale index. ERB, Haml, and Slim templates are
+    #    scanned under `view_search_paths`.
     #
     # ## Limitations
     #
@@ -51,6 +57,11 @@ module Rigor
     #   Lazy keys in non-controller `.rb` files (models, helpers,
     #   mailers, …) are silently skipped — the controller/action
     #   scope cannot be statically determined there.
+    # - View template lazy keys (`t('.key')` inside ERB / Haml /
+    #   Slim) are validated for key existence and per-locale
+    #   coverage. Interpolation variable validation is skipped
+    #   for view templates (the hash may come from controller
+    #   instance variables not visible in the template).
     # - Pluralization (`t('errors.messages.too_short',
     #   count: n)`) is recognised at the call site but the
     #   `count` key is not used to validate the locale's
@@ -61,14 +72,15 @@ module Rigor
     class RailsI18n < Rigor::Plugin::Base
       manifest(
         id: "rails-i18n",
-        # Bumped 2026-05-28 — skip `unknown-key` on Rails / rails-
-        # i18n shipped defaults (`date.order`, `time.am`,
-        # `support.array.*`, `errors.format`, …).
-        version: "0.2.0",
+        # Bumped 2026-06-23 — view template lazy-key scanning
+        # (`t('.key')` inside ERB / Haml / Slim under
+        # `view_search_paths`).
+        version: "0.3.0",
         description: "Validates I18n `t(key)` calls against `config/locales/*.yml`.",
         config_schema: {
           "locale_search_paths" => { kind: :array, default: ["config/locales"] },
-          "configured_locales" => { kind: :array, default: ["en"] }
+          "configured_locales" => { kind: :array, default: ["en"] },
+          "view_search_paths" => { kind: :array, default: ["app/views"] }
         }
       )
 
@@ -88,22 +100,44 @@ module Rigor
         index
       end
 
+      # Scans view templates under `view_search_paths` for lazy
+      # `t('.key')` / `I18n.translate('.key')` calls and validates
+      # each expanded key against the locale index. Interpolation
+      # validation is skipped — the hash may come from controller
+      # instance variables not visible in the template source.
+      #
+      # Watches `**/*.{erb,haml,slim}` under each search root so
+      # the cache invalidates when templates are edited.
+      producer :view_diagnostics, watch: -> { [[@view_search_paths, "**/*.erb", "**/*.haml", "**/*.slim"]] } do |_params|
+        index = producer_value(:locale_index)
+        next [] if index.nil? || index.empty?
+
+        scan_view_files(index)
+      end
+
       def init(_services)
         @locale_search_paths = Array(config.fetch("locale_search_paths")).map(&:to_s)
+        @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
         @configured_locales = Array(config.fetch("configured_locales")).map(&:to_s)
         @load_errors = []
         @load_errors_emitted = false
+        @view_diagnostics_emitted = false
       end
 
       # File-level only: the once-per-run YAML load errors + the
-      # runtime (cache-load) error. Per-call `t('key')` validation runs
-      # over the engine-owned walk via the node_rule below (ADR-37). The
-      # locale index is lazily loaded + memoised by `producer_value`.
+      # runtime (cache-load) error + the view-template scan. Per-call
+      # `t('key')` validation runs over the engine-owned walk via the
+      # node_rule below (ADR-37). The locale index and view diagnostics
+      # are lazily loaded + memoised by `producer_value`.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:locale_index)
         diagnostics = []
         diagnostics.concat(consume_load_error_diagnostics(path)) unless @load_errors.empty?
         diagnostics << runtime_error_diagnostic(path) if index.nil? && producer_error(:locale_index)
+        unless @view_diagnostics_emitted
+          diagnostics.concat(producer_value(:view_diagnostics) || [])
+          @view_diagnostics_emitted = true
+        end
         diagnostics
       end
 
@@ -125,6 +159,44 @@ module Rigor
       end
 
       private
+
+      def scan_view_files(index)
+        view_files.flat_map do |view_path|
+          content = read_view_template(view_path) or next []
+          scope = Analyzer.view_scope_from_path(view_path) or next []
+
+          Analyzer.extract_lazy_keys_from_erb(content).flat_map do |key|
+            full_key = "#{scope}.#{key}"
+            Analyzer.validate_view_key(
+              full_key, locale_index: index, configured_locales: @configured_locales
+            ).map { |v| view_diagnostic(view_path, v) }
+          end
+        end
+      end
+
+      def view_files
+        @view_search_paths.flat_map do |root|
+          absolute = File.expand_path(root)
+          next [] unless File.directory?(absolute)
+
+          Dir.glob(File.join(absolute, "**", "*.{erb,haml,slim}"))
+        end.sort
+      end
+
+      def read_view_template(path)
+        io_boundary.read_file(path)
+      rescue Plugin::AccessDeniedError
+        nil
+      end
+
+      def view_diagnostic(view_path, violation)
+        Rigor::Analysis::Diagnostic.new(
+          path: view_path, line: 1, column: 1,
+          message: violation.message,
+          severity: violation.severity,
+          rule: violation.rule
+        )
+      end
 
       # The runner only invokes `diagnostics_for_file` for
       # Ruby files (`paths:` is filtered to `.rb`). YAML

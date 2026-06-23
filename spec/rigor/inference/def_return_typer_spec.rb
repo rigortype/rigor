@@ -35,6 +35,25 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
       result = described_class.call(def_node, scope_index)
       expect(result).to be_nil
     end
+
+    it "returns the inferred type for a simple method body" do
+      def_node = parse_def("def foo; 1; end")
+      int_type = Rigor::Type::Combinator.constant_of(1)
+      scope = instance_double(Rigor::Scope, type_of: int_type)
+      indexed = { def_node.body => scope }
+      expect(described_class.call(def_node, indexed)).to eq(int_type)
+    end
+
+    it "unions the last expression with explicit return values" do
+      def_node = parse_def("def foo; return 1; 2; end")
+      last_expr = described_class.body_last_expression(def_node.body)
+      int_type = Rigor::Type::Combinator.constant_of(1)
+      scope = instance_double(Rigor::Scope, type_of: int_type)
+      return_node = def_node.body.body.first
+      indexed = { last_expr => scope, return_node => scope }
+      expected = Rigor::Type::Combinator.union(int_type, int_type)
+      expect(described_class.call(def_node, indexed)).to eq(expected)
+    end
   end
 
   describe "stack safety" do
@@ -53,6 +72,56 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
   end
 
   describe "private helpers" do
+    describe ".union_with_explicit_returns" do
+      it "returns the last_type when there are no explicit returns" do
+        body = parse_def("def foo; 1; end").body
+        result = described_class.union_with_explicit_returns(body, :int_type, scope_index)
+        expect(result).to eq(:int_type)
+      end
+
+      it "unions last_type with collected return types" do
+        source = <<~RUBY
+          def foo
+            return 1
+            2
+          end
+        RUBY
+        body = parse_def(source).body
+        return_node = body.body.first
+        ret_type = Rigor::Type::Combinator.constant_of(1)
+        return_scope = instance_double(Rigor::Scope, type_of: ret_type)
+        last_type = Rigor::Type::Combinator.constant_of(2)
+        indexed = { return_node => return_scope }
+        result = described_class.union_with_explicit_returns(body, last_type, indexed)
+        expect(result).to eq(Rigor::Type::Combinator.union(last_type, ret_type))
+      end
+    end
+
+    describe ".collect_return_types" do
+      it "collects the type of a single-value return" do
+        source = "def foo; return 1; end"
+        body = parse_def(source).body
+        ret_type = Rigor::Type::Combinator.constant_of(1)
+        scope = instance_double(Rigor::Scope, type_of: ret_type)
+        return_node = body.body.first
+        indexed = { return_node => scope }
+        out = []
+        described_class.collect_return_types(body, indexed, out)
+        expect(out.size).to eq(1)
+        expect(out.first).to eq(ret_type)
+      end
+
+      it "collects nil for bare 'return'" do
+        source = "def foo; return; end"
+        body = parse_def(source).body
+        out = []
+        described_class.collect_return_types(body, scope_index, out)
+        expect(out.size).to eq(1)
+        expect(out.first).to be_a(Rigor::Type::Constant)
+        expect(out.first.value).to be_nil
+      end
+    end
+
     describe ".body_last_expression" do
       it "extracts the last statement from a StatementsNode" do
         body = parse_def("def foo; 1; 2; end").body

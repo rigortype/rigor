@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Plugins
+
+- **[rigor-rails-i18n]** View-template lazy keys are now validated. `t('.title')` inside `app/views/setting/index.html.erb` expands to `setting.index.title` (the Rails virtual-path convention — partial `_`-prefixes and `+variant` suffixes are stripped) and is checked for key existence and per-locale coverage against `config/locales/*.yml`. ERB, Haml, and Slim templates under the configurable `view_search_paths` (default `["app/views"]`) are scanned; the results are cached and invalidated when templates change. Interpolation validation is skipped for templates — the hash may come from controller instance variables not visible in the template source. Plugin bumped to `0.3.0`.
+  - Known limitation: the view scan is a project-wide pass surfaced through the per-file diagnostic hook, so under `--workers` each fork-pool worker re-emits the full set (the same once-per-run limitation the `load-error` diagnostics already carry). Default sequential `rigor check` is unaffected.
+
 ### Performance
 
 - **[spec suite]** Targeted profiling pass removes repeated per-example setup in three of the slowest spec groups, cutting roughly 50 seconds off the sequential suite run.

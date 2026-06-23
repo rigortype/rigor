@@ -101,6 +101,8 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | --- | --- |
 | 2026-06-05 | [ADR corpus rubric audit — scoring ADR-0…49 against ADR-49](20260605-adr-corpus-rubric-audit.md) |
 | 2026-06-10 | [ユーザー向けドキュメント レビュー・バッテリー設計 — chibirigor-review の移植検討](20260610-user-docs-review-battery-design.md) |
+| 2026-06-22 | [Rigor 0.2.x problem survey — type theory and Ruby runtime type model](20260622-rigor-0.2.x-problem-survey.md) |
+| 2026-06-22 | [Rigor 0.2.x compatibility-safe strengthening survey](20260622-rigor-0.2.x-compatibility-safe-strengthening-survey.md) |
 
 ## Adding a note
 

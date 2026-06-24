@@ -1,10 +1,11 @@
 # ADR-77 — `rigor doctor` and `rigor upgrade` evidence-routing commands
 
-Status: **Proposed — 2026-06-24.** Two additive CLI commands that *route
-existing evidence* rather than change default `check` behaviour.
-`rigor doctor` classifies already-produced findings (config-resolution
-warnings, strict-plugin recognition, baseline drift) into setup-problem vs
-clean-run with a suggested next action; `rigor upgrade` is the
+Status: **Accepted — implemented 2026-06-24 (`8048991c`; `upgrade`
+skeleton).** Two additive CLI commands that *route existing evidence*
+rather than change default `check` behaviour. `rigor doctor` classifies
+already-produced findings (config-resolution warnings, RBS-env health,
+strict-plugin recognition, baseline drift) into setup-problem vs clean-run
+with a suggested next action; `rigor upgrade` is the
 [ADR-50](50-release-engineering-and-stability-strategy.md) WD7 migration
 command. Both reuse the existing check / baseline / plugin surfaces, add no
 default behaviour change, and (where they emit JSON) carry a stable

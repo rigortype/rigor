@@ -1,10 +1,18 @@
 # ADR-76 — Effect modeling for `freeze` / `dup` / `clone` and shape-carrier preservation
 
-Status: **Proposed — 2026-06-24.** Records a split decision on effect /
-mutation modeling. The *conservative-invalidation* half — non-mutating
-calls preserve facts, aliased-mutation calls invalidate them — is
-compatibility-safe internal precision and lands incrementally (bucket 1).
-The *shape-carrier preservation through the pure self-returners*
+Status: **Accepted — WD1 implemented 2026-06-24 (`2751bc78`); WD2
+deferred.** Records a split decision on effect / mutation modeling. The
+*conservative-invalidation* half — non-mutating calls preserve facts,
+aliased-mutation calls invalidate them — is compatibility-safe internal
+precision and **landed** as the WD1 slice: `MutationWidening` now treats
+`freeze` / `dup` / `clone` / `itself` as pure self-returners
+(`PURE_SELF_RETURNERS` + `pure_self_returner?`, early-returns in
+`widen_after_call` / `widen_for_outer_receiver`) so they preserve the
+receiver's facts instead of invalidating them, no diagnostic or vocabulary
+change, self-check clean (the 12 reflexive `always-truthy` did **not**
+reappear — the change stays in the invalidation path, not the dispatch
+return-type tier). The *shape-carrier preservation through the pure
+self-returners*
 (`freeze` / `dup` / `clone` / `itself`) — which would close a real fold
 gap — is **deferred to a separate branch** (bucket 3) until the reflexive
 `flow.always-truthy-condition` interaction it triggers on Rigor's own

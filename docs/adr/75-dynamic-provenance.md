@@ -1,8 +1,9 @@
 # ADR-75 — `Dynamic[T]` provenance and explanation
 
-Status: **Proposed — 2026-06-24.** `Dynamic[T]` is already the correct
-carrier for a value drawn from an unchecked source, but the engine does
-not record *why* a value became dynamic. This ADR adds a precision-additive
+Status: **Accepted — implemented 2026-06-24 (`01e291cb`).** `Dynamic[T]`
+is already the correct carrier for a value drawn from an unchecked source,
+but the engine did not record *why* a value became dynamic. This ADR adds
+a precision-additive
 **provenance** side-channel — a small fixed set of dynamic-origin causes
 carried alongside (not inside) the carrier and surfaced additively through
 `coverage --protection` labels and `--format json` metadata — so a user
@@ -63,10 +64,23 @@ the `value_fields :static_facet` equality that makes `Dynamic[T]` dedup in
 unions and cache keys — two values that are the same type but reached
 dynamism by different routes must remain `==`, and the lattice must not
 fork by origin. Instead provenance lives in a parallel origin map keyed on
-the introduction site (the `FallbackTracer` choke point generalised into a
-queryable per-site `dynamic_origin`), read by `ProtectionScanner` when it
+the introduction-site AST node, read by `ProtectionScanner` when it
 classifies a site. This keeps the carrier, the lattice, and the cache
 untouched.
+
+**As implemented:** the map is `Scope#dynamic_origins`, an identity-keyed
+(`compare_by_identity`) side-table written by `Scope#record_dynamic_origin`
+at each introduction site (`ExpressionTyper#fallback_for` →
+`unsupported-syntax`; the `BudgetTrace` recursion cutoffs →
+`analyzer-budget-cutoff`; `MethodDispatcher`'s project-patched / dep-source
+tiers → `external-gem-without-rbs`; a plugin dynamic return →
+`framework-dsl-boundary`; an RBS `Dynamic[Top]` return → `explicit-untyped`).
+It is deliberately **not** carried on the trace-only `FallbackTracer` (an
+earlier sketch's choke point) — that recorder is nil outside `rigor trace`,
+so a normal run would carry no provenance; the always-populated `Scope`
+side-table is the correct home. `Scope#==` / `#hash` exclude it (the
+ADR-53 `DiscoveryIndex` litmus), so it never forks a flow-state dedup or a
+cache key, and `#join` copies it by reference, unexamined.
 
 ### WD2 — Surface additively, structured-not-string
 

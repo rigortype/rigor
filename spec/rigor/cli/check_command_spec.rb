@@ -232,14 +232,12 @@ RSpec.describe Rigor::CLI::CheckCommand do
     end
   end
 
-  describe "#resolve_workers (ADR-15 Phase 4c precedence)" do
-    subject(:command) { described_class.new(argv: [], out: StringIO.new, err: StringIO.new) }
-
+  describe "CheckRunnerFactory.resolve_workers (ADR-15 Phase 4c precedence)" do
     let(:configuration) { instance_double(Rigor::Configuration, parallel_workers: 0) }
 
     it "prefers an explicit --workers value, clamping negatives to 0" do
-      expect(command.send(:resolve_workers, { workers: "-1" }, configuration)).to eq(0)
-      expect(command.send(:resolve_workers, { workers: "4" }, configuration)).to eq(4)
+      expect(Rigor::CLI::CheckRunnerFactory.resolve_workers({ workers: "-1" }, configuration)).to eq(0)
+      expect(Rigor::CLI::CheckRunnerFactory.resolve_workers({ workers: "4" }, configuration)).to eq(4)
     end
 
     it "falls back to the configuration default when no CLI / env override is set" do
@@ -247,7 +245,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
       saved = ENV.fetch("RIGOR_RACTOR_WORKERS", :absent)
       ENV.delete("RIGOR_RACTOR_WORKERS")
 
-      expect(command.send(:resolve_workers, { workers: nil }, configuration)).to eq(5)
+      expect(Rigor::CLI::CheckRunnerFactory.resolve_workers({ workers: nil }, configuration)).to eq(5)
     ensure
       saved == :absent ? ENV.delete("RIGOR_RACTOR_WORKERS") : (ENV["RIGOR_RACTOR_WORKERS"] = saved)
     end

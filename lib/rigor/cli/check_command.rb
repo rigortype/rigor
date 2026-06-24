@@ -13,6 +13,7 @@ require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
 require_relative "ci_detector"
+require_relative "check_runner_factory"
 
 module Rigor
   class CLI
@@ -244,40 +245,10 @@ module Rigor
       end
 
       def build_check_runner(configuration:, options:, buffer:, cache_root:)
-        cache_store = if options.fetch(:no_cache)
-                        nil
-                      else
-                        Cache::Store.new(
-                          root: cache_root,
-                          max_bytes: configuration.cache_max_bytes
-                        )
-                      end
-        Analysis::Runner.new(
-          configuration: configuration,
-          explain: options.fetch(:explain),
-          cache_store: cache_store,
-          collect_stats: options.fetch(:stats),
-          workers: resolve_workers(options, configuration),
-          buffer: buffer
+        CheckRunnerFactory.build(
+          configuration: configuration, options: options,
+          buffer: buffer, cache_root: cache_root
         )
-      end
-
-      # ADR-15 Phase 4c — resolves the worker count by
-      # precedence: CLI `--workers=N` (most explicit) > env
-      # `RIGOR_RACTOR_WORKERS` > config `.rigor.yml`
-      # `parallel.workers:` > 0 (sequential default). Returns
-      # an Integer; non-numeric values raise so typos fail
-      # loudly. CLI / env may pass a negative value — clamped
-      # to 0 (sequential) so a stray `-1` doesn't crash the
-      # pool spawn loop.
-      def resolve_workers(options, configuration)
-        cli_value = options[:workers]
-        return [Integer(cli_value), 0].max if cli_value
-
-        env_value = ENV.fetch("RIGOR_RACTOR_WORKERS", nil)
-        return [Integer(env_value), 0].max if env_value && !env_value.empty?
-
-        configuration.parallel_workers
       end
 
       def parse_check_options # rubocop:disable Metrics/AbcSize,Metrics/MethodLength

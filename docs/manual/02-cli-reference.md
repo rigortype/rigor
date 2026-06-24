@@ -539,6 +539,63 @@ with its stable id, the severity it would impose, and whether your config
 adopts it. See [`docs/compatibility.md`](../compatibility.md) for how
 bleeding-edge fits the stability model.
 
+## `rigor doctor`
+
+Classify setup problems vs a clean run with routed next actions
+([ADR-77](../adr/77-doctor-and-upgrade-commands.md) WD1).
+
+```sh
+rigor doctor [--config PATH] [--format text|json]
+```
+
+| Flag | Purpose |
+| --- | --- |
+| `--config PATH` | Use this `.rigor.yml` instead of auto-discovery. |
+| `--format text\|json` | Output format. Default `text`. |
+
+Runs a scoped analysis and audits:
+
+- **Configuration audit** — unresolved `signature_paths:`, unknown
+  `libraries:`, inert `disable:` / `severity_overrides:` tokens
+  ({ConfigAudit}).
+- **RBS environment health** — whether the RBS class universe built
+  successfully (`0` classes means a broken setup).
+- **Plugin load errors** — whether every configured plugin loaded.
+- **Baseline drift** — whether the current diagnostics have drifted
+  from the saved baseline.
+- **Rails plugin gap** — whether `Gemfile.lock` contains Rails gems
+  but no Rails plugin is enabled.
+
+Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
+routed hint (e.g. "Run `rigor baseline regenerate`").  JSON output
+is a stable contract:
+
+```json
+{
+  "status": "issues_found",
+  "checks": [
+    { "id": "config_audit", "status": "fail", "message": "...", "hint": "..." }
+  ]
+}
+```
+
+Exits `1` when any check fails, `0` when all pass.
+
+## `rigor upgrade`
+
+Migration command skeleton ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
+WD7).  The real body lands when a concrete backwards-compatibility
+break gives it a target (e.g. re-running `baseline regenerate`
+against a strengthened default profile, surfacing renamed
+suppression ids, reporting `bleeding_edge:` graduations).
+
+```sh
+rigor upgrade
+```
+
+Until then it prints the current version and notes that upgrade is
+queued.  Exits `0`.
+
 ## Environment variables
 
 Most behaviour is driven by flags and `.rigor.yml`; a few

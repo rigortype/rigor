@@ -43,7 +43,9 @@ module Rigor
       "skill" => :run_skill,
       "describe" => :run_describe,
       "docs" => :run_docs,
-      "show-bleedingedge" => :run_show_bleedingedge
+      "show-bleedingedge" => :run_show_bleedingedge,
+      "doctor" => :run_doctor,
+      "upgrade" => :run_upgrade
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -317,6 +319,18 @@ module Rigor
       CLI::ShowBleedingedgeCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_doctor
+      require_relative "cli/doctor_command"
+
+      CLI::DoctorCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
+    def run_upgrade
+      require_relative "cli/upgrade_command"
+
+      CLI::UpgradeCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def help
       <<~HELP
         Usage: rigor <command> [options]
@@ -342,6 +356,8 @@ module Rigor
           skill      Recommend the next skill + list/print bundled Agent Skills (skill describe, skill <name>)
           docs       Print the bundled docs offline (docs <name>, docs --list)
           show-bleedingedge  Show the bleeding-edge overlay + what your config adopts (ADR-50)
+          doctor     Classify setup problems vs clean run with routed next actions (ADR-77)
+          upgrade    Migration command skeleton (ADR-50 WD7, queued)
           version    Print the Rigor version
           help       Print this help
       HELP

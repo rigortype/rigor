@@ -102,7 +102,21 @@ module Rigor
         replace
       ].to_set.freeze
 
+      # Methods that return the receiver (or a shallow copy) and
+      # cannot mutate it. They must not trigger widening or any
+      # other receiver-fact invalidation. The list is intentionally
+      # narrow — only methods whose purity is unconditional and
+      # whose return value is the receiver itself (or a copy that
+      # leaves the original untouched).
+      PURE_SELF_RETURNERS = %i[freeze dup clone itself].freeze
+
       module_function
+
+      # True when `method_name` is a pure self-returner that must
+      # not invalidate the receiver's facts.
+      def pure_self_returner?(method_name)
+        PURE_SELF_RETURNERS.include?(method_name)
+      end
 
       # Returns a scope with the call's receiver widened, when the
       # receiver is a local-/instance-variable read whose current
@@ -114,6 +128,8 @@ module Rigor
       # @param current_scope [Rigor::Scope]
       # @return              [Rigor::Scope]
       def widen_after_call(call_node:, current_scope:)
+        return current_scope if pure_self_returner?(call_node.name)
+
         receiver = call_node.receiver
         return current_scope if receiver.nil?
 
@@ -181,6 +197,8 @@ module Rigor
       end
 
       def widen_for_outer_receiver(call_node, scope)
+        return scope if pure_self_returner?(call_node.name)
+
         receiver = call_node.receiver
         return scope if receiver.nil?
 

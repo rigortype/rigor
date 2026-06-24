@@ -13,6 +13,22 @@ require "rigor/type"
 # end-to-end loop-mutation spec under `spec/integration/`;
 # this file pins the widening primitive in isolation.
 RSpec.describe Rigor::Inference::MutationWidening do
+  describe ".pure_self_returner?" do
+    it "recognizes freeze, dup, clone, and itself" do
+      expect(described_class.pure_self_returner?(:freeze)).to be true
+      expect(described_class.pure_self_returner?(:dup)).to be true
+      expect(described_class.pure_self_returner?(:clone)).to be true
+      expect(described_class.pure_self_returner?(:itself)).to be true
+    end
+
+    it "declines for mutators and ordinary readers" do
+      expect(described_class.pure_self_returner?(:<<)).to be false
+      expect(described_class.pure_self_returner?(:push)).to be false
+      expect(described_class.pure_self_returner?(:first)).to be false
+      expect(described_class.pure_self_returner?(:map)).to be false
+    end
+  end
+
   describe ".widen_for_mutator" do
     it "widens a single-element Tuple under `<<` to Array[T]" do
       tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
@@ -128,6 +144,30 @@ RSpec.describe Rigor::Inference::MutationWidening do
       call = parse_call("arms = []; arms << x")
       expect(described_class.widen_after_call(call_node: call, current_scope: scope)).to equal(scope)
     end
+
+    it "leaves the scope unchanged for pure self-returners on a Tuple" do
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
+      seeded = scope.with_local(:arms, tuple)
+
+      %i[freeze dup clone itself].each do |meth|
+        call = parse_call("arms = []; arms.#{meth}")
+        result = described_class.widen_after_call(call_node: call, current_scope: seeded)
+        expect(result.local(:arms)).to equal(tuple),
+                                       "expected #{meth} not to widen the Tuple, but it did"
+      end
+    end
+
+    it "leaves the scope unchanged for pure self-returners on a HashShape" do
+      shape = Rigor::Type::HashShape.new(a: Rigor::Type::Combinator.nominal_of("Integer"))
+      seeded = scope.with_local(:params, shape)
+
+      %i[freeze dup clone itself].each do |meth|
+        call = parse_call("params = {}; params.#{meth}")
+        result = described_class.widen_after_call(call_node: call, current_scope: seeded)
+        expect(result.local(:params)).to equal(shape),
+                                         "expected #{meth} not to widen the HashShape, but it did"
+      end
+    end
   end
 
   describe ".widen_after_block" do
@@ -218,6 +258,21 @@ RSpec.describe Rigor::Inference::MutationWidening do
       call = parse_each_call("arr = [1]; items.size")
       seeded = Rigor::Scope.empty.with_local(:arr, tuple)
       expect(described_class.widen_after_block(call_node: call, outer_scope: seeded)).to equal(seeded)
+    end
+
+    it "leaves the outer scope unchanged for pure self-returners inside a block body" do
+      call = parse_each_call(<<~RUBY)
+        arr = [1]
+        items.each do |x|
+          arr.freeze
+          arr.dup
+          arr.clone
+          arr.itself
+        end
+      RUBY
+      seeded = Rigor::Scope.empty.with_local(:arr, tuple)
+      result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
+      expect(result.local(:arr)).to equal(tuple)
     end
   end
 end

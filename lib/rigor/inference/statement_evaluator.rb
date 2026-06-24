@@ -2918,7 +2918,8 @@ module Rigor
           environment: scope.environment,
           locals: {}.freeze,
           source_path: scope.source_path,
-          discovery: scope.discovery
+          discovery: scope.discovery,
+          dynamic_origins: scope.dynamic_origins
         )
       end
 

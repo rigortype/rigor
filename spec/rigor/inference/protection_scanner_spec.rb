@@ -30,6 +30,30 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(result.unprotected_count).to eq(1)
     expect(result.protected_count).to eq(0)
     expect(result.sites.first.method_name).to eq("save")
+    expect(result.sites.first.dynamic_origin).to be_nil
+  end
+
+  it "carries dynamic_origin when the scope seeds it for the receiver" do
+    source = <<~RUBY
+      def f(x)
+        x.save
+      end
+    RUBY
+    root = Prism.parse(source).value
+    scope = Rigor::Scope.empty
+
+    receiver_node = nil
+    Rigor::Source::NodeWalker.each(root) do |node|
+      if node.is_a?(Prism::CallNode) && node.receiver
+        receiver_node = node.receiver
+        break
+      end
+    end
+    scope.record_dynamic_origin(receiver_node, :unsupported_syntax) if receiver_node
+
+    result = described_class.new(scope: scope).scan(root)
+    expect(result.unprotected_count).to eq(1)
+    expect(result.sites.first.dynamic_origin).to eq(:unsupported_syntax)
   end
 
   it "treats a union with a Dynamic arm as unprotected (gradually valid)" do

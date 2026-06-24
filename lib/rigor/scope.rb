@@ -23,7 +23,8 @@ module Rigor
                 :ivars, :cvars, :globals,
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced,
-                :source_path, :discovery, :struct_fold_safe_locals
+                :source_path, :discovery, :struct_fold_safe_locals,
+                :dynamic_origins
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # {DiscoveryIndex} the scope carries by a single reference; the
@@ -122,6 +123,11 @@ module Rigor
       end
     end
 
+    def record_dynamic_origin(node, cause)
+      @dynamic_origins[node] = cause
+      self
+    end
+
     def initialize(
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
@@ -134,7 +140,8 @@ module Rigor
       method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
       declaration_sourced: EMPTY_DECLARATION_SOURCED,
       source_path: nil,
-      struct_fold_safe_locals: EMPTY_FOLD_SAFE
+      struct_fold_safe_locals: EMPTY_FOLD_SAFE,
+      dynamic_origins: {}.compare_by_identity
     )
       @environment = environment
       @locals = locals
@@ -149,6 +156,7 @@ module Rigor
       @declaration_sourced = declaration_sourced
       @source_path = source_path
       @struct_fold_safe_locals = struct_fold_safe_locals
+      @dynamic_origins = dynamic_origins
       freeze
     end
 
@@ -716,7 +724,8 @@ module Rigor
       method_chain_narrowings: @method_chain_narrowings,
       declaration_sourced: @declaration_sourced,
       source_path: @source_path,
-      struct_fold_safe_locals: @struct_fold_safe_locals
+      struct_fold_safe_locals: @struct_fold_safe_locals,
+      dynamic_origins: @dynamic_origins
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -727,7 +736,8 @@ module Rigor
         method_chain_narrowings: method_chain_narrowings,
         declaration_sourced: declaration_sourced,
         source_path: source_path,
-        struct_fold_safe_locals: struct_fold_safe_locals
+        struct_fold_safe_locals: struct_fold_safe_locals,
+        dynamic_origins: dynamic_origins
       )
     end
 
@@ -764,7 +774,8 @@ module Rigor
         # flow-live (a method-local nil write / failed-guard narrowing), the
         # merge is flow-live and `possible-nil-receiver` fires as before.
         declaration_sourced: join_declaration_sourced(other),
-        source_path: source_path
+        source_path: source_path,
+        dynamic_origins: @dynamic_origins
       )
     end
 

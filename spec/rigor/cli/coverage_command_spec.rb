@@ -112,6 +112,19 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(below).to eq(1)
       expect(meets).to eq(0)
     end
+
+    it "omits dynamic_origin in JSON output when nil" do
+      File.write("dyn.rb", "def f(x)\n  x.whatever\nend\n")
+
+      status, out, = run(["--protection", "--format", "json", "dyn.rb"])
+
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      expect(payload["add_a_type_here"]).to be_an(Array)
+      entry = payload["add_a_type_here"].first
+      expect(entry).to have_key("method")
+      expect(entry).not_to have_key("dynamic_origin")
+    end
   end
 
   # ADR-70 — the fused static∪dynamic overlay. The TestSuiteOracle is stubbed so

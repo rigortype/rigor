@@ -20,8 +20,8 @@ module Rigor
     # - inner_type: the Rigor::Type returned to the caller (currently
     #   always Dynamic[Top]; later slices may carry richer fallback
     #   types).
-    class Fallback < Data.define(:node_class, :location, :family, :inner_type)
-      def initialize(node_class:, location:, family:, inner_type:)
+    class Fallback < Data.define(:node_class, :location, :family, :inner_type, :origin)
+      def initialize(node_class:, location:, family:, inner_type:, origin: nil)
         raise ArgumentError, "node_class must be a Class, got #{node_class.class}" unless node_class.is_a?(Class)
 
         unless FALLBACK_FAMILIES.include?(family)

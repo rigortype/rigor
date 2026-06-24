@@ -19,7 +19,7 @@ module Rigor
     # (does a diagnostic fire) is the phased mutation tier.
     class ProtectionScanner
       # A single unprotected call site.
-      Site = Data.define(:line, :receiver, :method_name)
+      Site = Data.define(:line, :receiver, :method_name, :dynamic_origin)
 
       FileResult = Data.define(:protected_count, :unprotected_count, :sites) do
         def total = protected_count + unprotected_count
@@ -43,14 +43,17 @@ module Rigor
         Source::NodeWalker.each(root) do |node|
           next unless dispatch_site?(node)
 
-          receiver_type = index[node.receiver].type_of(node.receiver)
+          scope = index[node.receiver]
+          receiver_type = scope.type_of(node.receiver)
           if concrete_receiver?(receiver_type)
             protected_count += 1
           else
+            origin = scope.dynamic_origins[node.receiver]
             sites << Site.new(
               line: node.location.start_line,
               receiver: safe_describe(receiver_type),
-              method_name: node.name.to_s
+              method_name: node.name.to_s,
+              dynamic_origin: origin
             )
           end
         end

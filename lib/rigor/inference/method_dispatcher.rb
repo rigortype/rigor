@@ -6,6 +6,7 @@ require_relative "../flow_contribution"
 require_relative "../flow_contribution/merger"
 require_relative "../builtins/hkt_builtins"
 require_relative "../builtins/static_return_refinements"
+require_relative "dynamic_origin"
 require_relative "flow_tracer"
 require_relative "method_dispatcher/call_context"
 require_relative "method_dispatcher/constant_folding"
@@ -83,7 +84,7 @@ module Rigor
         result
       end
 
-      def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
                   block_type: nil, environment: nil,
                   call_node: nil, scope: nil)
         return nil if receiver_type.nil?
@@ -114,7 +115,12 @@ module Rigor
         # are supplied — the dispatcher's own internal callers
         # (per-element block fold, etc.) skip this tier.
         plugin_result = try_plugin_contribution(call_node, scope, receiver_type)
-        return plugin_result if plugin_result
+        if plugin_result
+          if plugin_result.is_a?(Type::Dynamic)
+            scope&.record_dynamic_origin(call_node, DynamicOrigin::FRAMEWORK_DSL_BOUNDARY)
+          end
+          return plugin_result
+        end
 
         # ADR-20 slice 3 — Rigor-bundled HKT-builtin return-
         # type tier. Sits ABOVE `RbsDispatch.try_dispatch` so
@@ -145,6 +151,9 @@ module Rigor
         rbs_result = RbsDispatch.try_dispatch(context)
         if rbs_result
           record_boundary_cross_if_applicable(receiver_type, method_name, rbs_result, environment)
+          if rbs_result.is_a?(Type::Dynamic) && rbs_result.static_facet.is_a?(Type::Top)
+            scope&.record_dynamic_origin(call_node, DynamicOrigin::EXPLICIT_UNTYPED)
+          end
           return rbs_result
         end
 
@@ -174,7 +183,10 @@ module Rigor
         # `Dynamic[top]` so the patched call resolves
         # cross-file without `call.undefined-method`.
         patched_result = try_project_patched_method(receiver_type, method_name, environment)
-        return patched_result if patched_result
+        if patched_result
+          scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+          return patched_result
+        end
 
         # ADR-10 slice 2b-ii — dependency-source inference tier.
         # Sits BELOW RBS dispatch (RBS / RBS::Inline / generated
@@ -186,7 +198,10 @@ module Rigor
         # dynamic-origin envelope; per-method return-type
         # precision is queued for a later slice.
         dep_source_result = try_dependency_source(receiver_type, method_name, environment)
-        return dep_source_result if dep_source_result
+        if dep_source_result
+          scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+          return dep_source_result
+        end
 
         # v0.1.3 — discovered-method dispatch tier. When the
         # receiver class has no RBS BUT scope_indexer recorded

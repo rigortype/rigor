@@ -8,6 +8,7 @@ module Rigor
     attr_reader cvars: Hash[Symbol, Type::t]
     attr_reader globals: Hash[Symbol, Type::t]
     attr_reader discovery: DiscoveryIndex
+    attr_reader dynamic_origins: Hash[untyped, Symbol]
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
@@ -32,6 +33,7 @@ module Rigor
     def data_member_layouts: () -> Hash[String, Array[Symbol]]
     def struct_member_layouts: () -> Hash[String, { members: Array[Symbol], keyword_init: bool }]
     def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
+    def record_dynamic_origin: (untyped node, Symbol cause) -> Scope
 
     class DiscoveryIndex
       attr_reader declared_types: Hash[untyped, Type::t]
@@ -71,7 +73,7 @@ module Rigor
 
     def self.empty: (?environment: Environment, ?source_path: String?) -> Scope
 
-    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?) -> void
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?discovery: DiscoveryIndex, ?source_path: String?, ?dynamic_origins: Hash[untyped, Symbol]) -> void
     def with_source_path: (String? path) -> Scope
     def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
     def struct_fold_safe?: (String | Symbol name) -> bool

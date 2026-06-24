@@ -9,7 +9,7 @@ module Rigor
     # untyped dispatches, where a receiver annotation buys the most catching
     # power.
     FileProtection = Data.define(:path, :protected_count, :unprotected_count, :ratio)
-    UntypedCall = Data.define(:method_name, :count, :examples)
+    UntypedCall = Data.define(:method_name, :count, :examples, :dynamic_origin)
 
     ProtectionReport = Data.define(:files, :untyped_calls, :parse_errors) do
       def total_protected = files.sum(&:protected_count)
@@ -27,7 +27,9 @@ module Rigor
               "unprotected" => f.unprotected_count, "ratio" => f.ratio.round(4) }
           end,
           "add_a_type_here" => untyped_calls.map do |c|
-            { "method" => c.method_name, "count" => c.count, "examples" => c.examples }
+            entry = { "method" => c.method_name, "count" => c.count, "examples" => c.examples }
+            entry["dynamic_origin"] = c.dynamic_origin if c.dynamic_origin
+            entry
           end,
           "parse_errors" => parse_errors
         }
@@ -37,7 +39,7 @@ module Rigor
     class ProtectionAccumulator
       def initialize
         @files = []
-        @calls = Hash.new { |h, k| h[k] = { count: 0, examples: [] } }
+        @calls = Hash.new { |h, k| h[k] = { count: 0, examples: [], origins: Hash.new(0) } }
         @parse_errors = []
       end
 
@@ -50,6 +52,7 @@ module Rigor
           bucket = @calls[site.method_name]
           bucket[:count] += 1
           bucket[:examples] << "#{path}:#{site.line}" if bucket[:examples].size < 3
+          bucket[:origins][site.dynamic_origin] += 1 if site.dynamic_origin
         end
       end
 
@@ -58,9 +61,12 @@ module Rigor
       end
 
       def to_report
-        untyped = @calls
-                  .map { |method, v| UntypedCall.new(method_name: method, count: v[:count], examples: v[:examples]) }
-                  .sort_by { |c| [-c.count, c.method_name] }
+        calls = @calls.map do |method, v|
+          origin = v[:origins].max_by { |_, count| count }&.first
+          UntypedCall.new(method_name: method, count: v[:count], examples: v[:examples],
+                          dynamic_origin: origin)
+        end
+        untyped = calls.sort_by { |c| [-c.count, c.method_name] }
         ProtectionReport.new(files: @files, untyped_calls: untyped, parse_errors: @parse_errors)
       end
     end

@@ -41,10 +41,18 @@ module Rigor
 
         @out.puts "\nAdd a type here — methods most often called on an untyped receiver:"
         calls.first(TOP_CALLS).each do |call|
-          @out.puts format("  %<count>-5d #%<method>s   e.g. %<sites>s",
-                           count: call.count, method: call.method_name, sites: call.examples.join("  "))
+          label = origin_label(call.dynamic_origin)
+          @out.puts format("  %<count>-5d #%<method>s   e.g. %<sites>s%<label>s",
+                           count: call.count, method: call.method_name,
+                           sites: call.examples.join("  "), label: label)
         end
         @out.puts "  (#{calls.size - TOP_CALLS} more)" if calls.size > TOP_CALLS
+      end
+
+      def origin_label(origin)
+        return "" if origin.nil?
+
+        "  [#{origin.to_s.tr('_', '-')}]"
       end
 
       def render_files(report)

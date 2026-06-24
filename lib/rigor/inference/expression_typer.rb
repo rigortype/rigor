@@ -9,6 +9,7 @@ require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
+require_relative "dynamic_origin"
 require_relative "fallback"
 require_relative "flow_tracer"
 require_relative "indexed_narrowing"
@@ -224,15 +225,20 @@ module Rigor
       def initialize(scope:, tracer: nil)
         @scope = scope
         @tracer = tracer
+        @typing_node = nil
       end
 
       def type_of(node)
-        return untraced_type_of(node) unless FlowTracer.active?
-
-        # `rigor trace` — bracket the recursion with enter/result events.
-        # The tracer is observational only: the inferred type flows
-        # through unchanged (see FlowTracer's contract).
-        FlowTracer.trace_node(node) { untraced_type_of(node) }
+        previous = @typing_node
+        @typing_node = node
+        result = if FlowTracer.active?
+                   FlowTracer.trace_node(node) { untraced_type_of(node) }
+                 else
+                   untraced_type_of(node)
+                 end
+        result
+      ensure
+        @typing_node = previous
       end
 
       def untraced_type_of(node)
@@ -1011,11 +1017,12 @@ module Rigor
 
       def fallback_for(node, family:)
         inner = dynamic_top
-        record_fallback(node, family: family, inner_type: inner)
+        record_fallback(node, family: family, inner_type: inner, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
+        scope.record_dynamic_origin(node, DynamicOrigin::UNSUPPORTED_SYNTAX)
         inner
       end
 
-      def record_fallback(node, family:, inner_type:)
+      def record_fallback(node, family:, inner_type:, origin: nil)
         return unless tracer
 
         location = node.respond_to?(:location) ? node.location : nil
@@ -1023,7 +1030,8 @@ module Rigor
           node_class: node.class,
           location: location,
           family: family,
-          inner_type: inner_type
+          inner_type: inner_type,
+          origin: origin
         )
         tracer.record_fallback(event)
       end
@@ -2128,6 +2136,7 @@ module Rigor
       # this signature's summary sees the floor, not the stale `bot` seed.
       def degrade_entangled_fixpoint(summaries, plain_signature)
         BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+        scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
         summaries[plain_signature][:assumption] = Type::Combinator.untyped
         Type::Combinator.untyped
       end
@@ -2152,6 +2161,7 @@ module Rigor
           # Out of iterations and still unstable — collapse to today's
           # widening behaviour.
           BudgetTrace.hit(BudgetTrace::RECURSION_FIXPOINT_CAP)
+          scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
           summaries[plain_signature][:assumption] = Type::Combinator.untyped
           return Type::Combinator.untyped
         end
@@ -2244,6 +2254,7 @@ module Rigor
         return type unless would_have_been_guarded && !fully_value_pinned?(type)
 
         BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+        scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
         # ADR-55 WD1 clamp: a guarded extended frame whose body is non-pinned
         # must be byte-identical to the plain guard's `untyped`. This path
         # deliberately does NOT route to the in-progress fixpoint summary:
@@ -2363,7 +2374,8 @@ module Rigor
           locals: locals.freeze,
           self_type: receiver,
           discovery: scope.discovery,
-          struct_fold_safe_locals: struct_fold_safe_locals_for(def_node.body)
+          struct_fold_safe_locals: struct_fold_safe_locals_for(def_node.body),
+          dynamic_origins: scope.dynamic_origins
         )
       end
 

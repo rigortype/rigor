@@ -441,6 +441,35 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
+  describe "Difference acceptance (survivor #5 self-mutation adjudication)" do
+    def diff(base, removed_val)
+      Rigor::Type::Combinator.difference(base, removed_val)
+    end
+
+    it "accepts a Difference whose base accepts and removed matches" do
+      non_empty = Rigor::Type::Combinator.non_empty_string
+      other_non_empty = diff(str_nominal, Rigor::Type::Combinator.constant_of(""))
+      expect(accepts(non_empty, other_non_empty)).to be_yes
+    end
+
+    it "rejects a Difference whose removed values differ" do
+      non_empty = Rigor::Type::Combinator.non_empty_string
+      other_diff = diff(str_nominal, Rigor::Type::Combinator.constant_of("x"))
+      expect(accepts(non_empty, other_diff)).to be_no
+    end
+
+    it "rejects a non-Difference value when self is Difference" do
+      non_empty = Rigor::Type::Combinator.non_empty_string
+      expect(accepts(non_empty, str_nominal)).to be_no
+    end
+
+    it "rejects when base does not accept" do
+      non_empty = Rigor::Type::Combinator.non_empty_string
+      other = diff(int_nominal, Rigor::Type::Combinator.constant_of(""))
+      expect(accepts(non_empty, other)).to be_no
+    end
+  end
+
   describe "Type#accepts public surface" do
     it "every type form exposes accepts as a public method" do
       [top, bot, dyn_top, int_nominal, int_singleton, int_constant, int_or_str].each do |t|

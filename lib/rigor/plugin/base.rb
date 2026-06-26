@@ -20,7 +20,7 @@ module Rigor
     #
     # This class implements all plugin protocol hooks: per-call
     # return-type contributions (`dynamic_return`), narrowing-fact
-    # contributions (`type_specifier`), AST node rules (`node_rule`),
+    # contributions (`narrowing_facts`), AST node rules (`node_rule`),
     # and producer/cache hooks. Cumulative implementation per the
     # ADR-37 / ADR-52 slice chain.
     #
@@ -440,25 +440,52 @@ module Rigor
         # `post_return_facts` slot of the deleted `flow_contribution_for`
         # hook (ADR-52 WD3):
         #
-        #   type_specifier methods: [:assert_kind_of] do |call_node, scope|
+        #   narrowing_facts methods: [:assert_kind_of] do |call_node, scope|
         #     # return an Array of post-return facts, or nil
         #   end
         #
         # `methods:` is a non-empty Array of method names; the engine
         # calls the block only when `call_node.name` is one of them. The
         # block returns the same `post_return_facts` the merger applies.
-        def type_specifier(methods:, &block)
-          raise ArgumentError, "Plugin::Base.type_specifier requires a block body" if block.nil?
+        #
+        # This hook supplies post-return *narrowing facts* — the
+        # predicate/assertion edges a call establishes about its
+        # arguments or receiver, e.g. `assert_kind_of(String, x)` ⇒ `x`
+        # is narrowed to `String` on the continuation. It does NOT give a
+        # call a *type*; for that use {dynamic_return} (per-call-site) or
+        # contribute RBS via the manifest `signature_paths:`.
+        # `dynamic_return` is the type slot, this is the fact slot.
+        #
+        # Renamed from `type_specifier` (ADR-80): the old name read as a
+        # parallel to `dynamic_return` (a type) when it actually returns
+        # facts. {.type_specifier} survives as a deprecating alias through
+        # 0.2.x and is removed in 0.3.0.
+        def narrowing_facts(methods:, &block)
+          raise ArgumentError, "Plugin::Base.narrowing_facts requires a block body" if block.nil?
           unless methods.is_a?(Array) && !methods.empty? &&
                  methods.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) }
             raise ArgumentError,
-                  "Plugin::Base.type_specifier methods: must be a non-empty Array of Symbol/String, " \
+                  "Plugin::Base.narrowing_facts methods: must be a non-empty Array of Symbol/String, " \
                   "got #{methods.inspect}"
           end
 
           @type_specifiers ||= []
           @type_specifiers << { methods: methods.map(&:to_sym).freeze, block: block }.freeze
           nil
+        end
+
+        # DEPRECATED (ADR-80) — renamed to {.narrowing_facts}. This hook
+        # supplies post-return narrowing *facts*, not a type; the old
+        # name misleads by parallel with {.dynamic_return}. Retained as a
+        # warning-emitting alias through 0.2.x; REMOVED in 0.3.0. Migrate
+        # `type_specifier methods: …` → `narrowing_facts methods: …`.
+        def type_specifier(methods:, &)
+          unless @type_specifier_deprecation_warned
+            @type_specifier_deprecation_warned = true
+            warn("[rigor] Plugin::Base.type_specifier is deprecated (ADR-80) and will be " \
+                 "removed in Rigor 0.3.0; rename it to `narrowing_facts`. (#{name})")
+          end
+          narrowing_facts(methods:, &)
         end
 
         # Frozen snapshot of the declared type-specifier rules. Memoised
@@ -504,7 +531,7 @@ module Rigor
       # production users migrated. Per-call return types are declared via
       # the gated {.dynamic_return} DSL (static / run-time / per-file
       # name sets, static / run-time receiver sets); post-return
-      # narrowing facts via {.type_specifier}. See the CHANGELOG
+      # narrowing facts via {.narrowing_facts}. See the CHANGELOG
       # migration note for the idiom-by-idiom mapping.
 
       # ADR-9 slice 3 — per-run preparation hook. The runner
@@ -625,7 +652,7 @@ module Rigor
       end
 
       # ADR-37 slice 2 — the post-return narrowing facts contributed by
-      # this plugin's {.type_specifier} rules for a call. The engine
+      # this plugin's {.narrowing_facts} rules for a call. The engine
       # calls this from `StatementEvaluator`; a rule fires only when
       # `call_node.name`
       # is one of its declared `methods:`. Failures isolate to [].

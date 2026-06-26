@@ -41,7 +41,7 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
     Class.new(Rigor::Plugin::Base) do
       manifest(id: "specifier", version: "0.0.1")
 
-      type_specifier methods: [:assert_kind_of] do |_call_node, _scope|
+      narrowing_facts methods: [:assert_kind_of] do |_call_node, _scope|
         nil
       end
     end

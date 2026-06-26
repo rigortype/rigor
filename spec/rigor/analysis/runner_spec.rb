@@ -3861,7 +3861,7 @@ RSpec.describe Rigor::Analysis::Runner do
           Rigor::Type::Combinator.constant_of(nil)
         end
 
-        type_specifier methods: [:narrow_self_to_string!] do |_call_node, _scope|
+        narrowing_facts methods: [:narrow_self_to_string!] do |_call_node, _scope|
           [Rigor::FlowContribution::Fact.new(
             target_kind: :self, target_name: :self, type: Rigor::Type::Combinator.nominal_of("String")
           )]

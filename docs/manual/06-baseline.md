@@ -77,6 +77,18 @@ a diagnostic another layer has already suppressed.
 default — one bucket per file × rule) or `--match-mode=message`
 (a bucket per distinct message: more precise, more churn).
 
+`--match-mode=message` keys each bucket on the **rendered
+message text**, which includes details such as the displayed
+receiver type. That makes it sharper at telling two same-rule
+diagnostics on one line apart, but also **brittle**: when a Rigor
+upgrade rewords a message or changes how a type is displayed, the
+key no longer matches and the previously-baselined diagnostic
+resurfaces as if new. `--match-mode=rule` keys only on
+`(file, rule)` and is immune to message rewording — prefer it
+unless you specifically need per-message discrimination, and
+expect to `regenerate` a `message`-mode baseline after upgrading
+Rigor.
+
 ## Working a baseline down
 
 `rigor triage` summarises a diagnostic stream — rule

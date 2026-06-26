@@ -110,7 +110,7 @@ module Rigor
       # ADR-37 slice 2 — matcher narrowing
       # (`expect(x).to be_a(T)` → `post_return_facts` on `x`),
       # method-gated by the engine on the expectation verbs.
-      type_specifier methods: %i[to not_to to_not] do |call_node, scope|
+      narrowing_facts methods: %i[to not_to to_not] do |call_node, scope|
         MatcherAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
       end
 

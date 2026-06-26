@@ -26,7 +26,7 @@ activation churn for projects that mix the two.
 
 | Surface | Used for |
 | --- | --- |
-| `type_specifier methods: …` (ADR-37 slice 2) | Method-gated narrowing — the analyzer returns a `:local`-kind `post_return_fact` for each recognised assertion, gated on `AssertionAnalyzer::SUPPORTED_METHODS`. |
+| `narrowing_facts methods: …` (ADR-37 slice 2) | Method-gated narrowing — the analyzer returns a `:local`-kind `post_return_fact` for each recognised assertion, gated on `AssertionAnalyzer::SUPPORTED_METHODS`. |
 | `additional_initializers:` (ADR-38) | Declares `setup` as an initialiser on `Minitest::Test` / `ActiveSupport::TestCase` / `Test::Unit::TestCase`, so ivars assigned there aren't read as possibly-nil in the test body. |
 | `ASSERT_FORM` / `SPEC_MATCHER_FORM` tables | The closed recogniser sets — shape + positive/negative flag per method name, in `assertion_analyzer.rb`. |
 

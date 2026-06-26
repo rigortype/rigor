@@ -78,7 +78,7 @@ module Rigor
       # assertion, method-gated by the engine. The engine routes
       # `:local`-kind facts through
       # `StatementEvaluator#apply_local_post_return_fact`.
-      type_specifier methods: AssertionAnalyzer::SUPPORTED_METHODS do |call_node, scope|
+      narrowing_facts methods: AssertionAnalyzer::SUPPORTED_METHODS do |call_node, scope|
         AssertionAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
       end
     end

@@ -208,7 +208,7 @@ Two call-argument helpers sit on top of the grid:
   index is out of range, or that argument is not a literal
   Symbol/String.
 
-#### Return-type and narrowing contributions — `dynamic_return` / `type_specifier` (ADR-37 Slice 2)
+#### Return-type and narrowing contributions — `dynamic_return` / `narrowing_facts` (ADR-37 Slice 2)
 
 `flow_contribution_for` was consulted at exactly two engine sites, each
 reading exactly one slot of the returned bundle: `MethodDispatcher`
@@ -246,12 +246,14 @@ the block carries logic and runs through `instance_exec`:
     (coerce direction):** the gate is on the *receiver* class, and Ruby
     dispatches `1 + money` on `Integer`, so a `["Money"]` rule does not
     fire there; that result types left-biased as `Integer` (see ADR-42).
-- `type_specifier(methods:) { |call_node, scope| facts | nil }` —
+- `narrowing_facts(methods:) { |call_node, scope| facts | nil }` —
   **post-return narrowing facts**, gated on `call_node.name` being in
   the declared `methods:`. The engine invokes it through
   `#type_specifier_facts(call_node:, scope:)`. `rigor-minitest`
   (assertion narrowing) and `rigor-rspec`'s matcher narrowing are the
-  worked consumers.
+  worked consumers. Renamed from `type_specifier`
+  ([ADR-80](../adr/80-narrowing-facts-rename.md)); `type_specifier`
+  remains as a deprecating alias, removed in 0.3.0.
 
 `receivers:` / `methods:` are the greppable, indexable gates the
 `rigor plugins --capabilities` catalogue (ADR-37 § "Machine-readable
@@ -259,7 +261,7 @@ capability catalogue") enumerates.
 
 **`#flow_contribution_for` was removed in ADR-52 WD3 (2026-06-11).** A
 plugin that still defines the hook raises `ArgumentError` at load time.
-All five production users migrated to `dynamic_return` / `type_specifier`
+All five production users migrated to `dynamic_return` / `narrowing_facts`
 (see CHANGELOG `### Removed` for the full migration table). The
 historical role it played — an ungated per-call fat hook returning a
 `FlowContribution` bundle — is now expressed through the narrow,
@@ -293,7 +295,7 @@ capabilities). With `--format json` the output is:
 The five capability arrays are exactly the declarative gates of the
 narrow protocols above: `node_rule_types` from each `node_rule` node
 type, `dynamic_return_receivers` from `dynamic_return(receivers:)`,
-`type_specifier_methods` from `type_specifier(methods:)`, and
+`type_specifier_methods` from `narrowing_facts(methods:)`, and
 `produces` / `consumes` from the ADR-9 manifest fields. An array is
 empty when the plugin declares nothing for that surface; the text view
 omits empty surfaces entirely. This is the contract that keeps the
@@ -609,7 +611,7 @@ following are now in place and are documented in their own specs:
   ([`flow-contribution-merger.md`](flow-contribution-merger.md))
   shipped in slice 3; the return-type contribution tier shipped
   in slice 4 (originally `#flow_contribution_for`, later split into
-  `dynamic_return` / `type_specifier` per ADR-37, then
+  `dynamic_return` / `narrowing_facts` per ADR-37, then
   `flow_contribution_for` was removed ADR-52 WD3) and was extended
   by the v0.1.1 cross-plugin work (ADR-9).
 - **Plugin diagnostic provenance.** Slice 5 routes plugin-emitted
@@ -638,7 +640,7 @@ following are now in place and are documented in their own specs:
     onto `node_rule`** — `rigor-actionpack` (4 phases,
     namespace-qualification-sensitive) was the last.
   - *Slice 2* — `#flow_contribution_for` split into the receiver-gated
-    `dynamic_return` + method-gated `type_specifier` DSLs (documented
+    `dynamic_return` + method-gated `narrowing_facts` DSLs (documented
     above); cleanly-fitting consumers migrated, remaining consumers
     stayed on the escape valve. **`flow_contribution_for` was then
     deleted in ADR-52 WD3 (2026-06-11)** — all five escape-valve

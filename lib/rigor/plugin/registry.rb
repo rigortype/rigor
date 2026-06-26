@@ -148,7 +148,7 @@ module Rigor
               "plugin #{(plugin.class.name || plugin.class).inspect} defines `flow_contribution_for`, " \
               "which was removed (ADR-52). Declare the per-call return type via `dynamic_return` " \
               "(receivers:/methods:/file_methods: gates, static or callable) and post-return narrowing " \
-              "facts via `type_specifier` — see the CHANGELOG migration note."
+              "facts via `narrowing_facts` — see the CHANGELOG migration note."
       end
 
       # Same `Method#owner` trick for the per-file diagnostics hook —

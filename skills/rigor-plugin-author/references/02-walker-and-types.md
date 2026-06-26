@@ -162,7 +162,7 @@ rather than hand-rolling Levenshtein:
 Rigor::Plugin::Base.suggest(typo, known_names)  # nearest match, or nil
 ```
 
-## Optional — contribute a return type with `dynamic_return` / `type_specifier`
+## Optional — contribute a return type with `dynamic_return` / `narrowing_facts`
 
 > **Critical — these hooks do NOT make a method "defined", so they do
 > NOT suppress `call.undefined-method`.** Method *existence* and call
@@ -197,10 +197,14 @@ end
 # Post-return NARROWING FACTS, gated on the call's method name.
 # Return an Array of facts (or nil). Used for assertion / predicate
 # narrowing (`assert_kind_of(Foo, x)` ⇒ x is Foo afterwards).
-type_specifier methods: [:assert_kind_of] do |call_node, scope|
+narrowing_facts methods: [:assert_kind_of] do |call_node, scope|
   # ... build and return the post-return facts ...
 end
 ```
+
+> **`narrowing_facts` was renamed from `type_specifier` in ADR-80.**
+> `type_specifier` remains as a deprecating alias, removed in 0.3.0 — use
+> `narrowing_facts` in new plugins.
 
 Build return types with `Rigor::Type::Combinator`:
 
@@ -240,7 +244,7 @@ If the DSL introduces methods or classes that Rigor cannot see (a
 Rigor RBS declaring them so *core* inference — not just your plugin —
 treats them as **defined**. This is what removes the
 `call.undefined-method` diagnostics on those methods; nothing else
-(not a `node_rule`, not `dynamic_return` / `type_specifier`) makes a
+(not a `node_rule`, not `dynamic_return` / `narrowing_facts`) makes a
 method exist in Rigor's view.
 
 Two ways to wire the RBS, depending on how the plugin is packaged:
@@ -288,6 +292,6 @@ They compose — many plugins ship both.
 
 A plugin whose `node_rule`(s) recognise the DSL and emit diagnostics
 with correct severities and rule ids — optionally a `dynamic_return` /
-`type_specifier` and a `sig/` bundle. Verify by eye with `rigor check`;
+`narrowing_facts` and a `sig/` bundle. Verify by eye with `rigor check`;
 lock it down with tests in Phase 3
 ([`03-test-and-ship.md`](03-test-and-ship.md)).

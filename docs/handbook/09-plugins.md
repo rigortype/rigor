@@ -68,12 +68,15 @@ directory — gives a plugin five primary surfaces:
    array of `Rigor::Analysis::Diagnostic` rows. The runner
    stamps each with `source_family: "plugin.<your-id>"`.
 2. **`dynamic_return(receivers:, methods:, file_methods:)` /
-   `type_specifier(methods:)`** — the per-call-site return-type
+   `narrowing_facts(methods:)`** — the per-call-site return-type
    and flow-narrowing contribution surface (ADR-37 Slice 2).
    A `dynamic_return` block names the inferred return type at a
    matching call site; the analyzer's dispatcher merges the
    contribution and uses it as if it were RBS-declared. A
-   `type_specifier` block contributes branch-narrowing facts.
+   `narrowing_facts` block contributes branch-narrowing facts.
+   (`narrowing_facts` was renamed from `type_specifier` in ADR-80;
+   `type_specifier` remains as a deprecating alias removed in 0.3.0,
+   so use `narrowing_facts` in new plugins.)
    (These replaced the removed `flow_contribution_for` hook —
    ADR-52 WD3; a plugin that still defines it raises at load.)
 3. **`Plugin::IoBoundary#read_file`** / **`#open_url`** —

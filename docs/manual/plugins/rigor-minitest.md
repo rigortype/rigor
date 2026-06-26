@@ -79,7 +79,7 @@ matches.
 ## Plugin internals
 
 The assertion recogniser and the contract surfaces this plugin
-exercises — the ADR-37 `type_specifier` narrowing gate and the ADR-38
+exercises — the ADR-37 `narrowing_facts` narrowing gate and the ADR-38
 `additional_initializers` for `setup` — are in the
 [plugin's README](../../../plugins/rigor-minitest/README.md). To write a
 plugin, see [`examples/`](../../../examples/README.md) and the

@@ -403,7 +403,7 @@ catalogue** ([ADR-37](../adr/37-plugin-interface-segregation.md)):
 a focused, machine-readable map of what each loaded plugin
 contributes — the AST node types its `node_rule`s match, the
 receiver classes its `dynamic_return`s gate on, the methods its
-`type_specifier`s narrow, and the facts it `produces` /
+`narrowing_facts`s narrow, and the facts it `produces` /
 `consumes`. Combine with `--format=json` for tooling (an AI
 agent can enumerate every plugin's behaviour without reading a
 line of plugin source). The same narrow surfaces also appear in

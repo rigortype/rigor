@@ -175,7 +175,7 @@ module Rigor
       # `dynamic_return` rule above; the block re-checks the `T.`
       # receiver via the recogniser, so an unrelated `bind` call
       # contributes nothing.
-      type_specifier methods: [:bind] do |call_node, scope|
+      narrowing_facts methods: [:bind] do |call_node, scope|
         bind_post_return_facts(call_node, scope)
       end
 

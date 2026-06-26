@@ -22,6 +22,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 - **`{…}.freeze` / `.dup` / `.clone` / `.itself` on a literal hash or array now preserve the precise shape type** instead of degrading to a nominal `Hash` / `Array`, so `MESSAGES = {…}.freeze; MESSAGES[reason]` and `XS = […].freeze; XS[0]` fold the precise value rather than `Dynamic`. ([ADR-76](docs/adr/76-effect-modeling-freeze-dup-shape-preservation.md) WD2 / [ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD3.)
 - **Shape-carrier methods no longer fold a block-form call.** `tuple.any? { … }` / `.sum { … }` / `.count { … }` (and the hash-shape equivalents) previously folded the *no-block* result, ignoring the block; they now defer to the normal block/RBS path. Strictly precision-reducing (an unsound fold removed), and the fix that let array/tuple `freeze` preservation land without spurious `flow.always-truthy-condition`. ([ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD1.)
 
+### Deprecated
+
+- **The plugin hook `type_specifier` is renamed to `narrowing_facts`.** The old name read as a parallel to `dynamic_return` (which contributes a *type*) when it actually contributes post-return narrowing *facts*. `type_specifier` keeps working as an alias that emits a one-time deprecation warning per plugin and **will be removed in 0.3.0** — migrate `type_specifier methods: …` → `narrowing_facts methods: …` in your plugins. The bundled `rigor-minitest` / `rigor-sorbet` / `rigor-rspec` plugins are already migrated; the engine-facing `rigor plugins --capabilities` JSON field `type_specifier_methods` is unchanged for now. ([ADR-80](docs/adr/80-narrowing-facts-rename.md).)
+
 ## [0.2.5] - 2026-06-24
 
 v0.2.5 adds i18n validation for view-template lazy keys in `rigor-rails-i18n`, so `t('.title')` calls inside ERB, Haml, and Slim templates are now expanded using the Rails virtual-path convention and checked against `config/locales/*.yml` for key existence and per-locale coverage.

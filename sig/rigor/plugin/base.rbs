@@ -26,6 +26,8 @@ class Rigor::Plugin::Base
   def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?) { (untyped call_node, untyped scope) -> untyped } -> nil
   def self.dynamic_returns: () -> Array[untyped]
 
+  def self.narrowing_facts: (methods: Array[untyped]) { (untyped call_node, untyped scope) -> untyped } -> nil
+  # Deprecating alias for `narrowing_facts` (ADR-80); removed in 0.3.0.
   def self.type_specifier: (methods: Array[untyped]) { (untyped call_node, untyped scope) -> untyped } -> nil
   def self.type_specifiers: () -> Array[untyped]
 

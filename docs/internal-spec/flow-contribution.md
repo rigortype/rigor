@@ -11,7 +11,7 @@ alongside the plugin API in v0.1.0.
 
 **Plugins no longer construct this bundle.** ADR-37 replaced the
 plugin-authored bundle hook with the narrow `dynamic_return`
-(returns a bare `Type`) and `type_specifier` (returns facts)
+(returns a bare `Type`) and `narrowing_facts` (returns facts)
 DSLs, and ADR-52 WD3 deleted the underlying `flow_contribution_for`
 hook outright. A plugin's `dynamic_return` result is wrapped into
 a `FlowContribution` *by the engine*

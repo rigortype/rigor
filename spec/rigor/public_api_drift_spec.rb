@@ -188,6 +188,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     dynamic_return(key:receivers,key:methods,key:file_methods,block:block)
     dynamic_returns()
     manifest(keyrest:fields)
+    narrowing_facts(keyreq:methods,block:block)
     node_file_context(block:block)
     node_file_context_block()
     node_rule(req:node_type,block:block)
@@ -195,7 +196,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     producer(req:id,key:watch,key:serialize,key:deserialize,block:block)
     producers()
     suggest(req:name,req:candidates)
-    type_specifier(keyreq:methods,block:block)
+    type_specifier(keyreq:methods,block:&)
     type_specifiers()
   ].freeze
 

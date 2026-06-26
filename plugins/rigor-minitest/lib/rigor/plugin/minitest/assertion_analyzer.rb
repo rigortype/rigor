@@ -145,7 +145,7 @@ module Rigor
         private_constant :SPEC_MATCHER_FORM
 
         # ADR-37 slice 2 — the method names this analyzer narrows on,
-        # for the plugin's `type_specifier methods:` gate.
+        # for the plugin's `narrowing_facts methods:` gate.
         SUPPORTED_METHODS = (ASSERT_FORM.keys + SPEC_MATCHER_FORM.keys).freeze
 
         def spec_form_fact(call_node, environment:)

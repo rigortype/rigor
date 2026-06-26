@@ -210,10 +210,12 @@ def shout(thing)
 end
 
 # Clause 1 / covariant returns: the body provably returns the
-# receiver, so #dup returns `self` (Array, not the widened Object).
-# Returning Object would *weaken* the postcondition.
+# receiver, so #dup returns `self` (the receiver's own type, not the
+# widened Object). Returning Object would *weaken* the postcondition.
+# Shape preservation through `dup` (ADR-76 WD2) keeps the precise
+# tuple here rather than degrading to the nominal `Array`.
 copy = [1, 2, 3].dup
-assert_type("Array", copy)
+assert_type("[1, 2, 3]", copy)
 ```
 
 The connection to the type-theory appendix's **gradual guarantee**

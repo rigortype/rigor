@@ -1,7 +1,8 @@
 # ADR-76 — Effect modeling for `freeze` / `dup` / `clone` and shape-carrier preservation
 
 Status: **Accepted — WD1 implemented 2026-06-24 (`2751bc78`); WD2
-deferred.** Records a split decision on effect / mutation modeling. The
+partially landed 2026-06-26 (HashShape preservation only; Tuple deferred,
+via ADR-78 WD3).** Records a split decision on effect / mutation modeling. The
 *conservative-invalidation* half — non-mutating calls preserve facts,
 aliased-mutation calls invalidate them — is compatibility-safe internal
 precision and **landed** as the WD1 slice: `MutationWidening` now treats
@@ -12,12 +13,16 @@ receiver's facts instead of invalidating them, no diagnostic or vocabulary
 change, self-check clean (the 12 reflexive `always-truthy` did **not**
 reappear — the change stays in the invalidation path, not the dispatch
 return-type tier). The *shape-carrier preservation through the pure
-self-returners*
-(`freeze` / `dup` / `clone` / `itself`) — which would close a real fold
-gap — is **deferred to a separate branch** (bucket 3) until the reflexive
-`flow.always-truthy-condition` interaction it triggers on Rigor's own
-self-analysis is resolved at the root. This ADR fixes the scope and the
-ordering so the precision fix is not re-attempted cold.
+self-returners* (`freeze` / `dup` / `clone` / `itself`) — which closes a
+real fold gap — landed for **`HashShape`** 2026-06-26 once [ADR-78](78-reflexive-overfold-always-truthy.md)
+WD2 removed the reflective-send over-fold (`shape_self` in
+`ShapeDispatch::HASH_SHAPE_HANDLERS`, self-check clean). The **`Tuple`**
+half stays **deferred**: it re-surfaces 6 reflexive
+`flow.always-truthy-condition` firings in Rigor's own reduce / range
+folding code — a wider over-fold class than ADR-78 WD2's reflective-send
+guard covers — and re-applies once that root cause is fixed. This ADR
+fixes the scope and the ordering so the precision fix is not re-attempted
+cold.
 
 Grounding: the [2026-06-22 strengthening survey](../notes/20260622-rigor-0.2.x-compatibility-safe-strengthening-survey.md)
 §4 and its "Compatibility traps to avoid" entry, and the

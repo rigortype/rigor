@@ -1435,4 +1435,27 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: recv, method_name: :compact, args: [constant(1)])).to be_nil
     end
   end
+
+  describe "ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the HashShape carrier" do
+    let(:t) { tuple(constant(1), constant(2), constant(3)) }
+    let(:h) { hash_shape(reason: constant("boom")) }
+
+    %i[freeze dup clone itself].each do |m|
+      it "returns the HashShape unchanged for `hash.#{m}`" do
+        expect(dispatch(receiver: h, method_name: m)).to eq(h)
+      end
+
+      # Tuple preservation is deliberately deferred (it re-surfaces
+      # reflexive always-truthy over-folds; see the HASH_SHAPE_HANDLERS
+      # note + ADR-78 carry-over), so the Tuple path still falls through.
+      it "still falls through (nil) for `tuple.#{m}` — Tuple preservation deferred" do
+        expect(dispatch(receiver: t, method_name: m)).to be_nil
+      end
+    end
+
+    it "folds element access through a frozen HashShape (the MESSAGES[reason] gap)" do
+      frozen = dispatch(receiver: h, method_name: :freeze)
+      expect(dispatch(receiver: frozen, method_name: :[], args: [constant(:reason)])).to eq(constant("boom"))
+    end
+  end
 end

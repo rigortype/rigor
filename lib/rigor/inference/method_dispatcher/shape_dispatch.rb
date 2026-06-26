@@ -151,7 +151,26 @@ module Rigor
           :< => :hash_compare,
           :<= => :hash_compare,
           :> => :hash_compare,
-          :>= => :hash_compare
+          :>= => :hash_compare,
+          # ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the
+          # `HashShape` carrier instead of degrading to the nominal `Hash`
+          # via the RBS `() -> self` signature, so
+          # `MESSAGES = {…}.freeze; MESSAGES[reason]` folds the value union
+          # rather than reading `Dynamic`. `dup` / `clone` produce a fresh
+          # object, but Rigor's shape carriers are immutable values, so
+          # preserving the carrier is sound for reads; a later in-place
+          # mutation routes through `MutationWidening`.
+          #
+          # Scoped to `HashShape` deliberately: the same preservation on
+          # `Tuple` re-surfaces 6 reflexive `flow.always-truthy-condition`
+          # firings in Rigor's own reduce/range folding code — a residual
+          # over-fold class WIDER than the reflective-send subset ADR-78
+          # WD2 guards. Tuple preservation stays deferred until that class
+          # is fixed at the root (ADR-78 carry-over).
+          freeze: :shape_self,
+          dup: :shape_self,
+          clone: :shape_self,
+          itself: :shape_self
         }.freeze
 
         # @return [Rigor::Type, nil] the precise element/value type, or
@@ -234,6 +253,14 @@ module Rigor
             return nil unless handler
 
             send(handler, shape, method_name, args)
+          end
+
+          # ADR-76 WD2 / ADR-78 WD3 — a pure self-returner
+          # (`freeze` / `dup` / `clone` / `itself`) returns the receiver
+          # carrier unchanged, preserving the shape that the nominal
+          # `() -> self` RBS signature would otherwise drop.
+          def shape_self(carrier, _method_name, _args)
+            carrier
           end
 
           def dispatch_nominal_size(nominal, method_name, args)

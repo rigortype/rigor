@@ -1,6 +1,6 @@
 # ADR-78 — Reflexive over-fold and the `flow.always-truthy-condition` envelope
 
-Status: **Accepted — WD1+WD2 implemented 2026-06-25 (`REFLECTIVE_SEND_METHODS` guard in `ConstantFolding.try_dispatch`).** `flow.always-truthy-condition`
+Status: **Accepted — WD1+WD2 implemented 2026-06-25 (`REFLECTIVE_SEND_METHODS` guard in `ConstantFolding.try_dispatch`); WD3 partially landed 2026-06-26 (HashShape preservation only — Tuple deferred).** `flow.always-truthy-condition`
 concludes a predicate is provably truthy when it folds to a
 `Type::Constant`. That conclusion is unsound when the constant came from
 an **over-fold** — a fold whose soundness holds only for a narrower form
@@ -86,11 +86,24 @@ narrowing) could also be misled.
 
 Once the reflective over-fold no longer yields a constant, the ADR-76 WD2
 shape-carrier preservation tier (`freeze` / `dup` / `clone` / `itself`
-returning the receiver type unchanged) can be re-applied: the
-already-written tier was corpus-FP-safe, and the only blocker was the 12
-reflexive firings WD2 removes. Landing WD3 is what makes this ADR pay off
-beyond the bare FP fix — it closes the `MESSAGES = {…}.freeze;
-MESSAGES[reason]` fold gap the recon note found.
+returning the receiver type unchanged) can be re-applied. Landing WD3 is
+what makes this ADR pay off beyond the bare FP fix — it closes the
+`MESSAGES = {…}.freeze; MESSAGES[reason]` fold gap the recon note found.
+
+**As implemented (2026-06-26, partial):** the tier is re-applied to
+`HashShape` only (the recon note's actual target), via `shape_self` in
+`ShapeDispatch`'s `HASH_SHAPE_HANDLERS` — self-check clean, zero
+always-truthy. The **`Tuple`** half is **deferred**: applying the same
+preservation to `Tuple` re-surfaces 6 reflexive
+`flow.always-truthy-condition` firings in Rigor's own reduce / range
+folding code (`reduce_folding.rb`, `statement_evaluator.rb`,
+`expression_typer.rb`, the always-truthy collector itself). WD2's
+reflective-send guard was therefore **necessary but not sufficient** — it
+covers the `public_send` subset, but the Tuple preservation exposes a
+*wider* over-fold class (a fold sound only for a narrower form, reached
+through paths other than a reflective send). That wider class is the WD1
+carry-over below; Tuple preservation re-applies once it is fixed at the
+root.
 
 ## Rejected / deferred alternatives
 

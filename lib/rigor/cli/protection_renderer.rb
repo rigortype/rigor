@@ -51,6 +51,7 @@ module Rigor
         return if calls.empty?
 
         @out.puts "\nAdd a type here — methods most often called on an untyped receiver:"
+        render_tractability_summary(report)
         calls.first(TOP_CALLS).each do |call|
           label = origin_label(call.dynamic_origin)
           @out.puts format("  %<count>-5d #%<method>s   e.g. %<sites>s%<label>s",
@@ -58,6 +59,14 @@ module Rigor
                            sites: call.examples.join("  "), label: label)
         end
         @out.puts "  (#{calls.size - TOP_CALLS} more)" if calls.size > TOP_CALLS
+      end
+
+      def render_tractability_summary(report)
+        summary = report.tractability_summary
+        return if summary.empty?
+
+        parts = summary.sort_by { |_, n| -n }.map { |axis, n| "#{n} #{axis.to_s.tr('_', '-')}" }
+        @out.puts "  by tractability: #{parts.join(' · ')}  (add-rbs = closable with a type)"
       end
 
       def origin_label(origin)

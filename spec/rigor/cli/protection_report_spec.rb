@@ -33,4 +33,24 @@ RSpec.describe Rigor::CLI::ProtectionReport do
       expect(entry).not_to have_key("tractability")
     end
   end
+
+  describe "#tractability_summary (ADR-73 P6)" do
+    it "sums dispatch-site counts per axis across classified holes" do
+      r = report([
+                   untyped_call(:save, count: 7, origin: :external_gem_without_rbs),
+                   untyped_call(:cast, count: 2, origin: :explicit_untyped),
+                   untyped_call(:render, count: 4, origin: :framework_dsl_boundary),
+                   untyped_call(:whatever, count: 9) # unclassified — excluded
+                 ])
+
+      expect(r.tractability_summary).to eq(add_rbs: 9, enable_plugin: 4)
+      expect(r.to_h["tractability_summary"]).to eq("add_rbs" => 9, "enable_plugin" => 4)
+    end
+
+    it "is empty when no hole has a recorded origin" do
+      r = report([untyped_call(:whatever, count: 3)])
+      expect(r.tractability_summary).to eq({})
+      expect(r.to_h["tractability_summary"]).to eq({})
+    end
+  end
 end

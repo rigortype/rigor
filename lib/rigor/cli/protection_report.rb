@@ -19,11 +19,25 @@ module Rigor
       def grand_total = total_protected + total_unprotected
       def ratio = grand_total.zero? ? 1.0 : total_protected.to_f / grand_total
 
+      # ADR-73 P6 — total dispatch-site count per tractability axis across
+      # the classified holes (those with a recorded `dynamic_origin`), so a
+      # user sees at a glance how much of the untyped surface a type can
+      # actually close (`add_rbs`) vs. needs a plugin (`enable_plugin`) vs.
+      # is an engine gap. Keys are omitted when zero; an all-unclassified
+      # run yields `{}`.
+      def tractability_summary
+        untyped_calls.each_with_object(Hash.new(0)) do |c, acc|
+          axis = c.dynamic_origin && Inference::DynamicOrigin.tractability(c.dynamic_origin)
+          acc[axis] += c.count if axis
+        end
+      end
+
       def to_h
         {
           "protected" => total_protected,
           "unprotected" => total_unprotected,
           "protection_ratio" => ratio.round(4),
+          "tractability_summary" => tractability_summary.transform_keys(&:to_s),
           "files" => files.map do |f|
             { "path" => f.path, "protected" => f.protected_count,
               "unprotected" => f.unprotected_count, "ratio" => f.ratio.round(4) }

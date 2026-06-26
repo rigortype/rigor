@@ -14,7 +14,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 ### Added
 
 - **`rigor coverage --protection`** now explains *why* each unprotected dispatch is untyped and whether a type can close it.
-  - Every `add_a_type_here` entry carries a `dynamic_origin` cause (`external_gem_without_rbs`, `framework_dsl_boundary`, `analyzer_budget_cutoff`, `explicit_untyped`, `unsupported_syntax`) and a derived `tractability` axis (`add_rbs` / `enable_plugin` / `engine_gap`), in both `--format json` and the text report — so you can prioritise the holes a hand-written or installed RBS can actually close and skip the ones that need a plugin / `pre_eval:` or an engine fix. ([ADR-75](docs/adr/75-dynamic-provenance.md), [ADR-73](docs/adr/73-skill-driven-user-experience.md) field-trial follow-up.)
+  - Every `add_a_type_here` entry carries a `dynamic_origin` cause (`external_gem_without_rbs`, `framework_dsl_boundary`, `analyzer_budget_cutoff`, `explicit_untyped`, `unsupported_syntax`) and a derived `tractability` axis (`add_rbs` / `enable_plugin` / `engine_gap`), in both `--format json` and the text report — so you can prioritise the holes a hand-written or installed RBS can actually close and skip the ones that need a plugin / `pre_eval:` or an engine fix. A `tractability_summary` (per-axis dispatch-site totals) is emitted in the JSON and shown as a one-line `by tractability:` breakdown in the text report. ([ADR-75](docs/adr/75-dynamic-provenance.md), [ADR-73](docs/adr/73-skill-driven-user-experience.md) field-trial follow-up.)
   - Provenance is a precision-additive side-channel: it never changes `untyped = Dynamic[top]` semantics, fires no diagnostic, and never feeds severity.
 
 ### Changed

@@ -172,6 +172,35 @@ breakage a *different* test would catch shows as a gap). For an
 accurate map, run the command over all tests that exercise the
 files you are measuring — trading time for completeness.
 
+### Why a hole is untyped — provenance and tractability
+
+For a `Dynamic`-receiver hole, `rigor coverage --protection` also
+records *why* the receiver is untyped and *whether a type can close
+it*, so you spend effort where it pays off. Each `add_a_type_here`
+entry carries two fields:
+
+- **`dynamic_origin`** — the cause the value became dynamic:
+  `external_gem_without_rbs`, `framework_dsl_boundary`,
+  `analyzer_budget_cutoff`, `explicit_untyped`, or
+  `unsupported_syntax`.
+- **`tractability`** — the action axis derived from that cause:
+  - **`add_rbs`** — you can close it with a type: install RBS
+    (`rbs collection install`), enable `dependencies.source_inference:`,
+    or tighten an authored `untyped` signature.
+  - **`enable_plugin`** — a framework / DSL boundary; reach for a
+    plugin or [`pre_eval:`](03-configuration.md), not a hand-written
+    type.
+  - **`engine_gap`** — not closable by a user type (a budget cutoff
+    or a construct Rigor does not yet model); report it.
+
+The text report prints a one-line `by tractability:` breakdown under
+the "Add a type here" header, and the JSON carries the same totals as
+`tractability_summary`. Start with the `add_rbs` holes — they are the
+ones a type actually catches.
+
+Provenance is precision-additive only: it never changes a type, fires
+no diagnostic, and never affects severity or the protection ratio.
+
 ## Cost and scope
 
 The fused tiers run real analyses and real test suites, so treat

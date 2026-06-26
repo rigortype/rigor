@@ -102,7 +102,11 @@ module Rigor
           find_index: :tuple_find_index,
           rindex: :tuple_rindex,
           flatten: :tuple_flatten,
-          join: :tuple_join
+          join: :tuple_join,
+          freeze: :shape_self,
+          dup: :shape_self,
+          clone: :shape_self,
+          itself: :shape_self
         }.freeze
 
         # Byte cap on a folded `tuple.join` result — a huge tuple times a
@@ -159,14 +163,11 @@ module Rigor
           # rather than reading `Dynamic`. `dup` / `clone` produce a fresh
           # object, but Rigor's shape carriers are immutable values, so
           # preserving the carrier is sound for reads; a later in-place
-          # mutation routes through `MutationWidening`.
-          #
-          # Scoped to `HashShape` deliberately: the same preservation on
-          # `Tuple` re-surfaces 6 reflexive `flow.always-truthy-condition`
-          # firings in Rigor's own reduce/range folding code — a residual
-          # over-fold class WIDER than the reflective-send subset ADR-78
-          # WD2 guards. Tuple preservation stays deferred until that class
-          # is fixed at the root (ADR-78 carry-over).
+          # mutation routes through `MutationWidening`. (The `Tuple` table
+          # carries the same four entries; both became safe once the
+          # block-form over-fold guard landed in `try_dispatch` — ADR-78
+          # WD1 — so `CONST = [...].freeze; CONST.any? { … }` no longer
+          # folds the no-block result and fires a reflexive always-truthy.)
           freeze: :shape_self,
           dup: :shape_self,
           clone: :shape_self,
@@ -208,6 +209,17 @@ module Rigor
           method_name = context.method_name
           args = context.args
           args ||= []
+          # ADR-78 WD1 — every shape handler folds *no-block* semantics; none
+          # evaluates a passed block. So a block-form call (`tuple.any? { … }`,
+          # `tuple.sum { … }`, `tuple.count { … }`) must NOT fold the no-block
+          # result — doing so ignores the block (an over-fold: `any? { false }`
+          # would still fold `Constant[true]`). Declining defers to BlockFolding
+          # / RBS. This is the over-fold class the Tuple shape-carrier
+          # preservation (ADR-76 WD2) surfaced as reflexive `always-truthy` on
+          # `CONST = [...].freeze; CONST.any? { … }`; fixing it at the fold (not
+          # the rule) unblocks that preservation.
+          return nil unless context.block_type.nil?
+
           handler = RECEIVER_HANDLERS[receiver.class]
           return nil unless handler
 

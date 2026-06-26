@@ -13,8 +13,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     Rigor::Type::Combinator.hash_shape_of(pairs)
   end
 
-  def dispatch(receiver:, method_name:, args: [])
-    described_class.try_dispatch(cc(receiver: receiver, method_name: method_name, args: args))
+  def dispatch(receiver:, method_name:, args: [], block_type: nil)
+    described_class.try_dispatch(
+      cc(receiver: receiver, method_name: method_name, args: args, block_type: block_type)
+    )
   end
 
   describe "Tuple element access" do
@@ -1436,26 +1438,48 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
   end
 
-  describe "ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the HashShape carrier" do
+  describe "ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the shape carrier" do
     let(:t) { tuple(constant(1), constant(2), constant(3)) }
     let(:h) { hash_shape(reason: constant("boom")) }
 
     %i[freeze dup clone itself].each do |m|
+      it "returns the Tuple unchanged for `tuple.#{m}`" do
+        expect(dispatch(receiver: t, method_name: m)).to eq(t)
+      end
+
       it "returns the HashShape unchanged for `hash.#{m}`" do
         expect(dispatch(receiver: h, method_name: m)).to eq(h)
       end
+    end
 
-      # Tuple preservation is deliberately deferred (it re-surfaces
-      # reflexive always-truthy over-folds; see the HASH_SHAPE_HANDLERS
-      # note + ADR-78 carry-over), so the Tuple path still falls through.
-      it "still falls through (nil) for `tuple.#{m}` — Tuple preservation deferred" do
-        expect(dispatch(receiver: t, method_name: m)).to be_nil
-      end
+    it "folds element access through a frozen Tuple (`[…].freeze[i]`)" do
+      frozen = dispatch(receiver: t, method_name: :freeze)
+      expect(dispatch(receiver: frozen, method_name: :[], args: [constant(0)])).to eq(constant(1))
     end
 
     it "folds element access through a frozen HashShape (the MESSAGES[reason] gap)" do
       frozen = dispatch(receiver: h, method_name: :freeze)
       expect(dispatch(receiver: frozen, method_name: :[], args: [constant(:reason)])).to eq(constant("boom"))
+    end
+  end
+
+  describe "ADR-78 WD1 — shape handlers decline a block-form call (the over-fold guard)" do
+    let(:t) { tuple(constant(1), constant(2), constant(3)) }
+    let(:h) { hash_shape(a: constant(1)) }
+    let(:block) { Rigor::Type::Combinator.nominal_of("FalseClass") }
+
+    it "declines `tuple.any? { … }` instead of folding the no-block result" do
+      expect(dispatch(receiver: t, method_name: :any?)).to eq(constant(true)) # no-block still folds
+      expect(dispatch(receiver: t, method_name: :any?, block_type: block)).to be_nil
+    end
+
+    it "declines `tuple.count { … }` / `tuple.sum { … }` (block changes the result)" do
+      expect(dispatch(receiver: t, method_name: :count, block_type: block)).to be_nil
+      expect(dispatch(receiver: t, method_name: :sum, block_type: block)).to be_nil
+    end
+
+    it "declines `hash.any? { … }`" do
+      expect(dispatch(receiver: h, method_name: :any?, block_type: block)).to be_nil
     end
   end
 end

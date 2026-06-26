@@ -19,7 +19,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
-- **`{…}.freeze` / `.dup` / `.clone` / `.itself` on a literal hash now preserve the hash-shape type** instead of degrading to a nominal `Hash`, so `MESSAGES = {…}.freeze; MESSAGES[reason]` folds the precise value type rather than `Dynamic`. ([ADR-76](docs/adr/76-effect-modeling-freeze-dup-shape-preservation.md) WD2 / [ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD3; the same preservation for arrays/tuples is deferred.)
+- **`{…}.freeze` / `.dup` / `.clone` / `.itself` on a literal hash or array now preserve the precise shape type** instead of degrading to a nominal `Hash` / `Array`, so `MESSAGES = {…}.freeze; MESSAGES[reason]` and `XS = […].freeze; XS[0]` fold the precise value rather than `Dynamic`. ([ADR-76](docs/adr/76-effect-modeling-freeze-dup-shape-preservation.md) WD2 / [ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD3.)
+- **Shape-carrier methods no longer fold a block-form call.** `tuple.any? { … }` / `.sum { … }` / `.count { … }` (and the hash-shape equivalents) previously folded the *no-block* result, ignoring the block; they now defer to the normal block/RBS path. Strictly precision-reducing (an unsound fold removed), and the fix that let array/tuple `freeze` preservation land without spurious `flow.always-truthy-condition`. ([ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD1.)
 
 ## [0.2.5] - 2026-06-24
 

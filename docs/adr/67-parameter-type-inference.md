@@ -98,6 +98,20 @@ proceed without breaching the robustness principle.
   bound** (responds-to set / interface) and let it drive protection on `arr.<method>`. No
   call sites needed, so it helps the leaf-script corpus the survey excused — but yields a
   duck/structural bound, not a nominal type.
+  - **Implementation finding (2026-06-26): WD2 is blocked on a missing carrier.** The
+    "structural lower bound / responds-to set / interface" it specifies has **no carrier** —
+    the type zoo is entirely nominal-ish (`nominal`, `union`, `refined`, `difference`,
+    `intersection`, `integer_range`, `tuple`, `hash_shape`, `struct`/`data`, …); there is no
+    structural-interface / capability type to hold a responds-to set. The only cheap
+    alternative is to *guess a nominal* from the in-body method names, which is fragile
+    (`each` / `map` / `<<` / `size` are shared across `Array` / `Hash` / `String` / custom
+    classes, so a method set rarely pins one class) and feeds `concrete_receiver?`
+    (`protection_scanner.rb` — any non-`Dynamic` type counts as protected) a low-confidence
+    guess, degrading the metric's meaning. **WD2 done right needs a structural-interface
+    carrier first** (a new carrier + its acceptance / protection-metric handling), which is a
+    larger change than the "cheapest" framing implied. Re-scoped: introduce the carrier, or
+    keep WD2 deferred. The WD3 call-site path (which yields real nominals) stays the
+    higher-confidence lever.
 - **WD3 — call-site union (TypeProf-style; the real lever for apps). Implemented.** A
   param's inferred type = the union of resolved call-site argument types (needs ≥1 resolved
   call site). `ParameterInferenceCollector` resolves a call to its user `def` via the

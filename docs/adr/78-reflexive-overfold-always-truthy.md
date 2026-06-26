@@ -1,6 +1,6 @@
 # ADR-78 — Reflexive over-fold and the `flow.always-truthy-condition` envelope
 
-Status: **Accepted — WD1+WD2 implemented 2026-06-25 (`REFLECTIVE_SEND_METHODS` guard in `ConstantFolding.try_dispatch`); WD3 partially landed 2026-06-26 (HashShape preservation only — Tuple deferred).** `flow.always-truthy-condition`
+Status: **Accepted — fully implemented 2026-06-26.** WD2 (`REFLECTIVE_SEND_METHODS` guard in `ConstantFolding.try_dispatch`, 2026-06-25) + the WD1 carry-over (the block-form over-fold guard in `ShapeDispatch.try_dispatch`) + WD3 (shape-carrier preservation for both `HashShape` and `Tuple`). `flow.always-truthy-condition`
 concludes a predicate is provably truthy when it folds to a
 `Type::Constant`. That conclusion is unsound when the constant came from
 an **over-fold** — a fold whose soundness holds only for a narrower form
@@ -90,20 +90,22 @@ returning the receiver type unchanged) can be re-applied. Landing WD3 is
 what makes this ADR pay off beyond the bare FP fix — it closes the
 `MESSAGES = {…}.freeze; MESSAGES[reason]` fold gap the recon note found.
 
-**As implemented (2026-06-26, partial):** the tier is re-applied to
-`HashShape` only (the recon note's actual target), via `shape_self` in
-`ShapeDispatch`'s `HASH_SHAPE_HANDLERS` — self-check clean, zero
-always-truthy. The **`Tuple`** half is **deferred**: applying the same
-preservation to `Tuple` re-surfaces 6 reflexive
+**As implemented (2026-06-26):** the tier is re-applied to **both**
+`HashShape` and `Tuple` via `shape_self` in `ShapeDispatch`'s handler
+tables. Landing `HashShape` first surfaced the WD1 carry-over: applying the
+same preservation to `Tuple` re-surfaced 6 reflexive
 `flow.always-truthy-condition` firings in Rigor's own reduce / range
-folding code (`reduce_folding.rb`, `statement_evaluator.rb`,
-`expression_typer.rb`, the always-truthy collector itself). WD2's
-reflective-send guard was therefore **necessary but not sufficient** — it
-covers the `public_send` subset, but the Tuple preservation exposes a
-*wider* over-fold class (a fold sound only for a narrower form, reached
-through paths other than a reflective send). That wider class is the WD1
-carry-over below; Tuple preservation re-applies once it is fixed at the
-root.
+folding code. WD2's reflective-send guard was **necessary but not
+sufficient** — the residual class was not `public_send` at all but a
+**block-form over-fold**: `CONST = [Integer, Float, …].freeze` (a frozen
+array literal, now preserved as a `Tuple`) feeding
+`CONST.any? { |k| value.is_a?(k) }`, where `ShapeDispatch`'s `tuple_any?`
+folded the *no-block* result (`Constant[true]` for a non-empty tuple)
+**ignoring the block**. Every shape handler folds no-block semantics and
+none evaluates a passed block, so the fix is general (WD1 carry-over
+below). With it in place, Tuple preservation is diagnostic-identical to
+master on `lib` and on the mail / kramdown corpora (and the recon note's
+8-project run validated the preservation tier itself).
 
 ## Rejected / deferred alternatives
 
@@ -134,9 +136,13 @@ root.
   change is that runtime-variable reflective calls type `untyped` instead
   of a spurious constant — which is correct.
 - **Carry-over:** the same "over-fold ⇏ provable constant" criterion (WD1)
-  may apply to other folds that are sound only for a literal form; this ADR
-  fixes the one reachable instance (reflective send), and the criterion is
-  the guard for the next.
+  applied to a second instance found while landing WD3 — the **block-form
+  over-fold** (`ShapeDispatch` folding `tuple.any? { … }` / `sum { … }` /
+  `count { … }` to the no-block result, ignoring the block). Fixed at the
+  fold: `ShapeDispatch.try_dispatch` declines when `block_type` is present
+  (no shape handler evaluates a block). Both instances (reflective send,
+  block form) are now closed; the criterion remains the guard for any
+  future fold that is sound only for a narrower form.
 
 ## Relationship to other ADRs
 

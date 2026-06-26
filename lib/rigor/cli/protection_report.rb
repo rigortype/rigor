@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../inference/dynamic_origin"
+
 module Rigor
   class CLI
     # ADR-63 Tier 1 — aggregates per-file {Inference::ProtectionScanner}
@@ -28,7 +30,11 @@ module Rigor
           end,
           "add_a_type_here" => untyped_calls.map do |c|
             entry = { "method" => c.method_name, "count" => c.count, "examples" => c.examples }
-            entry["dynamic_origin"] = c.dynamic_origin if c.dynamic_origin
+            if c.dynamic_origin
+              entry["dynamic_origin"] = c.dynamic_origin
+              tractability = Inference::DynamicOrigin.tractability(c.dynamic_origin)
+              entry["tractability"] = tractability if tractability
+            end
             entry
           end,
           "parse_errors" => parse_errors

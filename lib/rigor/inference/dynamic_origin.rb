@@ -31,6 +31,37 @@ module Rigor
         EXPLICIT_UNTYPED,
         UNSUPPORTED_SYNTAX
       ].freeze
+
+      # ADR-73 P6 / ADR-75 WD2 — tractability: given the cause, can a user
+      # close this `Dynamic` hole, and on which axis. `coverage --protection`
+      # surfaces it so a user does not chase a hole a hand-written type
+      # cannot fix. Three coarse, action-oriented categories:
+      #
+      # - `:add_rbs`      — write or install RBS (a missing gem signature,
+      #                     or an authored `untyped` to tighten).
+      # - `:enable_plugin`— a framework / DSL boundary; needs a plugin or
+      #                     `pre_eval:`, not a hand-written type.
+      # - `:engine_gap`   — not user-closable (a budget cutoff or unmodeled
+      #                     syntax); report it.
+      ADD_RBS       = :add_rbs
+      ENABLE_PLUGIN = :enable_plugin
+      ENGINE_GAP    = :engine_gap
+
+      TRACTABILITY = {
+        EXTERNAL_GEM_WITHOUT_RBS => ADD_RBS,
+        EXPLICIT_UNTYPED => ADD_RBS,
+        FRAMEWORK_DSL_BOUNDARY => ENABLE_PLUGIN,
+        ANALYZER_BUDGET_CUTOFF => ENGINE_GAP,
+        UNSUPPORTED_SYNTAX => ENGINE_GAP
+      }.freeze
+
+      module_function
+
+      # @return [Symbol, nil] the tractability category for a cause, or nil
+      #   when the cause is unknown / absent.
+      def tractability(cause)
+        TRACTABILITY[cause]
+      end
     end
   end
 end

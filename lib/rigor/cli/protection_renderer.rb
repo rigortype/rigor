@@ -2,6 +2,8 @@
 
 require "json"
 
+require_relative "../inference/dynamic_origin"
+
 module Rigor
   class CLI
     # Renders an {ProtectionReport} (ADR-63 Tier 1) as text or JSON. The text
@@ -11,6 +13,15 @@ module Rigor
     class ProtectionRenderer
       TOP_CALLS = 15
       TOP_FILES = 10
+
+      # ADR-73 P6 / ADR-75 WD2 — the actionable axis for each tractability
+      # category, shown next to a hole's origin so a user knows whether (and
+      # how) a type can close it.
+      TRACTABILITY_HINTS = {
+        Inference::DynamicOrigin::ADD_RBS => "add RBS",
+        Inference::DynamicOrigin::ENABLE_PLUGIN => "enable a plugin / pre_eval",
+        Inference::DynamicOrigin::ENGINE_GAP => "engine gap — report it"
+      }.freeze
 
       def initialize(out:)
         @out = out
@@ -52,7 +63,9 @@ module Rigor
       def origin_label(origin)
         return "" if origin.nil?
 
-        "  [#{origin.to_s.tr('_', '-')}]"
+        tractability = Inference::DynamicOrigin.tractability(origin)
+        hint = tractability ? " → #{TRACTABILITY_HINTS[tractability]}" : ""
+        "  [#{origin.to_s.tr('_', '-')}#{hint}]"
       end
 
       def render_files(report)

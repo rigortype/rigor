@@ -1,6 +1,6 @@
 # ADR-78 — Reflexive over-fold and the `flow.always-truthy-condition` envelope
 
-Status: **Proposed — 2026-06-24.** `flow.always-truthy-condition`
+Status: **Accepted — WD1+WD2 implemented 2026-06-25 (`REFLECTIVE_SEND_METHODS` guard in `ConstantFolding.try_dispatch`).** `flow.always-truthy-condition`
 concludes a predicate is provably truthy when it folds to a
 `Type::Constant`. That conclusion is unsound when the constant came from
 an **over-fold** — a fold whose soundness holds only for a narrower form

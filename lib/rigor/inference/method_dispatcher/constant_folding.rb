@@ -218,11 +218,27 @@ module Rigor
         # is what ultimately limits how wide an inferred type gets.
         UNION_FOLD_OUTPUT_LIMIT = 8
 
+        # ADR-78 — reflexive over-fold guard.
+        # Reflective dispatch (`public_send` / `send` / `__send__`) must
+        # NOT constant-fold unless the method-name argument is itself a
+        # value-pinned literal `Constant[Symbol]`. With a runtime-variable
+        # method name the dispatched method is not statically determined,
+        # so the call degrades to the RBS result (`untyped`) — exactly as
+        # it does without the guard, but explicit so a later shape-carrier
+        # preservation tier (ADR-76 WD2) cannot surface an over-fold as a
+        # spurious `flow.always-truthy-condition`.
+        REFLECTIVE_SEND_METHODS = %i[public_send send __send__].to_set.freeze
+
         # @return [Rigor::Type::Constant, Rigor::Type::Union, Rigor::Type::IntegerRange, nil]
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name
           args = context.args
+
+          if REFLECTIVE_SEND_METHODS.include?(method_name)
+            first_arg = args.first
+            return nil unless first_arg.is_a?(Type::Constant) && first_arg.value.is_a?(Symbol)
+          end
           # v0.0.7 — `String#%` against a `Tuple` / `HashShape`
           # argument runs Ruby's format-string engine when both
           # sides are statically constant. The standard

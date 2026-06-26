@@ -1473,4 +1473,29 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
   end
+
+  describe "ADR-78 reflective-send guard" do
+    it "declines public_send when the method-name argument is not a Constant[Symbol]" do
+      expect(fold("hello", :public_send, [42])).to be_nil
+      expect(fold("hello", :public_send, [nil])).to be_nil
+      expect(fold("hello", :public_send)).to be_nil
+    end
+
+    it "declines send when the method-name argument is not a Constant[Symbol]" do
+      expect(fold("hello", :send, [42])).to be_nil
+      expect(fold("hello", :send, [nil])).to be_nil
+      expect(fold("hello", :send)).to be_nil
+    end
+
+    it "declines __send__ when the method-name argument is not a Constant[Symbol]" do
+      expect(fold("hello", :__send__, [42])).to be_nil
+      expect(fold("hello", :__send__, [nil])).to be_nil
+      expect(fold("hello", :__send__)).to be_nil
+    end
+
+    it "does not affect non-reflective method dispatch" do
+      expect(fold(1, :+, [2])).not_to be_nil
+      expect(fold("abc", :upcase)).not_to be_nil
+    end
+  end
 end

@@ -1,13 +1,13 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-06-16T15:14:23Z",
-  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.2.0 @ run 27627812560",
-  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated for the v0.2.0 cycle: allocations + peak_rss_kb grew with the detection-teeth / protection-coverage / constant-folding additions while wall_s held (GC kept pace).",
+  "calibrated_at": "2026-06-27T00:00:00Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.2.6 @ run 28276063402",
+  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated for the v0.2.6 cut: allocations grew ~+5.3% with the ADR-75 Dynamic-provenance side-table and the ADR-76/78 shape-carrier preservation; the OSS-corpus (Mastodon) sweep stayed green (no new false positives), so the increase is blessed feature cost, not a regression. peak_rss_kb and wall_s refreshed to the same run's values.",
   "targets": {
     "lib": {
-      "wall_s": 13.75,
-      "allocations": 18769957,
-      "peak_rss_kb": 232292,
+      "wall_s": 16.625,
+      "allocations": 19770221,
+      "peak_rss_kb": 237108,
       "diagnostics": 1
     }
   }

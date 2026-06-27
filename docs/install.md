@@ -152,7 +152,7 @@ without WSL). For all other environments, prefer Case A–D above.
 rigor --version
 ```
 
-A version string like `rigor 0.1.x` confirms a successful install.
+A version string like `rigor 0.2.x` confirms a successful install.
 If the command is not found, revisit Step 2 for your case.
 
 ---

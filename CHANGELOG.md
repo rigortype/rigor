@@ -11,20 +11,28 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-06-27
+
+v0.2.6 sharpens how Rigor explains itself and tightens shape-aware inference. `rigor coverage --protection` now labels each untyped hole with why it is dynamic and whether a type can close it, and a new `rigor doctor` command routes setup problems to their fix. Literal hashes and arrays keep their precise shape through `freeze` / `dup` / `clone`, closing a folding gap on frozen constants. It also begins a plugin-contract cleanup ahead of the v1.0 freeze: the `type_specifier` hook is renamed to `narrowing_facts`, with the old name kept as a deprecated alias.
+
 ### Added
 
-- **`rigor coverage --protection`** now explains *why* each unprotected dispatch is untyped and whether a type can close it.
-  - Every `add_a_type_here` entry carries a `dynamic_origin` cause (`external_gem_without_rbs`, `framework_dsl_boundary`, `analyzer_budget_cutoff`, `explicit_untyped`, `unsupported_syntax`) and a derived `tractability` axis (`add_rbs` / `enable_plugin` / `engine_gap`), in both `--format json` and the text report — so you can prioritise the holes a hand-written or installed RBS can actually close and skip the ones that need a plugin / `pre_eval:` or an engine fix. A `tractability_summary` (per-axis dispatch-site totals) is emitted in the JSON and shown as a one-line `by tractability:` breakdown in the text report. ([ADR-75](docs/adr/75-dynamic-provenance.md), [ADR-73](docs/adr/73-skill-driven-user-experience.md) field-trial follow-up.)
-  - Provenance is a precision-additive side-channel: it never changes `untyped = Dynamic[top]` semantics, fires no diagnostic, and never feeds severity.
+- **[rigor coverage]** `rigor coverage --protection` now explains why each unprotected dispatch is untyped and whether a type can close it ([ADR-75](docs/adr/75-dynamic-provenance.md)).
+  - Every `add_a_type_here` entry carries a `dynamic_origin` cause (`external_gem_without_rbs`, `framework_dsl_boundary`, `analyzer_budget_cutoff`, `explicit_untyped`, `unsupported_syntax`) and a derived `tractability` axis (`add_rbs` / `enable_plugin` / `engine_gap`), in both `--format json` and the text report, so you can prioritise the holes an installed or hand-written RBS can actually close. A `tractability_summary` of per-axis dispatch-site totals is emitted in the JSON and shown as a one-line `by tractability:` breakdown in text.
+  - Provenance is precision-additive: it never changes `untyped = Dynamic[top]` semantics, fires no diagnostic, and never feeds severity.
+- **[rigor doctor]** New `rigor doctor` command classifies a project's existing findings into setup-problem vs clean-run and prints a routed next action for each, over a stable `checks[].id` JSON contract ([ADR-77](docs/adr/77-doctor-and-upgrade-commands.md)).
+  - It is a presentation layer over data `rigor check` already produces (config resolution, RBS environment, plugin load, baseline drift) and runs no new analysis. The companion `rigor upgrade` ships as a queued skeleton (ADR-50 WD7) that reports no migration target yet.
 
 ### Changed
 
-- **`{…}.freeze` / `.dup` / `.clone` / `.itself` on a literal hash or array now preserve the precise shape type** instead of degrading to a nominal `Hash` / `Array`, so `MESSAGES = {…}.freeze; MESSAGES[reason]` and `XS = […].freeze; XS[0]` fold the precise value rather than `Dynamic`. ([ADR-76](docs/adr/76-effect-modeling-freeze-dup-shape-preservation.md) WD2 / [ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD3.)
-- **Shape-carrier methods no longer fold a block-form call.** `tuple.any? { … }` / `.sum { … }` / `.count { … }` (and the hash-shape equivalents) previously folded the *no-block* result, ignoring the block; they now defer to the normal block/RBS path. Strictly precision-reducing (an unsound fold removed), and the fix that let array/tuple `freeze` preservation land without spurious `flow.always-truthy-condition`. ([ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD1.)
+- **[engine]** Literal hashes and arrays now preserve their precise shape through `freeze` / `dup` / `clone` / `itself` instead of degrading to a nominal `Hash` / `Array`, so `MESSAGES = {…}.freeze; MESSAGES[reason]` and `XS = […].freeze; XS[0]` fold the precise value rather than `Dynamic` ([ADR-76](docs/adr/76-effect-modeling-freeze-dup-shape-preservation.md) WD2 / [ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD3).
+- **[engine]** Shape-carrier methods (`tuple.any? { … }`, `.sum { … }`, `.count { … }`, and the hash-shape equivalents) no longer constant-fold a block-form call, deferring to the normal block/RBS path ([ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) WD1).
+  - They previously folded the no-block result, ignoring the block; the fix is strictly precision-reducing and removed the spurious `flow.always-truthy-condition` firings that blocked the shape-preservation change above.
 
 ### Deprecated
 
-- **The plugin hook `type_specifier` is renamed to `narrowing_facts`.** The old name read as a parallel to `dynamic_return` (which contributes a *type*) when it actually contributes post-return narrowing *facts*. `type_specifier` keeps working as an alias that emits a one-time deprecation warning per plugin and **will be removed in 0.3.0** — migrate `type_specifier methods: …` → `narrowing_facts methods: …` in your plugins. The bundled `rigor-minitest` / `rigor-sorbet` / `rigor-rspec` plugins are already migrated; the engine-facing `rigor plugins --capabilities` JSON field `type_specifier_methods` is unchanged for now. ([ADR-80](docs/adr/80-narrowing-facts-rename.md).)
+- **[plugin contract]** The plugin hook `type_specifier` is renamed to `narrowing_facts`; `type_specifier` keeps working as a deprecated alias and will be removed in 0.3.0 ([ADR-80](docs/adr/80-narrowing-facts-rename.md)).
+  - The old name read as a parallel to `dynamic_return` (which contributes a type) when it contributes post-return narrowing facts; migrate `type_specifier methods: …` → `narrowing_facts methods: …`, after which the one-time deprecation warning stops firing. The bundled `rigor-minitest` / `rigor-sorbet` / `rigor-rspec` plugins are already migrated, and the `rigor plugins --capabilities` JSON field `type_specifier_methods` is unchanged for now.
 
 ## [0.2.5] - 2026-06-24
 
@@ -205,7 +213,8 @@ v0.2.0 is Rigor's first publicly-announced (general / evaluation) release, gover
 - **[cli]** `rigor explain call.unresolved-toplevel` now resolves — the [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) rule was missing from the catalogue despite being live since v0.1.14 — and a completeness spec now asserts every rule has a catalogue entry.
 - **[packaging]** The Docker build-context ignore file is scoped to the Dockerfile (`Dockerfile.dockerignore`) instead of a repo-wide `.dockerignore`, so external tools embedding the rigor source via BuildKit `--build-context` no longer get an empty context.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/rigortype/rigor/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/rigortype/rigor/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/rigortype/rigor/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/rigortype/rigor/compare/v0.2.2...v0.2.3

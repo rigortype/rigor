@@ -96,13 +96,13 @@ When the assertion is recognised by **call shape** rather than
 by signature — PHPStan's `TypeSpecifyingExtension` interface,
 where you write a class that the framework instantiates and
 asks "given this call, what narrowings does it produce?" —
-Rigor's analogue is a plugin's `type_specifier` / `dynamic_return` and
+Rigor's analogue is a plugin's `narrowing_facts` / `dynamic_return` and
 `#diagnostics_for_file` hooks plus the engine's
 `post_return_facts` substrate.
 
 | PHPStan extension type | Rigor analogue |
 | --- | --- |
-| `MethodTypeSpecifyingExtension` | Plugin's `Fact(target_kind: :parameter)` returned from `type_specifier` |
+| `MethodTypeSpecifyingExtension` | Plugin's `Fact(target_kind: :parameter)` returned from `narrowing_facts` |
 | `StaticMethodTypeSpecifyingExtension` | Same, with `Fact(target_kind: :receiver-class)` |
 | `FunctionTypeSpecifyingExtension` | Same, with `Fact(target_kind: :argument)` |
 | `DynamicMethodReturnTypeExtension` | Plugin's `dynamic_return(methods:) { |call_node, scope, ...| ... }` |

@@ -400,7 +400,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | ------------------------------------------ | -------- |
 | `manifest(...)` + `config_schema`          | declares the optional `paths:` config knob |
 | `Plugin::Base#io_boundary` (`read_file`)   | reads project source AND `sorbet/rbi/**/*.rbi` under the trusted scope |
-| `Plugin::Base#dynamic_return` / `#type_specifier` | contributes the parsed return type / `T.bind` narrowing facts at every call site (replaced `flow_contribution_for`, removed ADR-52 WD3) |
+| `Plugin::Base#dynamic_return` / `#narrowing_facts` | contributes the parsed return type / `T.bind` narrowing facts at every call site (replaced `flow_contribution_for`, removed ADR-52 WD3) |
 | `Plugin::Base#diagnostics_for_file`        | emits `plugin.sorbet.parse-error` for malformed sig blocks |
 | `Scope#type_of` (via `dynamic_return` block) | resolves instance-side receivers to `Nominal[T]` for catalog lookup |
 | `Type::Combinator.{nominal_of,union,intersection,untyped,top,bot,constant_of}` | constructs the Rigor-side carriers from the Sorbet vocabulary |
@@ -409,7 +409,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 
 Slice 2 of ADR-11 wires the `T.let` / `T.cast` / `T.must` /
 `T.bind` flow assertions through the same `dynamic_return` /
-`type_specifier` substrate as their `%a{rigor:v1:assert:}` analogues. Slice 3
+`narrowing_facts` substrate as their `%a{rigor:v1:assert:}` analogues. Slice 3
 broadens the type-vocabulary translator (`T.proc`, `T::Array`,
 `T.class_of`, `T.attached_class`). Slice 4 adds the RBI
 directory walker so `sorbet/rbi/{gems,annotations,dsl,shims}/`

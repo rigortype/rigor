@@ -135,7 +135,7 @@ RSpec.describe "plugins/rigor-rspec" do
 
   # Pillar 2 Slice 1 — `expect(x).to MATCHER` narrows `x`
   # downstream in the same `it` body. The plugin's
-  # `type_specifier` (method-gated on `to` / `not_to` / `to_not`,
+  # `narrowing_facts` (method-gated on `to` / `not_to` / `to_not`,
   # ADR-37 slice 2) recognises the call shape and emits a
   # `post_return_fact` targeting local `x`; the engine's
   # `apply_plugin_assertions` → `:local` target_kind branch

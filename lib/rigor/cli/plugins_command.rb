@@ -37,7 +37,7 @@ module Rigor
     #   `source_rbs_synthesizer:`);
     # - the ADR-37 narrow extension protocols read off the plugin
     #   class — `node_rule` node types, `dynamic_return` receivers,
-    #   `type_specifier` methods.
+    #   `narrowing_facts` methods.
     #
     # `--capabilities` switches to a focused catalogue of just the
     # narrow-protocol gate values + produced/consumed facts (ADR-37
@@ -194,7 +194,7 @@ module Rigor
 
       # ADR-37 narrow extension protocols. Unlike the 10 declarative
       # manifest fields, these are class-level DSLs (`node_rule` /
-      # `dynamic_return` / `type_specifier`), so they are read off the
+      # `dynamic_return` / `narrowing_facts`), so they are read off the
       # plugin class rather than the manifest. The gate values — node
       # types, receiver class names, specified method names — are the
       # greppable, enumerable surface the capability catalogue exposes.

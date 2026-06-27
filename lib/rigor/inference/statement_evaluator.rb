@@ -1861,13 +1861,13 @@ module Rigor
       end
 
       # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's post-return
-      # narrowing from the method-gated `type_specifier` DSL, wrapped as
+      # narrowing from the method-gated `narrowing_facts` DSL, wrapped as
       # a facts-only `FlowContribution`, swallowing per-plugin
       # exceptions so a buggy plugin can't abort the assertion path.
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
 
-      # Fast-exit guard: skip if no plugin declares a `type_specifier`, or if
+      # Fast-exit guard: skip if no plugin declares a `narrowing_facts` rule, or if
       # no registered method-name gate matches the call. See
       # `collect_gated_statement_contributions` for the full consultation.
       def collect_plugin_contributions(registry, call_node, current_scope)
@@ -1882,7 +1882,7 @@ module Rigor
       end
 
       # ADR-37 slice 2 / ADR-52 WD1 — post-gate walk in registry order.
-      # Visits only plugins in `for_statement` (declare a `type_specifier`),
+      # Visits only plugins in `for_statement` (declare a `narrowing_facts` rule),
       # further gated by the method-name Set probe so the common no-candidate
       # case is a single lookup. Accumulates lazily; caller is read-only.
       def collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)

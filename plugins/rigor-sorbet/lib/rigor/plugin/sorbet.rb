@@ -169,7 +169,7 @@ module Rigor
       end
 
       # ADR-52 slice 4 — `T.bind(self, T)`'s self-narrowing fact,
-      # contributed via the method-gated `type_specifier` DSL. The
+      # contributed via the method-gated `narrowing_facts` DSL. The
       # statement evaluator consults this path for narrowing facts.
       # The return-type half (`Constant[nil]`) flows through the
       # `dynamic_return` rule above; the block re-checks the `T.`
@@ -258,7 +258,7 @@ module Rigor
         lookup_signature(call_node, scope)&.return_type
       end
 
-      # The `type_specifier` body for `T.bind` — same sigil gate as
+      # The `narrowing_facts` body for `T.bind` — same sigil gate as
       # the return-type path, then the recogniser's
       # `post_return_facts` (the `Fact(target_kind: :self)` that
       # narrows `scope.self_type` for the rest of the block).

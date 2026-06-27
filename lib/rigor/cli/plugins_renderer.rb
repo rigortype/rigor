@@ -170,7 +170,7 @@ module Rigor
       end
 
       # ADR-37 narrow extension protocols (node_rule / dynamic_return /
-      # type_specifier). Surfaced in the full report alongside the
+      # narrowing_facts). Surfaced in the full report alongside the
       # declarative surfaces; `--capabilities` is the focused view.
       def narrow_protocol_lines(row)
         lines = []

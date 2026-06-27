@@ -26,11 +26,14 @@ git switch -c release/x.y.z
 ```
 
 Every step below — the metadata edits, the local verify, the version-bump
-commit — lands on this branch. Pushing it runs the **comprehensive release
-gate** the normal master/PR CI does not (see "Push and watch the release
-gate" below): the base CI gate (`ci.yml` also triggers on `release/**`) plus
-`release-gate.yml` (perf benchmark, gem-build validation, OSS-corpus sweep —
-advisory during the v0.2.0 trial).
+commit — lands on this branch. Pushing it runs `release-gate.yml` (perf
+benchmark, gem-build validation, OSS-corpus sweep — advisory during the
+v0.2.0 trial), the **comprehensive release gate** the normal master CI does
+not (see "Push and watch the release gate" below). The base CI gate
+(`ci.yml`) runs on the release **PR** you open next, via its `pull_request`
+event — `ci.yml` triggers on `push` to `master` only, so a release branch is
+not double-run (push + pull_request) the way it would be if `release/**` were
+also a `push` branch.
 
 ## Update Release Metadata
 
@@ -267,10 +270,12 @@ Push the version-bump commit on the release branch:
 git push -u origin release/x.y.z
 ```
 
-This triggers two workflows:
+The push triggers `release-gate.yml`; the base `ci.yml` gate runs on the
+release **PR** you open next (it triggers on `pull_request`, not on a
+`release/**` push, so the branch is not double-run):
 
 - **`ci.yml`** (base gate, required) — test / lint / self-check warm+cold /
-  warm==cold diff. MUST be green before the PR merge below.
+  warm==cold diff; runs on the PR. MUST be green before the PR merge below.
 - **`release-gate.yml`** (comprehensive, advisory during the v0.2.0 trial) —
   the perf benchmark (`make bench-perf`, [ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)
   WD4), gem-build validation, and the OSS-corpus sweep. It reports but does

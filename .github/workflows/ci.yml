@@ -2,17 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [master, "release/**"]
+    branches: [master]
   pull_request:
 
-# Cancel any in-progress run on the same branch when a new commit
-# arrives. Pushes to master and to a release/* branch are always run to
-# completion so the commit-level status is always present (a release
-# branch is a publish candidate — its base gate must not be cancelled
-# mid-run); other refs (PR head branches) cancel the stale run.
+# A release or feature branch is validated through its pull request (the
+# `pull_request` event), so release/** is deliberately NOT listed under
+# `push`: listing it there double-ran every release PR (push +
+# pull_request). master still runs on push for the post-merge
+# commit-level status.
+#
+# Cancel an in-progress run on the same ref when a new commit arrives,
+# except for master and release-branch PRs, which run to completion (a
+# release PR is a publish candidate — its base gate must not be
+# cancelled mid-run; matched via head_ref now that release/** no longer
+# triggers a push run). Other PR heads cancel the stale run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/release/') }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.head_ref, 'release/') }}
 
 permissions:
   contents: read

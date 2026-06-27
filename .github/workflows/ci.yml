@@ -3,6 +3,14 @@ name: CI
 on:
   push:
     branches: [master]
+    # A Markdown-only push (ADRs, notes, CHANGELOG, READMEs, skills) does
+    # not change analysable code, so skip the full suite for it. Mixed
+    # commits still run — paths-ignore only skips when EVERY changed file
+    # matches. Applied to `push` only: `pull_request` stays unfiltered so
+    # the required "CI required" fan-in always reports on a PR (a paths-
+    # filtered required check hangs as pending and blocks the merge).
+    paths-ignore:
+      - "**/*.md"
   pull_request:
 
 # A release or feature branch is validated through its pull request (the

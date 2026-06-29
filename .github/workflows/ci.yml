@@ -61,7 +61,7 @@ jobs:
       # next. Key is unique per run-id so the post-step always saves
       # fresh timing data; restore-keys prefix-matches the most recent.
       - name: Restore binpacker timing file
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: tmp/binpacker.timings
           key: binpacker-timings-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}
@@ -164,7 +164,7 @@ jobs:
       # gem-version or source change that does not touch linting rules
       # reuses the warm cache and skips re-inspecting unchanged files.
       - name: Restore RuboCop cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/rubocop_cache
           key: rubocop-${{ runner.os }}-${{ hashFiles('.rubocop.yml', '.rubocop_todo.yml', 'Gemfile.lock') }}
@@ -217,7 +217,7 @@ jobs:
       # the warm==cold diff gate even when the analysis is correct.
       - name: Restore Rigor analysis cache
         if: matrix.cache == 'warm'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .rigor/cache
           key: rigor-cache-${{ runner.os }}-${{ hashFiles('Gemfile.lock') }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml') }}

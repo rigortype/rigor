@@ -620,3 +620,36 @@ hkt_registry, kernel_dispatch, overload_selector, precision_scanner, protection_
 project_patched_scanner, debouncer, document_symbol_provider, signature_help_provider, mcp/server,
 …). Remaining frontier: the `cli/*_command` integration-blindness tail (batch 4), overload_selector's
 2 all-block-overload residuals, ~50 still-unmeasured 60–300 LOC files, and the >300 LOC engine tier.
+
+## Eighth batch — def-return typer + two plugin surfaces (2026-06-30)
+
+Two fused batches over the still-unmeasured 60–300 LOC tier; most files measured at floor
+(`type/{union,constant,nominal}`, `source/{constant_path,node_walker}`, `macro_block_self_type`,
+`method_dispatcher/method_folding`, `sig_gen/{type_elaborator,layout_index,path_mapper}`,
+`plugin/trust_policy` were all already 100 %). Three genuine clusters closed, all spec-only,
+rspec + rubocop green:
+
+- `inference/def_return_typer` (1 → 0): `body_last_expression`'s recursive `Prism::BeginNode`
+  arm was never executed — the existing "unwraps a BeginNode" test used the explicit
+  `begin…end` form, which parses with a **StatementsNode** body (the BeginNode is *nested*
+  under it, so line 51 returns it without recursing). Only the **inline def-rescue** form
+  (`def foo; 1; rescue; 2; end`) yields a BeginNode *body* directly, hitting line 52. Rewrote
+  the case to the inline form and pinned the exact unwrapped statement (`not_to be_nil` →
+  `IntegerNode` value 1), killing the recursive-call `undefined_method` mutant.
+- `plugin/io_boundary` (14 → 0): `DefaultHttpClient#get` — the real-`Net::HTTP` wrapper the
+  boundary injects-over in every other spec — was entirely untested (no network in the suite,
+  no WebMock). Unit-tested with **stubbed transport**: `Net::HTTP.start`/`request_get` stubbed
+  to yield a *real* `Net::HTTPOK`/`Net::HTTPForbidden` (so `#is_a?(Net::HTTPSuccess)` and
+  `#code` stay genuine), only the socket-backed `#read_body` stubbed to yield chunks. Three
+  cases — success concatenation, the `:url_fetch_failed` non-success raise (naming status +
+  url), and the `:url_body_too_large` streamed-oversize raise — execute the whole method body
+  and pin the two `AccessDeniedError` reason codes (real plugin trust/access contract).
+- `plugin/protocol_contract` (8 → 2-equivalent): added a string-key `param_types` entry test
+  (the `entry["index"]`/`entry["type_name"]` config-sourced fallback — all prior success tests
+  used symbol keys, so the `|| entry["…"]` arm was never read) and a non-`to_sym`-able severity
+  test (`severity: 42` → the `rescue NoMethodError` arm, previously unexercised). The 2 residual
+  (`validate_severity!`'s main `raise`/`inspect`, lines 149–150) are **rescue-masked equivalent
+  mutants**: a `NoMethodError` from the mutated main raise is caught by the duplicate
+  `rescue NoMethodError` and re-raised as the same `ArgumentError`, so the breakage is
+  indistinguishable from outside — the equivalent-mutant floor. `type/refined:83` left at the
+  documented `#inspect` debug-format floor.

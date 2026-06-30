@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "tmpdir"
+require "net/http"
 
 RSpec.describe Rigor::Plugin::IoBoundary do
   let(:tmpdir) { Dir.mktmpdir("rigor-io-boundary-spec-") }
@@ -143,6 +144,57 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       expect(first.files.size).to eq(1)
       expect(second.files.size).to eq(2)
       expect(first).to be_frozen
+    end
+  end
+
+  # The real-`Net::HTTP` wrapper the boundary injects-over in every other
+  # test (a fake `#get`); exercised here with stubbed transport so the
+  # success / non-success / oversize-body branches and their reason codes
+  # have a unit safety net without touching the network.
+  describe Rigor::Plugin::DefaultHttpClient do
+    subject(:client) { described_class.new }
+
+    let(:url) { "https://example.test/data.json" }
+    let(:http) { instance_double(Net::HTTP) }
+
+    before { allow(Net::HTTP).to receive(:start).and_yield(http) }
+
+    # Real response objects so `#is_a?(Net::HTTPSuccess)` and `#code` are
+    # genuine; only the socket-backed `#read_body` needs stubbing.
+    def respond_with(response)
+      allow(http).to receive(:request_get).and_yield(response)
+    end
+
+    it "returns the streamed body concatenated on a successful response" do
+      response = Net::HTTPOK.new("1.1", "200", "OK")
+      allow(response).to receive(:read_body) { |&block| %w[foo bar].each(&block) }
+      respond_with(response)
+
+      expect(client.get(url, timeout: 1, max_bytes: 1000)).to eq("foobar")
+    end
+
+    it "raises url_fetch_failed on a non-success response, naming the status and url" do
+      respond_with(Net::HTTPForbidden.new("1.1", "403", "Forbidden"))
+
+      expect { client.get(url, timeout: 1, max_bytes: 1000) }
+        .to raise_error(Rigor::Plugin::AccessDeniedError) do |e|
+          expect(e.reason).to eq(:url_fetch_failed)
+          expect(e.resource).to eq(url)
+          expect(e.message).to include("403").and include(url)
+        end
+    end
+
+    it "raises url_body_too_large once the streamed body exceeds max_bytes" do
+      response = Net::HTTPOK.new("1.1", "200", "OK")
+      allow(response).to receive(:read_body) { |&block| %w[aaaa bbbb].each(&block) }
+      respond_with(response)
+
+      expect { client.get(url, timeout: 1, max_bytes: 5) }
+        .to raise_error(Rigor::Plugin::AccessDeniedError) do |e|
+          expect(e.reason).to eq(:url_body_too_large)
+          expect(e.resource).to eq(url)
+          expect(e.message).to include("5")
+        end
     end
   end
 end

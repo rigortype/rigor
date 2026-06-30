@@ -130,10 +130,16 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
         expect(result.value).to eq(2)
       end
 
-      it "unwraps a BeginNode to its statements" do
-        body = parse_def("def foo; begin; 1; rescue; 2; end; end").body
+      it "recurses through a BeginNode body to its inner last statement" do
+        # The inline def-rescue form parses with a BeginNode *body* directly
+        # (an explicit `begin…end` nests under a StatementsNode instead), so
+        # this is what exercises the recursive `Prism::BeginNode` arm — and the
+        # exact-value assertion pins the unwrap rather than merely non-nil.
+        body = parse_def("def foo; 1; rescue; 2; end").body
+        expect(body).to be_a(Prism::BeginNode)
         result = described_class.body_last_expression(body)
-        expect(result).not_to be_nil
+        expect(result).to be_a(Prism::IntegerNode)
+        expect(result.value).to eq(1)
       end
     end
 

@@ -33,6 +33,13 @@ RSpec.describe Rigor::Plugin::ProtocolContract do
       expect(build(method_name: "get").method_name).to eq(:get)
     end
 
+    it "reads param_types entries with string keys (config-sourced hashes)" do
+      contract = build(param_types: [{ "index" => 1, "type_name" => "Rack::Session" }])
+      param = contract.param_types.first
+      expect(param.index).to eq(1)
+      expect(param.type_name).to eq("Rack::Session")
+    end
+
     it "defaults param_types to empty and singleton to false" do
       contract = described_class.new(
         path_glob: "lib/**/*.rb", method_name: :call, return_type_name: "Object"
@@ -70,6 +77,10 @@ RSpec.describe Rigor::Plugin::ProtocolContract do
 
     it "rejects a severity outside the allowed set" do
       expect { build(severity: :fatal) }.to raise_error(ArgumentError, /severity/)
+    end
+
+    it "rejects a severity that does not respond to #to_sym (rescue path)" do
+      expect { build(severity: 42) }.to raise_error(ArgumentError, /severity/)
     end
 
     it "rejects a param_types entry without a valid index" do

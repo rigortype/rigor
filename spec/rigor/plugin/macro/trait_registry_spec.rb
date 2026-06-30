@@ -103,6 +103,12 @@ RSpec.describe Rigor::Plugin::Macro::TraitRegistry do
       end.to raise_error(ArgumentError, /modules_by_symbol value/)
     end
 
+    it "rejects modules_by_symbol keys that are neither Symbol nor non-empty String" do
+      expect do
+        described_class.new(receiver_constraint: "Foo", method_name: :devise, modules_by_symbol: { 42 => "Mod::A" })
+      end.to raise_error(ArgumentError, /modules_by_symbol key/)
+    end
+
     it "rejects a non-Array always_included" do
       expect do
         described_class.new(receiver_constraint: "Foo", method_name: :devise, always_included: "Mod::A")

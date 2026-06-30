@@ -129,4 +129,51 @@ RSpec.describe Rigor::Plugin::Isolation do
       end
     end
   end
+
+  # Unit-exercise the RubyBox backend's branches with a stubbed Box, so the
+  # error gates and the inspect-rendered expression are covered without the
+  # process-global `RUBY_BOX=1` the integration example above requires.
+  describe "RubyBox (unit, stubbed Box)" do
+    let(:box) { Rigor::Plugin::Box }
+
+    it "raises Unavailable when the Ruby::Box is not active" do
+      allow(box).to receive(:enabled?).and_return(false)
+      expect do
+        described_class::RubyBox.call(feature: feature, receiver: inflector, method: :pluralize, args: ["post"])
+      end.to raise_error(described_class::Unavailable, /RUBY_BOX/)
+    end
+
+    it "raises Unavailable when the feature cannot be loaded into the box" do
+      allow(box).to receive(:enabled?).and_return(true)
+      allow(box).to receive(:require_feature).with(feature).and_return(false)
+      expect do
+        described_class::RubyBox.call(feature: feature, receiver: inflector, method: :pluralize, args: ["post"])
+      end.to raise_error(described_class::Unavailable, /could not be loaded/)
+    end
+
+    it "evals the inspect-rendered call expression and returns the box result" do
+      allow(box).to receive_messages(enabled?: true, require_feature: true)
+      allow(box).to receive(:eval).with('ActiveSupport::Inflector.pluralize("post")').and_return("posts")
+      result = described_class::RubyBox.call(feature: feature, receiver: inflector, method: :pluralize, args: ["post"])
+      expect(result).to eq("posts")
+    end
+
+    it "joins multiple inspect-rendered args with ', ' in the expression" do
+      allow(box).to receive_messages(enabled?: true, require_feature: true)
+      # Two args so the join separator is observable (a single arg renders the
+      # same under any separator, masking a dropped/altered one).
+      allow(box).to receive(:eval).with('ActiveSupport::Inflector.camelize("a", "b")').and_return("ok")
+      result = described_class::RubyBox.call(feature: feature, receiver: inflector, method: :camelize, args: %w[a b])
+      expect(result).to eq("ok")
+    end
+  end
+
+  describe "Process backend (fork unavailable)" do
+    it "raises Unavailable when fork is not supported on the platform" do
+      allow(described_class::Process).to receive(:available?).and_return(false)
+      expect do
+        described_class::Process.call(feature: feature, receiver: inflector, method: :pluralize, args: ["post"])
+      end.to raise_error(described_class::Unavailable, /fork is not supported/)
+    end
+  end
 end

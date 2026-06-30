@@ -65,6 +65,24 @@ RSpec.describe Rigor::Plugin::Macro::NestedClassTemplate do
         described_class.new(receiver_constraint: "My::Enum", variant_method: 3)
       end.to raise_error(ArgumentError, /variant_method/)
     end
+
+    it "rejects a non-Symbol/String block_method, naming it" do
+      expect do
+        described_class.new(receiver_constraint: "My::Enum", block_method: 3)
+      end.to raise_error(ArgumentError, /block_method/)
+    end
+
+    it "rejects a negative inner_arg_position, naming it" do
+      expect do
+        described_class.new(receiver_constraint: "My::Enum", inner_arg_position: -1)
+      end.to raise_error(ArgumentError, /inner_arg_position/)
+    end
+
+    it "rejects a non-Symbol/String inner_reader, naming it" do
+      expect do
+        described_class.new(receiver_constraint: "My::Enum", inner_reader: 3)
+      end.to raise_error(ArgumentError, /inner_reader/)
+    end
   end
 
   describe "value semantics" do

@@ -653,3 +653,40 @@ rspec + rubocop green:
   `rescue NoMethodError` and re-raised as the same `ArgumentError`, so the breakage is
   indistinguishable from outside — the equivalent-mutant floor. `type/refined:83` left at the
   documented `#inspect` debug-format floor.
+
+## Ninth batch — plugin isolation + macro validators (2026-07-01)
+
+A fused batch over ten plugin surfaces; most at floor (`fact_store`, `services`, `box`,
+`blueprint`, `additional_initializer`, `macro/block_as_method`). Three genuine clusters closed,
+one equivalent-mutant floor documented; all spec-only, rspec + rubocop green. (First re-ran
+`bundle install` — PR #33's rbs 4.0.2 → 4.0.3 bump landed while this session was open, and the
+fused test axis's spawned `bundle exec rspec` cannot boot until the new native extension is
+built; symptom is `Could not find rbs-4.0.3 in locally installed gems` from the subprocess.)
+
+- `plugin/macro/nested_class_template` (6 → 0): the `validate_method!`/`validate_position!`
+  calls for `block_method` / `inner_arg_position` / `inner_reader` (lines 79/82/83) were
+  unprotected — the existing validation tests covered only the *other three* params
+  (`receiver_constraint` / `variant_method` / `symbol_arg_position`), so the per-call `label`
+  argument (the `#block_method` etc. embedded in the message) survived `nil_inject`/`type_swap`.
+  Three tests each pass an invalid value for one param and assert the message names it.
+- `plugin/macro/trait_registry` (2 → 0): the `validate_modules_by_symbol!` invalid-**key**
+  branch (a Hash key that is neither Symbol nor non-empty String, lines 166/168) — the existing
+  spec covered the value branch and the non-Hash guard but never an invalid key. One test with
+  `{ 42 => "Mod::A" }` asserting the `modules_by_symbol key` message.
+- `plugin/isolation` (15 → 2-floor): the `RubyBox` backend (lines 96/97/103/105) was entirely
+  unexercised — its only integration example is gated `if: Box.enabled?` and the suite never
+  sets `RUBY_BOX=1`. Unit-tested with a **stubbed `Box`** (`enabled?`/`require_feature`/`eval`):
+  the two `Unavailable` gates, plus the inspect-rendered expression pinned by stubbing
+  `Box.eval` with the exact `'ActiveSupport::Inflector.pluralize("post")'` (the "no free input
+  reaches eval" contract). The `join(", ")` separator needed a **two-arg** case to bite — a
+  single arg renders identically under any separator (`["x"].join(nil) == "x"`), masking a
+  dropped/altered one. Also added the `Process` fork-unavailable gate (line 122) via a stubbed
+  `Process.available? => false`. The 2 residual (`run_worker_loop`'s `ensure exit!(0)`, line
+  186) are a **subprocess-child floor**: the loop runs only in the forked child, and calling it
+  in-process to mutate the exit code would terminate the test runner — genuinely untestable
+  without a real fork.
+- `plugin/inflector:100` left at an **equivalent-mutant floor**: `available?` probes with
+  `invoke(:pluralize, "rigor_inflector_probe")`; mutating the probe *argument* (`nil_inject`/
+  `type_swap`) still yields a successful pluralization, so `available?` returns `true`
+  regardless — the probe string is immaterial to the method's contract, and pinning it would be
+  testing an implementation detail.

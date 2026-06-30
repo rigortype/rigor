@@ -64,7 +64,7 @@ jobs:
       # the ~30-minute cold build. Keyed on the ruby_wasm version + the wasm
       # build inputs.
       - name: Cache ruby_wasm toolchain + build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: plugins/rigor-playground/wasm/build
           key: ruby-wasm-${{ runner.os }}-${{ hashFiles('plugins/rigor-playground/wasm/Gemfile') }}

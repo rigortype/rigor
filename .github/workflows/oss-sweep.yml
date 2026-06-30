@@ -72,7 +72,7 @@ jobs:
       # Restore the Rigor analysis cache to skip re-analysing unchanged files
       # across weekly runs (ADR-6). Key encodes Rigor source + Mastodon tag.
       - name: Restore Rigor analysis cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /tmp/mastodon/.rigor/cache
           key: rigor-oss-mastodon-${{ steps.mastodon_tag.outputs.tag }}-${{ hashFiles('lib/**/*.rb', 'data/builtins/**/*.yml', 'Gemfile.lock') }}

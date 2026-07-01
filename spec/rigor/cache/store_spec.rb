@@ -248,6 +248,117 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
+  describe "#fetch_or_validate (ADR-45 record-and-validate)" do
+    def fresh_descriptor(path, value)
+      Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.new(path: path, comparator: :digest,
+                                                        value: Digest::SHA256.hexdigest(value))]
+      )
+    end
+
+    it "misses, runs the block, writes, and returns the produced value" do
+      called = 0
+      result = store.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: { x: 1 }) do
+        called += 1
+        [{ v: 42 }, Rigor::Cache::Descriptor.new]
+      end
+
+      expect(called).to eq(1)
+      expect(result).to eq(v: 42)
+      key = descriptor.cache_key_for(producer_id: "p", params: { x: 1 })
+      expect(File.exist?(File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry"))).to be(true)
+    end
+
+    it "serves a fresh entry as a hit without re-running the block, across a fresh Store" do
+      file = File.join(tmpdir, "dep.txt")
+      File.write(file, "v1")
+      produce = lambda do
+        content = File.read(file)
+        [content, fresh_descriptor(file, content)]
+      end
+
+      first = described_class.new(root: cache_root).fetch_or_validate(
+        producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}, &produce
+      )
+      expect(first).to eq("v1")
+
+      called = 0
+      second_store = described_class.new(root: cache_root)
+      second = second_store.fetch_or_validate(
+        producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}
+      ) do
+        called += 1
+        ["should-not-run", Rigor::Cache::Descriptor.new]
+      end
+      expect(called).to eq(0)
+      expect(second).to eq("v1")
+      expect(second_store.stats).to include(hits: 1, misses: 0)
+    end
+
+    it "recomputes when the stored dependency_descriptor is stale (dependency file changed)" do
+      file = File.join(tmpdir, "dep.txt")
+      File.write(file, "v1")
+
+      run = lambda do |s|
+        s.fetch_or_validate(producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}) do
+          content = File.read(file)
+          [content, fresh_descriptor(file, content)]
+        end
+      end
+
+      expect(run.call(described_class.new(root: cache_root))).to eq("v1")
+
+      File.write(file, "v2")
+      called = 0
+      result = described_class.new(root: cache_root).fetch_or_validate(
+        producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}
+      ) do
+        called += 1
+        content = File.read(file)
+        [content, fresh_descriptor(file, content)]
+      end
+      expect(called).to eq(1)
+      expect(result).to eq("v2")
+    end
+
+    it "increments misses (and writes on success) on every miss, hits on a fresh re-read" do
+      3.times do |i|
+        described_class.new(root: cache_root).fetch_or_validate(
+          producer_id: "demo", key_descriptor: descriptor, params: { i: i }
+        ) { [i, Rigor::Cache::Descriptor.new] }
+      end
+      hit_store = described_class.new(root: cache_root)
+      2.times do
+        hit_store.fetch_or_validate(
+          producer_id: "demo", key_descriptor: descriptor, params: { i: 0 }
+        ) { [:unused, Rigor::Cache::Descriptor.new] }
+      end
+
+      stats = hit_store.stats
+      expect(stats).to include(misses: 0, writes: 0, hits: 2)
+    end
+
+    it "treats a missing block as [nil, Descriptor.new] and does not raise" do
+      result = store.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: {})
+      expect(result).to be_nil
+    end
+
+    it "does not write to disk and does not raise when read_only" do
+      ro = described_class.new(root: cache_root, read_only: true)
+      called = 0
+      result = ro.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: {}) do
+        called += 1
+        [:v, Rigor::Cache::Descriptor.new]
+      end
+
+      expect(called).to eq(1)
+      expect(result).to eq(:v)
+      key = descriptor.cache_key_for(producer_id: "p", params: {})
+      expect(File.exist?(File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry"))).to be(false)
+      expect(ro.stats).to include(writes: 0, misses: 1)
+    end
+  end
+
   describe "#stats (v0.0.9 group A slice 3)" do
     it "starts at zero hits / misses / writes" do
       expect(store.stats).to include(hits: 0, misses: 0, writes: 0)
@@ -373,6 +484,59 @@ RSpec.describe Rigor::Cache::Store do
       end
       expect(called).to eq(1)
       expect(result).to eq(:second)
+    end
+  end
+
+  describe "atomic write (#write_entry / #atomically_replace)" do
+    it "round-trips the exact written value and leaves no .tmp file behind" do
+      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { "the-value" }
+      key = descriptor.cache_key_for(producer_id: "p", params: {})
+      entry_path = File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry")
+
+      expect(File.exist?(entry_path)).to be(true)
+      expect(Dir.glob("#{entry_path}.tmp.*")).to be_empty
+
+      fresh = described_class.new(root: cache_root)
+      result = fresh.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :should_not_run }
+      expect(result).to eq("the-value")
+    end
+
+    it "derives the temp filename's random suffix from SecureRandom.hex(4) (16 hex chars)" do
+      allow(SecureRandom).to receive(:hex).and_call_original
+      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
+      expect(SecureRandom).to have_received(:hex).with(4)
+    end
+
+    it "does not collide across concurrent writers targeting the same entry (unique temp names)" do
+      key = descriptor.cache_key_for(producer_id: "p", params: {})
+      entry_path = File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry")
+
+      threads = Array.new(16) do |i|
+        Thread.new do
+          described_class.new(root: cache_root).fetch_or_compute(
+            producer_id: "p", params: {}, descriptor: descriptor
+          ) { "value-#{i}" }
+        end
+      end
+      threads.each(&:join)
+
+      # Every writer raced for the SAME entry; the last rename wins but the
+      # entry must be intact (one of the written values) and no temp file
+      # from any writer is left behind — collisions there would clobber a
+      # sibling writer's in-flight temp file.
+      expect(Dir.glob("#{entry_path}.tmp.*")).to be_empty
+      final = described_class.new(root: cache_root).fetch_or_compute(
+        producer_id: "p", params: {}, descriptor: descriptor
+      ) { :should_not_run }
+      expect(final).to match(/\Avalue-\d+\z/)
+    end
+  end
+
+  describe "#write_varint (private LEB128 encoder)" do
+    it "raises ArgumentError for a negative value" do
+      expect do
+        store.send(:write_varint, +"".b, -1)
+      end.to raise_error(ArgumentError, "varint must be non-negative")
     end
   end
 

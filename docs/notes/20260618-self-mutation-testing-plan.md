@@ -768,3 +768,24 @@ files; the parent measures + adjudicates + commits), one done inline. All three 
   the `Time#to_i` mtime path). The 3 it left (`to_canonical_bytes` at 319/324) were the
   `Descriptor#==` / `#eql?` / `#hash` value-semantics — closed inline with an equal/not-equal/
   Hash-key trio (the existing `.hash` test was on an *entry*, not the descriptor).
+
+## Thirteenth batch — medium spec'd files, part 2 (2026-07-01)
+
+The remaining two >300 LOC spec'd files. `analysis/rule_catalog` (618 LOC) measured at
+**0 survivors** — the rule-catalogue is already exhaustively spec'd. `cache/store` (523 LOC)
+was delegated to a Sonnet subagent.
+
+- `cache/store` (21 → 1-equivalent, Sonnet): the whole `#fetch_or_validate` record-and-validate
+  flow (lines 244–268) had no *direct* coverage — it was only exercised transitively via
+  `Plugin::Base#cache_for`. Closed with a `#fetch_or_validate` block (hit returns the cached
+  value + increments `hits`; miss runs the block, writes, increments `misses`; missing-block →
+  `[nil, Descriptor.new]`; stale dependency descriptor → recompute), an atomic-write block
+  (round-trip the exact value, no leftover `.tmp`, `SecureRandom.hex(4)` suffix pinned by a spy),
+  and a `write_varint` negative-value raise test (via `.send`). The 1 residual is line 421
+  `File.open(path, RDWR|CREAT, 0o644)` — a `nil_inject` on the `0o644` mode is an **equivalent
+  mutant**: under umask `022` the default create mode `0666 & ~022 == 0644`, byte-identical to
+  the literal, so no non-umask-fragile test can distinguish it (the `path`/`flags` args are a
+  variable and a constant-OR, not literals `nil_inject` targets).
+
+**Phase 1 (medium 380–620 LOC spec'd tier) complete.** baseline, method_parameter_binder,
+cache/descriptor, rule_catalog, cache/store all at their equivalent-mutant floor.

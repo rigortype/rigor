@@ -713,3 +713,33 @@ protection, zero survivors** — the constant-fold tier is exhaustively spec'd; 
   string) is unexercised, consistent with the `type/refined:83` precedent. The carrier
   convention in this repo does not spec `inspect`, so these are deliberately not chased.
 - `inference/dynamic_origin` at 100 % (ADR-75's cause-set carrier, already fully spec'd).
+
+## Eleventh batch — CLI commands (2026-07-01)
+
+A fused batch over four CLI commands. `cli/ci_detector` at 100 %. Two genuine clusters closed
+in `doctor`/`skill`; the residuals are `if key?`-guarded equivalent defaults, a defensive
+unreachable branch, and flag-description cosmetics.
+
+- `cli/doctor_command` (18 → 6-equivalent): the baseline-drift path was untested. The spec
+  covered the malformed-baseline (`:warn`) and clean-empty (`[]`) cases but never a *drifting*
+  baseline. Added (a) a `#baseline_drift_summary` unit test via `.send` with fabricated audit
+  rows (`Struct.new(:status)`) pinning the by-status counting, labels, and `join(', ')`
+  (closes lines 200/205), and (b) an integration test that records a `call.undefined-method`
+  bucket on a now-clean file → a `:cleared` drift row → the `:fail` finding, exercising the
+  `reject { status == :within }` filter and the `baseline_drift_summary` call site
+  (closes 177/184). The 6 residual are `counts.fetch(:over, 0)` / `:cleared` / `:reducible`
+  **default arguments** — each guarded by a preceding `if counts.key?(...)`, so the `0` default
+  is unreachable dead code and `nil_inject`/`type_swap` on it is an **equivalent mutant**
+  (left spec-only; not worth a lib edit to delete the redundant default).
+- `cli/skill_command` (6 → 1-defensive): added a `--print` with no name → usage-error test
+  (`run_print(nil)` hits `usage_error("a skill name is required")`, reachable via
+  `rigor skill --print`, line 139) and strengthened the unknown-skill test to assert the
+  `"Available skills (try ...)"` header (line 212 — the per-skill listing below it was already
+  asserted). The 1 residual is `run_list`'s `@err.puts("No bundled skills found under …")`
+  (line 127) — unreachable without stubbing `discover_skills` to empty, since the gem always
+  bundles skills; a defensive floor.
+- `cli/triage_command` (5, left documented): the `opts.on(...)` `nil_inject` survivors on
+  `--hints-only` / `--selectors-only` (behaviours already tested) target the **help-description
+  string**, an equivalent mutant; `--top` / `--no-hints` are untested flags whose effect is only
+  awkwardly observable (hotspot count / printed-section set), low value; `configuration.paths`
+  (line 84) is the empty-`@argv` branch the spec's always-`["code.rb"]` runner never takes.

@@ -271,7 +271,22 @@ RSpec.describe Rigor::CLI::SkillCommand do
       status, _out, err = run(%w[no-such-skill])
       expect(status).to eq(1)
       expect(err).to include("Unknown skill: no-such-skill")
+      expect(err).to include("Available skills (try `rigor skill --list`):")
       expect(err).to include("rigor-project-init")
+    end
+  end
+
+  describe "--print <name>" do
+    it "prints the named skill body" do
+      status, out, = run(%w[--print rigor-project-init])
+      expect(status).to eq(0)
+      expect(out).to start_with("# Rigor skill: rigor-project-init\n")
+    end
+
+    it "is a usage error when no name follows the flag" do
+      status, _out, err = run(["--print"])
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("a skill name is required")
     end
   end
 

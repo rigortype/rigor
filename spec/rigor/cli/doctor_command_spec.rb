@@ -99,6 +99,25 @@ RSpec.describe Rigor::CLI::DoctorCommand do
       expect(status).to eq(0)
       expect(out).to include("all checks passed")
     end
+
+    it "fails with a drift summary when a recorded bucket no longer fires" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\nbaseline: .rigor-baseline.yml\n")
+      # The bucket records one expected call.undefined-method on clean.rb, but
+      # the file is clean now → actual 0 → a :cleared drift row.
+      File.write(".rigor-baseline.yml", <<~YAML)
+        version: 1
+        ignored:
+          - file: clean.rb
+            rule: call.undefined-method
+            count: 1
+      YAML
+
+      status, out, = run([])
+      expect(status).to eq(1)
+      expect(out).to include("Baseline drift detected")
+      expect(out).to include("cleared")
+    end
   end
 
   describe "plugin check" do
@@ -151,6 +170,26 @@ RSpec.describe Rigor::CLI::DoctorCommand do
       status, _out, err = run(["--format=xml"])
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
       expect(err).to include("unsupported format: xml")
+    end
+  end
+
+  # The private summary formatter behind the "Baseline drift detected (...)"
+  # message. Exercised directly with fabricated audit rows (each answers
+  # #status) so the by-status counting, per-status labels, and joining are
+  # pinned without staging a real drifting baseline.
+  describe "#baseline_drift_summary (private)" do
+    let(:command) { described_class.new(argv: [], out: StringIO.new, err: StringIO.new) }
+
+    def drift_row(status) = Struct.new(:status).new(status)
+
+    it "counts by status and joins the present labels" do
+      rows = [drift_row(:over), drift_row(:over), drift_row(:cleared), drift_row(:reducible)]
+      expect(command.send(:baseline_drift_summary, rows))
+        .to eq("2 over threshold, 1 cleared, 1 reducible")
+    end
+
+    it "omits statuses that are absent from the drift set" do
+      expect(command.send(:baseline_drift_summary, [drift_row(:over)])).to eq("1 over threshold")
     end
   end
 end

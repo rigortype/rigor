@@ -845,3 +845,38 @@ inline. All three now 0 survivors.
   `each_with_object` test never reached it). `Object#tap` is the discriminating shape: a **single**
   `() { (self) -> void } -> self` overload, no enumerator twin; calling it with a spurious arg fails
   every pass on arity → the `.first` fall-back returns it.
+
+## Sixteenth batch — mid-large engine tier, part 2 (Phase 3, 2026-07-01)
+
+Three more mid-large files, delegated to Sonnet subagents, all closed to zero survivors —
+including `conformance_checker`, the file the tracker had long flagged as the hardest remaining
+(~110 survivors, RBS-fixture-dependent). Its message-floor concern turned out fully closable.
+
+- `plugin/manifest` (17 → 0, Sonnet): the `config_schema` / `consumes` validation raises + their
+  `inspect` message interpolation, and the string-vs-symbol-key config lookups (`value[:kind] ||
+  value["kind"]`, the `key?("default")` disjunct). Closed with distinctive-bad-value raise tests
+  (the offending value shows up verbatim so the `inspect` rename dies) and **string-keyed
+  YAML-round-trip** fixtures that can only be satisfied by the `value["…"]` fallback branch.
+- `analysis/worker_session` (29 → 0, Sonnet, two rounds): the trusted-gem path resolution
+  (`trusted_gem_name`/`trusted_gem_root`/`full_gem_path` via `.send` + a stubbed `Gem.loaded_specs`),
+  config `resolve`/`target_ruby` threading (forced a `Prism` raise with `target_ruby: "3.0"` to hit
+  the generic `rescue`), the discovery-seed plumbing, the plugin node-rule error AND success paths
+  (`collect_plugin_diagnostics`), the `safe_plugin_id` `plugin.class.to_s` rescue fallback, and the
+  `--explain` fail-soft fallback diagnostics (a real `CoverageScanner` flip-flop event end-to-end
+  plus `.send(:explain_diagnostic)` with event doubles to pin the `start_column + 1` off-by-one and
+  the `location`-nil branch).
+- `rbs_extended/conformance_checker` (110 → 0, Sonnet): a `scan_rbs` helper writes real RBS into a
+  tmpdir and builds a real `RbsLoader`, driving `scan` end-to-end through every branch — conforms →
+  `[]`, `Unsatisfied` (exact `missing_methods`), `UnresolvedInterface`, and each mismatch detail
+  generator (`return_detail` covariant, `param_detail` contravariant + parameter-index, `arity_detail`
+  both over/under shapes + rest guards + singular/plural, `keyword_detail` missing/extra/kwrest, the
+  `Dynamic[Top]` and multi-overload skip guards). Detail *wording* asserted on the load-bearing
+  substrings (type names, parameter index, counts), not full strings. Gotcha recorded: interface
+  names colliding with RBS core builtins (`_Reader`/`_Writer`) make the env build fail silently →
+  `scan` returns `[]` and masks assertions; use non-colliding names.
+
+**Phase 3 mid-large tier substantially closed.** The remaining >300 LOC files are the giant core
+engine files (statement_evaluator 3388, expression_typer 3059, scope_indexer 2716, narrowing 2640,
+shape_dispatch/constant_folding, rbs_loader, plugin/base, sig_gen/generator, runner, …) — deferred
+as a separate large, expensive sweep; their sizeable existing specs already carry them, and a full
+fused measurement of each is minutes-long.

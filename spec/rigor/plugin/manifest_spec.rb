@@ -41,6 +41,22 @@ RSpec.describe Rigor::Plugin::Manifest do
         described_class.new(id: "rails", version: "0.1.0", config_schema: { "foo" => :bogus })
       end.to raise_error(ArgumentError, /value kind must be one of/)
     end
+
+    it "rejects a non-Hash config_schema, naming the offending value" do
+      expect do
+        described_class.new(id: "rails", version: "0.1.0", config_schema: :not_a_hash)
+      end.to raise_error(ArgumentError, "plugin manifest config_schema must be a Hash, got :not_a_hash")
+    end
+
+    it "rejects a config_schema value that is neither a kind nor a {kind:, default:} Hash" do
+      expect do
+        described_class.new(id: "rails", version: "0.1.0", config_schema: { "foo" => 42 })
+      end.to raise_error(
+        ArgumentError,
+        "plugin manifest config_schema value must be a kind Symbol/String or a " \
+        "{kind:, default:} Hash, got 42"
+      )
+    end
   end
 
   describe "config_schema defaults (ADR-40)" do
@@ -103,6 +119,16 @@ RSpec.describe Rigor::Plugin::Manifest do
 
       expect(manifest.config_defaults["name"]).to be_frozen
     end
+
+    it "accepts a {kind:, default:} entry using string keys (YAML round-trip)" do
+      manifest = described_class.new(
+        id: "states", version: "0.1.0",
+        config_schema: { "dsl_method" => { "kind" => "string", "default" => "state_machine" } }
+      )
+
+      expect(manifest.config_schema).to eq({ "dsl_method" => :string })
+      expect(manifest.config_defaults).to eq({ "dsl_method" => "state_machine" })
+    end
   end
 
   describe "#validate_config" do
@@ -140,6 +166,28 @@ RSpec.describe Rigor::Plugin::Manifest do
     it "rejects non-Hash config" do
       errors = manifest.validate_config([])
       expect(errors).to eq(["plugin config must be a Hash, got Array"])
+    end
+  end
+
+  describe "#to_h field rendering" do
+    it "renders config_schema kinds as Strings" do
+      manifest = described_class.new(
+        id: "rails", version: "0.1.0",
+        config_schema: { "eager_load" => :boolean, "name" => :string }
+      )
+
+      expect(manifest.to_h["config_schema"]).to eq({ "eager_load" => "boolean", "name" => "string" })
+    end
+
+    it "renders hkt_definitions as uri/params Hashes" do
+      definition = Rigor::Inference::HktRegistry.definition_with_body_tree(
+        uri: :"mymonad::Result", params: %i[t e], body_tree: nil
+      )
+      manifest = described_class.new(id: "hkt", version: "0.1.0", hkt_definitions: [definition])
+
+      expect(manifest.to_h["hkt_definitions"]).to eq(
+        [{ "uri" => :"mymonad::Result", "params" => %i[t e] }]
+      )
     end
   end
 
@@ -372,6 +420,15 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.consumes.first.plugin_id).to eq("ar")
     end
 
+    it "reads a string-keyed optional when no Symbol :optional key is present" do
+      m = described_class.new(
+        id: "ap",
+        version: "0.1.0",
+        consumes: [{ plugin_id: "ar", name: :model_index, "optional" => true }]
+      )
+      expect(m.consumes.first.optional).to be(true)
+    end
+
     it "rejects malformed consumes entries (missing plugin_id or name)" do
       expect do
         described_class.new(id: "ap", version: "0.1.0", consumes: [{ plugin_id: "ar" }])
@@ -381,10 +438,28 @@ RSpec.describe Rigor::Plugin::Manifest do
       end.to raise_error(ArgumentError, /consumes/)
     end
 
+    it "rejects malformed consumes entries, naming the offending entry" do
+      expect do
+        described_class.new(id: "ap", version: "0.1.0", consumes: [{ plugin_id: "ar" }])
+      end.to raise_error(
+        ArgumentError,
+        'plugin manifest consumes entry missing plugin_id/name: {plugin_id: "ar"}'
+      )
+    end
+
     it "rejects non-Array consumes" do
       expect do
         described_class.new(id: "ap", version: "0.1.0", consumes: "model_index")
       end.to raise_error(ArgumentError, /consumes/)
+    end
+
+    it "rejects a consumes entry that is not a Hash or Consumption, naming the offending value" do
+      expect do
+        described_class.new(id: "ap", version: "0.1.0", consumes: [:not_a_hash])
+      end.to raise_error(
+        ArgumentError,
+        "plugin manifest consumes entry must be a Hash or Consumption, got :not_a_hash"
+      )
     end
 
     it "round-trips produces / consumes through #to_h" do

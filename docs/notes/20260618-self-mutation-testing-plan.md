@@ -789,3 +789,32 @@ was delegated to a Sonnet subagent.
 
 **Phase 1 (medium 380–620 LOC spec'd tier) complete.** baseline, method_parameter_binder,
 cache/descriptor, rule_catalog, cache/store all at their equivalent-mutant floor.
+
+## Fourteenth batch — spec-less carrier specs authored (Phase 2, 2026-07-01)
+
+Five files had **no dedicated convention spec** — they were exercised only transitively, so the
+harness ran them type-only (no test axis: it mutates just the type-anchored sites, all
+type-killed except one). Authoring the specs both pins normative behaviour explicitly and gives
+the harness a per-file test axis. Two Sonnet subagents authored the specs; the parent verified
+each at 100 % fused protection afterward. All five now 0 survivors.
+
+- `inference/body_fixpoint` (ADR-56 capped-fixpoint; **zero prior spec references**, the highest
+  value) — a 9-example unit spec exercising `converge` directly with lambda `evaluate_body` /
+  `widen` (no flow engine needed): empty-names, zero-iteration seed soundness, single stable pass
+  (early `break`), new-type union, multi-pass convergence within `CAP`, non-convergence →
+  final-iteration dual widening to the nominal base, structural compounding (`a = [a]`) → floor to
+  `Combinator.untyped` + a `BudgetTrace::BLOCK_WRITEBACK_CAP` hit, and the mixed moved/unwritten
+  case. Uses the **real production widener** `Combinator.widen_value_pinned` (what both call sites
+  pass), values verified against a live probe before asserting.
+- `type/{bot,top,dynamic,singleton}` — dedicated value-lattice-identity specs (9/9/15/12
+  examples). Pin the exact `describe` / `erase_to_rbs` strings, the `top`/`bot`/`dynamic` lattice
+  trio per carrier, `==`/`eql?`/`hash` (singleton identity for bot/top; `ValueSemantics` field
+  equality for dynamic/singleton), and two load-bearing invariants the sources call out:
+  `Combinator.dynamic` idempotence (`untyped == Dynamic[Top]`, nested `Dynamic` collapses) and
+  the `Singleton["String"] != Nominal["String"]` disjointness. Private-`.new` / singleton
+  accessors verified against the real source, not guessed.
+
+**Phase 2 complete.** The substantive spec-less files now carry dedicated specs; the remaining
+spec-less files are the trivial mixins (`acceptance_router` 19 LOC, `plain_lattice` 37 LOC) whose
+behaviour is the including carriers' and which the type-only harness already shows fully
+protected.

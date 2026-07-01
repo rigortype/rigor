@@ -58,6 +58,28 @@ RSpec.describe Rigor::Type::HashShape do
         .to raise_error(ArgumentError, /extra_keys must be :open or :closed/)
     end
 
+    it "rejects unknown policy keywords, listing each one" do
+      expect { described_class.new({ a: int_nominal }, bogus: [:x], other: [:y]) }
+        .to raise_error(ArgumentError, /unknown keywords: :bogus, :other/)
+    end
+
+    it "rejects a key list containing duplicates, naming the field" do
+      expect { described_class.new({ a: int_nominal }, required_keys: %i[a a]) }
+        .to raise_error(ArgumentError, /required_keys must not contain duplicate keys/)
+    end
+
+    it "rejects required_keys and optional_keys that overlap, naming the offenders" do
+      expect { described_class.new({ a: int_nominal, b: str_nominal }, required_keys: [:a], optional_keys: [:a]) }
+        .to raise_error(ArgumentError, /required_keys and optional_keys overlap: \[:a\]/)
+    end
+
+    it "rejects a shape with keys classified as neither required nor optional" do
+      expect do
+        described_class.new({ a: int_nominal, b: str_nominal, c: int_nominal }, required_keys: [:a],
+                                                                                optional_keys: [:b])
+      end.to raise_error(ArgumentError, /must be classified as required or optional: \[:c\]/)
+    end
+
     it "freezes the pairs hash" do
       shape = described_class.new(a: int_nominal)
       expect(shape.pairs).to be_frozen

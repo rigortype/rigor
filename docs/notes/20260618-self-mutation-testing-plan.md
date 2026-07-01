@@ -690,3 +690,26 @@ built; symptom is `Could not find rbs-4.0.3 in locally installed gems` from the 
   `type_swap`) still yields a successful pluralization, so `available?` returns `true`
   regardless — the probe string is immaterial to the method's contract, and pinning it would be
   testing an implementation detail.
+
+## Tenth batch — method_dispatcher foldings + type carriers (2026-07-01)
+
+Two fused batches. The **eight `method_dispatcher/*_folding` files** (`reduce`, `set`, `cgi`,
+`shellwords`, `regexp`, `data`, `file`, `literal_string`) all measured at **100 % fused
+protection, zero survivors** — the constant-fold tier is exhaustively spec'd; no work. The
+**seven type-carrier files** were mostly at floor; one genuine cluster closed.
+
+- `type/hash_shape` (10 → 1-floor): four constructor-validation branches were unprotected —
+  the existing spec covered `validate_pairs!` (non-Hash, bad key class) and the
+  `canonical_key_list` unknown-key branch, but not: the unknown-**keyword** rejection in
+  `split_constructor_args` (line 122), the duplicate-key guard (173), the required/optional
+  **overlap** guard (183), and the **unclassified-key** guard (188). Four tests, each hitting
+  one branch and asserting the message names the offending keys — two unknown keywords so the
+  `join(', ')` separator bites, and the `.inspect`-rendered offender lists (`[:a]`, `[:c]`) so
+  the `183`/`188` inspect calls are pinned. The 1 residual is `inspect`'s `describe(:short)`
+  call (line 109) — the documented inspect debug-format floor (below).
+- `type/{data_class,data_instance,struct_class,struct_instance,tuple}` each left at 1 survivor,
+  all the **same inspect debug-format floor**: `def inspect = "#<... #{describe(:short)}>"`, and
+  `describe` itself is thoroughly tested — only the `inspect` wrapper (a debug/diagnostic
+  string) is unexercised, consistent with the `type/refined:83` precedent. The carrier
+  convention in this repo does not spec `inspect`, so these are deliberately not chased.
+- `inference/dynamic_origin` at 100 % (ADR-75's cause-set carrier, already fully spec'd).

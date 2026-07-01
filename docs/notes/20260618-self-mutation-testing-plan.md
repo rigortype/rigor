@@ -818,3 +818,30 @@ each at 100 % fused protection afterward. All five now 0 survivors.
 spec-less files are the trivial mixins (`acceptance_router` 19 LOC, `plain_lattice` 37 LOC) whose
 behaviour is the including carriers' and which the type-only harness already shows fully
 protected.
+
+## Fifteenth batch — mid-large engine tier, part 1 (Phase 3, 2026-07-01)
+
+The >300 LOC engine tier. The giant core files (statement_evaluator 3388, expression_typer 3059,
+scope_indexer 2716, narrowing 2640) are deferred — heavy to mutate and already thickly spec'd; the
+mid-large (350–600 LOC) files are the tractable front. Two delegated to Sonnet subagents, one
+inline. All three now 0 survivors.
+
+- `inference/mutation_widening` (52 → 0, Sonnet): the ADR-56 slice-C collection content-element
+  extraction helpers (`collection_element_types`, `hash_shape_key_values`, `drop_dynamic`,
+  `array_added_elements`, `join_*_content`, `widen_hash_shape`) were untested at the unit level —
+  they extract element/key/value types out of Tuple / Array-Nominal / HashShape / Union receivers
+  for the block/loop content write-back. 32 tests exercising each helper with each receiver shape
+  (incl. the `Combinator.nominal_of` result wraps and the `Dynamic`-member `drop_dynamic`/`grep_v`
+  filters); `contain_exactly` where `Combinator.union` reorders members.
+- `plugin/registry` (27 → 0, Sonnet): the ADR-52 compiled contribution-index surface reached
+  through the Registry — the `dynamic_returns` / `type_specifiers` per-plugin gates, `block_as_methods`
+  index, the global gate `Set#merge`, `class_ordering` ancestry, the `hkt_registrations` /
+  `hkt_definitions` HKT aggregation, and the removed-`flow_contribution_for` duplicate-registration
+  raise. 8 tests with ≥2 plugins each so the merge/flat-map/ordering is observable.
+- `inference/method_dispatcher/overload_selector` (1 → 0, inline): line 157's `overloads.first`
+  fall-back — reached only when *every* selection pass fails AND every overload requires a block,
+  so `find { !requires_block? }` yields nil. Core RBS block methods almost all ship an enumerator
+  fall-back overload (so `find` succeeds and `.first` is dead for them — the existing
+  `each_with_object` test never reached it). `Object#tap` is the discriminating shape: a **single**
+  `() { (self) -> void } -> self` overload, no enumerator twin; calling it with a spurious arg fails
+  every pass on arity → the `.first` fall-back returns it.

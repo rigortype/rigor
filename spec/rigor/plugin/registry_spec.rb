@@ -267,4 +267,168 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(pairs.map { |p, _| p.manifest.id }).to eq(["synth-spec-plugin"])
     end
   end
+
+  describe "ContributionIndex compiled tables reached through Registry (ADR-52 WD1)" do
+    let(:gated_plugin_class) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "gated", version: "0.0.1")
+
+        dynamic_return receivers: ["Result"], methods: %i[unwrap unwrap!] do |_call_node, _scope|
+          nil
+        end
+      end
+    end
+    let(:type_specifier_plugin_class) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "specifier", version: "0.0.1")
+
+        narrowing_facts methods: [:assert_kind_of] do |_call_node, _scope|
+          nil
+        end
+      end
+    end
+
+    it "compiles per-plugin dynamic_return/type_specifier method-name gates keyed by plugin (.class grouping)" do
+      dynamic_plugin = gated_plugin_class.new(services: services)
+      specifier_plugin = type_specifier_plugin_class.new(services: services)
+      registry = described_class.new(plugins: [dynamic_plugin, specifier_plugin])
+      index = registry.contribution_index
+
+      # dynamic_gates: keyed per plugin instance, grouping happens by
+      # `p.class.dynamic_returns` — the gate reflects only THIS
+      # plugin's declared method names, not the other plugin's.
+      expect(index.dynamic_candidate_for?(dynamic_plugin, :unwrap)).to be(true)
+      expect(index.dynamic_candidate_for?(dynamic_plugin, :unwrap!)).to be(true)
+      expect(index.dynamic_candidate_for?(dynamic_plugin, :assert_kind_of)).to be(false)
+      expect(index.dynamic_candidate_for?(specifier_plugin, :unwrap)).to be(false)
+
+      # type_specifier_gates: same per-plugin isolation, on the other rule table.
+      expect(index.type_specifier_candidate_for?(specifier_plugin, :assert_kind_of)).to be(true)
+      expect(index.type_specifier_candidate_for?(specifier_plugin, :unwrap)).to be(false)
+      expect(index.type_specifier_candidate_for?(dynamic_plugin, :assert_kind_of)).to be(false)
+    end
+
+    it "unions per-plugin gates into a global dispatch/statement gate (Set#merge across plugins)" do
+      unwrap_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "unwrapper", version: "0.0.1")
+        dynamic_return receivers: ["Result"], methods: [:unwrap] do |_call_node, _scope|
+          nil
+        end
+      end
+      kilometers_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "units", version: "0.0.1")
+        dynamic_return methods: [:kilometers] do |_call_node, _scope|
+          nil
+        end
+      end
+      registry = described_class.new(
+        plugins: [unwrap_class.new(services: services), kilometers_class.new(services: services)]
+      )
+      index = registry.contribution_index
+
+      # The union gate must include names from BOTH plugins, proving
+      # `union_gate` actually merges (not just keeps the last plugin's set).
+      expect(index.dispatch_candidate?(:unwrap)).to be(true)
+      expect(index.dispatch_candidate?(:kilometers)).to be(true)
+      expect(index.dispatch_candidate?(:nonexistent)).to be(false)
+    end
+
+    it "raises ArgumentError naming the offending plugin's class for the removed flow_contribution_for hook" do
+      legacy_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "legacy-flow", version: "0.0.1")
+
+        def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+          nil
+        end
+      end
+      legacy_plugin = legacy_class.new(services: services)
+
+      expect { described_class.new(plugins: [legacy_plugin]) }.to raise_error(ArgumentError) do |error|
+        expect(error.message).to include(legacy_plugin.class.inspect)
+        expect(error.message).to include("flow_contribution_for")
+        expect(error.message).to include("removed (ADR-52)")
+      end
+    end
+
+    it "builds the block_as_methods index (#each over entries, #method_names per entry) and #fetch defaults to empty" do
+      entry_a = Rigor::Plugin::Macro::BlockAsMethod.new(receiver_constraint: "Sinatra::Base",
+                                                        method_names: %i[get post])
+      entry_b = Rigor::Plugin::Macro::BlockAsMethod.new(receiver_constraint: "Grape::API", method_names: [:get])
+      klass_a = Class.new(Rigor::Plugin::Base) { manifest(id: "a", version: "0.0.1", block_as_methods: [entry_a]) }
+      klass_b = Class.new(Rigor::Plugin::Base) { manifest(id: "b", version: "0.0.1", block_as_methods: [entry_b]) }
+      registry = described_class.new(plugins: [klass_a.new(services: services), klass_b.new(services: services)])
+      index = registry.contribution_index
+
+      # #each over entries + #method_names per entry populate BOTH
+      # names for entry_a and the one name for entry_b, in
+      # (plugin, declaration) order.
+      expect(index.block_entries_for(:get)).to eq([entry_a, entry_b])
+      expect(index.block_entries_for(:post)).to eq([entry_a])
+      # #fetch's default value kicks in for an unknown key, and the
+      # SAME frozen empty array is returned every time (identity).
+      expect(index.block_entries_for(:missing)).to eq([])
+      expect(index.block_entries_for(:missing)).to be(index.block_entries_for(:never))
+    end
+
+    it "resolves owns_receiver? ancestry via Environment#class_ordering" do
+      owns_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "owner", version: "0.0.1", owns_receivers: ["ActiveRecord::Relation"])
+      end
+      registry = described_class.new(plugins: [owns_class.new(services: services)])
+      index = registry.contribution_index
+      environment = instance_double(Rigor::Environment)
+      allow(environment).to receive(:class_ordering).with("Post::Relation", "ActiveRecord::Relation")
+                                                    .and_return(:subclass)
+      allow(environment).to receive(:class_ordering).with("Unrelated", "ActiveRecord::Relation")
+                                                    .and_return(nil)
+
+      expect(index.owns_receiver?("ActiveRecord::Relation", environment)).to be(true) # exact-name fast path
+      expect(index.owns_receiver?("Post::Relation", environment)).to be(true) # via class_ordering => :subclass
+      expect(index.owns_receiver?("Unrelated", environment)).to be(false) # class_ordering => nil, no match
+      expect(environment).to have_received(:class_ordering).with("Post::Relation", "ActiveRecord::Relation").once
+    end
+
+    it "tolerates a plugin whose #manifest raises when compiling block_as_methods (manifest_for rescue)" do
+      manifest_raising_plugin = plugin_class.new(services: services)
+      allow(manifest_raising_plugin).to receive(:manifest).and_raise(NoMethodError, "no manifest")
+
+      registry = described_class.new(plugins: [manifest_raising_plugin])
+
+      expect(registry.contribution_index.block_entries_for(:anything)).to eq([])
+    end
+  end
+
+  describe "#hkt_overlay_registry (ADR-20 slice 6)" do
+    it "returns the shared EMPTY registry when no plugin declares HKT entries" do
+      registry = described_class.new(plugins: [plugin_class.new(services: services)])
+      expect(registry.hkt_overlay_registry).to be(Rigor::Inference::HktRegistry::EMPTY)
+    end
+
+    it "aggregates hkt_registrations and hkt_definitions across plugins into one HktRegistry" do
+      registration = Rigor::Inference::HktRegistry::Registration.new(
+        uri: :"plugin::box", arity: 1, variance: [:out], bound: Rigor::Type::Combinator.untyped
+      )
+      definition = Rigor::Inference::HktRegistry.definition_with_body_tree(
+        uri: :"plugin::box",
+        params: [:K],
+        body_tree: Rigor::Inference::HktBody::Param.new(name: :K)
+      )
+      registration_plugin_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "hkt-reg", version: "0.0.1", hkt_registrations: [registration])
+      end
+      definition_plugin_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "hkt-def", version: "0.0.1", hkt_definitions: [definition])
+      end
+      registry = described_class.new(
+        plugins: [registration_plugin_class.new(services: services), definition_plugin_class.new(services: services)]
+      )
+
+      overlay = registry.hkt_overlay_registry
+      expect(overlay).to be_a(Rigor::Inference::HktRegistry)
+      expect(overlay).to be_registered(:"plugin::box")
+      expect(overlay).to be_defined(:"plugin::box")
+      expect(overlay.registration(:"plugin::box")).to eq(registration)
+      expect(overlay.definition(:"plugin::box")).to eq(definition)
+    end
+  end
 end

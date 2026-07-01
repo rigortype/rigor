@@ -113,6 +113,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         mt = select("Array", :each_with_object, [Rigor::Type::Combinator.constant_of(0)], block_required: false)
         expect(mt).not_to be_nil
       end
+
+      it "falls back to overloads.first when no overload matches and every overload requires a block" do
+        # `Object#tap` has a SINGLE `() { (self) -> void } -> self`
+        # overload (no enumerator fall-back). Passing a spurious arg
+        # makes every selection pass fail on arity, so the tail
+        # `overloads.find { !requires_block? } || overloads.first`
+        # runs: `find` yields nil (the only overload requires a block),
+        # so the `overloads.first` fall-back is what returns it.
+        mt = select("Object", :tap, [Rigor::Type::Combinator.constant_of(1)], block_required: false)
+        expect(mt).not_to be_nil
+        expect(described_class.overload_requires_block?(mt)).to be(true)
+      end
     end
 
     describe "interface-strictness preference (v0.1.2)" do

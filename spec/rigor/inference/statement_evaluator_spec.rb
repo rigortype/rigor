@@ -396,6 +396,143 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "begin/rescue/retry (retry-edge widening)" do
+    # B2.1: when a rescue arm contains `retry` AND rebinds a local
+    # across the retry edge, the primary body observes the rebound
+    # local widened to its Nominal envelope (not the pre-retry
+    # Constant) because control can re-enter the primary body via
+    # that rescue arm. Without the widening, `tries += 1` inside
+    # the primary body would keep folding from `Constant[0]` on
+    # every notional retry pass instead of reflecting that `tries`
+    # can already be a live Integer by the time the primary body
+    # re-runs.
+    it "widens a local rebound across a retry edge to its Nominal envelope" do
+      type, post = evaluate(<<~RUBY)
+        tries = 0
+        begin
+          tries += 1
+        rescue
+          tries += 1
+          retry
+        end
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(post.local(:tries)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "widens an ivar rebound across a retry edge to its Nominal envelope" do
+      type, post = evaluate(<<~RUBY)
+        @tries = 0
+        begin
+          @tries += 1
+        rescue
+          @tries += 1
+          retry
+        end
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(post.ivar(:@tries)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "widens a local introduced only inside the retrying rescue arm" do
+      # `y` has no pre-existing binding in the entry scope (the
+      # `pre.nil?` branch of `retry_widened_type`): the retry edge
+      # still widens it to its Nominal envelope rather than leaving
+      # it untouched, because the arm's own rebind cycles back
+      # through the primary body on retry.
+      _type, post = evaluate(<<~RUBY)
+        begin
+          1
+        rescue
+          y = 1
+          retry
+        end
+      RUBY
+      expect(post.local(:y)).to eq(
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.constant_of(1),
+          Rigor::Type::Combinator.nominal_of("Integer")
+        )
+      )
+    end
+
+    it "does NOT widen when the rescue arm does not contain retry" do
+      # Guards `arm_contains_retry?` / `widen_entry_for_retry`'s nil
+      # return: an ordinary (non-retrying) rescue arm rebinding the
+      # same local must keep the precise Constant union produced by
+      # the un-widened join, not a Nominal envelope.
+      _type, post = evaluate(<<~RUBY)
+        tries = 0
+        begin
+          tries += 1
+        rescue
+          tries = 99
+        end
+      RUBY
+      expect(post.local(:tries).members.map(&:value)).to contain_exactly(1, 99)
+    end
+
+    it "re-evaluates the else-clause under the widened retry entry" do
+      # Exercises eval_begin_primary_under's else-clause branch
+      # (the primary body ran, then else replaces its value) under
+      # a widened entry produced by a sibling retry arm.
+      type, post = evaluate(<<~RUBY)
+        tries = 0
+        begin
+          tries += 1
+        rescue
+          tries += 1
+          retry
+        else
+          tries
+        end
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(post.local(:tries)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "re-evaluates the ensure-clause's scope on top of the widened retry join" do
+      _type, post = evaluate(<<~RUBY)
+        tries = 0
+        begin
+          tries += 1
+        rescue
+          tries += 1
+          retry
+        ensure
+          done = true
+        end
+      RUBY
+      expect(post.local(:tries)).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(post.local(:done)).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    it "re-evaluates every arm of a multi-rescue chain under the widened entry" do
+      # Only the first arm retries, but widen_entry_for_retry widens
+      # the shared entry scope once, and BOTH collect_rescue_chain_results
+      # calls (pre- and post-widening) walk the full rescue_clause
+      # chain — the second (non-retrying) arm's fresh evaluation
+      # must also be visible in the final union.
+      type, post = evaluate(<<~RUBY)
+        tries = 0
+        begin
+          tries += 1
+        rescue TypeError
+          tries += 1
+          retry
+        rescue StandardError
+          tries = "boom"
+        end
+      RUBY
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to contain_exactly(
+        Rigor::Type::Combinator.constant_of("boom"),
+        Rigor::Type::Combinator.nominal_of("Integer")
+      )
+      expect(post.local(:tries)).to eq(type)
+    end
+  end
+
   describe "loops" do
     it "types as Constant[nil] and nil-injects loop-bound names" do
       type, post = evaluate(<<~RUBY)

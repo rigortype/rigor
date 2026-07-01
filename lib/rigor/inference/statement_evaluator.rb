@@ -782,10 +782,6 @@ module Rigor
       # (the else runs only when no exception was raised), but the
       # body's scope effects still apply because the body did run
       # before the else.
-      def eval_begin_primary(node)
-        eval_begin_primary_under(node, scope)
-      end
-
       def eval_begin_primary_under(node, entry_scope)
         body_type, body_scope =
           if node.statements

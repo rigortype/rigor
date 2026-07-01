@@ -107,6 +107,20 @@
 
             BUNDLE_PATH = "vendor/bundle";
             BUNDLE_BIN = "bin";
+
+            # Guarantee a UTF-8 locale inside the dev shell. Nix does not
+            # inherit the host locale, so `LANG`/`LC_ALL` are otherwise
+            # empty and Ruby's `Encoding.default_external` falls back to
+            # US-ASCII. Any tool that reads non-ASCII bytes then breaks —
+            # concretely `make test-binpacker` crashes when binpacker
+            # strips worker stdout carrying UTF-8 bytes (raises
+            # Encoding::CompatibilityError in worker.rb). Default-assign
+            # so an already UTF-8 outer locale is preserved; only fill
+            # in when unset.
+            shellHook = ''
+              export LANG="''${LANG:-C.UTF-8}"
+              export LC_ALL="''${LC_ALL:-C.UTF-8}"
+            '';
           };
         });
 

@@ -45,6 +45,32 @@ RSpec.describe Rigor::Cache::Descriptor do
     end
   end
 
+  describe "PluginEntry" do
+    it "stores id, version, and config_hash as given" do
+      entry = described_class::PluginEntry.new(id: "rigor-rspec", version: "1.2.3", config_hash: "cfg-hash")
+      expect(entry.id).to eq("rigor-rspec")
+      expect(entry.version).to eq("1.2.3")
+      expect(entry.config_hash).to eq("cfg-hash")
+    end
+
+    it "freezes after construction" do
+      entry = described_class::PluginEntry.new(id: "rigor-rspec", version: "1.2.3")
+      expect(entry).to be_frozen
+    end
+
+    it "#to_h renders the exact id/version/config_hash triple" do
+      entry = described_class::PluginEntry.new(id: "rigor-rspec", version: "1.2.3", config_hash: "cfg-hash")
+      expect(entry.to_h).to eq({ "id" => "rigor-rspec", "version" => "1.2.3", "config_hash" => "cfg-hash" })
+    end
+  end
+
+  describe "ConfigEntry" do
+    it "#to_h renders the exact key/value_hash pair" do
+      entry = described_class::ConfigEntry.new(key: "url:https://x", value_hash: "deadbeef")
+      expect(entry.to_h).to eq({ "key" => "url:https://x", "value_hash" => "deadbeef" })
+    end
+  end
+
   describe "DependencyEntry" do
     it "rejects an unknown mode" do
       expect do
@@ -163,6 +189,19 @@ RSpec.describe Rigor::Cache::Descriptor do
     end
   end
 
+  describe ".compose with no descriptors" do
+    it "returns a fresh empty descriptor" do
+      composed = described_class.compose
+      expect(composed).to be_a(described_class)
+      expect(composed.files).to eq([])
+      expect(composed.gems).to eq([])
+      expect(composed.plugins).to eq([])
+      expect(composed.configs).to eq([])
+      expect(composed.dependencies).to eq([])
+      expect(composed.globs).to eq([])
+    end
+  end
+
   describe "per-gem-version invalidation (ADR-10 slice 3)" do
     let(:rack_old) { described_class::DependencyEntry.new(gem_name: "rack", gem_version: "3.0.0", mode: :when_missing) }
     let(:rack_new) { described_class::DependencyEntry.new(gem_name: "rack", gem_version: "3.1.0", mode: :when_missing) }
@@ -238,6 +277,50 @@ RSpec.describe Rigor::Cache::Descriptor do
       )
       expect(a.to_canonical_bytes).to eq(b.to_canonical_bytes)
     end
+
+    it "sorts configs by key regardless of construction order" do
+      d = described_class.new(
+        configs: [
+          described_class::ConfigEntry.new(key: "z-key", value_hash: "z"),
+          described_class::ConfigEntry.new(key: "a-key", value_hash: "a")
+        ]
+      )
+      keys = d.to_canonical_hash.fetch("configs").map { |h| h.fetch("key") }
+      expect(keys).to eq(%w[a-key z-key])
+    end
+
+    it "sorts dependencies by gem_name regardless of construction order" do
+      d = described_class.new(
+        dependencies: [
+          described_class::DependencyEntry.new(gem_name: "zeitwerk", gem_version: "1.0.0", mode: :when_missing),
+          described_class::DependencyEntry.new(gem_name: "faraday", gem_version: "2.0.0", mode: :when_missing)
+        ]
+      )
+      names = d.to_canonical_hash.fetch("dependencies").map { |h| h.fetch("gem_name") }
+      expect(names).to eq(%w[faraday zeitwerk])
+    end
+
+    it "sorts plugins by id regardless of construction order" do
+      d = described_class.new(
+        plugins: [
+          described_class::PluginEntry.new(id: "z-plugin", version: "1.0.0"),
+          described_class::PluginEntry.new(id: "a-plugin", version: "1.0.0")
+        ]
+      )
+      ids = d.to_canonical_hash.fetch("plugins").map { |h| h.fetch("id") }
+      expect(ids).to eq(%w[a-plugin z-plugin])
+    end
+
+    it "sorts gems by name regardless of construction order" do
+      d = described_class.new(
+        gems: [
+          described_class::GemEntry.new(name: "zeitwerk", requirement: "*"),
+          described_class::GemEntry.new(name: "actionview", requirement: "*")
+        ]
+      )
+      names = d.to_canonical_hash.fetch("gems").map { |h| h.fetch("name") }
+      expect(names).to eq(%w[actionview zeitwerk])
+    end
   end
 
   describe "#cache_key_for" do
@@ -272,6 +355,20 @@ RSpec.describe Rigor::Cache::Descriptor do
       expect(a).to eq(b)
     end
 
+    it "differs when an array element inside params changes (canonicalize_value Array branch)" do
+      d = described_class.new
+      a = d.cache_key_for(producer_id: "p", params: { list: [1, 2, 3] })
+      b = d.cache_key_for(producer_id: "p", params: { list: [1, 2, 4] })
+      expect(a).not_to eq(b)
+    end
+
+    it "is invariant to element order within a nested hash inside an array param" do
+      d = described_class.new
+      a = d.cache_key_for(producer_id: "p", params: { list: [{ a: 1, b: 2 }] })
+      b = d.cache_key_for(producer_id: "p", params: { list: [{ b: 2, a: 1 }] })
+      expect(a).to eq(b)
+    end
+
     it "differs when a glob entry changes (ADR-60 WD3)" do
       a = described_class.new(
         globs: [described_class::GlobEntry.new(root: "/p", pattern: "**/*.rb", value: "v1")]
@@ -281,6 +378,68 @@ RSpec.describe Rigor::Cache::Descriptor do
       )
       expect(a.cache_key_for(producer_id: "p", params: {}))
         .not_to eq(b.cache_key_for(producer_id: "p", params: {}))
+    end
+  end
+
+  describe ".canonicalize_value" do
+    it "maps each array element through canonicalize_value, preserving order" do
+      result = described_class.canonicalize_value([{ b: 2, a: 1 }, :sym, "str"])
+      expect(result).to eq([{ "a" => 1, "b" => 2 }, "sym", "str"])
+    end
+  end
+
+  describe "#fresh? with file entries" do
+    around do |example|
+      Dir.mktmpdir("rigor-file-fresh-spec-") do |dir|
+        @dir = dir
+        example.run
+      end
+    end
+
+    attr_reader :dir
+
+    it "is fresh for a :digest entry whose file content matches, stale after edit" do
+      path = File.join(dir, "a.rb")
+      File.write(path, "A")
+      entry = described_class::FileEntry.new(
+        path: path, comparator: :digest, value: Digest::SHA256.file(path).hexdigest
+      )
+      d = described_class.new(files: [entry])
+      expect(d.fresh?).to be(true)
+
+      File.write(path, "A2")
+      expect(d.fresh?).to be(false)
+    end
+
+    it "is fresh for a :mtime entry whose recorded value matches File.mtime.to_i, stale after touch" do
+      path = File.join(dir, "a.rb")
+      File.write(path, "A")
+      recorded_mtime = File.mtime(path).to_i
+      entry = described_class::FileEntry.new(path: path, comparator: :mtime, value: recorded_mtime.to_s)
+      d = described_class.new(files: [entry])
+      expect(d.fresh?).to be(true)
+
+      File.utime(Time.now, Time.at(recorded_mtime + 1000), path)
+      expect(d.fresh?).to be(false)
+    end
+
+    it "is fresh for an :exists entry recorded as present, stale once the file is removed" do
+      path = File.join(dir, "a.rb")
+      File.write(path, "A")
+      entry = described_class::FileEntry.new(path: path, comparator: :exists, value: "true")
+      d = described_class.new(files: [entry])
+      expect(d.fresh?).to be(true)
+
+      File.unlink(path)
+      expect(d.fresh?).to be(false)
+    end
+
+    it "is stale for an :exists entry recorded as absent when the file is actually present" do
+      path = File.join(dir, "a.rb")
+      File.write(path, "A")
+      entry = described_class::FileEntry.new(path: path, comparator: :exists, value: "false")
+      d = described_class.new(files: [entry])
+      expect(d.fresh?).to be(false)
     end
   end
 
@@ -411,6 +570,29 @@ RSpec.describe Rigor::Cache::Descriptor do
         globs: [described_class::GlobEntry.new(root: "/p", pattern: "*.rb", value: "v2")]
       )
       expect { described_class.compose(a, b) }.to raise_error(described_class::Conflict)
+    end
+  end
+
+  describe "value semantics (#== / #eql? / #hash)" do
+    let(:file_a) { described_class::FileEntry.new(path: "a.rb", comparator: :digest, value: "abc") }
+    let(:file_b) { described_class::FileEntry.new(path: "b.rb", comparator: :digest, value: "def") }
+
+    it "is == and eql? to a structurally identical descriptor" do
+      a = described_class.new(files: [file_a])
+      b = described_class.new(files: [file_a])
+      expect(a).to eq(b)
+      expect(a).to eql(b)
+    end
+
+    it "is not == to a descriptor with different canonical content" do
+      expect(described_class.new(files: [file_a])).not_to eq(described_class.new(files: [file_b]))
+    end
+
+    it "hashes equal for identical descriptors and works as a Hash key" do
+      a = described_class.new(files: [file_a])
+      b = described_class.new(files: [file_a])
+      expect(a.hash).to eq(b.hash)
+      expect({ a => :value }[b]).to eq(:value)
     end
   end
 end

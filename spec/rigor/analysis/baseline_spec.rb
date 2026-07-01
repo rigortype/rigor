@@ -372,6 +372,27 @@ RSpec.describe Rigor::Analysis::Baseline do
       expect(rows.first.bucket.file).to eq("a.rb")
       expect(rows.first.status).to eq(:within)
     end
+
+    it "keys message-mode buckets by the regex source so distinct messages stay separate" do
+      baseline = described_class.from_diagnostics(
+        [
+          diagnostic(path: "a.rb", rule: "call.undefined-method", message: "undefined method `foo'"),
+          diagnostic(path: "a.rb", rule: "call.undefined-method", message: "undefined method `bar'")
+        ],
+        match_mode: :message
+      )
+      rows = baseline.audit([
+                              diagnostic(path: "a.rb", rule: "call.undefined-method", message: "undefined method `foo'")
+                            ])
+      # Two distinct messages → two buckets, each keyed by its own regex source
+      # (bucket_key reads message_regex.source); the foo bucket matches once, bar
+      # matches nothing, so the two counts must not collide.
+      expect(rows.size).to eq(2)
+      foo_row = rows.find { |r| r.bucket.message_regex.source.include?("foo") }
+      bar_row = rows.find { |r| r.bucket.message_regex.source.include?("bar") }
+      expect(foo_row.status).to eq(:within)
+      expect(bar_row.status).to eq(:cleared)
+    end
   end
 
   describe "#without (slice 2 — prune helper)" do

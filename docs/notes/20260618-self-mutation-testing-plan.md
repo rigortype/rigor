@@ -743,3 +743,28 @@ unreachable branch, and flag-description cosmetics.
   string**, an equivalent mutant; `--top` / `--no-hints` are untested flags whose effect is only
   awkwardly observable (hotspot count / printed-section set), low value; `configuration.paths`
   (line 84) is the empty-`@argv` branch the spec's always-`["code.rb"]` runner never takes.
+
+## Twelfth batch — medium (380–620 LOC) spec'd files, part 1 (2026-07-01)
+
+The first of the >300 LOC tier. Two files delegated to parallel Sonnet subagents (disjoint spec
+files; the parent measures + adjudicates + commits), one done inline. All three now at 0 survivors.
+
+- `analysis/baseline` (1 → 0): `bucket_key`'s `message_regex&.source` (line 335) was never
+  exercised — every `#audit` test built rule-mode buckets (regex nil, safe-nav short-circuits).
+  One message-mode audit test (two distinct messages → two buckets keyed by regex source, one
+  matching → `:within`, the other → `:cleared`) reaches the `.source` read.
+- `inference/method_parameter_binder` (43 → 0, Sonnet): the two large clusters were slot
+  construction / RBS-type-provider lambdas / `Combinator.nominal_of` (147–199, 326–369) and the
+  entire ADR-28 path-scoped protocol-contract tier (270–298). Closed with one all-slot-kinds
+  fixture (`(String a, ?Integer b, *Float rest, Symbol c, d:, ?e:, **Numeric kw) { … }` giving
+  each slot a *distinct* nominal so a wrong index/name or a nil/swapped `nominal_of` arg surfaces
+  a mismatched `class_name`) plus a 10-test `apply_protocol_contract` block covering every
+  match/no-match branch (path glob, receiver singleton-ness, method name, index, nil registry /
+  source_path / unresolved type). No equivalents — all 34 genuinely observable.
+- `cache/descriptor` (35 → 0, Sonnet + inline finish): the subagent closed 32 — `PluginEntry` /
+  `ConfigEntry` field + `to_h` reads, `sort_entries` ordering (non-sorted input → asserted
+  canonical order), `canonicalize_value` array branch, and the `fresh?` comparator dispatch
+  (`:digest` / `:mtime` / `:exists`, each with a real freshen-then-stale filesystem probe incl.
+  the `Time#to_i` mtime path). The 3 it left (`to_canonical_bytes` at 319/324) were the
+  `Descriptor#==` / `#eql?` / `#hash` value-semantics — closed inline with an equal/not-equal/
+  Hash-key trio (the existing `.hash` test was on an *entry*, not the descriptor).

@@ -11,6 +11,16 @@ Grounding: [`rigor-project-init`](../../skills/rigor-project-init/SKILL.md) ス�
 （parameter inference）、tractability ラベルは [ADR-75](../adr/75-dynamic-provenance.md) /
 [ADR-63](../adr/63-type-protection-coverage.md)。
 
+> **⚠️ 訂正（2026-07-04 再調査、バグ A 修正後）** — 本ノート初版の見出し的主張
+> 「sig-gen の生成 `sig/` はカバレッジを下げる／目的に純負」は **誤り**だった。それは終始
+> **RBS 環境クラッシュ（バグ A）のアーティファクト**で、sig/ をロードするたびに env が壊れ
+> 全 type-of が Dynamic に落ちていたためカバレッジが低く見えていた（手動 git 修正1件では他の
+> bare-class アダプタ等で env が再クラッシュし続け 0.1576 のままだった）。バグ A をエンジンで
+> 修正すると、**生成 `sig/` はカバレッジを大きく上げる**（redmine +10.3pp / mastodon +5.4pp）。
+> carrier-additivity トラップは実在するが、その顕在化は「カバレッジ減」ではなく
+> **「非掲載メンバ脱落による sig-quality FP の増加」**（下記「再調査」節）。以下 §2・バグ B・H1 は
+> この訂正で置き換わる。§4 の最終状態・§1（プラグイン中立）・H4（engine-bound）は有効。
+
 ## 目的と初期状態
 
 ユーザ要求は「redmine / mastodon の型カバレッジを強化したい」。両プロジェクトとも `.rigor.yml`・
@@ -117,11 +127,10 @@ sig 単体（+core）ロードでは再現せず、フル環境ビルド時の�
 
 ## 仮説
 
-- **H1（本命）: inference 依存の Rails コードでは、sig-gen の sidecar `sig/` は protection
-  カバレッジに対して純負になりやすい。** クラス再宣言によるメンバ脱落が、推論が達成していた
-  受信者型付けを削る。durable fix は手書き/生成 RBS でなく推論の底上げ（`rigor-protection-uplift`
-  の Honest bounds と一致）。in-place additive carrier（rbs-inline `#:` / `%a{rigor:v1:...}`
-  return-override）なら再宣言を避けられ理論上は非負のはず — 未検証。
+- **H1（REFUTED — 下記「再調査」節）: 「sig-gen の sidecar `sig/` は protection カバレッジに
+  純負」は誤り。** 真相は env クラッシュ（バグ A）のアーティファクト。env 修正後は sig が
+  カバレッジを +5〜10pp 上げる。carrier トラップは「メンバ脱落 → undefined-method FP 増」として
+  顕在化する（coverage 増 vs FP 増のトレードオフ）。
 
 - **H2: superclass 欠落は sig-gen の一般的欠陥。** 全 169 ファイルで `class X < Y` が `class X` に
   なる。多くは env 内で衝突相手を持たず顕在化しないだけで、subclass が解析対象に含まれると
@@ -141,10 +150,74 @@ sig 単体（+core）ロードでは再現せず、フル環境ビルド時の�
 
 ## Follow-up
 
-- sig-gen の superclass 出力 / env マージ許容（バグ A、H2）— タスク登録済み。
-- env ビルド失敗の可視化強化（H3）。
+- sig-gen の superclass 出力 / env マージ許容（バグ A、H2）— **両方 FIXED（2026-07-04）**。
+  真因は superclass 不一致そのものではなく、生成 sig が inherited nested type
+  （`GitAdapter::Revision`）を参照 → `stub_missing_referenced_types` の stub 掃引が
+  既宣言の `class GitAdapter` を囲み名前空間として `module` 再宣言 → class/module kind
+  衝突で `DuplicatedDeclarationError`（superclass を足すと nested type が継承経由で解決 →
+  stub 不要 → 衝突回避、で「効いた」）。修正 (a) `Generator#record_superclass` +
+  `Writer#superclass_suffix`：plain-constant 親を `class X < Y` として出力（`Struct.new`
+  等の computed 親は従来どおり無出力）。修正 (b) `RbsLoader.append_stub_declarations`：
+  env に既宣言の名前を stub しない（`collect_missing_namespaces` の `declared.include?`
+  ガードを掃引側にも適用）。**(b) 単独で env 崩落を防ぐ** = H2(b) の「1 ファイルで全体 Dynamic」
+  という不均衡を解消。回帰テスト：generator_spec / writer_spec / rbs_loader_spec。
+- env ビルド失敗の可視化強化（H3）— 未着手（`warn_about_env_build_failure_once` の 1 行
+  警告のみ。専用診断 / 非ゼロ exit / triage hint は demand-gated）。
 - ADR-58 WD1b/WD2・ADR-67 の実装がカバレッジ最大レバー（H4）。in-place additive carrier での
   protection A/B（H1 の裏取り）。
+
+## 再調査（2026-07-04、バグ A エンジン修正後）
+
+バグ A（superclass 出力 + stub 掃引ガード）を修正した working tree で全て再計測。affected specs
+155/0 green。redmine で修正済みエンジンにより sig を再生成 → superclass 出力確認
+（`class GitAdapter < AbstractAdapter`、127 with-superclass / 51 bare）、`baseline generate`
+クラッシュ解消（281 バケット / 956 診断を正常書き出し）。
+
+### 訂正 R1 — 生成 `sig/` はカバレッジを大きく上げる（§2 を置換）
+
+redmine 全体（app+lib、28267 sites、キャッシュ排除 A/B、**sig-gen が env を壊さなくなった状態**）:
+
+| 構成 | ratio | protected | tractability |
+| --- | --- | --- | --- |
+| **sig あり（修正済みエンジン）** | **0.2986** | **8440** | engine_gap 16168, add_rbs 49 |
+| sig なし | 0.1953 | 5520 | engine_gap 18437, add_rbs 116 |
+
+**+10.3pp（保護サイト +2920）。** 初版 §2 の 0.1576（sig あり）は、手動 git 修正1件では他ファイルで
+env が再クラッシュしていた *壊れた env* の数字だった。mastodon `app/models` でも同傾向:
+sig あり 0.2311（1360/5884）vs なし 0.1773（1043/5884）→ **+5.4pp**。
+
+### 訂正 R2 — carrier トラップの真の顕在化 = sig-quality FP 増（バグ B を再定義）
+
+env が健全化すると、sig がクラス再宣言時に落とす非掲載メンバが **今度は証明可能な
+`call.undefined-method` として噴出**する。redmine triage A/B（baseline 非依存）:
+
+| rule | sig あり | sig なし |
+| --- | --- | --- |
+| call.undefined-method | 155 | 33 |
+| call.wrong-arity | 22 | 0 |
+| def.return-type-mismatch | 10 | 0 |
+| （error 合計） | 201 | 57 |
+
+adjudication（全て sig-quality FP）:
+- **undefined-method +122**: メッセージが `undefined method 'scope_select' … the project defines
+  'Redmine::Activity::Fetcher#scope_select'` と自白 — sig がクラス宣言時に**実在メンバを落とした**。
+- **wrong-arity +22**: `Struct.new` サブクラス（`Webhook::Executor`, `Redmine::Notifiable`,
+  `MultipleValuesDetail` 等）の生成 initialize を sig が欠く → `given 3, expected 0`。
+- **return-type-mismatch +10**: 過度に狭い推論戻り（`declared nil, inferred X` / `declared bool`）。
+
+つまり **coverage +10pp と FP +150 のトレードオフ**。protection-uplift の二重ゲート
+（coverage 増 AND 新規診断ゼロ）を FP 側で破る。acknowledge モードでは baseline が吸収するが、
+「実在メソッドを undefined と言う」FP で baseline を汚す。
+
+### 訂正 R3 — 再調査で見えた最大のエンジンレバー: **プロジェクト自身の `sig/` を additive に**
+
+FP の根は「sig にクラスを宣言するとそれが *完全*とみなされ、推論が付けていたメンバが落ちる」
+（RBS 宣言モードの all-or-nothing）。もし **プロジェクト自身の `sig/` を推論とマージ（additive）**
+できれば、coverage +10pp を **FP ゼロ**で得られる。候補: (a) sig-gen が宣言クラスの全メソッドを
+（un-inferrable は `untyped` 戻りで）出力し脱落を無くす、(b) エンジンがプロジェクト sig を
+authoritative-complete でなく inference-additive に扱う。(b) はバグ A のクラッシュ修正より
+射程が大きく、Rails アプリ全般の「sig-gen で coverage を上げたいが FP を出したくない」を解く。
+H1 の in-place additive carrier 案（rbs-inline `#:` / return-override）は (a) の手動版に相当。
 
 ## GOTCHAs（再実行者向け）
 

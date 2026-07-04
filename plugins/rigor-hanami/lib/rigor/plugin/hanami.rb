@@ -98,11 +98,18 @@ module Rigor
         @protocol_contracts || manifest.protocol_contracts
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+      # ADR-37 — per-class-node validation over the engine-owned walk.
+      # Each `Prism::ClassNode` is checked against every contract
+      # independently, so the plugin no longer ships its own `class_nodes`
+      # traversal; `ActionChecker#check_class` keeps the per-class
+      # contract logic. (A per-class contract check is exactly what
+      # `node_rule` is for — the return type is void, so no `scope`
+      # query is needed.)
+      node_rule Prism::ClassNode do |node, _scope, path|
         contracts = protocol_contracts
-        return [] if contracts.empty?
+        next [] if contracts.empty?
 
-        ActionChecker.new(contracts: contracts).check(path: path, root: root)
+        ActionChecker.new(contracts: contracts).check_class(node, path: path)
       end
     end
 

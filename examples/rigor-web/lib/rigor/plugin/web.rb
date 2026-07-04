@@ -64,7 +64,9 @@ module Rigor
         version: "0.1.0",
         description: "Enforces the RigWeb controller protocol: #get(Rack::Request) -> Rack::Response.",
         config_schema: {
-          "controller_path" => :string
+          # Empty default = "use the manifest's convention path"; a
+          # non-empty override retargets every contract's path glob.
+          "controller_path" => { kind: :string, default: "" }
         },
         # The plugin ships RBS for Rack::Request / Rack::Response
         # so the analysed project does not need rack installed for

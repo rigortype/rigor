@@ -108,8 +108,7 @@ narrowly focused on the diagnostic emission protocol.
 ## Future direction — lightweight HKT / type-level eval
 
 The plugin supplies the inferred type at the call site through
-`dynamic_return methods: -> { [@method_name] }` (ADR-52 slice 4;
-the former `flow_contribution_for` hook was removed ADR-52 WD3): downstream
+`dynamic_return methods: -> { [@method_name] }` (ADR-52 slice 4): downstream
 calls on the result resolve against the inferred carrier
 (`Lisp.eval([:+, 1, 2]).bit_length` resolves on `Integer`,
 not the RBS-level `untyped`). The diagnostic stays as a

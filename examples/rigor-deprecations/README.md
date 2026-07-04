@@ -83,7 +83,7 @@ RUBYLIB=$PWD/../lib bundle exec rigor check
 | --- | --- |
 | `manifest(... config_schema: { "methods" => :array })` | top of `Deprecations` |
 | `#init(services)` parses config rows into frozen `Entry` Structs | `Deprecations#init` |
-| `#diagnostics_for_file(path:, scope:, root:)` walks Prism, matches, emits | the rest of the file |
+| `node_rule(Prism::CallNode) { ... }` — the engine owns the AST walk | the rest of the file |
 | `Prism::Node#slice` for receiver source-text comparison | `#receiver_source` private helper |
 
 ## Why this example matters
@@ -95,7 +95,7 @@ directly to "Rigor as a user-extensible lint engine":
 - **Units** propagates types through local-variable flow
 - **Routes** reads project config files under TrustPolicy + cache
 - **Pattern** queries Rigor's own type inference
-- **Statesman** does two-pass DSL analysis
+- **Web** enforces a path-scoped behavioural protocol contract
 - **Deprecations** lets users write rules without writing code
 
 Once a team has the plugin gem on their `Gemfile`, adding a
@@ -106,7 +106,7 @@ shrinks to a single PR with a YAML diff.
 
 ## Compared with the other examples
 
-| | lisp-eval | units | routes | pattern | statesman | **deprecations** |
+| | lisp-eval | units | routes | pattern | web | **deprecations** |
 | --- | --- | --- | --- | --- | --- | --- |
 | Lines of plugin code | ~200 | ~280 | ~250 | ~180 | ~210 | **~80** |
 | Manifest declaration | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -114,8 +114,8 @@ shrinks to a single PR with a YAML diff.
 | Local-variable flow | — | ✅ | — | — | — | — |
 | `IoBoundary` (slice 2) | — | — | ✅ | — | — | — |
 | `cache_for` / producer (slice 6) | — | — | ✅ | — | — | — |
-| Engine collaboration (`Scope#type_of`) | — | — | — | ✅ | — | — |
-| Two-pass DSL analysis | — | — | — | — | ✅ | — |
+| Engine collaboration (`Scope#type_of`) | — | — | — | ✅ | ✅ | — |
+| Path-scoped protocol contract (ADR-28) | — | — | — | — | ✅ | — |
 | **Pure config-driven rules** | — | — | — | — | — | ✅ |
 
 ## Future direction

@@ -56,6 +56,20 @@ as the rule block's fourth argument.
 diagnostics a per-node walk cannot express — see concern 5 for the case
 where a stateful whole-file walk is *required*, not lazy.
 
+**"Genuinely whole-file" is a sharp line — apply it, don't defer to
+precedent.** A per-*class* or per-*def* contract check (does this class
+define `#get`? does its body return the contracted type?) IS
+node-expressible — migrate it to `node_rule(Prism::ClassNode)` /
+`node_rule(Prism::DefNode)`, even if a shipped production plugin still
+uses `#diagnostics_for_file` + a hand-rolled `class_nodes` walk for the
+same job (`rigor-hanami`'s ADR-28 check half does — an equivalent,
+older shape, not a reason to keep a new copy hand-rolled). The genuine
+whole-file case is a diagnostic whose *identity or count is not tied to
+any one node* — e.g. `rigor-routes`'s "routes file failed to load"
+warning, which must fire exactly once per file (or run) even on a file
+with zero matching nodes. That cannot be a node rule; a per-class check
+can.
+
 **Authority:** `docs/internal-spec/plugin.md` §§ "Node-scoped rules —
 `node_rule`", "`node_file_context`".
 

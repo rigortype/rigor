@@ -9,6 +9,17 @@ Status: 内部監査ノート、authored 2026-07-04（Rigor は release/0.2.x �
 `node_rule Prism::CallNode` へ移し `diagnostics_for_file` を load-error 専用に（本番 rigor-rails-routes
 と一致）、units `Analyzer` の手動 `Diagnostic.new` を公開コンストラクタ `Diagnostic.from_location` へ
 （バイト同一）。web は本番 rigor-hanami と同じ `diagnostics_for_file`+checker 形なので変更不要と再確認。
+**第3弾（skill の盲検証）** として、`master`（第1・2弾の PR 前）の worktree に `rigor-plugin-review`
+スキルだけを渡した Sonnet サブエージェントに examples をレビュー・改修させ、我々の解答と比較した
+（我々の変更・本ノートは非公開）。結果: Sonnet はスキルのみで我々の全項目（ADR-40・WD4 ヘルパ・
+routes の node_rule 化・units の罠回避・doc 鮮度）を独立に再現し、**さらに我々が見落とした doc 陳腐化を
+3 件発見**（deprecations README の存在しない "statesman" 参照、lisp-eval README の「return-type は
+later slice に queued」＝実装済み `dynamic_return` と矛盾、units README の存在しない
+`evaluate(node, emit_terminal:)` 引数）、かつ **web を `node_rule(Prism::ClassNode)` へ移行**する独立設計判断を
+下した（我々は本番 hanami 踏襲で `diagnostics_for_file` 維持だったが、per-class 検査は node 表現可能で
+スキルの観点2は移行を支持 — Sonnet の方がスキルに忠実）。この3件の doc 修正・web 移行・スキル観点2への
+「genuinely whole-file の境界」注記を本 PR に反映した（77/77 緑を維持）。スキルが「我々の作業の記述」ではなく
+汎用的に機能する強い証拠。
 `examples/` 配下 6 本のチュートリアル・
 プラグインが、現行の（＝多くが後発の ADR で追加された）プラグイン・オーサリング面を
 どこまで使い切れているかを棚卸しする。examples は「契約面を最小コードで見せる教材」

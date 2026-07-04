@@ -36,8 +36,12 @@ module Rigor
     # misuse of the request inside a controller body
     # (`request.no_such_method`) surfaces as an ordinary core
     # diagnostic. The check half is this plugin's
-    # `#diagnostics_for_file` hook: it confirms `#get` exists and
-    # that its inferred return type conforms to `Rack::Response`.
+    # `node_rule(Prism::ClassNode)`: for every class the engine-owned
+    # walk hands it, it confirms `#get` exists and that its inferred
+    # return type conforms to `Rack::Response`. (The check is per class,
+    # so it rides the engine's walk rather than shipping a `class_nodes`
+    # traversal — contrast the file-level load-error in `rigor-routes`,
+    # which genuinely cannot be expressed per node.)
     #
     # ## Configuration
     #
@@ -103,11 +107,19 @@ module Rigor
         @protocol_contracts || manifest.protocol_contracts
       end
 
-      def diagnostics_for_file(path:, scope:, root:)
+      # ADR-37 — per-class-node validation over the engine-owned walk.
+      # Each `Prism::ClassNode` is checked against every contract
+      # independently of the others, so the plugin no longer ships its
+      # own `class_nodes` traversal; `ProtocolChecker#check_class` keeps
+      # the per-class contract logic. (Production `rigor-hanami`'s ADR-28
+      # check half still uses `#diagnostics_for_file` + a hand-rolled
+      # class walk — an equivalent, older shape; either is contract-valid,
+      # but a per-class check is exactly what `node_rule` is for.)
+      node_rule Prism::ClassNode do |node, scope, path|
         contracts = protocol_contracts
-        return [] if contracts.empty?
+        next [] if contracts.empty?
 
-        ProtocolChecker.new(contracts: contracts).check(path: path, scope: scope, root: root)
+        ProtocolChecker.new(contracts: contracts).check_class(node, path: path, scope: scope)
       end
     end
 

@@ -108,7 +108,7 @@ on top of the surfaces `rigor-lisp-eval` covered:
 | `#diagnostics_for_file(path:, scope:, root:)` | walks the parsed root |
 | Per-file analyzer state | `Analyzer` instance lives one-per-file |
 | Local-variable binding map | `@bindings` Hash threaded through `evaluate` |
-| Multi-pass evaluation | `evaluate(node, emit_terminal:)` distinguishes leaf vs. nested calls so chained `.in_*` only emits once per chain |
+| Single-pass evaluation | `evaluate(node)` recurses once per node, emitting each node's diagnostic as a side effect of evaluating it |
 | Pure dispatch table | `MethodTable.dispatch` — separable, easily extended |
 
 ## What this plugin does NOT exercise

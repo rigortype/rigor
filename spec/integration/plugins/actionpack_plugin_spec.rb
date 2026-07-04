@@ -135,13 +135,39 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
   end
 
-  describe "params typing (Phase 5 — typing-obstacle O3)" do
+  describe "request-context reader typing (Phase 5 — typing-obstacle O3)" do
     it "types the implicit-self `params` reader as ActionController::Parameters" do
       source = "class C\n  def create\n    Rigor.dump_type(params)\n  end\nend\n"
       with_demo(source) do |result|
         dump = result.diagnostics.find { |d| d.rule == "dump.type" }
         expect(dump).not_to be_nil
         expect(dump.message).to include("ActionController::Parameters")
+      end
+    end
+
+    it "types `session` and `request` as their ActionDispatch classes" do
+      source = "class C\n  def create\n    Rigor.dump_type(session)\n    Rigor.dump_type(request)\n  end\nend\n"
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps).to include(a_string_including("ActionDispatch::Request::Session"))
+        expect(dumps).to include(a_string_including("ActionDispatch::Request"))
+      end
+    end
+
+    it "keeps session/request surfaces FP-safe (no undefined-method on delete/xhr?/headers)" do
+      source = <<~RUBY
+        class C
+          def create
+            session[:x] = 1
+            session.delete(:y)
+            request.xhr?
+            request.headers["X"]
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+        expect(undefined).to be_empty
       end
     end
 

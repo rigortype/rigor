@@ -153,21 +153,38 @@ module Rigor
         accumulator.to_report
       end
 
-      # ADR-67 WD3 — seed the call-site parameter-inference table so the
-      # protection scan counts an inferred-parameter receiver (e.g. `node.loc`
-      # where `node` is a `def compile(node)` parameter) as protected when its
-      # call sites resolve to concrete argument types. ONLY the parameter table
-      # is seeded — no cross-file discovery — so every site that does not gain
-      # an inferred parameter type is classified byte-identically to the
-      # un-inferred baseline. Collection spans the scanned `paths`.
+      # Seed the protection scan's scope with the same cross-file facts
+      # `rigor check` resolves against, so a receiver reads the type it
+      # actually has rather than a stripped-scope `Dynamic`:
+      #
+      # - `discovered_classes` — a project constant referring to a class
+      #   defined in a *sibling* file (`Account`, `User`) types as
+      #   `singleton(Account)` instead of `Dynamic`. Without this, a
+      #   single-file scan cannot see a class it does not itself declare,
+      #   so every cross-file class-constant dispatch was miscounted as
+      #   unprotected (the model-constant undercount found 2026-07-04).
+      # - `param_inferred_types` (ADR-67 WD3) — an inferred-parameter
+      #   receiver (`node.loc` where `node` is a `def compile(node)`
+      #   parameter) counts as protected when its call sites resolve to
+      #   concrete argument types.
+      #
+      # Both span the scanned `paths` only (no whole-project pre-pass) —
+      # a site that gains neither is classified exactly as before.
       def scope_with_inferred_params(paths, configuration, environment)
         base = Scope.empty(environment: environment)
+        seed = {}
+
+        discovered = Inference::ScopeIndexer.discovered_classes_for_paths(paths)
+        seed[:discovered_classes] = discovered unless discovered.empty?
+
         table = Inference::ParameterInferenceCollector.collect(
           files: paths, environment: environment, target_ruby: configuration.target_ruby
         )
-        return base if table.empty?
+        seed[:param_inferred_types] = table unless table.empty?
 
-        base.with_discovery(base.discovery.with(param_inferred_types: table))
+        return base if seed.empty?
+
+        base.with_discovery(base.discovery.with(**seed))
       end
 
       def determine_protection_exit(report, options)

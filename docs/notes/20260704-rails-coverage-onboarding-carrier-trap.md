@@ -348,7 +348,32 @@ Dynamic 化し未保護に誤カウント。`check` は per-file で `seed_proje
 `make verify` green、actionpack spec +3、coverage_command_spec 不変。コミット `2273f2c1`
 （discovery-seed）。discovery-seed 後の mastodon models トップ未保護は `[]`(288) `present?`(161)
 `nil?`(136) `!` `id` `==` `to_s` `each` — 残りは ivar / association / method-chain 結果の素の
-Dynamic（O4 = ADR-58/67 領域）。残レバー: session/request 型付け（小）、O5 provenance 精緻化。
+Dynamic。
+
+### I4 — request-context reader ファミリ完成（session/request/flash/cookies）
+
+params と同じ lenient-nominal 手法を `session`→`ActionDispatch::Request::Session`、`request`→
+`ActionDispatch::Request`、`flash`→`ActionDispatch::Flash::FlashHash`、`cookies`→
+`ActionDispatch::Cookies::CookieJar` に拡張（コミット `53fec3eb`, `ec8b6e84`）。全て FP ゼロ
+（`session.delete`/`request.xhr?`/`flash.now` 等は engine-lenient）。`flash[` は redmine controllers
+で 129 使用と多く、app/controllers 0.045→0.229 に。
+
+### 最終累積カバレッジ（全修正後 = check 忠実）
+
+| 対象 | 原初(plugin-blind) | 最終 | 総差 |
+| --- | --- | --- | --- |
+| redmine app+lib | 0.1953 | **0.3386** | **+14.3pp** |
+| mastodon app/models | 0.1773 | **0.3112** | **+13.4pp** |
+| mastodon app/controllers | ~0.04（params前） | **0.2736** | — |
+
+### 境界と次レバー
+
+well-scoped な quick-slice はここまで（reader ファミリ + coverage 忠実度2修正）。残る未保護は
+**素の Dynamic ivar / association / method-chain 結果**で、その真因は untyped param → Dynamic ivar
+連鎖。**ADR-58 は発火ポリシー（possible-nil FP 削減）が主題で protection 向上ではなく**（ADR自身
+「ivar を `Node | nil` に精緻化すると FP が悪化」と明記、実質実装済）、真のレバーは
+**ADR-67（parameter inference、proposed）** = call-site から param 型を推論して ivar/receiver を
+sharpen する大規模機能。これは独立した本格作業で、quick-slice の継続ではない。
 
 ## GOTCHAs（再実行者向け）
 

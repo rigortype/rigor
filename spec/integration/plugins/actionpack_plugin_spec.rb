@@ -154,6 +154,15 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    it "types `flash` and `cookies` as their ActionDispatch classes" do
+      source = "class C\n  def create\n    Rigor.dump_type(flash)\n    Rigor.dump_type(cookies)\n  end\nend\n"
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps).to include(a_string_including("ActionDispatch::Flash::FlashHash"))
+        expect(dumps).to include(a_string_including("ActionDispatch::Cookies::CookieJar"))
+      end
+    end
+
     it "keeps session/request surfaces FP-safe (no undefined-method on delete/xhr?/headers)" do
       source = <<~RUBY
         class C

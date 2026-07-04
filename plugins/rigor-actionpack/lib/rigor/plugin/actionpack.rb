@@ -174,7 +174,8 @@ module Rigor
       end
 
       # Phase 5 (2026-07-04) — type the implicit-self request-context
-      # readers (`params`, `session`, `request`) inside controllers. The
+      # readers (`params`, `session`, `request`, `flash`, `cookies`)
+      # inside controllers. The
       # typing-obstacle probe
       # (docs/notes/20260704-rails-coverage-onboarding-carrier-trap.md,
       # obstacle O3) found `params` typing to `Dynamic[top]` the single
@@ -197,7 +198,9 @@ module Rigor
       REQUEST_CONTEXT_READER_TYPES = {
         params: "ActionController::Parameters",
         session: "ActionDispatch::Request::Session",
-        request: "ActionDispatch::Request"
+        request: "ActionDispatch::Request",
+        flash: "ActionDispatch::Flash::FlashHash",
+        cookies: "ActionDispatch::Cookies::CookieJar"
       }.freeze
 
       dynamic_return methods: REQUEST_CONTEXT_READER_TYPES.keys do |call_node, scope|

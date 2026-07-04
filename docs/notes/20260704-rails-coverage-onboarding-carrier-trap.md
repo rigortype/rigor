@@ -320,9 +320,35 @@ plugin registry を wire していない**。ゆえに coverage は **plugin が
 | mastodon app/models | 0.1773 (1043/5884) | **0.2364** (1391/5884) | +5.9pp（**AR relation 型付けが可視化**） |
 
 mastodon の +5.9pp は params 無しの app/models なので、丸ごと「従来 coverage に不可視だった AR
-`dynamic_return` 貢献」。これが plugin-blind バグの規模を示す。両変更 `make verify` green、
-actionpack spec +3。コミット `ec4d7a6d`（params + coverage）、`7afa4aa5`（sig-gen env 修正）。
-残: session/request 型付け（小）、O2 モデル定数 singleton 化、O5 provenance 精緻化。
+`dynamic_return` 貢献」。これが plugin-blind バグの規模を示す。コミット `ec4d7a6d`（params + coverage）、
+`7afa4aa5`（sig-gen env 修正）。
+
+### 発見 I3 — O2 は誤り、真の gap は coverage の **discovery 未 seed**
+
+O2「モデル定数が Dynamic」を実装しようとして、まず再検証 → **全 app/models を発見対象にすると
+`Account` → `singleton(Account)`、`User` → `singleton(User)` と正しく型付く**（`Status.where` →
+`Relation[Status]` も）。先の「Account → Dynamic」は**単一ファイル probe のアーティファクト**
+（`_rigor_probe.rb` 単体 check では sibling の app/models が発見されない）だった。O2 はエンジン gap
+ではない。
+
+真の gap は plugin-blind と同種: **coverage の protection scan が `Scope.empty` で cross-file
+発見（`discovered_classes`）を seed していなかった** → sibling ファイルのクラス定数が coverage 内で
+Dynamic 化し未保護に誤カウント。`check` は per-file で `seed_project_scope` するので、また coverage
+だけが乖離。修正: scan scope に `ScopeIndexer.discovered_classes_for_paths(paths)` を seed。
+
+### 修正後の実測（plugin-aware + discovery-seed、= check 忠実）
+
+| 対象 | 原初(plugin-blind) | +plugin-aware | +discovery-seed | 総差 |
+| --- | --- | --- | --- | --- |
+| redmine app+lib | 0.1953 | 0.2227 | **0.3278** | **+13.2pp** |
+| mastodon app/models | 0.1773 | 0.2364 | **0.3112** | **+13.4pp** |
+
+**真の保護率は ~33%**。「~18-20% / 94% engine_gap」は coverage の2つの scope 欠落
+（plugin registry 未 wire + discovery 未 seed）による約 **13pp の過小評価**だった。両変更
+`make verify` green、actionpack spec +3、coverage_command_spec 不変。コミット `2273f2c1`
+（discovery-seed）。discovery-seed 後の mastodon models トップ未保護は `[]`(288) `present?`(161)
+`nil?`(136) `!` `id` `==` `to_s` `each` — 残りは ivar / association / method-chain 結果の素の
+Dynamic（O4 = ADR-58/67 領域）。残レバー: session/request 型付け（小）、O5 provenance 精緻化。
 
 ## GOTCHAs（再実行者向け）
 

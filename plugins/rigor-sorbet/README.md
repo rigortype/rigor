@@ -400,7 +400,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | ------------------------------------------ | -------- |
 | `manifest(...)` + `config_schema`          | declares the optional `paths:` config knob |
 | `Plugin::Base#io_boundary` (`read_file`)   | reads project source AND `sorbet/rbi/**/*.rbi` under the trusted scope |
-| `Plugin::Base#dynamic_return` / `#narrowing_facts` | contributes the parsed return type / `T.bind` narrowing facts at every call site (replaced `flow_contribution_for`, removed ADR-52 WD3) |
+| `Plugin::Base#dynamic_return` / `#narrowing_facts` | contributes the parsed return type / `T.bind` narrowing facts at every call site |
 | `Plugin::Base#diagnostics_for_file`        | emits `plugin.sorbet.parse-error` for malformed sig blocks |
 | `Scope#type_of` (via `dynamic_return` block) | resolves instance-side receivers to `Nominal[T]` for catalog lookup |
 | `Type::Combinator.{nominal_of,union,intersection,untyped,top,bot,constant_of}` | constructs the Rigor-side carriers from the Sorbet vocabulary |

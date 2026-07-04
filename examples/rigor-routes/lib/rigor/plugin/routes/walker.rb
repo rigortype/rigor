@@ -5,35 +5,27 @@ require "prism"
 module Rigor
   module Plugin
     class Routes < Rigor::Plugin::Base
-      # Yields every implicit-receiver call whose method name
-      # matches `*_path` or `*_url`, paired with the base helper
-      # name (`users_path` → `"users"`). Reduces the AST to the
-      # minimum the plugin needs to validate against the route
-      # table — the rest of the file is irrelevant.
+      # Recognises the implicit-receiver `*_path` / `*_url` route
+      # helper call shape. The engine owns the per-file AST walk
+      # (ADR-37 `node_rule`); this module is only the matcher the
+      # node rule applies to each `Prism::CallNode` it is handed —
+      # it holds no traversal of its own.
       module Walker
         SUFFIX_RE = /\A(?<base>.+)_(?<kind>path|url)\z/
 
         module_function
 
-        def each_helper_call(root, &)
-          return enum_for(__method__, root) unless block_given?
+        # Returns `[base, kind]` for an implicit-receiver `*_path` /
+        # `*_url` call (`users_path` → `["users", :path]`), or `nil`
+        # for any other node.
+        def helper_call(node)
+          return nil unless node.is_a?(Prism::CallNode)
+          return nil unless node.receiver.nil?
 
-          walk(root) do |node|
-            next unless node.is_a?(Prism::CallNode)
-            next unless node.receiver.nil?
+          match = SUFFIX_RE.match(node.name.to_s)
+          return nil unless match
 
-            match = SUFFIX_RE.match(node.name.to_s)
-            next unless match
-
-            yield node, match[:base], match[:kind].to_sym
-          end
-        end
-
-        def walk(node, &)
-          return if node.nil?
-
-          yield node
-          node.compact_child_nodes.each { |child| walk(child, &) }
+          [match[:base], match[:kind].to_sym]
         end
       end
     end

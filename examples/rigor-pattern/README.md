@@ -13,7 +13,7 @@ The key surfaces:
 | Surface | Used in this plugin |
 | --- | --- |
 | `Scope#type_of(node)` | Per-call query against the analyzer's inference engine |
-| `Type::Combinator.literal_string_compatible?(type)` | Predicate the v0.0.9 literal-string carrier publishes |
+| `Type::Combinator.literal_string_compatible?(type)` | Predicate the literal-string carrier publishes |
 | `Type::Constant#value` | Exact-value extraction when the type is a `Constant<String>` |
 
 What this means in practice: when the user writes
@@ -114,8 +114,7 @@ through `FlowContribution::Merger`.
 ## Future direction — lightweight HKT
 
 The plugin supplies a return type at the call site through
-`dynamic_return` (ADR-52; the former `flow_contribution_for` hook was
-removed ADR-52 WD3): on a successful
+`dynamic_return` (ADR-52): on a successful
 match the runtime `validate` returns the value argument, so
 the plugin contributes the argument's type (typically
 `Constant<String>`) as the call site's return type. Mismatches

@@ -10,9 +10,9 @@ module Rigor
     # against a user-declared regex pattern table. Demonstrates
     # **plugin → analyzer collaboration**: the plugin asks Rigor's
     # type system whether each `value` argument is a provably
-    # literal string (via `Type::Combinator.literal_string_compatible?`,
-    # introduced in v0.0.9), and if so, runs the configured regex
-    # against the literal value at lint time.
+    # literal string (via `Type::Combinator.literal_string_compatible?`),
+    # and if so, runs the configured regex against the literal value
+    # at lint time.
     #
     # Compared with the AST-only approach used by the earlier
     # examples, this one **does not reimplement** literal-string
@@ -53,17 +53,14 @@ module Rigor
         version: "0.1.0",
         description: "Statically validates literal arguments to validate(:name, value) calls.",
         config_schema: {
-          "method_name" => :string,
-          "patterns" => :hash
+          "method_name" => { kind: :string, default: "validate" },
+          "patterns" => { kind: :hash, default: {} }
         }
       )
 
-      DEFAULT_METHOD_NAME = "validate"
-
       def init(_services)
-        @method_name = config.fetch("method_name", DEFAULT_METHOD_NAME).to_sym
-        raw_patterns = config.fetch("patterns", {})
-        @patterns = raw_patterns.transform_values { |source| Regexp.new(source) }
+        @method_name = config["method_name"].to_sym
+        @patterns = config["patterns"].transform_values { |source| Regexp.new(source) }
       rescue RegexpError => e
         raise "rigor-pattern: invalid regex in config: #{e.message}"
       end
@@ -148,8 +145,8 @@ module Rigor
         # Use the per-file entry scope's `type_of` so the plugin
         # rides Rigor's existing literal-string folding rather
         # than reimplementing it. `Type::Combinator.literal_string_compatible?`
-        # is the engine-side predicate the v0.0.9 literal-string
-        # carrier publishes.
+        # is the engine-side predicate the literal-string carrier
+        # publishes.
         value_type = scope.type_of(value_node)
         evaluate_value(path, value_node, pattern, pattern_name, value_type)
       end

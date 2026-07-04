@@ -51,14 +51,14 @@ module Rigor
         version: "0.1.0",
         description: "Surfaces deprecation warnings for user-declared method signatures.",
         config_schema: {
-          "methods" => :array
+          "methods" => { kind: :array, default: [] }
         }
       )
 
       Entry = Struct.new(:method_name, :receiver, :replacement, :since, keyword_init: true)
 
       def init(_services)
-        @entries = (config["methods"] || []).map do |row|
+        @entries = config["methods"].map do |row|
           Entry.new(
             method_name: row.fetch("method").to_sym,
             receiver: row["receiver"],

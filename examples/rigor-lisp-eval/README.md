@@ -12,14 +12,11 @@ call site:
 demo/demo.rb:3:9: info: Lisp.eval return type inferred as Integer [plugin.lisp-eval.inferred-return-type]
 ```
 
-It is a *companion to the analyzer*, not an extension of the
-analyzer's inference engine. v0.1.0 plugins emit diagnostics
-and contribute cache entries; the protocol that lets a plugin
-override the analyzer's own inferred return type for a call
-site is queued for a later v0.1.x slice. When that ships, the
-same interpreter inside this plugin will move into a return-type
-contribution. The diagnostic-side surface stays useful either
-way.
+It is a *companion to the analyzer*: alongside the diagnostic,
+the plugin contributes the inferred type back to the call site
+via `dynamic_return`, so downstream calls on the result resolve
+against the precise carrier instead of the RBS-level `untyped`
+(see "Future direction" below).
 
 ## What the plugin recognises
 
@@ -108,8 +105,7 @@ narrowly focused on the diagnostic emission protocol.
 ## Future direction — lightweight HKT / type-level eval
 
 The plugin supplies the inferred type at the call site through
-`dynamic_return methods: -> { [@method_name] }` (ADR-52 slice 4;
-the former `flow_contribution_for` hook was removed ADR-52 WD3): downstream
+`dynamic_return methods: -> { [@method_name] }` (ADR-52 slice 4): downstream
 calls on the result resolve against the inferred carrier
 (`Lisp.eval([:+, 1, 2]).bit_length` resolves on `Integer`,
 not the RBS-level `untyped`). The diagnostic stays as a

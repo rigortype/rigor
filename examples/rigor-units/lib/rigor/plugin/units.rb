@@ -13,9 +13,10 @@ module Rigor
     # arithmetic, chained constructors (`60.kilometers.per_hour`),
     # and conversion queries (`speed.in_kilometers_per_hour`).
     #
-    # The plugin walks the file's AST, maintains a local-variable
-    # binding map (`distance: :distance`, `speed: :speed`, …),
-    # and emits one diagnostic per recognised event:
+    # The plugin walks the file's AST ({Analyzer}), maintains a
+    # local-variable binding map (`distance: :distance`,
+    # `speed: :speed`, …), and emits one diagnostic per recognised
+    # event:
     #
     # | Event                                 | Severity | Rule |
     # | ---                                   | ---      | --- |
@@ -30,6 +31,37 @@ module Rigor
     # (`Distance` / `Speed` / …) through assignments and into
     # downstream calls instead of seeing the DSL's untyped RBS
     # boundary.
+    #
+    # ## Why the parallel binding map is NOT redundant
+    #
+    # It is tempting to delete {Analyzer}'s `@bindings` map and have
+    # the diagnostics side read dimensions straight from
+    # `Scope#type_of`, the way `rigor-pattern` reads literal-string
+    # facts back from the engine. That does not work here, and the
+    # asymmetry is worth understanding:
+    #
+    # - The `Scope` handed to `#diagnostics_for_file` / a `node_rule`
+    #   is the **seed entry scope** (`seed_project_scope(Scope.empty)`).
+    #   `Scope#type_of` re-evaluates a node on demand, so it folds a
+    #   *self-contained* expression — `scope.type_of(100.kilometers)`
+    #   re-runs the {.dynamic_return} block and yields `Distance`. But
+    #   it carries **no flow-accumulated local bindings**: for
+    #   `speed = distance / time`, `scope.type_of(distance)` is
+    #   `untyped`, because the entry scope never bound `distance` — the
+    #   binding only ever existed in the mid-inference flow scope.
+    # - The `Scope` handed to {.dynamic_return} IS that flow scope, at
+    #   the call site, so there `scope.type_of(distance)` is `Distance`.
+    #   The engine threads dimensions correctly (a downstream
+    #   `speed.upcase` really does trip `call.undefined-method` on
+    #   `Speed`), but the diagnostics API cannot see that thread.
+    #
+    # So the two halves read dimensions from different sources of
+    # necessity: {.dynamic_return} from the flow `Scope#type_of`, and
+    # {Analyzer} from its own single-pass binding map — the only way to
+    # follow a dimension across statements on the diagnostics side. A
+    # plugin that needs a value literally at one call site (rigor-pattern)
+    # reaches for the engine; a plugin that needs cross-statement
+    # local flow on the diagnostics side (this one) still tracks it.
     #
     # Usage in `.rigor.yml`:
     #

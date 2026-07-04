@@ -28,8 +28,7 @@ module Rigor
     #
     # This plugin emits an `:info` diagnostic AND contributes a
     # precise return type at the call site via `dynamic_return`
-    # (ADR-52 slice 4 — the former `flow_contribution_for` hook
-    # was removed). The diagnostic serves as a user-facing trace
+    # (ADR-52 slice 4). The diagnostic serves as a user-facing trace
     # per the README's "info-diagnostic" pattern; the same
     # Interpreter walk feeds both channels.
     class LispEval < Rigor::Plugin::Base
@@ -38,21 +37,23 @@ module Rigor
         version: "0.1.0",
         description: "Types the return value of literal `Lisp.eval(...)` calls.",
         config_schema: {
-          "module_name" => :string,
-          "method_name" => :string,
-          "severity" => :string
+          "module_name" => { kind: :string, default: "Lisp" },
+          "method_name" => { kind: :string, default: "eval" },
+          "severity" => { kind: :string, default: "info" }
         }
       )
 
-      DEFAULT_MODULE_NAME = "Lisp"
-      DEFAULT_METHOD_NAME = "eval"
+      # Only the severity fallback needs a constant now — ADR-40 merges the
+      # `module_name` / `method_name` / `severity` defaults from the manifest,
+      # but `severity` is additionally allow-list-validated, so a bad value
+      # falls back here rather than to the merged default.
       DEFAULT_SEVERITY = :info
       ALLOWED_SEVERITIES = %i[info warning].freeze
 
       def init(_services)
-        @module_name = config.fetch("module_name", DEFAULT_MODULE_NAME)
-        @method_name = config.fetch("method_name", DEFAULT_METHOD_NAME).to_sym
-        configured_severity = config.fetch("severity", DEFAULT_SEVERITY.to_s).to_sym
+        @module_name = config["module_name"]
+        @method_name = config["method_name"].to_sym
+        configured_severity = config["severity"].to_sym
         @severity = ALLOWED_SEVERITIES.include?(configured_severity) ? configured_severity : DEFAULT_SEVERITY
         @interpreter = Interpreter.new
       end
@@ -153,27 +154,20 @@ module Rigor
       end
 
       def diagnostic_for_inferred_type(path, call_node, result)
-        location = call_node.location
-        rendered = render_result(result)
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
-          message: "#{@module_name}.#{@method_name} return type inferred as #{rendered}",
-          severity: @severity,
-          rule: "inferred-return-type"
+        diagnostic(
+          call_node, path: path,
+                     message: "#{@module_name}.#{@method_name} return type inferred as #{render_result(result)}",
+                     severity: @severity,
+                     rule: "inferred-return-type"
         )
       end
 
       def diagnostic_for_error(path, error)
-        location = error.node.location
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
-          message: error.message,
-          severity: :error,
-          rule: "type-error"
+        diagnostic(
+          error.node, path: path,
+                      message: error.message,
+                      severity: :error,
+                      rule: "type-error"
         )
       end
 

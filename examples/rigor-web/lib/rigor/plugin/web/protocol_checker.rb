@@ -27,11 +27,17 @@ module Rigor
           @contracts = contracts
         end
 
-        def check(path:, scope:, root:)
+        # Per-`ClassNode` check over the engine-owned walk (ADR-37):
+        # called once per class node the `node_rule` in `web.rb`
+        # dispatches, checking it against every contract whose
+        # `path_glob` matches the file. No cross-class-node state is
+        # needed, so the checker ships no `class_nodes` traversal of its
+        # own.
+        def check_class(class_node, path:, scope:)
           @contracts.flat_map do |contract|
             next [] unless path_matches?(contract.path_glob, path)
 
-            check_contract(contract, path, scope, root)
+            diagnostics_for_class(contract, path, scope, class_node)
           end
         end
 
@@ -47,12 +53,6 @@ module Rigor
             File.fnmatch?(File.join("**", glob), path, FNMATCH_FLAGS)
         end
 
-        def check_contract(contract, path, scope, root)
-          class_nodes(root).flat_map do |class_node|
-            diagnostics_for_class(contract, path, scope, class_node)
-          end
-        end
-
         def diagnostics_for_class(contract, path, scope, class_node)
           def_node = target_def(class_node, contract)
           if def_node.nil?
@@ -60,13 +60,6 @@ module Rigor
           else
             Array(return_type_diagnostic(contract, path, scope, def_node))
           end
-        end
-
-        # Every `Prism::ClassNode` reachable from the root.
-        def class_nodes(root)
-          found = []
-          walk(root) { |node| found << node if node.is_a?(Prism::ClassNode) }
-          found
         end
 
         # The contracted method, defined directly in `class_node`'s
@@ -190,13 +183,6 @@ module Rigor
         def class_name(class_node)
           path = class_node.constant_path
           path.respond_to?(:slice) ? path.slice : class_node.name.to_s
-        end
-
-        def walk(node, &)
-          return if node.nil?
-
-          yield node
-          node.compact_child_nodes.each { |child| walk(child, &) }
         end
       end
     end

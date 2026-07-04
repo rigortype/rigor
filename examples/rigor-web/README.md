@@ -59,8 +59,8 @@ The contract drives two distinct behaviours:
   typo like `request.path_inf0` surfaces as an ordinary core
   `call.undefined-method` diagnostic — `rigor-web` never has to
   check for that itself.
-- **check** (plugin-side) — the plugin's `#diagnostics_for_file`
-  hook confirms each controller class defines `#get` and that its
+- **check** (plugin-side) — the plugin's `node_rule(Prism::ClassNode)`
+  rule confirms each controller class defines `#get` and that its
   inferred return type conforms to `Rack::Response`.
 
 ## What the plugin recognises

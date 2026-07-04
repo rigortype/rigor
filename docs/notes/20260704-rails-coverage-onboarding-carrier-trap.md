@@ -282,6 +282,48 @@ engine-bound」は過大評価**で、相当部分は plugin/config で閉じら
 4. **O5 provenance 精緻化**（計測）— 誤誘導の是正。coverage の信頼性。
 5. **O4 ADR-58 / ADR-67**（engine）— O1-O3 で残る素の Dynamic ivar/param。
 
+## 実装（2026-07-04）: O3 params 型付け + coverage の plugin-blind 修正
+
+O3 の実装中に、より大きな計測バグが露見した。
+
+### 実装 I1 — rigor-actionpack が controller の `params` を型付け
+
+`dynamic_return methods: [:params]`（implicit-self + controller `self` で gate）が
+`params` を `ActionController::Parameters` に型付ける。**RBS は敢えて同梱しない**: 受信者は
+concrete（`params[:x]` の ~2400 dispatch が保護される）だが、クラスのメソッド面は engine-lenient
+のまま（Rigor は RBS 未知クラスに undefined-method を出さない）→ `params.require(...).permit(...)`・
+`params.to_unsafe_h` 等が全て FP-safe。部分 RBS を同梱すると carrier トラップ（宣言クラスは
+非掲載メンバを落とす）を再発させるため。ADR-5: コンテナを型付け、値は lenient。`check`/`dump_type`
+で検証、FP ゼロ。
+
+### 発見 I2（I1 より重大）— `coverage --protection` が **plugin-blind** だった
+
+I1 実装後も `coverage` の比率が動かなかった。原因: protection scan の scope が
+`Scope.empty(environment: Environment.for_project(libraries, signature_paths))` = **RBS 環境のみで
+plugin registry を wire していない**。ゆえに coverage は **plugin が `dynamic_return` で型付けた
+受信者を一切見ていなかった**（params も、`Model.where`→`Relation[Model]` も）→ 全て Dynamic 扱いで
+未保護に誤カウント。dump_type プローブ（`check` 経由）は plugin を見るので正しかったが、
+**coverage の比率は plugin 貢献を構造的に過小評価**していた。
+
+**重要な含意**: 本ノート §1 の「プラグインは coverage 中立（0.187→0.187）」と、§O1–O5 の coverage
+比率・engine_gap 割合は**すべて plugin-blind な計測**で、実際の保護を過小評価していた（dump_type
+ベースの型判定＝O1–O5 の質的結論は有効）。
+
+修正: coverage の protection scope を `LanguageServer::ProjectContext#environment`（runner/LSP と
+同じ plugin-aware environment: registry materialize + prepare pass）で構築。
+
+### 修正後の実測（plugin-aware coverage + params 型付け）
+
+| 対象 | 修正前(plugin-blind) | 修正後 | 差 |
+| --- | --- | --- | --- |
+| redmine app+lib | 0.1953 (5520/28267) | **0.2227** (6295/28267) | +2.7pp（主に params, `[]` 2378→1782） |
+| mastodon app/models | 0.1773 (1043/5884) | **0.2364** (1391/5884) | +5.9pp（**AR relation 型付けが可視化**） |
+
+mastodon の +5.9pp は params 無しの app/models なので、丸ごと「従来 coverage に不可視だった AR
+`dynamic_return` 貢献」。これが plugin-blind バグの規模を示す。両変更 `make verify` green、
+actionpack spec +3。コミット `ec4d7a6d`（params + coverage）、`7afa4aa5`（sig-gen env 修正）。
+残: session/request 型付け（小）、O2 モデル定数 singleton 化、O5 provenance 精緻化。
+
 ## GOTCHAs（再実行者向け）
 
 - 診断メッセージは i18n 由来の非 ASCII を含む → JSON パースは `File.read(f, encoding:"UTF-8").scrub`。

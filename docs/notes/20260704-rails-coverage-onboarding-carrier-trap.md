@@ -219,6 +219,69 @@ authoritative-complete でなく inference-additive に扱う。(b) はバグ A 
 射程が大きく、Rails アプリ全般の「sig-gen で coverage を上げたいが FP を出したくない」を解く。
 H1 の in-place additive carrier 案（rbs-inline `#:` / return-override）は (a) の手動版に相当。
 
+## さらなる型付け障害の調査（2026-07-04、sig なしクリーン状態で）
+
+`coverage --protection --format json` の `add_a_type_here`（method × count × dynamic_origin）を
+集計 + `Rigor.dump_type(x)` プローブで実型を確認し、Dynamic の**発生源**を特定した。
+
+### 障害の分布（redmine app+lib, 未保護 22747, count 加重）
+
+| dynamic_origin | 割合 | tractability |
+| --- | --- | --- |
+| unsupported_syntax | 81.1% | engine_gap |
+| (nil / 未分類) | 18.4% | — |
+| explicit_untyped | 0.5% | add_rbs |
+
+Dynamic 受信者上のトップメソッド: `[]`(2378) `==`(716) `to_s`(632) `table_name`(514) `current`(493)
+`id`(472) `where`(406) `+`(400) `present?`(363) `each`(359) `new`(355) `[]=`(324) `is_a?`(323)…
+— いずれも受信者が Dynamic 化した後の下流。`dump_type` プローブが真の発生源を明かした:
+
+### O1（redmine 最大・config 修正可）: rigor-activerecord が inert
+
+`load-error: rigor-activerecord: schema file db/schema.rb not found; AR call checks skipped`。
+Redmine は `db/schema.rb` をコミットしない（327 migration から生成）ため model_index に schema が
+無く、**AR チェック全体がスキップ**。結果、`User` `Issue` などモデル定数・`Issue.where(…)`・
+`Issue.find(…)`・AR 由来 ivar が**すべて `Dynamic[top]`**（プローブ実測）。対比: mastodon
+（`db/schema.rb` あり）では `Account.where(id:1)` → `ActiveRecord::Relation[Account]`、
+`User.find(1)` → `User` と型付く。ただし O1 の上限は O2 で頭打ち（下記）。
+
+### O2（両者・plugin/engine gap）: モデル定数が `Dynamic[top]`
+
+AR 稼働時（mastodon）でも**裸のモデル定数 `Account` は `Dynamic[top]`**。プラグインは
+recognized な call の*結果*（`.where`→Relation, `.find`→Model）は型付けるが、モデル定数自身を
+`singleton(Account)` に型付けない。ゆえに mastodon の working AR でも app/models の保護は
+~0.177 止まり（inert AR の redmine 0.187 とほぼ同じ）— **AR スキーマ導入は銀の弾丸ではない**。
+model_index は存在を知っているので、定数を `singleton(Model)` へ型付ける拡張が O2 の解。
+
+### O3（両者・plugin gap）: `params` / `session` / `request` が未型付
+
+最大の method クラスタ `[]`(2378) + `[]=`(324) ≈ 2700 サイトは、サンプルした限り
+`params[:x]` / `session[:x] =` / `request.query_parameters[:x]` が支配的。ActionController の
+これらを型付けるプラグインは無く、全て `Dynamic[top]`（プローブ実測）。rigor-actionpack が
+params を hash-shape / `ActionController::Parameters` に型付ければ最大の単一クラスタが閉じる。
+
+### O4（両者・engine）: untyped ivar → メンバ
+
+`@object.project` `@author.name` 等。AR 由来 ivar は O1/O2 で改善するが、非 AR ivar は
+[ADR-58](../adr/58-ivar-field-typing.md) 領域。
+
+### O5（横断・計測の質）: provenance が catch-all で誤誘導
+
+上記 O1（config gap）・O2/O3（plugin gap）は本来 `framework_dsl_boundary`（→ enable_plugin）や
+config-gap に分類されるべきだが、**81% が `unsupported_syntax`（→ engine_gap）に一括りにされ**、
+`coverage --protection` の tractability 誘導が「engine_gap = ユーザ closable でない」と誤って伝える。
+[ADR-75](../adr/75-dynamic-provenance.md) の cause set は粗く、Dynamic 受信者の真因（未型 framework
+オブジェクト / 未認識モデル定数 / inert plugin の load-error）を区別できていない。**H4 の「94%
+engine-bound」は過大評価**で、相当部分は plugin/config で閉じられる。
+
+### 障害ランキング（レバーの大きさ順）
+
+1. **O3 params/session 型付け**（~2700, plugin, 両者）— 最大の単一クラスタ、rigor-actionpack 拡張。
+2. **O2 モデル定数 → `singleton(Model)`**（plugin, 両者）— AR の recognized 範囲を定数へ拡張。
+3. **O1 redmine の schema 供給**（config, redmine のみ）— AR を稼働させる。上限は O2 が規定。
+4. **O5 provenance 精緻化**（計測）— 誤誘導の是正。coverage の信頼性。
+5. **O4 ADR-58 / ADR-67**（engine）— O1-O3 で残る素の Dynamic ivar/param。
+
 ## GOTCHAs（再実行者向け）
 
 - 診断メッセージは i18n 由来の非 ASCII を含む → JSON パースは `File.read(f, encoding:"UTF-8").scrub`。

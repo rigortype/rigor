@@ -38,8 +38,8 @@ inside a file matching the glob, it substitutes
 `Dynamic[Top]` fallback — so type errors inside action bodies are
 caught precisely as core `call.undefined-method` diagnostics.
 
-**Check half (plugin-side):** the plugin's `#diagnostics_for_file` hook
-confirms each class in a matching file defines `#handle` with exactly
+**Check half (plugin-side):** the plugin's `node_rule(Prism::ClassNode)`
+rule confirms each class in a matching file defines `#handle` with exactly
 two parameters, emitting `missing-handle-method` / `handle-arity-mismatch`.
 
 The `action_path` config key is folded into the contract set at `init`
@@ -55,7 +55,7 @@ override, so an override reaches both the provide and check halves
 | `manifest(... config_schema:)` | The `action_path` glob override (static fallback to the manifest glob in `init`). |
 | `manifest(... signature_paths: ["sig"])` (ADR-25) | Loads the bundled `sig/hanami_action.rbs` stubs for Request / Response / Params. |
 | `#protocol_contracts` override | Folds the per-project `action_path` into the contract set so the override reaches the engine's provide tier. |
-| `#diagnostics_for_file` | The ADR-28 check half — delegates to `ActionChecker`. |
+| `node_rule(Prism::ClassNode)` | The ADR-28 check half — delegates to `ActionChecker#check_class`. |
 
 ## RBS stubs
 

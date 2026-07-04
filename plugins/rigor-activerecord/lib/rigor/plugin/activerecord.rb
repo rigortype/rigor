@@ -208,9 +208,8 @@ module Rigor
       FINDER_METHOD_NAMES = %i[find find_by! find_by where all order limit none select].freeze
       private_constant :FINDER_METHOD_NAMES
 
-      # v0.1.2 — return-type contribution; ADR-52 slice 5b —
-      # migrated off `flow_contribution_for` onto the run-time
-      # `methods:` name gate. `Model.find(id)` narrows the call
+      # Return-type contribution via the run-time `methods:` name
+      # gate (ADR-52 slice 5b). `Model.find(id)` narrows the call
       # site's return type to `Nominal[Model]`, so chained calls
       # (`User.find(1).name`) resolve through the analyzer's
       # normal dispatch instead of the RBS-level untyped

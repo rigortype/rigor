@@ -22,17 +22,20 @@ module Rigor
           @contracts = contracts
         end
 
-        def check(path:, root:)
-          @contracts.flat_map do |contract|
-            next [] unless path_matches?(contract.path_glob, path)
+        # Per-`ClassNode` check over the engine-owned walk (ADR-37):
+        # called once per class node the `node_rule` in `hanami.rb`
+        # dispatches, against every contract whose `path_glob` matches
+        # the file. No cross-class-node state is needed, so the checker
+        # ships no `class_nodes` traversal of its own.
+        def check_class(class_node, path:)
+          @contracts.filter_map do |contract|
+            next unless path_matches?(contract.path_glob, path)
 
-            class_nodes(root).filter_map do |class_node|
-              handle_def = find_handle(class_node, contract)
-              if handle_def.nil?
-                missing_handle_diagnostic(contract, path, class_node)
-              else
-                handle_arity_mismatch_diagnostic(contract, path, class_node, handle_def)
-              end
+            handle_def = find_handle(class_node, contract)
+            if handle_def.nil?
+              missing_handle_diagnostic(contract, path, class_node)
+            else
+              handle_arity_mismatch_diagnostic(contract, path, class_node, handle_def)
             end
           end
         end
@@ -47,12 +50,6 @@ module Rigor
 
           File.fnmatch?(glob, path, FNMATCH_FLAGS) ||
             File.fnmatch?(File.join("**", glob), path, FNMATCH_FLAGS)
-        end
-
-        def class_nodes(root)
-          found = []
-          walk(root) { |node| found << node if node.is_a?(Prism::ClassNode) }
-          found
         end
 
         def find_handle(class_node, contract)
@@ -106,13 +103,6 @@ module Rigor
         def class_name(class_node)
           path = class_node.constant_path
           path.respond_to?(:slice) ? path.slice : class_node.name.to_s
-        end
-
-        def walk(node, &)
-          return if node.nil?
-
-          yield node
-          node.compact_child_nodes.each { |child| walk(child, &) }
         end
       end
     end

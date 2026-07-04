@@ -147,11 +147,7 @@ module Rigor
         # symlink-bearing form here. Look up under both so the
         # match is symlink-agnostic.
         errors = @parse_errors_by_path[path] || @parse_errors_by_path[canonicalize(path)] || []
-        diagnostics = errors.map { |error| parse_error_diagnostic(path, error) }
-        diagnostics.concat(absurd_reachable_diagnostics(path, root))
-        diagnostics.concat(reveal_type_diagnostics(path, root))
-        diagnostics.concat(assert_type_mismatch_diagnostics(path, root))
-        diagnostics
+        errors.map { |error| parse_error_diagnostic(path, error) }
       end
 
       # ADR-52 slice 4 — per-call return-type path via the
@@ -177,6 +173,35 @@ module Rigor
       # contributes nothing.
       narrowing_facts methods: [:bind] do |call_node, scope|
         bind_post_return_facts(call_node, scope)
+      end
+
+      # ADR-37 — the three per-call diagnostics ride the engine-owned
+      # walk instead of three hand-rolled `walk_for_*` recursions. Each
+      # candidate `T.` call is *recorded by object identity* during the
+      # inference pass (the `dynamic_return` / `narrowing_facts` rules
+      # above call `record_*`), so by the time these node rules fire in
+      # the diagnostics phase the sets are populated; the membership
+      # `delete` both gates the emission and pops the entry so a re-run
+      # cannot double-fire. The recorded set is the gate — no per-node
+      # `AbsurdRecognizer` / name check is needed here.
+      node_rule Prism::CallNode do |node, _scope, path|
+        next [] unless @reachable_absurd_nodes.delete(node)
+
+        [absurd_diagnostic(path, node)]
+      end
+
+      node_rule Prism::CallNode do |node, _scope, path|
+        display = @reveal_type_calls.delete(node)
+        next [] if display.nil?
+
+        [reveal_type_diagnostic(path, node, display)]
+      end
+
+      node_rule Prism::CallNode do |node, _scope, path|
+        recorded = @assert_type_mismatches.delete(node)
+        next [] if recorded.nil?
+
+        [assert_type_mismatch_diagnostic(path, node, *recorded)]
       end
 
       private
@@ -536,31 +561,9 @@ module Rigor
         nil
       end
 
-      # Walks the per-file AST looking for `T.absurd(x)` call
-      # nodes and emits a `plugin.sorbet.absurd-reachable`
-      # warning for any whose object identity matches
-      # `@reachable_absurd_nodes` (populated during the engine's
-      # earlier pass through the `dynamic_return` rule). Pops
-      # matched entries so a duplicate run doesn't double-emit.
-      def absurd_reachable_diagnostics(path, root)
-        return [] if @reachable_absurd_nodes.empty?
-
-        diagnostics = []
-        walk_for_absurd(root) do |call_node|
-          next unless @reachable_absurd_nodes.delete(call_node)
-
-          diagnostics << absurd_diagnostic(path, call_node)
-        end
-        diagnostics
-      end
-
-      def walk_for_absurd(node, &)
-        return unless node.is_a?(Prism::Node)
-
-        yield node if node.is_a?(Prism::CallNode) && AbsurdRecognizer.absurd_call?(node)
-        node.compact_child_nodes.each { |child| walk_for_absurd(child, &) }
-      end
-
+      # Emits a `plugin.sorbet.absurd-reachable` warning for the
+      # `T.absurd(x)` call recorded in `@reachable_absurd_nodes` during
+      # inference; the node rule above does the identity match and pop.
       def absurd_diagnostic(path, call_node)
         Rigor::Analysis::Diagnostic.from_node(
           call_node,
@@ -589,29 +592,6 @@ module Rigor
         return "untyped" if type.nil?
 
         type.respond_to?(:describe) ? type.describe : type.inspect
-      end
-
-      def reveal_type_diagnostics(path, root)
-        return [] if @reveal_type_calls.empty?
-
-        diagnostics = []
-        walk_for_reveal_type(root) do |call_node|
-          display = @reveal_type_calls.delete(call_node)
-          next if display.nil?
-
-          diagnostics << reveal_type_diagnostic(path, call_node, display)
-        end
-        diagnostics
-      end
-
-      def walk_for_reveal_type(node, &)
-        return unless node.is_a?(Prism::Node)
-
-        if node.is_a?(Prism::CallNode) && node.name == :reveal_type &&
-           TypeTranslator.sorbet_t_namespaced?(node.receiver)
-          yield node
-        end
-        node.compact_child_nodes.each { |child| walk_for_reveal_type(child, &) }
       end
 
       def reveal_type_diagnostic(path, call_node, display)
@@ -645,29 +625,6 @@ module Rigor
         return unless result.no?
 
         @assert_type_mismatches[call_node] = [display_for_type(inferred), display_for_type(asserted)]
-      end
-
-      def assert_type_mismatch_diagnostics(path, root)
-        return [] if @assert_type_mismatches.empty?
-
-        diagnostics = []
-        walk_for_assert_type(root) do |call_node|
-          recorded = @assert_type_mismatches.delete(call_node)
-          next if recorded.nil?
-
-          diagnostics << assert_type_mismatch_diagnostic(path, call_node, *recorded)
-        end
-        diagnostics
-      end
-
-      def walk_for_assert_type(node, &)
-        return unless node.is_a?(Prism::Node)
-
-        if node.is_a?(Prism::CallNode) && node.name == :assert_type! &&
-           TypeTranslator.sorbet_t_namespaced?(node.receiver)
-          yield node
-        end
-        node.compact_child_nodes.each { |child| walk_for_assert_type(child, &) }
       end
 
       def assert_type_mismatch_diagnostic(path, call_node, inferred_display, asserted_display)

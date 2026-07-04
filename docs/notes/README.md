@@ -105,6 +105,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-06-22 | [Rigor 0.2.x problem survey — type theory and Ruby runtime type model](20260622-rigor-0.2.x-problem-survey.md) |
 | 2026-06-22 | [Rigor 0.2.x compatibility-safe strengthening survey](20260622-rigor-0.2.x-compatibility-safe-strengthening-survey.md) |
 | 2026-07-04 | [`examples/` プラグイン近代化調査 — 最初期プラグインと現行契約面のギャップ](20260704-examples-plugin-modernization-survey.md) |
+| 2026-07-04 | [`plugins/` 近代化スイープ — SKILL 適用による本番プラグインのドリフト監査](20260704-plugins-modernization-sweep.md) |
 
 ## Adding a note
 

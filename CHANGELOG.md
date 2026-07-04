@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[rigor sig-gen]** Generated RBS for a subclass now carries its superclass — `class GitAdapter < AbstractAdapter` instead of the bare `class GitAdapter` — for plain-constant parents (`class X < Foo` / `class X < Foo::Bar`). Dropping it made the sidecar `sig/` misrepresent the class (inherited members vanished, so receiver dispatch degraded to `Dynamic`) and could reference an inherited nested type that no longer resolved. A computed parent (`Struct.new` / `Data.define` / `Class.new`) is still emitted without a superclass, as before.
+- **[engine]** A malformed project `.rbs` no longer collapses the entire RBS environment. The referenced-type stub sweep re-declared an already-declared `class` as a `module` when stubbing an enclosing namespace (e.g. stubbing `Foo::GitAdapter::Revision` re-emitted `module Foo::GitAdapter` over the existing `class`), and the resulting `RBS::DuplicatedDeclarationError` nulled the whole env — every type-of query then degraded to `Dynamic[top]` and most diagnostics silently stopped firing. The sweep now skips names already declared in the env, mirroring the guard the missing-namespace synthesizer already applied. Surfaced onboarding redmine (2026-07-04).
+
 ## [0.2.6] - 2026-06-27
 
 v0.2.6 sharpens how Rigor explains itself and tightens shape-aware inference. `rigor coverage --protection` now labels each untyped hole with why it is dynamic and whether a type can close it, and a new `rigor doctor` command routes setup problems to their fix. Literal hashes and arrays keep their precise shape through `freeze` / `dup` / `clone`, closing a folding gap on frozen constants. It also begins a plugin-contract cleanup ahead of the v1.0 freeze: the `type_specifier` hook is renamed to `narrowing_facts`, with the old name kept as a deprecated alias.

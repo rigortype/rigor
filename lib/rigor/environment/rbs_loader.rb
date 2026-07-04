@@ -291,12 +291,29 @@ module Rigor
         # prefix of another name is declared `module` (it is a
         # namespace); a leaf is declared `class` (referenced types
         # appear in instance position far more often than as mixins).
+        #
+        # Names already declared in `base_env` are skipped — exactly the
+        # `declared.include?` guard {.collect_missing_namespaces} applies.
+        # Without it, stubbing a nested reference (`Foo::Bar::Baz`) re-emits
+        # its enclosing prefix (`Foo::Bar`) as a `module`, and when that
+        # prefix is already a `class` in the project's own `sig/` the kind
+        # mismatch makes `resolve_type_names` raise
+        # `RBS::DuplicatedDeclarationError`, collapsing the WHOLE env to nil
+        # (every type-of query then degrades to `Dynamic[Top]`). One
+        # malformed `.rbs` must not disproportionately blind the analysis:
+        # a subclass sig that references an inherited nested type
+        # (`class GitAdapter; def x: () -> GitAdapter::Revision`) was the
+        # real-world trigger — see the 2026-07-04 redmine onboarding note.
         def append_stub_declarations(base_env, missing)
+          declared = declared_type_names(base_env)
           names = missing.to_set
           missing.each do |name|
             parts = name.split("::")
             (1...parts.length).each { |i| names << parts[0, i].join("::") }
           end
+          names = names.reject { |name| declared.include?(name) }.to_set
+          return if names.empty?
+
           source = names.sort_by { |n| n.count(":") }.map do |name|
             keyword = names.any? { |other| other != name && other.start_with?("#{name}::") } ? "module" : "class"
             "#{keyword} #{name}\nend\n"
@@ -306,6 +323,17 @@ module Rigor
           add_parsed_decls(base_env, buffer, directives, decls)
         rescue ::RBS::BaseError
           nil
+        end
+
+        # The `::`-stripped names of every class / module / class-alias
+        # declaration already present in `env`, so the synthesis paths
+        # never re-declare (and thereby duplicate) a real declaration.
+        def declared_type_names(env)
+          names = env.class_decls.keys.map { |n| n.to_s.sub(/\A::/, "") }
+          if env.respond_to?(:class_alias_decls)
+            names.concat(env.class_alias_decls.keys.map { |n| n.to_s.sub(/\A::/, "") })
+          end
+          names.to_set
         end
 
         # ADR-32 WD4 — merge synthesised-from-source RBS strings

@@ -533,6 +533,52 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader = described_class.new(signature_paths: [tmpdir])
       expect(loader.synthesized_stub_types).to eq([])
     end
+
+    it "does not collapse the env when a class references its own nested type (2026-07-04 redmine)" do
+      # The stub sweep must stub only the missing leaf
+      # (`GitAdapter::Revision`), never re-declare the already-declared
+      # `GitAdapter` as a `module` — that class-vs-module kind mismatch
+      # made `resolve_type_names` raise DuplicatedDeclarationError and
+      # nulled the WHOLE env (every type-of query → Dynamic[Top]). The
+      # exact shape `rigor sig-gen` emitted for a subclass whose sig
+      # dropped the superclass.
+      File.write(
+        File.join(tmpdir, "adapter.rbs"),
+        <<~RBS
+          module Scm
+            class GitAdapter
+              def lastrev: () -> (Scm::GitAdapter::Revision | nil)
+            end
+          end
+        RBS
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      # The env builds (non-nil), so the declared method resolves...
+      expect(loader.send(:env)).not_to be_nil
+      expect(loader.instance_method(class_name: "Scm::GitAdapter", method_name: :lastrev)).not_to be_nil
+      # ...and the missing nested leaf is the only thing stubbed.
+      expect(loader.synthesized_stub_types).to include("Scm::GitAdapter::Revision")
+    end
+
+    it "does not re-stub a leaf whose namespace prefix is already a declared class" do
+      # `append_stub_declarations` mirrors `collect_missing_namespaces`'s
+      # `declared.include?` guard: an enclosing prefix already present in
+      # the env is never re-emitted.
+      File.write(
+        File.join(tmpdir, "adapter.rbs"),
+        <<~RBS
+          class Outer::Base
+            def x: () -> Outer::Base::Nested
+          end
+        RBS
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.send(:env)).not_to be_nil
+      expect(loader.synthesized_stub_types).to include("Outer::Base::Nested")
+      expect(loader.synthesized_stub_types).not_to include("Outer::Base")
+    end
   end
 
   describe "env via cache_store (v0.0.9 C2)" do

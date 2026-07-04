@@ -199,6 +199,54 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "superclass capture (ADR-14)" do
+    it "records a plain-constant superclass on every candidate" do
+      src = <<~RUBY
+        class Base
+          def b; 1; end
+        end
+        class Child < Base
+          def c; 2; end
+        end
+      RUBY
+      path = write_fixture("lib/hier.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :c }
+
+      expect(candidate.class_superclasses["Child"]).to eq("Base")
+    end
+
+    it "records a qualified-constant-path superclass verbatim" do
+      src = <<~RUBY
+        module Scm
+          module Adapters
+            class GitAdapter < AbstractAdapter
+              def rev; 1; end
+            end
+          end
+        end
+      RUBY
+      path = write_fixture("lib/git.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :rev }
+
+      expect(candidate.class_superclasses["Scm::Adapters::GitAdapter"]).to eq("AbstractAdapter")
+    end
+
+    it "does not record a computed superclass (Struct.new / Class.new)" do
+      src = <<~RUBY
+        class Point < Struct.new(:x, :y)
+          def norm; 1; end
+        end
+      RUBY
+      path = write_fixture("lib/point.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :norm }
+
+      expect(candidate.class_superclasses).not_to have_key("Point")
+    end
+  end
+
   describe "visibility-aware emission (post-dogfood)" do
     it "skips private methods by default" do
       src = "class Box\n  def public_one; \"x\"; end\n  private\n  def private_one; \"y\"; end\nend\n"

@@ -63,6 +63,7 @@ module Rigor
         @namespace_kinds = {}
         @module_function_methods = Set.new
         @class_shells = Set.new
+        @class_superclasses = {}
       end
 
       # Lifts legacy plain-`Array[Type]` observation entries
@@ -116,6 +117,7 @@ module Rigor
         @namespace_kinds = {}
         @module_function_methods = Set.new
         @class_shells = Set.new
+        @class_superclasses = {}
         defs = collect_method_definitions(parse_result.value)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           # An analyzer bug typing one def's body must cost only that
@@ -195,8 +197,30 @@ module Rigor
 
         full = (prefix + [name]).join("::")
         @namespace_kinds[full] = node.is_a?(Prism::ClassNode) ? :class : :module
+        record_superclass(node, full)
         walk_namespace_body(node, prefix + [name], out)
         true
+      end
+
+      # ADR-14: a generated subclass declaration MUST carry its
+      # superclass, or the sidecar `sig/` misrepresents the class
+      # (inherited members vanish → receiver dispatch degrades to
+      # `Dynamic`) and, worse, a nested reference to an inherited
+      # type re-declares the class as a bare namespace on the RBS
+      # side and can collapse the whole env (the 2026-07-04 redmine
+      # `GitAdapter < AbstractAdapter` crash). Only a plain constant
+      # superclass is emittable: `class X < Foo` / `class X <
+      # Foo::Bar` yields the source token verbatim (RBS resolves it
+      # relative to the emitted namespace, matching Ruby's lexical
+      # scope). A computed superclass (`Struct.new`, `Data.define`,
+      # `Class.new`, any `CallNode`) is left unrecorded — those flow
+      # through the {#register_data_struct_shell} shell path or are
+      # simply un-representable, and guessing would misfold.
+      def record_superclass(node, full)
+        return unless node.is_a?(Prism::ClassNode)
+
+        superclass = qualified_constant_path(node.superclass)
+        @class_superclasses[full] = superclass if superclass
       end
 
       # ADR-14 gap-#3 (e): recognises
@@ -292,6 +316,7 @@ module Rigor
         MethodCandidate.new(
           namespace_kinds: @namespace_kinds,
           class_shells: @class_shells.to_a,
+          class_superclasses: @class_superclasses,
           **
         )
       end

@@ -25,11 +25,11 @@ module Rigor
     class MethodCandidate
       attr_reader :path, :class_name, :method_name, :kind, :classification,
                   :inferred_return, :declared_return_rbs, :rbs, :skip_reason,
-                  :namespace_kinds, :class_shells
+                  :namespace_kinds, :class_shells, :class_superclasses
 
       def initialize(path:, class_name:, method_name:, kind:, classification:, # rubocop:disable Metrics/ParameterLists
                      inferred_return: nil, declared_return_rbs: nil, rbs: nil, skip_reason: nil,
-                     namespace_kinds: {}, class_shells: [])
+                     namespace_kinds: {}, class_shells: [], class_superclasses: {})
         @path = path
         @class_name = class_name
         @method_name = method_name
@@ -41,6 +41,11 @@ module Rigor
         @skip_reason = skip_reason
         @namespace_kinds = namespace_kinds.freeze
         @class_shells = class_shells.freeze
+        # Qualified-class-name => superclass source token (e.g.
+        # `{ "Foo::Bar" => "Base" }`). Only plain-constant
+        # superclasses appear; computed ones are absent. The Writer
+        # emits `class Bar < Base` for the leaf when present.
+        @class_superclasses = class_superclasses.freeze
         freeze
       end
 

@@ -51,6 +51,9 @@ module Rigor
         # Empty until then so the single-target `#write` path
         # falls back to per-candidate kinds only.
         @global_namespace_kinds = {}
+        # Run-level qualified-class-name => superclass-token view,
+        # same lifecycle as `@global_namespace_kinds`.
+        @global_superclasses = {}
       end
 
       # Process the full candidate list by resolving each
@@ -71,6 +74,7 @@ module Rigor
         return [] if emittable.empty?
 
         @global_namespace_kinds = build_namespace_kinds(candidates)
+        @global_superclasses = build_superclasses(candidates)
         emittable.group_by { |c| @path_mapper.target_for(c.path, class_name: c.class_name) }
                  .map { |target, group| write_target(target, group) }
       end
@@ -154,7 +158,8 @@ module Rigor
         shells = collect_class_shells(candidates)
         tree = build_namespace_tree(candidates, shells)
         kinds = merged_namespace_kinds(candidates)
-        render_tree_nodes(tree, kinds, 0)
+        supers = merged_superclasses(candidates)
+        render_tree_nodes(tree, kinds, supers, 0)
       end
 
       # Drains `class_shells` from every candidate; the
@@ -188,6 +193,30 @@ module Rigor
       def build_namespace_kinds(candidates)
         candidates.each_with_object({}) do |candidate, acc|
           (candidate.namespace_kinds || {}).each { |name, kind| apply_namespace_kind(acc, name, kind) }
+        end
+      end
+
+      # Superclass twins of {#merged_namespace_kinds} /
+      # {#build_namespace_kinds}: fold every candidate's
+      # per-file `class_superclasses` map into one view keyed by
+      # qualified class name. Only plain-constant superclasses are
+      # ever recorded (the generator skips computed ones), so a
+      # missing key means "emit no superclass", never "unknown".
+      def merged_superclasses(candidates)
+        merged = @global_superclasses.dup
+        candidates.each do |c|
+          next unless c.respond_to?(:class_superclasses)
+
+          (c.class_superclasses || {}).each { |name, sup| merged[name] = sup }
+        end
+        merged
+      end
+
+      def build_superclasses(candidates)
+        candidates.each_with_object({}) do |candidate, acc|
+          next unless candidate.respond_to?(:class_superclasses)
+
+          (candidate.class_superclasses || {}).each { |name, sup| acc[name] = sup }
         end
       end
 
@@ -234,25 +263,41 @@ module Rigor
         end
       end
 
-      def render_tree_nodes(node, kinds, depth)
-        node[:children].values.map { |child| render_tree_node(child, kinds, depth, [node[:name]].compact) }.join("\n")
+      def render_tree_nodes(node, kinds, supers, depth)
+        node[:children].values.map do |child|
+          render_tree_node(child, kinds, supers, depth, [node[:name]].compact)
+        end.join("\n")
       end
 
-      def render_tree_node(node, kinds, depth, prefix)
+      def render_tree_node(node, kinds, supers, depth, prefix)
         indent = INDENT * depth
         qualified = (prefix + [node[:name]]).join("::")
         keyword = node_keyword(node, kinds, qualified)
-        body = render_tree_node_body(node, kinds, depth, prefix)
-        "#{indent}#{keyword} #{node[:name]}\n#{body}#{indent}end\n"
+        header = "#{keyword} #{node[:name]}#{superclass_suffix(keyword, supers, qualified)}"
+        body = render_tree_node_body(node, kinds, supers, depth, prefix)
+        "#{indent}#{header}\n#{body}#{indent}end\n"
       end
 
-      def render_tree_node_body(node, kinds, depth, prefix)
+      def render_tree_node_body(node, kinds, supers, depth, prefix)
         inner_indent = INDENT * (depth + 1)
         method_lines = node[:methods].map { |c| "#{inner_indent}#{c.rbs}\n" }.join
         child_blocks = node[:children].values.map do |child|
-          render_tree_node(child, kinds, depth + 1, prefix + [node[:name]])
+          render_tree_node(child, kinds, supers, depth + 1, prefix + [node[:name]])
         end.join
         method_lines + child_blocks
+      end
+
+      # ` < Super` for a `class` node whose qualified name has a
+      # recorded superclass, else the empty string. A `module`
+      # never takes a superclass (RBS forbids it), so the keyword
+      # gates emission — a name coincidentally recorded as both
+      # (impossible from one source class, but cheap to guard)
+      # stays a bare module.
+      def superclass_suffix(keyword, supers, qualified)
+        return "" unless keyword == :class
+
+        superclass = supers[qualified]
+        superclass ? " < #{superclass}" : ""
       end
 
       # Per ADR-14 gap-#3 (a) the keyword for a segment comes
@@ -277,7 +322,8 @@ module Rigor
         return WriteResult.new(source_path: source_path, target_path: target, action: :noop) if decls.nil?
 
         state = MergeState.new(source: source, decls: decls, applied: [], skipped: [])
-        candidates.group_by(&:class_name).each { |class_name, methods| merge_class(state, class_name, methods) }
+        supers = merged_superclasses(candidates)
+        candidates.group_by(&:class_name).each { |class_name, methods| merge_class(state, class_name, methods, supers) }
         merge_class_shells(state, collect_class_shells(candidates), merged_namespace_kinds(candidates))
 
         action = state.applied.empty? ? :noop : :updated
@@ -367,10 +413,10 @@ module Rigor
         nil
       end
 
-      def merge_class(state, class_name, methods)
+      def merge_class(state, class_name, methods, supers = {})
         decl = find_class_decl(state.decls, class_name)
         state.source = if decl.nil?
-                         append_new_class(state.source, class_name, methods, state.applied)
+                         append_new_class(state.source, class_name, methods, state.applied, supers[class_name])
                        else
                          merge_into_existing_class(state.source, decl, methods, state.applied, state.skipped)
                        end
@@ -405,9 +451,10 @@ module Rigor
       # Appends an entirely new `class Foo … end` block at the
       # end of the file (with a leading blank line as
       # separator).
-      def append_new_class(source, class_name, methods, applied)
+      def append_new_class(source, class_name, methods, applied, superclass = nil)
         body = methods.map { |c| "#{INDENT}#{c.rbs}" }.join("\n")
-        snippet = "\nclass #{class_name}\n#{body}\nend\n"
+        header = superclass ? "class #{class_name} < #{superclass}" : "class #{class_name}"
+        snippet = "\n#{header}\n#{body}\nend\n"
         applied.concat(methods)
         ends_with_newline?(source) ? source + snippet : "#{source}\n#{snippet}"
       end

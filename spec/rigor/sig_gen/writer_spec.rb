@@ -275,6 +275,57 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(output).to match(/class Shell\s*\n\s*end/)
     end
 
+    it "emits ` < Super` on a nested class node carrying a recorded superclass (ADR-14)" do
+      method_in_child = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/s.rb", class_name: "Scm::Adapters::GitAdapter",
+        method_name: :rev, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def rev: () -> Integer",
+        namespace_kinds: { "Scm" => :module, "Scm::Adapters" => :module, "Scm::Adapters::GitAdapter" => :class },
+        class_superclasses: { "Scm::Adapters::GitAdapter" => "AbstractAdapter" }
+      )
+
+      writer.write("lib/s.rb", [method_in_child])
+      output = File.read(File.join(tmpdir, "sig/s.rbs"))
+
+      expect(output).to match(/class GitAdapter < AbstractAdapter\b/)
+    end
+
+    it "never emits a superclass on a `module` wrapper segment" do
+      method_in_child = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/s.rb", class_name: "Wrapper::Leaf",
+        method_name: :m, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def m: () -> Integer",
+        namespace_kinds: { "Wrapper" => :module, "Wrapper::Leaf" => :class },
+        # A stray superclass recorded against the module wrapper must be ignored.
+        class_superclasses: { "Wrapper" => "Bogus", "Wrapper::Leaf" => "Base" }
+      )
+
+      writer.write("lib/s.rb", [method_in_child])
+      output = File.read(File.join(tmpdir, "sig/s.rbs"))
+
+      expect(output).to include("module Wrapper\n")
+      expect(output).not_to include("module Wrapper < Bogus")
+      expect(output).to match(/class Leaf < Base\b/)
+    end
+
+    it "emits ` < Super` when appending a brand-new class to an existing sig file" do
+      write_target("class Other\n  def o: () -> Integer\nend\n")
+      new_subclass = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/foo.rb", class_name: "Child",
+        method_name: :c, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def c: () -> Integer",
+        class_superclasses: { "Child" => "Base" }
+      )
+
+      writer.write("lib/foo.rb", [new_subclass])
+      output = File.read(File.join(tmpdir, "sig/foo.rbs"))
+
+      expect(output).to match(/class Child < Base\b/)
+    end
+
     it "injects a missing class shell into the nearest existing ancestor when updating an existing sig" do
       write_target("module Outer\n  module Wrap\n    def w: () -> Integer\n  end\nend\n")
       shell_carrier = Rigor::SigGen::MethodCandidate.new(

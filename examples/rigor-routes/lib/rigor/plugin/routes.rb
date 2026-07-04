@@ -20,24 +20,26 @@ module Rigor
     #
     # - `init` reads the configured `routes_file` path from the
     #   plugin's frozen `config` Hash. Default: `config/routes.yml`.
-    # - `diagnostics_for_file` consults a memoised `RouteTable`
-    #   through `#producer_value` (ADR-60 WD4), which runs the
-    #   `:route_table` producer via `#cache_for` and caches the result
-    #   (nil included) on the instance. The producer block reads the
-    #   file through `IoBoundary#read_file` (so `TrustPolicy`
-    #   validates the path AND the boundary records a `:digest`
-    #   `FileEntry`); ADR-60 WD3 record-and-validate captures that
-    #   digest into the dependency descriptor after the block runs, so
-    #   subsequent runs hit the cache when `routes.yml` is unchanged.
-    #   A malformed / missing / denied file is rescued into
-    #   `#producer_error`, degrading the plugin to a single load-error
-    #   warning.
-    # - The `Walker` finds every `*_path` / `*_url` implicit-
-    #   receiver call. Each is checked against the table for
-    #   existence and arity (= number of `:foo` placeholders in
-    #   the path template). Unknown helpers carry a "did you
-    #   mean" suggestion via `Plugin::Base.suggest`
-    #   (`DidYouMean::SpellChecker`).
+    # - A memoised `RouteTable` is loaded through `#producer_value`
+    #   (ADR-60 WD4), which runs the `:route_table` producer via
+    #   `#cache_for` and caches the result (nil included) on the
+    #   instance — so the node rule and the file rule share one round
+    #   trip. The producer block reads the file through
+    #   `IoBoundary#read_file` (so `TrustPolicy` validates the path AND
+    #   the boundary records a `:digest` `FileEntry`); ADR-60 WD3
+    #   record-and-validate captures that digest into the dependency
+    #   descriptor after the block runs, so subsequent runs hit the
+    #   cache when `routes.yml` is unchanged. A malformed / missing /
+    #   denied file is rescued into `#producer_error`; the file rule
+    #   emits one load-error warning for it.
+    # - A `node_rule Prism::CallNode` (the engine-owned walk, ADR-37)
+    #   validates every implicit-receiver `*_path` / `*_url` call —
+    #   `Walker.helper_call` is the matcher it applies — against the
+    #   table for existence and arity (= number of `:foo` placeholders
+    #   in the path template). Unknown helpers carry a "did you mean"
+    #   suggestion via `Plugin::Base.suggest` (`DidYouMean::SpellChecker`).
+    #   `#diagnostics_for_file` is left with only the file-level
+    #   load-error emission.
     #
     #
     # ## Usage
@@ -74,27 +76,46 @@ module Rigor
 
       def init(_services)
         @routes_file = config["routes_file"]
+        @load_error_emitted = false
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        # ADR-60 WD4 — `#producer_value` runs the `:route_table` producer
-        # through `#cache_for` and memoises the result (nil included) on
-        # this instance. A `StandardError` the producer raises (missing /
-        # malformed / access-denied `routes.yml`) is rescued into
-        # `#producer_error`, degrading the plugin to a single load-error
-        # warning rather than aborting the run. ADR-60 WD3
-        # record-and-validate captures the in-block `routes.yml` read into
-        # the dependency descriptor, so the cache invalidates on edit with
-        # nothing to wire up by hand.
+      # ADR-37 — per-call helper validation over the engine-owned walk.
+      # The engine hands us every `CallNode`; `Walker.helper_call` gates
+      # on the implicit-receiver `*_path` / `*_url` shape, and each match
+      # is checked against the route table. `#producer_value` (ADR-60 WD4)
+      # loads and memoises the table on this instance, so the node rule
+      # and the file rule below share one `#cache_for` round-trip. When
+      # the table failed to load the file rule owns the single load-error
+      # warning; the node rule stays silent.
+      node_rule Prism::CallNode do |node, _scope, path|
         table = producer_value(:route_table)
-        return [load_error_diagnostic(path)] if table.nil?
-        return [] if table.empty?
+        next [] if table.nil? || table.empty?
 
-        diagnostics = []
-        Walker.each_helper_call(root) do |node, base, kind|
-          diagnostics.concat(diagnostics_for_call(path, node, base, kind, table))
-        end
-        diagnostics
+        base, kind = Walker.helper_call(node)
+        next [] if base.nil?
+
+        diagnostics_for_call(path, node, base, kind, table)
+      end
+
+      # File-level only: the once-per-run load-error emission. Per-call
+      # validation runs over the engine-owned walk via the node rule
+      # above, so this hook is reserved for the one diagnostic a per-node
+      # walk cannot express — the project-global "routes file did not
+      # load" warning, emitted once rather than on every analysed file.
+      #
+      # `#producer_value` runs the `:route_table` producer through
+      # `#cache_for`; a `StandardError` the producer raises (missing /
+      # malformed / access-denied `routes.yml`) is rescued into
+      # `#producer_error`. ADR-60 WD3 record-and-validate captures the
+      # in-block `routes.yml` read into the dependency descriptor, so the
+      # cache invalidates on edit with nothing to wire up by hand.
+      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+        table = producer_value(:route_table)
+        return [] unless table.nil?
+        return [] if @load_error_emitted
+
+        @load_error_emitted = true
+        [load_error_diagnostic(path)]
       end
 
       private

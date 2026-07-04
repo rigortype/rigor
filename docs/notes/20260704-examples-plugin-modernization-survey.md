@@ -3,7 +3,13 @@
 Status: 内部監査ノート、authored 2026-07-04（Rigor は release/0.2.x ライン、master
 `ae6844e7` 時点）。**このノートは同名ブランチ `examples-modernization` の実装 PR を駆動した**
 （ADR-40 デフォルト移行・routes の ADR-60 WD4 化・ドキュメント鮮度整理を実施、units は
-検証の結果「元設計が正」と判明し訂正済み。下記の各節に実装結果の追記あり）。`examples/` 配下 6 本のチュートリアル・
+検証の結果「元設計が正」と判明し訂正済み。下記の各節に実装結果の追記あり）。**第2弾**として、
+本作業から生まれた `rigor-plugin-review` スキルを examples 自身に適用（ドッグフーディング）し、
+チェックリスト観点2（AST 走査の所有権）で残っていた2件を追加修正した — routes の毎コール検査を
+`node_rule Prism::CallNode` へ移し `diagnostics_for_file` を load-error 専用に（本番 rigor-rails-routes
+と一致）、units `Analyzer` の手動 `Diagnostic.new` を公開コンストラクタ `Diagnostic.from_location` へ
+（バイト同一）。web は本番 rigor-hanami と同じ `diagnostics_for_file`+checker 形なので変更不要と再確認。
+`examples/` 配下 6 本のチュートリアル・
 プラグインが、現行の（＝多くが後発の ADR で追加された）プラグイン・オーサリング面を
 どこまで使い切れているかを棚卸しする。examples は「契約面を最小コードで見せる教材」
 であり ([`examples/README.md`](../../examples/README.md))、`make check-plugins`

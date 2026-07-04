@@ -76,8 +76,8 @@ module Rigor
         # resolves as `Admin::DomainBlocksController` (matching the
         # `ControllerDiscoverer`), so render paths and filter-chain
         # validation on nested controllers are correct.
-        version: "0.8.0",
-        description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
+        version: "0.9.0",
+        description: "Validates Action Pack route-helper calls and filter chains inside controllers, and types `params`.",
         config_schema: {
           "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
           "view_search_paths" => { kind: :array, default: ["app/views"] }
@@ -173,7 +173,54 @@ module Rigor
         diagnostics_for(Analyzer.permit_violations_for(call_node: node, model_index: index), path: path, node: node)
       end
 
+      # Phase 5 (2026-07-04) — type the implicit-self `params` reader
+      # inside controllers. The typing-obstacle probe
+      # (docs/notes/20260704-rails-coverage-onboarding-carrier-trap.md,
+      # obstacle O3) found `params` typing to `Dynamic[top]` the single
+      # largest protection-coverage hole on real Rails apps: `params[:x]`
+      # is the #1 dispatch cluster (redmine app+lib: `[]` 2378 sites),
+      # all unprotected because the receiver is Dynamic.
+      #
+      # Returns a bare `ActionController::Parameters` nominal with NO
+      # bundled RBS on purpose. That makes `params` a *concrete* receiver
+      # (so `coverage --protection` counts the site as protected and the
+      # dispatch resolves against a named class) while its method surface
+      # stays engine-lenient — Rigor does not fire `undefined-method` on a
+      # class it has no RBS for, so `params.require(...).permit(...)`,
+      # `params.to_unsafe_h`, and every other Parameters method stay
+      # FP-safe. Shipping a partial RBS would re-introduce the
+      # carrier-additivity trap (a declared class drops every member the
+      # RBS omits → false `undefined-method`). ADR-5: this types the
+      # container, never the caller's argument, so parameters stay lenient.
+      dynamic_return methods: [:params] do |call_node, scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+        next nil unless call_node.receiver.nil?   # the implicit-self reader
+        next nil unless call_node.arguments.nil?  # `params`, not `params(x)`
+        next nil unless controller_scope?(scope)
+
+        Rigor::Type::Combinator.nominal_of("ActionController::Parameters")
+      end
+
       private
+
+      # True when the current `self` is a controller — the enclosing
+      # class is one the discoverer indexed, or its name follows the
+      # Rails `*Controller` convention (covering controllers outside
+      # `controller_search_paths`, e.g. one shipped by an engine).
+      # Typing `params` is precision-additive, so the name-convention
+      # fallback is FP-safe.
+      def controller_scope?(scope)
+        self_type = scope&.self_type
+        return false unless self_type.respond_to?(:class_name)
+
+        name = self_type.class_name
+        return false if name.nil?
+
+        index = producer_value(:controller_index)
+        return true if index && (index.find(name) || index.find("::#{name}"))
+
+        name.end_with?("Controller")
+      end
 
       def controller_file?(path)
         @controller_search_paths.any? do |root|

@@ -11,8 +11,13 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[rigor-actionpack]** The implicit-self `params` reader inside a controller now types as `ActionController::Parameters` instead of `Dynamic[top]`, so `params[:x]` / `params.require(...).permit(...)` dispatch on a concrete receiver. On real Rails apps this is the single largest type-coverage hole — `params[...]` is the #1 dispatch cluster (redmine `app`+`lib`: ~2400 `[]` sites). The type carries no bundled RBS on purpose: the receiver is concrete (so `coverage --protection` counts the site and the dispatch resolves against a named class) while its method surface stays engine-lenient, so every `Parameters` method stays false-positive-safe. Values read `untyped` ([ADR-5](docs/adr/5-robustness-principle.md): the container is typed, never the caller's argument). Surfaced by the 2026-07-04 typing-obstacle probe.
+
 ### Fixed
 
+- **[rigor coverage]** `rigor coverage --protection` now sees plugin-contributed receiver types. It built its scan scope from the RBS environment alone (no plugin registry), so any receiver a plugin types via `dynamic_return` — a controller's `params`, a `Model.where` → `ActiveRecord::Relation[Model]` — read `Dynamic` and its dispatch site was miscounted as *unprotected*, systematically undercounting protection on a plugin-using project. The scan now builds the same plugin-aware environment the runner and LSP use (mastodon `app/models`: 0.177 → 0.236 as the ActiveRecord relation typing becomes visible).
 - **[rigor sig-gen]** Generated RBS for a subclass now carries its superclass — `class GitAdapter < AbstractAdapter` instead of the bare `class GitAdapter` — for plain-constant parents (`class X < Foo` / `class X < Foo::Bar`). Dropping it made the sidecar `sig/` misrepresent the class (inherited members vanished, so receiver dispatch degraded to `Dynamic`) and could reference an inherited nested type that no longer resolved. A computed parent (`Struct.new` / `Data.define` / `Class.new`) is still emitted without a superclass, as before.
 - **[engine]** A malformed project `.rbs` no longer collapses the entire RBS environment. The referenced-type stub sweep re-declared an already-declared `class` as a `module` when stubbing an enclosing namespace (e.g. stubbing `Foo::GitAdapter::Revision` re-emitted `module Foo::GitAdapter` over the existing `class`), and the resulting `RBS::DuplicatedDeclarationError` nulled the whole env — every type-of query then degraded to `Dynamic[top]` and most diagnostics silently stopped firing. The sweep now skips names already declared in the env, mirroring the guard the missing-namespace synthesizer already applied. Surfaced onboarding redmine (2026-07-04).
 

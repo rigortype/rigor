@@ -144,7 +144,7 @@ module Rigor
 
       def scan_protection(paths, options)
         configuration = Configuration.load(options.fetch(:config))
-        environment = project_environment(configuration)
+        environment = plugin_aware_environment(configuration)
         scope = scope_with_inferred_params(paths, configuration, environment)
         scanner = Inference::ProtectionScanner.new(scope: scope)
         accumulator = ProtectionAccumulator.new
@@ -194,6 +194,21 @@ module Rigor
       # reuses `precision_report` over the same machinery.
       def project_environment(configuration)
         CoverageScan.project_environment(configuration)
+      end
+
+      # The protection scan must see the same receiver types `rigor check`
+      # does — including plugin-contributed `dynamic_return` types (a
+      # controller's `params` → `ActionController::Parameters`, a
+      # `Model.where` → `ActiveRecord::Relation[Model]`). The bare
+      # `project_environment` carries only the RBS environment (no plugin
+      # registry), so every plugin-typed receiver reads `Dynamic` and its
+      # dispatch site is miscounted as *unprotected* — a systematic
+      # undercount of what Rigor actually types on a plugin-using project.
+      # `ProjectContext` builds the plugin-aware environment (registry
+      # materialised + the per-run prepare pass that primes producers like
+      # the controller / model index) exactly as the LSP and the runner do.
+      def plugin_aware_environment(configuration)
+        LanguageServer::ProjectContext.new(configuration: configuration).environment
       end
 
       def scan_one(path, scanner, accumulator, configuration)

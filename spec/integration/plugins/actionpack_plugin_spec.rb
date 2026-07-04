@@ -135,6 +135,34 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
   end
 
+  describe "params typing (Phase 5 — typing-obstacle O3)" do
+    it "types the implicit-self `params` reader as ActionController::Parameters" do
+      source = "class C\n  def create\n    Rigor.dump_type(params)\n  end\nend\n"
+      with_demo(source) do |result|
+        dump = result.diagnostics.find { |d| d.rule == "dump.type" }
+        expect(dump).not_to be_nil
+        expect(dump.message).to include("ActionController::Parameters")
+      end
+    end
+
+    it "keeps the Parameters surface FP-safe (no undefined-method on require/permit/to_unsafe_h)" do
+      source = "class C\n  def create\n    params.require(:user).permit(:name)\n    params.to_unsafe_h\n  end\nend\n"
+      with_demo(source) do |result|
+        undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+        expect(undefined).to be_empty
+      end
+    end
+
+    it "does not type an explicit-receiver `params` call (implicit-self only)" do
+      source = "class C\n  def create\n    Rigor.dump_type(config.params)\n  end\nend\n"
+      with_demo(source) do |result|
+        dump = result.diagnostics.find { |d| d.rule == "dump.type" }
+        expect(dump).not_to be_nil
+        expect(dump.message).not_to include("ActionController::Parameters")
+      end
+    end
+  end
+
   describe "helper-call error diagnostics (canonically delegated to rigor-rails-routes)" do
     # rigor-actionpack and rigor-rails-routes both consume the same
     # `:helper_table` fact. To avoid every typo'd / wrong-arity

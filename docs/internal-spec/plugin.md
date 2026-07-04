@@ -163,6 +163,24 @@ function, and replaces the hand-rolled Levenshtein copies plugins used to
 carry. It only affects suggestion *text* on an already-emitted
 diagnostic, never whether one fires.
 
+`#diagnostics_for(violations, path:, node: nil)` (ADR-60 WD4) maps a
+plugin's own violation objects onto `Diagnostic`s through `#diagnostic`,
+absorbing the `violations.map { |v| diagnostic(node, …) }` block the
+node-rule plugins otherwise repeat. Each violation duck-types `#message`
+(required) plus optional `#node` (the Prism node to position at — falls
+back to the `node:` argument), `#location`, `#severity` (defaults
+`:error`), and `#rule`. Returns an Array suitable for direct return from
+`#diagnostics_for_file` / a `node_rule` block.
+
+`#read_fact(plugin_id:, name:)` (ADR-60 WD4) reads a cross-plugin fact
+(ADR-9) another plugin's `#prepare` published, memoised per `(plugin_id,
+name)` on the instance **including a nil result**. The nil-inclusive
+memo retires the hand-rolled `@x_resolved` flag discovery plugins carried
+to distinguish "fact not published" from "not yet read"; a fact no loaded
+producer published reads as `nil`. (`#producer_value` / `#producer_error`
+— the cache-producer twins of these helpers — are spec'd in
+[`plugin-cache-producers.md`](plugin-cache-producers.md).)
+
 `#prepare(services)` (ADR-9) is the project-wide pre-pass hook,
 invoked once before per-file analysis begins. Plugins that publish
 cross-plugin facts (`manifest(produces:)`) override it to walk the

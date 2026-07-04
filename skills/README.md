@@ -61,6 +61,7 @@ your installed version rather than being frozen into a SKILL file — see
 | [`rigor-protection-uplift`](rigor-protection-uplift/SKILL.md) | Close the type-protection holes `rigor coverage --protection` surfaces, under a double gate that keeps `rigor check` clean. |
 | [`rigor-plugin-tune`](rigor-plugin-tune/SKILL.md) | Re-match `Gemfile.lock` against the bundled plugin catalogue and enable the plugins for the project's current stack; verify with `rigor plugins --strict`. |
 | [`rigor-plugin-author`](rigor-plugin-author/SKILL.md) | Author a Rigor plugin (in your own repo) to teach Rigor an application DSL, framework, or metaprogramming pattern. |
+| [`rigor-plugin-review`](rigor-plugin-review/SKILL.md) | Review an existing plugin against the current authoring contract and produce a prioritized upgrade path — config defaults (ADR-40), the ADR-60 WD4 helpers, `node_rule` vs a hand-rolled walk, `dynamic_return` / `narrowing_facts`, doc freshness. |
 | [`rigor-upgrade`](rigor-upgrade/SKILL.md) | Adopt a new Rigor version cleanly — diff diagnostics against the baseline, sort genuine new catches from sig-quality FPs, regenerate. |
 | [`rigor-doctor`](rigor-doctor/SKILL.md) | Validate the setup is healthy — config resolves, plugins load, baseline is fresh, the analysis sees your code. |
 

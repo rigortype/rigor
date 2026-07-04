@@ -54,6 +54,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-06-05 | [ADR-47 `flow.unreachable-clause` — corpus FP sweep (WD4)](20260605-adr47-unreachable-clause-corpus-sweep.md) |
 | 2026-06-20 | [SKILL-driven onboarding (`rigor-next-steps`) — conference-app dogfood + rigor-survey field trial](20260620-skill-driven-onboarding-dogfood.md) |
 | 2026-06-20 | [OpenCode (ACP) cross-model validation — driving `rigor-next-steps` across 13 models](20260620-opencode-acp-cross-model-validation.md) |
+| 2026-07-04 | [Rails カバレッジ強化オンボーディング — sig-gen carrier トラップと engine-bound な天井（redmine / mastodon）](20260704-rails-coverage-onboarding-carrier-trap.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

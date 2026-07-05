@@ -2,24 +2,20 @@
 
 module Rigor
   module Source
-    # Flattens a Prism constant-reference node (`ConstantReadNode` /
-    # `ConstantPathNode`) to its source-qualified `"A::B::C"` string.
+    # Flattens a Prism constant-reference node (`ConstantReadNode` / `ConstantPathNode`) to its
+    # source-qualified `"A::B::C"` string.
     #
-    # Two nil policies for the one edge case that distinguishes the call
-    # sites — a constant path rooted in a *dynamic* base (`expr::Bar`, where
-    # the left side is a runtime expression rather than a constant):
+    # Two nil policies for the one edge case that distinguishes the call sites — a constant path rooted in a
+    # *dynamic* base (`expr::Bar`, where the left side is a runtime expression rather than a constant):
     #
-    # * {.qualified_name} / {.render} are LENIENT — they drop the dynamic
-    #   segment and render the trailing constant names (`expr::Bar` => "Bar").
-    #   The scope indexer and statement evaluator feed only genuine
+    # * {.qualified_name} / {.render} are LENIENT — they drop the dynamic segment and render the trailing
+    #   constant names (`expr::Bar` => "Bar"). The scope indexer and statement evaluator feed only genuine
     #   class/module path nodes and want a best-effort name.
-    # * {.qualified_name_or_nil} is STRICT — a dynamic base anywhere in the
-    #   chain yields `nil`, so a caller that statically names constants can
-    #   treat the path as opaque rather than guessing.
+    # * {.qualified_name_or_nil} is STRICT — a dynamic base anywhere in the chain yields `nil`, so a caller
+    #   that statically names constants can treat the path as opaque rather than guessing.
     #
-    # A leading `::` (absolute root, `::Foo`) renders as `"Foo"` under both
-    # policies. A node that is neither a `ConstantReadNode` nor a
-    # `ConstantPathNode` yields `nil` under both.
+    # A leading `::` (absolute root, `::Foo`) renders as `"Foo"` under both policies. A node that is neither
+    # a `ConstantReadNode` nor a `ConstantPathNode` yields `nil` under both.
     module ConstantPath
       module_function
 

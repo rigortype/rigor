@@ -5,24 +5,18 @@ require_relative "rbs_cache_producer"
 
 module Rigor
   module Cache
-    # Cache producer that materialises the RBS-declared ancestor
-    # chain of every loaded class / module into a Marshal-clean
-    # `Hash<String, Array<String>>`. Ancestor names are top-level-
-    # stripped (e.g. `"Integer"` not `"::Integer"`) to match
-    # `Environment::RbsHierarchy#normalize_name`.
+    # Cache producer that materialises the RBS-declared ancestor chain of every loaded class / module into a
+    # Marshal-clean `Hash<String, Array<String>>`. Ancestor names are top-level-stripped (e.g. `"Integer"` not
+    # `"::Integer"`) to match `Environment::RbsHierarchy#normalize_name`.
     #
-    # The hierarchy is the substrate behind every `class_ordering`
-    # query, which is itself a hot path on the dispatcher (overload
-    # selection, narrowing, etc.). Building one ancestor chain
-    # requires a full `RBS::DefinitionBuilder#build_instance` over
-    # that class — a cold-cost dominated by RBS's own resolution
-    # work. Caching the table lets a warm process skip the build
-    # entirely and pay only a `Marshal.load` of the resulting
-    # hash.
+    # The hierarchy is the substrate behind every `class_ordering` query, which is itself a hot path on the
+    # dispatcher (overload selection, narrowing, etc.). Building one ancestor chain requires a full
+    # `RBS::DefinitionBuilder#build_instance` over that class — a cold-cost dominated by RBS's own resolution
+    # work. Caching the table lets a warm process skip the build entirely and pay only a `Marshal.load` of the
+    # resulting hash.
     #
-    # Cache descriptor shape is shared with every other cache
-    # producer that depends on the RBS environment — see
-    # {RbsDescriptor.build}.
+    # Cache descriptor shape is shared with every other cache producer that depends on the RBS environment —
+    # see {RbsDescriptor.build}.
     class RbsClassAncestorTable < RbsCacheProducer
       PRODUCER_ID = "rbs.class_ancestor_table"
 

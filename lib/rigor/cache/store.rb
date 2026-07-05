@@ -11,51 +11,38 @@ require_relative "descriptor"
 
 module Rigor
   module Cache
-    # Filesystem-backed cache store. Schema, layout, file format,
-    # atomicity, and locking are fixed by [ADR-6](../../../docs/adr/6-cache-persistence-backend.md);
-    # callers use `#fetch_or_compute` (producer-keyed),
-    # `#fetch_or_validate` (record-and-validate for discovered-dep
-    # caches, ADR-45), `#stats`, `#evict!`, and `.disk_inventory`,
-    # plus the [`Rigor::Cache::Descriptor`](descriptor.rb) value object.
+    # Filesystem-backed cache store. Schema, layout, file format, atomicity, and locking are fixed by
+    # [ADR-6](../../../docs/adr/6-cache-persistence-backend.md); callers use `#fetch_or_compute`
+    # (producer-keyed), `#fetch_or_validate` (record-and-validate for discovered-dep caches, ADR-45), `#stats`,
+    # `#evict!`, and `.disk_inventory`, plus the [`Rigor::Cache::Descriptor`](descriptor.rb) value object.
     #
-    # Read failures (missing file, bad magic, format-version mismatch,
-    # corrupt SHA-256 trailer, un-inflatable or unmarshal-able payload)
-    # are silently treated as cache misses; the producer block reruns
-    # and the next write replaces the bad entry. The trailing SHA-256
-    # catches accidental corruption (partial writes, FS errors); it is
-    # **not** a security boundary, per ADR-2's trusted-gem trust model.
+    # Read failures (missing file, bad magic, format-version mismatch, corrupt SHA-256 trailer, un-inflatable
+    # or unmarshal-able payload) are silently treated as cache misses; the producer block reruns and the next
+    # write replaces the bad entry. The trailing SHA-256 catches accidental corruption (partial writes, FS
+    # errors); it is **not** a security boundary, per ADR-2's trusted-gem trust model.
     class Store # rubocop:disable Metrics/ClassLength
-      # On-disk byte-layout version. Bumped on incompatible format
-      # changes (independent of {Descriptor::SCHEMA_VERSION}, which
-      # covers the descriptor schema rather than the byte layout).
-      # v2 (ADR-54 WD2): the value payload is zlib-deflated on write
-      # and inflated on read — Marshal blobs compress to 13–16 % at
-      # an inflate cost an order of magnitude below their
-      # `Marshal.load`. v1 entries fail the header check and read as
-      # silent misses; the `schema_version.txt` marker additionally
-      # carries this version, so the first writable run after a bump
-      # clears the root and reclaims the unreadable bytes.
+      # On-disk byte-layout version. Bumped on incompatible format changes (independent of
+      # {Descriptor::SCHEMA_VERSION}, which covers the descriptor schema rather than the byte layout). v2
+      # (ADR-54 WD2): the value payload is zlib-deflated on write and inflated on read — Marshal blobs
+      # compress to 13–16 % at an inflate cost an order of magnitude below their `Marshal.load`. v1 entries
+      # fail the header check and read as silent misses; the `schema_version.txt` marker additionally carries
+      # this version, so the first writable run after a bump clears the root and reclaims the unreadable
+      # bytes.
       FORMAT_VERSION = 2
 
-      # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte
-      # format version.
+      # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte format version.
       HEADER = "RIGOR\x00#{FORMAT_VERSION.chr}".b.freeze
 
       VALID_PRODUCER_ID = /\A[a-z][a-z0-9._-]*\z/
 
       # @param root [String] cache root directory.
-      # @param read_only [Boolean] when true, every disk-side
-      #   side-effect is suppressed: `fetch_or_compute` still
-      #   reads existing entries (hits) and still runs the
-      #   producer block on miss, but it does NOT write the
-      #   produced value to disk, does NOT update the
-      #   `schema_version.txt` marker, and does NOT touch the
-      #   on-disk root directory. The in-process memo is still
-      #   populated so repeated lookups within the same run stay
-      #   cheap. Used by editor mode so multiple buffer-mode
-      #   invocations can read from the same cache concurrently
-      #   without churning it. See
-      #   `docs/design/20260516-editor-mode.md` § "Cache behaviour".
+      # @param read_only [Boolean] when true, every disk-side side-effect is suppressed: `fetch_or_compute`
+      #   still reads existing entries (hits) and still runs the producer block on miss, but it does NOT
+      #   write the produced value to disk, does NOT update the `schema_version.txt` marker, and does NOT
+      #   touch the on-disk root directory. The in-process memo is still populated so repeated lookups within
+      #   the same run stay cheap. Used by editor mode so multiple buffer-mode invocations can read from the
+      #   same cache concurrently without churning it. See `docs/design/20260516-editor-mode.md` § "Cache
+      #   behaviour".
       def initialize(root:, read_only: false, max_bytes: nil)
         @root = root.to_s.dup.freeze
         @read_only = read_only
@@ -65,40 +52,30 @@ module Rigor
         @misses = 0
         @writes = 0
         @by_producer = Hash.new { |h, k| h[k] = { hits: 0, misses: 0, writes: 0 } }
-        # Process-level in-memory layer keyed by
-        # `(producer_id, cache_key)`. Avoids the disk read +
-        # `Marshal.load` cost (the dominant share of repeated
-        # cache-hit calls per stackprof) when many short-lived
-        # `Analysis::Runner` instances share one `Store` — the
-        # spec process, the LSP daemon's repeated re-check
-        # path, and any other "many runs, same project" loop.
-        # Keys are content-derived (descriptor digests), so
-        # cross-fixture contamination is impossible.
+        # Process-level in-memory layer keyed by `(producer_id, cache_key)`. Avoids the disk read +
+        # `Marshal.load` cost (the dominant share of repeated cache-hit calls per stackprof) when many
+        # short-lived `Analysis::Runner` instances share one `Store` — the spec process, the LSP daemon's
+        # repeated re-check path, and any other "many runs, same project" loop. Keys are content-derived
+        # (descriptor digests), so cross-fixture contamination is impossible.
         @memo = {}
-        # `Analysis::Runner` walks files concurrently (file-
-        # level parallelism); the per-file workers share one
-        # Store. The monitor guards `@memo` + the counter
-        # hashes against concurrent writes. The Monitor is
-        # re-entrant so producer blocks can recursively
-        # consult the Store (e.g. one cache layer building on
-        # another) without dead-locking.
+        # `Analysis::Runner` walks files concurrently (file-level parallelism); the per-file workers share
+        # one Store. The monitor guards `@memo` + the counter hashes against concurrent writes. The Monitor
+        # is re-entrant so producer blocks can recursively consult the Store (e.g. one cache layer building
+        # on another) without dead-locking.
         @monitor = Monitor.new
       end
 
       attr_reader :root
 
-      # @return [Boolean] whether this Store suppresses disk writes
-      #   (`schema_version.txt`, entry creation). Reads are
-      #   unaffected.
+      # @return [Boolean] whether this Store suppresses disk writes (`schema_version.txt`, entry creation).
+      #   Reads are unaffected.
       def read_only?
         @read_only
       end
 
-      # Returns a frozen snapshot of this Store's per-run hit / miss /
-      # write counters. The bookkeeping is in-memory only — every new
-      # `Store.new` starts at zero — so the counters reflect activity
-      # against this specific instance rather than the on-disk cache
-      # state. Disk-level state is reported separately by
+      # Returns a frozen snapshot of this Store's per-run hit / miss / write counters. The bookkeeping is
+      # in-memory only — every new `Store.new` starts at zero — so the counters reflect activity against this
+      # specific instance rather than the on-disk cache state. Disk-level state is reported separately by
       # {.disk_inventory}.
       #
       # @return [Hash] `{ hits:, misses:, writes:, by_producer: { id => { hits:, misses:, writes: } } }`
@@ -109,26 +86,19 @@ module Rigor
         end
       end
 
-      # Walks the on-disk cache rooted at `root` and reports a
-      # producer-level inventory. Used by `rigor check --cache-stats`
-      # to surface cache size and per-producer entry counts without
-      # depending on in-process counters (which only reflect the
-      # current run).
+      # Walks the on-disk cache rooted at `root` and reports a producer-level inventory. Used by
+      # `rigor check --cache-stats` to surface cache size and per-producer entry counts without depending on
+      # in-process counters (which only reflect the current run).
       #
-      # @return [Hash] `{ root:, schema_version:, total_entries:,
-      #   total_bytes:, producers: [{ id:, entries:, bytes: }, ...] }`.
-      #   When the root does not exist or has no schema-version
-      #   marker, `schema_version` is nil and the producer list is
-      #   empty.
+      # @return [Hash] `{ root:, schema_version:, total_entries:, total_bytes:, producers: [{ id:, entries:,
+      #   bytes: }, ...] }`. When the root does not exist or has no schema-version marker, `schema_version` is
+      #   nil and the producer list is empty.
       #
-      # The `schema_version.txt` marker content. Covers BOTH
-      # invalidation axes: the descriptor schema and the on-disk byte
-      # layout ({FORMAT_VERSION}, ADR-54). A format bump leaves the
-      # old entries permanently unreadable (header mismatch → miss)
-      # but, alone, would never reclaim their bytes — they can sit
-      # below the eviction cap forever. Folding the format version
-      # into the marker routes the bump through the established
-      # clear-the-root path instead.
+      # The `schema_version.txt` marker content. Covers BOTH invalidation axes: the descriptor schema and the
+      # on-disk byte layout ({FORMAT_VERSION}, ADR-54). A format bump leaves the old entries permanently
+      # unreadable (header mismatch → miss) but, alone, would never reclaim their bytes — they can sit below
+      # the eviction cap forever. Folding the format version into the marker routes the bump through the
+      # established clear-the-root path instead.
       def self.schema_marker_value
         "#{Descriptor::SCHEMA_VERSION}.#{FORMAT_VERSION}"
       end
@@ -166,31 +136,21 @@ module Rigor
       end
       private_class_method :collect_producers
 
-      # @param producer_id [String] stable cache namespace; only
-      #   `[a-z][a-z0-9._-]*` is accepted.
-      # @param params [Hash] producer inputs; mixed into the cache key
-      #   via {Descriptor#cache_key_for}.
-      # @param descriptor [Rigor::Cache::Descriptor] the invalidation
-      #   descriptor for the value being cached.
-      # @param serialize [#call, nil] optional callable that turns the
-      #   producer's return value into a binary `String`. Defaults to
-      #   `Marshal.dump(value).b`. Producers whose return values are
-      #   not `Marshal`-clean (RBS-native objects with `RBS::Location`
-      #   members, raw `IO`, …) MUST provide a serialiser. The pair
-      #   `(serialize, deserialize)` MUST round-trip — a producer that
-      #   reads with one strategy and writes with another corrupts
-      #   its own cache slice.
-      # @param deserialize [#call, nil] optional callable that turns
-      #   bytes back into the producer's value. Defaults to
-      #   `Marshal.load`. Any exception (`StandardError`) raised by
-      #   the deserialiser is treated as a cache miss — the entry is
-      #   considered corrupt, the producer block reruns, and the
-      #   next write overwrites it. This is consistent with the
-      #   fault-tolerance contract for the default `Marshal.load`
+      # @param producer_id [String] stable cache namespace; only `[a-z][a-z0-9._-]*` is accepted.
+      # @param params [Hash] producer inputs; mixed into the cache key via {Descriptor#cache_key_for}.
+      # @param descriptor [Rigor::Cache::Descriptor] the invalidation descriptor for the value being cached.
+      # @param serialize [#call, nil] optional callable that turns the producer's return value into a binary
+      #   `String`. Defaults to `Marshal.dump(value).b`. Producers whose return values are not
+      #   `Marshal`-clean (RBS-native objects with `RBS::Location` members, raw `IO`, …) MUST provide a
+      #   serialiser. The pair `(serialize, deserialize)` MUST round-trip — a producer that reads with one
+      #   strategy and writes with another corrupts its own cache slice.
+      # @param deserialize [#call, nil] optional callable that turns bytes back into the producer's value.
+      #   Defaults to `Marshal.load`. Any exception (`StandardError`) raised by the deserialiser is treated as
+      #   a cache miss — the entry is considered corrupt, the producer block reruns, and the next write
+      #   overwrites it. This is consistent with the fault-tolerance contract for the default `Marshal.load`
       #   path.
       # @yieldreturn the value to cache.
-      # @return the cached value (loaded from disk on hit; produced by
-      #   the block on miss).
+      # @return the cached value (loaded from disk on hit; produced by the block on miss).
       def fetch_or_compute(producer_id:, params:, descriptor:,
                            serialize: nil, deserialize: nil, &block)
         validate_producer_id!(producer_id)
@@ -224,19 +184,15 @@ module Rigor
         value
       end
 
-      # ADR-45 — record-and-validate variant. Unlike {fetch_or_compute},
-      # which keys the entry on its descriptor (so the inputs MUST be
-      # known before running), this keys on `key_descriptor` (the stable
-      # inputs known up front) and stores, alongside the value, a
-      # `dependency_descriptor` of the files the value actually read —
-      # including inputs discovered DURING the computation (e.g. a plugin
-      # reading a file mid-analysis). On the next run the stored
-      # dependencies are re-validated against the filesystem
+      # ADR-45 — record-and-validate variant. Unlike {fetch_or_compute}, which keys the entry on its
+      # descriptor (so the inputs MUST be known before running), this keys on `key_descriptor` (the stable
+      # inputs known up front) and stores, alongside the value, a `dependency_descriptor` of the files the
+      # value actually read — including inputs discovered DURING the computation (e.g. a plugin reading a
+      # file mid-analysis). On the next run the stored dependencies are re-validated against the filesystem
       # ({Descriptor#fresh?}); a stale dependency forces a recompute.
       #
-      # The block MUST return `[value, dependency_descriptor]`. Disk reads
-      # are not in-process-memoised — validation always re-checks the
-      # filesystem — but a single run only looks up once.
+      # The block MUST return `[value, dependency_descriptor]`. Disk reads are not in-process-memoised —
+      # validation always re-checks the filesystem — but a single run only looks up once.
       def fetch_or_validate(producer_id:, key_descriptor:, params: {}, serialize: nil, deserialize: nil)
         validate_producer_id!(producer_id)
         ensure_schema_version!
@@ -253,9 +209,8 @@ module Rigor
         value, dependency_descriptor = block_given? ? yield : [nil, Descriptor.new]
         wrote = false
         unless @read_only
-          # A cache write must never break the run. If the value is not
-          # Marshal-clean (or any disk error occurs) skip caching and
-          # return the freshly-computed value — the next run recomputes.
+          # A cache write must never break the run. If the value is not Marshal-clean (or any disk error
+          # occurs) skip caching and return the freshly-computed value — the next run recomputes.
           begin
             write_entry(path, key_descriptor, [value, dependency_descriptor], serialize: serialize)
             wrote = true
@@ -270,14 +225,12 @@ module Rigor
         value
       end
 
-      # ADR-6 § "Eviction" — LRU pass over the on-disk cache. No-op when
-      # `max_bytes:` was not configured or the store is read-only.
-      # Walks all `.entry` files, sorts by mtime ascending (oldest = least
-      # recently used), and unlinks from the oldest until the total is at
-      # or below the cap. Touch-on-disk-read ({read_entry}) is the
-      # cross-process LRU signal: every disk hit (not in-process-memo hit)
-      # updates the mtime so recently-read entries survive the eviction pass.
-      # Any FS error is swallowed — eviction must never break a run.
+      # ADR-6 § "Eviction" — LRU pass over the on-disk cache. No-op when `max_bytes:` was not configured or
+      # the store is read-only. Walks all `.entry` files, sorts by mtime ascending (oldest = least recently
+      # used), and unlinks from the oldest until the total is at or below the cap. Touch-on-disk-read
+      # ({read_entry}) is the cross-process LRU signal: every disk hit (not in-process-memo hit) updates the
+      # mtime so recently-read entries survive the eviction pass. Any FS error is swallowed — eviction must
+      # never break a run.
       def evict!
         return if @max_bytes.nil? || @read_only
 
@@ -324,9 +277,8 @@ module Rigor
         File.join(@root, producer_id, key[0, 2], "#{key[2..]}.entry")
       end
 
-      # Reads and validates one entry file. Any failure (missing,
-      # short, bad magic, bad version, bad checksum, unmarshal-able)
-      # returns nil so the caller treats it as a cache miss.
+      # Reads and validates one entry file. Any failure (missing, short, bad magic, bad version, bad
+      # checksum, unmarshal-able) returns nil so the caller treats it as a cache miss.
       def read_entry(path, deserialize: nil)
         return nil unless File.file?(path)
 
@@ -344,8 +296,8 @@ module Rigor
         Entry.new(descriptor_bytes, value)
       end
 
-      # Validates the magic + format-version header and the trailing
-      # SHA-256 over everything before the trailer.
+      # Validates the magic + format-version header and the trailing SHA-256 over everything before the
+      # trailer.
       def envelope_valid?(bytes)
         return false if bytes.bytesize < HEADER.bytesize + 32
         return false unless bytes.byteslice(0, HEADER.bytesize) == HEADER
@@ -354,8 +306,8 @@ module Rigor
         Digest::SHA256.digest(bytes.byteslice(0, bytes.bytesize - 32)) == trailer
       end
 
-      # Splits the body into (descriptor_bytes, value_bytes). Returns
-      # `[nil, nil]` on a malformed varint or length-overrun.
+      # Splits the body into (descriptor_bytes, value_bytes). Returns `[nil, nil]` on a malformed varint or
+      # length-overrun.
       def parse_body(body)
         offset = 0
         descriptor_len, offset = read_varint(body, offset)
@@ -374,9 +326,8 @@ module Rigor
       LOAD_FAILED = Object.new.freeze
       private_constant :LOAD_FAILED
 
-      # Inflates the stored value payload (ADR-54 WD2), then hands the
-      # raw bytes to the deserialiser. Any failure — corrupt deflate
-      # stream included — reads as a miss.
+      # Inflates the stored value payload (ADR-54 WD2), then hands the raw bytes to the deserialiser. Any
+      # failure — corrupt deflate stream included — reads as a miss.
       def safe_load(bytes, deserialize)
         raw = Zlib::Inflate.inflate(bytes)
         if deserialize
@@ -430,17 +381,13 @@ module Rigor
       end
 
       def ensure_schema_version!
-        # Read-only stores never touch the cache root — no mkdir,
-        # no marker write, no destructive clear on schema
-        # mismatch. A stale or wrong-schema marker simply yields
-        # nothing back (entries read through the version check
-        # are content-keyed, so a write under the new schema
-        # never collides with a read under the old). The next
-        # writable run will repair the cache.
+        # Read-only stores never touch the cache root — no mkdir, no marker write, no destructive clear on
+        # schema mismatch. A stale or wrong-schema marker simply yields nothing back (entries read through
+        # the version check are content-keyed, so a write under the new schema never collides with a read
+        # under the old). The next writable run will repair the cache.
         return if @read_only
-        # The marker is process-stable; one check per Store is
-        # enough (a benign double-check under a thread race just
-        # repeats idempotent work).
+        # The marker is process-stable; one check per Store is enough (a benign double-check under a thread
+        # race just repeats idempotent work).
         return if @schema_version_ensured
 
         @schema_version_ensured = true
@@ -465,9 +412,8 @@ module Rigor
         end
       end
 
-      # LEB128 unsigned varint encoder/decoder. Lengths fit easily in
-      # five bytes (cap at 2^35); the cache layer never writes a value
-      # larger than that in practice.
+      # LEB128 unsigned varint encoder/decoder. Lengths fit easily in five bytes (cap at 2^35); the cache
+      # layer never writes a value larger than that in practice.
       def write_varint(bytes, value)
         raise ArgumentError, "varint must be non-negative" if value.negative?
 
@@ -482,9 +428,8 @@ module Rigor
         end
       end
 
-      # Updates both atime and mtime of `path` to the current time — the
-      # cross-process LRU signal used by {evict!}. Best-effort: any FS
-      # error (read-only mount, deleted file) is silently ignored.
+      # Updates both atime and mtime of `path` to the current time — the cross-process LRU signal used by
+      # {evict!}. Best-effort: any FS error (read-only mount, deleted file) is silently ignored.
       def touch_for_lru(path)
         now = Time.now
         File.utime(now, now, path)
@@ -492,8 +437,8 @@ module Rigor
         nil
       end
 
-      # Returns an array of `{ path:, mtime:, bytes: }` hashes for every
-      # `.entry` file under the cache root, skipping unreadable entries.
+      # Returns an array of `{ path:, mtime:, bytes: }` hashes for every `.entry` file under the cache root,
+      # skipping unreadable entries.
       def collect_entry_stats
         Dir.glob(File.join(@root, "**", "*.entry")).filter_map do |path|
           stat = File.stat(path)

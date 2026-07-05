@@ -6,14 +6,12 @@ module Rigor
   module Source
     # Yields every `Prism::Node` reachable from a root in DFS pre-order.
     #
-    # The walker is the source-positioning analogue to `NodeLocator`: where the
-    # locator answers "what node is at this point?", the walker enumerates the
-    # full set of Prism nodes for tooling that needs to operate on each one
-    # (coverage probes, lint passes, IDE outlines).
+    # The walker is the source-positioning analogue to `NodeLocator`: where the locator answers "what node
+    # is at this point?", the walker enumerates the full set of Prism nodes for tooling that needs to
+    # operate on each one (coverage probes, lint passes, IDE outlines).
     #
-    # Non-Prism children (literals embedded in node attributes, virtual nodes,
-    # or `nil` slots) are silently skipped so callers can rely on every yielded
-    # value responding to the `Prism::Node` API.
+    # Non-Prism children (literals embedded in node attributes, virtual nodes, or `nil` slots) are silently
+    # skipped so callers can rely on every yielded value responding to the `Prism::Node` API.
     module NodeWalker
       module_function
 
@@ -33,12 +31,10 @@ module Rigor
         node.compact_child_nodes.each { |child| walk(child, &) }
       end
 
-      # Like {.each}, but also yields the node's lexical ancestor chain
-      # (outermost first, EXCLUDING the node itself). The yielded
-      # `ancestors` array is the live descent stack — callers that retain
-      # it past the block invocation MUST copy it (`Plugin::NodeContext`
-      # does). Used by the plugin engine to give `node_rule` blocks their
-      # enclosing class / method / block context (ADR-37 slice 1d).
+      # Like {.each}, but also yields the node's lexical ancestor chain (outermost first, EXCLUDING the node
+      # itself). The yielded `ancestors` array is the live descent stack — callers that retain it past the
+      # block invocation MUST copy it (`Plugin::NodeContext` does). Used by the plugin engine to give
+      # `node_rule` blocks their enclosing class / method / block context (ADR-37 slice 1d).
       #
       # @yieldparam node [Prism::Node]
       # @yieldparam ancestors [Array<Prism::Node>]

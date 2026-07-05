@@ -6,17 +6,16 @@ module Rigor
   module Source
     # Locates the deepest Prism AST node enclosing a given source position.
     #
-    # The locator works on byte offsets internally so that multibyte source
-    # text behaves consistently with Prism, which itself reports offsets in
-    # bytes. Convenience constructors translate from `(line, column)` pairs.
+    # The locator works on byte offsets internally so that multibyte source text behaves consistently with
+    # Prism, which itself reports offsets in bytes. Convenience constructors translate from `(line, column)`
+    # pairs.
     #
-    # Lines are 1-indexed (matching editor / Prism / gcc conventions).
-    # Columns are 1-indexed when supplied via the `(line, column)` API; this
-    # matches the canonical `file.rb:line:col` form most tools emit. Internal
-    # offsets remain 0-indexed bytes.
+    # Lines are 1-indexed (matching editor / Prism / gcc conventions). Columns are 1-indexed when supplied
+    # via the `(line, column)` API; this matches the canonical `file.rb:line:col` form most tools emit.
+    # Internal offsets remain 0-indexed bytes.
     #
-    # The locator is read-only: a single instance binds to one source buffer
-    # and AST root, and queries are pure functions of the byte offset.
+    # The locator is read-only: a single instance binds to one source buffer and AST root, and queries are
+    # pure functions of the byte offset.
     class NodeLocator
       class OutOfRangeError < StandardError; end
 
@@ -58,8 +57,7 @@ module Rigor
         descend(@root, offset)
       end
 
-      # Translate a `(line, column)` pair into a 0-indexed byte offset for the
-      # bound source buffer.
+      # Translate a `(line, column)` pair into a 0-indexed byte offset for the bound source buffer.
       def position_to_offset(line, column)
         raise ArgumentError, "source buffer required for position lookup" if @source.nil?
         raise OutOfRangeError, "line must be >= 1, got #{line}" if line < 1

@@ -21,36 +21,28 @@ require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"
 
 module Rigor
-  # The engine's view of the type universe outside the current scope.
-  # Slice 1 exposed only the class registry; Slice 4 added the RBS loader,
-  # which threads through ExpressionTyper and MethodDispatcher to type
-  # constant references and method calls that the literal-typer and
-  # constant-folding tiers cannot answer.
+  # The engine's view of the type universe outside the current scope. Slice 1 exposed only the class
+  # registry; Slice 4 added the RBS loader, which threads through ExpressionTyper and MethodDispatcher to
+  # type constant references and method calls that the literal-typer and constant-folding tiers cannot
+  # answer.
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
   class Environment # rubocop:disable Metrics/ClassLength
     DEFAULT_PROJECT_SIG_DIR = "sig"
     private_constant :DEFAULT_PROJECT_SIG_DIR
 
-    # Slice A stdlib expansion. Stdlib libraries that
-    # `Environment.for_project` loads on top of RBS core unless
-    # the caller passes an explicit `libraries:` array. Each
-    # entry MUST be a stdlib library name accepted by
-    # `RBS::EnvironmentLoader#has_library?`; unknown libraries
-    # MUST fail-soft (`RbsLoader#build_env` already filters
-    # through `has_library?`). The default set covers the common
-    # stdlib surface a Ruby program is likely to import
-    # (`pathname`, `optparse`, `json`, `yaml`, `fileutils`,
-    # `tempfile`, `uri`, `logger`, `date`) plus the analyzer-
-    # adjacent gems shipping their own RBS in this bundle
-    # (`prism`, `rbs`). On hosts where one of these libraries is
-    # not installed, the loader silently drops it.
+    # Slice A stdlib expansion. Stdlib libraries that `Environment.for_project` loads on top of RBS core
+    # unless the caller passes an explicit `libraries:` array. Each entry MUST be a stdlib library name
+    # accepted by `RBS::EnvironmentLoader#has_library?`; unknown libraries MUST fail-soft
+    # (`RbsLoader#build_env` already filters through `has_library?`). The default set covers the common
+    # stdlib surface a Ruby program is likely to import (`pathname`, `optparse`, `json`, `yaml`, `fileutils`,
+    # `tempfile`, `uri`, `logger`, `date`) plus the analyzer-adjacent gems shipping their own RBS in this
+    # bundle (`prism`, `rbs`). On hosts where one of these libraries is not installed, the loader silently
+    # drops it.
     #
-    # Callers MAY add to the default by passing
-    # `libraries: %w[csv ...]`; the explicit list is appended to
-    # `DEFAULT_LIBRARIES` and de-duplicated. Callers that need
-    # a strictly RBS-core view MUST construct an `RbsLoader`
-    # directly instead of going through `for_project`.
+    # Callers MAY add to the default by passing `libraries: %w[csv ...]`; the explicit list is appended to
+    # `DEFAULT_LIBRARIES` and de-duplicated. Callers that need a strictly RBS-core view MUST construct an
+    # `RbsLoader` directly instead of going through `for_project`.
     DEFAULT_LIBRARIES = %w[
       pathname optparse json yaml fileutils tempfile tmpdir
       stringio forwardable digest securerandom
@@ -65,11 +57,10 @@ module Rigor
       prism rbs
     ].freeze
 
-    # ADR-72 — a Gemfile.lock gem name mapped to the opt-in plugin id
-    # that ships the SAME core-ext RBS. When that plugin is loaded the
-    # auto-overlay for the gem stands down, so the two never both
-    # declare the methods (which would raise a duplicate-declaration
-    # error). Keyed on the gem name `RbsCoverageReport` reports.
+    # ADR-72 — a Gemfile.lock gem name mapped to the opt-in plugin id that ships the SAME core-ext RBS. When
+    # that plugin is loaded the auto-overlay for the gem stands down, so the two never both declare the
+    # methods (which would raise a duplicate-declaration error). Keyed on the gem name `RbsCoverageReport`
+    # reports.
     GEM_OVERLAY_PLUGIN_IDS = { "activesupport" => "activesupport-core-ext" }.freeze
 
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
@@ -77,24 +68,17 @@ module Rigor
                 :synthetic_method_index, :project_patched_methods
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
-    # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
-    #   environment is "RBS-blind"; useful in tests that want to assert
-    #   how the engine behaves without RBS data. The default Environment
-    #   wires the shared core loader, which is itself lazy: requesting an
-    #   environment instance does NOT load RBS until a method or class
-    #   query actually consults the loader.
-    # @param plugin_registry [Rigor::Plugin::Registry, nil] v0.1.1
-    #   Track 2 slice 7. The per-run plugin registry the
-    #   inference engine consults at call sites for plugin
-    #   `dynamic_return` rules. When nil (the
-    #   default), no plugin-level return-type contribution
-    #   participates — useful for tests, the `Environment.default`
-    #   facade, and analyses that don't load plugins.
-    # @param dependency_source_index [Rigor::Analysis::DependencySourceInference::Index, nil]
-    #   ADR-10 slice 2b-ii. The per-run index of opt-in gem
-    #   sources the dispatcher consults BELOW RBS dispatch.
-    #   When nil (the default), no dep-source contribution
-    #   participates and the dispatcher tier is a no-op.
+    # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the environment is "RBS-blind"; useful
+    #   in tests that want to assert how the engine behaves without RBS data. The default Environment wires
+    #   the shared core loader, which is itself lazy: requesting an environment instance does NOT load RBS
+    #   until a method or class query actually consults the loader.
+    # @param plugin_registry [Rigor::Plugin::Registry, nil] v0.1.1 Track 2 slice 7. The per-run plugin
+    #   registry the inference engine consults at call sites for plugin `dynamic_return` rules. When nil
+    #   (the default), no plugin-level return-type contribution participates — useful for tests, the
+    #   `Environment.default` facade, and analyses that don't load plugins.
+    # @param dependency_source_index [Rigor::Analysis::DependencySourceInference::Index, nil] ADR-10 slice
+    #   2b-ii. The per-run index of opt-in gem sources the dispatcher consults BELOW RBS dispatch. When nil
+    #   (the default), no dep-source contribution participates and the dispatcher tier is a no-op.
     def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, # rubocop:disable Metrics/ParameterLists
                    plugin_registry: nil, dependency_source_index: nil,
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil,
@@ -105,11 +89,9 @@ module Rigor
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
       @dependency_source_index = dependency_source_index
-      # ADR-pending — reporters live in a mutable container so
-      # long-lived integrations (LSP `ProjectContext`) can swap
-      # them per `Runner.run` without rebuilding the env. The
-      # existing `#rbs_extended_reporter` / `#boundary_cross_reporter`
-      # accessors below preserve the public lookup shape.
+      # ADR-pending — reporters live in a mutable container so long-lived integrations (LSP `ProjectContext`)
+      # can swap them per `Runner.run` without rebuilding the env. The existing `#rbs_extended_reporter` /
+      # `#boundary_cross_reporter` accessors below preserve the public lookup shape.
       @reporters = Reporters.new(
         rbs_extended: rbs_extended_reporter,
         boundary_cross: boundary_cross_reporter,
@@ -117,19 +99,13 @@ module Rigor
       )
       @synthetic_method_index = synthetic_method_index || Inference::SyntheticMethodIndex::EMPTY
       @project_patched_methods = project_patched_methods || Inference::ProjectPatchedMethods::EMPTY
-      # ADR-20 slice 2c + 2e — the per-env HKT registry
-      # consulted by the reducer when resolving `Type::App`
-      # carriers. Defaults to {Inference::HktRegistry::EMPTY};
-      # the {.default} / {.for_project} class methods seed it
-      # with the bundled builtins (`json::value`, …) plus any
-      # `%a{rigor:v1:hkt_register / hkt_define}` annotations
-      # the RBS loader exposes. The hkt_registry getter
-      # (defined below) MEMOIZES the result of merging the
-      # base with the RBS scan so the scan is paid at most
-      # once per Environment lifetime — and only when first
-      # consulted, leaving fast paths like `rigor check
-      # --cache-stats --no-stats` from doing the RBS env
-      # build at all.
+      # ADR-20 slice 2c + 2e — the per-env HKT registry consulted by the reducer when resolving `Type::App`
+      # carriers. Defaults to {Inference::HktRegistry::EMPTY}; the {.default} / {.for_project} class methods
+      # seed it with the bundled builtins (`json::value`, …) plus any `%a{rigor:v1:hkt_register /
+      # hkt_define}` annotations the RBS loader exposes. The hkt_registry getter (defined below) MEMOIZES
+      # the result of merging the base with the RBS scan so the scan is paid at most once per Environment
+      # lifetime — and only when first consulted, leaving fast paths like `rigor check --cache-stats
+      # --no-stats` from doing the RBS env build at all.
       @hkt_registry_base = hkt_registry || Inference::HktRegistry::EMPTY
       @hkt_registry_holder = HktRegistryHolder.new
       @constant_type_cache = ConstantTypeCacheHolder.new
@@ -137,14 +113,10 @@ module Rigor
       freeze
     end
 
-    # ADR-20 slices 2e + 6 — lazy HKT registry getter.
-    # Merge order on first call: builtins (base) ← plugin
-    # manifest aggregation ← RBS env scan. Last-write-wins on
-    # URI collisions so user-authored `.rbs` overlays beat
-    # plugin entries, which beat the bundled JSON_VALUE.
-    # Memoised; single-threaded use only (under the Ractor
-    # pool path each worker has its own Environment so
-    # cross-worker mutation is impossible; the LSP
+    # ADR-20 slices 2e + 6 — lazy HKT registry getter. Merge order on first call: builtins (base) ← plugin
+    # manifest aggregation ← RBS env scan. Last-write-wins on URI collisions so user-authored `.rbs` overlays
+    # beat plugin entries, which beat the bundled JSON_VALUE. Memoised; single-threaded use only (under the
+    # Ractor pool path each worker has its own Environment so cross-worker mutation is impossible; the LSP
     # single-publish-at-a-time invariant serialises here).
     def hkt_registry
       @hkt_registry_holder.fetch do
@@ -161,10 +133,9 @@ module Rigor
       end
     end
 
-    # Backwards-compatible reporter accessors — every existing
-    # consumer (rbs_extended, method_dispatcher) calls these. The
-    # frozen `@reporters` container is mutable for slot reassignment
-    # via {#attach_reporters!} below.
+    # Backwards-compatible reporter accessors — every existing consumer (rbs_extended, method_dispatcher)
+    # calls these. The frozen `@reporters` container is mutable for slot reassignment via
+    # {#attach_reporters!} below.
     def rbs_extended_reporter
       @reporters.rbs_extended
     end
@@ -173,29 +144,22 @@ module Rigor
       @reporters.boundary_cross
     end
 
-    # ADR-32 WD6 — the per-run accumulator for synthesizer
-    # failure events. `Environment.for_project` records
-    # `[:error, message]` returns from a plugin's
-    # `source_rbs_synthesizer` here so the Runner can emit
-    # `source-rbs-synthesis-failed` `:info` diagnostics after
-    # analysis completes. Nil when no plugin contributes a
-    # synthesizer.
+    # ADR-32 WD6 — the per-run accumulator for synthesizer failure events. `Environment.for_project` records
+    # `[:error, message]` returns from a plugin's `source_rbs_synthesizer` here so the Runner can emit
+    # `source-rbs-synthesis-failed` `:info` diagnostics after analysis completes. Nil when no plugin
+    # contributes a synthesizer.
     def source_rbs_synthesis_reporter
       @reporters.source_rbs_synthesis
     end
 
-    # Replaces the env's per-run reporter slots. Intended for
-    # long-lived integrations (LSP `ProjectContext`) that share one
-    # Environment instance across many `Runner.run` calls: each call
-    # attaches its own fresh reporter pair so per-call diagnostic
-    # events stay scoped to that call rather than accumulating
-    # across publishes.
+    # Replaces the env's per-run reporter slots. Intended for long-lived integrations (LSP `ProjectContext`)
+    # that share one Environment instance across many `Runner.run` calls: each call attaches its own fresh
+    # reporter pair so per-call diagnostic events stay scoped to that call rather than accumulating across
+    # publishes.
     #
-    # Single-threaded use only. Concurrent publishes against one
-    # Environment must serialise — the LSP `Server` debouncer +
-    # synchronized writer already enforces this for the editor
-    # path. The Ractor pool path builds a per-worker Environment
-    # and does not reach this surface.
+    # Single-threaded use only. Concurrent publishes against one Environment must serialise — the LSP
+    # `Server` debouncer + synchronized writer already enforces this for the editor path. The Ractor pool
+    # path builds a per-worker Environment and does not reach this surface.
     def attach_reporters!(rbs_extended_reporter:, boundary_cross_reporter:)
       @reporters.rbs_extended = rbs_extended_reporter
       @reporters.boundary_cross = boundary_cross_reporter
@@ -210,26 +174,20 @@ module Rigor
         ).freeze
       end
 
-      # Builds an Environment that consults the project's local
-      # signatures and any opt-in stdlib libraries on top of RBS core.
+      # Builds an Environment that consults the project's local signatures and any opt-in stdlib libraries on
+      # top of RBS core.
       #
-      # @param root [String, Pathname] project root used to auto-detect
-      #   the default signature path. Defaults to the current working
-      #   directory.
-      # @param libraries [Array<String, Symbol>] additional stdlib
-      #   libraries to load on top of {DEFAULT_LIBRARIES}. The
-      #   final list is the union of the two, de-duplicated while
-      #   preserving order. Pass an empty array (the default) to
-      #   load only the defaults.
-      # @param signature_paths [Array<String, Pathname>, nil] explicit
-      #   list of `sig/`-style directories. When `nil` (the default),
-      #   the canonical project layout `<root>/sig` is used if it
-      #   exists, otherwise no signature path is loaded.
-      # @param cache_store [Rigor::Cache::Store, nil] persistent cache
-      #   threaded into the underlying {Environment::RbsLoader} so
-      #   constant lookups (and, in later v0.0.9 slices, other
-      #   reflection artefacts) consult the cache. Pass `nil` (the
-      #   default) to skip caching for this environment.
+      # @param root [String, Pathname] project root used to auto-detect the default signature path. Defaults
+      #   to the current working directory.
+      # @param libraries [Array<String, Symbol>] additional stdlib libraries to load on top of
+      #   {DEFAULT_LIBRARIES}. The final list is the union of the two, de-duplicated while preserving order.
+      #   Pass an empty array (the default) to load only the defaults.
+      # @param signature_paths [Array<String, Pathname>, nil] explicit list of `sig/`-style directories. When
+      #   `nil` (the default), the canonical project layout `<root>/sig` is used if it exists, otherwise no
+      #   signature path is loaded.
+      # @param cache_store [Rigor::Cache::Store, nil] persistent cache threaded into the underlying
+      #   {Environment::RbsLoader} so constant lookups (and, in later v0.0.9 slices, other reflection
+      #   artefacts) consult the cache. Pass `nil` (the default) to skip caching for this environment.
       # @return [Rigor::Environment]
       # rubocop:disable Metrics/MethodLength, Metrics/ParameterLists
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil,
@@ -242,21 +200,15 @@ module Rigor
                       synthetic_method_index: nil, project_patched_methods: nil,
                       source_files: [])
         resolved_paths = signature_paths || default_signature_paths(root)
-        # O4 MVP — append per-gem `sig/` directories discovered
-        # under the target project's bundler install root. Empty
-        # array when neither an explicit path nor auto-detection
-        # finds a bundle. Order: user `signature_paths:` win first
-        # (semantic precedence inside `RbsLoader.build_env_for`);
-        # gem-shipped sigs append last so user overrides stay
-        # authoritative.
+        # O4 MVP — append per-gem `sig/` directories discovered under the target project's bundler install
+        # root. Empty array when neither an explicit path nor auto-detection finds a bundle. Order: user
+        # `signature_paths:` win first (semantic precedence inside `RbsLoader.build_env_for`); gem-shipped
+        # sigs append last so user overrides stay authoritative.
         #
-        # O4 Layer 3 — when a Gemfile.lock is available (explicit
-        # `bundler_lockfile:` or auto-detected next to the project
-        # root), use the locked gem set to filter the discovered
-        # `sig/` directories. Stale gems in the bundle install
-        # tree (out-of-band installs, version drift after a
-        # `bundle update`) are silently dropped so only gems the
-        # project actually declares contribute RBS.
+        # O4 Layer 3 — when a Gemfile.lock is available (explicit `bundler_lockfile:` or auto-detected next
+        # to the project root), use the locked gem set to filter the discovered `sig/` directories. Stale
+        # gems in the bundle install tree (out-of-band installs, version drift after a `bundle update`) are
+        # silently dropped so only gems the project actually declares contribute RBS.
         locked = LockfileResolver.locked_gems(
           lockfile_path: bundler_lockfile,
           project_root: root,
@@ -268,19 +220,13 @@ module Rigor
           auto_detect: bundler_auto_detect,
           locked_gems: locked.empty? ? nil : locked
         ).map(&:to_s)
-        # O4 Layer 3 slice 2 — when `rbs collection install`
-        # has been run for the target project, parse the
-        # resulting `rbs_collection.lock.yaml` and feed each
-        # gem's `<collection_path>/<name>/<version>/` directory
-        # into `signature_paths:`. Stdlib-typed entries are
-        # skipped (already covered by `DEFAULT_LIBRARIES`), as
-        # are gems whose RBS rigor already loads from another
-        # source — stdlib-extracted default gems (`cgi`,
-        # `logger`, …, shipped by the collection under a `git`
-        # source) and the `data/vendored_gem_sigs/` bundle
-        # (`redis`, `nokogiri`, `pg`, …). `skip_gem_names:`
-        # passes both sets so the collection copy doesn't
-        # double-declare against rigor's bundled RBS (the
+        # O4 Layer 3 slice 2 — when `rbs collection install` has been run for the target project, parse the
+        # resulting `rbs_collection.lock.yaml` and feed each gem's `<collection_path>/<name>/<version>/`
+        # directory into `signature_paths:`. Stdlib-typed entries are skipped (already covered by
+        # `DEFAULT_LIBRARIES`), as are gems whose RBS rigor already loads from another source —
+        # stdlib-extracted default gems (`cgi`, `logger`, …, shipped by the collection under a `git` source)
+        # and the `data/vendored_gem_sigs/` bundle (`redis`, `nokogiri`, `pg`, …). `skip_gem_names:` passes
+        # both sets so the collection copy doesn't double-declare against rigor's bundled RBS (the
         # `RBS::DuplicatedDeclarationError` hazard).
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         skip_gem_names = merged_libraries + RbsLoader.vendored_gem_names
@@ -290,25 +236,18 @@ module Rigor
           auto_detect: rbs_collection_auto_detect,
           skip_gem_names: skip_gem_names
         ).map(&:to_s)
-        # ADR-25 — RBS signature directories contributed by loaded
-        # plugins via their manifest `signature_paths:`. Resolved
-        # to absolute dirs by `Plugin::Base#signature_paths`;
-        # additive, ranked below the user's explicit
-        # `signature_paths:` and above the opportunistic bundle /
-        # collection discovery. A duplicate-declaration conflict
-        # degrades through the same O7 failure-memo path.
+        # ADR-25 — RBS signature directories contributed by loaded plugins via their manifest
+        # `signature_paths:`. Resolved to absolute dirs by `Plugin::Base#signature_paths`; additive, ranked
+        # below the user's explicit `signature_paths:` and above the opportunistic bundle / collection
+        # discovery. A duplicate-declaration conflict degrades through the same O7 failure-memo path.
         plugin_sig_paths = plugin_registry ? plugin_registry.signature_paths.map(&:to_s) : []
-        # ADR-72 — Gemfile.lock-gated bundled RBS overlays. For each
-        # locked gem that ships no RBS through any resolution path
-        # (`:missing`) and has a Rigor-bundled overlay, load that
-        # overlay so its core-class extensions resolve (e.g.
-        # `Integer#minutes` on a Rails project) — turning a systematic
-        # false `call.undefined-method` into a no-op while a project
-        # WITHOUT the gem still sees the genuine diagnostic. Appended
-        # last so any RBS the project already supplies wins, and skipped
-        # for a gem whose opt-in plugin twin is loaded (no duplicate
-        # declaration). The paths ride in `loader_signature_paths`, so
-        # the env cache descriptor digests them for free.
+        # ADR-72 — Gemfile.lock-gated bundled RBS overlays. For each locked gem that ships no RBS through any
+        # resolution path (`:missing`) and has a Rigor-bundled overlay, load that overlay so its core-class
+        # extensions resolve (e.g. `Integer#minutes` on a Rails project) — turning a systematic false
+        # `call.undefined-method` into a no-op while a project WITHOUT the gem still sees the genuine
+        # diagnostic. Appended last so any RBS the project already supplies wins, and skipped for a gem whose
+        # opt-in plugin twin is loaded (no duplicate declaration). The paths ride in
+        # `loader_signature_paths`, so the env cache descriptor digests them for free.
         overlay_paths = gem_overlay_paths(
           locked: locked, default_libraries: merged_libraries,
           bundle_sig_paths: gem_sig_paths, rbs_collection_paths: collection_paths,
@@ -316,22 +255,15 @@ module Rigor
         )
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths +
                                  collection_paths + overlay_paths
-        # ADR-32 WD4 + WD5 — invoke each loaded plugin's
-        # `source_rbs_synthesizer` once per project source file
-        # and collect non-nil `[filename, rbs_source]` pairs.
-        # The synthesizer-emitting plugin (currently only
-        # `rigor-rbs-inline`) is responsible for its own
-        # fail-soft on parse errors per WD6; this loop only
-        # filters `nil` returns.
+        # ADR-32 WD4 + WD5 — invoke each loaded plugin's `source_rbs_synthesizer` once per project source
+        # file and collect non-nil `[filename, rbs_source]` pairs. The synthesizer-emitting plugin (currently
+        # only `rigor-rbs-inline`) is responsible for its own fail-soft on parse errors per WD6; this loop
+        # only filters `nil` returns.
         #
-        # When a `cache_store` is supplied, each synthesizer
-        # invocation is memoised per
-        # `(file path + content SHA, plugin id + version + config_hash)`
-        # — WD5's cache key — so a second run with unchanged
-        # source skips the rbs-inline parse cost. The empty
-        # string is the sentinel for "no contribution" so the
-        # Store (which treats `nil` as cache miss) can persist
-        # the no-contribution decision too.
+        # When a `cache_store` is supplied, each synthesizer invocation is memoised per `(file path + content
+        # SHA, plugin id + version + config_hash)` — WD5's cache key — so a second run with unchanged source
+        # skips the rbs-inline parse cost. The empty string is the sentinel for "no contribution" so the
+        # Store (which treats `nil` as cache miss) can persist the no-contribution decision too.
         virtual_rbs = collect_virtual_rbs(plugin_registry, source_files, cache_store,
                                           source_rbs_synthesis_reporter)
         loader = RbsLoader.new(
@@ -340,15 +272,11 @@ module Rigor
           cache_store: cache_store,
           virtual_rbs: virtual_rbs
         )
-        # ADR-20 slice 2c + 2e — seed hkt_registry with the
-        # bundled builtins. The Environment's `#hkt_registry`
-        # getter then LAZILY merges in the RBS env scan on
-        # first call so fast paths that don't consult HKT
-        # (e.g. `rigor check --cache-stats --no-stats`) don't
-        # pay the eager env-build cost up front. URI
-        # collisions let the user-authored overlay win over
-        # the bundled builtin (last-write-wins per ADR-20
-        # OQ3 tentative).
+        # ADR-20 slice 2c + 2e — seed hkt_registry with the bundled builtins. The Environment's
+        # `#hkt_registry` getter then LAZILY merges in the RBS env scan on first call so fast paths that
+        # don't consult HKT (e.g. `rigor check --cache-stats --no-stats`) don't pay the eager env-build cost
+        # up front. URI collisions let the user-authored overlay win over the bundled builtin
+        # (last-write-wins per ADR-20 OQ3 tentative).
         new(
           rbs_loader: loader,
           plugin_registry: plugin_registry,
@@ -370,13 +298,11 @@ module Rigor
         sig.directory? ? [sig] : []
       end
 
-      # ADR-72 — resolve the bundled RBS overlay directories to load for
-      # this project. A gem is eligible when it is locked in the
-      # Gemfile.lock, classified `:missing` by {RbsCoverageReport}
-      # (no RBS through default-library / vendored / bundle-`sig/` /
-      # rbs-collection), and its conflicting opt-in plugin (if any) is
-      # not loaded. Returns `[Pathname]`, deterministically ordered, or
-      # `[]` when no lockfile / no eligible gem.
+      # ADR-72 — resolve the bundled RBS overlay directories to load for this project. A gem is eligible when
+      # it is locked in the Gemfile.lock, classified `:missing` by {RbsCoverageReport} (no RBS through
+      # default-library / vendored / bundle-`sig/` / rbs-collection), and its conflicting opt-in plugin (if
+      # any) is not loaded. Returns `[Pathname]`, deterministically ordered, or `[]` when no lockfile / no
+      # eligible gem.
       def gem_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
                             rbs_collection_paths:, plugin_registry:)
         return [] if locked.empty?
@@ -394,27 +320,19 @@ module Rigor
         RbsLoader.gem_overlay_sig_paths(eligible)
       end
 
-      # ADR-32 WD4 + WD5 — for each project source file, invoke
-      # every plugin-registered synthesizer once and collect
-      # non-nil returns. The returned array is `[[virtual_filename,
-      # rbs_source], ...]`; the loader threads it through to
-      # `RbsLoader.new(virtual_rbs: ...)`.
+      # ADR-32 WD4 + WD5 — for each project source file, invoke every plugin-registered synthesizer once and
+      # collect non-nil returns. The returned array is `[[virtual_filename, rbs_source], ...]`; the loader
+      # threads it through to `RbsLoader.new(virtual_rbs: ...)`.
       #
-      # `virtual_filename` is the source file path prefixed with
-      # the plugin id so RBS parse errors point back to the
-      # contributing plugin in their diagnostic location string.
+      # `virtual_filename` is the source file path prefixed with the plugin id so RBS parse errors point back
+      # to the contributing plugin in their diagnostic location string.
       #
-      # When no plugin declares a synthesizer (the common case),
-      # the registry's `source_rbs_synthesizers` is empty and
-      # this method short-circuits to `[]` without walking the
-      # file list.
+      # When no plugin declares a synthesizer (the common case), the registry's `source_rbs_synthesizers` is
+      # empty and this method short-circuits to `[]` without walking the file list.
       #
-      # WD5 — when `cache_store` is supplied, each (file, plugin)
-      # synthesizer call is memoised through `Cache::Store`. The
-      # cache key composes the file's content SHA with the
-      # plugin's `PluginEntry` (id + version + config_hash) so a
-      # config change or content change invalidates the entry
-      # automatically.
+      # WD5 — when `cache_store` is supplied, each (file, plugin) synthesizer call is memoised through
+      # `Cache::Store`. The cache key composes the file's content SHA with the plugin's `PluginEntry` (id +
+      # version + config_hash) so a config change or content change invalidates the entry automatically.
       def collect_virtual_rbs(plugin_registry, source_files, cache_store, reporter)
         return [] if plugin_registry.nil?
 
@@ -436,14 +354,10 @@ module Rigor
         result
       end
 
-      # ADR-32 WD5 — cache wrapper around a single (plugin,
-      # file) invocation. The cache stores the empty string
-      # `""` as the "no contribution" sentinel because
-      # `Cache::Store` treats `nil` as a cache miss. Error
-      # tuples are stored as the canonical
-      # `[:error, message_string]` Array so the same wrapper
-      # short-circuits subsequent runs against unchanged broken
-      # input.
+      # ADR-32 WD5 — cache wrapper around a single (plugin, file) invocation. The cache stores the empty
+      # string `""` as the "no contribution" sentinel because `Cache::Store` treats `nil` as a cache miss.
+      # Error tuples are stored as the canonical `[:error, message_string]` Array so the same wrapper
+      # short-circuits subsequent runs against unchanged broken input.
       def synthesizer_output_for(plugin, callable, path, cache_store)
         return invoke_synthesizer_safely(callable, path) if cache_store.nil?
         return invoke_synthesizer_safely(callable, path) unless File.file?(path)
@@ -456,17 +370,14 @@ module Rigor
         ) { invoke_synthesizer_safely(callable, path) || "" }
       end
 
-      # ADR-32 WD6 — route a synthesizer return value through
-      # the per-run failure reporter. The synthesizer's contract
-      # (declared in `plugins/rigor-rbs-inline/lib/rigor/plugin/rbs_inline.rb`)
-      # admits three return shapes:
+      # ADR-32 WD6 — route a synthesizer return value through the per-run failure reporter. The
+      # synthesizer's contract (declared in
+      # `plugins/rigor-rbs-inline/lib/rigor/plugin/rbs_inline.rb`) admits three return shapes:
       #   - `String` (non-empty) → successful RBS source
       #   - `nil` / `""`         → no contribution
       #   - `[:error, message]`  → parse failed
-      # The error tuple is converted into a reporter entry +
-      # treated as "no contribution" so the analysis pipeline
-      # continues. Reporter is `nil` for callers that don't care
-      # (legacy Environment.new, tests).
+      # The error tuple is converted into a reporter entry + treated as "no contribution" so the analysis
+      # pipeline continues. Reporter is `nil` for callers that don't care (legacy Environment.new, tests).
       def interpret_synthesizer_outcome(outcome, plugin, path, reporter)
         return outcome unless outcome.is_a?(Array) && outcome[0] == :error
 
@@ -495,8 +406,7 @@ module Rigor
       def synthesizer_input_digest(path)
         Digest::SHA256.hexdigest(File.binread(path))
       rescue ::SystemCallError
-        # Unreadable file → key on the path alone; the
-        # synthesizer's File.file?/File.read will see the same
+        # Unreadable file → key on the path alone; the synthesizer's File.file?/File.read will see the same
         # failure and return nil.
         Digest::SHA256.hexdigest(path.to_s)
       end
@@ -504,23 +414,19 @@ module Rigor
       def invoke_synthesizer_safely(callable, path)
         callable.call(path.to_s)
       rescue StandardError
-        # WD6 fail-soft — a synthesizer that raises does NOT crash
-        # analysis. Unlike the `[:error, msg]` return path (which
-        # the runner surfaces as `source-rbs-synthesis-failed`),
-        # an unhandled raise is swallowed silently; the
-        # unexamined-raise channel is deliberately silent per WD6.
+        # WD6 fail-soft — a synthesizer that raises does NOT crash analysis. Unlike the `[:error, msg]`
+        # return path (which the runner surfaces as `source-rbs-synthesis-failed`), an unhandled raise is
+        # swallowed silently; the unexamined-raise channel is deliberately silent per WD6.
         nil
       end
     end
 
-    # Resolves a constant name to a Rigor::Type::Nominal (the *instance*
-    # type carrier). Consults the static class registry first (cheap,
-    # hardcoded), then falls back to the RBS loader. Returns nil when
-    # the name is unknown to both.
+    # Resolves a constant name to a Rigor::Type::Nominal (the *instance* type carrier). Consults the static
+    # class registry first (cheap, hardcoded), then falls back to the RBS loader. Returns nil when the name
+    # is unknown to both.
     #
-    # NOTE: This is the construction helper for "an instance of class
-    # `Foo`". For "the class object `Foo` itself" (the value of the
-    # constant), use {#singleton_for_name} instead.
+    # NOTE: This is the construction helper for "an instance of class `Foo`". For "the class object `Foo`
+    # itself" (the value of the constant), use {#singleton_for_name} instead.
     def nominal_for_name(name)
       registered = class_registry.nominal_for_name(name)
       return registered if registered
@@ -528,36 +434,29 @@ module Rigor
       class_known_in_rbs?(name) ? Type::Combinator.nominal_of(name.to_s) : nil
     end
 
-    # Resolves a constant name to a Rigor::Type::Singleton (the *class
-    # object* carrier). The expression `Foo` evaluates to the class
-    # object, whose RBS type is `singleton(Foo)` -- this method is the
-    # corresponding Rigor construction helper.
+    # Resolves a constant name to a Rigor::Type::Singleton (the *class object* carrier). The expression `Foo`
+    # evaluates to the class object, whose RBS type is `singleton(Foo)` -- this method is the corresponding
+    # Rigor construction helper.
     #
-    # The lookup uses the same registry/RBS chain as {#nominal_for_name}
-    # so a class is either known to both queries or to neither.
+    # The lookup uses the same registry/RBS chain as {#nominal_for_name} so a class is either known to both
+    # queries or to neither.
     def singleton_for_name(name)
       return nil unless class_known?(name)
 
       Type::Combinator.singleton_of(name.to_s)
     end
 
-    # Slice A constant-value lookup. Returns the translated
-    # `Rigor::Type` for an RBS-declared **non-class** constant
-    # (`Rigor::Analysis::FactStore::BUCKETS: Array[Symbol]`,
-    # `Rigor::Configuration::DEFAULT_PATH: String`, ...) or `nil`
-    # when no RBS constant declaration covers `name`. This is the
-    # value-bearing counterpart of {#singleton_for_name}, which
-    # only resolves names that name a class or module. Callers
-    # that need to type a `Prism::ConstantReadNode`/
-    # `Prism::ConstantPathNode` MUST consult {#singleton_for_name}
-    # first and fall through to this query when the constant is
-    # not a class.
+    # Slice A constant-value lookup. Returns the translated `Rigor::Type` for an RBS-declared **non-class**
+    # constant (`Rigor::Analysis::FactStore::BUCKETS: Array[Symbol]`, `Rigor::Configuration::DEFAULT_PATH:
+    # String`, ...) or `nil` when no RBS constant declaration covers `name`. This is the value-bearing
+    # counterpart of {#singleton_for_name}, which only resolves names that name a class or module. Callers
+    # that need to type a `Prism::ConstantReadNode`/ `Prism::ConstantPathNode` MUST consult
+    # {#singleton_for_name} first and fall through to this query when the constant is not a class.
     def constant_for_name(name)
       return nil if rbs_loader.nil?
 
-      # Pure function of `name` for this Environment's lifetime — the
-      # refinement table and the RBS constant table are both fixed — so
-      # memoise across the lexical-candidate ladder's heavy name reuse.
+      # Pure function of `name` for this Environment's lifetime — the refinement table and the RBS constant
+      # table are both fixed — so memoise across the lexical-candidate ladder's heavy name reuse.
       key = name.to_s
       @constant_type_cache.fetch(key) do
         Builtins::PredefinedConstantRefinements.lookup(key) ||
@@ -565,50 +464,39 @@ module Rigor
       end
     end
 
-    # Returns true when the constant name is known to either the static
-    # registry or the RBS loader. Useful for callers that only need a
-    # presence check without materialising a type carrier.
+    # Returns true when the constant name is known to either the static registry or the RBS loader. Useful
+    # for callers that only need a presence check without materialising a type carrier.
     def class_known?(name)
       return true if class_registry.nominal_for_name(name)
       return true if class_known_in_rbs?(name)
 
-      # ADR-36 nested-class emission — a variant subclass the
-      # substrate synthesised (e.g. `Shape::Circle` from a
-      # `variants do variant Circle, Float end` block) is a real
-      # class for resolution purposes even though no RBS / source
-      # declares it.
+      # ADR-36 nested-class emission — a variant subclass the substrate synthesised (e.g. `Shape::Circle`
+      # from a `variants do variant Circle, Float end` block) is a real class for resolution purposes even
+      # though no RBS / source declares it.
       @synthetic_method_index&.knows_class?(name) || false
     end
 
-    # ADR-15 Phase 2b — returns the loader's read-only,
-    # `Ractor.shareable?` query surface as a frozen
-    # {Environment::Reflection}. Built lazily on first
-    # access; subsequent calls return the same instance.
-    # Returns `nil` when the environment carries no RBS
-    # loader (test-only `Environment.new` without
+    # ADR-15 Phase 2b — returns the loader's read-only, `Ractor.shareable?` query surface as a frozen
+    # {Environment::Reflection}. Built lazily on first access; subsequent calls return the same instance.
+    # Returns `nil` when the environment carries no RBS loader (test-only `Environment.new` without
     # `rbs_loader:`).
     def reflection
       @rbs_loader&.reflection
     end
 
-    # Returns true when the RBS environment carries the named
-    # declaration as a Module (not a Class). Used by the
-    # `user_class_fallback_receiver` tier to detect a module-mixin
-    # receiver (e.g. `PP::ObjectMixin`) so the dispatcher can route
-    # unresolved method calls through the `Nominal[Object]`
-    # fallback — every concrete includer of M honours Kernel /
-    # Object instance methods through its own ancestor chain.
+    # Returns true when the RBS environment carries the named declaration as a Module (not a Class). Used by
+    # the `user_class_fallback_receiver` tier to detect a module-mixin receiver (e.g. `PP::ObjectMixin`) so
+    # the dispatcher can route unresolved method calls through the `Nominal[Object]` fallback — every
+    # concrete includer of M honours Kernel / Object instance methods through its own ancestor chain.
     def rbs_module?(name)
       return false unless rbs_loader
 
       rbs_loader.rbs_module?(name)
     end
 
-    # Compares two class/module names using analyzer-owned class data.
-    # Returns `:equal`, `:subclass`, `:superclass`, `:disjoint`, or
-    # `:unknown`. The static registry handles built-ins cheaply; the RBS
-    # loader handles project/stdlib classes without relying on host Ruby
-    # constants being loaded.
+    # Compares two class/module names using analyzer-owned class data. Returns `:equal`, `:subclass`,
+    # `:superclass`, `:disjoint`, or `:unknown`. The static registry handles built-ins cheaply; the RBS
+    # loader handles project/stdlib classes without relying on host Ruby constants being loaded.
     def class_ordering(lhs, rhs)
       lhs = normalize_class_name(lhs)
       rhs = normalize_class_name(rhs)
@@ -634,14 +522,11 @@ module Rigor
       name.to_s.delete_prefix("::")
     end
 
-    # ADR-13 slice 3b — composes the per-run plugin-supplied
-    # {Rigor::TypeNode::ResolverChain} into a single
-    # {Rigor::TypeNode::NameScope} that the RBS::Extended
-    # directive parser threads down to the
-    # {Rigor::Builtins::ImportedRefinements::Resolver}. Returns
-    # `nil` when no plugin contributes a type-node resolver so
-    # the parser short-circuits the chain consultation and
-    # behaves bit-for-bit like the v0.1.0 → v0.1.3 default.
+    # ADR-13 slice 3b — composes the per-run plugin-supplied {Rigor::TypeNode::ResolverChain} into a single
+    # {Rigor::TypeNode::NameScope} that the RBS::Extended directive parser threads down to the
+    # {Rigor::Builtins::ImportedRefinements::Resolver}. Returns `nil` when no plugin contributes a type-node
+    # resolver so the parser short-circuits the chain consultation and behaves bit-for-bit like the v0.1.0 →
+    # v0.1.3 default.
     def build_name_scope
       return nil if @plugin_registry.nil? || @plugin_registry.empty?
 

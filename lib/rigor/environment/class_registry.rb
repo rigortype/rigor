@@ -4,14 +4,13 @@ require_relative "../type"
 
 module Rigor
   class Environment
-    # Resolves Ruby Class/Module objects to Rigor::Type::Nominal instances.
-    # The hardcoded list spans the core classes the literal typer (Slice 1)
-    # and the constant-resolution path (Slice 2 strengthening) need.
-    # This is the static fast path for built-ins; `Environment` falls through
-    # to `RbsLoader` for all other names — the two tiers are complementary.
+    # Resolves Ruby Class/Module objects to Rigor::Type::Nominal instances. The hardcoded list spans the core
+    # classes the literal typer (Slice 1) and the constant-resolution path (Slice 2 strengthening) need.
+    # This is the static fast path for built-ins; `Environment` falls through to `RbsLoader` for all other
+    # names — the two tiers are complementary.
     #
-    # See docs/internal-spec/inference-engine.md for the binding contract
-    # (every entry below MUST always be recognised).
+    # See docs/internal-spec/inference-engine.md for the binding contract (every entry below MUST always be
+    # recognised).
     class ClassRegistry
       SLICE_1_BUILT_INS = [
         Integer,
@@ -25,11 +24,10 @@ module Rigor
         BasicObject
       ].freeze
 
-      # Common Ruby core classes that user code routinely names by constant
-      # reference. Adding them to the registry lets `nominal_for_name`
-      # resolve `Array`, `Hash`, etc. without each call site re-listing
-      # them. The static registry is the cheap fast path; `RbsLoader`
-      # extends coverage to all other RBS-declared names (Slice 4, landed).
+      # Common Ruby core classes that user code routinely names by constant reference. Adding them to the
+      # registry lets `nominal_for_name` resolve `Array`, `Hash`, etc. without each call site re-listing
+      # them. The static registry is the cheap fast path; `RbsLoader` extends coverage to all other
+      # RBS-declared names (Slice 4, landed).
       SLICE_2_BUILT_INS = [
         Array,
         Hash,
@@ -68,15 +66,11 @@ module Rigor
 
         private
 
-        # ADR-15 Phase 4b — the default registry MUST be
-        # `Ractor.shareable?` so worker Ractors that consult
-        # `Environment.for_project`'s default `class_registry:`
-        # don't trip `Ractor::IsolationError`. The internal
-        # `@nominals` / `@class_objects` Hashes are populated
-        # via `register`, then `Ractor.make_shareable`
-        # recursively freezes the registry, the two Hashes,
-        # and confirms every entry (Type::Nominal carriers +
-        # core Ruby classes) is itself shareable.
+        # ADR-15 Phase 4b — the default registry MUST be `Ractor.shareable?` so worker Ractors that consult
+        # `Environment.for_project`'s default `class_registry:` don't trip `Ractor::IsolationError`. The
+        # internal `@nominals` / `@class_objects` Hashes are populated via `register`, then
+        # `Ractor.make_shareable` recursively freezes the registry, the two Hashes, and confirms every entry
+        # (Type::Nominal carriers + core Ruby classes) is itself shareable.
         def build_default
           registry = new
           CORE_BUILT_INS.each { |klass| registry.register(klass) }
@@ -112,11 +106,10 @@ module Rigor
         @nominals.fetch(class_object.name)
       end
 
-      # Nil-safe lookup by class name. Accepts Symbol or String. Returns the
-      # registered Rigor::Type::Nominal, or nil when the name is unknown.
-      # Used by ExpressionTyper to resolve Prism::ConstantReadNode and
-      # Prism::ConstantPathNode under the fail-soft policy: unknown names
-      # MUST NOT raise and MUST flow through the engine's tracer.
+      # Nil-safe lookup by class name. Accepts Symbol or String. Returns the registered Rigor::Type::Nominal,
+      # or nil when the name is unknown. Used by ExpressionTyper to resolve Prism::ConstantReadNode and
+      # Prism::ConstantPathNode under the fail-soft policy: unknown names MUST NOT raise and MUST flow
+      # through the engine's tracer.
       def nominal_for_name(name)
         return nil if name.nil?
 

@@ -5,17 +5,13 @@ require_relative "rbs_cache_producer"
 
 module Rigor
   module Cache
-    # Cache producer that materialises every RBS-declared constant
-    # to its translated `Rigor::Type` form and stores the result as
-    # a `Hash<String, Rigor::Type>` keyed by canonical constant name.
-    # This is the v0.0.8 first cached producer per ADR-6 § 7; it
-    # caches a post-translation artefact so the cache value is
-    # `Marshal`-clean (RBS-native objects carry `RBS::Location`,
-    # which lacks `_dump_data`).
+    # Cache producer that materialises every RBS-declared constant to its translated `Rigor::Type` form and
+    # stores the result as a `Hash<String, Rigor::Type>` keyed by canonical constant name. This is the v0.0.8
+    # first cached producer per ADR-6 § 7; it caches a post-translation artefact so the cache value is
+    # `Marshal`-clean (RBS-native objects carry `RBS::Location`, which lacks `_dump_data`).
     #
-    # Cache descriptor shape is shared with every other cache
-    # producer that depends on the RBS environment — see
-    # {RbsDescriptor.build} for the slot definitions.
+    # Cache descriptor shape is shared with every other cache producer that depends on the RBS environment —
+    # see {RbsDescriptor.build} for the slot definitions.
     class RbsConstantTable < RbsCacheProducer
       PRODUCER_ID = "rbs.constant_type_table"
 
@@ -28,9 +24,8 @@ module Rigor
           translated = Inference::RbsTypeTranslator.translate(entry.decl.type)
           table[name] = translated unless translated.is_a?(Type::Bot)
         rescue ::RBS::BaseError
-          # Skip entries whose RBS type fails to translate; the cache
-          # stays robust to a broken signature rather than corrupting
-          # the whole table. Analyzer-internal errors propagate.
+          # Skip entries whose RBS type fails to translate; the cache stays robust to a broken signature
+          # rather than corrupting the whole table. Analyzer-internal errors propagate.
         end
         table
       end

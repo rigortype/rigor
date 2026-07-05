@@ -4,17 +4,13 @@
 #
 #   RUBYLIB=$PWD/../lib bundle exec rigor check
 #
-# The .rigor.yml in this directory enables the plugin and
-# points signature_paths at the local sig/ stub that mocks the
-# subset of Sinatra::Base the demo touches. With Tier A active,
-# bare identifiers inside each `get/post/...` block (params,
-# redirect, halt) resolve through Sinatra::Base's RBS.
+# The .rigor.yml in this directory enables the plugin and points signature_paths at the local sig/ stub
+# that mocks the subset of Sinatra::Base the demo touches. With Tier A active, bare identifiers inside each
+# `get/post/...` block (params, redirect, halt) resolve through Sinatra::Base's RBS.
 #
-# Without Tier A the same blocks would type-check against the
-# enclosing class body's Singleton[MyApp] self_type, where
-# `redirect` and friends do not exist — every call would fall
-# through to Dynamic[T] and the analyzer would lose track of
-# the block's return type.
+# Without Tier A the same blocks would type-check against the enclosing class body's Singleton[MyApp]
+# self_type, where `redirect` and friends do not exist — every call would fall through to Dynamic[T] and
+# the analyzer would lose track of the block's return type.
 
 class MyApp < Sinatra::Base
   get "/" do

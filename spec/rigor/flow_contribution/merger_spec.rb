@@ -92,10 +92,8 @@ RSpec.describe Rigor::FlowContribution::Merger do
       expect(conflict.kind).to eq(:return_type)
       expect(conflict.reason).to eq(:return_type_collapse)
       expect(conflict.provenances).to include(plugin_alpha, plugin_beta)
-      # The conflict message uses type#describe(:short); asserting the
-      # exact message kills the undefined_method mutant that renames the
-      # describe call to a fallback type.inspect (which would wrap names
-      # in a #<...> carrier prefix).
+      # The conflict message uses type#describe(:short); asserting the exact message kills the undefined_method mutant
+      # that renames the describe call to a fallback type.inspect (which would wrap names in a #<...> carrier prefix).
       expect(conflict.message).to match(/\Areturn-type intersection collapses to bot: String vs Integer\z/)
     end
 
@@ -193,8 +191,7 @@ RSpec.describe Rigor::FlowContribution::Merger do
       end
 
       it "falls back to inspect for a type without describe" do
-        # The else branch: when `respond_to?(:describe)` is false,
-        # `type.inspect` is returned directly.
+        # The else branch: when `respond_to?(:describe)` is false, `type.inspect` is returned directly.
         plain = "untyped"
         result = described_class.send(:describe, plain)
         expect(result).to eq(plain.inspect)

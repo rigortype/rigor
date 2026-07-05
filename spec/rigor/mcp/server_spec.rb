@@ -8,8 +8,8 @@ require "rigor/cli"
 RSpec.describe Rigor::MCP::Server do
   subject(:server) { described_class.new(err: StringIO.new) }
 
-  # Convenience: send a request and round-trip through JSON so all
-  # hash accesses use string keys (mirrors the wire format).
+  # Convenience: send a request and round-trip through JSON so all hash accesses use string keys (mirrors the wire
+  # format).
   def request(id:, method:, params: nil)
     req = { "id" => id, "method" => method }
     req["params"] = params if params
@@ -21,8 +21,7 @@ RSpec.describe Rigor::MCP::Server do
             params: { "name" => name, "arguments" => arguments })
   end
 
-  # ------------------------------------------------------------------ #
-  # Protocol lifecycle                                                    #
+  # ------------------------------------------------------------------ # Protocol lifecycle #
   # ------------------------------------------------------------------ #
 
   describe "initialize" do
@@ -64,8 +63,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/list                                                            #
+  # ------------------------------------------------------------------ # tools/list #
   # ------------------------------------------------------------------ #
 
   describe "tools/list" do
@@ -89,8 +87,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — unknown tool                                             #
+  # ------------------------------------------------------------------ # tools/call — unknown tool #
   # ------------------------------------------------------------------ #
 
   describe "tools/call with an unknown name" do
@@ -102,9 +99,8 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — rigor_explain (fast, catalog-only, no file I/O)          #
-  # ------------------------------------------------------------------ #
+  # ------------------------------------------------------------------ # tools/call — rigor_explain (fast, catalog-only,
+  # no file I/O) # ------------------------------------------------------------------ #
 
   describe "rigor_explain" do
     it "returns a JSON catalog entry for a known rule" do
@@ -134,8 +130,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — rigor_check                                              #
+  # ------------------------------------------------------------------ # tools/call — rigor_check #
   # ------------------------------------------------------------------ #
 
   describe "rigor_check" do
@@ -151,8 +146,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — rigor_type_of                                            #
+  # ------------------------------------------------------------------ # tools/call — rigor_type_of #
   # ------------------------------------------------------------------ #
 
   describe "rigor_type_of" do
@@ -175,8 +169,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — rigor_annotate                                           #
+  # ------------------------------------------------------------------ # tools/call — rigor_annotate #
   # ------------------------------------------------------------------ #
 
   describe "rigor_annotate" do
@@ -195,8 +188,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — rigor_triage                                             #
+  # ------------------------------------------------------------------ # tools/call — rigor_triage #
   # ------------------------------------------------------------------ #
 
   describe "rigor_triage" do
@@ -216,8 +208,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — rigor_coverage                                           #
+  # ------------------------------------------------------------------ # tools/call — rigor_coverage #
   # ------------------------------------------------------------------ #
 
   describe "rigor_coverage" do
@@ -232,8 +223,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # tools/call — rigor_sig_gen                                            #
+  # ------------------------------------------------------------------ # tools/call — rigor_sig_gen #
   # ------------------------------------------------------------------ #
 
   describe "rigor_sig_gen" do
@@ -243,8 +233,7 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
-  # ------------------------------------------------------------------ #
-  # Session-level --config default propagation                            #
+  # ------------------------------------------------------------------ # Session-level --config default propagation #
   # ------------------------------------------------------------------ #
 
   describe "config_path session default" do
@@ -303,8 +292,8 @@ RSpec.describe Rigor::MCP::Server do
       expect(resp["result"]["isError"]).to be(true)
       expect(resp.dig("result", "content", 0, "text")).to include("kaboom")
       expect(err.string).to include("rigor mcp:").and include("kaboom")
-      # The backtrace is logged on its own lines (newline-joined), so the
-      # error output spans more than just the one "rigor mcp:" line.
+      # The backtrace is logged on its own lines (newline-joined), so the error output spans more than just the one
+      # "rigor mcp:" line.
       expect(err.string.lines.count).to be > 2
     end
   end

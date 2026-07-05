@@ -1,9 +1,7 @@
 # frozen_string_literal: true
 
-# Tiny S-expression-style interpreter the plugin types
-# statically. The runtime body is intentionally
-# straightforward; the demo's value is what `rigor check`
-# says about callers, not the runtime semantics here.
+# Tiny S-expression-style interpreter the plugin types statically. The runtime body is intentionally straightforward;
+# the demo's value is what `rigor check` says about callers, not the runtime semantics here.
 module Lisp
   module_function
 

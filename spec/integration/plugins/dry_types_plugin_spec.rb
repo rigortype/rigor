@@ -1,18 +1,13 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-dry-types/`. ADR-12 slice 1.
-# Exercises the Tier A foundation plugin end-to-end:
+# Integration spec for `plugins/rigor-dry-types/`. ADR-12 slice 1. Exercises the Tier A foundation plugin end-to-end:
 #
 # 1. Load the example plugin via the `rigor-dry-types` entry point.
-# 2. Run rigor against a project that declares
-#    `module Types; include Dry.Types(); end`.
-# 3. Assert that the plugin publishes the `:dry_type_aliases`
-#    fact via the ADR-9 cross-plugin fact store.
+# 2. Run rigor against a project that declares `module Types; include Dry.Types(); end`.
+# 3. Assert that the plugin publishes the `:dry_type_aliases` fact via the ADR-9 cross-plugin fact store.
 #
-# Slice 1 has no user-facing diagnostics — the contract is
-# fact-publication. Downstream uplifts (rigor-dry-struct's
-# slice-6 precision promotion) consume the fact in later
-# slices.
+# Slice 1 has no user-facing diagnostics — the contract is fact-publication. Downstream uplifts
+# (rigor-dry-struct's slice-6 precision promotion) consume the fact in later slices.
 
 require "spec_helper"
 
@@ -162,12 +157,9 @@ RSpec.describe "rigor-dry-types integration" do
     expect(aliases).to be_nil
   end
 
-  # Runs the plugin against a single-file project and returns
-  # the `:dry_type_aliases` fact value (or `nil` if the plugin
-  # didn't publish it). Captures the per-run `Plugin::Services`
-  # instance via `wrap_original` so we can read the fact store
-  # after `prepare(services)` ran — same pattern as the
-  # rigor-rails-routes integration spec.
+  # Runs the plugin against a single-file project and returns the `:dry_type_aliases` fact value (or `nil` if
+  # the plugin didn't publish it). Captures the per-run `Plugin::Services` instance via `wrap_original` so we
+  # can read the fact store after `prepare(services)` ran — same pattern as the rigor-rails-routes integration spec.
   def run_and_read_fact(demo:)
     Rigor::Plugin.unregister!
     captured_store = nil

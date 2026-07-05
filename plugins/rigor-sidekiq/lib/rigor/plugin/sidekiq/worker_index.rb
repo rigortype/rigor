@@ -3,17 +3,13 @@
 module Rigor
   module Plugin
     class Sidekiq < Rigor::Plugin::Base
-      # Frozen catalogue of discovered Sidekiq worker
-      # classes keyed by qualified class name. Each entry
-      # holds the `#perform` method's arity envelope so the
-      # analyzer can validate `Worker.perform_async(...)`
-      # call sites.
+      # Frozen catalogue of discovered Sidekiq worker classes keyed by qualified class name. Each entry
+      # holds the `#perform` method's arity envelope so the analyzer can validate
+      # `Worker.perform_async(...)` call sites.
       #
-      # Uses the same `min_arity` / `max_arity` closed-range
-      # envelope as `rigor-activejob`'s `JobIndex::Entry`
-      # (`Float::INFINITY` upper bound when `*args` is present);
-      # Sidekiq workers serialize args to JSON so keyword arity
-      # is not tracked here.
+      # Uses the same `min_arity` / `max_arity` closed-range envelope as `rigor-activejob`'s
+      # `JobIndex::Entry` (`Float::INFINITY` upper bound when `*args` is present); Sidekiq workers
+      # serialize args to JSON so keyword arity is not tracked here.
       class WorkerIndex
         Entry = Data.define(:class_name, :min_arity, :max_arity) do
           def arity_label

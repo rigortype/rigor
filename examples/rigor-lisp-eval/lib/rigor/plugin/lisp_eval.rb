@@ -6,10 +6,8 @@ require_relative "lisp_eval/interpreter"
 
 module Rigor
   module Plugin
-    # Example plugin: types the return value of `Lisp.eval`
-    # calls whose argument is a literal Lisp-style expression
-    # tree. Demonstrates the v0.1.0 plugin authoring surface —
-    # manifest, services, AST walking, diagnostic emission —
+    # Example plugin: types the return value of `Lisp.eval` calls whose argument is a literal Lisp-style expression
+    # tree. Demonstrates the v0.1.0 plugin authoring surface — manifest, services, AST walking, diagnostic emission —
     # without depending on any private analyzer internals.
     #
     # Usage in `.rigor.yml`:
@@ -26,11 +24,9 @@ module Rigor
     #         method_name: "eval"   # default
     #         severity: "info"      # info|warning — severity for the inferred-type note
     #
-    # This plugin emits an `:info` diagnostic AND contributes a
-    # precise return type at the call site via `dynamic_return`
-    # (ADR-52 slice 4). The diagnostic serves as a user-facing trace
-    # per the README's "info-diagnostic" pattern; the same
-    # Interpreter walk feeds both channels.
+    # This plugin emits an `:info` diagnostic AND contributes a precise return type at the call site via
+    # `dynamic_return` (ADR-52 slice 4). The diagnostic serves as a user-facing trace per the README's "info-diagnostic"
+    # pattern; the same Interpreter walk feeds both channels.
     class LispEval < Rigor::Plugin::Base
       manifest(
         id: "lisp-eval",
@@ -43,10 +39,9 @@ module Rigor
         }
       )
 
-      # Only the severity fallback needs a constant now — ADR-40 merges the
-      # `module_name` / `method_name` / `severity` defaults from the manifest,
-      # but `severity` is additionally allow-list-validated, so a bad value
-      # falls back here rather than to the merged default.
+      # Only the severity fallback needs a constant now — ADR-40 merges the `module_name` / `method_name` / `severity`
+      # defaults from the manifest, but `severity` is additionally allow-list-validated, so a bad value falls back here
+      # rather than to the merged default.
       DEFAULT_SEVERITY = :info
       ALLOWED_SEVERITIES = %i[info warning].freeze
 
@@ -58,11 +53,9 @@ module Rigor
         @interpreter = Interpreter.new
       end
 
-      # ADR-37 — per-call trace over the engine-owned walk. `eval_call?`
-      # (receiver + method-name match) is the gate the old hand-rolled
-      # walker applied, so the plugin no longer ships its own traversal;
-      # the `Walker` retains only the receiver-matching helper that this
-      # gate and `#dynamic_return` block share.
+      # ADR-37 — per-call trace over the engine-owned walk. `eval_call?` (receiver + method-name match) is the gate the
+      # old hand-rolled walker applied, so the plugin no longer ships its own traversal; the `Walker` retains only the
+      # receiver-matching helper that this gate and `#dynamic_return` block share.
       node_rule Prism::CallNode do |node, _scope, path|
         next [] unless eval_call?(node)
 
@@ -70,12 +63,10 @@ module Rigor
         found ? [found] : []
       end
 
-      # ADR-52 slice 4 — return-type contribution via the compiled
-      # dispatch DSL. The `methods:` callable resolves after `#init`
-      # so `@method_name` is available. The block re-checks `eval_call?`
-      # for the AST receiver guard, then delegates to the Interpreter;
-      # the engine wraps the bare `Rigor::Type` return in a
-      # `FlowContribution` automatically.
+      # ADR-52 slice 4 — return-type contribution via the compiled dispatch DSL. The `methods:` callable resolves after
+      # `#init` so `@method_name` is available. The block re-checks `eval_call?` for the AST receiver guard, then
+      # delegates to the Interpreter; the engine wraps the bare `Rigor::Type` return in a `FlowContribution`
+      # automatically.
       dynamic_return methods: -> { [@method_name] } do |call_node, _scope|
         next nil unless eval_call?(call_node)
 
@@ -102,9 +93,8 @@ module Rigor
         when Interpreter::TypeError
           diagnostic_for_error(path, result)
         when Interpreter::UnknownExpression
-          # Stay silent on call sites whose argument we cannot
-          # statically interpret — they are well-formed Ruby
-          # that just is not a literal Lisp expression.
+          # Stay silent on call sites whose argument we cannot statically interpret — they are well-formed Ruby that
+          # just is not a literal Lisp expression.
           nil
         else
           diagnostic_for_inferred_type(path, call_node, result)
@@ -194,10 +184,9 @@ module Rigor
         end
       end
 
-      # Receiver-matching helper shared by `#eval_call?` and
-      # the `dynamic_return` block. The AST walk itself is engine-owned
-      # via `node_rule`; Walker holds only the receiver-comparison
-      # logic so the integration spec can exercise it directly.
+      # Receiver-matching helper shared by `#eval_call?` and the `dynamic_return` block. The AST walk itself is
+      # engine-owned via `node_rule`; Walker holds only the receiver-comparison logic so the integration spec can
+      # exercise it directly.
       module Walker
         module_function
 

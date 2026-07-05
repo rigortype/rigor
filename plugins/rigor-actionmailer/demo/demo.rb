@@ -1,9 +1,7 @@
 # frozen_string_literal: true
 
-# Demo: rigor-actionmailer recognises every
-# `Mailer.action(args).deliver_*` call and validates arity
-# against the discovered action methods. Run with `bundle
-# exec rigor check` from this directory.
+# Demo: rigor-actionmailer recognises every `Mailer.action(args).deliver_*` call and validates arity
+# against the discovered action methods. Run with `bundle exec rigor check` from this directory.
 
 # `UserMailer#welcome(user, locale = "en")` → arity 1..2.
 UserMailer.welcome(:alice).deliver_now

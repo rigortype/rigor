@@ -1,16 +1,14 @@
 # frozen_string_literal: true
 
-# Verify that every executable code block in docs/handbook/ stays
-# accurate as the engine evolves.  "Executable" means the block
-# contains an `assert_type(...)` or `dump_type(...)` call — the two
-# Rigor introspection helpers that pin inferred types in prose.
+# Verify that every executable code block in docs/handbook/ stays accurate as the engine evolves.
+# "Executable" means the block contains an `assert_type(...)` or `dump_type(...)` call — the two Rigor
+# introspection helpers that pin inferred types in prose.
 #
-# A block that fires `assert.type-mismatch` is a documentation error:
-# the prose claims a type that the engine no longer produces.
+# A block that fires `assert.type-mismatch` is a documentation error: the prose claims a type that the engine
+# no longer produces.
 #
-# Blocks that use only the `#=> dump_type: TypeString` annotation
-# convention (documentation-only comments, not method calls) are not
-# tested here — they are presentation markers for `rigor annotate`.
+# Blocks that use only the `#=> dump_type: TypeString` annotation convention (documentation-only comments, not
+# method calls) are not tested here — they are presentation markers for `rigor annotate`.
 
 require "spec_helper"
 

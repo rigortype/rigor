@@ -4,35 +4,30 @@
 # Mutation-testing harness for Rigor — a *prototype* for the "壊したら壊れる"
 # (break-the-code / does-the-checker-bite) question.
 #
-# Idea: take a file Rigor currently reports clean, inject a *type-visible*
-# mutation (a literal flipped to nil, a literal's type swapped, a call renamed
-# to a missing method, an arg appended), re-run `rigor check` on the mutated
-# SOURCE, and see whether a NEW diagnostic appears. A surviving mutant — one
-# that produces no new diagnostic — is a candidate false-negative blind spot.
+# Idea: take a file Rigor currently reports clean, inject a *type-visible* mutation (a literal flipped to nil, a
+# literal's type swapped, a call renamed to a missing method, an arg appended), re-run `rigor check` on the mutated
+# SOURCE, and see whether a NEW diagnostic appears. A surviving mutant — one that produces no new diagnostic — is a
+# candidate false-negative blind spot.
 #
-# This is NOT classic mutation testing of a test suite. A type checker only
-# sees a subset of behavioural bugs, so most random mutations are equivalent
-# mutants (type-invariant) and survival is *correct*. We therefore restrict
-# ourselves to mutations that SHOULD be type-visible and read the survival of
+# This is NOT classic mutation testing of a test suite. A type checker only sees a subset of behavioural bugs, so most
+# random mutations are equivalent mutants (type-invariant) and survival is *correct*. We therefore restrict ourselves to
+# mutations that SHOULD be type-visible and read the survival of
 # *those* as signal — effectively a teeth-regression probe over the diagnostic
 # taxonomy. See tool/mutation/README.md.
 #
-# Efficiency (the "editor mode + cache" path): the expensive builds — the RBS
-# environment and the whole-project pre-pass (ProjectScan) — are paid ONCE via
-# LanguageServer::ProjectContext, then every mutant reuses them through
-# `Runner.new(environment:, prebuilt:)` + `#run_source` (in-memory overlay, no
-# disk write). Passing `prebuilt:` also disables the run-result cache, whose
-# key digests the *disk* file — so a mutant is never served a stale clean hit.
+# Efficiency (the "editor mode + cache" path): the expensive builds — the RBS environment and the whole-project pre-pass
+# (ProjectScan) — are paid ONCE via LanguageServer::ProjectContext, then every mutant reuses them through
+# `Runner.new(environment:, prebuilt:)` + `#run_source` (in-memory overlay, no disk write). Passing `prebuilt:` also
+# disables the run-result cache, whose key digests the *disk* file — so a mutant is never served a stale clean hit.
 # Marginal cost per mutant ≈ re-analysing one file's body.
 #
 # Run inside the Flake:
 #   nix --extra-experimental-features 'nix-command flakes' develop -c \
 #     bundle exec ruby tool/mutation/mutate.rb lib/rigor/<some_file>.rb
 #
-# By default a type-aware filter (Phase 1.5) keeps only mutations whose
-# anchor — the call receiver whose contract the mutation could violate — types
-# to a concrete, non-Dynamic type. That focuses the run on sites where Rigor
-# actually holds a contract; `--no-type-filter` disables it (A/B the filter).
+# By default a type-aware filter (Phase 1.5) keeps only mutations whose anchor — the call receiver whose contract the
+# mutation could violate — types to a concrete, non-Dynamic type. That focuses the run on sites where Rigor actually
+# holds a contract; `--no-type-filter` disables it (A/B the filter).
 #
 # Flags: --config PATH  --limit N  --seed N  --operators a,b
 #        --no-type-filter  --dry-run  --verbose
@@ -48,17 +43,15 @@ require "rigor/language_server"        # ProjectContext lives here (editor-mode 
 require "rigor/protection/mutator"     # the type-visible mutator, productized into lib (ADR-63)
 
 module RigorMutation
-  # The mutation generator + type-aware filter live in `lib/` now (ADR-63 Tier 2
-  # productized the per-file effectiveness measurement). This dev harness keeps
-  # only the survivor *clustering* / sweep / fuzz tooling (dev-only per ADR-62
-  # WD4) and reuses the lib mutator so there is one source of truth. The aliases
-  # keep the rest of this file (which says `Mutator` / `Mutation`) untouched.
+  # The mutation generator + type-aware filter live in `lib/` now (ADR-63 Tier 2 productized the per-file effectiveness
+  # measurement). This dev harness keeps only the survivor *clustering* / sweep / fuzz tooling (dev-only per ADR-62 WD4)
+  # and reuses the lib mutator so there is one source of truth. The aliases keep the rest of this file (which says
+  # `Mutator` / `Mutation`) untouched.
   Mutator = Rigor::Protection::Mutator
   Mutation = Rigor::Protection::Mutation
 
-  # Builds the warm session once: config + ProjectContext (RBS environment +
-  # whole-project ProjectScan memoised). Progress goes to stderr so a sweep's
-  # `--json` stdout stays clean.
+  # Builds the warm session once: config + ProjectContext (RBS environment + whole-project ProjectScan memoised).
+  # Progress goes to stderr so a sweep's `--json` stdout stays clean.
   module Session
     module_function
 
@@ -231,9 +224,8 @@ module RigorMutation
     end
   end
 
-  # Corpus sweep: one warm session, every file's survivors aggregated and
-  # clustered into a ranked false-negative backlog for the engine.
-  # Expand file / directory / glob arguments to a sorted, unique `.rb` list.
+  # Corpus sweep: one warm session, every file's survivors aggregated and clustered into a ranked false-negative backlog
+  # for the engine. Expand file / directory / glob arguments to a sorted, unique `.rb` list.
   module Paths
     module_function
 
@@ -335,13 +327,11 @@ module RigorMutation
     end
   end
 
-  # Broad-fuzz mode — the soundness / robustness sibling of the teeth sweep.
-  # Not "does Rigor bite" but "can Rigor be broken": stress the analyzer with
-  # aggressive, un-filtered mutation (every operator, every site) and report
-  # mutants that make it CRASH (a rescued `internal analyzer error:`
-  # diagnostic), HANG (per-mutant timeout), or — with `--repeat` — return
-  # NON-DETERMINISTIC diagnostics (which would break the cache's byte-identical
-  # contract, ADR-45/54). A clean run finds nothing; a finding is a bug.
+  # Broad-fuzz mode — the soundness / robustness sibling of the teeth sweep. Not "does Rigor bite" but "can Rigor be
+  # broken": stress the analyzer with aggressive, un-filtered mutation (every operator, every site) and report mutants
+  # that make it CRASH (a rescued `internal analyzer error:` diagnostic), HANG (per-mutant timeout), or — with
+  # `--repeat` — return NON-DETERMINISTIC diagnostics (which would break the cache's byte-identical contract,
+  # ADR-45/54). A clean run finds nothing; a finding is a bug.
   class Fuzz
     CRASH_PREFIX = "internal analyzer error:"
 

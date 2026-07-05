@@ -5,8 +5,8 @@ require "tmpdir"
 
 require "rigor/protection/test_suite_oracle"
 
-# ADR-70 — the dynamic (test-suite) kill oracle. The runner is injected so the
-# kill logic + the file restore guarantee are exercised without shelling out.
+# ADR-70 — the dynamic (test-suite) kill oracle. The runner is injected so the kill logic + the file restore guarantee
+# are exercised without shelling out.
 RSpec.describe Rigor::Protection::TestSuiteOracle do
   it "is green when the runner reports the suite passed" do
     oracle = described_class.new(command: %w[noop], runner: ->(_) { true })
@@ -62,9 +62,8 @@ RSpec.describe Rigor::Protection::TestSuiteOracle do
     end
   end
 
-  # The default (shelling) runner must strip Bundler's env, or a `bundle exec`
-  # test command resolves Rigor's own bundle instead of the target's — which
-  # makes a green suite look red and aborts the run (found validating ADR-70).
+  # The default (shelling) runner must strip Bundler's env, or a `bundle exec` test command resolves Rigor's own bundle
+  # instead of the target's — which makes a green suite look red and aborts the run (found validating ADR-70).
   it "runs the default command inside a cleaned bundler env" do
     oracle = described_class.new(command: %w[true]) # default runner (no injection)
     cleaned = false

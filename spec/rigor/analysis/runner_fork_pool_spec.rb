@@ -9,20 +9,16 @@ require "rigor/plugin"
 
 # ADR-15 Amendment (2026-05-20) — fork-pool equivalence.
 #
-# `workers: N > 0` dispatches per-file analysis across a fork-based
-# worker pool — the active backend (the Ractor pool is preserved only
-# behind `RIGOR_POOL_BACKEND=ractor`). Unlike the Ractor pool — which
-# crashes (~70 % of runs, Ruby Bug #22075) and otherwise emits 100 %
-# `Ractor::IsolationError` diagnostics — the fork pool runs each worker
-# in a separate process, so it is memory-safe and this spec runs in the
-# DEFAULT suite (no `RIGOR_INCLUDE_RACTOR_POOL` gate).
+# `workers: N > 0` dispatches per-file analysis across a fork-based worker pool — the active backend (the Ractor pool is
+# preserved only behind `RIGOR_POOL_BACKEND=ractor`). Unlike the Ractor pool — which crashes (~70 % of runs, Ruby Bug
+# #22075) and otherwise emits 100 % `Ractor::IsolationError` diagnostics — the fork pool runs each worker in a separate
+# process, so it is memory-safe and this spec runs in the DEFAULT suite (no `RIGOR_INCLUDE_RACTOR_POOL` gate).
 #
-# Contract: the fork pool produces the same diagnostic stream as the
-# sequential path AND does real analysis (never an
+# Contract: the fork pool produces the same diagnostic stream as the sequential path AND does real analysis (never an
 # `internal analyzer error`).
 RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
-  # Per-file diagnostic comparison key. Severity is stripped — the
-  # severity-profile re-stamping is identical on both code paths.
+  # Per-file diagnostic comparison key. Severity is stripped — the severity-profile re-stamping is identical on both
+  # code paths.
   def diag_keys(diagnostics)
     diagnostics.map do |d|
       [d.path, d.line, d.column, d.rule, d.source_family, d.message]
@@ -36,10 +32,9 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
     end
   end
 
-  # Two-file fixture for the cross-file seed regression: `Widget` is
-  # RBS-known via `signature_paths:` while `Widget#render` is defined in a
-  # different source file than its caller. Returns the definition path,
-  # the caller path, and the configuration entries.
+  # Two-file fixture for the cross-file seed regression: `Widget` is RBS-known via `signature_paths:` while
+  # `Widget#render` is defined in a different source file than its caller. Returns the definition path, the caller path,
+  # and the configuration entries.
   def write_cross_file_fixture(dir)
     FileUtils.mkdir_p(File.join(dir, "sig"))
     File.write(File.join(dir, "sig", "widget.rbs"), "class Widget\nend\n")
@@ -125,29 +120,22 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
     it "carries the cross-file project pre-pass seed into worker scopes " \
        "(regression: workers emitted call.undefined-method false positives)" do
       Dir.mktmpdir do |dir|
-        # Regression for the fork-pool seeding gap observed on rigor's
-        # own self-check (`--workers 2` emitted 20 cross-file
-        # `call.undefined-method` errors the sequential path did not):
-        # {WorkerSession#analyze} built its per-file scope from
-        # `Scope.empty` without `Runner#seed_project_scope`'s cross-file
-        # discovery tables. This fixture makes the seed observable in
-        # the diagnostic STREAM: the receiver class is RBS-known via
-        # `signature_paths:` while `render` is defined in a different
-        # source file, so the ADR-17 diagnostic both paths emit must
-        # carry the `project defines ... at a_widget.rb:2` site, which
-        # only the seeded `discovered_def_sources` table can supply — an
-        # unseeded worker produces a different message and breaks the
+        # Regression for the fork-pool seeding gap observed on rigor's own self-check (`--workers 2` emitted 20
+        # cross-file `call.undefined-method` errors the sequential path did not): {WorkerSession#analyze} built its
+        # per-file scope from `Scope.empty` without `Runner#seed_project_scope`'s cross-file discovery tables. This
+        # fixture makes the seed observable in the diagnostic STREAM: the receiver class is RBS-known via
+        # `signature_paths:` while `render` is defined in a different source file, so the ADR-17 diagnostic both paths
+        # emit must carry the `project defines ... at a_widget.rb:2` site, which only the seeded
+        # `discovered_def_sources` table can supply — an unseeded worker produces a different message and breaks the
         # byte-identical sequential-equivalence contract.
         defn, caller_path, config = write_cross_file_fixture(dir)
         sequential = run_check(dir, [defn, caller_path], config: config, cache_store: nil)
-        # workers: 2 puts each file in its own slice, so the worker
-        # analysing b_board.rb never parses a_widget.rb itself — it can
-        # only resolve `Widget#render` through the seeded pre-pass tables.
+        # workers: 2 puts each file in its own slice, so the worker analysing b_board.rb never parses a_widget.rb itself
+        # — it can only resolve `Widget#render` through the seeded pre-pass tables.
         pool = run_check(dir, [defn, caller_path], config: config, cache_store: nil, workers: 2)
 
-        # Guard the fixture itself: the sequential diagnostic must carry
-        # the cross-file definition site, or the equivalence assertion
-        # below would pass vacuously on two unseeded streams.
+        # Guard the fixture itself: the sequential diagnostic must carry the cross-file definition site, or the
+        # equivalence assertion below would pass vacuously on two unseeded streams.
         expect(sequential.map(&:message)).to include(a_string_matching(/a_widget\.rb:2/))
         expect(diag_keys(pool)).to eq(diag_keys(sequential))
       end

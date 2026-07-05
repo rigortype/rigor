@@ -95,10 +95,8 @@ RSpec.describe Rigor::CLI::BaselineCommand do
 
   describe "rigor check --baseline" do
     let(:diagnostic_source) do
-      # Deliberate undefined-method on a well-typed receiver
-      # (Integer) so rigor fires `call.undefined-method`
-      # reliably. Two sites so the baseline gets a non-empty
-      # bucket.
+      # Deliberate undefined-method on a well-typed receiver (Integer) so rigor fires `call.undefined-method` reliably.
+      # Two sites so the baseline gets a non-empty bucket.
       <<~RUBY
         1.this_method_does_not_exist
         2.also_not_a_method

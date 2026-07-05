@@ -2,8 +2,8 @@
 
 require "spec_helper"
 
-# A top-level constant so the Blueprint's `Object.const_get` can
-# resolve it the same way it does inside a Ractor worker (ADR-15 Phase 4).
+# A top-level constant so the Blueprint's `Object.const_get` can resolve it the same way it does inside a Ractor worker
+# (ADR-15 Phase 4).
 class RigorPluginBlueprintSpecPlugin < Rigor::Plugin::Base
   manifest(id: "blueprint-spec", version: "0.1.0")
 

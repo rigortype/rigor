@@ -284,18 +284,15 @@ RSpec.describe Rigor::Environment do
         expect(env.singleton_for_name("JSON")).not_to be_nil
         expect(env.singleton_for_name("YAML")).not_to be_nil
         expect(env.singleton_for_name("Pathname")).not_to be_nil
-        # `tmpdir` extends Dir with `Dir.mktmpdir`; verify the
-        # singleton method is now reachable.
+        # `tmpdir` extends Dir with `Dir.mktmpdir`; verify the singleton method is now reachable.
         loader = env.rbs_loader
         expect(loader.singleton_method(class_name: "Dir", method_name: :mktmpdir)).not_to be_nil
         expect(env.singleton_for_name("StringIO")).not_to be_nil
       end
 
       it "merges caller-supplied libraries on top of the defaults, preserving order and de-duplicating" do
-        # `coverage` is not in DEFAULT_LIBRARIES (it's a
-        # test-time-only stdlib library, intentionally kept out
-        # of the default-load set). The user opts in explicitly
-        # here.
+        # `coverage` is not in DEFAULT_LIBRARIES (it's a test-time-only stdlib library, intentionally kept out of the
+        # default-load set). The user opts in explicitly here.
         env = described_class.for_project(libraries: %w[coverage json], signature_paths: [])
         loader = env.rbs_loader
         expect(loader.libraries).to start_with(*Rigor::Environment::DEFAULT_LIBRARIES)

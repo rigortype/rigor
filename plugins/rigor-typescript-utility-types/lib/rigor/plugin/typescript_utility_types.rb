@@ -4,36 +4,27 @@ require "rigor/plugin"
 
 module Rigor
   module Plugin
-    # Example plugin: ships the TypeScript-canonical utility-type
-    # aliases (`Pick<T, K>`, `Omit<T, K>`, `Partial<T>`,
-    # `Required<T>`, `Readonly<T>`) as opt-in vocabulary that
-    # resolves to the Rigor-canonical shape-projection type
-    # functions introduced in ADR-13.
+    # Example plugin: ships the TypeScript-canonical utility-type aliases (`Pick<T, K>`, `Omit<T, K>`,
+    # `Partial<T>`, `Required<T>`, `Readonly<T>`) as opt-in vocabulary that resolves to the Rigor-canonical
+    # shape-projection type functions introduced in ADR-13.
     #
-    # Background. `docs/type-specification/imported-built-in-types.md`
-    # § "Deferred or rejected imports" deliberately rejects
-    # TypeScript-canonical names from the Rigor core surface: the
-    # core stays RBS-canonical per ADR-0 / ADR-1, and the shape
-    # semantics live in core under `pick_of[T, K]` /
-    # `omit_of[T, K]` / `partial_of[T]` / `required_of[T]` /
-    # `readonly_of[T]` (added in ADR-13 slice 4). This plugin
-    # ships the TS spellings as an opt-in translation layer for
-    # users migrating from TypeScript / Sorbet / Flow-style RBI.
+    # Background. `docs/type-specification/imported-built-in-types.md` § "Deferred or rejected imports"
+    # deliberately rejects TypeScript-canonical names from the Rigor core surface: the core stays
+    # RBS-canonical per ADR-0 / ADR-1, and the shape semantics live in core under `pick_of[T, K]` /
+    # `omit_of[T, K]` / `partial_of[T]` / `required_of[T]` / `readonly_of[T]` (added in ADR-13 slice 4).
+    # This plugin ships the TS spellings as an opt-in translation layer for users migrating from
+    # TypeScript / Sorbet / Flow-style RBI.
     #
-    # Off by default — users add the gem to their `.rigor.yml`
-    # plugins list to enable.
+    # Off by default — users add the gem to their `.rigor.yml` plugins list to enable.
     #
     # @example .rigor.yml
     #   plugins:
     #     - gem: rigor-typescript-utility-types
     #
-    # Once loaded, an RBS::Extended payload such as
-    # `%a{rigor:v1:return: Pick[Foo, :a | :b]}` resolves through
-    # the chain: the parser builds a `Generic("Pick", …)` AST,
-    # the registry / built-in parametric builders decline, the
-    # chain consults `Resolvers::Pick`, which recursively
-    # resolves the two arguments to Rigor types and calls
-    # `Type::Combinator.pick_of` on them.
+    # Once loaded, an RBS::Extended payload such as `%a{rigor:v1:return: Pick[Foo, :a | :b]}` resolves
+    # through the chain: the parser builds a `Generic("Pick", …)` AST, the registry / built-in parametric
+    # builders decline, the chain consults `Resolvers::Pick`, which recursively resolves the two arguments
+    # to Rigor types and calls `Type::Combinator.pick_of` on them.
     #
     # ## Translation table
     #
@@ -47,22 +38,17 @@ module Rigor
     #
     # ## Deferred TypeScript utility names
     #
-    # `Parameters<F>` / `ReturnType<F>` / `InstanceType<C>` /
-    # `Awaited<P>` / `Uppercase<S>` / `Lowercase<S>` /
-    # `Capitalize<S>` / `Uncapitalize<S>` / `ThisParameterType<F>`
-    # / `OmitThisParameter<F>` / `ConstructorParameters<C>` /
-    # `NoInfer<T>` are NOT mapped today. The plugin returns `nil`
-    # from `#resolve` for those heads, leaving the parser's
-    # default Nominal-fallback to produce `Nominal[ReturnType, …]`
-    # etc. Function-type projection operators (`params_of[F]` /
-    # `return_of[F]`) and class projections (`instance_type[C]`)
-    # would unlock these — they remain deferred in core.
+    # `Parameters<F>` / `ReturnType<F>` / `InstanceType<C>` / `Awaited<P>` / `Uppercase<S>` /
+    # `Lowercase<S>` / `Capitalize<S>` / `Uncapitalize<S>` / `ThisParameterType<F>` /
+    # `OmitThisParameter<F>` / `ConstructorParameters<C>` / `NoInfer<T>` are NOT mapped today. The plugin
+    # returns `nil` from `#resolve` for those heads, leaving the parser's default Nominal-fallback to
+    # produce `Nominal[ReturnType, …]` etc. Function-type projection operators (`params_of[F]` /
+    # `return_of[F]`) and class projections (`instance_type[C]`) would unlock these — they remain
+    # deferred in core.
     class TypescriptUtilityTypes < Rigor::Plugin::Base
       module Resolvers
-        # Common helper: extract a single-arg utility-type Generic
-        # whose head matches `name`. Returns the resolved
-        # argument's `Rigor::Type` or `nil` (so the chain falls
-        # through).
+        # Common helper: extract a single-arg utility-type Generic whose head matches `name`. Returns the
+        # resolved argument's `Rigor::Type` or `nil` (so the chain falls through).
         module SingleArg
           def self.resolve(node, scope, name)
             return nil unless node.is_a?(Rigor::TypeNode::Generic)

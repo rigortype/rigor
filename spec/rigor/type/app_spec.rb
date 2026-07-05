@@ -93,9 +93,8 @@ RSpec.describe Rigor::Type::App do
   end
 
   describe "reduce (delegates to a registry)" do
-    # A minimal registry stand-in: records the fuel it was handed and
-    # returns a sentinel, so the test pins the delegation + the default-fuel
-    # wiring without depending on a real reduction rule.
+    # A minimal registry stand-in: records the fuel it was handed and returns a sentinel, so the test pins the
+    # delegation + the default-fuel wiring without depending on a real reduction rule.
     let(:fake_registry) do
       Class.new do
         attr_reader :received_app, :received_fuel

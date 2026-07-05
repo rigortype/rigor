@@ -5,14 +5,11 @@ require "prism"
 module Rigor
   module Plugin
     class LispEval < Rigor::Plugin::Base
-      # Static interpreter that walks a literal Lisp-style
-      # expression encoded as a Prism AST and returns a tag
-      # naming the type the runtime evaluation would produce.
+      # Static interpreter that walks a literal Lisp-style expression encoded as a Prism AST and returns a tag naming
+      # the type the runtime evaluation would produce.
       #
-      # Tags are kept as plain Symbols (`:integer`, `:float`,
-      # `:bool`) and translated to Rigor type carriers at the
-      # plugin boundary; that keeps the grammar table easy to
-      # read and the type API surface contained to one site.
+      # Tags are kept as plain Symbols (`:integer`, `:float`, `:bool`) and translated to Rigor type carriers at the
+      # plugin boundary; that keeps the grammar table easy to read and the type API surface contained to one site.
       #
       # The accepted grammar is intentionally small:
       #
@@ -24,10 +21,8 @@ module Rigor
       #              | :and | :or | :not  (boolean)
       #              | :if   (conditional)
       #
-      # Every expression that does not fit the grammar — a
-      # non-literal element, an unknown operator, a wrong arity
-      # — yields {UnknownExpression} so the caller can decide
-      # whether to stay silent or to publish a diagnostic.
+      # Every expression that does not fit the grammar — a non-literal element, an unknown operator, a wrong arity —
+      # yields {UnknownExpression} so the caller can decide whether to stay silent or to publish a diagnostic.
       class Interpreter
         # Static type tags the interpreter produces.
         INTEGER = :integer
@@ -36,23 +31,19 @@ module Rigor
 
         NUMERIC = [INTEGER, FLOAT].freeze
 
-        # Carries both a type tag and an optional concrete value.
-        # When `value` is non-nil the result is a precise constant
-        # (e.g. `[:+, 1, 2]` → tag `:integer`, value `3`).
+        # Carries both a type tag and an optional concrete value. When `value` is non-nil the result is a precise
+        # constant (e.g. `[:+, 1, 2]` → tag `:integer`, value `3`).
         Result = Struct.new(:tag, :value, keyword_init: true) do
           def error? = false
         end
 
-        # Produced when the expression is well-formed but its
-        # operands violate the operator's domain.
+        # Produced when the expression is well-formed but its operands violate the operator's domain.
         TypeError = Struct.new(:message, :node, keyword_init: true) do
           def error? = true
         end
 
-        # Produced when the expression is outside the supported
-        # grammar. Distinct from {TypeError} so the plugin can
-        # stay silent on user code that is just not a Lisp
-        # literal.
+        # Produced when the expression is outside the supported grammar. Distinct from {TypeError} so the plugin can
+        # stay silent on user code that is just not a Lisp literal.
         UnknownExpression = Struct.new(:reason, :node, keyword_init: true) do
           def error? = false
         end

@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `examples/rigor-pattern/`. Reference
-# coverage for the plugin -> analyzer collaboration pattern:
-# the plugin queries `Scope#type_of` and Rigor's
-# `Type::Combinator.literal_string_compatible?` predicate
-# rather than reimplementing literal-string tracking.
+# Integration spec for `examples/rigor-pattern/`. Reference coverage for the plugin -> analyzer collaboration
+# pattern: the plugin queries `Scope#type_of` and Rigor's `Type::Combinator.literal_string_compatible?`
+# predicate rather than reimplementing literal-string tracking.
 
 require "spec_helper"
 
@@ -69,13 +67,10 @@ RSpec.describe "examples/rigor-pattern" do
     end
 
     it "still recognises interpolated literal strings as literal-string-compatible" do
-      # Interpolation may not constant-fold all the way to a
-      # `Constant<String>` (depending on Rigor's interpolation
-      # tier), but the literal-string carrier still publishes
-      # the fact, so the plugin emits either `literal-match`
-      # (exact value known) or `literal-unknown` (carrier
-      # detected, exact value not Constant). Either rule
-      # demonstrates the engine collaboration.
+      # Interpolation may not constant-fold all the way to a `Constant<String>` (depending on Rigor's
+      # interpolation tier), but the literal-string carrier still publishes the fact, so the plugin emits
+      # either `literal-match` (exact value known) or `literal-unknown` (carrier detected, exact value not
+      # Constant). Either rule demonstrates the engine collaboration.
       diags = plugin_diagnostics(with_pattern_config('validate(:email, "user@#{"example.com"}")')) # rubocop:disable Lint/InterpolationCheck
       info = diags.find { |d| %w[literal-match literal-unknown].include?(d.rule) }
       expect(info).not_to be_nil
@@ -136,11 +131,9 @@ RSpec.describe "examples/rigor-pattern" do
   end
 
   describe "dynamic_return return-type contribution (v0.1.2)" do
-    # On a successful match the runtime `validate` returns its
-    # value argument unchanged, so the plugin contributes the
-    # argument's type (typically `Constant<String>`) as the
-    # call site's return type. Downstream calls then resolve
-    # against `String` instead of the RBS-level untyped.
+    # On a successful match the runtime `validate` returns its value argument unchanged, so the plugin
+    # contributes the argument's type (typically `Constant<String>`) as the call site's return type.
+    # Downstream calls then resolve against `String` instead of the RBS-level untyped.
     it "narrows a matching literal so downstream non-String calls surface" do
       result = with_pattern_config(<<~RUBY)
         result = validate(:email, "user@example.com")

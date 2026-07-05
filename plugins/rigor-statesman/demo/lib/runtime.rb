@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# Tiny state-machine runtime. Just enough to make demo.rb
-# runnable; the plugin's value is in the lint-time check
-# of the `transition_to(:state)` calls below.
+# Tiny state-machine runtime. Just enough to make demo.rb runnable; the plugin's value is in the lint-time
+# check of the `transition_to(:state)` calls below.
 
 class Class
   def state_machine(&)
@@ -35,9 +34,8 @@ class StateMachine
     @initial_state = name if initial
   end
 
-  # Runtime stub for `event :name do ... end`. The plugin does
-  # NOT yet introspect events; real DSL plugins would extend
-  # the collector to track per-event from/to declarations.
+  # Runtime stub for `event :name do ... end`. The plugin does NOT yet introspect events; real DSL
+  # plugins would extend the collector to track per-event from/to declarations.
   def event(_name, &)
     nil
   end

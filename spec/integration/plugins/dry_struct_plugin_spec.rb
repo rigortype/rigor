@@ -1,18 +1,14 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-dry-struct/`. ADR-16 slice 2c.
-# Exercises the substrate's Tier C path end-to-end:
+# Integration spec for `plugins/rigor-dry-struct/`. ADR-16 slice 2c. Exercises the substrate's Tier C path end-to-end:
 #
 # 1. Load the example plugin via the `rigor-dry-struct` entry point.
-# 2. Run rigor against a multi-file Dry::Struct fixture with a
-#    minimal Dry::Struct RBS stub.
-# 3. Assert that cross-file dispatch through the synthesised
-#    readers resolves (no `call.undefined-method` for
+# 2. Run rigor against a multi-file Dry::Struct fixture with a minimal Dry::Struct RBS stub.
+# 3. Assert that cross-file dispatch through the synthesised readers resolves (no `call.undefined-method` for
 #    `address.city` / `user.name` etc.).
 #
-# Per WD13 floor — the synthetic readers return `Dynamic[T]`;
-# this spec verifies the *name resolution* path, not precise
-# return typing (which is the slice-6 ceiling).
+# Per WD13 floor — the synthetic readers return `Dynamic[T]`; this spec verifies the *name resolution* path,
+# not precise return typing (which is the slice-6 ceiling).
 
 require "spec_helper"
 
@@ -126,11 +122,9 @@ RSpec.describe "rigor-dry-struct integration" do
           end
         RBS
 
-        # Capture the synthesised methods directly so we can
-        # assert on their `return_type` instead of relying on
-        # downstream call-site narrowing (which would need
-        # `Types::String` to resolve at the constant-typing
-        # tier — separate work).
+        # Capture the synthesised methods directly so we can assert on their `return_type` instead of relying
+        # on downstream call-site narrowing (which would need `Types::String` to resolve at the
+        # constant-typing tier — separate work).
         captured_index = nil
         allow(Rigor::Inference::SyntheticMethodIndex).to receive(:new).and_wrap_original do |original, **kwargs|
           captured_index = original.call(**kwargs)

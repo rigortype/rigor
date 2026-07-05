@@ -114,8 +114,8 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       )
       allow(walker).to receive(:walk).and_raise(StandardError, "boom")
 
-      # walker_outcome_for rescues the raise and substitutes an empty,
-      # non-truncated Outcome rather than letting the whole build crash.
+      # walker_outcome_for rescues the raise and substitutes an empty, non-truncated Outcome rather than letting the
+      # whole build crash.
       index = described_class.build(dependencies({ "gem" => "alpha" }))
 
       expect(index.contribution_for(class_name: "Alpha", method_name: :one)).to be_nil
@@ -132,10 +132,8 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
           gem_dir: gem_dir, mode: :when_missing, roots: %w[lib]
         )
       )
-      # The Index normalizes legacy bare-Symbol catalog values
-      # (`=> :instance`) into `CatalogEntry(kind:)` at
-      # construction, so spec stubs may pass either shape. We
-      # keep the helper's API on bare Symbols for legibility.
+      # The Index normalizes legacy bare-Symbol catalog values (`=> :instance`) into `CatalogEntry(kind:)` at
+      # construction, so spec stubs may pass either shape. We keep the helper's API on bare Symbols for legibility.
       outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated)
       allow(walker).to receive(:walk).with(
         gem_dir: gem_dir, roots: %w[lib], budget: anything

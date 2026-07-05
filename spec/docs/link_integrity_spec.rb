@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Verify that every relative markdown link in docs/handbook/ and
-# docs/manual/ resolves to an existing file.
+# Verify that every relative markdown link in docs/handbook/ and docs/manual/ resolves to an existing file.
 #
-# External links (http/https) and pure in-page anchors (#section)
-# are not checked — only relative file references.
+# External links (http/https) and pure in-page anchors (#section) are not checked — only relative file references.
 
 require "spec_helper"
 
@@ -17,8 +15,7 @@ LINK_INTEGRITY_DOC_DIRS = [
 
 module LinkIntegrityHelpers
   def extract_relative_links(content, base_dir)
-    # Strip fenced code blocks and inline code spans to avoid matching
-    # code like `[T any](x T)` as a markdown link.
+    # Strip fenced code blocks and inline code spans to avoid matching code like `[T any](x T)` as a markdown link.
     stripped = content
                .gsub(/```.*?```/m, "")
                .gsub(/`[^`\n]+`/, "")

@@ -2,12 +2,9 @@
 
 # Integration spec for `plugins/rigor-activesupport-core-ext/`.
 #
-# ADR-25 — the bundle is a pure RBS-bundle plugin: its manifest
-# declares `signature_paths: ["sig"]` and the plugin loader feeds
-# that directory into the RBS environment. This spec proves the
-# end-to-end path: with the plugin active, ActiveSupport
-# `core_ext` selectors type-check instead of producing
-# `call.undefined-method` diagnostics.
+# ADR-25 — the bundle is a pure RBS-bundle plugin: its manifest declares `signature_paths: ["sig"]` and the
+# plugin loader feeds that directory into the RBS environment. This spec proves the end-to-end path: with the
+# plugin active, ActiveSupport `core_ext` selectors type-check instead of producing `call.undefined-method` diagnostics.
 
 require "spec_helper"
 

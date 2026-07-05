@@ -7,16 +7,12 @@ require_relative "units/analyzer"
 
 module Rigor
   module Plugin
-    # Example plugin: types a units-of-measure DSL that extends
-    # `Numeric` with constructor methods (`100.kilometers`,
-    # `2.hours`) and propagates dimensional types through
-    # arithmetic, chained constructors (`60.kilometers.per_hour`),
+    # Example plugin: types a units-of-measure DSL that extends `Numeric` with constructor methods (`100.kilometers`,
+    # `2.hours`) and propagates dimensional types through arithmetic, chained constructors (`60.kilometers.per_hour`),
     # and conversion queries (`speed.in_kilometers_per_hour`).
     #
-    # The plugin walks the file's AST ({Analyzer}), maintains a
-    # local-variable binding map (`distance: :distance`,
-    # `speed: :speed`, …), and emits one diagnostic per recognised
-    # event:
+    # The plugin walks the file's AST ({Analyzer}), maintains a local-variable binding map (`distance: :distance`,
+    # `speed: :speed`, …), and emits one diagnostic per recognised event:
     #
     # | Event                                 | Severity | Rule |
     # | ---                                   | ---      | --- |
@@ -25,20 +21,15 @@ module Rigor
     # | dimensional mismatch in `+`/`-`/`*`/`/`/comparison | `:error` | `dimension-mismatch` |
     # | wrong `.in_<unit>` for the dimension  | `:error` | `in-method-mismatch` |
     #
-    # In addition to diagnostics the plugin contributes return
-    # types for every recognised call site via {.dynamic_return},
-    # so the engine's flow analysis threads the dimensional type
-    # (`Distance` / `Speed` / …) through assignments and into
-    # downstream calls instead of seeing the DSL's untyped RBS
-    # boundary.
+    # In addition to diagnostics the plugin contributes return types for every recognised call site via
+    # {.dynamic_return}, so the engine's flow analysis threads the dimensional type (`Distance` / `Speed` / …) through
+    # assignments and into downstream calls instead of seeing the DSL's untyped RBS boundary.
     #
     # ## Why the parallel binding map is NOT redundant
     #
-    # It is tempting to delete {Analyzer}'s `@bindings` map and have
-    # the diagnostics side read dimensions straight from
-    # `Scope#type_of`, the way `rigor-pattern` reads literal-string
-    # facts back from the engine. That does not work here, and the
-    # asymmetry is worth understanding:
+    # It is tempting to delete {Analyzer}'s `@bindings` map and have the diagnostics side read dimensions straight from
+    # `Scope#type_of`, the way `rigor-pattern` reads literal-string facts back from the engine. That does not work here,
+    # and the asymmetry is worth understanding:
     #
     # - The `Scope` handed to `#diagnostics_for_file` / a `node_rule`
     #   is the **seed entry scope** (`seed_project_scope(Scope.empty)`).
@@ -55,13 +46,10 @@ module Rigor
     #   `speed.upcase` really does trip `call.undefined-method` on
     #   `Speed`), but the diagnostics API cannot see that thread.
     #
-    # So the two halves read dimensions from different sources of
-    # necessity: {.dynamic_return} from the flow `Scope#type_of`, and
-    # {Analyzer} from its own single-pass binding map — the only way to
-    # follow a dimension across statements on the diagnostics side. A
-    # plugin that needs a value literally at one call site (rigor-pattern)
-    # reaches for the engine; a plugin that needs cross-statement
-    # local flow on the diagnostics side (this one) still tracks it.
+    # So the two halves read dimensions from different sources of necessity: {.dynamic_return} from the flow
+    # `Scope#type_of`, and {Analyzer} from its own single-pass binding map — the only way to follow a dimension across
+    # statements on the diagnostics side. A plugin that needs a value literally at one call site (rigor-pattern) reaches
+    # for the engine; a plugin that needs cross-statement local flow on the diagnostics side (this one) still tracks it.
     #
     # Usage in `.rigor.yml`:
     #
@@ -74,9 +62,8 @@ module Rigor
         description: "Types a units-of-measure DSL (Distance / Time / Speed / Acceleration)."
       )
 
-      # Dimension → Rigor type. Used by the {.dynamic_return} rule
-      # to translate the {MethodTable} dispatch result back into
-      # the carrier the engine threads through call sites.
+      # Dimension → Rigor type. Used by the {.dynamic_return} rule to translate the {MethodTable} dispatch result back
+      # into the carrier the engine threads through call sites.
       DIMENSION_NOMINALS = {
         distance: "Distance",
         time: "Time",
@@ -85,9 +72,8 @@ module Rigor
         float: "Float"
       }.freeze
 
-      # Inverse map — Rigor type → dimension Symbol. Keyed on the
-      # nominal class name; non-class carriers (Constant, IntegerRange)
-      # fall through and the contribution declines.
+      # Inverse map — Rigor type → dimension Symbol. Keyed on the nominal class name; non-class carriers (Constant,
+      # IntegerRange) fall through and the contribution declines.
       NOMINAL_DIMENSIONS = {
         "Distance" => :distance,
         "Time" => :time,
@@ -99,11 +85,9 @@ module Rigor
       }.freeze
 
       # Union of every method name {MethodTable.dispatch} can recognise:
-      # numeric unit constructors, chained speed/acceleration constructors,
-      # arithmetic and comparison operators, and every `.in_<unit>` query
-      # across all receiver dimensions. Used as the `methods:` gate for the
-      # {.dynamic_return} declaration below so the engine skips this block
-      # for every call to an unrelated method.
+      # numeric unit constructors, chained speed/acceleration constructors, arithmetic and comparison operators, and
+      # every `.in_<unit>` query across all receiver dimensions. Used as the `methods:` gate for the {.dynamic_return}
+      # declaration below so the engine skips this block for every call to an unrelated method.
       RECOGNISED_METHODS = (
         MethodTable::DISTANCE_UNIT_METHODS +
         MethodTable::TIME_UNIT_METHODS +
@@ -118,14 +102,11 @@ module Rigor
         Analyzer.new(path: path).analyze(root).diagnostics
       end
 
-      # v0.1.2 — return-type contribution via the {.dynamic_return} DSL.
-      # The same {MethodTable} the diagnostics path consults supplies the
-      # call-site return type when both receiver and argument map cleanly
-      # to a known dimension. Dimensional mismatches stay at the RBS-level
-      # untyped return — surfacing the existing `dimension-mismatch` /
-      # `in-method-mismatch` error diagnostic without propagating `bot`
-      # downstream. The engine wraps a non-nil return in a
-      # `FlowContribution`; the block returns a bare `Rigor::Type`.
+      # v0.1.2 — return-type contribution via the {.dynamic_return} DSL. The same {MethodTable} the diagnostics path
+      # consults supplies the call-site return type when both receiver and argument map cleanly to a known dimension.
+      # Dimensional mismatches stay at the RBS-level untyped return — surfacing the existing `dimension-mismatch` /
+      # `in-method-mismatch` error diagnostic without propagating `bot` downstream. The engine wraps a non-nil return in
+      # a `FlowContribution`; the block returns a bare `Rigor::Type`.
       dynamic_return methods: RECOGNISED_METHODS do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
         next nil if call_node.receiver.nil?

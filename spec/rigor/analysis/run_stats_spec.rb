@@ -52,12 +52,10 @@ RSpec.describe Rigor::Analysis::RunStats do
     end
   end
 
-  # The Linux `/proc/self/status` reader is exercised on Linux CI but never on
-  # the macOS dev box (no `/proc`), and even on Linux the `.peak_rss_bytes`
-  # test above only asserts a non-negative integer — so the parse (the
-  # `VmHWM:` line filter, the digit-token extraction, the kB→byte scale) has
-  # no assertion pinning the actual value. Feed synthetic `/proc/self/status`
-  # content so the parse is verified on every platform.
+  # The Linux `/proc/self/status` reader is exercised on Linux CI but never on the macOS dev box (no `/proc`), and even
+  # on Linux the `.peak_rss_bytes` test above only asserts a non-negative integer — so the parse (the `VmHWM:` line
+  # filter, the digit-token extraction, the kB→byte scale) has no assertion pinning the actual value. Feed synthetic
+  # `/proc/self/status` content so the parse is verified on every platform.
   describe ".read_vmhwm_from_proc" do
     it "returns the VmHWM kilobytes scaled to bytes, ignoring sibling lines" do
       allow(File).to receive(:readable?).with("/proc/self/status").and_return(true)

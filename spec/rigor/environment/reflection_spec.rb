@@ -3,8 +3,8 @@
 require "spec_helper"
 
 RSpec.describe Rigor::Environment::Reflection do
-  # Reflection is immutable and the examples below only query it, so build the
-  # expensive RBS-backed surface once for the file instead of once per example.
+  # Reflection is immutable and the examples below only query it, so build the expensive RBS-backed surface once for the
+  # file instead of once per example.
   before(:all) do # rubocop:disable RSpec/BeforeAfterAll
     @reflection = Rigor::Environment.for_project.reflection
   end

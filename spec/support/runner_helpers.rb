@@ -58,13 +58,10 @@ module RunnerHelpers
       @sig_cache_root ||= Dir.mktmpdir("rigor-spec-sig-")
     end
 
-    # Materialises a `sig:` hash to a content-keyed directory
-    # under {.sig_cache_root}. Returns the directory path so
-    # the caller can thread it into `Configuration` as
-    # `signature_paths:`. Idempotent: once a digest's directory
-    # exists, the files are not rewritten — every subsequent
-    # caller observes the same `(path, sha256)` tuple and the
-    # cached RBS environment hits.
+    # Materialises a `sig:` hash to a content-keyed directory under {.sig_cache_root}. Returns the directory path so the
+    # caller can thread it into `Configuration` as `signature_paths:`. Idempotent: once a digest's directory exists, the
+    # files are not rewritten — every subsequent caller observes the same `(path, sha256)` tuple and the cached RBS
+    # environment hits.
     def materialise_sig(sig_hash)
       return nil if sig_hash.nil? || sig_hash.empty?
 
@@ -78,12 +75,9 @@ module RunnerHelpers
       sig_root
     end
 
-    # Empties the shared workspace's top-level `.rb` files so
-    # the runner's `Dir.glob(<workspace>/**/*.rb)` only finds
-    # the file the current call writes. The workspace is reused
-    # across calls; nested directories created by `files:` callers
-    # are removed wholesale so leftover fixtures from a prior call
-    # cannot leak into the current one.
+    # Empties the shared workspace's top-level `.rb` files so the runner's `Dir.glob(<workspace>/**/*.rb)` only finds
+    # the file the current call writes. The workspace is reused across calls; nested directories created by `files:`
+    # callers are removed wholesale so leftover fixtures from a prior call cannot leak into the current one.
     def reset_shared_workspace
       Dir.glob(File.join(shared_workspace_root, "*")).each do |entry|
         FileUtils.rm_rf(entry)
@@ -139,15 +133,12 @@ module RunnerHelpers
   def analyze(source = nil, files: {}, sig: {}, config: {}, explain: false, cache_store: :shared, &)
     effective_cache = cache_store == :shared ? RunnerHelpers.shared_cache_store : cache_store
 
-    # Fastest path: a bare `analyze(source)` with no sig / config / files /
-    # block analyses the source IN MEMORY (no workspace file write, no
-    # chdir) via `Runner#run_source`, which is diagnostic-equivalent to the
-    # workspace run for a single file. This is the dominant call shape.
+    # Fastest path: a bare `analyze(source)` with no sig / config / files / block analyses the source IN MEMORY (no
+    # workspace file write, no chdir) via `Runner#run_source`, which is diagnostic-equivalent to the workspace run for a
+    # single file. This is the dominant call shape.
     if !source.nil? && files.empty? && sig.empty? && config.empty? && !block_given?
-      # Disable bundler / rbs-collection auto-detection: the workspace path
-      # `chdir`s into an empty dir with no Gemfile.lock, so matching its
-      # diagnostics means NOT picking up the repo's lockfiles from the spec
-      # process's cwd.
+      # Disable bundler / rbs-collection auto-detection: the workspace path `chdir`s into an empty dir with no
+      # Gemfile.lock, so matching its diagnostics means NOT picking up the repo's lockfiles from the spec process's cwd.
       memory_config = Rigor::Configuration.new(
         "bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false }
       )
@@ -169,13 +160,10 @@ module RunnerHelpers
 
   private
 
-  # The shared workspace path is reused across calls; any config
-  # that pins `paths:` or `signature_paths:` to caller-supplied
-  # entries cannot share it because the runner's expansion would
-  # see the override, not the workspace. The `files:` shape also
-  # falls back because callers may write into nested paths whose
-  # cleanup is harder to reason about than a tmpdir's wholesale
-  # rmtree.
+  # The shared workspace path is reused across calls; any config that pins `paths:` or `signature_paths:` to
+  # caller-supplied entries cannot share it because the runner's expansion would see the override, not the workspace.
+  # The `files:` shape also falls back because callers may write into nested paths whose cleanup is harder to reason
+  # about than a tmpdir's wholesale rmtree.
   def shared_workspace_safe?(files:, config:)
     return false unless files.empty?
     return false if config.key?("paths") || config.key?(:paths)

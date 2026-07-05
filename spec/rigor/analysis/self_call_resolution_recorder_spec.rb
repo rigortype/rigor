@@ -3,19 +3,14 @@
 require "spec_helper"
 require "tmpdir"
 
-# ADR-24 slice 4a — the evaluation-time recorder for unresolved
-# implicit-self calls. The central hypothesis these specs validate: by
-# recording at the engine's OWN resolution miss point (rather than
-# reimplementing resolution in CheckRules, the reverted attempt-1 route),
-# the method classes that produced 135 false positives in attempt 1 —
-# `module_function` siblings, `Data.define` accessors, inherited /
-# included methods — resolve in the engine BEFORE the miss and so never
-# reach the recorder. A genuine typo, with no resolution anywhere, is the
-# only thing that lands.
+# ADR-24 slice 4a — the evaluation-time recorder for unresolved implicit-self calls. The central hypothesis these specs
+# validate: by recording at the engine's OWN resolution miss point (rather than reimplementing resolution in CheckRules,
+# the reverted attempt-1 route), the method classes that produced 135 false positives in attempt 1 — `module_function`
+# siblings, `Data.define` accessors, inherited / included methods — resolve in the engine BEFORE the miss and so never
+# reach the recorder. A genuine typo, with no resolution anywhere, is the only thing that lands.
 RSpec.describe Rigor::Analysis::SelfCallResolutionRecorder do
-  # Runs a recording analysis over `files` (`{ "name.rb" => source }`) and
-  # returns the set of every recorded unresolved implicit-self call as
-  # `[class_name, method_name]` pairs.
+  # Runs a recording analysis over `files` (`{ "name.rb" => source }`) and returns the set of every recorded unresolved
+  # implicit-self call as `[class_name, method_name]` pairs.
   def recorded_calls(files)
     Dir.mktmpdir do |dir|
       files.each { |name, source| File.write(File.join(dir, name), source) }
@@ -70,14 +65,11 @@ RSpec.describe Rigor::Analysis::SelfCallResolutionRecorder do
     expect(calls.map(&:last)).not_to include(:inner)
   end
 
-  # The engine does not model a `Data.define` / `Struct.new` block method's
-  # `self` as the named constant — it types it `Object` — so a synthesized
-  # member accessor (`x`) reaches the type-miss choke-point and IS recorded,
-  # but under `Object`, never under the `Point` constant. `Object` is never
-  # "confidently closed", so the later closed-class gate filters this
-  # over-capture naturally; the recorder never attributes it to a project
-  # class. (Recorded under `Object`, this is the attempt-1 FP class #2 — and
-  # the gate, not the recorder, is what keeps it from re-surfacing.)
+  # The engine does not model a `Data.define` / `Struct.new` block method's `self` as the named constant — it types it
+  # `Object` — so a synthesized member accessor (`x`) reaches the type-miss choke-point and IS recorded, but under
+  # `Object`, never under the `Point` constant. `Object` is never "confidently closed", so the later closed-class gate
+  # filters this over-capture naturally; the recorder never attributes it to a project class. (Recorded under `Object`,
+  # this is the attempt-1 FP class #2 — and the gate, not the recorder, is what keeps it from re-surfacing.)
   it "attributes a `Data.define` block-form accessor over-capture to Object, never the constant" do
     calls = recorded_calls(
       "point.rb" => <<~RUBY

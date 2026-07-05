@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-dry-validation/`.
-# ADR-12 Tier A per the slicing plan in
+# Integration spec for `plugins/rigor-dry-validation/`. ADR-12 Tier A per the slicing plan in
 # `docs/design/20260517-dry-validation-slicing.md`.
 
 require "spec_helper"

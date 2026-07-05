@@ -13,8 +13,7 @@ RSpec.describe Rigor::LanguageServer::SynchronizedWriter do
       end
 
       def write(payload)
-        # Simulate interleaving-prone work — two `<<` operations
-        # with a tiny gap. Without an outer mutex this would
+        # Simulate interleaving-prone work — two `<<` operations with a tiny gap. Without an outer mutex this would
         # produce torn output under concurrent writers.
         @write_mutex.synchronize { @payloads << [:start, payload] }
         sleep 0.001
@@ -39,10 +38,8 @@ RSpec.describe Rigor::LanguageServer::SynchronizedWriter do
     end
     threads.each(&:join)
 
-    # If `write` were unsynchronised, the per-call pair
-    # `[:start, msg]` then `[:end, msg]` could be interleaved
-    # with another writer's pair. With the mutex, every pair is
-    # contiguous in the payloads list.
+    # If `write` were unsynchronised, the per-call pair `[:start, msg]` then `[:end, msg]` could be interleaved with
+    # another writer's pair. With the mutex, every pair is contiguous in the payloads list.
     inner.payloads.each_slice(2) do |start_pair, end_pair|
       expect(start_pair[0]).to eq(:start)
       expect(end_pair[0]).to eq(:end)

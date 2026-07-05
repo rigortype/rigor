@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# DO NOT run via `ruby errors_demo.rb` — analyse with
-# `bundle exec rigor check` to see rigor-rails-i18n's
+# DO NOT run via `ruby errors_demo.rb` — analyse with `bundle exec rigor check` to see rigor-rails-i18n's
 # diagnostics.
 
 def t(_key, **_options); end
@@ -18,8 +17,7 @@ t("users.welcome")
 #   plugin.rails-i18n.extra-interpolation
 t("users.welcome", name: "Alice", extra: "unused")
 
-# `errors.messages.blank` is only in `en`; this project's
-# `configured_locales` is `[en, ja]` and there is no
+# `errors.messages.blank` is only in `en`; this project's `configured_locales` is `[en, ja]` and there is no
 # `default:`, so we get a missing-locale warning:
 #   plugin.rails-i18n.missing-locale
 t("errors.messages.blank")

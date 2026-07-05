@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# Tiny runtime — the plugin's value is the static check it
-# performs at lint time. The runtime side is just enough to
+# Tiny runtime — the plugin's value is the static check it performs at lint time. The runtime side is just enough to
 # make demo.rb runnable.
 
 PATTERNS = {

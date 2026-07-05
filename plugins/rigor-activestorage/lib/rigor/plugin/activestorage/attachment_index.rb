@@ -3,16 +3,13 @@
 module Rigor
   module Plugin
     class Activestorage < Rigor::Plugin::Base
-      # Maps a discovered class name to the list of attachment
-      # rows declared on it. Marshal-clean so the cache producer
-      # round-trips it through the standard pair.
+      # Maps a discovered class name to the list of attachment rows declared on it. Marshal-clean so the
+      # cache producer round-trips it through the standard pair.
       #
       # Each row is `{ name:, kind: }`:
       #
-      # - `name` — String, the attachment method name as the
-      #            user invokes it (`"avatar"`).
-      # - `kind` — `:singular` (`has_one_attached`) or
-      #            `:collection` (`has_many_attached`).
+      # - `name` — String, the attachment method name as the user invokes it (`"avatar"`).
+      # - `kind` — `:singular` (`has_one_attached`) or `:collection` (`has_many_attached`).
       class AttachmentIndex
         attr_reader :entries
 

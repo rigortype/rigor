@@ -1,10 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Extracts a PHPStan-functionMap-style catalog of CRuby built-in
-# methods from the reference checkout at `references/ruby` and the
-# RBS core signatures at `references/rbs`. Topics handled by this
-# tool today: Numeric/Integer/Float, String/Symbol, and Array.
+# Extracts a PHPStan-functionMap-style catalog of CRuby built-in methods from the reference checkout at
+# `references/ruby` and the RBS core signatures at `references/rbs`. Topics handled by this tool today:
+# Numeric/Integer/Float, String/Symbol, and Array.
 #
 # Usage:
 #   ruby tool/extract_builtin_catalog.rb              # all topics
@@ -52,12 +51,10 @@ require "set"
 ROOT = File.expand_path("..", __dir__)
 
 # ---------------------------------------------------------------------
-# Per-topic configuration table. Adding a new topic is purely a
-# data change here — no class needs editing.
+# Per-topic configuration table. Adding a new topic is purely a data change here — no class needs editing.
 # ---------------------------------------------------------------------
 
-# Class-variable globals that show up in any Init_* block. Each
-# topic merges its own additions on top of this base.
+# Class-variable globals that show up in any Init_* block. Each topic merges its own additions on top of this base.
 BASE_CLASS_VARS = {
   "rb_cObject" => "Object",
   "rb_cBasicObject" => "BasicObject",
@@ -176,11 +173,9 @@ TOPICS = {
     output_path: "data/builtins/ruby_core/range.yml"
   },
   "set" => {
-    # Set was rewritten in C and folded into CRuby for Ruby 3.2+.
-    # On the `ruby_4_0` reference branch the Init function lives
-    # in `set.c`; there is no `set.rb` prelude (the C side calls
-    # `rb_provide("set.rb")` at the end of Init_Set so a top-level
-    # `require "set"` is a no-op against the built-in).
+    # Set was rewritten in C and folded into CRuby for Ruby 3.2+. On the `ruby_4_0` reference branch the Init function
+    # lives in `set.c`; there is no `set.rb` prelude (the C side calls `rb_provide("set.rb")` at the end of Init_Set so
+    # a top-level `require "set"` is a no-op against the built-in).
     init_function: "Init_Set",
     ruby_c_path: "references/ruby/set.c",
     ruby_prelude_path: nil,
@@ -191,12 +186,10 @@ TOPICS = {
     output_path: "data/builtins/ruby_core/set.yml"
   },
   "time" => {
-    # Time is a pure-C built-in: `Init_Time` registers the class
-    # body, and the Ruby-side prelude lives in `timev.rb` (compiled
-    # to `timev.rbinc` and `#include`d at the bottom of `time.c`).
-    # The prelude carries the class-side surface (`Time.now`,
-    # `Time.at`, `Time.new`) through Primitive cexpr stubs, so it
-    # MUST be parsed for the catalog to capture those entries.
+    # Time is a pure-C built-in: `Init_Time` registers the class body, and the Ruby-side prelude lives in `timev.rb`
+    # (compiled to `timev.rbinc` and `#include`d at the bottom of `time.c`). The prelude carries the class-side surface
+    # (`Time.now`, `Time.at`, `Time.new`) through Primitive cexpr stubs, so it MUST be parsed for the catalog to capture
+    # those entries.
     init_function: "Init_Time",
     ruby_c_path: "references/ruby/time.c",
     ruby_prelude_path: "references/ruby/timev.rb",
@@ -207,13 +200,10 @@ TOPICS = {
     output_path: "data/builtins/ruby_core/time.yml"
   },
   "date" => {
-    # Date is a stdlib gem (date_core.c) bundled with CRuby. The
-    # single Init function `Init_date_core` registers BOTH `Date`
-    # and `DateTime` (the latter inheriting from the former), so a
-    # single topic suffices — `rbs_paths` carries one entry per
-    # class. The Ruby-side prelude (`lib/date.rb`) only contributes
-    # `Date#infinite?` and the nested `Date::Infinity` class; the
-    # bulk of the surface is in C.
+    # Date is a stdlib gem (date_core.c) bundled with CRuby. The single Init function `Init_date_core` registers BOTH
+    # `Date` and `DateTime` (the latter inheriting from the former), so a single topic suffices — `rbs_paths` carries
+    # one entry per class. The Ruby-side prelude (`lib/date.rb`) only contributes `Date#infinite?` and the nested
+    # `Date::Infinity` class; the bulk of the surface is in C.
     init_function: "Init_date_core",
     ruby_c_path: "references/ruby/ext/date/date_core.c",
     ruby_prelude_path: "references/ruby/ext/date/lib/date.rb",
@@ -285,13 +275,10 @@ TOPICS = {
     output_path: "data/builtins/ruby_core/random.yml"
   },
   "struct" => {
-    # Class registration lives in `InitVM_Struct` — the outer
-    # `Init_Struct` only sets up symbol IDs and forwards to
-    # `InitVM(Struct)`. The same `InitVM_*` indirection that
-    # Random and Pathname use. `InitVM_Struct` defines both
-    # `Struct` and `Data` in one pass, so the YAML carries
-    # both classes; only `Struct` is wired into
-    # `CATALOG_BY_CLASS` today.
+    # Class registration lives in `InitVM_Struct` — the outer `Init_Struct` only sets up symbol IDs and forwards to
+    # `InitVM(Struct)`. The same `InitVM_*` indirection that Random and Pathname use. `InitVM_Struct` defines both
+    # `Struct` and `Data` in one pass, so the YAML carries both classes; only `Struct` is wired into `CATALOG_BY_CLASS`
+    # today.
     init_function: "InitVM_Struct",
     ruby_c_path: "references/ruby/struct.c",
     ruby_prelude_path: nil,
@@ -312,10 +299,8 @@ TOPICS = {
     output_path: "data/builtins/ruby_core/encoding.yml"
   },
   "re" => {
-    # `Init_Regexp` registers BOTH `Regexp` and `MatchData` (and the
-    # `RegexpError` exception class) in a single C init block, so a
-    # single topic suffices — `rbs_paths` carries one entry per class.
-    # There is no Ruby-side prelude.
+    # `Init_Regexp` registers BOTH `Regexp` and `MatchData` (and the `RegexpError` exception class) in a single C init
+    # block, so a single topic suffices — `rbs_paths` carries one entry per class. There is no Ruby-side prelude.
     init_function: "Init_Regexp",
     ruby_c_path: "references/ruby/re.c",
     ruby_prelude_path: nil,
@@ -327,11 +312,9 @@ TOPICS = {
     output_path: "data/builtins/ruby_core/re.yml"
   },
   "proc" => {
-    # `Init_Proc` registers `Proc`, `Method`, AND `UnboundMethod`
-    # in a single C init block (plus the `LocalJumpError` /
-    # `SystemStackError` exception classes), so a single topic
-    # suffices — `rbs_paths` carries one entry per class. There is
-    # no Ruby-side prelude.
+    # `Init_Proc` registers `Proc`, `Method`, AND `UnboundMethod` in a single C init block (plus the `LocalJumpError` /
+    # `SystemStackError` exception classes), so a single topic suffices — `rbs_paths` carries one entry per class. There
+    # is no Ruby-side prelude.
     init_function: "Init_Proc",
     ruby_c_path: "references/ruby/proc.c",
     ruby_prelude_path: nil,
@@ -361,15 +344,13 @@ TOPICS = {
 
 class CInitParser
   CLASS_DEFINE_RE = /^\s*(\w+)\s*=\s*rb_define_class\(\s*"([^"]+)"\s*,\s*(\w+)\s*\)\s*;/
-  # `rb_mFoo = rb_define_module("Foo");` — module registration. Modules
-  # have no parent class, so the captured field reduces to a one-arg
-  # form. Recorded with `parent: "Module"` so downstream tools that
-  # iterate `classes` get a stable parent slot.
+  # `rb_mFoo = rb_define_module("Foo");` — module registration. Modules have no parent class, so the captured field
+  # reduces to a one-arg form. Recorded with `parent: "Module"` so downstream tools that iterate `classes` get a stable
+  # parent slot.
   MODULE_DEFINE_RE = /^\s*(\w+)\s*=\s*rb_define_module\(\s*"([^"]+)"\s*\)\s*;/
-  # Range/Struct-style class registration. The first arg is the class name,
-  # the second is the parent (a `rb_c*` global), the rest are the struct
-  # accessor names which we ignore. Multi-line forms are joined into a
-  # single logical line by `init_region` before the regex runs.
+  # Range/Struct-style class registration. The first arg is the class name, the second is the parent (a `rb_c*` global),
+  # the rest are the struct accessor names which we ignore. Multi-line forms are joined into a single logical line by
+  # `init_region` before the regex runs.
   STRUCT_DEFINE_RE =
     /^\s*(\w+)\s*=\s*rb_struct_define_without_accessor\(\s*"([^"]+)"\s*,\s*(\w+)\s*,.*?\)\s*;/
   DEFINE_METHOD_RE = /^\s*rb_define_method\(\s*(\w+)\s*,\s*"([^"]+)"\s*,\s*(\w+)\s*,\s*(-?\d+)\s*\)\s*;/
@@ -386,12 +367,9 @@ class CInitParser
     @init_function = init_function
     @class_var_map = class_var_map
     @relative_path = path.sub("#{ROOT}/", "")
-    # Pre-strip block comments from the source so multi-line
-    # `/* ... */` rdoc blocks (very common right above a class
-    # registration) do not leak unbalanced parens into
-    # `join_continuations`'s state machine. Line numbers MUST be
-    # preserved — we replace comment characters with spaces and
-    # keep newlines intact rather than collapsing the file.
+    # Pre-strip block comments from the source so multi-line `/* ... */` rdoc blocks (very common right above a class
+    # registration) do not leak unbalanced parens into `join_continuations`'s state machine. Line numbers MUST be
+    # preserved — we replace comment characters with spaces and keep newlines intact rather than collapsing the file.
     @lines = strip_block_comments(File.read(path, encoding: "UTF-8")).each_line.to_a
   end
 
@@ -448,11 +426,9 @@ class CInitParser
     join_continuations(raw)
   end
 
-  # Joins consecutive lines whose paren depth has not yet returned to
-  # zero into a single logical line, keyed by the first line's number.
-  # This lets the per-statement regexes recognise multi-line forms
-  # like `rb_struct_define_without_accessor( … , "begin", "end", NULL);`
-  # without each regex having to deal with newlines.
+  # Joins consecutive lines whose paren depth has not yet returned to zero into a single logical line, keyed by the
+  # first line's number. This lets the per-statement regexes recognise multi-line forms like
+  # `rb_struct_define_without_accessor( … , "begin", "end", NULL);` without each regex having to deal with newlines.
   def join_continuations(raw)
     out = []
     buffer = nil
@@ -479,13 +455,10 @@ class CInitParser
     line.gsub(%r{/\*.*?\*/}, "").gsub(%r{//[^\n]*}, "")
   end
 
-  # Replaces `/* ... */` block-comment contents with spaces while
-  # preserving newlines so per-line indexing stays valid. Without
-  # this, multi-line rdoc blocks (e.g. the long `/* ... */` above
-  # `cDateTime = rb_define_class(...)` in `date_core.c`) leak
-  # unbalanced parens into `join_continuations`, which then merges
-  # the next code line into the comment buffer and prevents the
-  # class-registration regex from matching.
+  # Replaces `/* ... */` block-comment contents with spaces while preserving newlines so per-line indexing stays valid.
+  # Without this, multi-line rdoc blocks (e.g. the long `/* ... */` above `cDateTime = rb_define_class(...)` in
+  # `date_core.c`) leak unbalanced parens into `join_continuations`, which then merges the next code line into the
+  # comment buffer and prevents the class-registration regex from matching.
   def strip_block_comments(text)
     out = +""
     i = 0
@@ -527,11 +500,9 @@ class CInitParser
     true
   end
 
-  # `rb_mFoo = rb_define_module("Foo")` — Comparable / Enumerable
-  # / Kernel / etc. live here. Modules have no class parent;
-  # downstream readers that iterate `classes` get `"Module"` as
-  # the stable parent slot so the per-class shape stays uniform
-  # with class entries.
+  # `rb_mFoo = rb_define_module("Foo")` — Comparable / Enumerable / Kernel / etc. live here. Modules have no class
+  # parent; downstream readers that iterate `classes` get `"Module"` as the stable parent slot so the per-class shape
+  # stays uniform with class entries.
   def module_definition(line, lineno, var_to_class, classes)
     return false unless (m = line.match(MODULE_DEFINE_RE))
 
@@ -541,10 +512,8 @@ class CInitParser
     true
   end
 
-  # Range registers itself with `rb_struct_define_without_accessor`
-  # (see `Init_Range` in references/ruby/range.c). Treat it as a
-  # plain class declaration so downstream method/include definitions
-  # land in the right bucket.
+  # Range registers itself with `rb_struct_define_without_accessor` (see `Init_Range` in references/ruby/range.c). Treat
+  # it as a plain class declaration so downstream method/include definitions land in the right bucket.
   def struct_definition(line, lineno, var_to_class, classes)
     return false unless (m = line.match(STRUCT_DEFINE_RE))
 
@@ -651,10 +620,8 @@ class CBodyIndex
     @bodies[target]
   end
 
-  # Returns the set of cfunc names whose bodies are mutation-
-  # gate helpers — the per-class wrappers (`time_modify`,
-  # `str_modifiable`, …) that the C-body classifier MUST treat
-  # the same way as `rb_check_frozen` itself.
+  # Returns the set of cfunc names whose bodies are mutation- gate helpers — the per-class wrappers (`time_modify`,
+  # `str_modifiable`, …) that the C-body classifier MUST treat the same way as `rb_check_frozen` itself.
   #
   # Two seeding rules feed the set:
   #
@@ -675,9 +642,8 @@ class CBodyIndex
   #    that the previous "frozen-check only" recogniser
   #    missed.
   #
-  # Cross-source helpers and complex wrappers that don't
-  # match either rule still need a per-class blocklist entry
-  # in the corresponding `*_catalog.rb` file.
+  # Cross-source helpers and complex wrappers that don't match either rule still need a per-class blocklist entry in the
+  # corresponding `*_catalog.rb` file.
   def mutator_helpers
     @mutator_helpers ||= compute_mutator_helpers
   end
@@ -690,41 +656,27 @@ class CBodyIndex
     bodies
   end
 
-  # A body counts as a mutation-gate wrapper iff its text after
-  # stripping comments contains exactly `rb_check_frozen(...)`
-  # and no other tokens that would smell like real work
-  # (assignments, control flow, function calls other than
-  # `rb_check_frozen`). Bodies that just forward to
-  # `rb_check_frozen` are safe to treat as mutators because
-  # their callers are by definition about to mutate the same
-  # receiver — the wrapper exists only to centralise the
-  # frozen-check call pattern.
+  # A body counts as a mutation-gate wrapper iff its text after stripping comments contains exactly
+  # `rb_check_frozen(...)` and no other tokens that would smell like real work (assignments, control flow, function
+  # calls other than `rb_check_frozen`). Bodies that just forward to `rb_check_frozen` are safe to treat as mutators
+  # because their callers are by definition about to mutate the same receiver — the wrapper exists only to centralise
+  # the frozen-check call pattern.
   def compute_mutator_helpers
     @bodies ||= build
     helpers = Set.new
 
-    # Seed-only recognition: a function is a mutator helper
-    # iff its body matches the pure-frozen-check shape OR its
-    # name follows the `_modify` / `_modifiable` convention
-    # AND its body issues a frozen-check call.
+    # Seed-only recognition: a function is a mutator helper iff its body matches the pure-frozen-check shape OR its name
+    # follows the `_modify` / `_modifiable` convention AND its body issues a frozen-check call.
     #
-    # Earlier iterations of this slice tried a "transitive
-    # closure on first-arg-is-formal-param" rule to chain
-    # through helpers like `time_localtime -> time_modify`.
-    # The closure caught a few real cases (`Time#localtime`
-    # via `time_localtime_m`) but also false-positived on
-    # functions where the first arg is a formal param yet the
-    # helper doesn't actually mutate that arg (`rb_ary_reject`
-    # passes `ary` to `ary_reject` which iterates `ary` and
-    # pushes to a separately-passed array). Static C-level
-    # analysis can't distinguish "uses formal as receiver" from
-    # "uses formal as input"; the closure was too permissive
-    # for v0.1.x conservatism. The seed-only recogniser is the
-    # principled middle ground — it catches the gates the
-    # original v0.0.5 fix missed (`str_modifiable`,
-    # `rb_struct_modify`, `rb_class_modify_check`, …) without
-    # the over-classification risk. Per-class blocklists in
-    # `*_catalog.rb` continue to absorb anything still missing.
+    # Earlier iterations of this slice tried a "transitive closure on first-arg-is-formal-param" rule to chain through
+    # helpers like `time_localtime -> time_modify`. The closure caught a few real cases (`Time#localtime` via
+    # `time_localtime_m`) but also false-positived on functions where the first arg is a formal param yet the helper
+    # doesn't actually mutate that arg (`rb_ary_reject` passes `ary` to `ary_reject` which iterates `ary` and pushes to
+    # a separately-passed array). Static C-level analysis can't distinguish "uses formal as receiver" from "uses formal
+    # as input"; the closure was too permissive for v0.1.x conservatism. The seed-only recogniser is the principled
+    # middle ground — it catches the gates the original v0.0.5 fix missed (`str_modifiable`, `rb_struct_modify`,
+    # `rb_class_modify_check`, …) without the over-classification risk. Per-class blocklists in `*_catalog.rb` continue
+    # to absorb anything still missing.
     @bodies.each do |name, body|
       stripped = CBodyClassifier.strip_comments(body.text)
       helpers << name if pure_frozen_check_wrapper?(stripped) || naming_convention_helper?(name, stripped)
@@ -733,12 +685,9 @@ class CBodyIndex
     helpers
   end
 
-  # Parses the parenthesised argument list off a function
-  # signature like `static VALUE \nfoo(VALUE x, int y)\n`. The
-  # caller passes the joined header text up to (but not
-  # including) the opening brace. Returns an Array of formal
-  # parameter names, or [] when the parse fails or the
-  # signature is `(void)` / unparseable.
+  # Parses the parenthesised argument list off a function signature like `static VALUE \nfoo(VALUE x, int y)\n`. The
+  # caller passes the joined header text up to (but not including) the opening brace. Returns an Array of formal
+  # parameter names, or [] when the parse fails or the signature is `(void)` / unparseable.
   def parse_signature_params(header_text)
     match = header_text.match(/\(([^)]*)\)/m)
     return [] unless match
@@ -747,9 +696,8 @@ class CBodyIndex
     return [] if raw.empty? || raw == "void"
 
     raw.split(",").filter_map do |chunk|
-      # Take the last identifier of each comma-separated
-      # parameter slot — that's the formal name (the rest is
-      # the type, possibly with `*` or `[]` decoration).
+      # Take the last identifier of each comma-separated parameter slot — that's the formal name (the rest is the type,
+      # possibly with `*` or `[]` decoration).
       ident = chunk.gsub(/[*\[\]]/, " ").split.last
       ident if ident && ident.match?(/\A[A-Za-z_]\w*\z/)
     end
@@ -762,10 +710,8 @@ class CBodyIndex
   \z/x
   private_constant :PURE_FROZEN_CHECK_RE
 
-  # Matches names like `str_modifiable`, `time_modify`,
-  # `rb_struct_modify`, `rb_class_modify_check`, `range_modify`,
-  # `str_modify_keep_cr`. Requires word boundaries around the
-  # `_modify` / `_modifiable` token so unrelated names like
+  # Matches names like `str_modifiable`, `time_modify`, `rb_struct_modify`, `rb_class_modify_check`, `range_modify`,
+  # `str_modify_keep_cr`. Requires word boundaries around the `_modify` / `_modifiable` token so unrelated names like
   # `something_modifier` don't accidentally match.
   NAMING_HELPER_RE = /(?:_(?:modify|modifiable))(?:\b|_)/
   private_constant :NAMING_HELPER_RE
@@ -774,12 +720,9 @@ class CBodyIndex
     PURE_FROZEN_CHECK_RE.match?(text)
   end
 
-  # Naming-convention helper: function name matches the
-  # `_modify` / `_modifiable` convention AND its body issues
-  # a `rb_check_frozen` / `rb_check_lockedtmp` call. The
-  # body-content guard rules out a function that just happens
-  # to have `_modify` in its name without actually being a
-  # mutation gate.
+  # Naming-convention helper: function name matches the `_modify` / `_modifiable` convention AND its body issues a
+  # `rb_check_frozen` / `rb_check_lockedtmp` call. The body-content guard rules out a function that just happens to have
+  # `_modify` in its name without actually being a mutation gate.
   def naming_convention_helper?(name, stripped_text)
     return false unless NAMING_HELPER_RE.match?(name)
 
@@ -921,14 +864,10 @@ module CBodyClassifier
     calls_helper_on_own_param?(text, mutator_helpers, formal_params)
   end
 
-  # Formal parameter names that the convention reserves for
-  # variadic-method bookkeeping (`int argc, VALUE *argv, VALUE
-  # self`). The "self" position in such a signature is the
-  # final formal, not `argc` / `argv` — and only the self
-  # position is what a downstream mutator helper would target.
-  # Filtering these out prevents false-positive matches on
-  # `helper(argc, ...)` patterns that have nothing to do with
-  # mutation.
+  # Formal parameter names that the convention reserves for variadic-method bookkeeping (`int argc, VALUE *argv, VALUE
+  # self`). The "self" position in such a signature is the final formal, not `argc` / `argv` — and only the self
+  # position is what a downstream mutator helper would target. Filtering these out prevents false-positive matches on
+  # `helper(argc, ...)` patterns that have nothing to do with mutation.
   VARARG_FORMAL_NAMES = %w[argc argv _argc _argv].freeze
 
   def calls_helper_on_own_param?(body_text, helpers, formal_params)
@@ -947,19 +886,13 @@ module CBodyClassifier
     end
   end
 
-  # Detects `<param> = ...` (excluding `==` / `>=` / `<=` / `!=`)
-  # — the C shadowing pattern that lets a body locally
-  # reassign a formal parameter (`time = time_dup(time);`).
-  # When a formal is reassigned, downstream uses of the same
-  # identifier no longer refer to the caller's value, so a
-  # syntactic `helper(<formal>, ...)` match would falsely
-  # imply the caller's value is mutated.
+  # Detects `<param> = ...` (excluding `==` / `>=` / `<=` / `!=`) — the C shadowing pattern that lets a body locally
+  # reassign a formal parameter (`time = time_dup(time);`). When a formal is reassigned, downstream uses of the same
+  # identifier no longer refer to the caller's value, so a syntactic `helper(<formal>, ...)` match would falsely imply
+  # the caller's value is mutated.
   #
-  # The negative lookbehind on `[.\w>]` excludes struct
-  # field initialisers (`.self = self`), arrow-deref
-  # initialisers (`x->self = ...`), and identifier prefix
-  # matches (`myself = ...`) — none of those reassign the
-  # formal binding.
+  # The negative lookbehind on `[.\w>]` excludes struct field initialisers (`.self = self`), arrow-deref initialisers
+  # (`x->self = ...`), and identifier prefix matches (`myself = ...`) — none of those reassign the formal binding.
   def formal_param_reassigned?(text, param)
     text.match?(/(?<![.\w>])#{Regexp.escape(param)}\s*=(?![=])/)
   end
@@ -1046,10 +979,8 @@ class PreludeParser
   def analyse_body(body)
     return [[], "empty", nil] unless body
 
-    # `def foo; …; rescue; …; end` gives a `Prism::BeginNode`
-    # body wrapping the actual statements. The classifier
-    # only inspects the top-level statement list, so we descend
-    # into the begin-block's `statements` for the rescue-on-def
+    # `def foo; …; rescue; …; end` gives a `Prism::BeginNode` body wrapping the actual statements. The classifier only
+    # inspects the top-level statement list, so we descend into the begin-block's `statements` for the rescue-on-def
     # idiom (used widely in `pathname_builtin.rb`).
     statements_node = body.is_a?(Prism::BeginNode) ? body.statements : body
     return [[], "empty", nil] if statements_node.nil?
@@ -1352,13 +1283,10 @@ class CatalogBuilder # rubocop:disable Metrics/ClassLength
     return "leaf" if prelude_method.attrs.include?("leaf")
     return "inline_block" if prelude_method.attrs.intersect?(%w[inline_block use_block])
     return "trivial" if %w[trivial_self trivial_literal].include?(prelude_method.body_kind)
-    # `composed` prelude bodies (every prelude method whose body is
-    # neither `Primitive.attr!(:leaf)`, a literal return, nor `self`)
-    # invariably end in a Ruby method dispatch — and Ruby methods are
-    # all user-overridable, so the catalog must treat them as
-    # `dispatch` for folding-safety. Same effect as the previous
-    # `unknown` classification (both fall outside `FOLDABLE_PURITIES`)
-    # but more accurate self-documentation.
+    # `composed` prelude bodies (every prelude method whose body is neither `Primitive.attr!(:leaf)`, a literal return,
+    # nor `self`) invariably end in a Ruby method dispatch — and Ruby methods are all user-overridable, so the catalog
+    # must treat them as `dispatch` for folding-safety. Same effect as the previous `unknown` classification (both fall
+    # outside `FOLDABLE_PURITIES`) but more accurate self-documentation.
     return "dispatch" if prelude_method.body_kind == "composed"
 
     "unknown"

@@ -61,8 +61,8 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::ReturnTypeHeuristic d
     end
 
     it "digs past a begin/rescue wrapper to the protected body's tail" do
-      # The body is a BeginNode; tail_expression recurses into its
-      # protected statements rather than stopping at the wrapper.
+      # The body is a BeginNode; tail_expression recurses into its protected statements rather than stopping at the
+      # wrapper.
       type = extract_from(<<~RUBY)
         def m
           begin

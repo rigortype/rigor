@@ -12,8 +12,7 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
 
   describe "non-expression node exclusion" do
     it "counts only the value expression, not its Program/Statements wrappers" do
-      # `1` parses as Program > Statements > IntegerNode; the two
-      # wrappers are non-expressions and must not be counted.
+      # `1` parses as Program > Statements > IntegerNode; the two wrappers are non-expressions and must not be counted.
       result = scan("1\n")
       expect(result.total).to eq(1)
       expect(result.tier_counts.fetch(:constant)).to eq(1)
@@ -21,10 +20,8 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
     end
 
     it "skips the ArgumentsNode container but counts the call and its arguments" do
-      # `foo(1, 2)` => Call + Arguments + two Integers (+ Program /
-      # Statements). Counted: the CallNode (opaque — foo is unknown)
-      # and the two Integer literals (constant). Arguments / Program /
-      # Statements are skipped.
+      # `foo(1, 2)` => Call + Arguments + two Integers (+ Program / Statements). Counted: the CallNode (opaque — foo is
+      # unknown) and the two Integer literals (constant). Arguments / Program / Statements are skipped.
       result = scan("foo(1, 2)\n")
       expect(result.total).to eq(3)
       expect(result.tier_counts.fetch(:constant)).to eq(2)
@@ -32,8 +29,8 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
     end
 
     it "does not count parameter declarations in a method definition" do
-      # The def's parameter list and each RequiredParameterNode are
-      # non-expressions; the parameter *reads* in the body are not.
+      # The def's parameter list and each RequiredParameterNode are non-expressions; the parameter *reads* in the body
+      # are not.
       result = scan("def f(a, b)\n  a\nend\n")
       expect(result.total).to eq(2) # the DefNode + the `a` read
     end
@@ -101,8 +98,8 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
     end
 
     it "precision_ratio and opaque_ratio handle a zero-expression file without error" do
-      # A source containing only comments has no expression nodes —
-      # totals will be 0 and both ratios must not divide by zero.
+      # A source containing only comments has no expression nodes — totals will be 0 and both ratios must not divide by
+      # zero.
       result = scan("# no expressions\n")
       expect(result.total).to eq(0)
       expect(result.precision_ratio).to eq(1.0)
@@ -142,9 +139,8 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
   end
 
   describe "FileResult tier accessors (exact per-tier counts)" do
-    # The existing helper tests assert ratios and self-referential sums,
-    # so the per-tier `tier_counts.fetch` reads survive mutation. Pin the
-    # exact counts to bite a wrong key / default.
+    # The existing helper tests assert ratios and self-referential sums, so the per-tier `tier_counts.fetch` reads
+    # survive mutation. Pin the exact counts to bite a wrong key / default.
     let(:result) do
       described_class::FileResult.new(
         total: 9,
@@ -169,9 +165,8 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
     end
 
     it "defaults absent tiers to zero across every accessor" do
-      # An empty count map exercises each `fetch(tier, 0)` default — the
-      # present-key cases above never reach it, so the default survives
-      # mutation unless a key is genuinely absent.
+      # An empty count map exercises each `fetch(tier, 0)` default — the present-key cases above never reach it, so the
+      # default survives mutation unless a key is genuinely absent.
       empty = described_class::FileResult.new(total: 0, tier_counts: {})
 
       expect(empty.precise_count).to eq(0)

@@ -4,15 +4,12 @@ require "spec_helper"
 
 # Block-form `inject` / `reduce` return-type fold.
 #
-# Part 1 (soundness): the RBS generic `(S) { (S, E) -> S } -> S` binds
-# `S` from a SINGLE block pass (acc=seed, elem=element-join), so a
-# multiplying accumulator over `(1..5)` typed `int<1, 5>` against a
-# runtime of 120 — an interval the runtime escapes. The accumulator now
-# reaches a capped fixpoint, converging to the nominal carrier.
+# Part 1 (soundness): the RBS generic `(S) { (S, E) -> S } -> S` binds `S` from a SINGLE block pass (acc=seed,
+# elem=element-join), so a multiplying accumulator over `(1..5)` typed `int<1, 5>` against a runtime of 120 — an
+# interval the runtime escapes. The accumulator now reaches a capped fixpoint, converging to the nominal carrier.
 #
-# Part 2 (precision): a fully-constant finite receiver threads the
-# running constant through per-element block evaluation to the exact
-# folded value.
+# Part 2 (precision): a fully-constant finite receiver threads the running constant through per-element block evaluation
+# to the exact folded value.
 RSpec.describe "block-form inject/reduce fold", type: :runner do
   def dumped_type(source)
     result = analyze(<<~RUBY)
@@ -25,9 +22,8 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
 
   describe "Part 1 — soundness (no value-bounded interval the runtime escapes)" do
     it "the multiplying accumulator over a constant range never types a value interval" do
-      # Regression: this exact shape typed `int<1, 5>` (runtime 120) — the
-      # single-pass accumulator bug. The folded answer (Part 2) is the
-      # exact value; what MUST never reappear is the unsound interval.
+      # Regression: this exact shape typed `int<1, 5>` (runtime 120) — the single-pass accumulator bug. The folded
+      # answer (Part 2) is the exact value; what MUST never reappear is the unsound interval.
       message = dumped_type("dump_type((1..5).inject(1) { |acc, i| acc * i })")
       expect(message).not_to include("int<1, 5>")
       expect(message).to include("120")
@@ -103,9 +99,8 @@ RSpec.describe "block-form inject/reduce fold", type: :runner do
       RUBY
       messages = result.diagnostics.select { |d| d.message.start_with?("dump_type") }.map(&:message)
       expect(messages[0]).to include("6")
-      # Write-back: `sink` carries the appended element types, proving the
-      # ADR-56 statement-level write-back ran despite this fold answering
-      # the call's return type.
+      # Write-back: `sink` carries the appended element types, proving the ADR-56 statement-level write-back ran despite
+      # this fold answering the call's return type.
       expect(messages[1]).to include("Array")
       expect(messages[1]).to match(/1.*2.*3/)
     end

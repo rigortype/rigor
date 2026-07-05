@@ -1,24 +1,20 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Self-mutation testing of `lib/rigor/` — Product C (see
-# docs/notes/20260618-self-mutation-testing-plan.md). Points the productized
-# mutation machinery INWARD at Rigor's own implementation and fuses two kill
-# oracles:
+# Self-mutation testing of `lib/rigor/` — Product C (see docs/notes/20260618-self-mutation-testing-plan.md). Points the
+# productized mutation machinery INWARD at Rigor's own implementation and fuses two kill oracles:
 #
 #   * the TYPE axis  — Rigor's own self-check (`DiagnosticOracle`): does a
 #     type-visible breakage make `rigor check lib` newly complain?
 #   * the TEST axis  — Rigor's own RSpec suite (`TestSuiteOracle`): does the
 #     covering spec go red when the implementation is broken?
 #
-# A mutation killed by neither is an *implementation hole* — code that can be
-# broken without either the type net or a test noticing. The report attributes
-# each survivor so the cheaper missing guard is obvious: add a spec, or add a
-# type / sharpen a self-check rule.
+# A mutation killed by neither is an *implementation hole* — code that can be broken without either the type net or a
+# test noticing. The report attributes each survivor so the cheaper missing guard is obvious: add a spec, or add a type
+# / sharpen a self-check rule.
 #
-# This is a thin driver over `Rigor::Protection::{MutationScanner,TestSuiteOracle}`
-# (one source of truth with ADR-63 Tier 2 / ADR-70). It adds only the two things
-# Product C needs over Product B (mutating a *user's* code):
+# This is a thin driver over `Rigor::Protection::{MutationScanner,TestSuiteOracle}` (one source of truth with ADR-63
+# Tier 2 / ADR-70). It adds only the two things Product C needs over Product B (mutating a *user's* code):
 #
 #   1. The TEST runner uses Rigor's OWN bundle. `TestSuiteOracle`'s default
 #      runner strips Bundler's env (right for a *foreign* project's Gemfile,
@@ -28,12 +24,10 @@
 #      `lib/rigor/a/b.rb -> spec/rigor/a/b_spec.rb`), so the test axis runs only
 #      the relevant spec instead of the ~6,300-example suite per mutant.
 #
-# The TYPE oracle here is the IN-PROCESS worktree engine, which is sound and the
-# most rule-accurate choice: the engine is loaded once (clean) at startup and a
-# mutation is only ever analysed *input* (the type axis never writes to disk) —
-# so mutating the analyzer cannot corrupt the loaded oracle. The plan's
-# independent (mise / clean-HEAD) oracle is for the broad-fuzz / robustness
-# variant where rule-parity does not matter; not needed for this fused measure.
+# The TYPE oracle here is the IN-PROCESS worktree engine, which is sound and the most rule-accurate choice: the engine
+# is loaded once (clean) at startup and a mutation is only ever analysed *input* (the type axis never writes to disk) —
+# so mutating the analyzer cannot corrupt the loaded oracle. The plan's independent (mise / clean-HEAD) oracle is for
+# the broad-fuzz / robustness variant where rule-parity does not matter; not needed for this fused measure.
 #
 # Run inside the Flake:
 #   nix --extra-experimental-features 'nix-command flakes' develop -c \
@@ -58,10 +52,9 @@ require "rigor/protection/mutation_scanner"
 require "rigor/protection/test_suite_oracle"
 
 module RigorSelfMutation
-  # Maps a `lib/rigor/**.rb` path to its convention spec, or nil when none
-  # exists. Tier 0 of the plan's coverage-guided selection — cheap and exact
-  # for the 1:1 majority; a full `{line -> specs}` coverage index is the
-  # precise fallback (future).
+  # Maps a `lib/rigor/**.rb` path to its convention spec, or nil when none exists. Tier 0 of the plan's coverage-guided
+  # selection — cheap and exact for the 1:1 majority; a full `{line -> specs}` coverage index is the precise fallback
+  # (future).
   module SpecMap
     module_function
 
@@ -71,9 +64,8 @@ module RigorSelfMutation
     end
   end
 
-  # The in-bundle spec runner: plain `system` so the rspec subprocess inherits
-  # Rigor's OWN Bundler env (the SUT bundle is Rigor's). Output suppressed
-  # unless --verbose.
+  # The in-bundle spec runner: plain `system` so the rspec subprocess inherits Rigor's OWN Bundler env (the SUT bundle
+  # is Rigor's). Output suppressed unless --verbose.
   class BundledRunner
     def initialize(verbose:)
       @opts = verbose ? {} : { out: File::NULL, err: File::NULL }
@@ -109,13 +101,11 @@ module RigorSelfMutation
       report(outcomes)
     end
 
-    # Whole-tree backlog without a per-mutant suite run (the efficient pass).
-    # For each file, the cheap in-process TYPE axis over EVERY dispatch site
-    # (`:all`); a type-survivor whose line the suite never executed (per the
-    # `--coverage-gap` index) is provably test-unprotected — a high-confidence
-    # implementation hole. A type-survivor on a covered line is only *maybe*
-    # killed (covered ≠ asserted), so it is reported separately as needing the
-    # expensive fused verification.
+    # Whole-tree backlog without a per-mutant suite run (the efficient pass). For each file, the cheap in-process TYPE
+    # axis over EVERY dispatch site (`:all`); a type-survivor whose line the suite never executed (per the
+    # `--coverage-gap` index) is provably test-unprotected — a high-confidence implementation hole. A type-survivor on a
+    # covered line is only *maybe* killed (covered ≠ asserted), so it is reported separately as needing the expensive
+    # fused verification.
     def coverage_gap_sweep(files)
       holes = []
       needs_check = 0
@@ -133,8 +123,7 @@ module RigorSelfMutation
           end
         end
         holes.concat(file_holes)
-        # Stream a per-file JSONL line, flushed, so a killed run keeps its
-        # partial backlog (the sweep is the slow part).
+        # Stream a per-file JSONL line, flushed, so a killed run keeps its partial backlog (the sweep is the slow part).
         out&.puts(JSON.generate(path: path, holes: file_holes))
         out&.flush
       end
@@ -143,25 +132,20 @@ module RigorSelfMutation
       report_coverage_gap(holes, needs_check)
     end
 
-    # A type-survivor is a high-confidence hole only when its ENCLOSING METHOD
-    # is entirely uncovered (a never-executed def). Ruby line-coverage
-    # attributes a multi-line expression's execution to its first line, so a
-    # bare "line ∉ covered set" check false-flags the continuation lines of a
-    # covered expression — e.g. a tested `to_h`'s hash-literal entries read as
-    # uncovered. Method-level coldness removes that artifact: every site inside
-    # a warm method is treated as covered. (Trade-off: a cold branch inside a
-    # warm method is not flagged — accepted, this favours precision over recall
-    # for a trustworthy backlog.) Class-body / constant sites have no enclosing
-    # def to anchor on, suffer the same artifact, and are data not logic — they
-    # are never high-confidence holes.
+    # A type-survivor is a high-confidence hole only when its ENCLOSING METHOD is entirely uncovered (a never-executed
+    # def). Ruby line-coverage attributes a multi-line expression's execution to its first line, so a bare "line ∉
+    # covered set" check false-flags the continuation lines of a covered expression — e.g. a tested `to_h`'s
+    # hash-literal entries read as uncovered. Method-level coldness removes that artifact: every site inside a warm
+    # method is treated as covered. (Trade-off: a cold branch inside a warm method is not flagged — accepted, this
+    # favours precision over recall for a trustworthy backlog.) Class-body / constant sites have no enclosing def to
+    # anchor on, suffer the same artifact, and are data not logic — they are never high-confidence holes.
     def cold_site_classifier(source, executed)
       defs = method_ranges(source).map { |r| [r, r.none? { |ln| executed.include?(ln) }] }
       lambda do |line|
         enclosing = defs.select { |r, _| r.cover?(line) }.min_by { |r, _| r.size }
-        # A site with no enclosing def is class-body/constant data — not a
-        # high-confidence hole (it suffers the multi-line attribution artifact
-        # with no method to anchor on). The signal is trustworthy only inside
-        # a def, where coldness means the whole method never ran.
+        # A site with no enclosing def is class-body/constant data — not a high-confidence hole (it suffers the
+        # multi-line attribution artifact with no method to anchor on). The signal is trustworthy only inside a def,
+        # where coldness means the whole method never ran.
         enclosing ? enclosing.last : false
       end
     end
@@ -188,10 +172,9 @@ module RigorSelfMutation
       candidates.select { |f| f.end_with?(".rb") && File.file?(f) }
     end
 
-    # The test axis temporarily overwrites the real lib file on disk (the
-    # scanner restores per-mutant in an `ensure`). Refuse to start with those
-    # files already dirty so an aborted run cannot be confused with the user's
-    # own edits, and so the restore trap cannot stomp uncommitted work.
+    # The test axis temporarily overwrites the real lib file on disk (the scanner restores per-mutant in an `ensure`).
+    # Refuse to start with those files already dirty so an aborted run cannot be confused with the user's own edits, and
+    # so the restore trap cannot stomp uncommitted work.
     def guard_clean!(files)
       return if @options[:type_only]
 
@@ -202,9 +185,8 @@ module RigorSelfMutation
             "#{dirty.join("\n  ")}\n(or pass --type-only, which never writes to disk)"
     end
 
-    # Belt-and-suspenders over the scanner's per-mutant `ensure`: a hard
-    # interrupt mid-suite would leave a mutant on disk, so restore the targets
-    # from git on the way out.
+    # Belt-and-suspenders over the scanner's per-mutant `ensure`: a hard interrupt mid-suite would leave a mutant on
+    # disk, so restore the targets from git on the way out.
     def install_restore_trap(files)
       return if @options[:type_only]
 

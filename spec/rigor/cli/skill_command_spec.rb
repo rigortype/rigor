@@ -7,11 +7,9 @@ require "tmpdir"
 require "rigor/cli"
 require "rigor/cli/skill_command"
 
-# `rigor skill` exposes the SKILL.md files Rigor bundles under
-# `skills/` (`rigor-project-init`, `rigor-baseline-reduce`,
-# `rigor-plugin-author`). The integration-style examples here
-# exercise the real on-disk skill directory so the contract the
-# bundled skills + AI agents depend on is verified end-to-end.
+# `rigor skill` exposes the SKILL.md files Rigor bundles under `skills/` (`rigor-project-init`, `rigor-baseline-reduce`,
+# `rigor-plugin-author`). The integration-style examples here exercise the real on-disk skill directory so the contract
+# the bundled skills + AI agents depend on is verified end-to-end.
 RSpec.describe Rigor::CLI::SkillCommand do
   def run(argv)
     out = StringIO.new
@@ -43,8 +41,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
   end
 
   describe "describe" do
-    # `describe` probes the *current working directory*, so each
-    # example sets up a throwaway project root and runs from inside it.
+    # `describe` probes the *current working directory*, so each example sets up a throwaway project root and runs from
+    # inside it.
     def describe_in(files, argv = ["describe"])
       Dir.mktmpdir do |dir|
         files.each do |relative, contents|
@@ -65,8 +63,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("## Recommended next step")
       expect(out).to include("## All skills you can run next")
       expect(out).to include("## For the agent")
-      # P1-C: the agent prompt teaches check-aware routing (describe itself
-      # stays presence-only — it never runs `rigor check`).
+      # P1-C: the agent prompt teaches check-aware routing (describe itself stays presence-only — it never runs `rigor
+      # check`).
       expect(out).to include("refine the choice")
       expect(out).to include("→ rigor-monkeypatch-resolve")
     end
@@ -94,10 +92,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
     end
 
     it "does not push rigor-baseline-reduce as the headline when a baseline exists" do
-      # A present baseline is a healthy onboarding-complete state, not a chore
-      # to grind down \u2014 the headline routes to an additive step instead, while
-      # baseline-reduce stays available in the catalogue for the user who
-      # chooses it.
+      # A present baseline is a healthy onboarding-complete state, not a chore to grind down \u2014 the headline routes
+      # to an additive step instead, while baseline-reduce stays available in the catalogue for the user who chooses it.
       _status, out, = describe_in(
         {
           ".rigor.dist.yml" => "target_ruby: '3.3'\n",
@@ -145,9 +141,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
       expect(out).to include("Community RBS:  collection installed")
     end
 
-    # NB: assert on the recommendation *reason* (unique to the headline),
-    # not the bare skill name — the "For the agent" routing block also
-    # mentions `→ rigor-plugin-tune` as a conditional hint.
+    # NB: assert on the recommendation *reason* (unique to the headline), not the bare skill name — the "For the agent"
+    # routing block also mentions `→ rigor-plugin-tune` as a conditional hint.
     it "recommends rigor-plugin-tune for a configured Rails app with no Rails plugins enabled" do
       _status, out, = describe_in(
         {
@@ -292,9 +287,8 @@ RSpec.describe Rigor::CLI::SkillCommand do
 
   describe "--full <name>" do
     it "prints the SKILL.md body followed by each references/*.md inline" do
-      # rigor-doctor is a thin shell whose step detail lives in
-      # references/01-checks.md; --full re-assembles the complete,
-      # version-current procedure so a frozen copy can re-fetch it.
+      # rigor-doctor is a thin shell whose step detail lives in references/01-checks.md; --full re-assembles the
+      # complete, version-current procedure so a frozen copy can re-fetch it.
       status, out, = run(%w[--full rigor-doctor])
       expect(status).to eq(0)
       expect(out).to start_with("# Rigor skill: rigor-doctor\n")
@@ -302,8 +296,7 @@ RSpec.describe Rigor::CLI::SkillCommand do
       # The references are appended, each behind a labelled separator.
       expect(out).to include("references/01-checks.md")
       expect(out).to include("# 01 — The four checks")
-      # The separator names the shipping version so the reader can tell
-      # a stale vendored copy from the installed one.
+      # The separator names the shipping version so the reader can tell a stale vendored copy from the installed one.
       expect(out).to include("bundled with rigortype #{Rigor::VERSION}")
     end
 

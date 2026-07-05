@@ -99,8 +99,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
     end
 
     it "escapes tokens with spaces" do
-      # Shellwords.join uses Shellwords.escape per token, which
-      # backslash-escapes rather than quoting: "initial commit" → "initial\ commit"
+      # Shellwords.join uses Shellwords.escape per token, which backslash-escapes rather than quoting: "initial commit"
+      # → "initial\ commit"
       arg = tuple(c("git"), c("commit"), c("-m"), c("initial commit"))
       expect(fold(:join, arg)).to eq(c("git commit -m initial\\ commit"))
     end

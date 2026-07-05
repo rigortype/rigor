@@ -8,9 +8,8 @@ RSpec.describe Rigor::Source::ConstantPath do
     Prism.parse(source).value.statements.body.first
   end
 
-  # A constant path whose base is a runtime expression (`expr::Bar`).
-  # Prism models the left side as the dynamic node; the trailing `::Bar`
-  # is a ConstantPathNode whose parent is that non-constant node.
+  # A constant path whose base is a runtime expression (`expr::Bar`). Prism models the left side as the dynamic node;
+  # the trailing `::Bar` is a ConstantPathNode whose parent is that non-constant node.
   def dynamic_base_path
     node("bar::Baz")
   end

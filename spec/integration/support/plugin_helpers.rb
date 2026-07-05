@@ -5,13 +5,10 @@ require "tmpdir"
 
 module Rigor
   module IntegrationSupport
-    # Shared helpers for the plugin integration specs under
-    # `spec/integration/plugins/` (production plugins) and
-    # `spec/integration/examples/` (walkthrough samples).
-    # Auto-included for files that
-    # match the path pattern (see RSpec.configure block at the
-    # bottom of this file). Specs explicitly `include` this
-    # module if they live elsewhere.
+    # Shared helpers for the plugin integration specs under `spec/integration/plugins/` (production plugins)
+    # and `spec/integration/examples/` (walkthrough samples). Auto-included for files that match the path
+    # pattern (see RSpec.configure block at the bottom of this file). Specs explicitly `include` this module if
+    # they live elsewhere.
     #
     # ## Required `let` bindings
     #
@@ -19,58 +16,38 @@ module Rigor
     #
     #     let(:plugin_class) { Rigor::Plugin::SomePluginClass }
     #
-    # The helpers read `plugin_class` via RSpec's `let` /
-    # method-resolution surface, so subsequent calls do NOT
-    # repeat the class on each invocation. Plugin id is derived
-    # from `plugin_class.manifest.id`.
+    # The helpers read `plugin_class` via RSpec's `let` / method-resolution surface, so subsequent calls do NOT
+    # repeat the class on each invocation. Plugin id is derived from `plugin_class.manifest.id`.
     #
     # ## What each helper does
     #
-    # - `run_plugin(source:, ...)` — materialises a tmpdir
-    #   containing `demo.rb` (and optionally extra `files:`),
-    #   builds a `Rigor::Configuration` listing the plugin,
-    #   runs `Rigor::Analysis::Runner` against it, and returns
-    #   the `Rigor::Analysis::Result`. Auto-`unregister!`s the
-    #   plugin registry before each invocation so the loader's
-    #   newly-registered diff sees a fresh state.
-    # - `plugin_diagnostics(result)` — filters a result down to
-    #   diagnostics whose `source_family` matches the plugin's
-    #   manifest id (`"plugin.<id>"`).
-    # - `build_plugin_requirer` — returns the `requirer` lambda
-    #   the plugin loader expects. Specs that drive
-    #   `Analysis::Runner` themselves (e.g. routes' multi-run
-    #   cache test) call this directly.
-    # - `materialize_files(dir, files)` — convenience for specs
-    #   that build their tmpdir manually.
-    # - `run_plugin_in_dir(dir:, source:, ...)` — lower-level
-    #   variant that accepts an existing tmpdir, for specs that
-    #   need to run multiple analyses against the same project
-    #   (e.g. cache invalidation tests).
+    # - `run_plugin(source:, ...)` — materialises a tmpdir containing `demo.rb` (and optionally extra
+    #   `files:`), builds a `Rigor::Configuration` listing the plugin, runs `Rigor::Analysis::Runner` against
+    #   it, and returns the `Rigor::Analysis::Result`. Auto-`unregister!`s the plugin registry before each
+    #   invocation so the loader's newly-registered diff sees a fresh state.
+    # - `plugin_diagnostics(result)` — filters a result down to diagnostics whose `source_family` matches the
+    #   plugin's manifest id (`"plugin.<id>"`).
+    # - `build_plugin_requirer` — returns the `requirer` lambda the plugin loader expects. Specs that drive
+    #   `Analysis::Runner` themselves (e.g. routes' multi-run cache test) call this directly.
+    # - `materialize_files(dir, files)` — convenience for specs that build their tmpdir manually.
+    # - `run_plugin_in_dir(dir:, source:, ...)` — lower-level variant that accepts an existing tmpdir, for
+    #   specs that need to run multiple analyses against the same project (e.g. cache invalidation tests).
     #
     # ## Why not `before { unregister! }` automation?
     #
-    # `run_plugin` calls `Rigor::Plugin.unregister!` at the
-    # start of every invocation. Specs may STILL declare
-    # `before { Rigor::Plugin.unregister! }` /
-    # `after { Rigor::Plugin.unregister! }` for visibility — the
-    # belt-and-braces is harmless and surfaces the lifecycle
-    # for readers.
+    # `run_plugin` calls `Rigor::Plugin.unregister!` at the start of every invocation. Specs may STILL declare
+    # `before { Rigor::Plugin.unregister! }` / `after { Rigor::Plugin.unregister! }` for visibility — the
+    # belt-and-braces is harmless and surfaces the lifecycle for readers.
     #
     # ## Why `cache_store: :shared` is the default
     #
-    # The persistent `Cache::Store` caches the per-run RBS
-    # environment, constant table, instance/singleton
-    # definitions, and known-class set. With `cache_store: nil`
-    # every call paid the full ~250ms cold env build; using one
-    # process-wide store warms the cache after the first call so
-    # subsequent calls are ~30ms each (≈7× faster). The
-    # descriptor's `gems` / `files` / `configs` / `plugins`
-    # slots key the entries so different plugins, sigs, and
-    # libraries automatically land in separate slots —
-    # cross-test contamination is impossible. Tests that need to
-    # assert cache behaviour explicitly (e.g.
-    # `routes_plugin_spec`'s invalidation surface) pass an
-    # explicit `cache_store:` to opt out.
+    # The persistent `Cache::Store` caches the per-run RBS environment, constant table, instance/singleton
+    # definitions, and known-class set. With `cache_store: nil` every call paid the full ~250ms cold env build;
+    # using one process-wide store warms the cache after the first call so subsequent calls are ~30ms each
+    # (≈7× faster). The descriptor's `gems` / `files` / `configs` / `plugins` slots key the entries so
+    # different plugins, sigs, and libraries automatically land in separate slots — cross-test contamination is
+    # impossible. Tests that need to assert cache behaviour explicitly (e.g. `routes_plugin_spec`'s
+    # invalidation surface) pass an explicit `cache_store:` to opt out.
     module PluginHelpers
       class << self
         def shared_cache_store
@@ -82,24 +59,16 @@ module Rigor
         end
       end
 
-      # Sentinel default. Callers can pass `:shared` for the
-      # process-wide store, an explicit `Cache::Store`, or `nil`
-      # for no caching (the historical default — every call pays
-      # the cold ~250ms env build). The process-wide store is
-      # opt-in per spec file via `cache_store: :shared` (or via
-      # the `default_run_plugin_cache_store` let override) because
-      # it is only a net win for spec files with many `run_plugin`
-      # calls: cache I/O overhead exceeds the per-call env build
-      # savings up to and including ≈17 examples per spec file
-      # (measured: a 17-example file got ~12 % slower under
-      # shared cache). The crossover sits closer to the high end
-      # of plugin-spec example counts, so only the heaviest files
-      # opt in today — sorbet's 48 examples shrink from 13.1 s to
-      # 4.7 s with the shared cache (≈3× faster). Spec files
-      # whose plugin's `cache_for(...)` descriptor is incomplete
-      # (does not include the project files the producer reads
-      # from) MUST avoid the shared cache because stale producer
-      # output leaks between examples.
+      # Sentinel default. Callers can pass `:shared` for the process-wide store, an explicit `Cache::Store`, or
+      # `nil` for no caching (the historical default — every call pays the cold ~250ms env build). The
+      # process-wide store is opt-in per spec file via `cache_store: :shared` (or via the
+      # `default_run_plugin_cache_store` let override) because it is only a net win for spec files with many
+      # `run_plugin` calls: cache I/O overhead exceeds the per-call env build savings up to and including ≈17
+      # examples per spec file (measured: a 17-example file got ~12 % slower under shared cache). The crossover
+      # sits closer to the high end of plugin-spec example counts, so only the heaviest files opt in today —
+      # sorbet's 48 examples shrink from 13.1 s to 4.7 s with the shared cache (≈3× faster). Spec files whose
+      # plugin's `cache_for(...)` descriptor is incomplete (does not include the project files the producer
+      # reads from) MUST avoid the shared cache because stale producer output leaks between examples.
       DEFAULT_CACHE_STORE = :default
 
       def default_run_plugin_cache_store
@@ -152,10 +121,8 @@ module Rigor
       end
 
       def build_plugin_requirer
-        # Capture plugin_class in a local so the lambda doesn't
-        # close over `self` (specs may share a `let`-resolved
-        # binding across nested describes; capturing avoids
-        # surprising re-evaluation).
+        # Capture plugin_class in a local so the lambda doesn't close over `self` (specs may share a
+        # `let`-resolved binding across nested describes; capturing avoids surprising re-evaluation).
         plugin_class_local = plugin_class
         lambda do |_name|
           Rigor::Plugin.register(plugin_class_local)

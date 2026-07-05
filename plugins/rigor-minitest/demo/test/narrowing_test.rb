@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
-# Worked example — Minitest narrowing through assert_* /
-# refute_* / _(x).must_* / .wont_*. Without rigor-minitest the
-# downstream `.upcase` / `.length` / `+` calls fall through
-# `Dynamic[top]` (no diagnostic, but also no precision); the
-# plugin emits a `post_return_fact` so the local resolves at
-# the narrowed type for the rest of the test body.
+# Worked example — Minitest narrowing through assert_* / refute_* / _(x).must_* / .wont_*. Without
+# rigor-minitest the downstream `.upcase` / `.length` / `+` calls fall through `Dynamic[top]` (no diagnostic,
+# but also no precision); the plugin emits a `post_return_fact` so the local resolves at the narrowed type
+# for the rest of the test body.
 
 require "minitest/autorun"
 

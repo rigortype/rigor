@@ -2,34 +2,29 @@
 
 require "spec_helper"
 
-# Top-level constant the `.materialize` tests use as a
-# `Blueprint#klass_name`. Defined locally so this spec file is
-# self-contained — under `parallel_test` two workers may split
-# `blueprint_spec.rb` and `registry_spec.rb` across processes,
-# and `registry_spec` previously borrowed
-# `RigorPluginBlueprintSpecPlugin` from the blueprint spec
-# which left it `NameError`-prone in isolation.
+# Top-level constant the `.materialize` tests use as a `Blueprint#klass_name`. Defined locally so this spec file is
+# self-contained — under `parallel_test` two workers may split `blueprint_spec.rb` and `registry_spec.rb` across
+# processes, and `registry_spec` previously borrowed `RigorPluginBlueprintSpecPlugin` from the blueprint spec which left
+# it `NameError`-prone in isolation.
 class RigorPluginRegistrySpecPlugin < Rigor::Plugin::Base
   manifest(id: "registry-spec-plugin", version: "0.0.1")
 end
 
-# ADR-25 — a named plugin class declaring `signature_paths:`, for
-# the `Registry#signature_paths` aggregation test (resolution
-# needs a named constant).
+# ADR-25 — a named plugin class declaring `signature_paths:`, for the `Registry#signature_paths` aggregation test
+# (resolution needs a named constant).
 class RigorPluginRegistrySpecSigPlugin < Rigor::Plugin::Base
   manifest(id: "registry-spec-sig-plugin", version: "0.0.1", signature_paths: ["sig"])
 end
 
-# ADR-26 — a named plugin class declaring `open_receivers:`, for
-# the `Registry#open_receivers` / `#open_receiver?` tests.
+# ADR-26 — a named plugin class declaring `open_receivers:`, for the `Registry#open_receivers` / `#open_receiver?`
+# tests.
 class RigorPluginRegistrySpecOpenPlugin < Rigor::Plugin::Base
   manifest(id: "registry-spec-open-plugin", version: "0.0.1",
            open_receivers: ["ActiveRecord::Relation"])
 end
 
-# ADR-28 — a named plugin class declaring `protocol_contracts:`,
-# for the `Registry#protocol_contracts` / `#contracts_for_path`
-# tests.
+# ADR-28 — a named plugin class declaring `protocol_contracts:`, for the `Registry#protocol_contracts` /
+# `#contracts_for_path` tests.
 class RigorPluginRegistrySpecContractPlugin < Rigor::Plugin::Base
   manifest(
     id: "registry-spec-contract-plugin", version: "0.0.1",
@@ -294,9 +289,8 @@ RSpec.describe Rigor::Plugin::Registry do
       registry = described_class.new(plugins: [dynamic_plugin, specifier_plugin])
       index = registry.contribution_index
 
-      # dynamic_gates: keyed per plugin instance, grouping happens by
-      # `p.class.dynamic_returns` — the gate reflects only THIS
-      # plugin's declared method names, not the other plugin's.
+      # dynamic_gates: keyed per plugin instance, grouping happens by `p.class.dynamic_returns` — the gate reflects only
+      # THIS plugin's declared method names, not the other plugin's.
       expect(index.dynamic_candidate_for?(dynamic_plugin, :unwrap)).to be(true)
       expect(index.dynamic_candidate_for?(dynamic_plugin, :unwrap!)).to be(true)
       expect(index.dynamic_candidate_for?(dynamic_plugin, :assert_kind_of)).to be(false)
@@ -326,8 +320,8 @@ RSpec.describe Rigor::Plugin::Registry do
       )
       index = registry.contribution_index
 
-      # The union gate must include names from BOTH plugins, proving
-      # `union_gate` actually merges (not just keeps the last plugin's set).
+      # The union gate must include names from BOTH plugins, proving `union_gate` actually merges (not just keeps the
+      # last plugin's set).
       expect(index.dispatch_candidate?(:unwrap)).to be(true)
       expect(index.dispatch_candidate?(:kilometers)).to be(true)
       expect(index.dispatch_candidate?(:nonexistent)).to be(false)
@@ -359,13 +353,12 @@ RSpec.describe Rigor::Plugin::Registry do
       registry = described_class.new(plugins: [klass_a.new(services: services), klass_b.new(services: services)])
       index = registry.contribution_index
 
-      # #each over entries + #method_names per entry populate BOTH
-      # names for entry_a and the one name for entry_b, in
+      # #each over entries + #method_names per entry populate BOTH names for entry_a and the one name for entry_b, in
       # (plugin, declaration) order.
       expect(index.block_entries_for(:get)).to eq([entry_a, entry_b])
       expect(index.block_entries_for(:post)).to eq([entry_a])
-      # #fetch's default value kicks in for an unknown key, and the
-      # SAME frozen empty array is returned every time (identity).
+      # #fetch's default value kicks in for an unknown key, and the SAME frozen empty array is returned every time
+      # (identity).
       expect(index.block_entries_for(:missing)).to eq([])
       expect(index.block_entries_for(:missing)).to be(index.block_entries_for(:never))
     end

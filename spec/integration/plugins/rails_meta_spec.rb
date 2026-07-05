@@ -1,14 +1,12 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-rails/`. Verifies the
-# Tier 1+2 Rails meta-gem's contract:
+# Integration spec for `plugins/rigor-rails/`. Verifies the Tier 1+2 Rails meta-gem's contract:
 #
-# Requiring `rigor-rails` side-effects a `Rigor::Plugin.register`
-# call for every Tier 1+2 plugin class — so the plugin loader can
-# later look them up by id when `.rigor.yml` enumerates them.
+# Requiring `rigor-rails` side-effects a `Rigor::Plugin.register` call for every Tier 1+2 plugin class — so the
+# plugin loader can later look them up by id when `.rigor.yml` enumerates them.
 #
-# All sub-plugins ship bundled in the `rigortype` gem; no separate
-# $LOAD_PATH manipulation or gemspec loading is needed.
+# All sub-plugins ship bundled in the `rigortype` gem; no separate $LOAD_PATH manipulation or gemspec loading
+# is needed.
 
 require "spec_helper"
 require "rigor-rails"

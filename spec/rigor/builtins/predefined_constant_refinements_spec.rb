@@ -38,8 +38,8 @@ RSpec.describe Rigor::Builtins::PredefinedConstantRefinements do
     end
 
     it "does NOT fold Float::NAN (non-reflexive == would break the Constant equality contract)" do
-      # Float::NAN is a non-empty... it's not a String, so tier 2 also
-      # declines — the lookup falls through to the RBS Nominal[Float].
+      # Float::NAN is a non-empty... it's not a String, so tier 2 also declines — the lookup falls through to the RBS
+      # Nominal[Float].
       expect(described_class.lookup("Float::NAN")).to be_nil
     end
   end
@@ -70,18 +70,15 @@ RSpec.describe Rigor::Builtins::PredefinedConstantRefinements do
     end
 
     it "returns nil for a project-defined constant absent from the analyzer process" do
-      # MyProject::FOO is not loaded into the analyzer — const_get raises
-      # NameError and we fall through to the RBS tier.
+      # MyProject::FOO is not loaded into the analyzer — const_get raises NameError and we fall through to the RBS tier.
       expect(described_class.lookup("MyProject::UNDEFINED_FOO")).to be_nil
     end
 
     it "does not invoke const_missing for a const_missing-resolved path (e.g. Digest::UUID)" do
-      # Analysing a reference must never drive the analyzer's own runtime
-      # through a const_missing hook: `Digest::UUID` makes Digest.const_missing
-      # run `require "digest/uuid"`, and a missing optional library raises
-      # LoadError (a ScriptError, not NameError) — which used to abort the
-      # whole run. The const_defined?(false) guard answers "resolvable here?"
-      # without the side effect.
+      # Analysing a reference must never drive the analyzer's own runtime through a const_missing hook: `Digest::UUID`
+      # makes Digest.const_missing run `require "digest/uuid"`, and a missing optional library raises LoadError (a
+      # ScriptError, not NameError) — which used to abort the whole run. The const_defined?(false) guard answers
+      # "resolvable here?" without the side effect.
       called = false
       probe = Module.new do
         define_singleton_method(:const_missing) do |_name|
@@ -97,9 +94,8 @@ RSpec.describe Rigor::Builtins::PredefinedConstantRefinements do
     end
 
     it "returns nil (rescuing LoadError) when an autoload target library is missing" do
-      # An autoload-registered constant passes the const_defined? guard, so
-      # const_get fires the autoload; a missing target raises LoadError, which
-      # the rescue must absorb into a fall-through rather than crash the run.
+      # An autoload-registered constant passes the const_defined? guard, so const_get fires the autoload; a missing
+      # target raises LoadError, which the rescue must absorb into a fall-through rather than crash the run.
       probe = Module.new
       probe.autoload(:Missing, "rigor/spec/definitely/missing/file")
       stub_const("RigorSpecAutoloadProbe", probe)

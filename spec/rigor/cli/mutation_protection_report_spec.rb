@@ -4,8 +4,8 @@ require "spec_helper"
 require "rigor/cli/mutation_protection_report"
 require "rigor/protection/mutation_scanner"
 
-# ADR-63 Tier 2 — aggregation of per-file effectiveness results into a project
-# report: the kill ratio, per-file rows, and a ranked "missed breakage" list.
+# ADR-63 Tier 2 — aggregation of per-file effectiveness results into a project report: the kill ratio, per-file rows,
+# and a ranked "missed breakage" list.
 RSpec.describe Rigor::CLI::MutationProtectionReport do
   def file_result(path, killed:, survived:, sites: [])
     Rigor::Protection::MutationScanner::FileResult.new(

@@ -6,10 +6,9 @@ require "rigor/inference/protection_scanner"
 require "rigor/scope"
 require "rigor/type"
 
-# ADR-67 WD3 consumption side — `build_method_entry_scope` seeds an undeclared
-# parameter from the `param_inferred_types` table. Exercised through the
-# protection scanner (its `Scope#type_of` path runs the method-entry seed), the
-# same surface `coverage --protection` measures.
+# ADR-67 WD3 consumption side — `build_method_entry_scope` seeds an undeclared parameter from the `param_inferred_types`
+# table. Exercised through the protection scanner (its `Scope#type_of` path runs the method-entry seed), the same
+# surface `coverage --protection` measures.
 RSpec.describe "ADR-67 WD3 inferred-parameter seeding" do
   def scan(source, table)
     root = Prism.parse(source).value
@@ -46,11 +45,10 @@ RSpec.describe "ADR-67 WD3 inferred-parameter seeding" do
   end
 
   it "does not override an RBS-declared parameter (RBS wins)" do
-    # `String#upcase` is declared, so even a (wrong) seeded Integer entry must
-    # not replace the declared parameter — the binder produced a concrete
-    # (non-untyped) type, which the seed leaves untouched. Here the parameter
-    # has no RBS sig, so we assert the inverse via a singleton kind mismatch:
-    # an entry keyed :singleton must not seed an :instance method.
+    # `String#upcase` is declared, so even a (wrong) seeded Integer entry must not replace the declared parameter — the
+    # binder produced a concrete (non-untyped) type, which the seed leaves untouched. Here the parameter has no RBS sig,
+    # so we assert the inverse via a singleton kind mismatch: an entry keyed :singleton must not seed an :instance
+    # method.
     table = { ["Processor", :process, :singleton] => { item: string_type } }
     result = scan(<<~RUBY, table)
       class Processor

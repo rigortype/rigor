@@ -28,10 +28,8 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
     end
 
     it "returns the method signature for `\"hi\".center(|`" do
-      # `"hi".center(` — buffer fails to parse; sentinel patches
-      # `__rigor_lsp_arg_sentinel__` after the `(` so Prism gets
-      # a complete CallNode. The signature should reflect
-      # String#center's first overload.
+      # `"hi".center(` — buffer fails to parse; sentinel patches `__rigor_lsp_arg_sentinel__` after the `(` so Prism
+      # gets a complete CallNode. The signature should reflect String#center's first overload.
       buffer_table.open(uri: uri, bytes: "\"hi\".center(\n", version: 1)
       result = provider.provide(uri: uri, line: 0, character: 12)
 
@@ -51,8 +49,7 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
     end
 
     it "returns the signature for a clean (already-complete) call" do
-      # `"hi".center(10, "*")` — buffer parses cleanly; cursor on
-      # an argument. The provider should still surface the
+      # `"hi".center(10, "*")` — buffer parses cleanly; cursor on an argument. The provider should still surface the
       # signature.
       buffer_table.open(uri: uri, bytes: "\"hi\".center(10, \"*\")\n", version: 1)
       result = provider.provide(uri: uri, line: 0, character: 12)
@@ -69,8 +66,7 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
 
     describe "RBS documentation field (slice C3)" do
       it "attaches the method's RBS comments to each SignatureInformation" do
-        # `String#center` ships with rdoc comments in core RBS;
-        # the documentation field should carry them.
+        # `String#center` ships with rdoc comments in core RBS; the documentation field should carry them.
         buffer_table.open(uri: uri, bytes: "\"hi\".center(\n", version: 1)
         result = provider.provide(uri: uri, line: 0, character: 12)
 
@@ -80,8 +76,7 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
       end
 
       it "omits the documentation field when the method has no RBS comments" do
-        # Most analyzer-internal classes ship without rdoc; use a
-        # definition known to be comment-less by stubbing a
+        # Most analyzer-internal classes ship without rdoc; use a definition known to be comment-less by stubbing a
         # minimal `RBS::Definition::Method`-shaped double.
         require "rbs"
         empty_comments_def = Class.new do
@@ -106,8 +101,7 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
 
     describe "per-parameter info (slice C4)" do
       it "populates `parameters` with one entry per parameter in the signature" do
-        # `String#center(int, ?string) -> String` — two params:
-        # required `width` (int) + optional `pad_string` (string).
+        # `String#center(int, ?string) -> String` — two params: required `width` (int) + optional `pad_string` (string).
         buffer_table.open(uri: uri, bytes: "\"hi\".center(\n", version: 1)
         result = provider.provide(uri: uri, line: 0, character: 12)
 
@@ -122,8 +116,7 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
 
     describe "multi-overload presentation (slice C2)" do
       it "surfaces every overload of a multi-signature method" do
-        # `Array#fetch` has multiple overloads in core RBS:
-        # `(int) -> Elem`, `(int, X) -> Elem | X`, etc.
+        # `Array#fetch` has multiple overloads in core RBS: `(int) -> Elem`, `(int, X) -> Elem | X`, etc.
         buffer_table.open(uri: uri, bytes: "[1, 2].fetch(\n", version: 1)
         result = provider.provide(uri: uri, line: 0, character: 13)
 
@@ -172,8 +165,7 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
     end
 
     it "byte_offset_for accumulates byte (not character) lengths across lines" do
-      # Line 0 ("あ\n") is 4 bytes but 2 characters, so a char-length
-      # mutation would compute the wrong offset for line 1.
+      # Line 0 ("あ\n") is 4 bytes but 2 characters, so a char-length mutation would compute the wrong offset for line 1.
       expect(provider.send(:byte_offset_for, "あ\ncd\n", 1, 1)).to eq(5)
     end
 

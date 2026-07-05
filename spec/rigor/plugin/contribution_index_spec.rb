@@ -2,10 +2,9 @@
 
 require "spec_helper"
 
-# ADR-52 WD1 — the compiled contribution table. These specs pin the
-# gate semantics that keep the engine's pruned walks byte-identical to
-# the ungated ones: a gate may only return false when every pruned
-# consultation would have produced nothing.
+# ADR-52 WD1 — the compiled contribution table. These specs pin the gate semantics that keep the engine's pruned walks
+# byte-identical to the ungated ones: a gate may only return false when every pruned consultation would have produced
+# nothing.
 RSpec.describe Rigor::Plugin::ContributionIndex do
   let(:services) do
     Rigor::Plugin::Services.new(
@@ -110,9 +109,8 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
     end
 
     it "treats a run-time (callable) methods: rule as ungated by name (ADR-52 slice 4)" do
-      # A callable methods: set is unknown at registry-build time, so it
-      # cannot compile into the name gate — the plugin is consulted on
-      # every dispatch and filters in the instance path.
+      # A callable methods: set is unknown at registry-build time, so it cannot compile into the name gate — the plugin
+      # is consulted on every dispatch and filters in the instance path.
       runtime_methods_class = Class.new(Rigor::Plugin::Base) do
         manifest(id: "rtm", version: "0.0.1")
         dynamic_return methods: -> { [:evaluate] } do |_call_node, _scope|
@@ -195,12 +193,10 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
     end
   end
 
-  # The `&:symbol` block path dispatches with the BlockArgumentNode
-  # itself as `call_node` (`ExpressionTyper#symbol_block_return_type`),
-  # so the collector's name gate must tolerate nodes without `#name` —
-  # a raise here is silently absorbed upstream and nils the block type
-  # (GitLab corpus regression: `select(&:presence)` flipped onto its
-  # no-block Enumerator overload).
+  # The `&:symbol` block path dispatches with the BlockArgumentNode itself as `call_node`
+  # (`ExpressionTyper#symbol_block_return_type`), so the collector's name gate must tolerate nodes without `#name` — a
+  # raise here is silently absorbed upstream and nils the block type (GitLab corpus regression: `select(&:presence)`
+  # flipped onto its no-block Enumerator overload).
   describe "dispatcher collection with a non-CallNode (ADR-52 slice-1 regression)" do
     def block_argument_node
       Prism.parse("foo(&:bar)").value.statements.body.first.block

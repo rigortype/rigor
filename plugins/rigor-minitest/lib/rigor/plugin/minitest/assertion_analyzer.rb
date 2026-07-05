@@ -8,9 +8,8 @@ require "rigor/flow_contribution/fact"
 module Rigor
   module Plugin
     class Minitest < Rigor::Plugin::Base
-      # Recognises the four shapes of Minitest / Test::Unit
-      # assertions and emits a `post_return_fact` that narrows
-      # the named local on the post-call edge.
+      # Recognises the four shapes of Minitest / Test::Unit assertions and emits a `post_return_fact` that
+      # narrows the named local on the post-call edge.
       #
       # ## Recognised call shapes
       #
@@ -29,9 +28,8 @@ module Rigor
       #   refute_nil(x)               →  narrow x AWAY from nil
       #   refute_equal(literal, x)    →  narrow x AWAY from Constant<literal>
       #
-      # Test::Unit's `assert_not_nil(x)` / `assert_not_equal(...)` /
-      # `assert_not_kind_of(...)` / `assert_not_instance_of(...)`
-      # share the recognizer with `refute_*` (they're aliases).
+      # Test::Unit's `assert_not_nil(x)` / `assert_not_equal(...)` / `assert_not_kind_of(...)` /
+      # `assert_not_instance_of(...)` share the recognizer with `refute_*` (they're aliases).
       #
       # ### (3) Minitest/spec `_(x).must_*` (positive) ###
       #
@@ -41,12 +39,10 @@ module Rigor
       #   _(x).must_equal(literal)    →  narrow x to Constant<literal>
       #   _(x).must_match(regex)      →  narrow x to String
       #
-      # The legacy bare `x.must_be_kind_of(T)` form (Minitest <
-      # 6.0 monkey-patched onto Object) is intentionally NOT
-      # recognised — the receiver is the value itself rather
-      # than a wrapping `_(value)`, so the analyzer has nothing
-      # to narrow against. Users who still rely on the legacy
-      # form should migrate to `_(x).must_*`.
+      # The legacy bare `x.must_be_kind_of(T)` form (Minitest < 6.0 monkey-patched onto Object) is
+      # intentionally NOT recognised — the receiver is the value itself rather than a wrapping `_(value)`,
+      # so the analyzer has nothing to narrow against. Users who still rely on the legacy form should
+      # migrate to `_(x).must_*`.
       #
       # ### (4) Minitest/spec `_(x).wont_*` (negative) ###
       #
@@ -56,14 +52,10 @@ module Rigor
       #
       # ## Not yet recognised
       #
-      # `assert_predicate(x, :foo?)` (custom predicate) /
-      # `assert_respond_to(x, :method)` / `assert_includes` /
-      # `assert_operator` / `assert_throws` /
-      # `assert_raises(T) { ... }` etc. — each either needs a
-      # carrier Rigor doesn't model today (predicate-state,
-      # respond-to-set) or a multi-edge fact that the
-      # `post_return_facts` slot can't express. Queued for
-      # follow-up slices.
+      # `assert_predicate(x, :foo?)` (custom predicate) / `assert_respond_to(x, :method)` / `assert_includes`
+      # / `assert_operator` / `assert_throws` / `assert_raises(T) { ... }` etc. — each either needs a
+      # carrier Rigor doesn't model today (predicate-state, respond-to-set) or a multi-edge fact that the
+      # `post_return_facts` slot can't express. Queued for follow-up slices.
       module AssertionAnalyzer
         module_function
 
@@ -83,16 +75,12 @@ module Rigor
 
         # --- assert_* / refute_* / assert_not_* form ---
 
-        # Maps each recognised assertion name to a tuple
-        # `[shape, negative]`. `shape` is one of:
+        # Maps each recognised assertion name to a tuple `[shape, negative]`. `shape` is one of:
         #
-        # - :class_then_local   — `assert_kind_of(T, x)`, T at
-        #   args[0], local at args[1].
+        # - :class_then_local   — `assert_kind_of(T, x)`, T at args[0], local at args[1].
         # - :nil_local          — `assert_nil(x)`, local at args[0].
-        # - :literal_then_local — `assert_equal(literal, x)`,
-        #   literal at args[0], local at args[1].
-        # - :regex_then_local   — `assert_match(regex, x)`,
-        #   regex at args[0], local at args[1].
+        # - :literal_then_local — `assert_equal(literal, x)`, literal at args[0], local at args[1].
+        # - :regex_then_local   — `assert_match(regex, x)`, regex at args[0], local at args[1].
         ASSERT_FORM = {
           assert_kind_of: [:class_then_local, false],
           assert_instance_of: [:class_then_local, false],
@@ -123,8 +111,7 @@ module Rigor
 
         # --- _(x).must_* / .wont_* form ---
 
-        # Maps the spec-style matcher names to `[shape,
-        # negative]`. `shape`:
+        # Maps the spec-style matcher names to `[shape, negative]`. `shape`:
         # - :class_arg   — `_(x).must_be_kind_of(T)`, T at args[0].
         # - :no_arg_nil  — `_(x).must_be_nil`, no args.
         # - :literal_arg — `_(x).must_equal(literal)`, literal at args[0].
@@ -144,8 +131,8 @@ module Rigor
         }.freeze
         private_constant :SPEC_MATCHER_FORM
 
-        # ADR-37 slice 2 — the method names this analyzer narrows on,
-        # for the plugin's `narrowing_facts methods:` gate.
+        # ADR-37 slice 2 — the method names this analyzer narrows on, for the plugin's
+        # `narrowing_facts methods:` gate.
         SUPPORTED_METHODS = (ASSERT_FORM.keys + SPEC_MATCHER_FORM.keys).freeze
 
         def spec_form_fact(call_node, environment:)
@@ -160,10 +147,9 @@ module Rigor
           fact_for_spec_shape(shape, target_local, args, negative: negative, environment: environment)
         end
 
-        # `_(x)` returns a `Minitest::Expectation` wrapping x.
-        # Some specs use `value(x)` or `expect(x)` interchangeably
-        # (Minitest provides all three as aliases). Recognises the
-        # local-variable arg in any of those receiver-call shapes.
+        # `_(x)` returns a `Minitest::Expectation` wrapping x. Some specs use `value(x)` or `expect(x)`
+        # interchangeably (Minitest provides all three as aliases). Recognises the local-variable arg in
+        # any of those receiver-call shapes.
         SPEC_WRAPPER_NAMES = %i[_ value expect].freeze
         private_constant :SPEC_WRAPPER_NAMES
 

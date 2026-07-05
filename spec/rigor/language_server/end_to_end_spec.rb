@@ -59,15 +59,13 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
     expect(exit_status).to eq(0)
     expect(request_responses.map { |f| f[:id] }).to eq([1, 2, 3, 4])
 
-    # initialize — capabilities include textDocumentSync,
-    # hoverProvider, completionProvider, documentSymbolProvider.
+    # initialize — capabilities include textDocumentSync, hoverProvider, completionProvider, documentSymbolProvider.
     init = request_responses.find { |f| f[:id] == 1 }
     caps = init.dig(:result, :capabilities)
     expect(caps).to include(:textDocumentSync, :hoverProvider,
                             :completionProvider, :documentSymbolProvider)
 
-    # hover at the `upcase` position — CallNode renderer produces
-    # the # Receiver / # Method / # Return body.
+    # hover at the `upcase` position — CallNode renderer produces the # Receiver / # Method / # Return body.
     hover = request_responses.find { |f| f[:id] == 2 }
     expect(hover.dig(:result, :contents, :kind)).to eq("markdown")
     body = hover.dig(:result, :contents, :value)

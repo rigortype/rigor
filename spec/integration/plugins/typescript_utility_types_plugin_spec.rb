@@ -1,12 +1,9 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-typescript-utility-types/`.
-# Covers ADR-13's intended end-to-end flow: an RBS::Extended
-# payload using TypeScript-canonical spellings (`Pick`, `Omit`,
-# `Partial`, `Required`, `Readonly`) reaches the parser, the
-# plugin chain resolves it through the recursive Resolver, and
-# the result is the same Type carrier the canonical core
-# spellings (`pick_of`, etc.) would produce.
+# Integration spec for `plugins/rigor-typescript-utility-types/`. Covers ADR-13's intended end-to-end flow: an
+# RBS::Extended payload using TypeScript-canonical spellings (`Pick`, `Omit`, `Partial`, `Required`,
+# `Readonly`) reaches the parser, the plugin chain resolves it through the recursive Resolver, and the result
+# is the same Type carrier the canonical core spellings (`pick_of`, etc.) would produce.
 
 require "spec_helper"
 
@@ -29,18 +26,14 @@ RSpec.describe "plugins/rigor-typescript-utility-types" do
 
   describe "Pick<T, K>" do
     it "fires the Pick resolver and returns the lossy-degraded result for Nominal inputs" do
-      # `Address` resolves to Nominal[Address] (no shape
-      # evidence); `NameKey` resolves to Nominal[NameKey] (not
-      # a Constant<Symbol|String> or Union of such), so pick_of
-      # degrades to "input unchanged" per ADR-13 phase A. The
-      # observable difference from "chain declined → Nominal
-      # fallback" is the ABSENCE of `Pick` in the result.
+      # `Address` resolves to Nominal[Address] (no shape evidence); `NameKey` resolves to Nominal[NameKey] (not
+      # a Constant<Symbol|String> or Union of such), so pick_of degrades to "input unchanged" per ADR-13 phase
+      # A. The observable difference from "chain declined → Nominal fallback" is the ABSENCE of `Pick` in the result.
       expect(parse("Pick[Address, NameKey]")).to eq(Rigor::Type::Combinator.nominal_of("Address"))
     end
 
     it "falls back to Nominal[Pick, …] when the resolver declines on arity mismatch" do
-      # 1-arg / 3-arg Pick: plugin returns nil → parser's RBS
-      # fallback builds Nominal[Pick, …].
+      # 1-arg / 3-arg Pick: plugin returns nil → parser's RBS fallback builds Nominal[Pick, …].
       expected_one = Rigor::Type::Combinator.nominal_of("Pick", type_args: [Rigor::Type::Combinator.nominal_of("Address")])
       expect(parse("Pick[Address]")).to eq(expected_one)
     end
@@ -94,10 +87,8 @@ RSpec.describe "plugins/rigor-typescript-utility-types" do
 
   describe "recursive resolution via scope.resolver.resolve" do
     it "Pick<Address, non-empty-string> resolves the K arg through the built-in registry" do
-      # Pick<X, K> where K is a refinement name — the K arg
-      # resolves through built-in registry, not through the
-      # chain. The plugin returns pick_of(Nominal[Address],
-      # non-empty-string refinement carrier).
+      # Pick<X, K> where K is a refinement name — the K arg resolves through built-in registry, not through the
+      # chain. The plugin returns pick_of(Nominal[Address], non-empty-string refinement carrier).
       result = parse("Pick[Address, non-empty-string]")
       expected = Rigor::Type::Combinator.pick_of(
         Rigor::Type::Combinator.nominal_of("Address"),
@@ -108,15 +99,11 @@ RSpec.describe "plugins/rigor-typescript-utility-types" do
   end
 
   describe "resolver-level semantics (synthetic AST + scope)" do
-    # The RBS::Extended payload grammar doesn't yet accept Symbol /
-    # String literal tokens (`:name` / `"name"`), so end-to-end
-    # parsing of Pick<HashShape, :a | :b> isn't reachable through
-    # `ImportedRefinements.parse` yet. To prove the plugin's
-    # resolvers produce the right pick_of / partial_of / etc. on
-    # actual shape inputs, we invoke the resolver directly with a
-    # synthetic AST and a `NameScope` whose `resolver:` is a
-    # hand-rolled stub that knows how to map specific identifiers
-    # to the shape carriers under test.
+    # The RBS::Extended payload grammar doesn't yet accept Symbol / String literal tokens (`:name` / `"name"`),
+    # so end-to-end parsing of Pick<HashShape, :a | :b> isn't reachable through `ImportedRefinements.parse`
+    # yet. To prove the plugin's resolvers produce the right pick_of / partial_of / etc. on actual shape
+    # inputs, we invoke the resolver directly with a synthetic AST and a `NameScope` whose `resolver:` is a
+    # hand-rolled stub that knows how to map specific identifiers to the shape carriers under test.
 
     let(:string_t)  { Rigor::Type::Combinator.nominal_of("String") }
     let(:integer_t) { Rigor::Type::Combinator.nominal_of("Integer") }
@@ -185,10 +172,8 @@ RSpec.describe "plugins/rigor-typescript-utility-types" do
                                     "Address" => hash_shape,
                                     "KeysProxy" => Rigor::Type::Combinator.nominal_of("KeysProxy")
                                   ))
-      # K isn't a Constant<Symbol> / Union[Constant<Symbol>, …],
-      # so pick_of degrades to "input unchanged" — but the plugin
-      # DID fire (the result is the HashShape, not a Nominal[Pick, …]
-      # fallback).
+      # K isn't a Constant<Symbol> / Union[Constant<Symbol>, …], so pick_of degrades to "input unchanged" — but
+      # the plugin DID fire (the result is the HashShape, not a Nominal[Pick, …] fallback).
       expect(result).to eq(hash_shape)
     end
   end

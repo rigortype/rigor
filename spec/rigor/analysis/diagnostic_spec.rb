@@ -197,8 +197,8 @@ RSpec.describe Rigor::Analysis::Diagnostic do
   end
 
   describe ".from_message_loc" do
-    # A method call with a receiver: message_loc (the "foo" span) starts
-    # past the receiver, so it differs from the receiver-spanning location.
+    # A method call with a receiver: message_loc (the "foo" span) starts past the receiver, so it differs from the
+    # receiver-spanning location.
     let(:call) { Prism.parse("receiver.foo(:bar)").value.statements.body.first }
 
     it "positions at the call's message_loc (the method-name span)" do

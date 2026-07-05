@@ -2,17 +2,15 @@
 
 require "spec_helper"
 
-# ADR-43 — RBS-complete ancestor resolution. A Ruby-source subclass of
-# an allow-listed RBS-complete ancestor (seed `Rigor::Plugin::Base`)
-# resolves its *inherited* method calls against that ancestor's RBS, so
-# the normal call rules (here `call.undefined-method`) apply to misuse
-# of the inherited contract surface. Every other RBS ancestor keeps the
+# ADR-43 — RBS-complete ancestor resolution. A Ruby-source subclass of an allow-listed RBS-complete ancestor (seed
+# `Rigor::Plugin::Base`) resolves its *inherited* method calls against that ancestor's RBS, so the normal call rules
+# (here `call.undefined-method`) apply to misuse of the inherited contract surface. Every other RBS ancestor keeps the
 # false-positive-safe `Dynamic[Top]` fallback.
 RSpec.describe "ADR-43 RBS-complete ancestor resolution" do
   include RunnerHelpers
 
-  # An RBS where the allow-listed `Rigor::Plugin::Base` declares an
-  # inherited method returning a closed core type (`Integer`).
+  # An RBS where the allow-listed `Rigor::Plugin::Base` declares an inherited method returning a closed core type
+  # (`Integer`).
   let(:plugin_base_sig) do
     {
       "plugin_base.rbs" => <<~RBS
@@ -58,8 +56,7 @@ RSpec.describe "ADR-43 RBS-complete ancestor resolution" do
       end
     RUBY
 
-    # `Integer#succ` exists — resolving `contract_value` to Integer must
-    # NOT manufacture a diagnostic on a real method.
+    # `Integer#succ` exists — resolving `contract_value` to Integer must NOT manufacture a diagnostic on a real method.
     expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
   end
 
@@ -80,9 +77,8 @@ RSpec.describe "ADR-43 RBS-complete ancestor resolution" do
       end
     RUBY
 
-    # `OpenBase` is not allow-listed, so the inherited call stays
-    # `Dynamic[Top]` and `call.undefined-method` must not fire — the
-    # false-positive-safe behaviour that protects `< ActionController::Base`.
+    # `OpenBase` is not allow-listed, so the inherited call stays `Dynamic[Top]` and `call.undefined-method` must not
+    # fire — the false-positive-safe behaviour that protects `< ActionController::Base`.
     expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
   end
 end

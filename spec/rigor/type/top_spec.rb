@@ -42,9 +42,8 @@ RSpec.describe Rigor::Type::Top do
 
   describe "value semantics" do
     it "is equal (by ==) to any Top, matching structurally not just by identity" do
-      # `new` is private, so the only way to get a second reference is
-      # reflective construction — this is what pins that `==` checks
-      # `is_a?(Top)` rather than accidentally degrading to `equal?`.
+      # `new` is private, so the only way to get a second reference is reflective construction — this is what pins that
+      # `==` checks `is_a?(Top)` rather than accidentally degrading to `equal?`.
       other = described_class.allocate
       expect(described_class.instance).to eq(other)
     end

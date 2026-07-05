@@ -35,9 +35,8 @@ RSpec.describe Rigor::LanguageServer::Server do
     end
 
     it "exits with code 1 if `exit` is called without a preceding `shutdown`" do
-      # Per LSP § "exit": clients that exit without shutdown signal
-      # an abnormal termination; the server SHOULD set a non-zero
-      # exit code.
+      # Per LSP § "exit": clients that exit without shutdown signal an abnormal termination; the server SHOULD set a
+      # non-zero exit code.
       server.dispatch("initialize", {})
       server.dispatch("exit", nil)
 
@@ -74,8 +73,8 @@ RSpec.describe Rigor::LanguageServer::Server do
       server.dispatch("initialize", {})
       result = server.dispatch("textDocument/hover", {})
 
-      # `Server.new` here has no hover_provider wired, so
-      # the dispatcher returns MethodNotFound even for `textDocument/hover`.
+      # `Server.new` here has no hover_provider wired, so the dispatcher returns MethodNotFound even for
+      # `textDocument/hover`.
       expect(result.dig(:error, :code)).to eq(Rigor::LanguageServer::Server::ERROR_METHOD_NOT_FOUND)
     end
   end
@@ -203,8 +202,7 @@ RSpec.describe Rigor::LanguageServer::Server do
 
       it "advertises no hoverProvider capability" do
         server.dispatch("initialize", {})
-        # `initialize` already ran in before; dispatching again is
-        # an invalid-request, so re-construct.
+        # `initialize` already ran in before; dispatching again is an invalid-request, so re-construct.
         s = described_class.new
         result = s.dispatch("initialize", {})
         expect(result[:capabilities]).not_to include(:hoverProvider)

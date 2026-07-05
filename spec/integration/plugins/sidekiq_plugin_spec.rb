@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-sidekiq/`.
-# Tier 3C of the Rails plugins roadmap. Discovers Sidekiq
-# workers by walking `app/workers/` and validates
-# `Worker.perform_async(...)` / `.perform_in(...)` /
-# `.perform_at(...)` / `.perform_inline(...)` argument
-# count against each class's `#perform`.
+# Integration spec for `plugins/rigor-sidekiq/`. Tier 3C of the Rails plugins roadmap. Discovers Sidekiq
+# workers by walking `app/workers/` and validates `Worker.perform_async(...)` / `.perform_in(...)` /
+# `.perform_at(...)` / `.perform_inline(...)` argument count against each class's `#perform`.
 
 require "spec_helper"
 
@@ -80,8 +77,7 @@ RSpec.describe "plugins/rigor-sidekiq" do
 
   describe "scheduled entry points" do
     it "treats the first argument of `perform_in` as the schedule" do
-      # `perform_in(60, user_id)` — `60` is the schedule,
-      # `user_id` is the only forwarded arg → matches
+      # `perform_in(60, user_id)` — `60` is the schedule, `user_id` is the only forwarded arg → matches
       # `WelcomeEmailWorker#perform`'s 1..2 envelope.
       result = run_plugin(
         source: "WelcomeEmailWorker.perform_in(60, 1)\n",
@@ -94,8 +90,7 @@ RSpec.describe "plugins/rigor-sidekiq" do
     end
 
     it "flags wrong arity AFTER consuming the schedule arg" do
-      # `perform_in(60)` — `60` is the schedule, 0 args
-      # forwarded → fewer than `WelcomeEmailWorker#perform`'s
+      # `perform_in(60)` — `60` is the schedule, 0 args forwarded → fewer than `WelcomeEmailWorker#perform`'s
       # required min (1).
       result = run_plugin(
         source: "WelcomeEmailWorker.perform_in(60)\n",

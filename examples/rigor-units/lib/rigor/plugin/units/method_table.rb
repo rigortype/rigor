@@ -3,15 +3,11 @@
 module Rigor
   module Plugin
     class Units < Rigor::Plugin::Base
-      # Dispatch table mapping (receiver dimension, method name,
-      # argument dimensions) tuples onto a result dimension or a
-      # dimensional-mismatch error message. Pure data — the
-      # {Analyzer} walks the AST and consults this module to
-      # decide what each call site contributes to the local
-      # binding map.
+      # Dispatch table mapping (receiver dimension, method name, argument dimensions) tuples onto a result dimension or
+      # a dimensional-mismatch error message. Pure data — the {Analyzer} walks the AST and consults this module to
+      # decide what each call site contributes to the local binding map.
       #
-      # Dimensions are kept as plain Symbols so the table reads
-      # like a small physical-units cheatsheet. The set is
+      # Dimensions are kept as plain Symbols so the table reads like a small physical-units cheatsheet. The set is
       # closed:
       #
       #   :numeric       — Integer / Float literal (no unit yet)
@@ -31,8 +27,7 @@ module Rigor
         DISTANCE_PER_TIME = %i[per_hour per_minute per_second].freeze
         DISTANCE_PER_TIME_SQUARED = %i[per_second_squared per_minute_squared per_hour_squared].freeze
 
-        # Allowed `.in_<unit>` queries per receiver dimension.
-        # Anything not listed here is a dimensional mismatch.
+        # Allowed `.in_<unit>` queries per receiver dimension. Anything not listed here is a dimensional mismatch.
         IN_METHODS = {
           distance: %i[in_kilometers in_meters in_miles in_feet].freeze,
           time: %i[in_seconds in_minutes in_hours].freeze,
@@ -79,9 +74,8 @@ module Rigor
           DIMENSION_LABELS.fetch(dimension, dimension.to_s)
         end
 
-        # Internal helpers below. Public-but-inside-the-module so
-        # the analyzer-side specs can poke at them; not part of the
-        # plugin's external API.
+        # Internal helpers below. Public-but-inside-the-module so the analyzer-side specs can poke at them; not part of
+        # the plugin's external API.
 
         def numeric_unit_constructor(receiver, method)
           return nil unless receiver == :numeric

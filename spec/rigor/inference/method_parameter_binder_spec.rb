@@ -46,17 +46,14 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
     end
 
     it "skips overloads that omit a parameter slot when unioning across overloads" do
-      # Array#first has both `()` and `(int)` overloads; binding a
-      # `def first(n)` redefinition MUST union from the only overload
-      # that has slot 0.
+      # Array#first has both `()` and `(int)` overloads; binding a `def first(n)` redefinition MUST union from the only
+      # overload that has slot 0.
       binder = described_class.new(environment: env, class_path: "Array", singleton: false)
       result = binder.bind(def_node("def first(n); n; end"))
 
-      # The single relevant overload's type is `int` (an RBS interface),
-      # which the translator currently degrades to `Dynamic[Top]`.
-      # The binder MUST NOT have left it at the default-untyped sentinel
-      # under a different identity — it should match the translator's
-      # canonical Dynamic[Top].
+      # The single relevant overload's type is `int` (an RBS interface), which the translator currently degrades to
+      # `Dynamic[Top]`. The binder MUST NOT have left it at the default-untyped sentinel under a different identity — it
+      # should match the translator's canonical Dynamic[Top].
       expect(result[:n]).to eq(Rigor::Type::Combinator.untyped)
     end
 
@@ -64,8 +61,7 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
       binder = described_class.new(environment: env, class_path: "Integer", singleton: true)
       result = binder.bind(def_node("def sqrt(n); n; end"))
 
-      # `Integer.sqrt(::int)` again degrades to Dynamic[Top] but the
-      # singleton path MUST be the one consulted.
+      # `Integer.sqrt(::int)` again degrades to Dynamic[Top] but the singleton path MUST be the one consulted.
       expect(result.keys).to eq([:n])
       expect(result[:n]).to eq(Rigor::Type::Combinator.untyped)
     end
@@ -88,8 +84,8 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
     end
 
     it "binds keyword parameters by name from RBS" do
-      # We pick a method that has at least one keyword parameter in
-      # core RBS. `Numeric#step` has `by:` and `to:` keywords.
+      # We pick a method that has at least one keyword parameter in core RBS. `Numeric#step` has `by:` and `to:`
+      # keywords.
       binder = described_class.new(environment: env, class_path: "Numeric", singleton: false)
       result = binder.bind(def_node("def step(by:, to:); by; end"))
 
@@ -143,13 +139,10 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
     end
 
     context "with every positional/keyword/rest/block slot kind bound from RBS" do
-      # A single fixture method exercising every ParamSlot kind in one
-      # pass: required/optional/rest/trailing positionals, required/
-      # optional keywords, keyword-rest, and a block. Each slot's RBS
-      # type is a distinct concrete nominal so a wrong RBS_TYPE_PROVIDERS
-      # lookup (wrong lambda, wrong `.index`/`.name` key) or a wrong
-      # `wrap_for_kind` argument surfaces as a mismatched class_name
-      # rather than merely "not Dynamic".
+      # A single fixture method exercising every ParamSlot kind in one pass: required/optional/rest/trailing
+      # positionals, required/optional keywords, keyword-rest, and a block. Each slot's RBS type is a distinct concrete
+      # nominal so a wrong RBS_TYPE_PROVIDERS lookup (wrong lambda, wrong `.index`/`.name` key) or a wrong
+      # `wrap_for_kind` argument surfaces as a mismatched class_name rather than merely "not Dynamic".
       def with_full_slot_demo
         Dir.mktmpdir do |dir|
           FileUtils.mkdir_p(File.join(dir, "sig"))
@@ -183,10 +176,8 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
               type_args: [Rigor::Type::Combinator.nominal_of("Symbol"), Rigor::Type::Combinator.nominal_of("Numeric")]
             )
           )
-          # The block slot has no RBS counterpart to bind against (the
-          # `{ ... }` in the signature types the *call*, not a `&blk`
-          # parameter) — it MUST still be present in the entry scope,
-          # defaulted to Dynamic[Top].
+          # The block slot has no RBS counterpart to bind against (the `{ ... }` in the signature types the *call*, not
+          # a `&blk` parameter) — it MUST still be present in the entry scope, defaulted to Dynamic[Top].
           expect(result[:blk]).to equal(Rigor::Type::Combinator.untyped)
         end
       end

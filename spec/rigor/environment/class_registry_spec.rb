@@ -82,8 +82,8 @@ RSpec.describe Rigor::Environment::ClassRegistry do
     end
 
     it "normalizes a leading :: and accepts Symbol names" do
-      # normalize_name strips the top-level "::" and coerces to String,
-      # so "::Integer" and :Integer resolve to the same registered class.
+      # normalize_name strips the top-level "::" and coerces to String, so "::Integer" and :Integer resolve to the same
+      # registered class.
       expect(registry.class_ordering("::Integer", "Integer")).to eq(:equal)
       expect(registry.class_ordering(:Integer, :Numeric)).to eq(:subclass)
     end

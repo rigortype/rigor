@@ -6,9 +6,8 @@ require_relative "lib/units"
 #
 #   RUBYLIB=$PWD/../lib bundle exec rigor check demo.rb
 #
-# Each local assignment with an inferred dimension surfaces as
-# an `info` diagnostic naming the dimension; each `.in_<unit>`
-# query emits a second `info` diagnostic naming the conversion.
+# Each local assignment with an inferred dimension surfaces as an `info` diagnostic naming the dimension; each
+# `.in_<unit>` query emits a second `info` diagnostic naming the conversion.
 
 # ==========================================
 # 1. Distance and Time
@@ -63,6 +62,5 @@ velocity_after_fall = gravity * fall_time
 
 puts velocity_after_fall.in_meters_per_second # => 29.4
 
-# Suppress runtime "unused variable" warnings for the demo's
-# read-only locals; the static analysis above is the point.
+# Suppress runtime "unused variable" warnings for the demo's read-only locals; the static analysis above is the point.
 _ = [distance, total_distance, wind_speed]

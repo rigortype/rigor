@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# ADR-39 — `have_http_status` symbol validation reads the REAL
-# `Rack::Utils::SYMBOL_TO_STATUS_CODE` (the repo bundle carries `rack` as
-# a development dependency), never a vendored snapshot that could go
-# stale. When Rack is unavailable the accepted set is unknowable, so the
-# check declines rather than emitting a false `unknown-symbol`.
+# ADR-39 — `have_http_status` symbol validation reads the REAL `Rack::Utils::SYMBOL_TO_STATUS_CODE` (the repo
+# bundle carries `rack` as a development dependency), never a vendored snapshot that could go stale. When Rack
+# is unavailable the accepted set is unknowable, so the check declines rather than emitting a false `unknown-symbol`.
 
 require "spec_helper"
 

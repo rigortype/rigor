@@ -2,10 +2,8 @@
 
 require "spec_helper"
 
-# ADR-20 slice 3 end-to-end check: `JSON.parse(...)` dispatched
-# through the top-level `MethodDispatcher.dispatch` returns the
-# reduced HKT type instead of the upstream rbs gem's `untyped`
-# slot.
+# ADR-20 slice 3 end-to-end check: `JSON.parse(...)` dispatched through the top-level `MethodDispatcher.dispatch`
+# returns the reduced HKT type instead of the upstream rbs gem's `untyped` slot.
 RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/SpecFilePathFormat
   let(:environment) { Rigor::Environment.default }
   let(:json_singleton) { Rigor::Type::Combinator.singleton_of(JSON) }
@@ -132,9 +130,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
         arg_types: [Rigor::Type::Combinator.nominal_of(String)],
         environment: environment
       )
-      # The instance-side path falls through to standard dispatch (RBS or
-      # user-class fallback). Whatever it returns, it MUST NOT be the
-      # singleton-side reduced Union.
+      # The instance-side path falls through to standard dispatch (RBS or user-class fallback). Whatever it returns, it
+      # MUST NOT be the singleton-side reduced Union.
       expect(type).not_to be_a(Rigor::Type::Union)
     end
 
@@ -232,8 +229,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
       end
 
       it "does NOT augment JSON.parse (no post_reduce on JSON_VALUE_SPEC)" do
-        # JSON.parse with a similarly-shaped opts hash should NOT pick up Date —
-        # only YAML/Psych entries have the post_reduce hook.
+        # JSON.parse with a similarly-shaped opts hash should NOT pick up Date — only YAML/Psych entries have the
+        # post_reduce hook.
         require "date"
         opts_shape = Rigor::Type::HashShape.new(
           permitted_classes: Rigor::Type::Tuple.new([singleton_of_class("Date")])
@@ -249,10 +246,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
     end
 
     context "with CSV.parse / CSV.read overrides (no-headers shape)" do
-      # CSV is stdlib loaded by Rigor's bundled RBS but not
-      # `require`d in the test process; construct the
-      # Singleton from the class name string directly so the
-      # spec works regardless of `require "csv"` availability.
+      # CSV is stdlib loaded by Rigor's bundled RBS but not `require`d in the test process; construct the Singleton from
+      # the class name string directly so the spec works regardless of `require "csv"` availability.
       let(:csv_singleton) { Rigor::Type::Singleton.new("CSV") }
 
       it "CSV.parse(str) returns Array[Array[String | nil]]" do
@@ -308,9 +303,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
         arg_types: [Rigor::Type::Combinator.nominal_of(String)],
         environment: environment
       )
-      # YAML.parse is NOT in METHOD_RETURN_OVERRIDES; the dispatcher
-      # falls through to RBS / whatever else and the result MUST NOT be
-      # the json::value Union shape.
+      # YAML.parse is NOT in METHOD_RETURN_OVERRIDES; the dispatcher falls through to RBS / whatever else and the result
+      # MUST NOT be the json::value Union shape.
       next if type.nil?
 
       if type.is_a?(Rigor::Type::Union)

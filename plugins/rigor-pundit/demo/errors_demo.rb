@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# DO NOT run via `ruby errors_demo.rb` — analyse with
-# `bundle exec rigor check` to see rigor-pundit's
+# DO NOT run via `ruby errors_demo.rb` — analyse with `bundle exec rigor check` to see rigor-pundit's
 # diagnostics.
 
 def authorize(_record, _action = nil); end
@@ -15,8 +14,7 @@ authorize(Post, :destory)
 #   plugin.pundit.unknown-policy-method
 authorize(Post, :archive)
 
-# Misspelled record (so the policy class doesn't exist) —
-# flagged with did-you-mean against the known policies:
+# Misspelled record (so the policy class doesn't exist) — flagged with did-you-mean against the known policies:
 #   plugin.pundit.unknown-policy-class
 authorize(Commnet, :edit)
 

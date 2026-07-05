@@ -6,16 +6,13 @@ require "rigor/source/literals"
 module Rigor
   module Plugin
     class DrySchema < Rigor::Plugin::Base
-      # Walks project source for `Foo = Dry::Schema.{Params,JSON,define}
-      # { ... }` shapes and emits a
-      # `{schema_const_fqn => {required: {key => underlying_class}, optional: {…}}}`
-      # table covering each schema's typed-key surface.
+      # Walks project source for `Foo = Dry::Schema.{Params,JSON,define} { ... }` shapes and emits a
+      # `{schema_const_fqn => {required: {key => underlying_class}, optional: {…}}}` table covering each
+      # schema's typed-key surface.
       module SchemaScanner
-        # The dry-schema canonical-type symbols accepted as
-        # predicate arguments. Maps each to the underlying Ruby
-        # class name (the same vocabulary `rigor-dry-types`
-        # uses for `CANONICAL_ALIASES`, intersected with what
-        # dry-schema's predicate engine accepts).
+        # The dry-schema canonical-type symbols accepted as predicate arguments. Maps each to the
+        # underlying Ruby class name (the same vocabulary `rigor-dry-types` uses for `CANONICAL_ALIASES`,
+        # intersected with what dry-schema's predicate engine accepts).
         CANONICAL_TYPES = {
           string: "String",
           integer: "Integer",
@@ -30,12 +27,10 @@ module Rigor
           array: "Array"
         }.tap { |h| h[:nil] = "NilClass" }.freeze
 
-        # The dry-schema predicate verbs that accept a type
-        # argument. Each verb has a slightly different runtime
-        # semantic (`filled` = present + non-empty; `value` =
-        # present; `maybe` = present-or-nil; `each` = collection
-        # element type) but for Rigor's purposes they all
-        # contribute the same underlying class for the key.
+        # The dry-schema predicate verbs that accept a type argument. Each verb has a slightly different
+        # runtime semantic (`filled` = present + non-empty; `value` = present; `maybe` = present-or-nil;
+        # `each` = collection element type) but for Rigor's purposes they all contribute the same
+        # underlying class for the key.
         TYPE_BEARING_PREDICATES = %i[filled value maybe each].to_set.freeze
         private_constant :TYPE_BEARING_PREDICATES
 
@@ -45,17 +40,12 @@ module Rigor
 
         module_function
 
-        # @param paths [Array<String>] absolute paths to `.rb`
-        #   files the project's `paths:` resolves to.
-        # @param type_aliases [Hash{String => String}] the
-        #   ADR-9 `:dry_type_aliases` fact published by
-        #   `rigor-dry-types` when loaded. Used to resolve
-        #   `value(Types::Email)` references to their
-        #   underlying class. Empty when the plugin isn't
-        #   loaded.
-        # @return [Hash{String => Hash{Symbol => Hash{Symbol => String}}}]
-        #   frozen per-schema typed-key table. Empty when no
-        #   recognisable schema declaration is found.
+        # @param paths [Array<String>] absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @param type_aliases [Hash{String => String}] the ADR-9 `:dry_type_aliases` fact published by
+        #   `rigor-dry-types` when loaded. Used to resolve `value(Types::Email)` references to their
+        #   underlying class. Empty when the plugin isn't loaded.
+        # @return [Hash{String => Hash{Symbol => Hash{Symbol => String}}}] frozen per-schema typed-key
+        #   table. Empty when no recognisable schema declaration is found.
         def scan(paths:, type_aliases: {})
           table = {}
           paths.each do |path|
@@ -77,11 +67,9 @@ module Rigor
         end
         private_class_method :scan_file
 
-        # Walks the AST collecting `<Const> = Dry::Schema.X { ... }`
-        # assignments at any nesting level. Tracks the enclosing
-        # constant chain so a class-level `class Foo; SCHEMA =
-        # Dry::Schema.Params { ... }; end` registers as
-        # `"Foo::SCHEMA"`.
+        # Walks the AST collecting `<Const> = Dry::Schema.X { ... }` assignments at any nesting level.
+        # Tracks the enclosing constant chain so a class-level `class Foo; SCHEMA = Dry::Schema.Params
+        # { ... }; end` registers as `"Foo::SCHEMA"`.
         def collect_schemas(node, qualified_prefix, type_aliases)
           return {} if node.nil?
 
@@ -119,8 +107,7 @@ module Rigor
         end
         private_class_method :collect_schema_assignment
 
-        # Matches `Dry::Schema.Params { ... }` /
-        # `Dry::Schema.JSON { ... }` / `Dry::Schema.define { ... }`.
+        # Matches `Dry::Schema.Params { ... }` / `Dry::Schema.JSON { ... }` / `Dry::Schema.define { ... }`.
         def schema_entry_call?(node)
           return false unless node.is_a?(Prism::CallNode)
           return false unless SCHEMA_ENTRY_NAMES.include?(node.name)
@@ -147,10 +134,9 @@ module Rigor
         end
         private_class_method :collect_schema_shape
 
-        # Walks every top-level `required(:key).<predicate>(...)` /
-        # `optional(:key).<predicate>(...)` chain in the block
-        # body. The block's body is either a `Prism::StatementsNode`
-        # (multi-statement) or a single expression node.
+        # Walks every top-level `required(:key).<predicate>(...)` / `optional(:key).<predicate>(...)`
+        # chain in the block body. The block's body is either a `Prism::StatementsNode` (multi-statement)
+        # or a single expression node.
         def walk_block_body(block_node, &)
           body = block_node.body
           return if body.nil?
@@ -160,13 +146,10 @@ module Rigor
         end
         private_class_method :walk_block_body
 
-        # `required(:key).filled(:string)` parses as a CallNode
-        # whose receiver is the `required(:key)` call. Walk the
-        # chain inward looking for the type-bearing predicate at
-        # the head; the key sits on the chain's tail. The
-        # `each(<Type>)` predicate yields a list-of-element
-        # type info (`{type: <T>, list: true}`); other type-bearing
-        # predicates (`filled`/`value`/`maybe`) yield scalar info
+        # `required(:key).filled(:string)` parses as a CallNode whose receiver is the `required(:key)`
+        # call. Walk the chain inward looking for the type-bearing predicate at the head; the key sits on
+        # the chain's tail. The `each(<Type>)` predicate yields a list-of-element type info (`{type: <T>,
+        # list: true}`); other type-bearing predicates (`filled`/`value`/`maybe`) yield scalar info
         # (`{type: <T>, list: false}`).
         def visit_chain(node, &block)
           return unless node.is_a?(Prism::CallNode)
@@ -179,11 +162,9 @@ module Rigor
         end
         private_class_method :visit_chain
 
-        # `required(:key).filled(:string).value(...)...` — the
-        # OUTERMOST call's receiver chain ends in the
-        # `required(:key)` / `optional(:key)` call. Recurse on
-        # `node.receiver` until we hit the `required` /
-        # `optional` call, recording the key + kind.
+        # `required(:key).filled(:string).value(...)...` — the OUTERMOST call's receiver chain ends in
+        # the `required(:key)` / `optional(:key)` call. Recurse on `node.receiver` until we hit the
+        # `required` / `optional` call, recording the key + kind.
         def extract_key_and_kind(node)
           current = node
           while current.is_a?(Prism::CallNode)
@@ -199,11 +180,9 @@ module Rigor
         end
         private_class_method :extract_key_and_kind
 
-        # Walks the call chain finding the first type-bearing
-        # predicate (`filled` / `value` / `maybe` / `each`) and
-        # extracts its argument type. Returns a `{type:, list:}`
-        # tuple (`each` is the only verb that produces a list)
-        # or nil when no recognisable type sits on the chain.
+        # Walks the call chain finding the first type-bearing predicate (`filled` / `value` / `maybe` /
+        # `each`) and extracts its argument type. Returns a `{type:, list:}` tuple (`each` is the only
+        # verb that produces a list) or nil when no recognisable type sits on the chain.
         def walk_predicate_chain(node)
           current = node
           while current.is_a?(Prism::CallNode)
@@ -217,12 +196,10 @@ module Rigor
         end
         private_class_method :walk_predicate_chain
 
-        # Reads the first positional argument of a `filled(:string)`
-        # / `value(:integer)` / `maybe(Types::Email)` call. Returns
-        # either the canonical-type-symbol's underlying class
-        # ("String" / "Integer" / …), or the constant's qualified
-        # name for downstream type-alias resolution. Returns nil
-        # for anything else.
+        # Reads the first positional argument of a `filled(:string)` / `value(:integer)` /
+        # `maybe(Types::Email)` call. Returns either the canonical-type-symbol's underlying class
+        # ("String" / "Integer" / …), or the constant's qualified name for downstream type-alias
+        # resolution. Returns nil for anything else.
         def extract_type_from_predicate(call_node)
           arg = call_node.arguments&.arguments&.first
           case arg
@@ -236,12 +213,10 @@ module Rigor
         end
         private_class_method :extract_type_from_predicate
 
-        # In-place: any value's `type:` slot in `bucket` that
-        # doesn't already match a canonical class (e.g.
-        # `"Types::Email"`) gets resolved through the
-        # type_aliases fact. Unresolvable values drop from the
-        # bucket (no fact contribution rather than misleading
-        # data). The `list:` slot rides along unchanged.
+        # In-place: any value's `type:` slot in `bucket` that doesn't already match a canonical class
+        # (e.g. `"Types::Email"`) gets resolved through the type_aliases fact. Unresolvable values drop
+        # from the bucket (no fact contribution rather than misleading data). The `list:` slot rides along
+        # unchanged.
         def remap_aliases!(bucket, type_aliases)
           canonical_set = CANONICAL_TYPES.values.to_set
           bucket.each_pair.to_a.each do |key, info|
@@ -258,9 +233,8 @@ module Rigor
         end
         private_class_method :remap_aliases!
 
-        # Constant-path serialiser: `Dry::Schema` -> "Dry::Schema",
-        # bare `Foo` -> "Foo". Returns nil for shapes Prism
-        # doesn't expose as ConstantRead/PathNode.
+        # Constant-path serialiser: `Dry::Schema` -> "Dry::Schema", bare `Foo` -> "Foo". Returns nil for
+        # shapes Prism doesn't expose as ConstantRead/PathNode.
         def constant_name_for(node)
           return nil if node.nil?
 

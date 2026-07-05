@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Worked example — rigor-rspec-rails fires
-# `have_http_status.out-of-range` for numeric args outside
-# 100..599 and `have_http_status.unknown-symbol` for typos
-# in the symbol set. Recognised symbols / valid numerics
-# stay silent.
+# Worked example — rigor-rspec-rails fires `have_http_status.out-of-range` for numeric args outside
+# 100..599 and `have_http_status.unknown-symbol` for typos in the symbol set. Recognised symbols / valid
+# numerics stay silent.
 
 RSpec.describe "HomeController" do
   it "every recognised shape stays silent" do

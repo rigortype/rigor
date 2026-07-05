@@ -3,23 +3,16 @@
 module Rigor
   module Plugin
     class Actioncable < Rigor::Plugin::Base
-      # Frozen catalogue of discovered ActionCable channel
-      # classes keyed by qualified class name. Each entry
-      # holds:
+      # Frozen catalogue of discovered ActionCable channel classes keyed by qualified class name. Each
+      # entry holds:
       #
-      # - `action_methods` — the set of public instance
-      #   methods that aren't ActionCable framework hooks
-      #   (`subscribed` / `unsubscribed`). These are the
-      #   methods clients invoke via
+      # - `action_methods` — the set of public instance methods that aren't ActionCable framework hooks
+      #   (`subscribed` / `unsubscribed`). These are the methods clients invoke via
       #   `subscription.perform("action_name", data)`.
-      # - `stream_names` — the set of literal-string stream
-      #   names registered via `stream_from "name"` calls
-      #   inside the channel body. Dynamic registrations
-      #   (`stream_from interpolated_string`) are recorded
-      #   separately as `dynamic_streams: true` so the
-      #   analyzer can suppress unknown-stream warnings on
-      #   any channel that has at least one dynamic
-      #   registration.
+      # - `stream_names` — the set of literal-string stream names registered via `stream_from "name"`
+      #   calls inside the channel body. Dynamic registrations (`stream_from interpolated_string`) are
+      #   recorded separately as `dynamic_streams: true` so the analyzer can suppress unknown-stream
+      #   warnings on any channel that has at least one dynamic registration.
       class ChannelIndex
         Entry = Data.define(:class_name, :file_path, :action_methods, :stream_names, :dynamic_streams) do
           def includes_action?(name)
@@ -60,18 +53,14 @@ module Rigor
           @by_name.keys
         end
 
-        # All literal stream names registered across every
-        # discovered channel.
+        # All literal stream names registered across every discovered channel.
         def all_stream_names
           @entries.flat_map { |e| e.stream_names.to_a }.to_set
         end
 
-        # True when at least one discovered channel uses a
-        # dynamic stream registration. The analyzer treats
-        # this as "we can't be sure any literal name is
-        # missing" and skips the `unknown-stream` warning
-        # entirely — absence of a literal match doesn't prove
-        # the name is wrong.
+        # True when at least one discovered channel uses a dynamic stream registration. The analyzer
+        # treats this as "we can't be sure any literal name is missing" and skips the `unknown-stream`
+        # warning entirely — absence of a literal match doesn't prove the name is wrong.
         def any_dynamic_streams?
           @entries.any?(&:dynamic_streams)
         end

@@ -1,8 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Compare a fresh OSS sweep result against stored thresholds.
-# Exits 0 (pass) or 1 (regression).
+# Compare a fresh OSS sweep result against stored thresholds. Exits 0 (pass) or 1 (regression).
 #
 # Usage:
 #   ruby tool/oss_sweep_compare.rb \
@@ -11,8 +10,7 @@
 #     --thresholds-json PATH \
 #     [--write-thresholds PATH]
 #
-# If --write-thresholds is given and the thresholds file is
-# uncalibrated ("calibrated": false), this script writes fresh
+# If --write-thresholds is given and the thresholds file is uncalibrated ("calibrated": false), this script writes fresh
 # thresholds derived from the current run and exits 0.
 
 require "json"

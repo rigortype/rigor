@@ -1,15 +1,12 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-mangrove/`. Slice 1:
-# instantiates the Mangrove Result/Option carrier generic at the
-# unwrap call site, contributing `type_args[0]` (the OkType /
-# InnerType) as the unwrap call's return type.
+# Integration spec for `plugins/rigor-mangrove/`. Slice 1: instantiates the Mangrove Result/Option carrier
+# generic at the unwrap call site, contributing `type_args[0]` (the OkType / InnerType) as the unwrap call's
+# return type.
 #
-# The carriers are declared as applied generics in RBS but their
-# unwrap methods return `untyped` — mirroring a generic-unaware
-# sig source. Without the plugin every unwrap is `untyped` and a
-# typo'd chained call goes unnoticed; with the plugin the unwrap
-# resolves to the carried type and the typo surfaces as
+# The carriers are declared as applied generics in RBS but their unwrap methods return `untyped` — mirroring a
+# generic-unaware sig source. Without the plugin every unwrap is `untyped` and a typo'd chained call goes
+# unnoticed; with the plugin the unwrap resolves to the carried type and the typo surfaces as
 # `call.undefined-method`.
 
 require "spec_helper"
@@ -18,8 +15,7 @@ MANGROVE_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-mangrove/lib", __
 $LOAD_PATH.unshift(MANGROVE_PLUGIN_LIB) unless $LOAD_PATH.include?(MANGROVE_PLUGIN_LIB)
 require "rigor-mangrove"
 
-# Carriers as applied generics; a `Session` producer whose
-# declared return types make the receiver carry `type_args`.
+# Carriers as applied generics; a `Session` producer whose declared return types make the receiver carry `type_args`.
 MANGROVE_RBS = <<~RBS
   module Mangrove
     module Result
@@ -121,10 +117,8 @@ RSpec.describe "plugins/rigor-mangrove" do
 
   describe "conservative floor — never invents precision" do
     it "no-ops on a raw carrier with no type_args (constructor shape)" do
-      # `Result::Ok.new("x")` yields a raw Nominal (the engine
-      # does not infer generics from constructor args), so the
-      # plugin contributes nothing and the typo'd chain stays
-      # `untyped` — no false positive.
+      # `Result::Ok.new("x")` yields a raw Nominal (the engine does not infer generics from constructor args),
+      # so the plugin contributes nothing and the typo'd chain stays `untyped` — no false positive.
       source = <<~RUBY
         def demo
           Mangrove::Result::Ok.new("x").unwrap!.uppercaze
@@ -147,8 +141,8 @@ RSpec.describe "plugins/rigor-mangrove" do
     end
   end
 
-  # ADR-36 nested-class emission — the `variants do … end` Enum DSL
-  # mints a nested subclass per variant with a typed `#inner` reader.
+  # ADR-36 nested-class emission — the `variants do … end` Enum DSL mints a nested subclass per variant with a
+  # typed `#inner` reader.
   describe "Enum variant synthesis (ADR-36)" do
     it "resolves the variant constant + `.new` + a payload-typed `#inner`" do
       source = <<~RUBY

@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-activejob/`.
-# Tier 1D of the Rails plugins roadmap. Discovers
-# ActiveJob subclasses by walking `app/jobs/` and validates
-# `Job.perform_later` / `.perform_now` / `.perform`
-# argument arity against each class's `#perform`.
+# Integration spec for `plugins/rigor-activejob/`. Tier 1D of the Rails plugins roadmap. Discovers ActiveJob
+# subclasses by walking `app/jobs/` and validates `Job.perform_later` / `.perform_now` / `.perform` argument
+# arity against each class's `#perform`.
 
 require "spec_helper"
 
@@ -98,8 +96,7 @@ RSpec.describe "plugins/rigor-activejob" do
 
   describe "edge cases" do
     it "ignores `Job.perform_later` calls when `Job` is not in `app/jobs/`" do
-      # `UnrelatedKlass.perform_later(1)` doesn't trigger a
-      # diagnostic — the plugin only validates calls whose
+      # `UnrelatedKlass.perform_later(1)` doesn't trigger a diagnostic — the plugin only validates calls whose
       # receiver is a discovered job class.
       result = run_plugin(
         source: "UnrelatedKlass.perform_later(1)\n",

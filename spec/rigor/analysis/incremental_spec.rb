@@ -3,13 +3,10 @@
 require "spec_helper"
 require "tmpdir"
 
-# ADR-46 slice 2 — the incremental step's pure core plus its soundness
-# property. The body tier re-analyses `{changed} ∪ dependents[changed]`
-# and serves every other file from the per-file cache; the property that
-# makes that sound is that an edit whose declaration-structure fingerprint
-# is unchanged never changes the diagnostics of a file OUTSIDE that
-# closure. These specs assert the set algebra in isolation and then drive
-# real runs to confirm the property end-to-end.
+# ADR-46 slice 2 — the incremental step's pure core plus its soundness property. The body tier re-analyses `{changed} ∪
+# dependents[changed]` and serves every other file from the per-file cache; the property that makes that sound is that
+# an edit whose declaration-structure fingerprint is unchanged never changes the diagnostics of a file OUTSIDE that
+# closure. These specs assert the set algebra in isolation and then drive real runs to confirm the property end-to-end.
 RSpec.describe Rigor::Analysis::Incremental do
   describe ".affected" do
     it "is the changed set plus the dependents of every changed file" do
@@ -164,9 +161,8 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
-  # End-to-end soundness: drive real runs, mutate one file, and confirm
-  # the files whose diagnostics actually moved are a subset of the affected
-  # closure the body tier would re-analyse.
+  # End-to-end soundness: drive real runs, mutate one file, and confirm the files whose diagnostics actually moved are a
+  # subset of the affected closure the body tier would re-analyse.
   describe "soundness property (real runs)" do
     def baseline(dir)
       config = Rigor::Configuration.new("paths" => [dir])
@@ -182,10 +178,9 @@ RSpec.describe Rigor::Analysis::Incremental do
       Rigor::Analysis::Runner.new(configuration: config, cache_store: nil).run.diagnostics.group_by(&:path)
     end
 
-    # A self-contained `def.override-visibility-reduced` (balanced profile
-    # → :warning). `reduced:` toggles the `private` modifier that is the
-    # diagnostic's cause; `prefix` keeps each file's class names distinct
-    # so the cross-file index never merges two fixtures.
+    # A self-contained `def.override-visibility-reduced` (balanced profile → :warning). `reduced:` toggles the `private`
+    # modifier that is the diagnostic's cause; `prefix` keeps each file's class names distinct so the cross-file index
+    # never merges two fixtures.
     def write_reduction(path, prefix:, reduced:)
       File.write(path, <<~RUBY)
         class #{prefix}Base
@@ -215,20 +210,18 @@ RSpec.describe Rigor::Analysis::Incremental do
         expect(per_file_before[widget]).not_to be_nil
         expect(per_file_before[gadget]).not_to be_nil
 
-        # Body edit to widget that erases its diagnostic. No symbol
-        # added/removed/moved → declaration fingerprint unchanged.
+        # Body edit to widget that erases its diagnostic. No symbol added/removed/moved → declaration fingerprint
+        # unchanged.
         write_reduction(widget, prefix: "W", reduced: false)
 
         changed = described_class.changed_files(per_file_before, per_file(dir))
         affected = described_class.affected([widget], dependents)
 
-        # The soundness invariant: every file whose diagnostics moved is in
-        # the closure the body tier re-analyses.
+        # The soundness invariant: every file whose diagnostics moved is in the closure the body tier re-analyses.
         expect(changed).to be_subset(affected)
         # The edit toggled widget's own diagnostic …
         expect(changed).to include(widget)
-        # … and left gadget untouched — it is correctly served from cache,
-        # demonstrating the leaf-edit pruning win.
+        # … and left gadget untouched — it is correctly served from cache, demonstrating the leaf-edit pruning win.
         expect(changed).not_to include(gadget)
       end
     end
@@ -255,11 +248,9 @@ RSpec.describe Rigor::Analysis::Incremental do
         _diagnostics, dependents = baseline(dir)
         affected = described_class.affected([model], dependents)
 
-        # caller.rb resolved Model#compute through to its body, so a Model
-        # edit re-analyses caller.rb even though Rigor's conservative
-        # inferred-return handling means its diagnostics rarely actually
-        # change — the body tier re-checks it to stay sound, not because a
-        # ripple is guaranteed.
+        # caller.rb resolved Model#compute through to its body, so a Model edit re-analyses caller.rb even though
+        # Rigor's conservative inferred-return handling means its diagnostics rarely actually change — the body tier
+        # re-checks it to stay sound, not because a ripple is guaranteed.
         expect(affected).to include(caller_file)
       end
     end

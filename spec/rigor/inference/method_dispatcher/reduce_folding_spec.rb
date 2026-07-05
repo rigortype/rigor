@@ -82,9 +82,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ReduceFolding do
       end
 
       it "declines an endless range `(1..)` (constant path declines; nominal path too)" do
-        # The constant path declines (no finite size); `element_type_of`
-        # on an endless `Constant[Range]` also declines, so the whole
-        # tier returns nil — byte-identical to pre-fold behaviour.
+        # The constant path declines (no finite size); `element_type_of` on an endless `Constant[Range]` also declines,
+        # so the whole tier returns nil — byte-identical to pre-fold behaviour.
         expect(fold(constant_of(1..), :reduce, [constant_of(:+)])).to be_nil
       end
 
@@ -98,8 +97,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ReduceFolding do
       end
 
       it "declines an operator outside the constant allow-list (`:max`)" do
-        # `Integer#max` does not exist; the nominal fold also cannot
-        # dispatch it, so the whole call declines (nil).
+        # `Integer#max` does not exist; the nominal fold also cannot dispatch it, so the whole call declines (nil).
         expect(fold(tuple(1, 2, 3), :reduce, [constant_of(:max)])).to be_nil
       end
 
@@ -112,8 +110,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ReduceFolding do
       end
 
       it "declines a non-Constant seed (range members constant, seed nominal)" do
-        # A nominal seed makes the fold non-constant, so the value path
-        # declines but the carrier path still answers `Integer`.
+        # A nominal seed makes the fold non-constant, so the value path declines but the carrier path still answers
+        # `Integer`.
         expect(fold(int_range, :reduce, [integer, constant_of(:*)])).to eq(integer)
       end
 

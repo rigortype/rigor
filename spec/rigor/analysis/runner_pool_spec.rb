@@ -34,11 +34,9 @@ require "rigor/plugin"
 # no-cache_store degradation example pins the Ractor backend,
 # because that precondition is Ractor-specific (Phase 4b.x).
 RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
-  # Per-file diagnostic comparison key. Severity is stripped
-  # because the severity-profile re-stamping is identical on
-  # both code paths (the profile sees the same authored
-  # severity → resolved severity table); the remaining fields
-  # are the per-file invariant the equivalence contract binds.
+  # Per-file diagnostic comparison key. Severity is stripped because the severity-profile re-stamping is identical on
+  # both code paths (the profile sees the same authored severity → resolved severity table); the remaining fields are
+  # the per-file invariant the equivalence contract binds.
   def diag_keys(diagnostics)
     diagnostics.map do |d|
       [d.path, d.line, d.column, d.rule, d.source_family, d.message]
@@ -108,15 +106,10 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
     end
 
     it "handles non-trivial source that exercises the RBS dispatch chain (Phase 4b.x)" do
-      # Without the Phase 4b.x cache pre-warm, the worker
-      # would call `RBS::EnvironmentLoader.new` on first
-      # class lookup and trip
-      # `Ractor::IsolationError` reading
-      # `RBS::EnvironmentLoader::DEFAULT_CORE_ROOT` etc.
-      # The pre-warm ensures every cached producer is warm
-      # on the main Ractor first, so the worker's
-      # `cached_env` Marshal-load path serves every query
-      # without ever touching `EnvironmentLoader.new`.
+      # Without the Phase 4b.x cache pre-warm, the worker would call `RBS::EnvironmentLoader.new` on first class lookup
+      # and trip `Ractor::IsolationError` reading `RBS::EnvironmentLoader::DEFAULT_CORE_ROOT` etc. The pre-warm ensures
+      # every cached producer is warm on the main Ractor first, so the worker's `cached_env` Marshal-load path serves
+      # every query without ever touching `EnvironmentLoader.new`.
       Dir.mktmpdir do |dir|
         path = File.join(dir, "code.rb")
         File.write(path, <<~RUBY)
@@ -138,25 +131,19 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
           ).run.diagnostics
         end
 
-        # Both runs MUST flag the same `call.undefined-method`
-        # / `call.wrong-arity` diagnostics — proves the
-        # worker dispatched through RBS without crashing.
+        # Both runs MUST flag the same `call.undefined-method` / `call.wrong-arity` diagnostics — proves the worker
+        # dispatched through RBS without crashing.
         expect(diag_keys(pool).select { |k| %w[call.undefined-method call.wrong-arity].include?(k[3]) }).to eq(
           diag_keys(sequential).select { |k| %w[call.undefined-method call.wrong-arity].include?(k[3]) }
         )
       end
     end
 
-    # ADR-15 Phase 4b.x — the no-cache_store degradation is a
-    # RACTOR-backend precondition: without the cache pre-warm a
-    # worker's first reflection query would fall through to
-    # `RBS::EnvironmentLoader.new` and trip
-    # `Ractor::IsolationError`. The fork backend copy-on-write
-    # inherits the parent's warm Environment and needs no
-    # cache_store — its counterpart contract (no degradation)
-    # lives in `runner_fork_pool_spec.rb`. The guard fires
-    # BEFORE any Ractor spawns, so pinning the backend here is
-    # deterministic and carries none of the pool's Bus-Error
+    # ADR-15 Phase 4b.x — the no-cache_store degradation is a RACTOR-backend precondition: without the cache pre-warm a
+    # worker's first reflection query would fall through to `RBS::EnvironmentLoader.new` and trip
+    # `Ractor::IsolationError`. The fork backend copy-on-write inherits the parent's warm Environment and needs no
+    # cache_store — its counterpart contract (no degradation) lives in `runner_fork_pool_spec.rb`. The guard fires
+    # BEFORE any Ractor spawns, so pinning the backend here is deterministic and carries none of the pool's Bus-Error
     # exposure.
     it "degrades gracefully to sequential when the Ractor backend is configured without a cache_store" do
       original = ENV.fetch("RIGOR_POOL_BACKEND", nil)
@@ -182,10 +169,8 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
 
     it "preserves original path order even when workers complete out of order" do
       Dir.mktmpdir do |dir|
-        # Each file emits a parse-error diagnostic so the
-        # per-file output is deterministic; the resulting
-        # diagnostic stream's `path` sequence MUST match the
-        # input path order.
+        # Each file emits a parse-error diagnostic so the per-file output is deterministic; the resulting diagnostic
+        # stream's `path` sequence MUST match the input path order.
         paths = Array.new(5) do |i|
           path = File.join(dir, "broken_#{i}.rb")
           File.write(path, "def broken_#{i}\n")
@@ -296,8 +281,7 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
             d.source_family == :plugin_loader &&
             d.message.include?("pool-prepare-raises")
         end
-        # 3 workers, each runs `prepare` and raises; the
-        # coordinator keeps only the first worker's snapshot.
+        # 3 workers, each runs `prepare` and raises; the coordinator keeps only the first worker's snapshot.
         expect(prepare_errors.size).to eq(1)
       end
     end

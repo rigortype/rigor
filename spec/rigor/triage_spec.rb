@@ -3,13 +3,11 @@
 require "rigor/triage"
 require "rigor/analysis/diagnostic"
 
-# ADR-23 — `Rigor::Triage` is pure over the diagnostic stream, so
-# the aggregation and the six-recogniser catalogue are covered here
-# with synthetic `Diagnostic` arrays (no Runner / no analysis pass).
+# ADR-23 — `Rigor::Triage` is pure over the diagnostic stream, so the aggregation and the six-recogniser catalogue are
+# covered here with synthetic `Diagnostic` arrays (no Runner / no analysis pass).
 RSpec.describe Rigor::Triage do
-  # normalize_receiver is a private module_function — exercised
-  # indirectly through selectors and directly via .send for the
-  # patterns that build_selectors does not reach with synthetic data.
+  # normalize_receiver is a private module_function — exercised indirectly through selectors and directly via .send for
+  # the patterns that build_selectors does not reach with synthetic data.
   def normalize_receiver(token)
     described_class.send(:normalize_receiver, token)
   end
@@ -61,10 +59,9 @@ RSpec.describe Rigor::Triage do
   end
 
   describe "WD6 — info excluded from the volume views by default" do
-    # A real Rails project's info is dominated by plugin recognition
-    # trace (model-call / helper / …) — positive "resolved this call"
-    # records, not problems. The volume views must route only the
-    # actionable error/warning signal by default.
+    # A real Rails project's info is dominated by plugin recognition trace (model-call / helper / …) — positive
+    # "resolved this call" records, not problems. The volume views must route only the actionable error/warning signal
+    # by default.
     def trace(rule, path: "a.rb", method_name: nil)
       diag(rule: rule, severity: :info, method_name: method_name, path: path)
     end
@@ -204,9 +201,8 @@ RSpec.describe Rigor::Triage do
   end
 
   describe "WD3 — structured receiver_type / method_name fields (slice 4)" do
-    # Carries the structured pair but a message the `undefined
-    # method ...` parser cannot match — proves the recogniser reads
-    # the fields rather than the message.
+    # Carries the structured pair but a message the `undefined method ...` parser cannot match — proves the recogniser
+    # reads the fields rather than the message.
     def structured(method, receiver, **)
       diag(message: "(wording the message parser cannot match)",
            receiver_type: receiver, method_name: method, **)

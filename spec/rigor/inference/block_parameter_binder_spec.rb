@@ -64,9 +64,8 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
     end
 
     it "binds a trailing required positional after a rest (the `|a, *b, c|` shape)" do
-      # Regression: `bind_trailing_positionals` previously called an
-      # undefined `required_name` helper, so a `post` parameter raised
-      # NoMethodError. It now routes through `bind_required_param`.
+      # Regression: `bind_trailing_positionals` previously called an undefined `required_name` helper, so a `post`
+      # parameter raised NoMethodError. It now routes through `bind_required_param`.
       block = parse_block("foo { |a, *b, c| c }")
       bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
       expect(bindings[:a]).to eq(integer_nominal)
@@ -109,9 +108,8 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
     end
 
     it "binds MultiTargetNode block parameters with a non-Tuple slot to Dynamic[Top]" do
-      # When the slot expected type is not a Tuple, MultiTargetBinder
-      # falls back to Dynamic[Top] for every inner local. The outer
-      # `c` still binds to its slot type.
+      # When the slot expected type is not a Tuple, MultiTargetBinder falls back to Dynamic[Top] for every inner local.
+      # The outer `c` still binds to its slot type.
       block = parse_block("foo { |(a, b), c| c }")
       bindings = described_class.new(
         expected_param_types: [integer_nominal, string_nominal]

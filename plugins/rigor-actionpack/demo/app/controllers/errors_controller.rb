@@ -1,16 +1,14 @@
 # frozen_string_literal: true
 
-# Demo controller that triggers each error path
-# rigor-actionpack Phase 4 emits:
+# Demo controller that triggers each error path rigor-actionpack Phase 4 emits:
 #
 # - unknown-helper (with did-you-mean) — `usres_path` typo.
-# - wrong-helper-arity — `user_path` (arity 1) called with 0
-#   args, and `user_post_path` (arity 2) called with 1.
+# - wrong-helper-arity — `user_path` (arity 1) called with 0 args, and `user_post_path` (arity 2)
+#   called with 1.
 
 class ErrorsController < ApplicationController
-  # Phase 2 — `:authenticate!` is not defined on this
-  # controller (or its parent), so the filter reference is an
-  # error.
+  # Phase 2 — `:authenticate!` is not defined on this controller (or its parent), so the filter
+  # reference is an error.
   before_action :authenticate!
 
   def typo
@@ -29,8 +27,8 @@ class ErrorsController < ApplicationController
   end
 
   def missing_view
-    # Phase 3 — `app/views/errors/nope.html.erb` doesn't exist;
-    # the plugin emits `missing-template` here.
+    # Phase 3 — `app/views/errors/nope.html.erb` doesn't exist; the plugin emits `missing-template`
+    # here.
     render :nope
   end
 end

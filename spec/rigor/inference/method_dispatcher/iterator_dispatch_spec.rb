@@ -37,8 +37,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
     end
 
     it "is vacuous on 0.times — falls back to non_negative_int" do
-      # `0.times` does not iterate; the body still type-checks
-      # against a sensible binding.
+      # `0.times` does not iterate; the body still type-checks against a sensible binding.
       expect(block_params(constant_of(0), :times)).to eq([non_negative_int])
     end
 

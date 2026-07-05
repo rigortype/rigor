@@ -12,9 +12,8 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
   after { FileUtils.rm_rf(tmpdir) }
 
   def make_bundle_layout(root, *gem_entries)
-    # gem_entries: [name, version, ruby_version] tuples; creates
-    # <root>/ruby/<ruby_version>/gems/<name>-<version>/sig/ + a
-    # stub .rbs file inside so the dir exists.
+    # gem_entries: [name, version, ruby_version] tuples; creates <root>/ruby/<ruby_version>/gems/<name>-<version>/sig/ +
+    # a stub .rbs file inside so the dir exists.
     gem_entries.each do |name, version, ruby_version|
       sig_dir = File.join(root, "ruby", ruby_version, "gems", "#{name}-#{version}", "sig")
       FileUtils.mkdir_p(sig_dir)
@@ -89,8 +88,7 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
     end
 
     it "returns [] when neither .bundle/config nor vendor/bundle resolves" do
-      # `home:` points at an empty dir so the real user `~/.bundle/config`
-      # is not consulted — the test stays hermetic.
+      # `home:` points at an empty dir so the real user `~/.bundle/config` is not consulted — the test stays hermetic.
       result = described_class.discover(bundle_path: nil, project_root: tmpdir, auto_detect: true, home: tmpdir)
       expect(result).to eq([])
     end
@@ -151,8 +149,7 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
   end
 
   describe ".discover with a lockfile filter (O4 Layer 3)" do
-    # The lockfile filter accepts a `{name => LockedGem}` map.
-    # Only sig dirs whose `(name, version, platform)` matches a
+    # The lockfile filter accepts a `{name => LockedGem}` map. Only sig dirs whose `(name, version, platform)` matches a
     # lockfile entry survive.
     let(:locked_gem_klass) { Rigor::Environment::LockfileResolver::LockedGem }
 
@@ -177,8 +174,7 @@ RSpec.describe Rigor::Environment::BundleSigDiscovery do
 
     it "drops sig dirs whose version does not match the lockfile (bundle drift)" do
       bundle = File.join(tmpdir, "bundle")
-      # Bundle dir has acme_sdk-2.0.0 left over from before a
-      # `bundle update`; lockfile now pins 1.2.3.
+      # Bundle dir has acme_sdk-2.0.0 left over from before a `bundle update`; lockfile now pins 1.2.3.
       make_bundle_layout(bundle, ["acme_sdk", "2.0.0", "4.0.0"])
       locked = {
         "acme_sdk" => locked_gem_klass.new(name: "acme_sdk", version: "1.2.3", platform: "ruby")

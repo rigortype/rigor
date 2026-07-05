@@ -36,8 +36,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
       expect(idx[program]).to eq(default_scope)
       expect(idx[assignment]).to eq(default_scope)
-      # The local-variable read happens AFTER the assignment, so its
-      # entry scope MUST carry `x` bound to Constant[1].
+      # The local-variable read happens AFTER the assignment, so its entry scope MUST carry `x` bound to Constant[1].
       expect(idx[read].local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
@@ -66,9 +65,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       rhs = assignment_y.value # CallNode for `x + 2`
       receiver = rhs.receiver  # LocalVariableReadNode for `x`
 
-      # The rvalue (and its receiver child) is reached via sub_eval from
-      # eval_local_write under the post-`x = 1` scope, so `x` MUST be
-      # visible at both the call and its receiver.
+      # The rvalue (and its receiver child) is reached via sub_eval from eval_local_write under the post-`x = 1` scope,
+      # so `x` MUST be visible at both the call and its receiver.
       expect(idx[rhs].local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
       expect(idx[receiver].local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
     end
@@ -88,18 +86,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       x_inside_branch = then_statements[1] # LocalVariableReadNode for `x`
       expect(idx[x_inside_branch].local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
 
-      # After the if (with no else), nil-injection on the join-with-nil
-      # path makes `x` visible as `Constant[1] | Constant[nil]`.
+      # After the if (with no else), nil-injection on the join-with-nil path makes `x` visible as `Constant[1] |
+      # Constant[nil]`.
       expect(idx[after_if].local(:x)).to be_a(Rigor::Type::Union)
       expect(idx[after_if].local(:x).members.map(&:value)).to contain_exactly(1, nil)
     end
 
-    # Returns the index built for the canonical "expression-position
-    # conditional with a previously-bound x" shape, plus the
-    # LocalVariableReadNode for `x` extracted by `branch_path`. Pre-binding
-    # `x = nil` makes Prism parse the inner `x` as a local read; the
-    # surrounding `[]=` CallNode hides the conditional from
-    # StatementEvaluator's eval_if path.
+    # Returns the index built for the canonical "expression-position conditional with a previously-bound x" shape, plus
+    # the LocalVariableReadNode for `x` extracted by `branch_path`. Pre-binding `x = nil` makes Prism parse the inner
+    # `x` as a local read; the surrounding `[]=` CallNode hides the conditional from StatementEvaluator's eval_if path.
     def index_and_x_read_for(conditional, branch_path)
       program = parse("x = nil; cache[:k] = #{conditional}")
       assignment = program.statements.body[1]
@@ -159,12 +154,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       )
     end
 
-    # v0.1.2 — Data.define / Struct.new block-body methods are
-    # registered under the constant's qualified name in both
-    # `discovered_methods` and `discovered_def_nodes`. Without
-    # this, the block-body `def initialize(...)` override is
-    # invisible to `Reflection.user_def_for` / `discovered_method?`
-    # and the canonical-sig contract is missing.
+    # v0.1.2 — Data.define / Struct.new block-body methods are registered under the constant's qualified name in both
+    # `discovered_methods` and `discovered_def_nodes`. Without this, the block-body `def initialize(...)` override is
+    # invisible to `Reflection.user_def_for` / `discovered_method?` and the canonical-sig contract is missing.
     it "registers Data.define block-body methods under the constant's name" do
       program = parse(<<~RUBY)
         Point = Data.define(:x, :y) do
@@ -206,9 +198,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(scope.discovered_method?("Row", :to_pair, :instance)).to be(true)
     end
 
-    # Module-singleton call resolution (ADR-57 follow-up) — singleton-side
-    # def-node table that `ExpressionTyper#try_singleton_method_inference`
-    # re-types against a `Singleton[X]` receiver.
+    # Module-singleton call resolution (ADR-57 follow-up) — singleton-side def-node table that
+    # `ExpressionTyper#try_singleton_method_inference` re-types against a `Singleton[X]` receiver.
     it "records `def self.x` / `def Foo.x` / `class << self` singleton def-nodes" do
       program = parse(<<~RUBY)
         module Util
@@ -283,14 +274,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(scope.discovered_method?("Coord", :lng, :instance)).to be(true)
     end
 
-    # Survey item (e) — `Const = Module.new do ... end` and
-    # `Const = Class.new(?super) do ... end` are block-as-method
-    # idioms that mirror the Data.define / Struct.new shape: the
-    # block body holds method overrides whose canonical class is
-    # the named constant. Driven by `references/ruby/lib/resolv.rb`
-    # (~8 sites) where `ClassHash = Module.new do; def []=; ...; end; end`
-    # registers an instance method that `ClassHash[k] = v` then
-    # calls.
+    # Survey item (e) — `Const = Module.new do ... end` and `Const = Class.new(?super) do ... end` are block-as-method
+    # idioms that mirror the Data.define / Struct.new shape: the block body holds method overrides whose canonical class
+    # is the named constant. Driven by `references/ruby/lib/resolv.rb` (~8 sites) where `ClassHash = Module.new do; def
+    # []=; ...; end; end` registers an instance method that `ClassHash[k] = v` then calls.
     it "registers Module.new block-body methods under the constant's name" do
       program = parse(<<~RUBY)
         ClassHash = Module.new do
@@ -425,9 +412,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     it "narrows IfNode branches when the conditional sits in expression position" do
-      # `x = nil` makes x's entry type Constant[nil]; narrow_truthy collapses
-      # it to Bot. Without branch-aware propagation x would still read as
-      # Constant[nil] inside the truthy branch.
+      # `x = nil` makes x's entry type Constant[nil]; narrow_truthy collapses it to Bot. Without branch-aware
+      # propagation x would still read as Constant[nil] inside the truthy branch.
       idx, x_read = index_and_x_read_for("if x; x.foo; else; default; end",
                                          ->(n) { n.statements.body.first })
       expect(x_read).to be_a(Prism::LocalVariableReadNode)
@@ -435,8 +421,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     it "narrows UnlessNode branches in expression position (mirror of IfNode)" do
-      # `unless x` runs the body when x is falsey; the else branch is the
-      # truthy edge, so x narrows away from Constant[nil] (collapsing to Bot).
+      # `unless x` runs the body when x is falsey; the else branch is the truthy edge, so x narrows away from
+      # Constant[nil] (collapsing to Bot).
       idx, x_read = index_and_x_read_for("unless x; default; else; x.foo; end",
                                          ->(n) { n.else_clause.statements.body.first })
       expect(x_read).to be_a(Prism::LocalVariableReadNode)
@@ -444,10 +430,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     it "honors propagation order so visited entries are not overwritten" do
-      # `(x = 1; x)` : the parens visit the inner StatementsNode and the
-      # local-variable read; after StatementEvaluator runs, propagate
-      # MUST NOT overwrite the read's scope (which has `x` bound) with
-      # the parens' entry scope (which does not).
+      # `(x = 1; x)` : the parens visit the inner StatementsNode and the local-variable read; after StatementEvaluator
+      # runs, propagate MUST NOT overwrite the read's scope (which has `x` bound) with the parens' entry scope (which
+      # does not).
       program, idx = index_for("(x = 1; x)")
       parens = program.statements.body.first
       inner_read = parens.body.body[1] # LocalVariableReadNode
@@ -457,10 +442,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     it "does not invoke the StatementEvaluator's tracer (it is built tracer-free)" do
-      # If the indexer threaded a tracer, the user's later type_of probe
-      # would see double-counted events. The indexer's StatementEvaluator
-      # MUST run with no tracer so events come only from the post-index
-      # type_of call.
+      # If the indexer threaded a tracer, the user's later type_of probe would see double-counted events. The indexer's
+      # StatementEvaluator MUST run with no tracer so events come only from the post-index type_of call.
       tracer = Rigor::Inference::FallbackTracer.new
       program = parse("foo(1)")
       idx = described_class.index(program, default_scope: default_scope)
@@ -477,14 +460,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[foreign]).to eq(default_scope)
     end
 
-    # Regression: kwarg default value expressions execute when the
-    # method is INVOKED, so their `self` is the instance — not the
-    # surrounding class body's `self`. Previously the scope-index
-    # filled parameter-subtree nodes with the outer class-body
-    # scope (`self_type = singleton(C)`) via `propagate`, causing
-    # `def copy(x: self.foo)`-style idioms to be analysed as
-    # singleton-side calls. Observed surfacing 915 false positives
-    # in `prism-1.9.0`'s auto-generated `copy` methods.
+    # Regression: kwarg default value expressions execute when the method is INVOKED, so their `self` is the instance —
+    # not the surrounding class body's `self`. Previously the scope-index filled parameter-subtree nodes with the outer
+    # class-body scope (`self_type = singleton(C)`) via `propagate`, causing `def copy(x: self.foo)`-style idioms to be
+    # analysed as singleton-side calls. Observed surfacing 915 false positives in `prism-1.9.0`'s auto-generated `copy`
+    # methods.
     it "scopes parameter default values under the method's body scope (instance self)" do
       program = parse(<<~RUBY)
         class Foo
@@ -653,9 +633,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       mid = program.statements.body.first.body.body.first
       def_node = mid.body.body.first
       method_body_scope = idx[def_node.body.body.first]
-      # The fresh method-body scope still sees declared_types so a
-      # later override probe (e.g. SelfNode lookup, or a future
-      # constant-position annotation inside the body) can resolve.
+      # The fresh method-body scope still sees declared_types so a later override probe (e.g. SelfNode lookup, or a
+      # future constant-position annotation inside the body) can resolve.
       expect(method_body_scope.declared_types).not_to be_empty
     end
   end
@@ -721,8 +700,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       RUBY
       idx = described_class.index(program, default_scope: default_scope)
       outer_scope = idx[program]
-      # Not a singleton method of Foo::Bar; the receiver names a different
-      # constant so the slice does not promote.
+      # Not a singleton method of Foo::Bar; the receiver names a different constant so the slice does not promote.
       expect(outer_scope.discovered_method?("Foo::Bar", :unrelated, :singleton)).to be(false)
     end
   end
@@ -835,8 +813,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
         type = outer.class_ivars_for("Pure")[:@struct]
-        # `.last` is NOT a mutator, so no widening fires; the
-        # seed precision is preserved.
+        # `.last` is NOT a mutator, so no widening fires; the seed precision is preserved.
         expect(type).to be_a(Rigor::Type::Tuple)
       end
     end
@@ -852,8 +829,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         RUBY
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
-        # No other writes to @x in the class — the skip means
-        # the accumulator has no entry for @x at all.
+        # No other writes to @x in the class — the skip means the accumulator has no entry for @x at all.
         expect(outer.class_ivars_for("C")).not_to have_key(:@x)
       end
 
@@ -880,8 +856,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         RUBY
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
-        # The non-falsey rvalue's union with `Constant[nil]`
-        # does NOT collapse, so the seed is preserved.
+        # The non-falsey rvalue's union with `Constant[nil]` does NOT collapse, so the seed is preserved.
         type = outer.class_ivars_for("C")[:@z]
         expect(type).not_to be_nil
       end
@@ -1098,8 +1073,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           expect(values).to include(nil, true)
         end
 
-        # ADR-38 — a plugin-declared additional initializer is
-        # treated like `initialize` at the read-before-write gate.
+        # ADR-38 — a plugin-declared additional initializer is treated like `initialize` at the read-before-write gate.
         context "with a plugin-declared additional initializer (ADR-38)" do
           let(:setup_source) do
             <<~RUBY
@@ -1232,9 +1206,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             members.any? { |m| m.is_a?(Rigor::Type::Constant) && m.value.nil? }
           end
 
-          # Without a declaration the block body is never descended, so the
-          # ivar is simply absent from the accumulator (no type at all — a
-          # different problem than nil-widening, but equally undesirable).
+          # Without a declaration the block body is never descended, so the ivar is simply absent from the accumulator
+          # (no type at all — a different problem than nil-widening, but equally undesirable).
           it "control: without declaration, @user is not collected from a block body" do
             outer = parse(before_block_source).then do |program|
               described_class.index(program, default_scope: default_scope)[program]
@@ -1242,8 +1215,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             expect(user_type(outer)).to be_nil
           end
 
-          # With declaration: block body descended → type collected → init_writes
-          # suppresses the read-before-write nil contribution.
+          # With declaration: block body descended → type collected → init_writes suppresses the read-before-write nil
+          # contribution.
           it "collects @user and suppresses nil widening when `before` is a declared block_method" do
             entry = Rigor::Plugin::AdditionalInitializer.new(
               receiver_constraint: "FooSpec", block_methods: [:before]
@@ -1272,9 +1245,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
             expect(user_type(outer)).to be_nil
           end
 
-          # A def-form `before` method is walked by collect_def_ivar_writes as
-          # usual. It is NOT in init_writes (block_methods: [:before] only covers
-          # block-form calls, not defs), so the read-before-write nil contribution
+          # A def-form `before` method is walked by collect_def_ivar_writes as usual. It is NOT in init_writes
+          # (block_methods: [:before] only covers block-form calls, not defs), so the read-before-write nil contribution
           # fires — the nil-widening IS the expected result here.
           it "nil-widens a def-form `before` method even when block_methods: [:before] is declared" do
             entry = Rigor::Plugin::AdditionalInitializer.new(
@@ -1319,10 +1291,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           idx = described_class.index(program, default_scope: default_scope)
           outer = idx[program]
           type = outer.class_ivars_for("StreamingServerManager")[:@running_thread]
-          # Class-body write exempts the read-before-write nil
-          # contribution. Without the exemption, an unjustified
-          # nil widening would propagate into Thread.new's block
-          # body and produce a `.kill for nil` style FP.
+          # Class-body write exempts the read-before-write nil contribution. Without the exemption, an unjustified nil
+          # widening would propagate into Thread.new's block body and produce a `.kill for nil` style FP.
           members = type.is_a?(Rigor::Type::Union) ? type.members : [type]
           expect(members.find { |m| m.is_a?(Rigor::Type::Constant) && m.value.nil? }).to be_nil
         end
@@ -1342,19 +1312,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         RUBY
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
-        # The falsey-default write itself is skipped — the
-        # `init` write still seeds `@w` to its rvalue type. The
-        # B2.3 read-before-write pre-pass additionally unions
-        # `nil` here because `configure` reads `@w` before any
-        # write IN THAT METHOD BODY and `init` is NOT
-        # `initialize` (so the soundness gate's "constructor
-        # initialised" exemption does not apply).
+        # The falsey-default write itself is skipped — the `init` write still seeds `@w` to its rvalue type. The B2.3
+        # read-before-write pre-pass additionally unions `nil` here because `configure` reads `@w` before any write IN
+        # THAT METHOD BODY and `init` is NOT `initialize` (so the soundness gate's "constructor initialised" exemption
+        # does not apply).
         type = outer.class_ivars_for("C")[:@w]
         expect(type).to be_a(Rigor::Type::Union)
         member_kinds = type.members.map(&:class)
         expect(member_kinds).to include(Rigor::Type::Constant)
-        # And `init`'s rvalue precision survives — the union
-        # carries `Constant["hello"]` (plus the read-before-write
+        # And `init`'s rvalue precision survives — the union carries `Constant["hello"]` (plus the read-before-write
         # `Constant[nil]`).
         constant_member = type.members.find { |m| m.is_a?(Rigor::Type::Constant) && m.value == "hello" }
         expect(constant_member).not_to be_nil
@@ -1391,9 +1357,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
         type = outer.class_ivars_for("B")[:@thr]
-        # An unanalyzable parallel assignment means *unknown*, not nil —
-        # the sound floor is Dynamic[top]. A pure-nil seed here is the N1
-        # bug (it false-fires `@thr.alive?` undefined-for-nil).
+        # An unanalyzable parallel assignment means *unknown*, not nil — the sound floor is Dynamic[top]. A pure-nil
+        # seed here is the N1 bug (it false-fires `@thr.alive?` undefined-for-nil).
         expect(type).to be_a(Rigor::Type::Dynamic)
       end
 
@@ -1441,15 +1406,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
         type = outer.class_ivars_for("G")[:@x]
-        # `@x` is written by both a single write (Constant[1]) and a
-        # multi-write (Dynamic from `y`) — the union carries both.
+        # `@x` is written by both a single write (Constant[1]) and a multi-write (Dynamic from `y`) — the union carries
+        # both.
         expect(type).to be_a(Rigor::Type::Union)
       end
     end
   end
 
-  # T1 — cross-file `Const = Class.new(Super)` discovery so a rescue /
-  # const reference in a sibling file resolves to the project class.
+  # T1 — cross-file `Const = Class.new(Super)` discovery so a rescue / const reference in a sibling file resolves to the
+  # project class.
   describe ".discovered_classes_for_paths with Class.new constants" do
     def with_files(files)
       Dir.mktmpdir do |dir|

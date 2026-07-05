@@ -9,8 +9,8 @@ require "spec_helper"
 # (non-box) behaviour is unchanged. To exercise the box path:
 #   RUBY_BOX=1 bundle exec rspec spec/rigor/plugin/box_spec.rb
 RSpec.describe Rigor::Plugin::Box do
-  # Helper to reset memoized ivars between examples when the box
-  # is active, since module_function stores them on the module.
+  # Helper to reset memoized ivars between examples when the box is active, since module_function stores them on the
+  # module.
   def reset_box!
     described_class.remove_instance_variable(:@shared) if described_class.instance_variable_defined?(:@shared)
     described_class.remove_instance_variable(:@required) if described_class.instance_variable_defined?(:@required)
@@ -85,10 +85,9 @@ RSpec.describe Rigor::Plugin::Box do
       expect(described_class.require_feature("active_support/inflector")).to be(true)
       # The shared box answers the call...
       expect(described_class.eval("ActiveSupport::Inflector.pluralize(\"person\")")).to eq("people")
-      # ...without ActiveSupport leaking into Rigor's main space. (Guarded:
-      # another example in this process may have loaded it via the `none`
-      # strategy, which pollutes this process-global check; the no-leak
-      # property holds when this spec runs standalone.)
+      # ...without ActiveSupport leaking into Rigor's main space. (Guarded: another example in this process may have
+      # loaded it via the `none` strategy, which pollutes this process-global check; the no-leak property holds when
+      # this spec runs standalone.)
       skip "ActiveSupport already loaded in this process" if defined?(ActiveSupport)
       expect(defined?(ActiveSupport)).to be_nil
     end

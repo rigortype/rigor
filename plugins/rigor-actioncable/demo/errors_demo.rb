@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# DO NOT run via `ruby errors_demo.rb` — analyse with
-# `bundle exec rigor check` to see rigor-actioncable's
-# diagnostics.
+# DO NOT run via `ruby errors_demo.rb` — analyse with `bundle exec rigor check` to see
+# rigor-actioncable's diagnostics.
 
 module ActionCable
   def self.server

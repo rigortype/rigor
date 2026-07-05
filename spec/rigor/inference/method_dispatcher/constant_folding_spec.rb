@@ -19,18 +19,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "returns nil when the method is not in the binary catalogue" do
-      # `:foo_no_such_op` is purely synthetic — the existing surface
-      # gates folds via the `NUMERIC_BINARY` set, and `divmod` now
-      # has its own Tuple-shaped fold path (covered separately below).
+      # `:foo_no_such_op` is purely synthetic — the existing surface gates folds via the `NUMERIC_BINARY` set, and
+      # `divmod` now has its own Tuple-shaped fold path (covered separately below).
       expect(fold(1, :foo_no_such_op, [2])).to be_nil
     end
   end
 
   describe "per-process-non-reproducible selectors never fold" do
-    # `#hash` is SipHash-salted per process; folding `"abc".hash` would
-    # bake one process's random value into a Constant (and the on-disk
-    # cache), wrong in every other process. The fold must decline so the
-    # RBS tier answers with the widened `Integer`.
+    # `#hash` is SipHash-salted per process; folding `"abc".hash` would bake one process's random value into a Constant
+    # (and the on-disk cache), wrong in every other process. The fold must decline so the RBS tier answers with the
+    # widened `Integer`.
     it "declines #hash on Integer / Float / String / Symbol / nil / true" do
       expect(fold(5, :hash)).to be_nil
       expect(fold(1.5, :hash)).to be_nil
@@ -118,11 +116,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
       it "folds nil.nil? to true and 1.nil? on Integer is unsupported (no `nil?` in INTEGER_UNARY)" do
         expect(fold(nil, :nil?).value).to be(true)
-        # Integer's nil? is not in the catalogue — folding
-        # is conservative, returning nil so the RBS tier
-        # answers via `Method | Bool`. The integration
-        # test below proves the engine still returns the
-        # correct precise value through dispatch.
+        # Integer's nil? is not in the catalogue — folding is conservative, returning nil so the RBS tier answers via
+        # `Method | Bool`. The integration test below proves the engine still returns the correct precise value through
+        # dispatch.
         expect(fold(1, :nil?)).to be_nil
       end
 
@@ -139,9 +135,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "returns nil when the method's result is not a foldable scalar" do
-      # `Integer#coerce` returns an Array — not in the
-      # `foldable_constant_value?` envelope, and `:coerce` is not
-      # in any binary allow list, so the fold declines.
+      # `Integer#coerce` returns an Array — not in the `foldable_constant_value?` envelope, and `:coerce` is not in any
+      # binary allow list, so the fold declines.
       expect(fold(123, :coerce, [1])).to be_nil
     end
   end
@@ -284,8 +279,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "does not fold a NaN-producing result into a Constant" do
-      # 0.0 / 0.0 == NaN, which is non-reflexive under ==; the fold
-      # must decline so it never produces a Constant[NaN].
+      # 0.0 / 0.0 == NaN, which is non-reflexive under ==; the fold must decline so it never produces a Constant[NaN].
       expect(fold(0.0, :/, [0.0])).to be_nil
     end
   end
@@ -317,8 +311,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "declines the bit-test predicates on a Float receiver (no such method)" do
-      # Listing them in the shared NUMERIC_BINARY set is Float-safe: the
-      # method does not exist on Float, so invoke_binary rescues to nil.
+      # Listing them in the shared NUMERIC_BINARY set is Float-safe: the method does not exist on Float, so
+      # invoke_binary rescues to nil.
       expect(fold(3.5, :allbits?, [2])).to be_nil
       expect(fold(3.5, :anybits?, [2])).to be_nil
       expect(fold(3.5, :nobits?, [2])).to be_nil
@@ -344,9 +338,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "lifts String#grapheme_clusters to a per-grapheme Tuple (distinct from #chars)" do
-      # "e" + a combining acute accent (U+0301): one extended grapheme
-      # cluster, but two #chars. Built from codepoints so the source stays
-      # ASCII and the decomposed (not precomposed) form is unambiguous.
+      # "e" + a combining acute accent (U+0301): one extended grapheme cluster, but two #chars. Built from codepoints so
+      # the source stays ASCII and the decomposed (not precomposed) form is unambiguous.
       e_acute = [0x65, 0x301].pack("U*") # "e" + combining acute accent
       g = fold(e_acute, :grapheme_clusters)
       expect(g).to be_a(Rigor::Type::Tuple)
@@ -355,8 +348,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "folds the Float rational accessors numerator / denominator" do
-      # The exact rational decomposition of the float — the Float
-      # siblings of the already-folded Rational accessors.
+      # The exact rational decomposition of the float — the Float siblings of the already-folded Rational accessors.
       expect(fold(2.5, :numerator).value).to eq(5)
       expect(fold(2.5, :denominator).value).to eq(2)
       expect(fold(3.0, :numerator).value).to eq(3)
@@ -364,8 +356,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "keeps the non-finite Float numerator / denominator folds sound" do
-      # Infinity folds to the same value Ruby returns at runtime;
-      # a NaN numerator is non-reflexive under == so the fold declines.
+      # Infinity folds to the same value Ruby returns at runtime; a NaN numerator is non-reflexive under == so the fold
+      # declines.
       expect(fold(Float::INFINITY, :numerator).value).to eq(Float::INFINITY)
       expect(fold(Float::INFINITY, :denominator).value).to eq(1)
       expect(fold(Float::NAN, :numerator)).to be_nil
@@ -396,12 +388,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
-  # Methods unlocked by the offline numeric.yml catalog: methods
-  # whose CRuby implementation the catalog classifies as `leaf`
-  # (no Ruby-level callout) or `leaf_when_numeric` (callout only on
-  # non-Numeric arg, gated upstream by the literal-only fold).
-  # The hand-rolled `NUMERIC_BINARY` / `INTEGER_UNARY` sets do not
-  # cover these, so before the wiring landed the fold returned nil.
+  # Methods unlocked by the offline numeric.yml catalog: methods whose CRuby implementation the catalog classifies as
+  # `leaf` (no Ruby-level callout) or `leaf_when_numeric` (callout only on non-Numeric arg, gated upstream by the
+  # literal-only fold). The hand-rolled `NUMERIC_BINARY` / `INTEGER_UNARY` sets do not cover these, so before the wiring
+  # landed the fold returned nil.
   describe "catalog-driven binary fold" do
     it "folds Integer#** (power)" do
       expect(fold(2, :**, [10]).value).to eq(1024)
@@ -508,13 +498,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
-  # STRING_FOLD_BYTE_LIMIT (4096) keeps a literal-string fold from
-  # materialising an unbounded result in the analyzer. The three guarded
-  # paths are `*` by a count (count > limit), `*` by bytesize
-  # (receiver.bytesize * count > limit), and `+` concat
-  # (left.bytesize + right.bytesize > limit). A declined fold returns
-  # nil so dispatch falls through to the RBS `String` envelope — the
-  # value is still typed, just not as a literal.
+  # STRING_FOLD_BYTE_LIMIT (4096) keeps a literal-string fold from materialising an unbounded result in the analyzer.
+  # The three guarded paths are `*` by a count (count > limit), `*` by bytesize (receiver.bytesize * count > limit), and
+  # `+` concat (left.bytesize + right.bytesize > limit). A declined fold returns nil so dispatch falls through to the
+  # RBS `String` envelope — the value is still typed, just not as a literal.
   describe "STRING_FOLD_BYTE_LIMIT enforcement" do
     it "folds a small String#* within the byte budget" do
       type = fold("x", :*, [10])
@@ -527,8 +514,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "declines String#* when bytesize * count exceeds the limit" do
-      # 100-byte receiver * 50 = 5000 bytes > 4096, even though the
-      # count (50) is itself under the limit.
+      # 100-byte receiver * 50 = 5000 bytes > 4096, even though the count (50) is itself under the limit.
       expect(fold("y" * 100, :*, [50])).to be_nil
     end
 
@@ -544,10 +530,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
-  # Union[Constant…] folding. Each Constant in a union represents a
-  # possible runtime value; a binary op over two unions is the
-  # cartesian fold, deduplicated. Bounded by the input/output
-  # cardinality caps so an analyzer-side blowup is not possible.
+  # Union[Constant…] folding. Each Constant in a union represents a possible runtime value; a binary op over two unions
+  # is the cartesian fold, deduplicated. Bounded by the input/output cardinality caps so an analyzer-side blowup is not
+  # possible.
   describe "union fold" do
     def constant_union(*values)
       Rigor::Type::Combinator.union(
@@ -605,9 +590,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "drops always-raising pairs and keeps the safe ones" do
-      # `Union[5, 7] / Union[0, 2]` — the (·, 0) pairs are
-      # division-by-zero (caught by safe?), so only 5/2=2 and
-      # 7/2=3 reach the result. The fold returns the survivors.
+      # `Union[5, 7] / Union[0, 2]` — the (·, 0) pairs are division-by-zero (caught by safe?), so only 5/2=2 and 7/2=3
+      # reach the result. The fold returns the survivors.
       type = fold_types(
         constant_union(5, 7),
         :/,
@@ -634,9 +618,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "widens to IntegerRange when output cardinality exceeds UNION_FOLD_OUTPUT_LIMIT" do
-      # 5 × 5 = 25 inputs (under input cap), `:+` over disjoint ranges
-      # produces 25 distinct sums (>8). The graceful escape valve is to
-      # return the bounding `IntegerRange[min..max]` rather than `nil`.
+      # 5 × 5 = 25 inputs (under input cap), `:+` over disjoint ranges produces 25 distinct sums (>8). The graceful
+      # escape valve is to return the bounding `IntegerRange[min..max]` rather than `nil`.
       receiver = constant_union(1, 2, 3, 4, 5)
       arg = constant_union(10, 20, 30, 40, 50)
       type = fold_types(receiver, :+, [arg])
@@ -646,8 +629,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "narrows to Union[true, false] via comparisons regardless of input width" do
-      # `Union[1, 2, 3] < 2` — outputs only true/false; the
-      # output cap is 8 so this comfortably folds.
+      # `Union[1, 2, 3] < 2` — outputs only true/false; the output cap is 8 so this comfortably folds.
       type = fold_types(
         constant_union(1, 2, 3),
         :<,
@@ -684,10 +666,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
-  # IntegerRange (positive-int, non-negative-int, int<a, b>, …) folding.
-  # Compare to PHPStan's `int<min, max>` family. The carrier never widens
-  # beyond what the inputs imply, so `int<5, 10> + int<1, 2>` is exactly
-  # `int<6, 12>` rather than the looser `Nominal[Integer]`.
+  # IntegerRange (positive-int, non-negative-int, int<a, b>, …) folding. Compare to PHPStan's `int<min, max>` family.
+  # The carrier never widens beyond what the inputs imply, so `int<5, 10> + int<1, 2>` is exactly `int<6, 12>` rather
+  # than the looser `Nominal[Integer]`.
   describe "integer range fold" do
     def positive_int = Rigor::Type::Combinator.positive_int
     def non_negative_int = Rigor::Type::Combinator.non_negative_int
@@ -837,8 +818,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "treats 0 × +∞ as 0 (algebraic, not Float arithmetic)" do
-        # non_negative_int × Constant[0] = exactly Constant[0]
-        # because 0 × anything is 0 even at the +∞ endpoint.
+        # non_negative_int × Constant[0] = exactly Constant[0] because 0 × anything is 0 even at the +∞ endpoint.
         type = fold_types(non_negative_int, :*, [constant_of(0)])
         expect(type).to eq(constant_of(0))
       end
@@ -889,10 +869,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
 
-    # Signed-infinity edges: arithmetic where one or both endpoints are
-    # ±∞. The corner computations (with safe_mul's `0 × ∞ = 0`) must
-    # produce algebraically correct bounded/half-bounded results rather
-    # than NaN-corrupted ranges.
+    # Signed-infinity edges: arithmetic where one or both endpoints are ±∞. The corner computations (with safe_mul's `0
+    # × ∞ = 0`) must produce algebraically correct bounded/half-bounded results rather than NaN-corrupted ranges.
     describe "signed-infinity arithmetic edges" do
       it "negative-int * positive-int is negative-int" do
         # (-∞, -1] × [1, +∞): max corner is (-1)(1) = -1, min is -∞.
@@ -1003,8 +981,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "projects union receivers per tuple position" do
-        # Union[5, 7].divmod(3) → 5.divmod(3) = [1, 2]; 7.divmod(3) = [2, 1]
-        # → Tuple[Union[Constant[1], Constant[2]], Union[Constant[1], Constant[2]]]
+        # Union[5, 7].divmod(3) → 5.divmod(3) = [1, 2]; 7.divmod(3) = [2, 1] → Tuple[Union[Constant[1], Constant[2]],
+        # Union[Constant[1], Constant[2]]]
         type = fold_types(constant_union(5, 7), :divmod, [constant_of(3)])
         expect(type).to be_a(Rigor::Type::Tuple)
         expect(type.elements.size).to eq(2)
@@ -1042,8 +1020,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "does not yet fold IntegerRange divmod (returns nil)" do
-        # Range divmod is a follow-up; for now the fold bails so the
-        # caller can fall back to the RBS-widened result.
+        # Range divmod is a follow-up; for now the fold bails so the caller can fall back to the RBS-widened result.
         expect(fold_types(positive_int, :divmod, [constant_of(3)])).to be_nil
       end
     end
@@ -1063,16 +1040,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "does not widen when the result set has non-Integer members" do
-        # Each Float arg keeps the result a Float, so widening is
-        # not an option. The cap becomes a hard nil.
+        # Each Float arg keeps the result a Float, so widening is not an option. The cap becomes a hard nil.
         receiver = Rigor::Type::Combinator.union(
           *(1..5).map { |v| constant_of(v) }
         )
         arg = Rigor::Type::Combinator.union(
           *(1..5).map { |v| constant_of(v.to_f) }
         )
-        # 5×5 = 25 inputs (under input cap); 25 distinct Float sums (over output cap).
-        # Inputs include Float, so widening to IntegerRange is rejected.
+        # 5×5 = 25 inputs (under input cap); 25 distinct Float sums (over output cap). Inputs include Float, so widening
+        # to IntegerRange is rejected.
         expect(fold_types(receiver, :+, [arg])).to be_nil
       end
     end
@@ -1090,13 +1066,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "folds Integer#clamp through Comparable's catalog when Numeric has no entry" do
-      # `Integer#clamp(0..10)` is provided by the included
-      # Comparable module — it is NOT registered directly on
-      # Integer in `Init_Numeric`, so numeric.yml has no entry.
-      # The include-aware fallthrough consults
-      # `COMPARABLE_CATALOG`, which classifies `clamp` as
-      # `:leaf`, and the fold materialises through the Ruby
-      # invocation `5.clamp(0..10) #=> 5`.
+      # `Integer#clamp(0..10)` is provided by the included Comparable module — it is NOT registered directly on Integer
+      # in `Init_Numeric`, so numeric.yml has no entry. The include-aware fallthrough consults `COMPARABLE_CATALOG`,
+      # which classifies `clamp` as `:leaf`, and the fold materialises through the Ruby invocation `5.clamp(0..10) #=>
+      # 5`.
       result = fold_types(constant_of(5), :clamp, [constant_of(0..10)])
       expect(result).to eq(constant_of(5))
     end
@@ -1154,10 +1127,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "bails when an IntegerRange argument reaches the 2-arg path" do
-      # IntegerRange args (vs IntegerRange receivers) still
-      # decline; the v0.0.6 IntegerRange-aware ternary fold
-      # only triggers for IntegerRange receivers paired with
-      # scalar Constant args.
+      # IntegerRange args (vs IntegerRange receivers) still decline; the v0.0.6 IntegerRange-aware ternary fold only
+      # triggers for IntegerRange receivers paired with scalar Constant args.
       receiver = constant_of(5)
       range_arg = Rigor::Type::Combinator.integer_range(0, 10)
       expect(fold_types(receiver, :between?, [range_arg, constant_of(20)])).to be_nil
@@ -1199,10 +1170,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "declines clamp when bracket excludes the range entirely" do
-        # int<10, 20>.clamp(0, 5) — the bracket is fully below
-        # the range, so every receiver value snaps to 5; the
-        # fold declines so the RBS tier widens rather than the
-        # dispatcher inventing the snap point.
+        # int<10, 20>.clamp(0, 5) — the bracket is fully below the range, so every receiver value snaps to 5; the fold
+        # declines so the RBS tier widens rather than the dispatcher inventing the snap point.
         result = fold_types(integer_range(10, 20), :clamp, [constant_of(0), constant_of(5)])
         expect(result).to be_nil
       end
@@ -1230,10 +1199,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
       it "folds Constant<String> % HashShape of Constants for hash format specs" do
         shape = hash_shape_of(name: constant_of("Alice"), age: constant_of(30))
-        # The format template uses Ruby's `%{key}` hash-format
-        # spec. Build it from String#new to keep the rubocop
-        # FormatStringToken cop quiet (the cop only inspects
-        # interpolated string literals).
+        # The format template uses Ruby's `%{key}` hash-format spec. Build it from String#new to keep the rubocop
+        # FormatStringToken cop quiet (the cop only inspects interpolated string literals).
         template = String.new("%") << "{name} is " << "%" << "{age}"
         result = fold_types(constant_of(template), :%, [shape])
         expect(result).to eq(constant_of("Alice is 30"))
@@ -1250,15 +1217,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "declines on a malformed format spec (no crash)" do
-        # `%q` is not a recognised String#% conversion; Ruby raises
-        # `ArgumentError`. The fold catches the exception and falls
-        # through.
+        # `%q` is not a recognised String#% conversion; Ruby raises `ArgumentError`. The fold catches the exception and
+        # falls through.
         expect(fold_types(constant_of("%q"), :%, [tuple_of(constant_of(1))])).to be_nil
       end
 
       it "declines for non-String receivers" do
-        # Sanity: `Constant<Integer> % Constant<Integer>` still flows
-        # through the standard numeric binary path (modulo).
+        # Sanity: `Constant<Integer> % Constant<Integer>` still flows through the standard numeric binary path (modulo).
         expect(fold_types(constant_of(7), :%, [constant_of(3)])).to eq(constant_of(1))
       end
     end
@@ -1313,9 +1278,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "lifts #split to a Tuple[dirname, basename] of Pathname constants" do
-        # `Pathname#split` is the Array-returning sibling of the scalar
-        # `dirname` / `basename` folds — pure `@path` string manipulation,
-        # no filesystem read.
+        # `Pathname#split` is the Array-returning sibling of the scalar `dirname` / `basename` folds — pure `@path`
+        # string manipulation, no filesystem read.
         result = fold_types(constant_of(Pathname.new("/a/b/c.rb")), :split)
         expect(result).to be_a(Rigor::Type::Tuple)
         expect(result.elements).to eq([
@@ -1331,9 +1295,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "declines on filesystem-touching methods (e.g. exist?)" do
-        # `exist?` reads the host filesystem. Even on a Constant<Pathname>
-        # receiver the answer depends on the analysis machine, so the
-        # fold tier MUST decline so the RBS tier widens to bool.
+        # `exist?` reads the host filesystem. Even on a Constant<Pathname> receiver the answer depends on the analysis
+        # machine, so the fold tier MUST decline so the RBS tier widens to bool.
         expect(fold_types(p, :exist?)).to be_nil
       end
     end
@@ -1379,8 +1342,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "declines on a malformed split argument (no crash)" do
-        # `split(nil)` raises TypeError on most String forms; the
-        # rescue catches it and the fold falls through.
+        # `split(nil)` raises TypeError on most String forms; the rescue catches it and the fold falls through.
         expect(fold_types(constant_of("a,b"), :split, [constant_of(nil)])).to be_nil
       end
     end
@@ -1436,8 +1398,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
 
       it "still declines for non-integer-bounded ranges" do
-        # Float ranges decline because the elements would not be a
-        # finite enumerable; RBS tier widens.
+        # Float ranges decline because the elements would not be a finite enumerable; RBS tier widens.
         expect(fold_types(constant_of(1.0..2.0), :to_a)).to be_nil
       end
     end

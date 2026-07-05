@@ -6,11 +6,10 @@ require "tmpdir"
 
 require "rigor/cli/coverage_command"
 
-# Focused coverage for the `rigor coverage` command object: the ADR-63 Tier 2
-# mutation-effectiveness mode (`--protection --mutation`) and its git-changed-
-# files default, plus unit safety nets for the default type-precision mode and
-# the static Tier 1 protection mode (`--protection`), which are otherwise only
-# exercised through the dispatcher / `make coverage`.
+# Focused coverage for the `rigor coverage` command object: the ADR-63 Tier 2 mutation-effectiveness mode (`--protection
+# --mutation`) and its git-changed- files default, plus unit safety nets for the default type-precision mode and the
+# static Tier 1 protection mode (`--protection`), which are otherwise only exercised through the dispatcher / `make
+# coverage`.
 RSpec.describe Rigor::CLI::CoverageCommand do
   def run(argv)
     out = StringIO.new
@@ -81,8 +80,7 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     end
 
     it "exits 1 when the precision ratio is below --threshold, 0 when it meets it" do
-      # An untyped-parameter receiver dispatch is imprecise (Dynamic),
-      # so the ratio is below 1.0 and above 0.0.
+      # An untyped-parameter receiver dispatch is imprecise (Dynamic), so the ratio is below 1.0 and above 0.0.
       File.write("dyn.rb", "def f(x)\n  x.whatever\nend\n")
 
       below, = run(["--threshold", "1.0", "dyn.rb"])
@@ -127,8 +125,8 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     end
   end
 
-  # ADR-70 — the fused static∪dynamic overlay. The TestSuiteOracle is stubbed so
-  # the orchestration / report / exit logic is exercised without shelling out.
+  # ADR-70 — the fused static∪dynamic overlay. The TestSuiteOracle is stubbed so the orchestration / report / exit logic
+  # is exercised without shelling out.
   describe "--with-tests (fused protection)" do
     def fake_oracle(green:, kills:)
       oracle = Object.new
@@ -192,8 +190,8 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     end
 
     it "mutates Dynamic-receiver sites under --include-dynamic, crediting the test axis (Seam 2)" do
-      # `x.save` on an untyped param has no biteable site; --include-dynamic
-      # mutates it anyway so the test axis can score it.
+      # `x.save` on an untyped param has no biteable site; --include-dynamic mutates it anyway so the test axis can
+      # score it.
       File.write("dyn.rb", %(def f(x)\n  x.save\nend\n))
       stub_oracle(green: true, kills: true)
 

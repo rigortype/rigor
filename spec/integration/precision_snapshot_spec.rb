@@ -4,20 +4,17 @@
 #
 # For every fixture under `spec/integration/fixtures/` this spec:
 #   1. Runs the engine end-to-end via `FixtureHarness`.
-#   2. Captures the type string (`Type#describe(:short)`) of every top-level
-#      local variable in the evaluated scope.
+#   2. Captures the type string (`Type#describe(:short)`) of every top-level local variable in the evaluated scope.
 #   3. Compares the result to a YAML golden file under `spec/integration/snapshots/`.
 #
-# A failed example means a type CHANGED — either it became more precise
-# (good — update the snapshot) or it degraded (bad — investigate and fix).
-# In both cases the developer consciously reviews the diff before accepting.
+# A failed example means a type CHANGED — either it became more precise (good — update the snapshot) or it
+# degraded (bad — investigate and fix). In both cases the developer consciously reviews the diff before accepting.
 #
 # Regenerating golden files:
 #
 #   UPDATE_SNAPSHOTS=1 bundle exec rspec spec/integration/precision_snapshot_spec.rb
 #
-# The spec never deletes stale snapshot files automatically; remove them by hand
-# when a fixture is deleted.
+# The spec never deletes stale snapshot files automatically; remove them by hand when a fixture is deleted.
 
 require "spec_helper"
 require "yaml"
@@ -29,8 +26,7 @@ FIXTURE_DIR   = File.expand_path("fixtures",  __dir__)
 
 UPDATE_SNAPSHOTS = ENV.fetch("UPDATE_SNAPSHOTS", "0") == "1"
 
-# Enumerate fixture names: flat .rb files → name without extension,
-# directory fixtures → directory name.
+# Enumerate fixture names: flat .rb files → name without extension, directory fixtures → directory name.
 SNAPSHOT_FIXTURE_NAMES = (
   Dir.children(FIXTURE_DIR).sort.filter_map do |entry|
     path = File.join(FIXTURE_DIR, entry)
@@ -78,8 +74,7 @@ RSpec.describe "Precision snapshots (inference regression gate)" do
 
           golden = YAML.load_file(snap_path)
 
-          # Build a human-readable diff before failing so the engineer
-          # immediately sees which locals changed and how.
+          # Build a human-readable diff before failing so the engineer immediately sees which locals changed and how.
           changed = []
           (golden["locals"] || {}).each do |var, expected_type|
             actual_type = actual.dig("locals", var)

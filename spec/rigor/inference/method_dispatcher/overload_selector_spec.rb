@@ -78,21 +78,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
     end
 
     it "skips overloads with required keyword arguments" do
-      # We construct a synthetic method with one keyword-required and
-      # one positional-only overload to ensure the selector skips the
-      # keyword-required one. We use Object#tap which has no kwargs as
-      # baseline; the synthetic part is a stub that simulates a kwargs
-      # overload via a dummy MethodType. Easier: just verify behaviour
-      # via Hash#fetch which has keyword-free overloads in core RBS.
+      # We construct a synthetic method with one keyword-required and one positional-only overload to ensure the
+      # selector skips the keyword-required one. We use Object#tap which has no kwargs as baseline; the synthetic part
+      # is a stub that simulates a kwargs overload via a dummy MethodType. Easier: just verify behaviour via Hash#fetch
+      # which has keyword-free overloads in core RBS.
       mt = select("Hash", :fetch, [Rigor::Type::Combinator.constant_of(:k)])
       expect(mt).not_to be_nil
     end
 
     describe "block-less call-site overload selection" do
-      # `Array#filter` declares the block-bearing overload first
-      # (`() { (Elem) -> boolish } -> Array[Elem]`) and the
-      # bare-call overload second (`() -> Enumerator[...]`). A
-      # call with no block must pick the second: `[1, 2].filter`
+      # `Array#filter` declares the block-bearing overload first (`() { (Elem) -> boolish } -> Array[Elem]`) and the
+      # bare-call overload second (`() -> Enumerator[...]`). A call with no block must pick the second: `[1, 2].filter`
       # yields an `Enumerator`, not an `Array`.
       it "skips a required-block overload when the call has no block" do
         mt = select("Array", :filter, [], block_required: false)
@@ -107,9 +103,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       end
 
       it "keeps the only overload when every candidate requires a block" do
-        # `Array#each_with_object` has a single required-block
-        # overload; a block-less call still resolves to it via
-        # the `overloads.first` fall-back.
+        # `Array#each_with_object` has a single required-block overload; a block-less call still resolves to it via the
+        # `overloads.first` fall-back.
         mt = select("Array", :each_with_object, [Rigor::Type::Combinator.constant_of(0)], block_required: false)
         expect(mt).not_to be_nil
       end
@@ -153,16 +148,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
 
       it "still picks the alias-typed overload when only it is arity-compatible (Array#[](Integer))" do
         mt = select("Array", :[], [Rigor::Type::Combinator.nominal_of("Integer")])
-        # Pass 1 (strict) finds nothing — Range param doesn't
-        # accept Integer. Pass 2 falls back to the gradual
-        # behaviour and the alias-typed overload wins.
+        # Pass 1 (strict) finds nothing — Range param doesn't accept Integer. Pass 2 falls back to the gradual behaviour
+        # and the alias-typed overload wins.
         expect(mt.type.required_positionals.size).to eq(1)
         expect(mt.type.required_positionals.first.type).to be_a(RBS::Types::Alias)
       end
 
       it "still picks the alias-typed overload for two-Integer slicing (Array#[](Integer, Integer))" do
-        # The two-int overload is arity-2 and the only option;
-        # neither pass changes the outcome here.
+        # The two-int overload is arity-2 and the only option; neither pass changes the outcome here.
         mt = select(
           "Array", :[],
           [Rigor::Type::Combinator.nominal_of("Integer"), Rigor::Type::Combinator.nominal_of("Integer")]
@@ -198,16 +191,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
     end
 
     describe "receiver-affinity pre-sort (BigDecimal-coerce regression)" do
-      # When the `bigdecimal` stdlib RBS is loaded, its reopen
-      # of `Integer#+` adds `(BigDecimal) -> BigDecimal` at the
-      # FRONT of the overload list. Without the pre-sort the
-      # selector picks that arm for unknown / Integer args and
-      # produces a spurious BigDecimal return — surfacing as
-      # `undefined method 'upto' for BigDecimal` on plain
-      # `(i + 1).upto(n)` code. The pre-sort demotes the
-      # disjoint-sibling arm so the receiver-preserving
-      # `(Integer) -> Integer` wins for both Integer and
-      # untyped args.
+      # When the `bigdecimal` stdlib RBS is loaded, its reopen of `Integer#+` adds `(BigDecimal) -> BigDecimal` at the
+      # FRONT of the overload list. Without the pre-sort the selector picks that arm for unknown / Integer args and
+      # produces a spurious BigDecimal return — surfacing as `undefined method 'upto' for BigDecimal` on plain `(i +
+      # 1).upto(n)` code. The pre-sort demotes the disjoint-sibling arm so the receiver-preserving `(Integer) ->
+      # Integer` wins for both Integer and untyped args.
       let(:env) { Rigor::Environment.for_project(root: Dir.pwd) }
 
       def select_with_env(class_name, method_name, arg_types)
@@ -249,11 +237,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       end
 
       it "still routes Integer#*(Float) -> Float when the arg actually is a Float" do
-        # The pre-sort is stable: when a non-affinity arm
-        # accepts the actual arg and the affinity arm does not,
-        # the non-affinity arm still wins via Pass 1. Asserted
-        # so the pre-sort isn't misread as "always prefer the
-        # receiver class."
+        # The pre-sort is stable: when a non-affinity arm accepts the actual arg and the affinity arm does not, the
+        # non-affinity arm still wins via Pass 1. Asserted so the pre-sort isn't misread as "always prefer the receiver
+        # class."
         mt = select_with_env("Integer", :*, [Rigor::Type::Combinator.nominal_of("Float")])
         param_class = mt.type.required_positionals.first.type
         expect(param_class).to be_a(RBS::Types::ClassInstance)
@@ -262,15 +248,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
     end
 
     describe "value-pinning params vs untyped args (hash_shape.rb:182 regression)" do
-      # `Kernel#Array` declares `(nil) -> []` FIRST. An `untyped`
-      # arg gradually accepts against every param, so pass 2 used
-      # to lock in that overload purely by list position — typing
-      # `Array(dynamic_keys)` as the empty tuple `[]` and folding
-      # every downstream `keys.uniq.size == keys.size` guard to a
-      # false `always-truthy-condition` (surfaced by the self-check
-      # on `Type::HashShape#canonical_key_list`). A value-pinning
-      # param (nil / literal carriers) must not be matched by an
-      # arg that carries zero evidence for the pinned value.
+      # `Kernel#Array` declares `(nil) -> []` FIRST. An `untyped` arg gradually accepts against every param, so pass 2
+      # used to lock in that overload purely by list position — typing `Array(dynamic_keys)` as the empty tuple `[]` and
+      # folding every downstream `keys.uniq.size == keys.size` guard to a false `always-truthy-condition` (surfaced by
+      # the self-check on `Type::HashShape#canonical_key_list`). A value-pinning param (nil / literal carriers) must not
+      # be matched by an arg that carries zero evidence for the pinned value.
       it "does not let an untyped arg select `Kernel#Array: (nil) -> []`" do
         mt = select("Kernel", :Array, [Rigor::Type::Combinator.untyped])
         expect(mt.type.return_type).to be_a(RBS::Types::ClassInstance)
@@ -284,20 +266,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       end
 
       it "keeps a value-pinning overload reachable via the fallback when nothing else matches" do
-        # `NilClass#&` has a single `(untyped) -> false` overload —
-        # the literal return must still resolve for an untyped arg
-        # (the first-overload fallback, unchanged behaviour).
+        # `NilClass#&` has a single `(untyped) -> false` overload — the literal return must still resolve for an untyped
+        # arg (the first-overload fallback, unchanged behaviour).
         mt = select("NilClass", :&, [Rigor::Type::Combinator.untyped])
         expect(mt).not_to be_nil
       end
     end
 
     describe "block passed to a method whose overloads declare none" do
-      # In Ruby a block handed to a method that never yields it is
-      # simply ignored. `Integer#succ` (`() -> Integer`, no block
-      # clause) must therefore still resolve when the call site carries
-      # a block — otherwise the call degrades to Dynamic[Top] (and on a
-      # self-send suppresses the method's whole return type).
+      # In Ruby a block handed to a method that never yields it is simply ignored. `Integer#succ` (`() -> Integer`, no
+      # block clause) must therefore still resolve when the call site carries a block — otherwise the call degrades to
+      # Dynamic[Top] (and on a self-send suppresses the method's whole return type).
       it "falls back to the block-less overload instead of returning nil" do
         without_block = select("Integer", :succ, [], block_required: false)
         with_block = select("Integer", :succ, [], block_required: true)
@@ -332,8 +311,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
 
   describe "positional param binding" do
     it "absorbs surplus actual args into a rest positional" do
-      # `Array#push: (*Elem) -> self` has a rest positional and no fixed
-      # params, so binding 3 actual args fills three rest slots.
+      # `Array#push: (*Elem) -> self` has a rest positional and no fixed params, so binding 3 actual args fills three
+      # rest slots.
       fun = loader.instance_definition("Array").methods[:push].method_types.first.type
 
       expect(described_class.send(:positional_params_for, fun, 3).size).to eq(3)

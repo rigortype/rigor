@@ -7,22 +7,17 @@ require_relative "policy_index"
 module Rigor
   module Plugin
     class Pundit < Rigor::Plugin::Base
-      # Walks the configured policy-search paths via the
-      # plugin's `IoBoundary`, parses each `.rb` file with
-      # Prism, and collects classes whose immediate
-      # superclass is one of the configured base classes.
+      # Walks the configured policy-search paths via the plugin's `IoBoundary`, parses each `.rb` file with
+      # Prism, and collects classes whose immediate superclass is one of the configured base classes.
       #
-      # For each discovered policy class, the discoverer
-      # collects every instance-side `def name?` predicate
-      # method. Non-predicate methods (`initialize`,
-      # `resolve`, helper methods) are ignored — Pundit's
+      # For each discovered policy class, the discoverer collects every instance-side `def name?` predicate
+      # method. Non-predicate methods (`initialize`, `resolve`, helper methods) are ignored — Pundit's
       # `authorize` only ever calls predicate methods.
       #
       # Limitations (intentional for v0.1.0):
       #
       # - Direct-superclass match only.
-      # - Predicate methods are read from the syntactic
-      #   `def` list. Methods built via `define_method` /
+      # - Predicate methods are read from the syntactic `def` list. Methods built via `define_method` /
       #   inherited from a sibling concern are out of scope.
       class PolicyDiscoverer
         def initialize(io_boundary:, search_paths:, base_classes:)
@@ -120,8 +115,7 @@ module Rigor
           end
         end
 
-        # Returns symbolic predicate names (`:update?`,
-        # `:show?`, …) defined on the policy. Only
+        # Returns symbolic predicate names (`:update?`, `:show?`, …) defined on the policy. Only
         # instance-side names that end in `?` are recorded.
         def collect_predicate_methods(body)
           return [] if body.nil?

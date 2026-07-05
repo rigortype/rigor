@@ -3,26 +3,22 @@
 module Rigor
   module Plugin
     class Factorybot < Rigor::Plugin::Base
-      # Per-run frozen index of discovered FactoryBot factories
-      # and the attribute keys each declares. Indexes only
-      # **literal symbol/string** factory names + **literal
-      # symbol** attribute names; sequences, parent/child
-      # relationships, traits, and dynamically-named factories
-      # are deferred to follow-up slices.
+      # Per-run frozen index of discovered FactoryBot factories and the attribute keys each declares.
+      # Indexes only **literal symbol/string** factory names + **literal symbol** attribute names;
+      # sequences, parent/child relationships, traits, and dynamically-named factories are deferred to
+      # follow-up slices.
       #
-      # Each entry carries a `model_class` — the inferred or
-      # explicit class the factory builds. Resolved from:
+      # Each entry carries a `model_class` — the inferred or explicit class the factory builds. Resolved
+      # from:
       #
-      #   1. An explicit `factory :user, class: User do`
-      #      keyword option (ConstantReadNode / ConstantPathNode
-      #      value).
-      #   2. An explicit `factory :user, class: "User"` keyword
-      #      option (String value, supports `"Admin::User"`).
-      #   3. Fallback: inflected from the factory name —
-      #      `:user` → `"User"`, `:admin_user` → `"AdminUser"`.
+      #   1. An explicit `factory :user, class: User do` keyword option (ConstantReadNode /
+      #      ConstantPathNode value).
+      #   2. An explicit `factory :user, class: "User"` keyword option (String value, supports
+      #      `"Admin::User"`).
+      #   3. Fallback: inflected from the factory name — `:user` → `"User"`, `:admin_user` →
+      #      `"AdminUser"`.
       #
-      # The structure is intentionally flat: one entry per
-      # factory name. Attribute lists deduplicate.
+      # The structure is intentionally flat: one entry per factory name. Attribute lists deduplicate.
       class FactoryIndex
         Entry = Data.define(:name, :attribute_names, :model_class)
 

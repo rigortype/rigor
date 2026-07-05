@@ -5,34 +5,26 @@ require "prism"
 module Rigor
   module Plugin
     class Activejob < Rigor::Plugin::Base
-      # Walks a parsed file's AST looking for
-      # `<JobClass>.perform_later(...)` /
-      # `.perform_now(...)` / `.perform(...)` calls and
-      # validates each against the {JobIndex}.
+      # Walks a parsed file's AST looking for `<JobClass>.perform_later(...)` / `.perform_now(...)` /
+      # `.perform(...)` calls and validates each against the {JobIndex}.
       #
-      # The plugin recognises a call as job-shaped when the
-      # receiver is a `ConstantReadNode` / `ConstantPathNode`
-      # whose resolved name appears in the index, and the
-      # method name is one of the three ActiveJob entry
-      # points.
+      # The plugin recognises a call as job-shaped when the receiver is a `ConstantReadNode` /
+      # `ConstantPathNode` whose resolved name appears in the index, and the method name is one of the
+      # three ActiveJob entry points.
       module Analyzer
-        # Methods that delegate to the job's `#perform`. All
-        # three accept the same argument shape — `perform_later`
-        # is the most common (queues for later execution),
-        # `perform_now` runs synchronously, and `perform` is
-        # the bare execution path.
+        # Methods that delegate to the job's `#perform`. All three accept the same argument shape —
+        # `perform_later` is the most common (queues for later execution), `perform_now` runs
+        # synchronously, and `perform` is the bare execution path.
         ENTRY_METHODS = %i[perform_later perform_now perform].freeze
 
-        # One job-call observation. Carries no path/location — the
-        # caller (the `node_rule` block) positions it via
-        # `Plugin::Base#diagnostic`.
+        # One job-call observation. Carries no path/location — the caller (the `node_rule` block)
+        # positions it via `Plugin::Base#diagnostic`.
         Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
-        # The job-call violations for a single call node (0..2), or `[]`
-        # when the node is not a `<Job>.perform_*` entry call on a known
-        # job. ADR-37: the engine owns the walk.
+        # The job-call violations for a single call node (0..2), or `[]` when the node is not a
+        # `<Job>.perform_*` entry call on a known job. ADR-37: the engine owns the walk.
         #
         # @param call_node [Prism::Node]
         # @param job_index [JobIndex]
@@ -76,8 +68,7 @@ module Rigor
           )
         end
 
-        # Renders a constant-path receiver as a String.
-        # Mirrors the helpers in rigor-activerecord /
+        # Renders a constant-path receiver as a String. Mirrors the helpers in rigor-activerecord /
         # rigor-rails-routes for parity.
         def constant_receiver_name(node)
           case node

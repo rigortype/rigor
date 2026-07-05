@@ -266,9 +266,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
           arg_types: [],
           environment: env
         )
-        # No plugin tier consulted; falls through to RBS / fallback,
-        # which doesn't know `Object#foo`. Expect nil rather than
-        # the plugin's "admin" string.
+        # No plugin tier consulted; falls through to RBS / fallback, which doesn't know `Object#foo`. Expect nil rather
+        # than the plugin's "admin" string.
         expect(result).to be_nil
       end
 
@@ -356,12 +355,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
 
       describe "ADR-10 return-type heuristic (post-floor enhancement)" do
-        # The Walker's ReturnTypeHeuristic populates the
-        # CatalogEntry's `return_type:` with a static facet for
-        # literal-tail method bodies; the dispatcher wraps that
-        # facet in `Dynamic[T]` per the gem-boundary contract
-        # instead of falling back to the pre-heuristic
-        # `Dynamic[top]`.
+        # The Walker's ReturnTypeHeuristic populates the CatalogEntry's `return_type:` with a static facet for
+        # literal-tail method bodies; the dispatcher wraps that facet in `Dynamic[T]` per the gem-boundary contract
+        # instead of falling back to the pre-heuristic `Dynamic[top]`.
         let(:catalog_entry_klass) { Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry }
 
         it "wraps a heuristic-supplied Constant<Integer> return into Dynamic[Constant<value>]" do
@@ -496,10 +492,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
 
       it "records a boundary-cross entry when RBS resolves an Integer call on a `mode: :full` gem class" do
-        # Integer is in core RBS so `RbsDispatch.try_dispatch`
-        # resolves `1.bit_length` to `Integer`. The pretend-
-        # to-own-Integer gem-source catalog turns the call site
-        # into a `mode: :full` boundary crossing.
+        # Integer is in core RBS so `RbsDispatch.try_dispatch` resolves `1.bit_length` to `Integer`. The pretend-
+        # to-own-Integer gem-source catalog turns the call site into a `mode: :full` boundary crossing.
         env = env_with_full_mode_index(
           class_to_gem: { "Integer" => "core_shim" },
           gem_modes: { "core_shim" => :full },
@@ -585,8 +579,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
 
       it "does NOT fire for a BasicObject receiver (Kernel not mixed in)" do
-        # BasicObject is the one class that explicitly excludes
-        # Kernel, so the tightened return would be wrong.
+        # BasicObject is the one class that explicitly excludes Kernel, so the tightened return would be wrong.
         result = described_class.dispatch(
           receiver_type: Rigor::Type::Combinator.nominal_of("BasicObject"),
           method_name: :__dir__, arg_types: [], environment: env
@@ -599,10 +592,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       let(:env) { Rigor::Environment.default }
 
       it "routes Nominal[<core module>].inspect through Nominal[Object]" do
-        # Comparable is a real RBS module that does not declare
-        # `inspect` itself. With the module-mixin fallback in
-        # `user_class_fallback_receiver`, the dispatcher retries
-        # against Nominal[Object] and resolves Kernel#inspect.
+        # Comparable is a real RBS module that does not declare `inspect` itself. With the module-mixin fallback in
+        # `user_class_fallback_receiver`, the dispatcher retries against Nominal[Object] and resolves Kernel#inspect.
         result = described_class.dispatch(
           receiver_type: Rigor::Type::Combinator.nominal_of("Comparable"),
           method_name: :inspect, arg_types: [], environment: env
@@ -616,31 +607,23 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
           receiver_type: Rigor::Type::Combinator.nominal_of("Comparable"),
           method_name: :class, arg_types: [], environment: env
         )
-        # `meta_class` for a Nominal returns Singleton[<class_name>]
-        # — the receiver-side `class` always wins at the
-        # meta-introspection tier (above the fallback). The point
-        # of the test is that this doesn't surface as
-        # `undefined-method` because the fallback would have
-        # caught it even if meta-introspection didn't.
+        # `meta_class` for a Nominal returns Singleton[<class_name>] — the receiver-side `class` always wins at the
+        # meta-introspection tier (above the fallback). The point of the test is that this doesn't surface as
+        # `undefined-method` because the fallback would have caught it even if meta-introspection didn't.
         expect(result).to be_a(Rigor::Type::Singleton)
       end
 
       it "does NOT route Nominal[<core class>] through the module fallback" do
-        # Object is a class, not a module. The fallback path is
-        # NOT taken — the dispatcher uses Object's own RBS
+        # Object is a class, not a module. The fallback path is NOT taken — the dispatcher uses Object's own RBS
         # directly, not a fallback against Object's parent.
         expect(env.rbs_module?("Object")).to be(false)
       end
 
       it "preserves the original receiver type as `self` when falling back through Object" do
-        # `Kernel#dup: () -> self` resolved through the Object
-        # fallback (because `MyApp::UriThing` is not in RBS)
-        # MUST return `Nominal[MyApp::UriThing]`, not
-        # `Nominal[Object]`. Without `self_type_override`,
-        # `base = self.dup` inside a `Bundler::URI::Generic`
-        # method body types `base` as `Object` and every
-        # subsequent `base.fragment=` / `base.set_path(...)`
-        # call fires `undefined-method for Object`.
+        # `Kernel#dup: () -> self` resolved through the Object fallback (because `MyApp::UriThing` is not in RBS) MUST
+        # return `Nominal[MyApp::UriThing]`, not `Nominal[Object]`. Without `self_type_override`, `base = self.dup`
+        # inside a `Bundler::URI::Generic` method body types `base` as `Object` and every subsequent `base.fragment=` /
+        # `base.set_path(...)` call fires `undefined-method for Object`.
         unknown_receiver = Rigor::Type::Combinator.nominal_of("MyApp::UriThing")
         result = described_class.dispatch(
           receiver_type: unknown_receiver,
@@ -667,11 +650,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
 
       it "does NOT resolve a private Kernel method on an explicit non-self receiver" do
-        # `Favourite.select(:col)` (ActiveRecord) must not adopt the
-        # private `Kernel#select` signature (`-> Array[String]`).
-        # Ruby raises NoMethodError for a private method called with
-        # an explicit receiver, so the fallback returns nil and the
-        # call types `Dynamic[top]` rather than a wrong `Array[String]`.
+        # `Favourite.select(:col)` (ActiveRecord) must not adopt the private `Kernel#select` signature (`->
+        # Array[String]`). Ruby raises NoMethodError for a private method called with an explicit receiver, so the
+        # fallback returns nil and the call types `Dynamic[top]` rather than a wrong `Array[String]`.
         result = described_class.dispatch(
           receiver_type: Rigor::Type::Combinator.singleton_of("Favourite"),
           method_name: :select, arg_types: [Rigor::Type::Combinator.constant_of(:status_id)],
@@ -682,9 +663,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
 
       it "still resolves a private Kernel method on an IMPLICIT-self call" do
-        # `puts "x"` inside a method body is an implicit-self call:
-        # `call_node.receiver` is nil, so the fallback keeps resolving
-        # `Kernel#puts` (the fallback's intended target).
+        # `puts "x"` inside a method body is an implicit-self call: `call_node.receiver` is nil, so the fallback keeps
+        # resolving `Kernel#puts` (the fallback's intended target).
         result = described_class.dispatch(
           receiver_type: Rigor::Type::Combinator.nominal_of("MyApp::Greeter"),
           method_name: :puts, arg_types: [Rigor::Type::Combinator.nominal_of("String")],
@@ -695,8 +675,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
 
       it "still resolves a public Kernel method on an explicit non-self receiver" do
-        # `.dup` is public — the explicit-receiver suppression must
-        # not touch it.
+        # `.dup` is public — the explicit-receiver suppression must not touch it.
         unknown_receiver = Rigor::Type::Combinator.nominal_of("MyApp::Thing")
         result = described_class.dispatch(
           receiver_type: unknown_receiver,
@@ -765,9 +744,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       def sym(value) = Rigor::Type::Combinator.constant_of(value)
 
       it "folds `Struct.new(:a, :b)` (all symbol members) to a StructClass member layout" do
-        # ADR-48 Struct follow-up — StructFolding supersedes the old
-        # `struct_new_lift` (which produced a bare `Singleton[Struct]`); the
-        # chained `.new` now dispatches against the precise member layout.
+        # ADR-48 Struct follow-up — StructFolding supersedes the old `struct_new_lift` (which produced a bare
+        # `Singleton[Struct]`); the chained `.new` now dispatches against the precise member layout.
         result = dispatch(receiver: singleton("Struct"), method_name: :new, args: [sym(:a), sym(:b)])
         expect(result).to eq(Rigor::Type::Combinator.struct_class_of(members: %i[a b]))
       end

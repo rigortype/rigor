@@ -3,23 +3,17 @@
 module Rigor
   module Plugin
     class RailsI18n < Rigor::Plugin::Base
-      # Frozen catalogue of every dotted key discovered across
-      # all loaded locale files. Each entry tracks the locales
-      # the key appears in and, for each locale, the set of
-      # `%{var}` interpolation placeholders observed in the
-      # leaf string.
+      # Frozen catalogue of every dotted key discovered across all loaded locale files. Each entry tracks
+      # the locales the key appears in and, for each locale, the set of `%{var}` interpolation placeholders
+      # observed in the leaf string.
       #
-      # The catalogue is intentionally lossy: it only records
-      # the *presence* of each key per locale and the
-      # placeholder names. The actual translated values are
-      # not retained — the analyzer doesn't need them and
-      # keeping them would bloat the cache slice.
+      # The catalogue is intentionally lossy: it only records the *presence* of each key per locale and the
+      # placeholder names. The actual translated values are not retained — the analyzer doesn't need them
+      # and keeping them would bloat the cache slice.
       class LocaleIndex
-        # `placeholders` is a Hash: `locale_name => Set<String>`.
-        # `array_value` is true when at least one locale's leaf
-        # is an Array (used by `l(time, format:)` and similar).
-        # `value_kinds` is a Hash: `locale_name => Symbol`
-        # (`:string` / `:array` / `:hash`).
+        # `placeholders` is a Hash: `locale_name => Set<String>`. `array_value` is true when at least one
+        # locale's leaf is an Array (used by `l(time, format:)` and similar). `value_kinds` is a Hash:
+        # `locale_name => Symbol` (`:string` / `:array` / `:hash`).
         Entry = Data.define(:dotted_key, :placeholders, :value_kinds) do
           def locales
             placeholders.keys
@@ -33,8 +27,7 @@ module Rigor
             placeholders.fetch(locale.to_s) { Set.new }
           end
 
-          # Union of placeholder names across all known
-          # locales — used by the analyzer when no specific
+          # Union of placeholder names across all known locales — used by the analyzer when no specific
           # locale is in scope.
           def all_placeholders
             placeholders.values.reduce(Set.new) { |acc, set| acc | set }
@@ -44,8 +37,7 @@ module Rigor
         attr_reader :entries, :locales
 
         # @param entries [Array<Entry>]
-        # @param locales [Array<String>] all locale names
-        #   that contributed at least one key.
+        # @param locales [Array<String>] all locale names that contributed at least one key.
         def initialize(entries, locales:)
           @entries = entries.freeze
           @locales = locales.dup.freeze
@@ -62,19 +54,15 @@ module Rigor
           @by_key.key?(dotted_key.to_s)
         end
 
-        # CLDR plural form keys recognised by Ruby I18n. When a
-        # locale defines `accounts.posts.one`, `accounts.posts.other`,
-        # the call `t('accounts.posts', count: n)` resolves into
-        # the matching plural sub-key — the parent `accounts.posts`
-        # is a **pluralization namespace**, not a missing key.
-        # Mastodon hits this on `accounts.posts` /
-        # `accounts.following` / `accounts.followers` for the post,
-        # follow, and follower counts shown on the profile page.
+        # CLDR plural form keys recognised by Ruby I18n. When a locale defines `accounts.posts.one`,
+        # `accounts.posts.other`, the call `t('accounts.posts', count: n)` resolves into the matching
+        # plural sub-key — the parent `accounts.posts` is a **pluralization namespace**, not a missing key.
+        # Mastodon hits this on `accounts.posts` / `accounts.following` / `accounts.followers` for the
+        # post, follow, and follower counts shown on the profile page.
         PLURAL_SUBKEYS = %w[zero one two few many other].freeze
 
-        # Returns true when the dotted key itself isn't a leaf in
-        # any locale, but at least one of its CLDR plural form
-        # children exists.
+        # Returns true when the dotted key itself isn't a leaf in any locale, but at least one of its CLDR
+        # plural form children exists.
         def pluralization_namespace?(dotted_key)
           base = dotted_key.to_s
           PLURAL_SUBKEYS.any? { |sub| @by_key.key?("#{base}.#{sub}") }
@@ -88,14 +76,12 @@ module Rigor
           @entries.size
         end
 
-        # All known dotted keys, sorted for stable did-you-mean
-        # output.
+        # All known dotted keys, sorted for stable did-you-mean output.
         def keys
           @by_key.keys.sort
         end
 
-        # Returns the locales (set of strings) in which a key
-        # is *missing*, given the configured locale list.
+        # Returns the locales (set of strings) in which a key is *missing*, given the configured locale list.
         def missing_locales_for(dotted_key, configured_locales:)
           entry = find(dotted_key)
           return configured_locales.to_set if entry.nil?

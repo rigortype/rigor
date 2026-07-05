@@ -8,14 +8,11 @@ require_relative "sidekiq/analyzer"
 
 module Rigor
   module Plugin
-    # rigor-sidekiq — validates `Worker.perform_async(...)`
-    # / `.perform_in(...)` / `.perform_at(...)` /
-    # `.perform_inline(...)` argument arity against the
-    # discovered `#perform` definitions.
+    # rigor-sidekiq — validates `Worker.perform_async(...)` / `.perform_in(...)` / `.perform_at(...)` /
+    # `.perform_inline(...)` argument arity against the discovered `#perform` definitions.
     #
     # Tier 3C of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
-    # Statically discovers Sidekiq workers by walking
-    # `worker_search_paths` and parsing each file with
+    # Statically discovers Sidekiq workers by walking `worker_search_paths` and parsing each file with
     # Prism — no `sidekiq` runtime dependency.
     #
     # ## Configuration
@@ -28,30 +25,19 @@ module Rigor
     #
     # ## What it checks
     #
-    # 1. **Argument arity** — `perform_async(args)` /
-    #    `perform_inline(args)` forward every argument to
-    #    `#perform`; `perform_in(t, args)` /
-    #    `perform_at(t, args)` consume the first argument
-    #    as the schedule and forward the rest. Mismatches
-    #    emit `wrong-arity`.
-    # 2. **Missing schedule** — `perform_in()` /
-    #    `perform_at()` with zero arguments emit
-    #    `missing-schedule`.
+    # 1. **Argument arity** — `perform_async(args)` / `perform_inline(args)` forward every argument to
+    #    `#perform`; `perform_in(t, args)` / `perform_at(t, args)` consume the first argument as the
+    #    schedule and forward the rest. Mismatches emit `wrong-arity`.
+    # 2. **Missing schedule** — `perform_in()` / `perform_at()` with zero arguments emit `missing-schedule`.
     #
     # ## Limitations (v0.1.0)
     #
-    # - Direct `include` matches only against the
-    #   configured marker modules. Indirect includes via a
+    # - Direct `include` matches only against the configured marker modules. Indirect includes via a
     #   custom concern are out of scope.
-    # - `#perform` arity is read from the syntactic
-    #   parameter list. `define_method` actions are out of
-    #   scope.
-    # - Required keyword arguments are not validated at
-    #   the call site (positional-only for v0.1.0). Sidekiq
-    #   serialises arguments to JSON, so keyword args are
-    #   uncommon in practice.
-    # - The schedule argument's type isn't validated (no
-    #   "is this a Time?" check); we just consume it.
+    # - `#perform` arity is read from the syntactic parameter list. `define_method` actions are out of scope.
+    # - Required keyword arguments are not validated at the call site (positional-only for v0.1.0).
+    #   Sidekiq serialises arguments to JSON, so keyword args are uncommon in practice.
+    # - The schedule argument's type isn't validated (no "is this a Time?" check); we just consume it.
     class Sidekiq < Rigor::Plugin::Base
       manifest(
         id: "sidekiq",
@@ -76,9 +62,8 @@ module Rigor
         @worker_marker_modules = Array(config.fetch("worker_marker_modules")).map(&:to_s)
       end
 
-      # File-level only: the load-error emission. The per-call arity
-      # validation runs over the engine-owned walk via the node_rule
-      # below (ADR-37). The worker index is lazily loaded + memoised by
+      # File-level only: the load-error emission. The per-call arity validation runs over the engine-owned
+      # walk via the node_rule below (ADR-37). The worker index is lazily loaded + memoised by
       # `producer_value`, shared by both surfaces.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:worker_index)

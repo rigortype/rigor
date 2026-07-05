@@ -127,10 +127,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type.members.map(&:value)).to contain_exactly(1, 2, 3)
     end
 
-    # The surviving path of `if P then BODY else raise end` is BODY,
-    # so the post-scope must carry BODY's assignments forward — not the
-    # bare predicate narrowing, which would leave them unbound. Mirrors
-    # the case/when `drops a terminating else` rule.
+    # The surviving path of `if P then BODY else raise end` is BODY, so the post-scope must carry BODY's assignments
+    # forward — not the bare predicate narrowing, which would leave them unbound. Mirrors the case/when `drops a
+    # terminating else` rule.
     it "carries a then-body assignment past a terminating else (no nil-injection)" do
       _, post = evaluate(<<~RUBY)
         if cond
@@ -153,11 +152,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
-    # Regression — liquid v5.x sweep, Event 3. The inner `elsif … else
-    # raise` previously returned the bare truthy narrowing (with `x`
-    # unbound), so the OUTER if's join nil-injected `x` into a spurious
-    # `… | nil`. Every reachable path assigns `x` (the else raises), so
-    # the post-scope must bind `x` without nil.
+    # Regression — liquid v5.x sweep, Event 3. The inner `elsif … else raise` previously returned the bare truthy
+    # narrowing (with `x` unbound), so the OUTER if's join nil-injected `x` into a spurious `… | nil`. Every reachable
+    # path assigns `x` (the else raises), so the post-scope must bind `x` without nil.
     it "binds a local across an if/elsif/else-raise chain without nil-injection" do
       _, post = evaluate(<<~RUBY)
         if a
@@ -237,11 +234,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           v
         end
       RUBY
-      # The then-branch sees `v` narrowed to non-nil (`"[x]"`); the
-      # if-as-a-whole unions in the falsey `nil`. The discriminator is
-      # that the then-branch value is NOT nilable — without the safe-nav
-      # narrowing `v.end_with?` would have fired possible-nil and `v`
-      # inside would stay `"[x]" | nil`.
+      # The then-branch sees `v` narrowed to non-nil (`"[x]"`); the if-as-a-whole unions in the falsey `nil`. The
+      # discriminator is that the then-branch value is NOT nilable — without the safe-nav narrowing `v.end_with?` would
+      # have fired possible-nil and `v` inside would stay `"[x]" | nil`.
       expect(type.members.map(&:value)).to contain_exactly("[x]", nil)
     end
 
@@ -252,9 +247,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           v.upcase
         end
       RUBY
-      # `v.upcase` runs on a non-nil receiver and constant-folds to
-      # `"[X]"`; the falsey branch unions `nil`. Without the safe-nav
-      # narrowing `v` would stay nilable and `upcase` could not fold.
+      # `v.upcase` runs on a non-nil receiver and constant-folds to `"[X]"`; the falsey branch unions `nil`. Without the
+      # safe-nav narrowing `v` would stay nilable and `upcase` could not fold.
       expect(type.members.map(&:value)).to contain_exactly("[X]", nil)
     end
   end
@@ -329,12 +323,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type.members.map(&:value)).to contain_exactly(2, 3)
     end
 
-    # When a rescue arm unconditionally exits (`return`, `next`,
-    # `break`, `raise`, `throw`, `exit`, `abort`, `fail`),
-    # control cannot reach the post-begin scope via that arm, so
-    # it contributes neither a value-fragment nor a scope-binding
-    # to the join. The primary body's bindings survive without
-    # nil-injection from the (unreachable) rescue path.
+    # When a rescue arm unconditionally exits (`return`, `next`, `break`, `raise`, `throw`, `exit`, `abort`, `fail`),
+    # control cannot reach the post-begin scope via that arm, so it contributes neither a value-fragment nor a
+    # scope-binding to the join. The primary body's bindings survive without nil-injection from the (unreachable) rescue
+    # path.
     it "drops a rescue arm whose body returns from the post-begin scope" do
       type, post = evaluate(<<~RUBY)
         x = begin
@@ -345,9 +337,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         end
         x.size
       RUBY
-      # `list` survives without being widened by the
-      # (unreachable) rescue arm; `x` is the primary body's value
-      # type (Array<Integer>-shaped), so `.size` resolves cleanly.
+      # `list` survives without being widened by the (unreachable) rescue arm; `x` is the primary body's value type
+      # (Array<Integer>-shaped), so `.size` resolves cleanly.
       expect(post.local(:list)).to be_a(Rigor::Type::Tuple)
       expect(type).to be_a(Rigor::Type::Constant)
     end
@@ -361,8 +352,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         end
         list
       RUBY
-      # `list` remains the primary-body Tuple — the rescue arm
-      # would have raised, never bound `list`, but its scope is
+      # `list` remains the primary-body Tuple — the rescue arm would have raised, never bound `list`, but its scope is
       # excluded so no nil-injection occurs.
       expect(post.local(:list)).to be_a(Rigor::Type::Tuple)
     end
@@ -388,24 +378,18 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           return
         end
       RUBY
-      # The StandardError arm exits, so it contributes nothing;
-      # the TypeError arm survives and joins with the primary
-      # body. The post-scope's `x` is exactly { 1, 2 } — NOT
-      # widened by the exiting arm.
+      # The StandardError arm exits, so it contributes nothing; the TypeError arm survives and joins with the primary
+      # body. The post-scope's `x` is exactly { 1, 2 } — NOT widened by the exiting arm.
       expect(post.local(:x).members.map(&:value)).to contain_exactly(1, 2)
     end
   end
 
   describe "begin/rescue/retry (retry-edge widening)" do
-    # B2.1: when a rescue arm contains `retry` AND rebinds a local
-    # across the retry edge, the primary body observes the rebound
-    # local widened to its Nominal envelope (not the pre-retry
-    # Constant) because control can re-enter the primary body via
-    # that rescue arm. Without the widening, `tries += 1` inside
-    # the primary body would keep folding from `Constant[0]` on
-    # every notional retry pass instead of reflecting that `tries`
-    # can already be a live Integer by the time the primary body
-    # re-runs.
+    # B2.1: when a rescue arm contains `retry` AND rebinds a local across the retry edge, the primary body observes the
+    # rebound local widened to its Nominal envelope (not the pre-retry Constant) because control can re-enter the
+    # primary body via that rescue arm. Without the widening, `tries += 1` inside the primary body would keep folding
+    # from `Constant[0]` on every notional retry pass instead of reflecting that `tries` can already be a live Integer
+    # by the time the primary body re-runs.
     it "widens a local rebound across a retry edge to its Nominal envelope" do
       type, post = evaluate(<<~RUBY)
         tries = 0
@@ -435,11 +419,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "widens a local introduced only inside the retrying rescue arm" do
-      # `y` has no pre-existing binding in the entry scope (the
-      # `pre.nil?` branch of `retry_widened_type`): the retry edge
-      # still widens it to its Nominal envelope rather than leaving
-      # it untouched, because the arm's own rebind cycles back
-      # through the primary body on retry.
+      # `y` has no pre-existing binding in the entry scope (the `pre.nil?` branch of `retry_widened_type`): the retry
+      # edge still widens it to its Nominal envelope rather than leaving it untouched, because the arm's own rebind
+      # cycles back through the primary body on retry.
       _type, post = evaluate(<<~RUBY)
         begin
           1
@@ -457,10 +439,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "does NOT widen when the rescue arm does not contain retry" do
-      # Guards `arm_contains_retry?` / `widen_entry_for_retry`'s nil
-      # return: an ordinary (non-retrying) rescue arm rebinding the
-      # same local must keep the precise Constant union produced by
-      # the un-widened join, not a Nominal envelope.
+      # Guards `arm_contains_retry?` / `widen_entry_for_retry`'s nil return: an ordinary (non-retrying) rescue arm
+      # rebinding the same local must keep the precise Constant union produced by the un-widened join, not a Nominal
+      # envelope.
       _type, post = evaluate(<<~RUBY)
         tries = 0
         begin
@@ -473,9 +454,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "re-evaluates the else-clause under the widened retry entry" do
-      # Exercises eval_begin_primary_under's else-clause branch
-      # (the primary body ran, then else replaces its value) under
-      # a widened entry produced by a sibling retry arm.
+      # Exercises eval_begin_primary_under's else-clause branch (the primary body ran, then else replaces its value)
+      # under a widened entry produced by a sibling retry arm.
       type, post = evaluate(<<~RUBY)
         tries = 0
         begin
@@ -508,11 +488,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "re-evaluates every arm of a multi-rescue chain under the widened entry" do
-      # Only the first arm retries, but widen_entry_for_retry widens
-      # the shared entry scope once, and BOTH collect_rescue_chain_results
-      # calls (pre- and post-widening) walk the full rescue_clause
-      # chain — the second (non-retrying) arm's fresh evaluation
-      # must also be visible in the final union.
+      # Only the first arm retries, but widen_entry_for_retry widens the shared entry scope once, and BOTH
+      # collect_rescue_chain_results calls (pre- and post-widening) walk the full rescue_clause chain — the second
+      # (non-retrying) arm's fresh evaluation must also be visible in the final union.
       type, post = evaluate(<<~RUBY)
         tries = 0
         begin
@@ -560,9 +538,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         end
       RUBY
       expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
-      # `i` is bound only inside the body, so the no-iteration join
-      # path nil-injects it into the post-loop scope. The element
-      # type comes from the Tuple[1, 2, 3] carrier.
+      # `i` is bound only inside the body, so the no-iteration join path nil-injects it into the post-loop scope. The
+      # element type comes from the Tuple[1, 2, 3] carrier.
       i_type = post.local(:i)
       members = i_type.members.map { |m| m.is_a?(Rigor::Type::Constant) ? m.value : m }
       expect(members).to include(1, 2, 3, nil)
@@ -573,10 +550,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         for a, b in [[1, 2]]
         end
       RUBY
-      # `[[1, 2]]` is `Tuple[Tuple[1, 2]]`; the per-iteration element
-      # is `Tuple[1, 2]`, which the multi-target binder splits into
-      # `a: 1` and `b: 2`. The names are nil-injected through the
-      # zero-iteration join.
+      # `[[1, 2]]` is `Tuple[Tuple[1, 2]]`; the per-iteration element is `Tuple[1, 2]`, which the multi-target binder
+      # splits into `a: 1` and `b: 2`. The names are nil-injected through the zero-iteration join.
       expect(post.local(:a).members).to include(Rigor::Type::Combinator.constant_of(1))
       expect(post.local(:b).members).to include(Rigor::Type::Combinator.constant_of(2))
     end
@@ -614,9 +589,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         for k, v in { a: 1, b: 2 }
         end
       RUBY
-      # `Hash#each` yields `[K, V]`; the multi-target binder splits
-      # that into per-iteration `k` and `v` bindings, nil-injected
-      # through the zero-iteration join.
+      # `Hash#each` yields `[K, V]`; the multi-target binder splits that into per-iteration `k` and `v` bindings,
+      # nil-injected through the zero-iteration join.
       k_members = post.local(:k).members.map { |m| m.is_a?(Rigor::Type::Constant) ? m.value : m }
       v_members = post.local(:v).members.map { |m| m.is_a?(Rigor::Type::Constant) ? m.value : m }
       expect(k_members).to include(:a, :b, nil)
@@ -629,8 +603,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           y = "hi"
         end
       RUBY
-      # Unlike `each {}`, `for` does not introduce a new variable
-      # scope: writes inside the body are observable after the loop.
+      # Unlike `each {}`, `for` does not introduce a new variable scope: writes inside the body are observable after the
+      # loop.
       expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
     end
   end
@@ -652,12 +626,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type.members.map(&:value)).to contain_exactly(1, "hi")
     end
 
-    # Early-return narrowing through the OR / AND seam, mirroring
-    # the `eval_if` / `eval_unless` `branch_unconditionally_exits?`
-    # path. When the RHS terminates (raise / return / throw / exit /
-    # abort / fail / next / break), the surviving control flow is
-    # the LHS-skipped edge alone, so the post-scope narrows the
-    # write target accordingly.
+    # Early-return narrowing through the OR / AND seam, mirroring the `eval_if` / `eval_unless`
+    # `branch_unconditionally_exits?` path. When the RHS terminates (raise / return / throw / exit / abort / fail / next
+    # / break), the surviving control flow is the LHS-skipped edge alone, so the post-scope narrows the write target
+    # accordingly.
     context "when the RHS unconditionally exits (early-return narrowing across or / and)" do
       let(:union_local) do
         Rigor::Type::Combinator.union(
@@ -675,8 +647,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         _, post = bound_scope.evaluate(parse(<<~RUBY))
           (m = v) or raise "bad"
         RUBY
-        # The OR survives only when the LHS write is truthy; the
-        # nil fragment is removed from `m`.
+        # The OR survives only when the LHS write is truthy; the nil fragment is removed from `m`.
         expect(post.local(:m)).to be_a(Rigor::Type::Nominal)
         expect(post.local(:m).class_name).to eq("String")
       end
@@ -706,8 +677,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         _, post = bound_scope.evaluate(parse(<<~RUBY))
           (m = v) and raise "got something"
         RUBY
-        # AND survives only when LHS is falsey, so `m` is the nil
-        # fragment.
+        # AND survives only when LHS is falsey, so `m` is the nil fragment.
         expect(post.local(:m)).to eq(Rigor::Type::Combinator.constant_of(nil))
       end
 
@@ -715,8 +685,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         type, _post = bound_scope.evaluate(parse(<<~RUBY))
           (m = v) or raise "bad"
         RUBY
-        # Value of the OR expression is the truthy fragment of the
-        # LHS write — String only, no nil.
+        # Value of the OR expression is the truthy fragment of the LHS write — String only, no nil.
         expect(type).to be_a(Rigor::Type::Nominal)
         expect(type.class_name).to eq("String")
       end
@@ -769,8 +738,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       described_class.new(scope: scope, on_enter: on_enter).evaluate(ast)
 
-      # Sanity: every recursive sub_eval threads the callback so the
-      # rvalue (`x + 2`) is recorded with `x` already bound.
+      # Sanity: every recursive sub_eval threads the callback so the rvalue (`x + 2`) is recorded with `x` already
+      # bound.
       x_plus_2_event = events.find { |klass, _| klass == Prism::CallNode }
       expect(x_plus_2_event).not_to be_nil
       expect(x_plus_2_event[1]).to include(:x)
@@ -782,9 +751,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       ast = parse_program("foo(1)")
       described_class.new(scope: scope, on_enter: on_enter).evaluate(ast)
 
-      # The CallNode has no statement-evaluator handler; the default
-      # branch still fires on_enter so callers (the ScopeIndexer) can
-      # record its entry scope.
+      # The CallNode has no statement-evaluator handler; the default branch still fires on_enter so callers (the
+      # ScopeIndexer) can record its entry scope.
       expect(events).to include(Prism::CallNode)
     end
 
@@ -798,10 +766,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
   describe "DefNode / ClassNode handlers (Slice 3 phase 2 follow-up)" do
     let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
 
-    # Build an `on_enter` callback that records the entry-scope
-    # binding for `name` whenever the evaluator visits a
-    # LocalVariableReadNode for that name. Returns the events array
-    # (mutable) and the callback together.
+    # Build an `on_enter` callback that records the entry-scope binding for `name` whenever the evaluator visits a
+    # LocalVariableReadNode for that name. Returns the events array (mutable) and the callback together.
     def watch_local_reads(name)
       events = []
       on_enter = lambda do |node, s|
@@ -842,10 +808,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           def self.sqrt(n); n; end
         end
       RUBY
-      # The singleton path was consulted (no exception, the local is
-      # bound to *some* type, possibly Dynamic[Top] when the RBS type
-      # is an interface alias). The structural property under test is
-      # that the local was bound at all.
+      # The singleton path was consulted (no exception, the local is bound to *some* type, possibly Dynamic[Top] when
+      # the RBS type is an interface alias). The structural property under test is that the local was bound at all.
       expect(events).not_to be_empty
       expect(events.first).not_to be_nil
     end
@@ -878,8 +842,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       class_body_scopes = []
       on_enter = ->(_node, s) { class_body_scopes << s.locals.keys.sort }
       described_class.new(scope: scope, on_enter: on_enter).evaluate(ast)
-      # The class body's children enter with the fresh empty scope
-      # (`[]`), even though the outer `x = 1` post-scope contains x.
+      # The class body's children enter with the fresh empty scope (`[]`), even though the outer `x = 1` post-scope
+      # contains x.
       expect(class_body_scopes).to include([])
     end
 
@@ -943,9 +907,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "qualifies nested class names with :: without raising" do
-      # The binder's class_path is "A::B" here. Neither A nor A::B exist
-      # in core RBS, so x falls back to Dynamic[Top]; the structural
-      # test is just that no exception is raised.
+      # The binder's class_path is "A::B" here. Neither A nor A::B exist in core RBS, so x falls back to Dynamic[Top];
+      # the structural test is just that no exception is raised.
       ast = parse_program("class A; class B; def foo(x); x; end; end; end")
       expect { described_class.new(scope: scope).evaluate(ast) }.not_to raise_error
     end
@@ -960,8 +923,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           end
         end
       RUBY
-      # The body of `bar` -- inside the ruby2_keywords(<DefNode>) call --
-      # sees self as Nominal[Foo] (instance method), NOT Singleton[Foo].
+      # The body of `bar` -- inside the ruby2_keywords(<DefNode>) call -- sees self as Nominal[Foo] (instance method),
+      # NOT Singleton[Foo].
       expect(observed).to include(Rigor::Type::Combinator.nominal_of("Foo"))
       expect(observed).not_to include(Rigor::Type::Combinator.singleton_of("Foo"))
     end
@@ -991,18 +954,14 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       )
     end
 
-    # Parse `source` with `x` and `y` pre-declared as locals so the
-    # parser produces `LocalVariableReadNode` rather than implicit
-    # `CallNode` references. Tests that need a different local set
-    # MAY pass `locals:`.
+    # Parse `source` with `x` and `y` pre-declared as locals so the parser produces `LocalVariableReadNode` rather than
+    # implicit `CallNode` references. Tests that need a different local set MAY pass `locals:`.
     def parse_with_locals(source, locals: %i[x y])
       Prism.parse(source, scopes: [locals]).value
     end
 
-    # Build an `on_enter` callback that records the entry-scope
-    # binding for `name` whenever the evaluator visits a
-    # LocalVariableReadNode for that name. Returns the events array
-    # (mutable) and the callback together.
+    # Build an `on_enter` callback that records the entry-scope binding for `name` whenever the evaluator visits a
+    # LocalVariableReadNode for that name. Returns the events array (mutable) and the callback together.
     def watch_local_reads(name)
       events = []
       on_enter = lambda do |node, s|
@@ -1025,9 +984,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
 
-      # Predicate read sees the untouched union; the then-branch
-      # read sees x narrowed to Integer; the else-branch read sees
-      # x narrowed to Constant[nil].
+      # Predicate read sees the untouched union; the then-branch read sees x narrowed to Integer; the else-branch read
+      # sees x narrowed to Constant[nil].
       expect(events[0]).to eq(union_int_nil)
       expect(events[1]).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
       expect(events[2]).to eq(Rigor::Type::Combinator.constant_of(nil))
@@ -1062,8 +1020,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
 
-      # In `unless x` the body runs when x is falsey, the else-clause
-      # when x is truthy. The narrower swaps the two edges accordingly.
+      # In `unless x` the body runs when x is falsey, the else-clause when x is truthy. The narrower swaps the two edges
+      # accordingly.
       then_read, else_read = events.last(2)
       expect(then_read).to eq(Rigor::Type::Combinator.constant_of(nil))
       expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
@@ -1129,18 +1087,15 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           x
         end
       RUBY
-      # After the if, x has the union of the two narrowed branches,
-      # which collapses back to the original `Integer | nil` because
-      # the two narrowings partition the union.
+      # After the if, x has the union of the two narrowed branches, which collapses back to the original `Integer | nil`
+      # because the two narrowings partition the union.
       expect(post.local(:x)).to eq(union_int_nil)
     end
 
     it "evaluates the RHS of `&&` under the LHS truthy scope" do
-      # `x.succ` only resolves cleanly when `x` is narrowed to a
-      # non-nil Integer; otherwise dispatch over `Integer | nil`
-      # cannot prove `NilClass` defines `succ`. The RHS therefore
-      # types as `Nominal[Integer]` only when the narrower flowed
-      # `x` into the RHS scope.
+      # `x.succ` only resolves cleanly when `x` is narrowed to a non-nil Integer; otherwise dispatch over `Integer |
+      # nil` cannot prove `NilClass` defines `succ`. The RHS therefore types as `Nominal[Integer]` only when the
+      # narrower flowed `x` into the RHS scope.
       bound = scope.with_local(:x, union_int_nil)
       type, _post = bound.evaluate(parse_with_locals("x && x.succ"))
 
@@ -1169,17 +1124,14 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       ast = parse_with_locals("x || x.nil?")
       described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
 
-      # The LHS read sees the unnarrowed union; we don't assert on
-      # `events[1]` because the RHS receiver is typed via
-      # ExpressionTyper, which does not fire `on_enter`. The
-      # behavioural proof is in the dispatched return type below.
+      # The LHS read sees the unnarrowed union; we don't assert on `events[1]` because the RHS receiver is typed via
+      # ExpressionTyper, which does not fire `on_enter`. The behavioural proof is in the dispatched return type below.
       expect(events.first).to eq(union_int_nil)
 
       type, _post = bound.evaluate(ast)
       expect(type).to be_a(Rigor::Type::Union)
-      # The RHS `x.nil?` resolves on `Constant[nil]` to
-      # `Constant[true]` because `x` was narrowed to `nil` in the
-      # falsey branch. The full expression unions LHS and RHS.
+      # The RHS `x.nil?` resolves on `Constant[nil]` to `Constant[true]` because `x` was narrowed to `nil` in the falsey
+      # branch. The full expression unions LHS and RHS.
       expect(type.members).to include(Rigor::Type::Combinator.constant_of(true))
     end
 
@@ -1219,8 +1171,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
               .with_local(:y, union_str_nil)
       type, _post = bound.evaluate(parse_with_locals("if x && y; x; else; 0; end"))
 
-      # In the truthy branch x is narrowed to its non-falsey
-      # fragment; the read of `x` therefore returns `Integer`.
+      # In the truthy branch x is narrowed to its non-falsey fragment; the read of `x` therefore returns `Integer`.
       expect(type).to be_a(Rigor::Type::Union)
       expect(type.members).to include(
         Rigor::Type::Combinator.nominal_of("Integer"),
@@ -1235,8 +1186,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       bound = scope.with_local(:x, union)
       type, _post = bound.evaluate(parse_with_locals('if x == "a" && x == "b"; x; else; 0; end'))
 
-      # The truthy branch is unreachable because the RHS sees x
-      # narrowed to "a", then intersects that with "b".
+      # The truthy branch is unreachable because the RHS sees x narrowed to "a", then intersects that with "b".
       expect(type).to eq(Rigor::Type::Combinator.constant_of(0))
     end
 
@@ -1249,8 +1199,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       ast = parse_with_locals("if x.is_a?(Integer); x; else; x; end")
       events, on_enter = watch_local_reads(:x)
       described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
-      # The predicate receiver is typed by ExpressionTyper directly
-      # and is not surfaced through `on_enter`. Only the two
+      # The predicate receiver is typed by ExpressionTyper directly and is not surfaced through `on_enter`. Only the two
       # body-position reads of `x` are observed here.
       expect(events.size).to eq(2)
       then_read, else_read = events
@@ -1265,8 +1214,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
       then_read, else_read = events
       expect(then_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
-      # The else edge cannot prove "Numeric is not an Integer", so it
-      # stays conservative and preserves Nominal[Numeric].
+      # The else edge cannot prove "Numeric is not an Integer", so it stays conservative and preserves Nominal[Numeric].
       expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("Numeric"))
     end
 
@@ -1354,12 +1302,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
   describe "block return type uplift (Slice 6 phase C sub-phase 2)" do
     it "infers a per-position Tuple from `[1, 2, 3].map { |n| n.to_s }`" do
-      # v0.0.6 phase 2 — per-element block re-evaluation over a
-      # Tuple-shaped receiver. Each position binds its own constant
-      # to the block parameter, the body folds to the corresponding
-      # `Constant[String]`, and the assembled answer is
-      # `Tuple[Constant["1"], Constant["2"], Constant["3"]]` —
-      # strictly tighter than the previous `Array[union]` projection.
+      # v0.0.6 phase 2 — per-element block re-evaluation over a Tuple-shaped receiver. Each position binds its own
+      # constant to the block parameter, the body folds to the corresponding `Constant[String]`, and the assembled
+      # answer is `Tuple[Constant["1"], Constant["2"], Constant["3"]]` — strictly tighter than the previous
+      # `Array[union]` projection.
       type, _post = evaluate("[1, 2, 3].map { |n| n.to_s }")
       expect(type).to be_a(Rigor::Type::Tuple)
       expect(type.elements.map(&:value)).to eq(%w[1 2 3])
@@ -1383,12 +1329,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
   describe "downstream inference benefits" do
     it "lets methods on bound locals resolve through RBS" do
-      # Constant folding (v0.0.3 C) folds `1.succ` to
-      # `Constant[2]`, which is strictly more precise than
-      # the RBS-widened `Nominal[Integer]`. The RBS
-      # dispatch tier is still exercised — the same call
-      # on a non-constant receiver returns Nominal — see
-      # the wider-union tests in expression_typer_spec.rb.
+      # Constant folding (v0.0.3 C) folds `1.succ` to `Constant[2]`, which is strictly more precise than the RBS-widened
+      # `Nominal[Integer]`. The RBS dispatch tier is still exercised — the same call on a non-constant receiver returns
+      # Nominal — see the wider-union tests in expression_typer_spec.rb.
       type, _post = evaluate(<<~RUBY)
         x = 1
         x.succ
@@ -1398,8 +1341,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "lets shape-typed locals resolve through dispatch" do
-      # Slice 5 phase 2 picks the first element directly rather than
-      # the projected union; the test asserts the precise answer.
+      # Slice 5 phase 2 picks the first element directly rather than the projected union; the test asserts the precise
+      # answer.
       type, _post = evaluate(<<~RUBY)
         xs = [1, 2, 3]
         xs.first
@@ -1489,8 +1432,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         xs = [1, 2, 3]
         xs[100]
       RUBY
-      # The shape tier defers; RbsDispatch returns Array#[]'s projected
-      # type, which is Elem | nil under the value-lattice.
+      # The shape tier defers; RbsDispatch returns Array#[]'s projected type, which is Elem | nil under the
+      # value-lattice.
       expect(type).not_to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
@@ -1573,19 +1516,16 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         watch_v.call(node, s)
       end
       run_eval(default_env_scope, combined, "{ a: 1, b: 2 }.each { |k, v| k; v }")
-      # The receiver is a HashShape{a: 1, b: 2}; Hash#each yields
-      # `[K, V]` tuples and the binder receives the tuple slot type
-      # for each positional. We assert that the bindings are present
-      # rather than the exact tuple shape (which can vary across
-      # RBS revisions).
+      # The receiver is a HashShape{a: 1, b: 2}; Hash#each yields `[K, V]` tuples and the binder receives the tuple slot
+      # type for each positional. We assert that the bindings are present rather than the exact tuple shape (which can
+      # vary across RBS revisions).
       expect(events_k.first).not_to be_nil
       expect(events_v.first).not_to be_nil
     end
 
     it "defaults block parameters to Dynamic[Top] when the receiver has no RBS signature" do
       events, on_enter = watch_local_reads(:x)
-      # `foo` resolves to an implicit-self call without a known
-      # signature. The block param falls back to Dynamic[Top].
+      # `foo` resolves to an implicit-self call without a known signature. The block param falls back to Dynamic[Top].
       run_eval(default_env_scope, on_enter, "foo { |x| x }")
       expect(events).not_to be_empty
       expect(events.first).to eq(Rigor::Type::Combinator.untyped)
@@ -1612,9 +1552,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "evaluates the block body's terminal statement under the bound block param" do
-      # `n + 1` is itself a CallNode, so the inner `n` read does not
-      # fire `on_enter`; we probe the entry scope at the CallNode
-      # level instead, which sees the bound `n` via `type_of`.
+      # `n + 1` is itself a CallNode, so the inner `n` read does not fire `on_enter`; we probe the entry scope at the
+      # CallNode level instead, which sees the bound `n` via `type_of`.
       events = []
       on_enter = lambda do |node, s|
         next unless node.is_a?(Prism::CallNode) && node.name == :+
@@ -1690,13 +1629,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         )
       end
 
-      # Per Ruby's semantics, `;`-prefixed block-locals are
-      # freshly bound to `nil` at the start of each block
-      # invocation. Reading the name before writing it must
-      # therefore yield `Constant[nil]` — NOT the outer
-      # binding's value, which would be unsound (a runtime
-      # `nil.even?` would NoMethodError but the analyzer would
-      # claim the receiver is the outer Integer).
+      # Per Ruby's semantics, `;`-prefixed block-locals are freshly bound to `nil` at the start of each block
+      # invocation. Reading the name before writing it must therefore yield `Constant[nil]` — NOT the outer binding's
+      # value, which would be unsound (a runtime `nil.even?` would NoMethodError but the analyzer would claim the
+      # receiver is the outer Integer).
       it "binds block-locals to Constant[nil] at block entry, shadowing the outer value" do
         events, on_enter = watch_local_reads(:x)
         run_eval(
@@ -1711,10 +1647,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         expect(events.last).to eq(Rigor::Type::Combinator.constant_of(nil))
       end
 
-      # The terminal `x` read is the block body's last expression:
-      # by then the block-local has been written from `x = i`, so
-      # the read should see the Tuple-element union, not the outer
-      # `Constant[100]` shadow that `nil`-init introduced.
+      # The terminal `x` read is the block body's last expression: by then the block-local has been written from `x =
+      # i`, so the read should see the Tuple-element union, not the outer `Constant[100]` shadow that `nil`-init
+      # introduced.
       it "exposes the written type after the block-local is written" do
         events, on_enter = watch_local_reads(:x)
         run_eval(default_env_scope, on_enter, "x = 100; [1, 2, 3].each do |i; x| x = i; x end")
@@ -1817,8 +1752,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           @x
         end
       RUBY
-      # Inside the method body the outer @x = 99 binding MUST NOT
-      # be visible — `def` enters with a fresh scope.
+      # Inside the method body the outer @x = 99 binding MUST NOT be visible — `def` enters with a fresh scope.
       expect(observed.first).to be_nil
     end
   end
@@ -1876,10 +1810,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
   describe "cross-method ivar tracking via class accumulator (Slice 7 phase 2)" do
     it "seeds an instance method body's ivars from sibling-method writes when routed through ScopeIndexer" do
-      # `def initialize` (not `def init`) is the soundness gate
-      # for the B2.3 read-before-write nil contribution: a write
-      # in `initialize` runs before any other method body, so
-      # the analyzer does NOT widen `@cache` with nil here.
+      # `def initialize` (not `def init`) is the soundness gate for the B2.3 read-before-write nil contribution: a write
+      # in `initialize` runs before any other method body, so the analyzer does NOT widen `@cache` with nil here.
       ast = parse_program(<<~RUBY)
         class Foo
           def initialize; @cache = "hello"; end
@@ -1953,10 +1885,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       Rigor::Source::NodeWalker.each(ast) do |n|
         read_node = n if n.is_a?(Prism::InstanceVariableReadNode)
       end
-      # `def self.get`'s `@cache` is a class-level ivar of `Foo` the
-      # class object, NOT an instance ivar of a Foo instance. The
-      # accumulator tracks only instance defs, so this read stays
-      # unbound.
+      # `def self.get`'s `@cache` is a class-level ivar of `Foo` the class object, NOT an instance ivar of a Foo
+      # instance. The accumulator tracks only instance defs, so this read stays unbound.
       expect(index[read_node].ivar(:@cache)).to be_nil
     end
   end
@@ -2008,8 +1938,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "invalidates the local_binding fact on the dropped local" do
-      # Pre-bind x with a fact, then escape; the with_local call inside
-      # the drop must invalidate the local_binding bucket entry.
+      # Pre-bind x with a fact, then escape; the with_local call inside the drop must invalidate the local_binding
+      # bucket entry.
       base = default_env_scope.with_local(:x, integer_constant(1))
       base = base.with_fact(
         Rigor::Analysis::FactStore::Fact.new(
@@ -2024,10 +1954,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
   end
 
   describe "rescue variable binding" do
-    # The rescue variable is only bound inside the rescue branch; the
-    # primary body's scope does not include it. After the begin/rescue join
-    # the post-scope nil-injects the variable, so the observable type is
-    # `ExcType | nil`.  These tests verify the exception-type component.
+    # The rescue variable is only bound inside the rescue branch; the primary body's scope does not include it. After
+    # the begin/rescue join the post-scope nil-injects the variable, so the observable type is `ExcType | nil`. These
+    # tests verify the exception-type component.
     it "binds the rescue reference to StandardError when no classes named" do
       _, post = evaluate(<<~RUBY)
         begin
@@ -2090,9 +2019,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
   end
 
   describe "case/in pattern variable binding" do
-    # Like rescue, captured pattern variables are only bound on the matched
-    # branch; nil-injection produces `MatchType | nil` in the post-scope.
-    # We verify the match-type component is present.
+    # Like rescue, captured pattern variables are only bound on the matched branch; nil-injection produces `MatchType |
+    # nil` in the post-scope. We verify the match-type component is present.
     it "binds a capture variable to the matched class type" do
       _, post = evaluate(<<~RUBY)
         case value
@@ -2232,11 +2160,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:b)).to be_a(Rigor::Type::Union)
     end
 
-    # `if /(?<x>...)/ =~ str` — Ruby guarantees the named
-    # capture is a `String` inside the truthy branch (the
-    # match succeeded; the capture group must have
-    # participated for the match to be truthy with a
-    # non-optional group). The else branch sees `nil`.
+    # `if /(?<x>...)/ =~ str` — Ruby guarantees the named capture is a `String` inside the truthy branch (the match
+    # succeeded; the capture group must have participated for the match to be truthy with a non-optional group). The
+    # else branch sees `nil`.
     describe "narrowing through `if regex =~ str`" do
       let(:string_t) { Rigor::Type::Combinator.nominal_of("String") }
       let(:nil_t) { Rigor::Type::Combinator.constant_of(nil) }
@@ -2256,9 +2182,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         events.first
       end
 
-      # When the named-capture body is outside the v0.1.1 recogniser
-      # table (e.g. `.+`), the truthy branch still narrows to plain
-      # `String` per the v0.1.0 baseline.
+      # When the named-capture body is outside the v0.1.1 recogniser table (e.g. `.+`), the truthy branch still narrows
+      # to plain `String` per the v0.1.0 baseline.
       it "narrows the capture to String inside the truthy branch (recogniser fallback)" do
         observed = first_local_seen(:rest, <<~RUBY)
           if /(?<rest>.+)/ =~ str
@@ -2279,10 +2204,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         expect(observed).to eq(nil_t)
       end
 
-      # `\d+` triggers the v0.1.1 recogniser, so the truthy edge
-      # carries `decimal-int-string`; rejoining with the falsey
-      # `nil` edge widens back to a `decimal-int-string | nil`
-      # union (still tighter than the v0.1.0 `String | nil`).
+      # `\d+` triggers the v0.1.1 recogniser, so the truthy edge carries `decimal-int-string`; rejoining with the falsey
+      # `nil` edge widens back to a `decimal-int-string | nil` union (still tighter than the v0.1.0 `String | nil`).
       it "joins back to <refinement> | nil after the if" do
         _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
           if /(?<year>\\d+)/ =~ str
@@ -2391,10 +2314,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         expect(first_local_seen(:rest, source)).to eq(string_t)
       end
 
-      # `\d*` admits the empty string, which is not a valid
-      # `decimal-int-string` (the carrier excludes `""`). The
-      # recogniser rejects unbounded-zero quantifiers and the
-      # fallback to plain `String` keeps the carrier sound.
+      # `\d*` admits the empty string, which is not a valid `decimal-int-string` (the carrier excludes `""`). The
+      # recogniser rejects unbounded-zero quantifiers and the fallback to plain `String` keeps the carrier sound.
       it "falls back to String for `\\d*` and other zero-length-admitting forms" do
         observed = first_local_seen(:n, <<~RUBY)
           if /(?<n>\\d*)/ =~ str
@@ -2406,10 +2327,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
-  # Survey item (b) — `=~` with a regex literal binds the
-  # match-data globals (`$~`, `$&`, `$\``, `$'`, `$+`, `$1..$N`)
-  # on each predicate edge so subsequent reads inside an
-  # `unless ... raise` guard see the tightened type.
+  # Survey item (b) — `=~` with a regex literal binds the match-data globals (`$~`, `$&`, `$\``, `$'`, `$+`, `$1..$N`)
+  # on each predicate edge so subsequent reads inside an `unless ... raise` guard see the tightened type.
   describe "regex `=~` predicate narrowing (numbered globals)" do
     let(:string_t) { Rigor::Type::Combinator.nominal_of("String") }
     let(:nil_t) { Rigor::Type::Combinator.constant_of(nil) }
@@ -2421,8 +2340,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
           raise "bad"
         end
       RUBY
-      # After `unless ... raise`, only the predicate-truthy edge
-      # survives — $1 and $2 are narrowed to String.
+      # After `unless ... raise`, only the predicate-truthy edge survives — $1 and $2 are narrowed to String.
       expect(post.global(:$1)).to eq(string_t)
       expect(post.global(:$2)).to eq(string_t)
     end
@@ -2496,8 +2414,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "joins a `flag = true; break` binding into a `for` loop continuation" do
-      # Pre-fix `flag` typed `false` here (a later `if flag` false-fired
-      # always-falsey); the break path's `true` is now joined in.
+      # Pre-fix `flag` typed `false` here (a later `if flag` false-fired always-falsey); the break path's `true` is now
+      # joined in.
       flag = local_after(<<~RUBY, :flag)
         flag = false
         for i in [1, 2, 3]
@@ -2536,8 +2454,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "does NOT pollute the loop local with a break inside a nested block" do
-      # `break` inside `each { ... }` targets `each`, not the `while`; its
-      # scope must not join the while continuation — `flag` stays false.
+      # `break` inside `each { ... }` targets `each`, not the `while`; its scope must not join the while continuation —
+      # `flag` stays false.
       flag = local_after(<<~RUBY, :flag)
         flag = false
         while true
@@ -2550,8 +2468,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "does not leak a transient overwritten before the break (no over-widening)" do
-      # `out = nil; out = real; break` — the break scope captures the real
-      # value, never the transient nil, so `out` is not falsely nilable.
+      # `out = nil; out = real; break` — the break scope captures the real value, never the transient nil, so `out` is
+      # not falsely nilable.
       out = local_after(<<~RUBY, :out)
         out = []
         for i in [1]

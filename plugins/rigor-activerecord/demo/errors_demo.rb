@@ -4,10 +4,9 @@ require_relative "lib/runtime"
 require_relative "app/models/user"
 require_relative "app/models/post"
 
-# Intentionally ill-typed file — demonstrates the diagnostics
-# rigor-activerecord emits for unknown columns and arity
-# mistakes. DO NOT run via `ruby errors_demo.rb` — the runtime
-# stubs accept anything; rigor check is what catches these.
+# Intentionally ill-typed file — demonstrates the diagnostics rigor-activerecord emits for unknown
+# columns and arity mistakes. DO NOT run via `ruby errors_demo.rb` — the runtime stubs accept anything;
+# rigor check is what catches these.
 
 # Unknown column with a close did-you-mean suggestion.
 User.where(emial: "alice@example.com")

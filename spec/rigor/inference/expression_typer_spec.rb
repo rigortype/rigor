@@ -194,13 +194,10 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   end
 
   describe "LHS-only target nodes (non-value positions)" do
-    # `*TargetNode` kinds appear only on the left of destructuring
-    # assignments, in pattern bodies, or as inner slots of block
-    # parameters. They have no value to extract; the typer recognises
-    # them so the coverage scanner / `--explain` stream stops counting
-    # them as fail-soft fallbacks. Binding the inner names back into
-    # the scope is `StatementEvaluator` / `MultiTargetBinder` /
-    # `BlockParameterBinder`'s concern, never `type_of`'s.
+    # `*TargetNode` kinds appear only on the left of destructuring assignments, in pattern bodies, or as inner slots of
+    # block parameters. They have no value to extract; the typer recognises them so the coverage scanner / `--explain`
+    # stream stops counting them as fail-soft fallbacks. Binding the inner names back into the scope is
+    # `StatementEvaluator` / `MultiTargetBinder` / `BlockParameterBinder`'s concern, never `type_of`'s.
     def find_first(node, klass)
       return node if node.is_a?(klass)
       return nil unless node.respond_to?(:compact_child_nodes)
@@ -423,9 +420,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
   describe "method dispatch (Slice 4: RBS-backed)" do
     it "resolves Integer#succ on a Constant receiver via unary fold (v0.0.3 C)" do
-      # `1.succ` folds to `Constant[2]`; the RBS-widened
-      # `Nominal[Integer]` answer is exercised via
-      # non-constant receivers in dispatch_spec.
+      # `1.succ` folds to `Constant[2]`; the RBS-widened `Nominal[Integer]` answer is exercised via non-constant
+      # receivers in dispatch_spec.
       type = scope.type_of(parse_expression("1.succ"))
 
       expect(type).to be_a(Rigor::Type::Constant)
@@ -440,9 +436,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "resolves Array#length on a Nominal[Array] receiver" do
-      # Returns the precise Tuple length as a Constant rather than
-      # the projected Nominal[Integer]; the carrier still erases
-      # to Integer.
+      # Returns the precise Tuple length as a Constant rather than the projected Nominal[Integer]; the carrier still
+      # erases to Integer.
       type = scope.type_of(parse_expression("[1, 2, 3].length"))
 
       expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
@@ -456,20 +451,16 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "resolves bool predicates more precisely than RBS when the receiver is a constant (v0.0.3 C)" do
-      # `1.zero?` folds to `Constant[false]` — the unary
-      # constant-folding catalogue wins over the RBS-widened
-      # `Union[Constant[true], Constant[false]]`.
-      # When the receiver is *not* a constant, the union
-      # representation is still the answer; the broader
-      # widening behaviour is exercised below.
+      # `1.zero?` folds to `Constant[false]` — the unary constant-folding catalogue wins over the RBS-widened
+      # `Union[Constant[true], Constant[false]]`. When the receiver is *not* a constant, the union representation is
+      # still the answer; the broader widening behaviour is exercised below.
       type = scope.type_of(parse_expression("1.zero?"))
       expect(type).to be_a(Rigor::Type::Constant)
       expect(type.value).to be(false)
 
       union_type = scope.type_of(parse_expression("def f(n); n.zero?; end"))
-      # The DefNode's type isn't the body's bool, but the
-      # widened-union proof lives in the dedicated unary
-      # tests in `constant_folding_spec.rb`.
+      # The DefNode's type isn't the body's bool, but the widened-union proof lives in the dedicated unary tests in
+      # `constant_folding_spec.rb`.
       expect(union_type).not_to be_nil
     end
 
@@ -576,8 +567,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
     describe "lexical constant lookup (Slice A constant-walk)" do
       it "resolves a ConstantReadNode using the surrounding class path" do
-        # Inside `Rigor::CLI::Foo`, a bare `Integer` reference still
-        # resolves through the top-level fallback.
+        # Inside `Rigor::CLI::Foo`, a bare `Integer` reference still resolves through the top-level fallback.
         cli_self = Rigor::Type::Combinator.singleton_of("Rigor::CLI::Foo")
         bound = scope.with_self_type(cli_self)
         type = bound.type_of(parse_expression("Integer"))
@@ -586,10 +576,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "resolves a ConstantPathNode by stripping the lexical prefix one segment at a time" do
-        # Inside a hypothetical `IO::SomeNested`, the bare reference
-        # `Comparable` (a top-level RBS-core module) still resolves.
-        # The walk tries `IO::SomeNested::Comparable` and `IO::Comparable`
-        # first (both miss) before falling through to bare `Comparable`.
+        # Inside a hypothetical `IO::SomeNested`, the bare reference `Comparable` (a top-level RBS-core module) still
+        # resolves. The walk tries `IO::SomeNested::Comparable` and `IO::Comparable` first (both miss) before falling
+        # through to bare `Comparable`.
         nested_self = Rigor::Type::Combinator.singleton_of("IO::SomeNested")
         bound = scope.with_self_type(nested_self)
         type = bound.type_of(parse_expression("Comparable"))
@@ -598,9 +587,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "prefers the lexically-qualified candidate when one matches the surrounding path" do
-        # `Errno::ENOENT` is RBS-core. Inside `Errno::SomeFakeNested`,
-        # a bare `ENOENT` reference walks via `Errno::SomeFakeNested::ENOENT`
-        # (miss) → `Errno::ENOENT` (hit).
+        # `Errno::ENOENT` is RBS-core. Inside `Errno::SomeFakeNested`, a bare `ENOENT` reference walks via
+        # `Errno::SomeFakeNested::ENOENT` (miss) → `Errno::ENOENT` (hit).
         nested_self = Rigor::Type::Combinator.singleton_of("Errno::SomeFakeNested")
         bound = scope.with_self_type(nested_self)
         type = bound.type_of(parse_expression("ENOENT"))
@@ -609,12 +597,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "prefers the most-specific candidate over the bare name when both exist" do
-        # `Integer` exists at top level. From inside a class whose
-        # path joined to `Integer` would coincidentally match an
-        # already-known nominal, the most-specific candidate wins.
-        # Here we use a synthetic case that forces the bare match
-        # because no Rigor::CLI::Integer is known: Integer still
-        # resolves (the bare candidate is reached after the
+        # `Integer` exists at top level. From inside a class whose path joined to `Integer` would coincidentally match
+        # an already-known nominal, the most-specific candidate wins. Here we use a synthetic case that forces the bare
+        # match because no Rigor::CLI::Integer is known: Integer still resolves (the bare candidate is reached after the
         # qualified ones miss).
         cli_self = Rigor::Type::Combinator.singleton_of("Rigor::CLI::Foo")
         bound = scope.with_self_type(cli_self)
@@ -656,10 +641,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "in-source value overrides an RBS constant decl of the same name" do
-        # Sanity: the RBS constant lookup would normally win; the
-        # in-source map takes precedence per Ruby's runtime
-        # semantics (user code is the authoritative source for
-        # its own constants).
+        # Sanity: the RBS constant lookup would normally win; the in-source map takes precedence per Ruby's runtime
+        # semantics (user code is the authoritative source for its own constants).
         constants = { "Float::INFINITY" => Rigor::Type::Combinator.constant_of(:overridden) }.freeze
         bound = scope.with_discovery(scope.discovery.with(in_source_constants: constants))
         type = bound.type_of(parse_expression("Float::INFINITY"))
@@ -684,10 +667,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "resolves a non-class constant declared in RBS through Environment#constant_for_name" do
-        # `Rigor::Analysis::FactStore::BUCKETS` is declared in
-        # sig/rigor/analysis/fact_store.rbs as Array[bucket].
-        # singleton_for_name MUST miss (BUCKETS is not a class)
-        # and constant_for_name MUST take over.
+        # `Rigor::Analysis::FactStore::BUCKETS` is declared in sig/rigor/analysis/fact_store.rbs as Array[bucket].
+        # singleton_for_name MUST miss (BUCKETS is not a class) and constant_for_name MUST take over.
         project_env = Rigor::Environment.for_project
         project_scope = Rigor::Scope.empty(environment: project_env)
         type = project_scope.type_of(parse_expression("Rigor::Analysis::FactStore::BUCKETS"))
@@ -696,8 +677,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       end
 
       it "resolves the same constant through the lexical walk from inside FactStore" do
-        # Inside Rigor::Analysis::FactStore the bare `BUCKETS`
-        # reference walks the candidate list and lands on the
+        # Inside Rigor::Analysis::FactStore the bare `BUCKETS` reference walks the candidate list and lands on the
         # qualified `Rigor::Analysis::FactStore::BUCKETS` decl.
         project_env = Rigor::Environment.for_project
         inner_self = Rigor::Type::Combinator.singleton_of("Rigor::Analysis::FactStore")
@@ -725,10 +705,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "resolves Array.new(3) as Tuple[nil, nil, nil] via singleton dispatch (v0.0.7)" do
-      # `Array.new(n)` lifts to a per-position
-      # `Tuple[Constant[nil] * n]` carrier when `n` is a small
-      # `Constant<Integer>`. Oversize `n` falls back to
-      # `Nominal[Array]`.
+      # `Array.new(n)` lifts to a per-position `Tuple[Constant[nil] * n]` carrier when `n` is a small
+      # `Constant<Integer>`. Oversize `n` falls back to `Nominal[Array]`.
       type = scope.type_of(parse_expression("Array.new(3)"))
 
       expect(type).to be_a(Rigor::Type::Tuple)
@@ -836,9 +814,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "still resolves the 0-arg overload of Array#first" do
-      # `() -> Elem` — narrows to the precise first member
-      # of the Tuple shape rather than returning the projected
-      # `Elem` union from the underlying `Array#first`.
+      # `() -> Elem` — narrows to the precise first member of the Tuple shape rather than returning the projected `Elem`
+      # union from the underlying `Array#first`.
       type = scope.type_of(parse_expression("[1, 2, 3].first"))
 
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
@@ -875,9 +852,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "falls back to the first overload when no overload accepts the args" do
-      # Integer#+ has overloads for Integer/Float/Rational/Complex.
-      # Symbol matches none, so the selector falls back to the first
-      # overload (Integer) and returns Nominal[Integer].
+      # Integer#+ has overloads for Integer/Float/Rational/Complex. Symbol matches none, so the selector falls back to
+      # the first overload (Integer) and returns Nominal[Integer].
       union_recv = Rigor::Type::Combinator.nominal_of(Integer)
       sym_arg = Rigor::Type::Combinator.constant_of(:foo)
 
@@ -902,10 +878,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "types empty HashNode as the empty HashShape{} carrier (v0.0.7)" do
-      # `{}` resolves to `HashShape{}` (closed, no pairs) so
-      # HashShape projections (`empty?`, `count`, `first`, `keys`,
-      # `values`) fold against it. Both carriers erase to plain
-      # `Hash` for RBS interop.
+      # `{}` resolves to `HashShape{}` (closed, no pairs) so HashShape projections (`empty?`, `count`, `first`, `keys`,
+      # `values`) fold against it. Both carriers erase to plain `Hash` for RBS interop.
       type = scope.type_of(parse_expression("{}"))
 
       expect(type).to be_a(Rigor::Type::HashShape)
@@ -1064,12 +1038,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     it "selects the block-bearing overload of Hash#transform_values for &:freeze" do
       type = project_scope.type_of(parse_expression('{ a: "x" }.transform_values(&:freeze)'))
 
-      # Without the gap-(d) fix, this resolves to
-      # `Enumerator[...]` via the no-block overload. With the
-      # per-pair HashShape fold (added alongside ADR-14 gap-(d)),
-      # the result is a precise `HashShape` rather than the
-      # widened `Hash` — both confirm the block-bearing overload
-      # was selected.
+      # Without the gap-(d) fix, this resolves to `Enumerator[...]` via the no-block overload. With the per-pair
+      # HashShape fold (added alongside ADR-14 gap-(d)), the result is a precise `HashShape` rather than the widened
+      # `Hash` — both confirm the block-bearing overload was selected.
       expect(type).to be_a(Rigor::Type::HashShape)
       expect(type.pairs.keys).to eq([:a])
     end
@@ -1077,11 +1048,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     it "per-element folds Array#map for &:to_s into a Tuple" do
       type = project_scope.type_of(parse_expression("[1, 2, 3].map(&:to_s)"))
 
-      # The per-element block fold now recognises the `&:symbol`
-      # shorthand: the symbol is dispatched as a zero-arg method
-      # on each Tuple element, so `[1, 2, 3].map(&:to_s)` folds
-      # to `Tuple[Constant["1"], Constant["2"], Constant["3"]]` —
-      # strictly tighter than the RBS-projected `Array[String]`.
+      # The per-element block fold now recognises the `&:symbol` shorthand: the symbol is dispatched as a zero-arg
+      # method on each Tuple element, so `[1, 2, 3].map(&:to_s)` folds to `Tuple[Constant["1"], Constant["2"],
+      # Constant["3"]]` — strictly tighter than the RBS-projected `Array[String]`.
       expect(type).to be_a(Rigor::Type::Tuple)
       expect(type.elements.map(&:value)).to eq(%w[1 2 3])
     end
@@ -1171,8 +1140,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "strips the left operand's truthy constituents on the AndNode short-circuit edge" do
-      # `s && 7` yields `s` only when `s` is falsey, so a `String?` left
-      # contributes only its `nil` (the `String` part hands off to `7`).
+      # `s && 7` yields `s` only when `s` is falsey, so a `String?` left contributes only its `nil` (the `String` part
+      # hands off to `7`).
       nullable_string = Rigor::Type::Combinator.union(
         Rigor::Type::Combinator.nominal_of("String"),
         Rigor::Type::Combinator.constant_of(nil)
@@ -1207,9 +1176,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "unions prior `:maybe` branches with the first definitely-matching `when`" do
-      # rand(10) -> Integer (always-yes against `Integer`). Prior `when 0`
-      # is `:maybe` (Integer might be 0), so the result includes both
-      # bodies but stops before reaching the else.
+      # rand(10) -> Integer (always-yes against `Integer`). Prior `when 0` is `:maybe` (Integer might be 0), so the
+      # result includes both bodies but stops before reaching the else.
       type = scope.type_of(parse_expression("case rand(10); when 0; :zero; when Integer; :int; else; :other; end"))
 
       expected = Rigor::Type::Combinator.union(
@@ -1333,9 +1301,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "folds a RangeNode whose bounds TYPE as Constant into Constant<Range>" do
-      # `n` is pinned to a constant by an enclosing binding; the bound is
-      # a LocalVariableReadNode, not a literal IntegerNode, so the fold
-      # has to consult the evaluated bound type (fact2 chain).
+      # `n` is pinned to a constant by an enclosing binding; the bound is a LocalVariableReadNode, not a literal
+      # IntegerNode, so the fold has to consult the evaluated bound type (fact2 chain).
       type = scope.with_local(:n, Rigor::Type::Combinator.constant_of(5))
                   .type_of(parse_expression("(1..n)", scopes: [[:n]]))
 
@@ -1385,8 +1352,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "still unions both branches when the predicate is non-Constant" do
-      # `x` is unbound so its type is `Dynamic[Top]`; both branches
-      # remain live and the result is the union.
+      # `x` is unbound so its type is `Dynamic[Top]`; both branches remain live and the result is the union.
       type = scope.type_of(parse_expression('x ? "yes" : "no"'))
       members = type.members.map(&:value)
       expect(members).to contain_exactly("yes", "no")

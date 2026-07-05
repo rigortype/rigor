@@ -7,11 +7,9 @@ require "rigor/inference/mutation_widening"
 require "rigor/scope"
 require "rigor/type"
 
-# Unit-level coverage for {Rigor::Inference::MutationWidening}.
-# The integration with `eval_call` (the actual G1 / G2
-# flow-folding gap closure) is exercised by the
-# end-to-end loop-mutation spec under `spec/integration/`;
-# this file pins the widening primitive in isolation.
+# Unit-level coverage for {Rigor::Inference::MutationWidening}. The integration with `eval_call` (the actual G1 / G2
+# flow-folding gap closure) is exercised by the end-to-end loop-mutation spec under `spec/integration/`; this file pins
+# the widening primitive in isolation.
 RSpec.describe Rigor::Inference::MutationWidening do
   describe ".pure_self_returner?" do
     it "recognizes freeze, dup, clone, and itself" do
@@ -91,12 +89,9 @@ RSpec.describe Rigor::Inference::MutationWidening do
   end
 
   describe ".widen_after_call" do
-    # Parses the last statement in `source` as a CallNode. We
-    # parse a multi-statement source so that local-variable reads
-    # in the target expression resolve to `LocalVariableReadNode`
-    # — Prism's parser needs an explicit assignment to a name
-    # before treating later occurrences as locals (otherwise they
-    # parse as zero-arg implicit-self calls).
+    # Parses the last statement in `source` as a CallNode. We parse a multi-statement source so that local-variable
+    # reads in the target expression resolve to `LocalVariableReadNode` — Prism's parser needs an explicit assignment to
+    # a name before treating later occurrences as locals (otherwise they parse as zero-arg implicit-self calls).
     def parse_call(source)
       Prism.parse(source).value.statements.body.last
     end
@@ -171,11 +166,9 @@ RSpec.describe Rigor::Inference::MutationWidening do
   end
 
   describe ".widen_after_block" do
-    # Parses a method body so that locals declared at method scope
-    # and read inside a block resolve as LocalVariableReadNode with
-    # `depth >= 1` (the outer-scope hop count Prism records).
-    # Returns the outer-most call carrying the block (the
-    # `.each do ... end` call site).
+    # Parses a method body so that locals declared at method scope and read inside a block resolve as
+    # LocalVariableReadNode with `depth >= 1` (the outer-scope hop count Prism records). Returns the outer-most call
+    # carrying the block (the `.each do ... end` call site).
     def parse_each_call(body_source)
       source = "def m\n#{body_source}\nend\n"
       def_node = Prism.parse(source).value.statements.body.first
@@ -209,8 +202,8 @@ RSpec.describe Rigor::Inference::MutationWidening do
     end
 
     it "is a no-op when the receiver is a block-local shadow (depth 0)" do
-      # `arr` in the block parameter list shadows the outer name —
-      # mutations on the shadow MUST NOT widen the outer binding.
+      # `arr` in the block parameter list shadows the outer name — mutations on the shadow MUST NOT widen the outer
+      # binding.
       call = parse_each_call(<<~RUBY)
         arr = [1]
         items.each do |arr|
@@ -234,9 +227,8 @@ RSpec.describe Rigor::Inference::MutationWidening do
     end
 
     it "does not descend into a nested call's own block" do
-      # Outer `arr.each` carries the relevant block; the nested
-      # `[1,2].each` block also contains `acc << x` but `acc`
-      # is the nested call's block scope, not ours.
+      # Outer `arr.each` carries the relevant block; the nested `[1,2].each` block also contains `acc << x` but `acc` is
+      # the nested call's block scope, not ours.
       call = parse_each_call(<<~RUBY)
         arr = [1]
         items.each do |x|
@@ -247,10 +239,8 @@ RSpec.describe Rigor::Inference::MutationWidening do
       RUBY
       seeded = Rigor::Scope.empty.with_local(:arr, tuple)
       result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
-      # The recursive walk still finds the mutation; we just want
-      # to verify we don't crash on nesting. The widening MUST
-      # apply because the inner `arr` is still an outer-scope
-      # local (depth >= 1).
+      # The recursive walk still finds the mutation; we just want to verify we don't crash on nesting. The widening MUST
+      # apply because the inner `arr` is still an outer-scope local (depth >= 1).
       expect(result.local(:arr).class_name).to eq("Array")
     end
 
@@ -276,10 +266,9 @@ RSpec.describe Rigor::Inference::MutationWidening do
     end
   end
 
-  # ADR-56 slice C helpers — receiver-content element-type extraction and
-  # JOIN. Unlike the arity-forgetting widening above, these compute the
-  # exact continuation element/key/value types, so exact-`eq` assertions on
-  # the returned carriers are load-bearing.
+  # ADR-56 slice C helpers — receiver-content element-type extraction and JOIN. Unlike the arity-forgetting widening
+  # above, these compute the exact continuation element/key/value types, so exact-`eq` assertions on the returned
+  # carriers are load-bearing.
   describe ".collection_element_types" do
     let(:int_type) { Rigor::Type::Combinator.nominal_of("Integer") }
     let(:str_type) { Rigor::Type::Combinator.nominal_of("String") }
@@ -303,8 +292,7 @@ RSpec.describe Rigor::Inference::MutationWidening do
       tuple = Rigor::Type::Combinator.tuple_of(int_type)
       array = Rigor::Type::Combinator.nominal_of("Array", type_args: [str_type])
       union = Rigor::Type::Combinator.union(tuple, array)
-      # Combinator.union may reorder members, so assert set membership rather
-      # than element order.
+      # Combinator.union may reorder members, so assert set membership rather than element order.
       expect(described_class.send(:collection_element_types, union)).to contain_exactly(int_type, str_type)
     end
 
@@ -363,8 +351,7 @@ RSpec.describe Rigor::Inference::MutationWidening do
       hash = Rigor::Type::Combinator.nominal_of("Hash", type_args: [sym_type, str_type])
       union = Rigor::Type::Combinator.union(shape, hash)
       keys, values = described_class.send(:hash_shape_key_values, union)
-      # Combinator.union may reorder members, so assert set membership rather
-      # than pair order.
+      # Combinator.union may reorder members, so assert set membership rather than pair order.
       expect(keys).to contain_exactly(sym_type, sym_type)
       expect(values).to contain_exactly(int_type, str_type)
     end

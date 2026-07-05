@@ -7,14 +7,10 @@ require_relative "routes/walker"
 
 module Rigor
   module Plugin
-    # Example plugin: validates Rails-style route helper calls
-    # (`users_path`, `edit_user_path(@user.id)`, …) against a
-    # YAML route table read from the project. This is the
-    # reference example for **slice 2 (`Plugin::IoBoundary` /
-    # `Plugin::TrustPolicy`)** and **slice 6 (`Plugin::Base.producer`
-    # / `#cache_for`)** — the two facets the earlier
-    # `rigor-lisp-eval` and `rigor-units` examples did not
-    # exercise.
+    # Example plugin: validates Rails-style route helper calls (`users_path`, `edit_user_path(@user.id)`, …) against a
+    # YAML route table read from the project. This is the reference example for **slice 2 (`Plugin::IoBoundary` /
+    # `Plugin::TrustPolicy`)** and **slice 6 (`Plugin::Base.producer` / `#cache_for`)** — the two facets the earlier
+    # `rigor-lisp-eval` and `rigor-units` examples did not exercise.
     #
     # ## Architecture
     #
@@ -60,15 +56,11 @@ module Rigor
         }
       )
 
-      # Cached producer (slice 6-A). The block runs through
-      # `instance_exec` so `@routes_file`, `io_boundary`, and private
-      # helpers are all in scope. Under ADR-60 WD3 record-and-validate,
-      # the `io_boundary.read_file` BELOW runs inside the block, and
-      # its `FileEntry` digest is captured into the dependency
-      # descriptor *after* the block runs — so editing `routes.yml`
-      # invalidates the cache with nothing to wire up by hand. (A
-      # producer that globbed a directory would add `watch:` to cover
-      # file additions; this one reads a single named file.)
+      # Cached producer (slice 6-A). The block runs through `instance_exec` so `@routes_file`, `io_boundary`, and
+      # private helpers are all in scope. Under ADR-60 WD3 record-and-validate, the `io_boundary.read_file` BELOW runs
+      # inside the block, and its `FileEntry` digest is captured into the dependency descriptor *after* the block runs —
+      # so editing `routes.yml` invalidates the cache with nothing to wire up by hand. (A producer that globbed a
+      # directory would add `watch:` to cover file additions; this one reads a single named file.)
       producer :route_table do |_params|
         contents = io_boundary.read_file(@routes_file)
         RouteTable.parse(contents)
@@ -79,14 +71,11 @@ module Rigor
         @load_error_emitted = false
       end
 
-      # ADR-37 — per-call helper validation over the engine-owned walk.
-      # The engine hands us every `CallNode`; `Walker.helper_call` gates
-      # on the implicit-receiver `*_path` / `*_url` shape, and each match
-      # is checked against the route table. `#producer_value` (ADR-60 WD4)
-      # loads and memoises the table on this instance, so the node rule
-      # and the file rule below share one `#cache_for` round-trip. When
-      # the table failed to load the file rule owns the single load-error
-      # warning; the node rule stays silent.
+      # ADR-37 — per-call helper validation over the engine-owned walk. The engine hands us every `CallNode`;
+      # `Walker.helper_call` gates on the implicit-receiver `*_path` / `*_url` shape, and each match is checked against
+      # the route table. `#producer_value` (ADR-60 WD4) loads and memoises the table on this instance, so the node rule
+      # and the file rule below share one `#cache_for` round-trip. When the table failed to load the file rule owns the
+      # single load-error warning; the node rule stays silent.
       node_rule Prism::CallNode do |node, _scope, path|
         table = producer_value(:route_table)
         next [] if table.nil? || table.empty?
@@ -97,18 +86,14 @@ module Rigor
         diagnostics_for_call(path, node, base, kind, table)
       end
 
-      # File-level only: the once-per-run load-error emission. Per-call
-      # validation runs over the engine-owned walk via the node rule
-      # above, so this hook is reserved for the one diagnostic a per-node
-      # walk cannot express — the project-global "routes file did not
-      # load" warning, emitted once rather than on every analysed file.
+      # File-level only: the once-per-run load-error emission. Per-call validation runs over the engine-owned walk via
+      # the node rule above, so this hook is reserved for the one diagnostic a per-node walk cannot express — the
+      # project-global "routes file did not load" warning, emitted once rather than on every analysed file.
       #
-      # `#producer_value` runs the `:route_table` producer through
-      # `#cache_for`; a `StandardError` the producer raises (missing /
-      # malformed / access-denied `routes.yml`) is rescued into
-      # `#producer_error`. ADR-60 WD3 record-and-validate captures the
-      # in-block `routes.yml` read into the dependency descriptor, so the
-      # cache invalidates on edit with nothing to wire up by hand.
+      # `#producer_value` runs the `:route_table` producer through `#cache_for`; a `StandardError` the producer raises
+      # (missing / malformed / access-denied `routes.yml`) is rescued into `#producer_error`. ADR-60 WD3
+      # record-and-validate captures the in-block `routes.yml` read into the dependency descriptor, so the cache
+      # invalidates on edit with nothing to wire up by hand.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         table = producer_value(:route_table)
         return [] unless table.nil?
@@ -148,9 +133,8 @@ module Rigor
       end
 
       def unknown_route_diagnostic(path, node, base, kind, table)
-        # ADR-60 WD4 — the shared `DidYouMean::SpellChecker` helper the
-        # engine also uses for `NoMethodError` hints, replacing the
-        # hand-rolled Levenshtein table this example used to carry.
+        # ADR-60 WD4 — the shared `DidYouMean::SpellChecker` helper the engine also uses for `NoMethodError` hints,
+        # replacing the hand-rolled Levenshtein table this example used to carry.
         suggestion = self.class.suggest(base, table.names)
         hint = suggestion ? " (did you mean `#{suggestion}_#{kind}`?)" : ""
         diagnostic(
@@ -173,11 +157,9 @@ module Rigor
         )
       end
 
-      # File-level (line 1) load-error warning. There is no call node to
-      # position at, so this is one of the few places a plugin constructs
-      # a `Diagnostic` directly rather than through `#diagnostic`. The
-      # message is tailored to the `StandardError` class `#producer_value`
-      # rescued into `#producer_error(:route_table)`.
+      # File-level (line 1) load-error warning. There is no call node to position at, so this is one of the few places a
+      # plugin constructs a `Diagnostic` directly rather than through `#diagnostic`. The message is tailored to the
+      # `StandardError` class `#producer_value` rescued into `#producer_error(:route_table)`.
       def load_error_diagnostic(path)
         Rigor::Analysis::Diagnostic.new(
           path: path,

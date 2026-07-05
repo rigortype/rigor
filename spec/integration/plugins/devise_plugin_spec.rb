@@ -1,18 +1,15 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-devise/`. ADR-16 slice 3c.
-# Exercises the substrate's Tier B path end-to-end:
+# Integration spec for `plugins/rigor-devise/`. ADR-16 slice 3c. Exercises the substrate's Tier B path end-to-end:
 #
 # 1. Load the example plugin via the `rigor-devise` entry point.
-# 2. Run rigor against a multi-file fixture with a User model
-#    using `devise :database_authenticatable, :recoverable` plus a
-#    consumer file calling the synthesised methods cross-file.
-# 3. Assert that bare reader calls resolve through the substrate
-#    (no `call.undefined-method` for Devise module methods).
+# 2. Run rigor against a multi-file fixture with a User model using `devise :database_authenticatable,
+#    :recoverable` plus a consumer file calling the synthesised methods cross-file.
+# 3. Assert that bare reader calls resolve through the substrate (no `call.undefined-method` for Devise
+#    module methods).
 #
-# Per WD13 floor — the synthesised methods return `Dynamic[T]`;
-# this spec verifies the *name resolution* path, not precise
-# return typing (which is slice-6 ceiling).
+# Per WD13 floor — the synthesised methods return `Dynamic[T]`; this spec verifies the *name resolution* path,
+# not precise return typing (which is slice-6 ceiling).
 
 require "spec_helper"
 

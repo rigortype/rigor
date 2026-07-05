@@ -2,11 +2,9 @@
 
 require "spec_helper"
 
-# ADR-39 slice 5 — the selectable isolation strategy for target-library
-# invocation (none / ruby_box / process). The strategy is read from
-# `RIGOR_PLUGIN_ISOLATION`; examples set it per-case. `process` (fork) is
-# exercised directly; `ruby_box` needs `RUBY_BOX=1` at process start, so
-# those examples skip unless the feature is active.
+# ADR-39 slice 5 — the selectable isolation strategy for target-library invocation (none / ruby_box / process). The
+# strategy is read from `RIGOR_PLUGIN_ISOLATION`; examples set it per-case. `process` (fork) is exercised directly;
+# `ruby_box` needs `RUBY_BOX=1` at process start, so those examples skip unless the feature is active.
 RSpec.describe Rigor::Plugin::Isolation do
   let(:feature) { "active_support/inflector" }
   let(:inflector) { "ActiveSupport::Inflector" }
@@ -93,8 +91,8 @@ RSpec.describe Rigor::Plugin::Isolation do
       end
     end
 
-    # The whole point of process isolation: a worker crash is contained —
-    # the parent survives, declines, and recovers on the next call.
+    # The whole point of process isolation: a worker crash is contained — the parent survives, declines, and recovers on
+    # the next call.
     it "contains a worker crash and recovers" do
       with_strategy("process") do
         described_class.call(feature: feature, receiver: inflector, method: :pluralize, args: ["post"])
@@ -116,10 +114,9 @@ RSpec.describe Rigor::Plugin::Isolation do
   end
 
   describe "ruby_box", if: Rigor::Plugin::Box.enabled? do
-    # The no-leak property (boxing does not load the library into the main
-    # space) is a process-global negative that other examples in the suite
-    # pollute, so it is asserted in box_spec (run standalone) rather than
-    # here; this checks the strategy returns the correct result.
+    # The no-leak property (boxing does not load the library into the main space) is a process-global negative that
+    # other examples in the suite pollute, so it is asserted in box_spec (run standalone) rather than here; this checks
+    # the strategy returns the correct result.
     it "answers correctly through the box" do
       with_strategy("ruby_box") do
         expect(described_class.call(feature: feature, receiver: inflector, method: :pluralize, args: ["person"]))
@@ -130,9 +127,8 @@ RSpec.describe Rigor::Plugin::Isolation do
     end
   end
 
-  # Unit-exercise the RubyBox backend's branches with a stubbed Box, so the
-  # error gates and the inspect-rendered expression are covered without the
-  # process-global `RUBY_BOX=1` the integration example above requires.
+  # Unit-exercise the RubyBox backend's branches with a stubbed Box, so the error gates and the inspect-rendered
+  # expression are covered without the process-global `RUBY_BOX=1` the integration example above requires.
   describe "RubyBox (unit, stubbed Box)" do
     let(:box) { Rigor::Plugin::Box }
 
@@ -160,8 +156,8 @@ RSpec.describe Rigor::Plugin::Isolation do
 
     it "joins multiple inspect-rendered args with ', ' in the expression" do
       allow(box).to receive_messages(enabled?: true, require_feature: true)
-      # Two args so the join separator is observable (a single arg renders the
-      # same under any separator, masking a dropped/altered one).
+      # Two args so the join separator is observable (a single arg renders the same under any separator, masking a
+      # dropped/altered one).
       allow(box).to receive(:eval).with('ActiveSupport::Inflector.camelize("a", "b")').and_return("ok")
       result = described_class::RubyBox.call(feature: feature, receiver: inflector, method: :camelize, args: %w[a b])
       expect(result).to eq("ok")

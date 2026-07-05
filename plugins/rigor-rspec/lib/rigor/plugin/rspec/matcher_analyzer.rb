@@ -8,59 +8,42 @@ require "rigor/flow_contribution/fact"
 module Rigor
   module Plugin
     class Rspec < Rigor::Plugin::Base
-      # Recognises `expect(x).to MATCHER`
-      # patterns at per-call recognition time and emits
-      # `post_return_facts` that narrow the named local on the
-      # post-call edge.
+      # Recognises `expect(x).to MATCHER` patterns at per-call recognition time and emits
+      # `post_return_facts` that narrow the named local on the post-call edge.
       #
-      # The supported matchers are the lowest-false-positive
-      # floor of the RSpec matcher DSL:
+      # The supported matchers are the lowest-false-positive floor of the RSpec matcher DSL:
       #
-      # - `be_a(T)` / `be_kind_of(T)` — `x is_a?(T)` style class
-      #   membership; narrows `x` to `T`.
-      # - `be_instance_of(T)` — exact-class match; narrows
-      #   `x` to `T` (the engine currently treats Nominal[T]
-      #   uniformly, so the distinction with `be_a` is observed
-      #   at the carrier level but not the runtime).
+      # - `be_a(T)` / `be_kind_of(T)` — `x is_a?(T)` style class membership; narrows `x` to `T`.
+      # - `be_instance_of(T)` — exact-class match; narrows `x` to `T` (the engine currently treats
+      #   Nominal[T] uniformly, so the distinction with `be_a` is observed at the carrier level but not the
+      #   runtime).
       # - `be_nil` — narrows `x` to `Constant<nil>`.
-      # - `eq(LITERAL)` for a literal-value argument — narrows
-      #   `x` to `Constant<literal>`.
+      # - `eq(LITERAL)` for a literal-value argument — narrows `x` to `Constant<literal>`.
       #
-      # The matchers below this floor (`be_truthy` / `be_falsey`
-      # / `be_within` / `be > / < / >=` / `include` / `start_with`
-      # / `match(regex)` / `raise_error` / receive-style mocks)
-      # require either edge-aware fragments (`truthy_facts` /
-      # `falsey_facts` rather than `post_return_facts`) or
-      # diagnostic-only enforcement; both are queued for follow-up
-      # slices.
+      # The matchers below this floor (`be_truthy` / `be_falsey` / `be_within` / `be > / < / >=` /
+      # `include` / `start_with` / `match(regex)` / `raise_error` / receive-style mocks) require either
+      # edge-aware fragments (`truthy_facts` / `falsey_facts` rather than `post_return_facts`) or
+      # diagnostic-only enforcement; both are queued for follow-up slices.
       #
       # The analyzer fires ONLY when:
       #
-      # 1. The call node is one of `<recv>.to(matcher)` /
-      #    `<recv>.not_to(matcher)` / `<recv>.to_not(matcher)`.
-      #    `not_to` / `to_not` flip the fact's `negative` flag
-      #    so the engine narrows AWAY from the matcher's type
-      #    (e.g. `not_to be_nil` removes nil from the receiver).
-      # 2. The receiver is `expect(<local_var>)` — exactly one
-      #    positional argument that's a LocalVariableReadNode.
-      #    Composite receivers (`expect(foo.bar)`,
-      #    `expect { ... }.to raise_error`) fall through.
-      # 3. The matcher is one of the recognised forms above
-      #    (`be_a` / `be_kind_of` / `be_instance_of` /
-      #    `be_an_instance_of` / `be_nil` / `eq(literal)` /
-      #    `eql(literal)` / `match(/regex/)`).
+      # 1. The call node is one of `<recv>.to(matcher)` / `<recv>.not_to(matcher)` /
+      #    `<recv>.to_not(matcher)`. `not_to` / `to_not` flip the fact's `negative` flag so the engine
+      #    narrows AWAY from the matcher's type (e.g. `not_to be_nil` removes nil from the receiver).
+      # 2. The receiver is `expect(<local_var>)` — exactly one positional argument that's a
+      #    LocalVariableReadNode. Composite receivers (`expect(foo.bar)`, `expect { ... }.to raise_error`)
+      #    fall through.
+      # 3. The matcher is one of the recognised forms above (`be_a` / `be_kind_of` / `be_instance_of` /
+      #    `be_an_instance_of` / `be_nil` / `eq(literal)` / `eql(literal)` / `match(/regex/)`).
       module MatcherAnalyzer
         module_function
 
-        # @param call_node [Prism::CallNode] the call whose
-        #   contribution we're computing. Returns nil when the
-        #   call shape does not match `expect(local).to matcher`.
-        # @param environment [Rigor::Environment, nil] the
-        #   surrounding environment used to resolve a matcher's
-        #   class-name argument to a `Type::Nominal`. When nil,
-        #   class-name resolution falls back to a bare
-        #   `Nominal[<name>]` carrier (sound — the receiver
-        #   constant may be a user class not in RBS).
+        # @param call_node [Prism::CallNode] the call whose contribution we're computing. Returns nil when
+        #   the call shape does not match `expect(local).to matcher`.
+        # @param environment [Rigor::Environment, nil] the surrounding environment used to resolve a
+        #   matcher's class-name argument to a `Type::Nominal`. When nil, class-name resolution falls back
+        #   to a bare `Nominal[<name>]` carrier (sound — the receiver constant may be a user class not in
+        #   RBS).
         # @return [Rigor::FlowContribution, nil]
         def contribution_for(call_node, environment:)
           verb = assertion_verb(call_node)
@@ -136,11 +119,9 @@ module Rigor
           when :eq, :eql
             constant_type_for_literal_arg(matcher)
           when :match
-            # `match(/regex/)` narrows x to String. `match("...")`
-            # or `match(arbitrary_object)` falls through — the
-            # broader matcher dispatch needs the receiver to be a
-            # String, but we can only assert that for a literal
-            # regex.
+            # `match(/regex/)` narrows x to String. `match("...")` or `match(arbitrary_object)` falls
+            # through — the broader matcher dispatch needs the receiver to be a String, but we can only
+            # assert that for a literal regex.
             string_type_for_regex_arg(matcher)
           end
         end
@@ -184,10 +165,9 @@ module Rigor
         NO_LITERAL = Object.new.freeze
         private_constant :NO_LITERAL
 
-        # Returns the Ruby value of a literal-AST argument, or
-        # `NO_LITERAL` when the node isn't a recognised literal
-        # shape. Recognised forms cover the common `eq(literal)`
-        # case: integer, float, true/false/nil, string, symbol.
+        # Returns the Ruby value of a literal-AST argument, or `NO_LITERAL` when the node isn't a
+        # recognised literal shape. Recognised forms cover the common `eq(literal)` case: integer, float,
+        # true/false/nil, string, symbol.
         def literal_value_for(node)
           case node
           when Prism::IntegerNode then node.value
@@ -206,10 +186,8 @@ module Rigor
           args.nil? || args.empty?
         end
 
-        # Renders a `Prism::ConstantReadNode` /
-        # `Prism::ConstantPathNode` chain as a `"Foo::Bar"`
-        # String. Returns nil when the node isn't a constant
-        # reference.
+        # Renders a `Prism::ConstantReadNode` / `Prism::ConstantPathNode` chain as a `"Foo::Bar"` String.
+        # Returns nil when the node isn't a constant reference.
         def constant_path_name(node)
           case node
           when Prism::ConstantReadNode

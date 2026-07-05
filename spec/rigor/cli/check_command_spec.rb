@@ -6,12 +6,10 @@ require "tmpdir"
 
 require "rigor/cli/check_command"
 
-# Focused unit coverage for the extracted `rigor check` command object.
-# The full behavioural surface (CI formats, baselines, incremental modes,
-# editor mode, cache stats) is exercised end-to-end through the dispatcher
-# in `spec/rigor/cli_spec.rb`; this spec is the safety net for the move
-# itself — that `CheckCommand` parses options, runs the analysis, and
-# returns the right exit code when driven directly as a command object.
+# Focused unit coverage for the extracted `rigor check` command object. The full behavioural surface (CI formats,
+# baselines, incremental modes, editor mode, cache stats) is exercised end-to-end through the dispatcher in
+# `spec/rigor/cli_spec.rb`; this spec is the safety net for the move itself — that `CheckCommand` parses options, runs
+# the analysis, and returns the right exit code when driven directly as a command object.
 RSpec.describe Rigor::CLI::CheckCommand do
   def run(argv)
     out = StringIO.new
@@ -162,9 +160,8 @@ RSpec.describe Rigor::CLI::CheckCommand do
   end
 
   it "seeds parallel-assignment ivar writes so a cross-method read is not always-falsey (N1)" do
-    # `old, @cb = @cb, block` records the `@cb` target into the
-    # class-ivar union; before N1 the collector dropped it and `@cb`
-    # seeded pure `Constant[nil]`, folding `if @cb` always-falsey.
+    # `old, @cb = @cb, block` records the `@cb` target into the class-ivar union; before N1 the collector dropped it and
+    # `@cb` seeded pure `Constant[nil]`, folding `if @cb` always-falsey.
     File.write("channel.rb", <<~RUBY)
       class Channel
         def initialize
@@ -251,8 +248,7 @@ RSpec.describe Rigor::CLI::CheckCommand do
     end
   end
 
-  # ADR-50 § WD2 — the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI
-  # mirror of the `bleeding_edge:` config key.
+  # ADR-50 § WD2 — the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI mirror of the `bleeding_edge:` config key.
   describe "the --bleeding-edge flag" do
     def options_for(argv)
       command = described_class.new(argv: argv, out: StringIO.new, err: StringIO.new)

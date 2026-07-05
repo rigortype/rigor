@@ -41,8 +41,8 @@ RSpec.describe Rigor::CLI do
     it "reports OK and exits 0 when incremental matches a full run" do
       Dir.mktmpdir do |dir|
         File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\n")
-        # One file carries a diagnostic so the merge moves real data; the
-        # other is plain, so the cache-serving path is exercised too.
+        # One file carries a diagnostic so the merge moves real data; the other is plain, so the cache-serving path is
+        # exercised too.
         File.write(File.join(dir, "a.rb"), <<~RUBY)
           class Base
             def greet
@@ -214,8 +214,7 @@ RSpec.describe Rigor::CLI do
       end
 
       it "reads bytes from --tmp-file when probing the logical path" do
-        # Logical path has a different value at (1,1) than the buffer.
-        # On disk: ":on_disk_sym"; in buffer: "42".
+        # Logical path has a different value at (1,1) than the buffer. On disk: ":on_disk_sym"; in buffer: "42".
         logical = write_fixture("a.rb", ":on_disk_sym\n")
         buffer = write_fixture("buf.rb", "42\n")
 
@@ -227,8 +226,7 @@ RSpec.describe Rigor::CLI do
         )
 
         expect(status).to eq(0)
-        # The probe must reflect the BUFFER's bytes (42), not the
-        # on-disk symbol literal.
+        # The probe must reflect the BUFFER's bytes (42), not the on-disk symbol literal.
         expect(out).to include("Prism::IntegerNode")
         expect(out).to include("type:    42")
       end
@@ -284,10 +282,8 @@ RSpec.describe Rigor::CLI do
 
         expect(err).to eq("")
         expect(status).to eq(0)
-        # The constant reference evaluates to the class object itself,
-        # i.e. singleton(CliRbsDemoFixture). Phase 2b enforces this
-        # distinction so subsequent class-method dispatch can hit
-        # singleton-side definitions.
+        # The constant reference evaluates to the class object itself, i.e. singleton(CliRbsDemoFixture). Phase 2b
+        # enforces this distinction so subsequent class-method dispatch can hit singleton-side definitions.
         expect(out).to include("type:    singleton(CliRbsDemoFixture)")
       end
     end
@@ -368,11 +364,9 @@ RSpec.describe Rigor::CLI do
     it "prints '(empty)' under --cache-stats when no cache directory exists" do
       write_check_fixture("a.rb", "1\n")
       Dir.chdir(tmpdir) do
-        # `--no-cache` keeps the run from writing anything: both the
-        # default stats summary (which forces `class_decl_paths` to build
-        # the RBS env) and the ADR-45 whole-run result cache would warm
-        # `.rigor/cache` and defeat the "no cache directory exists"
-        # assertion.
+        # `--no-cache` keeps the run from writing anything: both the default stats summary (which forces
+        # `class_decl_paths` to build the RBS env) and the ADR-45 whole-run result cache would warm `.rigor/cache` and
+        # defeat the "no cache directory exists" assertion.
         status, out, _err = run_cli("check", "--cache-stats", "--no-cache", "a.rb")
         expect(status).to eq(0)
         expect(out).to include("Cache (root: .rigor/cache)")
@@ -423,10 +417,9 @@ RSpec.describe Rigor::CLI do
         FileUtils.mkdir_p(cache_root)
         File.write(File.join(cache_root, "schema_version.txt"), "1\n")
 
-        # `--no-cache` (see the sibling spec): otherwise the run re-warms
-        # the cache after the clear — both the stats summary and the
-        # ADR-45 whole-run result cache write — re-creating the directory
-        # we're asserting got deleted. `--clear-cache` still runs first.
+        # `--no-cache` (see the sibling spec): otherwise the run re-warms the cache after the clear — both the stats
+        # summary and the ADR-45 whole-run result cache write — re-creating the directory we're asserting got deleted.
+        # `--clear-cache` still runs first.
         status, out, _err = run_cli("check", "--clear-cache", "--no-cache", "a.rb")
         expect(status).to eq(0)
         expect(out).to include("Cleared cache: .rigor/cache")
@@ -515,16 +508,13 @@ RSpec.describe Rigor::CLI do
     end
 
     before do
-      # Load the plugin gem into $LOAD_PATH and register it so
-      # the flag's injected entry can resolve through
+      # Load the plugin gem into $LOAD_PATH and register it so the flag's injected entry can resolve through
       # `Plugin::Loader.require_gem!`.
       plugin_lib = File.expand_path("../../plugins/rigor-rbs-inline/lib", __dir__)
       $LOAD_PATH.unshift(plugin_lib) unless $LOAD_PATH.include?(plugin_lib)
       require "rigor-rbs-inline"
-      # Explicitly re-register in case another spec in the same
-      # parallel-worker process already loaded the gem and then
-      # called `Rigor::Plugin.unregister!` — `require` would be
-      # a no-op and the class would stay unregistered.
+      # Explicitly re-register in case another spec in the same parallel-worker process already loaded the gem and then
+      # called `Rigor::Plugin.unregister!` — `require` would be a no-op and the class would stay unregistered.
       Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
     end
 
@@ -551,12 +541,10 @@ RSpec.describe Rigor::CLI do
     end
 
     it "loads the include-aware config and still injects rigor-rbs-inline when a .rigor.yml exists" do
-      # Regression: `load_check_configuration` reached for
-      # `Configuration.load_with_includes`, which was
-      # `private_class_method` — so the moment a config file was
-      # present (the ternary's truthy branch) the flag crashed
-      # with `NoMethodError: private method 'load_with_includes'`.
-      # The no-config example above never exercises that branch.
+      # Regression: `load_check_configuration` reached for `Configuration.load_with_includes`, which was
+      # `private_class_method` — so the moment a config file was present (the ternary's truthy branch) the flag crashed
+      # with `NoMethodError: private method 'load_with_includes'`. The no-config example above never exercises that
+      # branch.
       write_check_fixture(".rigor.yml", <<~YAML)
         paths:
           - .
@@ -862,8 +850,8 @@ RSpec.describe Rigor::CLI do
         status, out, _err = run_cli("type-scan", "source.rb")
 
         expect(status).to eq(0)
-        # ScanRbsDemoFixture would be unrecognized without the project
-        # signature loader; with sig/ in scope it resolves cleanly.
+        # ScanRbsDemoFixture would be unrecognized without the project signature loader; with sig/ in scope it resolves
+        # cleanly.
         expect(out).not_to match(%r{Prism::ConstantReadNode\s+\d+/\d+})
       end
     end
@@ -1239,9 +1227,8 @@ RSpec.describe Rigor::CLI do
         status, _out, err = run_cli("sig-gen", "--write", "--print")
 
         expect(status).to eq(0).or eq(Rigor::CLI::EXIT_USAGE)
-        # --print after --write just overrides the mode; OptionParser does not
-        # treat them as exclusive at parse time. The validation_error path catches
-        # invalid mode values; ensure no crash.
+        # --print after --write just overrides the mode; OptionParser does not treat them as exclusive at parse time.
+        # The validation_error path catches invalid mode values; ensure no crash.
         expect(err).not_to include("Traceback")
       end
     end
@@ -1256,10 +1243,9 @@ RSpec.describe Rigor::CLI do
     end
 
     it "returns 0 when stdin closes cleanly with no LSP messages" do
-      # `rigor lsp` blocks reading LSP frames from $stdin via the
-      # gem's Io::Reader. Under RSpec stdin is non-TTY and hits EOF
-      # immediately, so the loop exits with exit_code=0 (no
-      # shutdown → server.exit_code stays nil → CLI returns 0).
+      # `rigor lsp` blocks reading LSP frames from $stdin via the gem's Io::Reader. Under RSpec stdin is non-TTY and
+      # hits EOF immediately, so the loop exits with exit_code=0 (no shutdown → server.exit_code stays nil → CLI returns
+      # 0).
       status, _out, _err = run_cli("lsp")
 
       expect(status).to eq(0)
@@ -1334,8 +1320,7 @@ RSpec.describe Rigor::CLI do
 
     after { FileUtils.remove_entry(tmpdir) }
 
-    # A single reliable `call.undefined-method` (rule-bearing) diagnostic
-    # at line 2, column 3.
+    # A single reliable `call.undefined-method` (rule-bearing) diagnostic at line 2, column 3.
     def run_format(format)
       Dir.chdir(tmpdir) do
         File.write("demo.rb", "x = \"hello\"\nx.no_such_method_here\n")
@@ -1459,13 +1444,11 @@ RSpec.describe Rigor::CLI do
 
     after { FileUtils.remove_entry(tmpdir) }
 
-    # The suite forces RIGOR_CI_DETECT=0 (spec_helper) for determinism; each
-    # example opts back in and simulates one platform, restoring all touched
-    # keys afterwards.
+    # The suite forces RIGOR_CI_DETECT=0 (spec_helper) for determinism; each example opts back in and simulates one
+    # platform, restoring all touched keys afterwards.
     #
-    # All known CI provider variables are also saved and cleared so that running
-    # the suite under a real CI (e.g. GitHub Actions) does not bleed its own
-    # GITHUB_ACTIONS=true into tests that simulate a different platform.
+    # All known CI provider variables are also saved and cleared so that running the suite under a real CI (e.g. GitHub
+    # Actions) does not bleed its own GITHUB_ACTIONS=true into tests that simulate a different platform.
     def with_ci_env(vars)
       all_provider_vars = Rigor::CLI::CiDetector::PROVIDERS.map { |p| p[:var] }
       keys = (vars.keys + ["RIGOR_CI_DETECT"] + all_provider_vars).uniq
@@ -1614,9 +1597,8 @@ RSpec.describe Rigor::CLI do
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
       lines = out.lines
-      # The loop body must reflect the converged (widened) bindings —
-      # never the cap-N intermediate constants of the ADR-56 fixpoint
-      # (`1 | 2`), nor the RHS literal of the operator-write (`1`).
+      # The loop body must reflect the converged (widened) bindings — never the cap-N intermediate constants of the
+      # ADR-56 fixpoint (`1 | 2`), nor the RHS literal of the operator-write (`1`).
       expect(lines[4]).to include("result *= i").and include("#=> Integer")
       expect(lines[5]).to include("i += 1").and include("#=> Integer")
       expect(lines[0]).to include("#=> Integer")
@@ -1638,9 +1620,8 @@ RSpec.describe Rigor::CLI do
       _status, out, _err = run_cli("annotate", "--no-color", path)
 
       lines = out.lines
-      # The header line's widest node is the BlockParametersNode — a
-      # non-expression whose evaluation falls back to `Dynamic[top]`.
-      # The annotation must instead show the bound parameter type(s).
+      # The header line's widest node is the BlockParametersNode — a non-expression whose evaluation falls back to
+      # `Dynamic[top]`. The annotation must instead show the bound parameter type(s).
       expect(lines[1]).to include("1.upto(5) do |i|").and include("#=> int<1, 5>")
       expect(lines[5]).to include("each do |k, v|").and include("#=> [:x, 1]")
       expect(out).not_to include("Dynamic")
@@ -1663,8 +1644,8 @@ RSpec.describe Rigor::CLI do
 
       lines = out.lines
       expect(lines[0]).to include("def greet(name)").and include("#=> String")
-      # The default annotation for the parameter (`Dynamic[top]`)
-      # is replaced by the return-type override on the header line.
+      # The default annotation for the parameter (`Dynamic[top]`) is replaced by the return-type override on the header
+      # line.
       expect(lines[0]).not_to include("Dynamic")
     end
 
@@ -1686,10 +1667,9 @@ RSpec.describe Rigor::CLI do
     end
 
     it "reads UTF-8 source even when `Encoding.default_external` is US-ASCII" do
-      # Em-dash + Japanese — the multi-byte content that triggers
-      # `invalid byte sequence in US-ASCII` from `String#sub`
-      # downstream when the file is read under a US-ASCII default
-      # external encoding (the Nix sandbox / minimal locale shape).
+      # Em-dash + Japanese — the multi-byte content that triggers `invalid byte sequence in US-ASCII` from `String#sub`
+      # downstream when the file is read under a US-ASCII default external encoding (the Nix sandbox / minimal locale
+      # shape).
       path = write_fixture("a.rb", "# Hello — こんにちは\n1\n")
 
       original = Encoding.default_external
@@ -1743,8 +1723,7 @@ RSpec.describe Rigor::CLI do
     end
 
     describe "bat integration (https://github.com/sharkdp/bat)" do
-      # Runs annotate with PATH pointing at `dir` (optionally
-      # holding a fake `bat`), with colour forced on.
+      # Runs annotate with PATH pointing at `dir` (optionally holding a fake `bat`), with colour forced on.
       def run_annotate_with_path(dir, *argv)
         original = ENV.fetch("PATH", "")
         ENV["PATH"] = dir
@@ -1758,8 +1737,7 @@ RSpec.describe Rigor::CLI do
 
       def write_fake_bat(dir)
         path = File.join(dir, "bat")
-        # `/bin/cat` because the test replaces PATH wholesale, so a
-        # bare `cat` would not resolve inside the fake script.
+        # `/bin/cat` because the test replaces PATH wholesale, so a bare `cat` would not resolve inside the fake script.
         File.write(path, "#!/bin/sh\necho BATMARK\n/bin/cat\n")
         File.chmod(0o755, path)
         path
@@ -1835,9 +1813,8 @@ RSpec.describe Rigor::CLI do
     end
 
     describe "NO_COLOR support (https://no-color.org)" do
-      # Runs `rigor annotate` against an out stream that reports
-      # itself as a tty, with `NO_COLOR` set to `value` (or unset
-      # when `value` is `:unset`).
+      # Runs `rigor annotate` against an out stream that reports itself as a tty, with `NO_COLOR` set to `value` (or
+      # unset when `value` is `:unset`).
       def run_annotate_tty(*argv, no_color: :unset)
         out = StringIO.new
         out.define_singleton_method(:tty?) { true }

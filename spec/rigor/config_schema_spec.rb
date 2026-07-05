@@ -30,8 +30,8 @@ RSpec.describe "Rigor configuration JSON Schema" do
     missing = default_keys - schema_keys
     expect(missing).to(be_empty, "schema is missing keys present in Configuration::DEFAULTS: #{missing.inspect}")
 
-    # `includes` is a load-time directive, not part of DEFAULTS, but
-    # it MUST be in the schema so editors stop flagging it.
+    # `includes` is a load-time directive, not part of DEFAULTS, but it MUST be in the schema so editors stop flagging
+    # it.
     expect(schema_keys).to include("includes")
   end
 

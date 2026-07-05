@@ -28,8 +28,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
 
     it "filter { false } on Array[Integer] folds to the empty tuple" do
-      # `filter` is an alias of `select` in Ruby; we cover it explicitly
-      # because the dispatcher receives the raw method name.
+      # `filter` is an alias of `select` in Ruby; we cover it explicitly because the dispatcher receives the raw method
+      # name.
       result = fold(receiver: array_of(integer_nominal), method: :filter, block: false_const)
       expect(result).to eq(tuple_of)
     end
@@ -181,8 +181,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
 
     it "folds count { true } over a finite-bound Range constant" do
-      # `(1..5).count { true }` — the inclusive integer range
-      # has 5 elements, so the truthy block sees all of them.
+      # `(1..5).count { true }` — the inclusive integer range has 5 elements, so the truthy block sees all of them.
       const_range = constant_of(1..5)
       expect(fold(receiver: const_range, method: :count, block: true_const)).to eq(constant_of(5))
     end
@@ -218,9 +217,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
 
     it "treats Constant[1] as truthy and Constant[nil] as falsey for predicate folds" do
-      # Block bodies often produce `Constant[1]` (e.g. `x.tap { 1 }`) or
-      # `Constant[nil]`; predicate folds should follow Ruby's
-      # truthiness semantics, not require literal true/false.
+      # Block bodies often produce `Constant[1]` (e.g. `x.tap { 1 }`) or `Constant[nil]`; predicate folds should follow
+      # Ruby's truthiness semantics, not require literal true/false.
       expect(fold(receiver: array_of(integer_nominal), method: :all?, block: constant_of(1)))
         .to eq(true_const)
       expect(fold(receiver: array_of(integer_nominal), method: :any?, block: constant_of(nil)))

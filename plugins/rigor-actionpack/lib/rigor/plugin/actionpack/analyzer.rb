@@ -7,49 +7,40 @@ require "rigor/source/literals"
 module Rigor
   module Plugin
     class Actionpack < Rigor::Plugin::Base
-      # Per-node validators for the Action Pack DSL inside controller
-      # files. ADR-37: the engine owns the single AST walk (the plugin
-      # declares `node_rule(Prism::CallNode)`), so each method here
-      # validates ONE call node and returns location-bearing
-      # {Violation}s — the `node_rule` block positions them via
-      # `Plugin::Base#diagnostic`. The enclosing-controller context the
-      # filter / render phases need is read from the node-rule
-      # `NodeContext` ancestors rather than re-derived by a forward walk.
+      # Per-node validators for the Action Pack DSL inside controller files. ADR-37: the engine owns the
+      # single AST walk (the plugin declares `node_rule(Prism::CallNode)`), so each method here
+      # validates ONE call node and returns location-bearing {Violation}s — the `node_rule` block
+      # positions them via `Plugin::Base#diagnostic`. The enclosing-controller context the filter /
+      # render phases need is read from the node-rule `NodeContext` ancestors rather than re-derived by
+      # a forward walk.
       #
       # The recogniser keys on call-method-name suffix:
       #
       # - `users_path`, `edit_user_path(@user)` → `_path` family.
       # - `users_url`, `edit_user_url(@user)` → `_url` family.
       #
-      # Any call whose name doesn't end in `_path` / `_url` is
-      # silently passed through. Calls with an explicit non-self
-      # receiver (`other_helper.users_path`) are also skipped —
-      # the helper is implicit-self in real controllers, and a
-      # custom-receiver call is almost certainly someone's own
+      # Any call whose name doesn't end in `_path` / `_url` is silently passed through. Calls with an
+      # explicit non-self receiver (`other_helper.users_path`) are also skipped — the helper is
+      # implicit-self in real controllers, and a custom-receiver call is almost certainly someone's own
       # method that happens to share the suffix.
       module Analyzer
         SUFFIXES = %w[_path _url].freeze
 
-        # Phase 2 — filter-chain DSL methods. Each takes a
-        # variadic list of filter names (Symbols / Strings) plus
-        # optional `only:` / `except:` / `if:` / `unless:`
-        # modifiers. Only the filter NAMES are validated; the
-        # `only:`/`except:` action-name arguments are not (deferred).
+        # Phase 2 — filter-chain DSL methods. Each takes a variadic list of filter names (Symbols /
+        # Strings) plus optional `only:` / `except:` / `if:` / `unless:` modifiers. Only the filter
+        # NAMES are validated; the `only:`/`except:` action-name arguments are not (deferred).
         FILTER_DSL_METHODS = %i[
           before_action after_action around_action
           skip_before_action skip_after_action skip_around_action
           prepend_before_action prepend_after_action prepend_around_action
         ].freeze
 
-        # Phase 3 — render-target template extensions checked in
-        # priority order. Covers the engines used by surveyed
-        # projects: ERB (Rails default — `.html.erb`, `.text.erb`),
-        # HAML (Mastodon, Solidus admin — `.html.haml`), Slim, and
-        # JSON (`.json.jbuilder` plus `.json.erb` for hand-rolled API
-        # responses). When a template exists under any of these
-        # extensions, the missing-template diagnostic stays silent.
-        # A configurable extension list is deferred; this set is wide
-        # enough to cover surveyed real-world projects without FPs.
+        # Phase 3 — render-target template extensions checked in priority order. Covers the engines used
+        # by surveyed projects: ERB (Rails default — `.html.erb`, `.text.erb`), HAML (Mastodon, Solidus
+        # admin — `.html.haml`), Slim, and JSON (`.json.jbuilder` plus `.json.erb` for hand-rolled API
+        # responses). When a template exists under any of these extensions, the missing-template
+        # diagnostic stays silent. A configurable extension list is deferred; this set is wide enough to
+        # cover surveyed real-world projects without FPs.
         RENDER_TEMPLATE_EXTENSIONS = %w[
           .html.erb
           .text.erb
@@ -62,39 +53,31 @@ module Rigor
           .xml.erb
         ].freeze
 
-        # Phase 1 — strong-parameter call shapes that begin a
-        # validatable chain. The walker matches the
-        # `params.require(:user).permit(:name, :email)` chain
-        # by looking for `:permit` call sites whose receiver is
-        # `params.require(:symbol)`.
+        # Phase 1 — strong-parameter call shapes that begin a validatable chain. The walker matches the
+        # `params.require(:user).permit(:name, :email)` chain by looking for `:permit` call sites whose
+        # receiver is `params.require(:symbol)`.
         STRONG_PARAMS_RECEIVER_NAMES = %i[require permit_params strong_params].freeze
 
-        # One Action Pack observation. Carries no path — the caller
-        # (the `node_rule` block) positions it via
-        # `Plugin::Base#diagnostic`. `location` is the Prism location the
-        # diagnostic should point at (a call's `message_loc` for the call
-        # itself, or a sub-argument's location for `unknown-*-key`-style
-        # diagnostics that point at the offending Symbol).
+        # One Action Pack observation. Carries no path — the caller (the `node_rule` block) positions
+        # it via `Plugin::Base#diagnostic`. `location` is the Prism location the diagnostic should point
+        # at (a call's `message_loc` for the call itself, or a sub-argument's location for
+        # `unknown-*-key`-style diagnostics that point at the offending Symbol).
         Violation = Data.define(:location, :message, :severity, :rule)
 
         module_function
 
-        # Phase 4 — route-helper consumption. The helper-existence /
-        # arity check for ONE call node. Only the **info-level** route
-        # resolution (`helper-call`) is the value this plugin adds — it
-        # surfaces the resolved HTTP method + path + action alongside the
-        # call site, which `rigor-rails-routes` does not. Unknown-helper
-        # and wrong-arity diagnostics are produced canonically by
-        # `rigor-rails-routes`'s own analyzer (same `:helper_table` source
-        # of truth), so emitting them here would double every call-site
-        # error. Real-world impact pre-fix: ~301 duplicates on Mastodon and
-        # ~119 on Redmine, exactly stacked with the rails-routes
-        # diagnostics. Returns `[]` for unknown / arity-mismatch shapes.
+        # Phase 4 — route-helper consumption. The helper-existence / arity check for ONE call node.
+        # Only the **info-level** route resolution (`helper-call`) is the value this plugin adds — it
+        # surfaces the resolved HTTP method + path + action alongside the call site, which
+        # `rigor-rails-routes` does not. Unknown-helper and wrong-arity diagnostics are produced
+        # canonically by `rigor-rails-routes`'s own analyzer (same `:helper_table` source of truth), so
+        # emitting them here would double every call-site error. Real-world impact pre-fix: ~301
+        # duplicates on Mastodon and ~119 on Redmine, exactly stacked with the rails-routes diagnostics.
+        # Returns `[]` for unknown / arity-mismatch shapes.
         #
         # @param call_node [Prism::Node]
-        # @param helper_table [Hash{String => Hash}] each entry carries
-        #   `name`, `arity`, `acceptable_arities`, `path`, `http_method`,
-        #   `action`.
+        # @param helper_table [Hash{String => Hash}] each entry carries `name`, `arity`,
+        #   `acceptable_arities`, `path`, `http_method`, `action`.
         # @return [Array<Violation>]
         def helper_violations_for(call_node:, helper_table:)
           return [] unless implicit_helper_call?(call_node)
@@ -103,24 +86,20 @@ module Rigor
           return [] if entry.nil?
 
           actual_arity = positional_arg_count(call_node)
-          # The `:helper_table` fact entry carries both `:arity` (the
-          # first registered entry's arity) and `:acceptable_arities`
-          # (the full Array — populated for uncountable-noun resources
-          # like `resources :news` which share a helper name across
-          # index/show). Honour the full set; fall back to the single
-          # arity for consumers compiled against an older fact shape.
+          # The `:helper_table` fact entry carries both `:arity` (the first registered entry's arity)
+          # and `:acceptable_arities` (the full Array — populated for uncountable-noun resources like
+          # `resources :news` which share a helper name across index/show). Honour the full set; fall
+          # back to the single arity for consumers compiled against an older fact shape.
           acceptable = entry[:acceptable_arities] || [entry[:arity]]
           return [] unless acceptable.include?(actual_arity)
 
           [helper_call_violation(call_node, entry)]
         end
 
-        # Phase 2 — filter-chain validation for ONE filter-DSL call
-        # (`before_action :name`, …). The enclosing controller is read
-        # from the node-rule `NodeContext` ancestors, looked up in the
-        # controller index to get the effective method set (including one
-        # level of inheritance), and each filter name reference is
-        # validated against it. Calls outside a known controller
+        # Phase 2 — filter-chain validation for ONE filter-DSL call (`before_action :name`, …). The
+        # enclosing controller is read from the node-rule `NodeContext` ancestors, looked up in the
+        # controller index to get the effective method set (including one level of inheritance), and
+        # each filter name reference is validated against it. Calls outside a known controller
         # contribute nothing.
         #
         # @param call_node [Prism::Node]
@@ -136,13 +115,11 @@ module Rigor
 
           methods = controller_index.effective_methods_for(class_name)
           spell_checker = DidYouMean::SpellChecker.new(dictionary: methods.map(&:to_s))
-          # When the controller (or its parent) `include`s a module the
-          # discoverer couldn't resolve — typically a gem-shipped concern
-          # such as `Devise::Controllers::Helpers` or
-          # `Pundit::Authorization` — any `before_action :name` MIGHT be
-          # defined in that unresolved module. Suppress
-          # `unknown-filter-method` in that case rather than FPing on
-          # legitimate gem-provided callback names.
+          # When the controller (or its parent) `include`s a module the discoverer couldn't resolve —
+          # typically a gem-shipped concern such as `Devise::Controllers::Helpers` or
+          # `Pundit::Authorization` — any `before_action :name` MIGHT be defined in that unresolved
+          # module. Suppress `unknown-filter-method` in that case rather than FPing on legitimate
+          # gem-provided callback names.
           ambiguous_filters = controller_index.unresolved_include?(class_name)
 
           filter_name_args(call_node).filter_map do |arg_node|
@@ -156,12 +133,10 @@ module Rigor
           end
         end
 
-        # Phase 1 — strong-parameter validation for ONE `permit` call.
-        # Recognises the `params.require(:symbol).permit(:key, :key, ...)`
-        # chain and validates each `:key` against the AR model's column
-        # list (looked up via the model_index fact published by
-        # `rigor-activerecord`). Calls whose `:require` argument is a
-        # non-literal Symbol are passed through; namespaced models
+        # Phase 1 — strong-parameter validation for ONE `permit` call. Recognises the
+        # `params.require(:symbol).permit(:key, :key, ...)` chain and validates each `:key` against the
+        # AR model's column list (looked up via the model_index fact published by `rigor-activerecord`).
+        # Calls whose `:require` argument is a non-literal Symbol are passed through; namespaced models
         # (`params.require(:admin_user)` → `Admin::User`) are deferred.
         #
         # @param call_node [Prism::Node]
@@ -185,23 +160,19 @@ module Rigor
           end
         end
 
-        # Phase 3 — render-target validation for ONE `render` call. Derive
-        # the candidate view template path(s) from the controller class
-        # name + the render argument shape, then check existence under the
-        # configured `view_search_paths` (default `["app/views"]`).
-        # Recognised call shapes:
+        # Phase 3 — render-target validation for ONE `render` call. Derive the candidate view template
+        # path(s) from the controller class name + the render argument shape, then check existence
+        # under the configured `view_search_paths` (default `["app/views"]`). Recognised call shapes:
         #
         # - `render :symbol` — `<views>/<controller_path>/<symbol>.html.erb`
         # - `render "string/path"` — `<views>/<string_path>.html.erb`
         # - `render partial: "name"` — `<views>/<controller_path>/_<name>.html.erb`
         # - `render partial: "string/path"` — `<views>/<string_path with _ prefix>.html.erb`
         #
-        # `render layout:`, `render plain:`, `render json:`, `render
-        # text:`, `render inline:`, `render :nothing => true`, etc. are
-        # pass-through (no template lookup). Implicit-render (a controller
-        # method that doesn't call `render`) is also skipped — Phase 3
-        # validates explicit renders only, since the implicit path would
-        # false-positive on `redirect_to` / `head` / early returns.
+        # `render layout:`, `render plain:`, `render json:`, `render text:`, `render inline:`, `render
+        # :nothing => true`, etc. are pass-through (no template lookup). Implicit-render (a controller
+        # method that doesn't call `render`) is also skipped — Phase 3 validates explicit renders only,
+        # since the implicit path would false-positive on `redirect_to` / `head` / early returns.
         #
         # @param call_node [Prism::Node]
         # @param ancestors [Array<Prism::Node>] the lexical ancestor chain
@@ -215,41 +186,32 @@ module Rigor
           class_name = enclosing_controller_name(ancestors)
           return [] if class_name.nil?
 
-          # Prefer the file-path-derived controller path when the source
-          # lives under `app/controllers/` — Rails autoload is the runtime
-          # authority on `Admin::Users::RolesController` vs
-          # `Users::RolesController` (a declaration like `module Admin;
-          # class Users::RolesController` resolves to whichever `Users`
-          # constant Ruby finds first, and the file path is the
-          # disambiguator Rails picks). Fall back to the AST-derived class
-          # name for files outside `app/controllers/` (libraries, test
-          # fixtures).
+          # Prefer the file-path-derived controller path when the source lives under `app/controllers/`
+          # — Rails autoload is the runtime authority on `Admin::Users::RolesController` vs
+          # `Users::RolesController` (a declaration like `module Admin; class Users::RolesController`
+          # resolves to whichever `Users` constant Ruby finds first, and the file path is the
+          # disambiguator Rails picks). Fall back to the AST-derived class name for files outside
+          # `app/controllers/` (libraries, test fixtures).
           controller_path = controller_path_from_file(path) || controller_path_for(class_name)
           return [] if controller_path.nil?
 
-          # Render checks silence when the controller (or its ancestor
-          # chain) inherits from a gem-shipped parent
-          # (Devise::ConfirmationsController,
-          # Doorkeeper::ApplicationsController, …). The gem ships its own
-          # views; the local subclass calling `render :show` resolves
-          # through the gem's view path, which our static analyser doesn't
-          # know about.
+          # Render checks silence when the controller (or its ancestor chain) inherits from a
+          # gem-shipped parent (Devise::ConfirmationsController, Doorkeeper::ApplicationsController, …).
+          # The gem ships its own views; the local subclass calling `render :show` resolves through the
+          # gem's view path, which our static analyser doesn't know about.
           if controller_index&.known?(class_name) &&
              controller_index.unresolved_include?(class_name)
             return []
           end
 
-          # Abstract base controllers: a `*BaseController` (`Admin::
-          # BaseController`, `Settings::Preferences::BaseController`, …)
-          # typically has no view of its own; its `render :show` bodies
-          # are resolved by Rails against the calling subclass's
-          # controller path at request time, NOT the base's. Same for
-          # parent controllers whose view directory exists but contains
-          # only subdirectories (Mastodon's `Admin::SettingsController`
-          # whose `app/views/admin/settings/` holds about/, appearance/,
-          # … but no top-level templates). Skip render checks for these —
-          # the diagnostic would be a false positive against intentional
-          # Rails abstract-base layouts.
+          # Abstract base controllers: a `*BaseController` (`Admin::BaseController`,
+          # `Settings::Preferences::BaseController`, …) typically has no view of its own; its `render
+          # :show` bodies are resolved by Rails against the calling subclass's controller path at
+          # request time, NOT the base's. Same for parent controllers whose view directory exists but
+          # contains only subdirectories (Mastodon's `Admin::SettingsController` whose
+          # `app/views/admin/settings/` holds about/, appearance/, … but no top-level templates). Skip
+          # render checks for these — the diagnostic would be a false positive against intentional Rails
+          # abstract-base layouts.
           return [] if abstract_base_controller?(class_name, controller_path, view_search_roots)
 
           target = render_target_for(call_node, controller_path)
@@ -259,27 +221,22 @@ module Rigor
           violation ? [violation] : []
         end
 
-        # Resolves the qualified name of the controller class the node
-        # sits in from its lexical ancestors (the node-rule
-        # `NodeContext#ancestors`, outermost first). The OUTERMOST
-        # `ClassNode` is the controller — matching the old forward walk,
-        # which returned the first `ClassNode` reachable from the file
-        # root and validated nested-class call sites against it. Enclosing
-        # `ModuleNode`s above it contribute the namespace, so the
-        # nested-module declaration shape
+        # Resolves the qualified name of the controller class the node sits in from its lexical
+        # ancestors (the node-rule `NodeContext#ancestors`, outermost first). The OUTERMOST `ClassNode`
+        # is the controller — matching the old forward walk, which returned the first `ClassNode`
+        # reachable from the file root and validated nested-class call sites against it. Enclosing
+        # `ModuleNode`s above it contribute the namespace, so the nested-module declaration shape
         #
         #   module Admin
         #     class DomainBlocksController < BaseController
         #     end
         #   end
         #
-        # is recovered as `Admin::DomainBlocksController` — the same name
-        # the `ControllerDiscoverer` registers under. Without this, a bare
-        # inner-class name would be used for index lookups +
-        # `controller_path_for`, silently skipping filter validation and
-        # pointing render template paths at the wrong directory
-        # (Mastodon's `admin/domain_blocks` rendered as bare
-        # `domain_blocks`). Returns nil when no enclosing class exists.
+        # is recovered as `Admin::DomainBlocksController` — the same name the `ControllerDiscoverer`
+        # registers under. Without this, a bare inner-class name would be used for index lookups +
+        # `controller_path_for`, silently skipping filter validation and pointing render template paths
+        # at the wrong directory (Mastodon's `admin/domain_blocks` rendered as bare `domain_blocks`).
+        # Returns nil when no enclosing class exists.
         def enclosing_controller_name(ancestors)
           class_index = ancestors.index { |n| n.is_a?(Prism::ClassNode) }
           return nil if class_index.nil?
@@ -296,10 +253,9 @@ module Rigor
           path ? path.split("::") : []
         end
 
-        # Resolves a class-name AST node against an enclosing namespace
-        # chain. A `ConstantPathNode` (e.g. `class Admin::Foo`) is already
-        # absolute and ignores the chain; a `ConstantReadNode` (bare
-        # `class Foo` inside `module Admin`) is qualified against it.
+        # Resolves a class-name AST node against an enclosing namespace chain. A `ConstantPathNode`
+        # (e.g. `class Admin::Foo`) is already absolute and ignores the chain; a `ConstantReadNode`
+        # (bare `class Foo` inside `module Admin`) is qualified against it.
         def qualified_name_with_enclosing(node, enclosing)
           return nil unless node.is_a?(Prism::Node)
 
@@ -334,9 +290,8 @@ module Rigor
           node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :render
         end
 
-        # Drops the trailing keyword hash (`only:` / `except:` / `if:` /
-        # `unless:`) so the modifier args don't get treated as filter
-        # names.
+        # Drops the trailing keyword hash (`only:` / `except:` / `if:` / `unless:`) so the modifier args
+        # don't get treated as filter names.
         def filter_name_args(call_node)
           args = call_node.arguments&.arguments || []
           args = args[0..-2] if args.last.is_a?(Prism::KeywordHashNode)
@@ -351,9 +306,8 @@ module Rigor
           if methods.include?(filter_name.to_sym)
             filter_call_violation(call_node, filter_name)
           elsif ambiguous_filters
-            # An unresolved include shadows our judgment — emit the
-            # recognized-filter info anyway so the call site is still
-            # indexed, but skip the error.
+            # An unresolved include shadows our judgment — emit the recognized-filter info anyway so
+            # the call site is still indexed, but skip the error.
             filter_call_violation(call_node, filter_name)
           else
             unknown_filter_violation(arg_node, call_node, filter_name, spell_checker)
@@ -373,11 +327,9 @@ module Rigor
         def model_class_for_permit(permit_call)
           require_call = permit_call.receiver
           symbol_node = require_call.arguments.arguments.first
-          # `:user` → `User`, `:order_item` → `OrderItem`. ADR-39: the
-          # shared inflector camelizes through the real
-          # `ActiveSupport::Inflector` when present (so the multi-word
-          # case the former `split("_").map(&:capitalize)` only
-          # approximated is authoritative), falling back otherwise.
+          # `:user` → `User`, `:order_item` → `OrderItem`. ADR-39: the shared inflector camelizes
+          # through the real `ActiveSupport::Inflector` when present (so the multi-word case the former
+          # `split("_").map(&:capitalize)` only approximated is authoritative), falling back otherwise.
           Rigor::Plugin::Inflector.camelize(symbol_node.value.to_s)
         end
 
@@ -405,29 +357,24 @@ module Rigor
           )
         end
 
-        # Convert `<root>/app/controllers/admin/users/roles_controller.rb`
-        # to `admin/users/roles`. Returns nil if the path is not under an
-        # `app/controllers/` segment.
+        # Convert `<root>/app/controllers/admin/users/roles_controller.rb` to `admin/users/roles`.
+        # Returns nil if the path is not under an `app/controllers/` segment.
         def controller_path_from_file(path)
           match = path.match(%r{(?:\A|/)app/controllers/(.+)_controller\.rb\z})
           match&.[](1)
         end
 
-        # An abstract base controller — its `render` bodies don't validate
-        # against its own controller_path because Rails resolves at
-        # request time against the actual subclass. Two conservative
-        # heuristics:
-        #   (1) The class name ends with `BaseController`. Strong
-        #       Rails-convention signal (Settings::Preferences::
-        #       BaseController, Admin::BaseController, …).
-        #   (2) The controller's view directory exists but contains ONLY
-        #       subdirectories (no template files at its top). Mastodon's
-        #       Admin::SettingsController whose app/views/admin/settings/
-        #       holds only about/, appearance/, … — the parent of nested
+        # An abstract base controller — its `render` bodies don't validate against its own
+        # controller_path because Rails resolves at request time against the actual subclass. Two
+        # conservative heuristics:
+        #   (1) The class name ends with `BaseController`. Strong Rails-convention signal
+        #       (Settings::Preferences::BaseController, Admin::BaseController, …).
+        #   (2) The controller's view directory exists but contains ONLY subdirectories (no template
+        #       files at its top). Mastodon's Admin::SettingsController whose
+        #       app/views/admin/settings/ holds only about/, appearance/, … — the parent of nested
         #       controllers.
-        # Deliberately NOT triggered by "no view directory at all" because
-        # that fires the diagnostic we DO want for genuinely-missing views
-        # (the typo / forgot-to-create case).
+        # Deliberately NOT triggered by "no view directory at all" because that fires the diagnostic we
+        # DO want for genuinely-missing views (the typo / forgot-to-create case).
         def abstract_base_controller?(class_name, controller_path, view_search_roots)
           return true if class_name.end_with?("BaseController")
 
@@ -440,12 +387,10 @@ module Rigor
           end
         end
 
-        # Returns `[kind, view_relative_path]` where kind is `:template`
-        # or `:partial`, and view_relative_path is the path under
-        # view_search_roots WITHOUT extension (the extension family is
-        # appended at lookup time). Returns nil for shapes Phase 3 doesn't
-        # validate (`layout:` / `plain:` / `json:` / `text:` / `inline:` /
-        # `:nothing` / no parseable target).
+        # Returns `[kind, view_relative_path]` where kind is `:template` or `:partial`, and
+        # view_relative_path is the path under view_search_roots WITHOUT extension (the extension
+        # family is appended at lookup time). Returns nil for shapes Phase 3 doesn't validate (`layout:`
+        # / `plain:` / `json:` / `text:` / `inline:` / `:nothing` / no parseable target).
         def render_target_for(call_node, controller_path)
           args = call_node.arguments&.arguments || []
           return nil if args.empty?
@@ -454,9 +399,8 @@ module Rigor
           # `render partial: "..."` — the keyword form.
           return partial_target_from_kwargs(first, controller_path) if first.is_a?(Prism::KeywordHashNode)
 
-          # `render :symbol` / `render "path"`. A trailing KeywordHashNode
-          # is allowed (e.g. `render :show, status: :ok`); the leading
-          # positional carries the template name.
+          # `render :symbol` / `render "path"`. A trailing KeywordHashNode is allowed (e.g. `render
+          # :show, status: :ok`); the leading positional carries the template name.
           template_target_from_positional(first, controller_path)
         end
 
@@ -487,15 +431,13 @@ module Rigor
 
         # `UsersController` → "users".
         # `Admin::WidgetsController` → "admin/widgets".
-        # Returns nil for class names that don't end with the `Controller`
-        # suffix.
+        # Returns nil for class names that don't end with the `Controller` suffix.
         def controller_path_for(class_name)
           return nil unless class_name.end_with?("Controller")
 
           stripped = class_name.delete_suffix("Controller")
-          # ADR-39: the shared inflector flattens `::` → `/` and applies
-          # Rails' real underscore (the per-segment hand-rolled version
-          # produced the same result for the common case but missed
+          # ADR-39: the shared inflector flattens `::` → `/` and applies Rails' real underscore (the
+          # per-segment hand-rolled version produced the same result for the common case but missed
           # acronym handling). `Admin::Widgets` → `admin/widgets`.
           Rigor::Plugin::Inflector.underscore(stripped)
         end

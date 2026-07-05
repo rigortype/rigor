@@ -7,9 +7,8 @@ require "rigor/cli"
 require "rigor/cli/mcp_command"
 
 RSpec.describe Rigor::CLI::McpCommand do
-  # Build the command with captured streams. The happy `#run` path boots a
-  # long-running stdio server loop (ADR-33), so these examples exercise only
-  # the option parsing and the early-return branches — the unit-testable logic.
+  # Build the command with captured streams. The happy `#run` path boots a long-running stdio server loop (ADR-33), so
+  # these examples exercise only the option parsing and the early-return branches — the unit-testable logic.
   let(:out) { StringIO.new }
   let(:err) { StringIO.new }
 

@@ -2,15 +2,12 @@
 
 require "spec_helper"
 
-# ADR-48 Struct follow-up — `Struct.new` value folding, exercised end-to-end
-# through the full Runner pipeline (the project pre-pass that builds the
-# class-name -> member-layout side-table only runs there). The distinguishing
-# property versus the immutable `Data` sibling: a `Struct` is mutable, so a
-# member read folds only off a FRESH (chained) instance; a read off a STORED
-# binding soundly degrades to `Dynamic[top]`.
+# ADR-48 Struct follow-up — `Struct.new` value folding, exercised end-to-end through the full Runner pipeline (the
+# project pre-pass that builds the class-name -> member-layout side-table only runs there). The distinguishing property
+# versus the immutable `Data` sibling: a `Struct` is mutable, so a member read folds only off a FRESH (chained)
+# instance; a read off a STORED binding soundly degrades to `Dynamic[top]`.
 RSpec.describe "Struct.new value folding", type: :runner do
-  # Returns the `describe(:short)` strings recorded by each `dump_type(...)`
-  # call in source order.
+  # Returns the `describe(:short)` strings recorded by each `dump_type(...)` call in source order.
   def dumped_types(source)
     result = analyze("require \"rigor/testing\"\ninclude Rigor::Testing\n#{source}")
     result.diagnostics
@@ -71,10 +68,9 @@ RSpec.describe "Struct.new value folding", type: :runner do
     end
 
     it "does NOT fold a member read off an unrecognised local-class binding" do
-      # `p = c.new(1)` where `c` is a local StructClass is conservatively not
-      # treated as a fold-safe materialisation (the scan resolves the constant
-      # and inline forms, not a local-class intermediate) — degrades, never
-      # a stale value.
+      # `p = c.new(1)` where `c` is a local StructClass is conservatively not treated as a fold-safe materialisation
+      # (the scan resolves the constant and inline forms, not a local-class intermediate) — degrades, never a stale
+      # value.
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
         c = Struct.new(:x)
         p = c.new(1)

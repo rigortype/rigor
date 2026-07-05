@@ -7,10 +7,8 @@ require_relative "type_translator"
 module Rigor
   module Plugin
     class Sorbet < Rigor::Plugin::Base
-      # Mini-interpreter for the chained-call expression that
-      # makes up a Sorbet `sig` block. The block body is always
-      # a single expression — Sorbet's docs (`sigs.md`) show the
-      # full grammar:
+      # Mini-interpreter for the chained-call expression that makes up a Sorbet `sig` block. The block
+      # body is always a single expression — Sorbet's docs (`sigs.md`) show the full grammar:
       #
       #   sig { params(x: T, y: T).returns(U) }
       #   sig { void }
@@ -22,26 +20,20 @@ module Rigor
       #     .returns(...)
       #   end
       #
-      # The parser walks the chain right-to-left, gathering
-      # whatever it recognises (`params` / `returns` / `void` /
-      # `abstract` / `override` / `overridable` / `final` /
-      # `type_parameters` / `checked` / `on_failure`) into a
-      # frozen result hash stored in {MethodSignature}. Modifiers
-      # and `type_parameters` are recorded but not yet acted on.
+      # The parser walks the chain right-to-left, gathering whatever it recognises (`params` / `returns` /
+      # `void` / `abstract` / `override` / `overridable` / `final` / `type_parameters` / `checked` /
+      # `on_failure`) into a frozen result hash stored in {MethodSignature}. Modifiers and
+      # `type_parameters` are recorded but not yet acted on.
       #
-      # The parser is intentionally tolerant — unknown chain
-      # nodes degrade to "the rest of the chain is opaque" rather
-      # than raising. The plugin emits a diagnostic
-      # (`plugin.sorbet.parse-error`) only when the entire chain
-      # fails to yield either a `returns` or a `void`.
+      # The parser is intentionally tolerant — unknown chain nodes degrade to "the rest of the chain is
+      # opaque" rather than raising. The plugin emits a diagnostic (`plugin.sorbet.parse-error`) only when
+      # the entire chain fails to yield either a `returns` or a `void`.
       module SigParser
-        # Modifiers we recognise at any position in the chain.
-        # Stored in `:modifiers` on the parse result.
+        # Modifiers we recognise at any position in the chain. Stored in `:modifiers` on the parse result.
         RECOGNISED_MODIFIERS = %i[abstract override overridable final].freeze
 
-        # Sorbet runtime-only chain steps. Recognised so the
-        # parser doesn't degrade the whole sig when it sees them,
-        # but their payload is intentionally discarded.
+        # Sorbet runtime-only chain steps. Recognised so the parser doesn't degrade the whole sig when it
+        # sees them, but their payload is intentionally discarded.
         RUNTIME_ONLY_STEPS = %i[checked on_failure].freeze
 
         ParseResult = Data.define(:return_type, :params, :modifiers, :void) do
@@ -52,8 +44,7 @@ module Rigor
 
         module_function
 
-        # @param sig_call [Prism::CallNode] the `sig { ... }` /
-        #   `sig do ... end` call.
+        # @param sig_call [Prism::CallNode] the `sig { ... }` / `sig do ... end` call.
         # @return [ParseResult, ParseError]
         def parse(sig_call)
           return ParseError.new(reason: :no_block, node: sig_call) if sig_call.block.nil?
@@ -72,11 +63,9 @@ module Rigor
           end
         end
 
-        # Walks the chain bottom-up. Each chain link is a
-        # `Prism::CallNode` whose receiver is the next link;
-        # `params` / `returns` / `void` may appear at any
-        # position, so we accumulate their effect into a
-        # mutable hash and freeze on the way out.
+        # Walks the chain bottom-up. Each chain link is a `Prism::CallNode` whose receiver is the next
+        # link; `params` / `returns` / `void` may appear at any position, so we accumulate their effect
+        # into a mutable hash and freeze on the way out.
         def fold_chain(node, sig_call)
           accumulator = { return_type: nil, params: {}, modifiers: [], void: false, terminus_kind: nil }
           current = node
@@ -92,15 +81,13 @@ module Rigor
             when :params
               accumulator[:params].merge!(parse_params(current))
             when :type_parameters
-              # Recognised to suppress the degraded path;
-              # payload intentionally discarded (deferred).
+              # Recognised to suppress the degraded path; payload intentionally discarded (deferred).
             when *RECOGNISED_MODIFIERS
               accumulator[:modifiers] << current.name
             when *RUNTIME_ONLY_STEPS
               # Discard payload; runtime-only.
             else
-              # Unknown chain link — stop folding and treat
-              # whatever we accumulated so far as the result.
+              # Unknown chain link — stop folding and treat whatever we accumulated so far as the result.
               break
             end
             current = current.receiver
@@ -116,20 +103,16 @@ module Rigor
           )
         end
 
-        # `void` and `returns(T)` share the slot; if both are
-        # present (unusual but parseable), `returns(T)` wins
-        # because Sorbet's static side treats `void` as
-        # "discard the value" — when the user explicitly named
-        # `T`, that's the more informative shape.
+        # `void` and `returns(T)` share the slot; if both are present (unusual but parseable), `returns(T)`
+        # wins because Sorbet's static side treats `void` as "discard the value" — when the user
+        # explicitly named `T`, that's the more informative shape.
         def resolve_return_type(accumulator)
           accumulator[:return_type] || Rigor::Type::Combinator.untyped
         end
 
-        # `params(x: Integer, y: T.nilable(String))` — extracts
-        # the `KeywordHashNode` AST and translates each value.
-        # The result is `{ Symbol => Rigor::Type }`. Splat /
-        # double-splat / unrecognised keys degrade silently
-        # (slice 1 behaviour).
+        # `params(x: Integer, y: T.nilable(String))` — extracts the `KeywordHashNode` AST and translates
+        # each value. The result is `{ Symbol => Rigor::Type }`. Splat / double-splat / unrecognised keys
+        # degrade silently (slice 1 behaviour).
         def parse_params(call_node)
           args = call_node.arguments&.arguments || []
           first = args.first

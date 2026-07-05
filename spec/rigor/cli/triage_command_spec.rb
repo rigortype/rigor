@@ -6,8 +6,8 @@ require "tmpdir"
 
 require "rigor/cli/triage_command"
 
-# ADR-23 — end-to-end wiring of `rigor triage`: the command runs
-# the real analysis pipeline, then renders the triage report.
+# ADR-23 — end-to-end wiring of `rigor triage`: the command runs the real analysis pipeline, then renders the triage
+# report.
 RSpec.describe Rigor::CLI::TriageCommand do
   def run(argv)
     out = StringIO.new

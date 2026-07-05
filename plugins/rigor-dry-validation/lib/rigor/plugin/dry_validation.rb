@@ -15,31 +15,23 @@ module Rigor
     #
     # Slice 1 floor:
     #
-    # - Walks the project for `class T < Dry::Validation::Contract`
-    #   subclasses and publishes the resulting set of contract
-    #   class FQNs as the `:dry_validation_contracts` ADR-9
-    #   cross-plugin fact.
-    # - Ships an RBS overlay (`sig/dry_validation.rbs`) typing
-    #   `Dry::Validation::Contract#call` (returns Result) and
-    #   `Dry::Validation::Result#{success?, failure?, to_h}`.
-    #   The manifest's `signature_paths: ["sig"]` auto-contributes
-    #   the overlay (ADR-25) — no project-side wiring needed.
+    # - Walks the project for `class T < Dry::Validation::Contract` subclasses and publishes the
+    #   resulting set of contract class FQNs as the `:dry_validation_contracts` ADR-9 cross-plugin fact.
+    # - Ships an RBS overlay (`sig/dry_validation.rbs`) typing `Dry::Validation::Contract#call` (returns
+    #   Result) and `Dry::Validation::Result#{success?, failure?, to_h}`. The manifest's
+    #   `signature_paths: ["sig"]` auto-contributes the overlay (ADR-25) — no project-side wiring needed.
     #
     # Slice 2 (deferred, per design note):
     #
-    # - Integrate with `:dry_schema_table` (published by
-    #   `rigor-dry-schema`) so the `params { ... }` block inside a
-    #   Contract contributes a typed `result.to_h` shape per the
-    #   schema. Until this lands, `result.to_h` types as
-    #   `Hash[Symbol, untyped]` (the generic RBS overlay shape).
+    # - Integrate with `:dry_schema_table` (published by `rigor-dry-schema`) so the `params { ... }`
+    #   block inside a Contract contributes a typed `result.to_h` shape per the schema. Until this lands,
+    #   `result.to_h` types as `Hash[Symbol, untyped]` (the generic RBS overlay shape).
     #
-    # Slice 3 (deferred): `json { ... }` adapter parity with
-    # `params { ... }`. Same shape as slice 2.
+    # Slice 3 (deferred): `json { ... }` adapter parity with `params { ... }`. Same shape as slice 2.
     #
-    # No ADR-3 amendment is needed for the validation surface
-    # itself; `Dry::Validation::Result` is a generic class, not a
-    # sum type (the `success?` / `failure?` predicates narrow via
-    # existing bool flow facts).
+    # No ADR-3 amendment is needed for the validation surface itself; `Dry::Validation::Result` is a
+    # generic class, not a sum type (the `success?` / `failure?` predicates narrow via existing bool flow
+    # facts).
     class DryValidation < Rigor::Plugin::Base
       manifest(
         id: "dry-validation",
@@ -47,9 +39,8 @@ module Rigor
         description: "Recognises `class T < Dry::Validation::Contract` subclasses and " \
                      "publishes the contract FQN set.",
         produces: [:dry_validation_contracts],
-        # Auto-contribute the bundled RBS overlay (Contract#call -> Result,
-        # Result#success?/#to_h/...) per ADR-25, so no project-side
-        # signature_paths wiring is needed.
+        # Auto-contribute the bundled RBS overlay (Contract#call -> Result, Result#success?/#to_h/...)
+        # per ADR-25, so no project-side signature_paths wiring is needed.
         signature_paths: ["sig"]
       )
 

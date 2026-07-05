@@ -6,28 +6,22 @@ require "rigor/type"
 module Rigor
   module Plugin
     class Rspec < Rigor::Plugin::Base
-      # Resolves the runtime type of a
-      # `let(:name) { body }` or `subject(:name) { body }`
-      # block by pattern-matching its body's tail expression.
+      # Resolves the runtime type of a `let(:name) { body }` or `subject(:name) { body }` block by
+      # pattern-matching its body's tail expression.
       #
       # Recognised body shapes (floor):
       #
       # - `ConstantClass.new(...)` → `Nominal[ConstantClass]`
       # - `Foo::Bar.new(...)` → `Nominal[Foo::Bar]`
-      # - `described_class.new(...)` → `Nominal[<describe const>]`
-      #   when the surrounding describe block has a constant
-      #   anchor.
-      # - `create(:factory)` / `build(:factory)` /
-      #   `build_stubbed(:factory)` / `attributes_for(:factory)`
-      #   → `Nominal[<factory.model_class>]` when the
-      #   `:factory_index` ADR-9 fact is available and the
+      # - `described_class.new(...)` → `Nominal[<describe const>]` when the surrounding describe block has
+      #   a constant anchor.
+      # - `create(:factory)` / `build(:factory)` / `build_stubbed(:factory)` / `attributes_for(:factory)` →
+      #   `Nominal[<factory.model_class>]` when the `:factory_index` ADR-9 fact is available and the
       #   factory name is known.
-      # - `FactoryBot.create(:factory)` etc. — same as the
-      #   implicit-receiver factorybot form.
+      # - `FactoryBot.create(:factory)` etc. — same as the implicit-receiver factorybot form.
       #
-      # Returns `nil` for any other body shape. Multi-statement
-      # bodies use the LAST statement (the block's return
-      # value).
+      # Returns `nil` for any other body shape. Multi-statement bodies use the LAST statement (the block's
+      # return value).
       module LetTypeResolver
         FACTORYBOT_ENTRY_METHODS = %i[
           create build build_stubbed attributes_for
@@ -38,9 +32,8 @@ module Rigor
 
         # @param block_node [Prism::BlockNode]
         # @param describe_const [String, nil]
-        # @param factory_index [Object, nil] something
-        #   responding to `find(factory_name)` and returning
-        #   an entry that responds to `model_class`.
+        # @param factory_index [Object, nil] something responding to `find(factory_name)` and returning an
+        #   entry that responds to `model_class`.
         # @param environment [Rigor::Environment, nil]
         # @return [Rigor::Type, nil]
         def resolve(block_node, describe_const:, factory_index:, environment:)
@@ -103,10 +96,8 @@ module Rigor
           nominal_for(model_class, environment: environment)
         end
 
-        # Recognises both `create(:name)` (implicit receiver,
-        # via `include FactoryBot::Syntax::Methods`) and the
-        # explicit `FactoryBot.create(:name)` /
-        # `FactoryGirl.create(:name)` (legacy) forms.
+        # Recognises both `create(:name)` (implicit receiver, via `include FactoryBot::Syntax::Methods`)
+        # and the explicit `FactoryBot.create(:name)` / `FactoryGirl.create(:name)` (legacy) forms.
         def factorybot_call?(call_node)
           return false unless FACTORYBOT_ENTRY_METHODS.include?(call_node.name)
 

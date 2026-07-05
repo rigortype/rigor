@@ -3,53 +3,35 @@
 module Rigor
   module Plugin
     class RailsRoutes < Rigor::Plugin::Base
-      # Generates the catalogue of route helpers a `devise_for
-      # :resources` call adds to a Rails app's routing table.
-      # The set is fixed and well-documented (the
-      # [Devise wiki](https://github.com/heartcombo/devise/wiki/How-To:-Add-routes-helpers)
-      # enumerates every generated helper); the generator
-      # mirrors it.
+      # Generates the catalogue of route helpers a `devise_for :resources` call adds to a Rails app's
+      # routing table. The set is fixed and well-documented (the
+      # [Devise wiki](https://github.com/heartcombo/devise/wiki/How-To:-Add-routes-helpers) enumerates
+      # every generated helper); the generator mirrors it.
       #
-      # Used by `RoutesParser` when it sees a top-level
-      # `devise_for :name` (or `devise_for :name, skip:
-      # [...]`) call. Each generated helper is materialised as
-      # a `HelperTable::Entry` so the analyzer's
-      # `unknown-helper` rule recognises them and the arity
-      # check accepts the canonical signatures (Devise helpers
-      # take zero positional args plus an optional trailing
-      # options hash, which `HelperTable#accepts_arity?`
-      # already handles via the `arity + 1` rule).
+      # Used by `RoutesParser` when it sees a top-level `devise_for :name` (or `devise_for :name, skip:
+      # [...]`) call. Each generated helper is materialised as a `HelperTable::Entry` so the analyzer's
+      # `unknown-helper` rule recognises them and the arity check accepts the canonical signatures (Devise
+      # helpers take zero positional args plus an optional trailing options hash, which
+      # `HelperTable#accepts_arity?` already handles via the `arity + 1` rule).
       #
       # Scope:
       #
-      # - Recognises the standard six controllers
-      #   (`:sessions`, `:passwords`, `:confirmations`,
-      #   `:unlocks`, `:registrations`, `:omniauth_callbacks`).
-      # - Honours `skip: [...]` to suppress controllers the
-      #   project disables.
-      # - Honours `path: "..."` to remap the URL path (does
-      #   NOT remap the helper-name prefix — Devise uses the
-      #   resource name for the helper, not the path).
-      # - Does NOT yet honour `as: "..."` overrides, `class_name:`,
-      #   `controllers: { ... }` (these are rare; expand on
-      #   demand).
-      # - `omniauth_callbacks` helpers are dynamic — the
-      #   provider name is supplied at call time
-      #   (`user_facebook_omniauth_authorize_path`) and Devise
-      #   declares them from the configured providers, which
-      #   live in an initializer this static parser does not
-      #   read. The suffix patterns are registered in
-      #   `OMNIAUTH_SUFFIXES` and consulted by
-      #   `HelperTable#omniauth_match?`.
+      # - Recognises the standard six controllers (`:sessions`, `:passwords`, `:confirmations`, `:unlocks`,
+      #   `:registrations`, `:omniauth_callbacks`).
+      # - Honours `skip: [...]` to suppress controllers the project disables.
+      # - Honours `path: "..."` to remap the URL path (does NOT remap the helper-name prefix — Devise uses
+      #   the resource name for the helper, not the path).
+      # - Does NOT yet honour `as: "..."` overrides, `class_name:`, `controllers: { ... }` (these are rare;
+      #   expand on demand).
+      # - `omniauth_callbacks` helpers are dynamic — the provider name is supplied at call time
+      #   (`user_facebook_omniauth_authorize_path`) and Devise declares them from the configured providers,
+      #   which live in an initializer this static parser does not read. The suffix patterns are registered
+      #   in `OMNIAUTH_SUFFIXES` and consulted by `HelperTable#omniauth_match?`.
       module DeviseRoutes
-        # The standard Devise controllers and the helper
-        # actions each generates. Keys are the controller
-        # name; values are arrays of `[helper_prefix,
-        # http_method, action]` triples — `helper_prefix` is
-        # the part BEFORE the resource-name segment (Rails
-        # produces `<prefix>_<resource>_<suffix>_path`; for
-        # the bare `<resource>_session_path` shape the prefix
-        # is empty).
+        # The standard Devise controllers and the helper actions each generates. Keys are the controller
+        # name; values are arrays of `[helper_prefix, http_method, action]` triples — `helper_prefix` is
+        # the part BEFORE the resource-name segment (Rails produces `<prefix>_<resource>_<suffix>_path`;
+        # for the bare `<resource>_session_path` shape the prefix is empty).
         CONTROLLER_HELPERS = {
           sessions: [
             ["new", "session", :get, :new],
@@ -77,13 +59,10 @@ module Rigor
           ]
         }.freeze
 
-        # Dynamic-provider helper patterns. `_omniauth_authorize_path`
-        # and `_omniauth_callback_path` are generated per
-        # configured provider (Facebook, GitHub, …) by an
-        # initializer this parser does not read. We treat any
-        # `<resource>_<provider>_omniauth_(authorize|callback)_(path|url)`
-        # call as recognised when the resource is one the
-        # project declared via `devise_for`.
+        # Dynamic-provider helper patterns. `_omniauth_authorize_path` and `_omniauth_callback_path` are
+        # generated per configured provider (Facebook, GitHub, …) by an initializer this parser does not
+        # read. We treat any `<resource>_<provider>_omniauth_(authorize|callback)_(path|url)` call as
+        # recognised when the resource is one the project declared via `devise_for`.
         OMNIAUTH_SUFFIXES = %w[
           _omniauth_authorize_path _omniauth_authorize_url
           _omniauth_callback_path _omniauth_callback_url
@@ -91,16 +70,12 @@ module Rigor
 
         module_function
 
-        # @param resource [String, Symbol] the `devise_for`
-        #   argument — typically `:users`. Used as both the
-        #   helper-name segment (`new_user_session_path`) and
-        #   to derive the resource path.
-        # @param skip [Array<Symbol>] controllers the project
-        #   disables via `devise_for :users, skip: [:registrations]`.
-        # @return [Array<HelperTable::Entry>] one entry per
-        #   generated `_path` helper. The caller is expected to
-        #   pair `_url` variants the same way `RoutesParser` does
-        #   for other entries.
+        # @param resource [String, Symbol] the `devise_for` argument — typically `:users`. Used as both the
+        #   helper-name segment (`new_user_session_path`) and to derive the resource path.
+        # @param skip [Array<Symbol>] controllers the project disables via `devise_for :users, skip:
+        #   [:registrations]`.
+        # @return [Array<HelperTable::Entry>] one entry per generated `_path` helper. The caller is
+        #   expected to pair `_url` variants the same way `RoutesParser` does for other entries.
         def generate(resource:, skip: [])
           resource_segment = singularize(resource.to_s)
           skip_set = skip.to_set(&:to_sym)
@@ -126,21 +101,15 @@ module Rigor
             end
           end
 
-          # Devise also ships *scoped* helpers
-          # (`Devise::Controllers::UrlHelpers`) that DROP the
-          # resource segment and take the scope as a positional
-          # argument: `new_password_path(resource_name)` is the
+          # Devise also ships *scoped* helpers (`Devise::Controllers::UrlHelpers`) that DROP the resource
+          # segment and take the scope as a positional argument: `new_password_path(resource_name)` is the
           # bare form of `new_user_password_path`. Used inside
-          # `Auth::PasswordsController < Devise::PasswordsController`
-          # (Mastodon's idiom). Arity 1 (the scope), and a
-          # trailing options-hash bumps it via the existing
-          # `arity + 1` rule.
+          # `Auth::PasswordsController < Devise::PasswordsController` (Mastodon's idiom). Arity 1 (the
+          # scope), and a trailing options-hash bumps it via the existing `arity + 1` rule.
           entries.concat(scoped_helpers(skip_set))
 
-          # `omniauth_authorize_path(scope, provider)` and
-          # `omniauth_callback_path(scope, provider)` are
-          # `Devise::Controllers::UrlHelpers` scoped helpers
-          # that delegate to the OmniAuth gem. Arity 2.
+          # `omniauth_authorize_path(scope, provider)` and `omniauth_callback_path(scope, provider)` are
+          # `Devise::Controllers::UrlHelpers` scoped helpers that delegate to the OmniAuth gem. Arity 2.
           unless skip_set.include?(:omniauth_callbacks)
             %w[omniauth_authorize_path omniauth_callback_path].each do |name|
               entries << HelperTable::Entry.new(
@@ -156,11 +125,9 @@ module Rigor
           entries
         end
 
-        # Scoped helpers Devise exposes inside its controllers.
-        # The arity-1 family — caller supplies the resource
-        # scope (`:user` etc.) as the first positional arg.
-        # Names mirror the qualified `<scope>_<name>_path`
-        # entries above, minus the scope segment.
+        # Scoped helpers Devise exposes inside its controllers. The arity-1 family — caller supplies the
+        # resource scope (`:user` etc.) as the first positional arg. Names mirror the qualified
+        # `<scope>_<name>_path` entries above, minus the scope segment.
         SCOPED_HELPERS = {
           sessions: %w[new_session_path session_path destroy_session_path],
           passwords: %w[new_password_path edit_password_path password_path],
@@ -186,28 +153,22 @@ module Rigor
           end
         end
 
-        # Returns the set of OmniAuth pattern suffixes the
-        # analyzer accepts for a given resource. The analyzer
-        # consults this set (via `HelperTable#omniauth_match?`)
-        # when a `*_path` / `*_url` call's name does not match
-        # any registered entry and its prefix matches a Devise
-        # resource.
+        # Returns the set of OmniAuth pattern suffixes the analyzer accepts for a given resource. The
+        # analyzer consults this set (via `HelperTable#omniauth_match?`) when a `*_path` / `*_url` call's
+        # name does not match any registered entry and its prefix matches a Devise resource.
         def omniauth_suffixes
           OMNIAUTH_SUFFIXES
         end
 
-        # ADR-39 — delegates to the shared inflector (real
-        # `ActiveSupport::Inflector` when available), replacing the tiny
-        # AS-replica this module used to duplicate from `RoutesParser`.
+        # ADR-39 — delegates to the shared inflector (real `ActiveSupport::Inflector` when available),
+        # replacing the tiny AS-replica this module used to duplicate from `RoutesParser`.
         def singularize(word)
           Rigor::Plugin::Inflector.singularize(word)
         end
 
-        # Approximate path generation. We don't honour the
-        # `path:` Devise option here because the helper NAME
-        # is what the analyzer cares about; the `path` field is
-        # informational and surfaces only in the `:helper` info
-        # diagnostic.
+        # Approximate path generation. We don't honour the `path:` Devise option here because the helper
+        # NAME is what the analyzer cares about; the `path` field is informational and surfaces only in
+        # the `:helper` info diagnostic.
         def devise_path_for(resource_segment, controller, action)
           plural = "#{resource_segment}s"
           base = "/#{plural}"

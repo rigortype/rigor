@@ -7,25 +7,19 @@ require_relative "job_index"
 module Rigor
   module Plugin
     class Activejob < Rigor::Plugin::Base
-      # Walks the configured job-search paths via the plugin's
-      # `IoBoundary`, parses each `.rb` file with Prism, and
-      # collects classes whose immediate superclass is one of
-      # the configured base classes. For each discovered class,
-      # the discoverer also reads the `#perform` method's
-      # parameter list and computes the arity envelope.
+      # Walks the configured job-search paths via the plugin's `IoBoundary`, parses each `.rb` file with
+      # Prism, and collects classes whose immediate superclass is one of the configured base classes.
+      # For each discovered class, the discoverer also reads the `#perform` method's parameter list and
+      # computes the arity envelope.
       #
       # Limitations (intentional for v0.1.0):
       #
-      # - Only direct-superclass matches. `class WelcomeJob <
-      #   BaseJob` where `BaseJob < ApplicationJob` is NOT
-      #   discovered. List `BaseJob` in `job_base_classes`
-      #   if needed.
-      # - The qualified class name is the lexical path
-      #   (`Admin::WelcomeJob` for a class declared inside
+      # - Only direct-superclass matches. `class WelcomeJob < BaseJob` where `BaseJob < ApplicationJob`
+      #   is NOT discovered. List `BaseJob` in `job_base_classes` if needed.
+      # - The qualified class name is the lexical path (`Admin::WelcomeJob` for a class declared inside
       #   `module Admin`).
-      # - The `#perform` arity is read from the syntactic
-      #   parameter list. Methods built via `define_method`
-      #   are out of scope.
+      # - The `#perform` arity is read from the syntactic parameter list. Methods built via
+      #   `define_method` are out of scope.
       class JobDiscoverer
         def initialize(io_boundary:, search_paths:, base_classes:)
           @io_boundary = io_boundary
@@ -119,9 +113,8 @@ module Rigor
           end
         end
 
-        # Returns the `def perform(...)` node from a class
-        # body, or `nil` when the class doesn't override
-        # `#perform`. Only matches instance-side `def perform`.
+        # Returns the `def perform(...)` node from a class body, or `nil` when the class doesn't
+        # override `#perform`. Only matches instance-side `def perform`.
         def lookup_perform_def(body)
           return nil if body.nil?
 
@@ -134,13 +127,10 @@ module Rigor
           nil
         end
 
-        # Builds a JobIndex::Entry from the discovered class's
-        # `#perform` def. When the class doesn't override
-        # `#perform`, we record an "any-arity" entry — Active
-        # Job's default `#perform` is abstract; calling
-        # `perform_later` on a job that didn't override it is
-        # itself a bug, but it's the user's bug, not the
-        # plugin's call to flag without runtime context.
+        # Builds a JobIndex::Entry from the discovered class's `#perform` def. When the class doesn't
+        # override `#perform`, we record an "any-arity" entry — Active Job's default `#perform` is
+        # abstract; calling `perform_later` on a job that didn't override it is itself a bug, but it's
+        # the user's bug, not the plugin's call to flag without runtime context.
         def build_entry(class_name, perform_def)
           if perform_def.nil?
             return JobIndex::Entry.new(

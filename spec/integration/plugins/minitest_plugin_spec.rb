@@ -1,9 +1,7 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-minitest/`.
-# Pillar 2 Slice 1 (sibling to rigor-rspec's matcher
-# narrowing) — extends spec-derived flow facts to the
-# Minitest / Test::Unit assertion API plus the Minitest/spec
+# Integration spec for `plugins/rigor-minitest/`. Pillar 2 Slice 1 (sibling to rigor-rspec's matcher narrowing)
+# — extends spec-derived flow facts to the Minitest / Test::Unit assertion API plus the Minitest/spec
 # `_(x).must_*` / `.wont_*` matchers.
 
 require "spec_helper"

@@ -92,8 +92,7 @@ RSpec.describe Rigor::ConfigAudit do
 
       bp = warnings.find { |w| w.kind == :bundler_bundle_path }
       expect(bp).not_to be_nil
-      # Pin the config-key label, not just the descriptor, so the message
-      # names which setting to fix.
+      # Pin the config-key label, not just the descriptor, so the message names which setting to fix.
       expect(bp.message).to include("bundler.bundle_path").and include("is not a directory")
     end
 

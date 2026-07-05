@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# Integration spec for `examples/rigor-deprecations/`.
-# Reference coverage for config-driven plugin rules.
+# Integration spec for `examples/rigor-deprecations/`. Reference coverage for config-driven plugin rules.
 
 require "spec_helper"
 

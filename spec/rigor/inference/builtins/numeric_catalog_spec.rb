@@ -7,8 +7,8 @@ RSpec.describe "Rigor::Inference::Builtins::NUMERIC_CATALOG" do
 
   describe "#safe_for_folding?" do
     it "approves prelude :leaf-marked methods" do
-      # Integer#abs, #even?, #odd? are prelude `Primitive.attr! :leaf`
-      # (numeric.rb) and surface as `leaf` in the catalog.
+      # Integer#abs, #even?, #odd? are prelude `Primitive.attr! :leaf` (numeric.rb) and surface as `leaf` in the
+      # catalog.
       expect(catalog.safe_for_folding?("Integer", :abs)).to be(true)
       expect(catalog.safe_for_folding?("Integer", :even?)).to be(true)
       expect(catalog.safe_for_folding?("Integer", :odd?)).to be(true)

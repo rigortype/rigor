@@ -10,8 +10,7 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
 
   after { FileUtils.rm_rf(tmpdir) }
 
-  # Builds a `.gem_rbs_collection/<gem>/<version>/<gem>.rbs`
-  # layout matching what `rbs collection install` produces.
+  # Builds a `.gem_rbs_collection/<gem>/<version>/<gem>.rbs` layout matching what `rbs collection install` produces.
   def make_collection(root, *entries)
     entries.each do |name, version|
       gem_dir = File.join(root, name, version)
@@ -82,10 +81,8 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
     end
 
     it "skips gems named in skip_gem_names regardless of source type" do # rubocop:disable RSpec/ExampleLength
-      # `cgi` / `logger` are stdlib-extracted default gems that
-      # ruby/gem_rbs_collection ships under a `git` source, yet
-      # rigor loads them from its bundled stdlib — admitting the
-      # collection copy double-declares and raises
+      # `cgi` / `logger` are stdlib-extracted default gems that ruby/gem_rbs_collection ships under a `git` source, yet
+      # rigor loads them from its bundled stdlib — admitting the collection copy double-declares and raises
       # RBS::DuplicatedDeclarationError.
       make_collection(
         File.join(tmpdir, ".gem_rbs_collection"),
@@ -202,9 +199,8 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
     end
 
     it "returns [] when the collection root referenced by the lockfile doesn't exist" do
-      # Lockfile says `path: .gem_rbs_collection` but the dir
-      # has never been created (e.g., committed lockfile, no
-      # `rbs collection install` run yet).
+      # Lockfile says `path: .gem_rbs_collection` but the dir has never been created (e.g., committed lockfile, no `rbs
+      # collection install` run yet).
       body = <<~YAML
         ---
         path: ".gem_rbs_collection"
@@ -267,8 +263,7 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
 
   describe ".discover with non-default collection path" do
     it "resolves a custom `path:` field against the lockfile's directory" do
-      # Lockfile lives in `<tmpdir>/config/` and points at
-      # `<tmpdir>/config/../rbs/`.
+      # Lockfile lives in `<tmpdir>/config/` and points at `<tmpdir>/config/../rbs/`.
       config_dir = File.join(tmpdir, "config")
       FileUtils.mkdir_p(config_dir)
       make_collection(File.join(tmpdir, "rbs"), ["rack", "3.0"])

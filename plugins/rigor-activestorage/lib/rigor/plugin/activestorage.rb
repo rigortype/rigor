@@ -8,26 +8,18 @@ require_relative "activestorage/analyzer"
 
 module Rigor
   module Plugin
-    # rigor-activestorage — recognises `has_one_attached` /
-    # `has_many_attached` macros on ActiveRecord models and
-    # contributes attachment accessor return types so chained
-    # calls (`user.avatar.attached?`) route through Rigor's
-    # normal dispatch.
+    # rigor-activestorage — recognises `has_one_attached` / `has_many_attached` macros on ActiveRecord
+    # models and contributes attachment accessor return types so chained calls (`user.avatar.attached?`)
+    # route through Rigor's normal dispatch.
     #
     # ## Architecture
     #
-    # One discovery pass per run reads the configured AR model
-    # paths (default `app/models/`) via the plugin's
-    # `IoBoundary`, walks each `.rb` file with Prism, and
-    # collects `has_one_attached :avatar` /
-    # `has_many_attached :photos` macros into an
-    # {AttachmentIndex} keyed by class name. The walker is
-    # stand-alone (mirrors `rigor-activerecord`'s
-    # `ModelDiscoverer`) so the plugin works even when
-    # `rigor-activerecord` is not loaded; when it IS loaded,
-    # the published `:model_index` fact (ADR-9 cross-plugin
-    # API) drives the same class set so the two plugins agree
-    # on what counts as a model.
+    # One discovery pass per run reads the configured AR model paths (default `app/models/`) via the
+    # plugin's `IoBoundary`, walks each `.rb` file with Prism, and collects `has_one_attached :avatar` /
+    # `has_many_attached :photos` macros into an {AttachmentIndex} keyed by class name. The walker is
+    # stand-alone (mirrors `rigor-activerecord`'s `ModelDiscoverer`) so the plugin works even when
+    # `rigor-activerecord` is not loaded; when it IS loaded, the published `:model_index` fact (ADR-9
+    # cross-plugin API) drives the same class set so the two plugins agree on what counts as a model.
     #
     # ## Configuration
     #
@@ -39,9 +31,8 @@ module Rigor
     #
     # `model_search_paths` defaults to `["app/models"]`.
     #
-    # The class name `Rigor::Plugin::Activestorage` (single
-    # capital A) matches the constant-distinguishing convention
-    # used by `rigor-activerecord`.
+    # The class name `Rigor::Plugin::Activestorage` (single capital A) matches the constant-distinguishing
+    # convention used by `rigor-activerecord`.
     class Activestorage < Rigor::Plugin::Base
       manifest(
         id: "activestorage",
@@ -53,11 +44,9 @@ module Rigor
         consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
       )
 
-      # Cached: attachment index. Walks every `.rb` file under
-      # `model_search_paths` for `has_*_attached` macros. `watch:`
-      # (ADR-60 WD3) covers model-file additions; the discoverer's
-      # in-block reads are captured into the record-and-validate
-      # dependency descriptor after the block runs.
+      # Cached: attachment index. Walks every `.rb` file under `model_search_paths` for `has_*_attached`
+      # macros. `watch:` (ADR-60 WD3) covers model-file additions; the discoverer's in-block reads are
+      # captured into the record-and-validate dependency descriptor after the block runs.
       producer :attachment_index, watch: -> { [[@model_search_paths, "**/*.rb"]] } do |_params|
         rows = AttachmentDiscoverer.new(
           io_boundary: io_boundary,
@@ -80,18 +69,12 @@ module Rigor
         Analyzer.new(path: path, attachment_index: index).analyze(root).diagnostics
       end
 
-      # Return-type contribution: when the receiver is
-      # `Nominal[Model]` and the method matches a discovered
-      # attachment, narrows to
-      # `Nominal[ActiveStorage::Attached::One]` (singular) or
-      # `Nominal[ActiveStorage::Attached::Many]` (collection)
-      # via a `dynamic_return` rule keyed on the live set of
-      # model class names from the attachment index.
-      # The chained call (`.attached?`, `.purge`, `.url`)
-      # then resolves through ActiveStorage's RBS surface.
-      # Attachment setters (`user.avatar=`) decline — they
-      # take side-effecting argument types that the RBS
-      # surface already covers.
+      # Return-type contribution: when the receiver is `Nominal[Model]` and the method matches a
+      # discovered attachment, narrows to `Nominal[ActiveStorage::Attached::One]` (singular) or
+      # `Nominal[ActiveStorage::Attached::Many]` (collection) via a `dynamic_return` rule keyed on the
+      # live set of model class names from the attachment index. The chained call (`.attached?`, `.purge`,
+      # `.url`) then resolves through ActiveStorage's RBS surface. Attachment setters (`user.avatar=`)
+      # decline — they take side-effecting argument types that the RBS surface already covers.
       dynamic_return receivers: -> { attachment_index&.class_names || [] } do |call_node, scope|
         next nil unless call_node.is_a?(Prism::CallNode)
         next nil if call_node.receiver.nil?
@@ -129,10 +112,9 @@ module Rigor
       def attachment_index
         return @attachment_index if @attachment_index
 
-        # ADR-60 WD3 record-and-validate: the producer's in-block
-        # `AttachmentDiscoverer` reads are captured into the
-        # dependency descriptor after the block runs, and the
-        # producer's `watch:` covers model-file additions.
+        # ADR-60 WD3 record-and-validate: the producer's in-block `AttachmentDiscoverer` reads are
+        # captured into the dependency descriptor after the block runs, and the producer's `watch:`
+        # covers model-file additions.
         @attachment_index = cache_for(:attachment_index, params: {}).call
       rescue Plugin::AccessDeniedError => e
         @load_errors << "rigor-activestorage: #{e.message}"

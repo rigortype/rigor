@@ -200,10 +200,8 @@ RSpec.describe Rigor::Inference::HktReducer do
         app = make_app(:"json::value", [str_nominal])
         result = described_class.new(registry).reduce(app)
         expect(result).to be_a(Rigor::Type::Union)
-        # leaf atoms — nil / true / false / Integer / Float / String
-        # (Constant<nil> / Constant<true> / Constant<false> render as the
-        # bare scalar form in the Union's display per the Constant carrier's
-        # describe rule)
+        # leaf atoms — nil / true / false / Integer / Float / String (Constant<nil> / Constant<true> / Constant<false>
+        # render as the bare scalar form in the Union's display per the Constant carrier's describe rule)
         expect(result.members.map(&:describe)).to include(
           "nil", "true", "false", "Integer", "Float", "String"
         )
@@ -385,8 +383,7 @@ RSpec.describe Rigor::Inference::HktReducer do
     end
 
     context "with cross-URI references" do
-      # outer::it[K] = Array[App[inner::it, K]]
-      # inner::it[K] = K
+      # outer::it[K] = Array[App[inner::it, K]] inner::it[K] = K
       let(:registry) do
         registry_class.new(
           registrations: [

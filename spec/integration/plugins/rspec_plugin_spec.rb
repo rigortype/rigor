@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-rspec/`.
-# Tier 3A of the Rails plugins roadmap. Deliberately
-# scoped — only flags duplicate `let` / `subject`
-# declarations and self-referencing let blocks. The
-# heavier mock-target / let-typo detection is out of scope
-# for v0.1.0.
+# Integration spec for `plugins/rigor-rspec/`. Tier 3A of the Rails plugins roadmap. Deliberately scoped — only
+# flags duplicate `let` / `subject` declarations and self-referencing let blocks. The heavier mock-target /
+# let-typo detection is out of scope for v0.1.0.
 
 require "spec_helper"
 
@@ -133,13 +130,10 @@ RSpec.describe "plugins/rigor-rspec" do
     end
   end
 
-  # Pillar 2 Slice 1 — `expect(x).to MATCHER` narrows `x`
-  # downstream in the same `it` body. The plugin's
-  # `narrowing_facts` (method-gated on `to` / `not_to` / `to_not`,
-  # ADR-37 slice 2) recognises the call shape and emits a
-  # `post_return_fact` targeting local `x`; the engine's
-  # `apply_plugin_assertions` → `:local` target_kind branch
-  # narrows the local in the surrounding scope.
+  # Pillar 2 Slice 1 — `expect(x).to MATCHER` narrows `x` downstream in the same `it` body. The plugin's
+  # `narrowing_facts` (method-gated on `to` / `not_to` / `to_not`, ADR-37 slice 2) recognises the call shape
+  # and emits a `post_return_fact` targeting local `x`; the engine's `apply_plugin_assertions` → `:local`
+  # target_kind branch narrows the local in the surrounding scope.
   describe "matcher narrowing (Pillar 2 Slice 1)" do
     def parse_call_node(source)
       Prism.parse(source, scopes: [[:x]]).value.statements.body.first
@@ -279,15 +273,14 @@ RSpec.describe "plugins/rigor-rspec" do
 
     context "with non-matching call shapes" do
       it "is silent for expect(non_local).to MATCHER" do
-        # expect(foo.bar) — the arg isn't a LocalVariableReadNode,
-        # so the analyzer cannot name a narrowing target.
+        # expect(foo.bar) — the arg isn't a LocalVariableReadNode, so the analyzer cannot name a narrowing target.
         call_node = parse_call_node("expect(foo.bar).to be_a(String)")
         expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
       end
 
       it "is silent for expect { block }.to raise_error(...)" do
-        # Block form doesn't match the call shape; future slices
-        # might add support, but for now the analyzer drops out.
+        # Block form doesn't match the call shape; future slices might add support, but for now the analyzer
+        # drops out.
         call_node = parse_call_node("expect { foo }.to raise_error(StandardError)")
         expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
       end
@@ -303,10 +296,8 @@ RSpec.describe "plugins/rigor-rspec" do
       end
     end
 
-    # End-to-end: the plugin's contribution flows through the
-    # engine's `apply_plugin_assertions` → `:local` branch and
-    # narrows the local so a downstream `.upcase` / `.+` /
-    # etc. resolves cleanly.
+    # End-to-end: the plugin's contribution flows through the engine's `apply_plugin_assertions` → `:local`
+    # branch and narrows the local so a downstream `.upcase` / `.+` / etc. resolves cleanly.
     context "when running end-to-end through the engine" do
       it "removes the possible-nil-receiver after expect(x).to be_a(String)" do
         result = run_plugin(
@@ -338,12 +329,9 @@ RSpec.describe "plugins/rigor-rspec" do
     end
   end
 
-  # Pillar 2 Slice 2 — let / subject locals in `it` bodies
-  # are bound to their inferred return type. Tests exercise
-  # the LetScopeIndex + LetTypeResolver directly with a stub
-  # factory_index where applicable; the end-to-end run goes
-  # through `dynamic_return` to prove the engine
-  # actually narrows the local.
+  # Pillar 2 Slice 2 — let / subject locals in `it` bodies are bound to their inferred return type. Tests
+  # exercise the LetScopeIndex + LetTypeResolver directly with a stub factory_index where applicable; the
+  # end-to-end run goes through `dynamic_return` to prove the engine actually narrows the local.
   describe "let / subject binding (Pillar 2 Slice 2)" do
     describe "LetScopeIndex" do
       def build_index(source)
@@ -370,8 +358,7 @@ RSpec.describe "plugins/rigor-rspec" do
             end
           end
         RUBY
-        # Two records: outer (User, lets [:user]) and inner
-        # (anchor inherits User, lets [:filter]).
+        # Two records: outer (User, lets [:user]) and inner (anchor inherits User, lets [:filter]).
         expect(index.records.size).to eq(2)
         const_anchors = index.records.map(&:describe_const)
         expect(const_anchors).to eq(%w[User User])
@@ -390,8 +377,7 @@ RSpec.describe "plugins/rigor-rspec" do
           end
         RUBY
         index = build_index(source)
-        # The `name` read inside the inner `it` block is line
-        # 6; the inner-record's `:name` let wins.
+        # The `name` read inside the inner `it` block is line 6; the inner-record's `:name` let wins.
         block = index.let_block_at(6, :name)
         expect(block).not_to be_nil
         expect(block.body.body.first.unescaped).to eq("inner")
@@ -517,10 +503,8 @@ RSpec.describe "plugins/rigor-rspec" do
             end
           RUBY
         )
-        # No undefined-method diagnostics — `user` resolved
-        # through the let binding rather than as an unknown
-        # method call. The engine's matcher narrowing (Slice
-        # 1) plus the let binding (Slice 2) compose cleanly.
+        # No undefined-method diagnostics — `user` resolved through the let binding rather than as an unknown
+        # method call. The engine's matcher narrowing (Slice 1) plus the let binding (Slice 2) compose cleanly.
         undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
         expect(undefined).to be_empty
       end
@@ -545,8 +529,7 @@ RSpec.describe "plugins/rigor-rspec" do
     end
 
     it "handles `subject` with no name (the implicit subject)" do
-      # Two `subject { ... }` calls at the same scope are
-      # still duplicates of the implicit `:subject`.
+      # Two `subject { ... }` calls at the same scope are still duplicates of the implicit `:subject`.
       result = run_plugin(
         source: <<~RUBY
           RSpec.describe "X" do

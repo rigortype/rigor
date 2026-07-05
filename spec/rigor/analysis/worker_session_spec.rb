@@ -86,8 +86,7 @@ RSpec.describe Rigor::Analysis::WorkerSession do
         end
         session_diags = Dir.chdir(dir) { session.analyze(path) }
 
-        # The CoverageScanner stream is identical regardless of
-        # whether the chosen source happens to trigger any
+        # The CoverageScanner stream is identical regardless of whether the chosen source happens to trigger any
         # fallback events — equivalence is the contract proof.
         expect(diag_keys(session_diags)).to eq(diag_keys(runner_diags))
       end
@@ -256,8 +255,8 @@ RSpec.describe Rigor::Analysis::WorkerSession do
     end
 
     it "appends a successful node_result's diagnostics (no error), stamped with plugin source_family" do
-      # Base#diagnostics_for_file already returns [], so no override is
-      # needed — the node_result diagnostics are the only input here.
+      # Base#diagnostics_for_file already returns [], so no override is needed — the node_result diagnostics are the
+      # only input here.
       stub_const("WorkerSessionNodeResultSuccess", Class.new(Rigor::Plugin::Base) do
         manifest(id: "session-noderesult-success", version: "0.1.0")
       end)
@@ -274,8 +273,8 @@ RSpec.describe Rigor::Analysis::WorkerSession do
         path: "x.rb", line: 3, column: 2,
         message: "from node rule", severity: :info, rule: "node-rule"
       )
-      # A Result with no error but carrying diagnostics exercises the
-      # SUCCESS branch `raw += node_result.diagnostics if node_result`.
+      # A Result with no error but carrying diagnostics exercises the SUCCESS branch `raw += node_result.diagnostics if
+      # node_result`.
       node_result = Rigor::Plugin::NodeRuleWalk::Result.new(plugin, [node_diagnostic], nil)
 
       diags = session.send(
@@ -300,8 +299,8 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       session = described_class.new(
         configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
       )
-      # `allocate` avoids invoking a normal `#initialize` path; only the
-      # overridden `#manifest` (which raises) matters for the fallback.
+      # `allocate` avoids invoking a normal `#initialize` path; only the overridden `#manifest` (which raises) matters
+      # for the fallback.
       plugin = raising_manifest_class.allocate
 
       diag = session.send(
@@ -386,11 +385,9 @@ RSpec.describe Rigor::Analysis::WorkerSession do
           binding = Rigor::Analysis::BufferBinding.new(
             logical_path: logical, physical_path: physical
           )
-          # "3.0" is version-shaped (passes Configuration's own
-          # validation) but is older than Prism's supported set, so
-          # Prism.parse itself raises ArgumentError — a discriminating
-          # probe that the buffer-path resolve() AND target_ruby both
-          # actually reach Prism.parse's `version:` keyword.
+          # "3.0" is version-shaped (passes Configuration's own validation) but is older than Prism's supported set, so
+          # Prism.parse itself raises ArgumentError — a discriminating probe that the buffer-path resolve() AND
+          # target_ruby both actually reach Prism.parse's `version:` keyword.
           configuration = Rigor::Configuration.new("paths" => ["lib"], "target_ruby" => "3.0")
           session = described_class.new(
             configuration: configuration, cache_store: nil, buffer: binding
@@ -410,9 +407,8 @@ RSpec.describe Rigor::Analysis::WorkerSession do
        "with column = location.start_column + 1" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, "code.rb")
-        # A flip-flop condition is a directly-unrecognised node, so the
-        # CoverageScanner records a real fail-soft fallback event — driving
-        # `explain_diagnostics` through the non-empty `result.events` map.
+        # A flip-flop condition is a directly-unrecognised node, so the CoverageScanner records a real fail-soft
+        # fallback event — driving `explain_diagnostics` through the non-empty `result.events` map.
         File.write(path, "if (a..b)\nend\n")
         configuration = Rigor::Configuration.new("paths" => [path])
 
@@ -495,8 +491,8 @@ RSpec.describe Rigor::Analysis::WorkerSession do
       Dir.mktmpdir do |dir|
         path = File.join(dir, "code.rb")
         File.write(path, "x = 1\n")
-        # Same "version-shaped but Prism-unsupported" probe as above,
-        # exercised on the non-buffer `Prism.parse_file` path this time.
+        # Same "version-shaped but Prism-unsupported" probe as above, exercised on the non-buffer `Prism.parse_file`
+        # path this time.
         configuration = Rigor::Configuration.new("paths" => [path], "target_ruby" => "3.0")
 
         session = Dir.chdir(dir) do
@@ -605,13 +601,10 @@ RSpec.describe Rigor::Analysis::WorkerSession do
     end
   end
 
-  # Per-file diagnostic comparison key. Severity is intentionally
-  # excluded from the key because the Runner re-stamps severity
-  # via `apply_severity_profile` AFTER the per-file pass, whereas
-  # the WorkerSession returns raw (un-stamped) per-file output —
-  # severity-profile application is the caller's responsibility.
-  # The remaining fields capture every per-file invariant the
-  # equivalence contract is built on.
+  # Per-file diagnostic comparison key. Severity is intentionally excluded from the key because the Runner re-stamps
+  # severity via `apply_severity_profile` AFTER the per-file pass, whereas the WorkerSession returns raw (un-stamped)
+  # per-file output — severity-profile application is the caller's responsibility. The remaining fields capture every
+  # per-file invariant the equivalence contract is built on.
   def diag_keys(diagnostics)
     diagnostics.map do |d|
       [d.path, d.line, d.column, d.rule, d.source_family, d.message]

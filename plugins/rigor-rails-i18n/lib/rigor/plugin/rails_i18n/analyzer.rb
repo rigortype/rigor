@@ -6,85 +6,64 @@ require "prism"
 module Rigor
   module Plugin
     class RailsI18n < Rigor::Plugin::Base
-      # Walks a parsed file's AST looking for `t(...)` /
-      # `I18n.t(...)` / `I18n.translate(...)` calls with a
-      # literal-string first argument. Calls with a non-literal
-      # key (variable, expression) are silently passed through —
-      # the plugin only validates what it can prove statically.
+      # Walks a parsed file's AST looking for `t(...)` / `I18n.t(...)` / `I18n.translate(...)` calls with a
+      # literal-string first argument. Calls with a non-literal key (variable, expression) are silently
+      # passed through — the plugin only validates what it can prove statically.
       #
       # ## What gets emitted per recognised call
       #
-      # - `plugin.rails-i18n.translation-call` (info) names the
-      #   key and the locales it resolves in.
-      # - `plugin.rails-i18n.unknown-key` (error) when the key
-      #   is missing from every loaded locale; the message
-      #   includes a did-you-mean suggestion drawn from the
-      #   index.
-      # - `plugin.rails-i18n.missing-locale` (warning) when the
-      #   key resolves in some configured locales but is absent
-      #   from at least one. Suppressed when the call passes
-      #   `default:` (the user has signalled they're aware of
-      #   the partial coverage).
-      # - `plugin.rails-i18n.wrong-interpolation` (error) when
-      #   the call's interpolation hash uses keys that don't
-      #   match the value's `%{var}` placeholders, or omits a
-      #   required placeholder.
+      # - `plugin.rails-i18n.translation-call` (info) names the key and the locales it resolves in.
+      # - `plugin.rails-i18n.unknown-key` (error) when the key is missing from every loaded locale; the
+      #   message includes a did-you-mean suggestion drawn from the index.
+      # - `plugin.rails-i18n.missing-locale` (warning) when the key resolves in some configured locales but
+      #   is absent from at least one. Suppressed when the call passes `default:` (the user has signalled
+      #   they're aware of the partial coverage).
+      # - `plugin.rails-i18n.wrong-interpolation` (error) when the call's interpolation hash uses keys that
+      #   don't match the value's `%{var}` placeholders, or omits a required placeholder.
       module Analyzer
         TRANSLATE_METHODS = %i[t translate].freeze
 
-        # Methods that are always I18n receivers (`I18n.t`,
-        # `::I18n.t`).
+        # Methods that are always I18n receivers (`I18n.t`, `::I18n.t`).
         I18N_RECEIVER_NAMES = %w[I18n ::I18n].freeze
 
-        # Matches controller file paths so lazy keys (`.key`)
-        # can be expanded to `<controller_scope>.<action>.<key>`.
-        # Captures the path segment between `controllers/` and
+        # Matches controller file paths so lazy keys (`.key`) can be expanded to
+        # `<controller_scope>.<action>.<key>`. Captures the path segment between `controllers/` and
         # `_controller.rb` (e.g. `users`, `admin/users`).
         CONTROLLER_PATH_RE = %r{(?:^|/)controllers/(.+)_controller\.rb$}
 
-        # Matches Rails view-template file paths to derive the
-        # I18n "virtual path" — the scope that Rails uses for
-        # lazy `t('.key')` lookups inside a template.
+        # Matches Rails view-template file paths to derive the I18n "virtual path" — the scope that Rails
+        # uses for lazy `t('.key')` lookups inside a template.
         #
-        # Captures the path segment between `views/` and the
-        # format+variant+handler suffix, then strips a leading
-        # underscore from each segment — Rails templates resolve
-        # `_form.html.erb` as "form", not "_form".
+        # Captures the path segment between `views/` and the format+variant+handler suffix, then strips a
+        # leading underscore from each segment — Rails templates resolve `_form.html.erb` as "form", not
+        # "_form".
         #
         #   app/views/setting/index.html.erb      → setting.index
         #   app/views/admin/users/new.html.erb    → admin.users.new
         #   app/views/home/index.html+mobile.erb  → home.index
         #   app/views/users/_form.html.erb        → users.form
         #
-        # The view-scope lazy expansion replaces the action
-        # part with the view's virtual path:
+        # The view-scope lazy expansion replaces the action part with the view's virtual path:
         #   `<%= t('.title') %>` → `setting.index.title`
         VIEW_SCOPE_RE = %r{views/(.+?)\.(?:\w+)(?:\+\w+)?\.\w+\z}
 
-        # Regex to extract lazy-key arguments from ERB / HTML
-        # template content. Matches `t('.key')`, `t(".key")`,
-        # `I18n.t('.key')`, and `I18n.translate('.key')` with a
-        # leading dot on the key string. Captures only the key
-        # part after the dot.
+        # Regex to extract lazy-key arguments from ERB / HTML template content. Matches `t('.key')`,
+        # `t(".key")`, `I18n.t('.key')`, and `I18n.translate('.key')` with a leading dot on the key string.
+        # Captures only the key part after the dot.
         LAZY_T_KEY_RE = /\b(?:I18n\.)?(?:t|translate)\s*\(\s*(?:"\.([^"\\]*)"|'\.([^'\\]*)')/
 
-        # Reserved option keys — these are recognised by I18n
-        # itself and not treated as interpolation variables.
+        # Reserved option keys — these are recognised by I18n itself and not treated as interpolation
+        # variables.
         RESERVED_OPTION_KEYS = %i[
           default scope locale count raise throw fallback
           fallback_in_progress separator deep_interpolation
         ].to_set.freeze
 
-        # Key prefixes Rails / `rails-i18n` ship in every
-        # locale by default. Projects whose own locale files
-        # don't redeclare them still get them at runtime (via
-        # the `rails-i18n` gem's bundled locale catalogues).
-        # `t('date.order')` is the canonical Mastodon case —
-        # used by `Settings::Date::Order` and date-of-birth
-        # selects, never authored project-side. Skip
-        # `unknown-key` for these; downstream interpolation
-        # checks have nothing to validate without a leaf entry
-        # so they decline silently too.
+        # Key prefixes Rails / `rails-i18n` ship in every locale by default. Projects whose own locale
+        # files don't redeclare them still get them at runtime (via the `rails-i18n` gem's bundled locale
+        # catalogues). `t('date.order')` is the canonical Mastodon case — used by `Settings::Date::Order`
+        # and date-of-birth selects, never authored project-side. Skip `unknown-key` for these; downstream
+        # interpolation checks have nothing to validate without a leaf entry so they decline silently too.
         RAILS_SHIPPED_KEY_PREFIXES = %w[
           date.
           time.
@@ -101,9 +80,8 @@ module Rigor
           activerecord.errors.models.
         ].freeze
 
-        # One translation-call observation. Carries no path/location —
-        # the caller (the `node_rule` block) positions it via
-        # `Plugin::Base#diagnostic`.
+        # One translation-call observation. Carries no path/location — the caller (the `node_rule` block)
+        # positions it via `Plugin::Base#diagnostic`.
         Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
@@ -118,12 +96,10 @@ module Rigor
         # @param locale_index [LocaleIndex]
         # @param configured_locales [Array<String>]
         # @return [Array<Diagnostic>]
-        # The translation violations for a single call node, or `[]`
-        # when it is not a recognised `t` / `translate` call with a
-        # literal key. ADR-37: the engine owns the walk; `action` (the
-        # enclosing method, for lazy `t('.key')` expansion) comes from
-        # the node-rule `NodeContext`, and `controller_scope` from the
-        # file path.
+        # The translation violations for a single call node, or `[]` when it is not a recognised `t` /
+        # `translate` call with a literal key. ADR-37: the engine owns the walk; `action` (the enclosing
+        # method, for lazy `t('.key')` expansion) comes from the node-rule `NodeContext`, and
+        # `controller_scope` from the file path.
         #
         # @param call_node [Prism::Node]
         # @param locale_index [LocaleIndex]
@@ -143,11 +119,11 @@ module Rigor
           options = options_hash(call_node)
           entry = locale_index.find(literal_key)
           if entry.nil?
-            # CLDR pluralization namespace: `t('accounts.posts', count: n)`
-            # resolves through a `.one` / `.other` child — not missing.
+            # CLDR pluralization namespace: `t('accounts.posts', count: n)` resolves through a `.one` /
+            # `.other` child — not missing.
             return [] if locale_index.pluralization_namespace?(literal_key)
-            # Rails / rails-i18n ship `date.order`, `time.am`, etc. in
-            # every locale at runtime even when project files omit them.
+            # Rails / rails-i18n ship `date.order`, `time.am`, etc. in every locale at runtime even when
+            # project files omit them.
             return [] if rails_shipped_key?(literal_key)
 
             return [unknown_key_violation(literal_key, locale_index)]
@@ -162,9 +138,8 @@ module Rigor
           violations
         end
 
-        # Derives the Rails controller scope from the file path,
-        # e.g. `app/controllers/admin/users_controller.rb` → `admin.users`.
-        # Returns nil for non-controller paths.
+        # Derives the Rails controller scope from the file path, e.g.
+        # `app/controllers/admin/users_controller.rb` → `admin.users`. Returns nil for non-controller paths.
         def controller_scope_from_path(path)
           m = CONTROLLER_PATH_RE.match(path.to_s)
           return nil unless m
@@ -198,12 +173,10 @@ module Rigor
           violations
         end
 
-        # Expands a lazy key (starting with `.`) to its full
-        # dotted path using the controller scope and action name.
-        # Returns the raw key unchanged for absolute keys.
-        # Returns nil for lazy keys outside a controller context
-        # or without an enclosing action — these are silently
-        # skipped to avoid false positives.
+        # Expands a lazy key (starting with `.`) to its full dotted path using the controller scope and
+        # action name. Returns the raw key unchanged for absolute keys. Returns nil for lazy keys outside a
+        # controller context or without an enclosing action — these are silently skipped to avoid false
+        # positives.
         def expand_key(raw_key, controller_scope:, action:)
           return raw_key unless raw_key.start_with?(".")
           return nil unless controller_scope && action
@@ -219,9 +192,8 @@ module Rigor
           I18N_RECEIVER_NAMES.include?(receiver_name)
         end
 
-        # Extracts the literal-string first argument when
-        # present. Returns nil for variable / expression keys —
-        # only literal keys are statically validated.
+        # Extracts the literal-string first argument when present. Returns nil for variable / expression
+        # keys — only literal keys are statically validated.
         def literal_key_for(call_node)
           args = call_node.arguments&.arguments || []
           return nil if args.empty?
@@ -232,11 +204,9 @@ module Rigor
           first.unescaped
         end
 
-        # Pulls the interpolation hash from the call's
-        # arguments. The trailing `Hash` argument (or
-        # `Prism::KeywordHashNode`) carries both reserved I18n
-        # options (`default:`, `scope:`, …) and interpolation
-        # variables. Returns:
+        # Pulls the interpolation hash from the call's arguments. The trailing `Hash` argument (or
+        # `Prism::KeywordHashNode`) carries both reserved I18n options (`default:`, `scope:`, …) and
+        # interpolation variables. Returns:
         #   {
         #     :has_default     => bool,
         #     :all_keys        => Set<Symbol>     (every assoc key in the hash),
@@ -244,15 +214,11 @@ module Rigor
         #     :hash_node       => Prism::Node (or nil)
         #   }
         #
-        # Note: a reserved option key (e.g. `count:`) can
-        # also serve as an interpolation value when the
-        # locale's leaf string has `%{count}`. The analyzer
-        # therefore checks the missing-placeholder set
-        # against `all_keys` (so `count:` satisfies a
-        # `%{count}` placeholder) and the
-        # extra-placeholder set against `non_reserved` (so
-        # `default:` / `scope:` are never reported as
-        # extra interpolation arguments).
+        # Note: a reserved option key (e.g. `count:`) can also serve as an interpolation value when the
+        # locale's leaf string has `%{count}`. The analyzer therefore checks the missing-placeholder set
+        # against `all_keys` (so `count:` satisfies a `%{count}` placeholder) and the extra-placeholder set
+        # against `non_reserved` (so `default:` / `scope:` are never reported as extra interpolation
+        # arguments).
         def options_hash(call_node)
           args = call_node.arguments&.arguments || []
           last = args.last
@@ -275,8 +241,8 @@ module Rigor
         end
 
         def collect_assoc_keys(hash_node)
-          # Both `Prism::HashNode` and `Prism::KeywordHashNode`
-          # expose `#elements`, so a single path handles both.
+          # Both `Prism::HashNode` and `Prism::KeywordHashNode` expose `#elements`, so a single path
+          # handles both.
           hash_node.elements.filter_map do |element|
             next nil unless element.is_a?(Prism::AssocNode)
 

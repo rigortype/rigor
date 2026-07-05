@@ -87,10 +87,8 @@ RSpec.describe Rigor::Environment::RbsCoverageReport do
     end
 
     it "respects DEFAULT_LIBRARIES precedence over VENDORED_GEM_NAMES (DEFAULT wins)" do
-      # If a gem is in both lists, the order in `classify` puts
-      # default_library first. In practice this is a theoretical
-      # case — DEFAULT_LIBRARIES and vendored_gem_sigs are
-      # curated to not overlap — but the contract is stable.
+      # If a gem is in both lists, the order in `classify` puts default_library first. In practice this is a theoretical
+      # case — DEFAULT_LIBRARIES and vendored_gem_sigs are curated to not overlap — but the contract is stable.
       locked_gems = { "json" => locked("json", "2.0") }
       rows = described_class.classify(
         locked_gems: locked_gems,

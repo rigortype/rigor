@@ -30,8 +30,7 @@ RSpec.describe Rigor::LanguageServer::SelectionRangeProvider do
     end
 
     it "builds an outward-chained linked list from innermost to root" do
-      # `class Foo; def m; 42; end; end` — selecting on `42`
-      # gives [innermost=42, def m, class Foo, root].
+      # `class Foo; def m; 42; end; end` — selecting on `42` gives [innermost=42, def m, class Foo, root].
       source = <<~RUBY
         class Foo
           def m
@@ -45,8 +44,7 @@ RSpec.describe Rigor::LanguageServer::SelectionRangeProvider do
       range = result.first
       expect(range).not_to be_nil
 
-      # Walk the parent chain. Innermost should be the smallest
-      # range; each parent strictly contains its child.
+      # Walk the parent chain. Innermost should be the smallest range; each parent strictly contains its child.
       chain = []
       current = range
       while current
@@ -54,8 +52,7 @@ RSpec.describe Rigor::LanguageServer::SelectionRangeProvider do
         current = current[:parent]
       end
       expect(chain.size).to be >= 3 # at minimum integer + def + class
-      # Each parent should contain its child (start <= child.start
-      # and end >= child.end).
+      # Each parent should contain its child (start <= child.start and end >= child.end).
       chain.each_cons(2) do |child, parent|
         expect(parent[:start][:line]).to be <= child[:start][:line]
         expect(parent[:end][:line]).to be >= child[:end][:line]

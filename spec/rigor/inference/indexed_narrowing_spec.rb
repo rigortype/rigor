@@ -7,14 +7,11 @@ require "rigor/inference/indexed_narrowing"
 require "rigor/scope"
 require "rigor/type"
 
-# Unit-level coverage for {Rigor::Inference::IndexedNarrowing}.
-# The recorder side (`Inference::StatementEvaluator#eval_index_or_write`)
-# and the consumer side (`Inference::ExpressionTyper#call_type_for`)
-# are exercised end-to-end by the
-# `fixtures/indexed_or_narrowing.rb` integration fixture; this
-# file pins the address-recognition + invalidation primitives
-# in isolation so the narrowing's soundness story has a stable
-# regression surface.
+# Unit-level coverage for {Rigor::Inference::IndexedNarrowing}. The recorder side
+# (`Inference::StatementEvaluator#eval_index_or_write`) and the consumer side
+# (`Inference::ExpressionTyper#call_type_for`) are exercised end-to-end by the `fixtures/indexed_or_narrowing.rb`
+# integration fixture; this file pins the address-recognition + invalidation primitives in isolation so the narrowing's
+# soundness story has a stable regression surface.
 RSpec.describe Rigor::Inference::IndexedNarrowing do
   let(:scope) { Rigor::Scope.empty }
   let(:tuple_empty) { Rigor::Type::Combinator.tuple_of }

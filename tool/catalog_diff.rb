@@ -1,16 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Compares two snapshots of a `data/builtins/ruby_core/<topic>.yml`
-# catalog and prints the surface-level diff: per-class additions
-# / removals / purity changes / arity changes / cfunc renames.
+# Compares two snapshots of a `data/builtins/ruby_core/<topic>.yml` catalog and prints the surface-level diff: per-class
+# additions / removals / purity changes / arity changes / cfunc renames.
 #
-# The motivating use is a `references/ruby` submodule bump: when
-# CRuby moves its public API around, individual cfunc names (and
-# occasionally classifications) shift. The full YAML diff is
-# noisy because it interleaves prose comments, RBS pulls, and
-# `defined_at` line numbers; this tool extracts the catalog-
-# semantic deltas that a reviewer actually has to look at.
+# The motivating use is a `references/ruby` submodule bump: when CRuby moves its public API around, individual cfunc
+# names (and occasionally classifications) shift. The full YAML diff is noisy because it interleaves prose comments, RBS
+# pulls, and `defined_at` line numbers; this tool extracts the catalog- semantic deltas that a reviewer actually has to
+# look at.
 #
 # Usage:
 #
@@ -45,9 +42,8 @@ end
 before = YAML.safe_load_file(before_path, permitted_classes: [Symbol])
 after = YAML.safe_load_file(after_path, permitted_classes: [Symbol])
 
-# Compares two `instance_methods` / `singleton_methods` hashes
-# under a single class and yields the diff records. Each record
-# is `[kind, *details]` where `kind` is one of:
+# Compares two `instance_methods` / `singleton_methods` hashes under a single class and yields the diff records. Each
+# record is `[kind, *details]` where `kind` is one of:
 #
 # - `:added`   — selector present only in `after`.
 # - `:removed` — selector present only in `before`.

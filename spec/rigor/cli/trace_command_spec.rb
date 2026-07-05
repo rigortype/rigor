@@ -73,9 +73,8 @@ RSpec.describe Rigor::CLI::TraceCommand do
   it "replays a file containing multibyte characters (Prism offsets are bytes)" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "multibyte.rb")
-      # An em dash before the code shifts every later byte offset off
-      # its character index; a multibyte literal exercises the
-      # highlight slicing itself.
+      # An em dash before the code shifts every later byte offset off its character index; a multibyte literal exercises
+      # the highlight slicing itself.
       File.write(path, "# コメント — note\na = \"あ\"\nb = a + \"い\"\n")
 
       status, out, err = run_cli("trace", path)

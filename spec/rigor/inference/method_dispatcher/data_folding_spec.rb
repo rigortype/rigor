@@ -2,13 +2,10 @@
 
 require "spec_helper"
 
-# ADR-48 — `Data.define` value folding, exercised end-to-end through the
-# full Runner pipeline (the project pre-pass that builds the class-name ->
-# member-layout side-table only runs there, not under the reduced
-# precision-snapshot harness).
+# ADR-48 — `Data.define` value folding, exercised end-to-end through the full Runner pipeline (the project pre-pass that
+# builds the class-name -> member-layout side-table only runs there, not under the reduced precision-snapshot harness).
 RSpec.describe "Data.define value folding", type: :runner do
-  # Returns the `describe(:short)` strings recorded by each `dump_type(...)`
-  # call in source order.
+  # Returns the `describe(:short)` strings recorded by each `dump_type(...)` call in source order.
   def dumped_types(source)
     result = analyze("require \"rigor/testing\"\ninclude Rigor::Testing\n#{source}")
     result.diagnostics
@@ -83,10 +80,9 @@ RSpec.describe "Data.define value folding", type: :runner do
       RUBY
     end
 
-    # Regression: `build_fresh_body_scope` (the ADR-44 single-allocation
-    # body-scope constructor) must carry `data_member_layouts` like every
-    # other discovery table — it was omitted when ADR-48 added the table,
-    # so member folding silently degraded inside method bodies.
+    # Regression: `build_fresh_body_scope` (the ADR-44 single-allocation body-scope constructor) must carry
+    # `data_member_layouts` like every other discovery table — it was omitted when ADR-48 added the table, so member
+    # folding silently degraded inside method bodies.
     it "keeps the member layout visible inside a method body" do
       expect(dumped_types(<<~RUBY)).to eq(["3"])
         Point = Data.define(:x, :y)
@@ -126,10 +122,8 @@ RSpec.describe "Data.define value folding", type: :runner do
     end
 
     it "does not fold a bare-local Data.define carrying a block" do
-      # The local block form has no resolvable class name, so its block
-      # method definitions cannot be consulted to guard a redefined reader;
-      # it stays conservatively unfolded (the named forms below do fold,
-      # guarded).
+      # The local block form has no resolvable class name, so its block method definitions cannot be consulted to guard
+      # a redefined reader; it stays conservatively unfolded (the named forms below do fold, guarded).
       types = dumped_types(<<~RUBY)
         c = Data.define(:x) do
           def double = x * 2
@@ -162,8 +156,8 @@ RSpec.describe "Data.define value folding", type: :runner do
     end
 
     it "does not fold a member read whose reader the subclass body redefines" do
-      # `def x` shadows the synthesised reader, so `p.x` runs that method, not
-      # the member — folding it to the member value would be unsound.
+      # `def x` shadows the synthesised reader, so `p.x` runs that method, not the member — folding it to the member
+      # value would be unsound.
       types = dumped_types(<<~RUBY)
         class Point < Data.define(:x, :y)
           def x = "overridden"

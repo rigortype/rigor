@@ -7,10 +7,8 @@ require_relative "lib/runtime"
 #   RUBYLIB=$PWD/../lib bundle exec rigor check
 #
 # rigor-statesman performs a two-pass analysis on each file:
-#   pass 1 — collect every `state :name` declaration inside
-#            `state_machine do ... end` blocks.
-#   pass 2 — validate every `transition_to(:sym)` call site
-#            against the collected state set.
+#   pass 1 — collect every `state :name` declaration inside `state_machine do ... end` blocks.
+#   pass 2 — validate every `transition_to(:sym)` call site against the collected state set.
 
 class Order
   state_machine do
@@ -33,7 +31,7 @@ order.transition_to(:approved)
 order.transition_to(:rejected)
 order.transition_to(:draft)
 
-# Non-Symbol arguments stay silent (the plugin can't statically
-# know which state value the variable resolves to).
+# Non-Symbol arguments stay silent (the plugin can't statically know which state value the variable
+# resolves to).
 target = :submitted
 order.transition_to(target)

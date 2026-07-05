@@ -19,8 +19,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
 
   describe "default body (unspecialised nodes)" do
     it "renders the slice-A1 type / erased / node body for an unspecialised node" do
-      # `BreakNode` has no specialisation in slices A1-A4; it
-      # exercises the default rendering path. The `break` keyword
+      # `BreakNode` has no specialisation in slices A1-A4; it exercises the default rendering path. The `break` keyword
       # has no inferable type so the renderer surfaces `untyped`.
       root = Prism.parse("loop { break 1 }").value
       break_node = nil
@@ -59,8 +58,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
     end
 
     it "falls back to the default body for implicit-`self` calls (no receiver)" do
-      # `foo` with no receiver — implicit self is not specialised;
-      # the renderer falls through to the default body.
+      # `foo` with no receiver — implicit self is not specialised; the renderer falls through to the default body.
       root, index = parse_and_index("foo\n")
       call_node = root.statements.body.first
       scope = index[call_node]
@@ -71,9 +69,8 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
     end
 
     it "falls back to the default body when the method isn't in the RBS env" do
-      # `1.totally_made_up_method` — receiver type known (Integer)
-      # but method doesn't resolve. Render falls through to the
-      # default body rather than emitting a bogus signature.
+      # `1.totally_made_up_method` — receiver type known (Integer) but method doesn't resolve. Render falls through to
+      # the default body rather than emitting a bogus signature.
       root, index = parse_and_index("1.totally_made_up_method\n")
       call_node = root.statements.body.first
       scope = index[call_node]
@@ -84,8 +81,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
     end
 
     it "appends RBS documentation when the method has comments (slice C3)" do
-      # `String#upcase`'s RBS in core ships with rdoc comments;
-      # hover should surface them below the code block.
+      # `String#upcase`'s RBS in core ships with rdoc comments; hover should surface them below the code block.
       root, index = parse_and_index("\"hello\".upcase\n")
       call_node = root.statements.body.first
       scope = index[call_node]
@@ -93,8 +89,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
       result = renderer.render(node: call_node, type: scope.type_of(call_node), node_scope_lookup: index)
       body = result[:contents][:value]
 
-      # The doc text contains rdoc-flavoured markup; just check
-      # the separator + at least one comment line is present.
+      # The doc text contains rdoc-flavoured markup; just check the separator + at least one comment line is present.
       expect(body).to include("---")
       expect(body).to match(/Returns|String/)
     end
@@ -107,8 +102,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
       result = renderer.render(node: call_node, type: scope.type_of(call_node), node_scope_lookup: index)
       body = result[:contents][:value]
 
-      # Should surface receiver class + the dot separator that marks
-      # a singleton dispatch.
+      # Should surface receiver class + the dot separator that marks a singleton dispatch.
       expect(body).to include("String")
       expect(body).to include("String.new:")
     end
@@ -124,8 +118,8 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
 
       expect(result).to include(:range)
       range = result[:range]
-      # `"hello".upcase` sits on LSP line 0; spans from col 0 to
-      # col 14 (length of the call expression including the dot).
+      # `"hello".upcase` sits on LSP line 0; spans from col 0 to col 14 (length of the call expression including the
+      # dot).
       expect(range[:start]).to eq(line: 0, character: 0)
       expect(range[:end][:line]).to eq(0)
       expect(range[:end][:character]).to be > 0
@@ -158,14 +152,10 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
     end
 
     it "falls back to the default body for value constants (e.g. FOO = 42)" do
-      # Without seeing `FOO = 42` in the buffer the renderer can't
-      # know the constant is a value; we test with an unknown
-      # bare-Constant whose type isn't a Singleton — the renderer
-      # must still produce a body (the default one). For this we
-      # use a known not-in-RBS constant by constructing the type
-      # directly is over-mocking; instead test the negative path
-      # via the absence of `# Constant` framing when type isn't
-      # `Singleton`.
+      # Without seeing `FOO = 42` in the buffer the renderer can't know the constant is a value; we test with an unknown
+      # bare-Constant whose type isn't a Singleton — the renderer must still produce a body (the default one). For this
+      # we use a known not-in-RBS constant by constructing the type directly is over-mocking; instead test the negative
+      # path via the absence of `# Constant` framing when type isn't `Singleton`.
       root, index = parse_and_index("CONSTANT_DOES_NOT_EXIST\n")
       const_node = root.statements.body.first
       scope = index[const_node]
@@ -206,8 +196,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
 
       expect(body).to include("# Type")
       expect(body).to include("# Erased")
-      # The string literal infers to `Constant<"hi">`; its
-      # erase_to_rbs is the inspected literal, not `::String`.
+      # The string literal infers to `Constant<"hi">`; its erase_to_rbs is the inspected literal, not `::String`.
       expect(body).to include("\"hi\"")
     end
 
@@ -219,17 +208,15 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
       result = renderer.render(node: arr_node, type: scope.type_of(arr_node), node_scope_lookup: index)
       body = result[:contents][:value]
 
-      # Tuple<1, 2, 3> or similar carrier description; the exact
-      # shape comes from Type::Tuple#describe.
+      # Tuple<1, 2, 3> or similar carrier description; the exact shape comes from Type::Tuple#describe.
       expect(body).to include("# Type")
       expect(body).to include("# Erased")
     end
 
     it "surfaces the refinement name for refined carriers" do
-      # We construct a refined type directly because triggering
-      # narrowing through source requires more setup than the test
-      # needs; the renderer's surface contract is "if the type
-      # responds to canonical_name with a non-nil value, surface it."
+      # We construct a refined type directly because triggering narrowing through source requires more setup than the
+      # test needs; the renderer's surface contract is "if the type responds to canonical_name with a non-nil value,
+      # surface it."
       refined = Rigor::Type::Combinator.non_empty_string
       stub_node = Prism.parse("nil\n").value.statements.body.first
       stub_index = { stub_node => Rigor::Scope.empty }
@@ -252,8 +239,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
 
       expect(body).to include("# Local\nx")
       expect(body).to include("# Type")
-      # `x` was assigned `42`; the inferred type for the read should
-      # be a Constant<42> or Nominal[Integer] form.
+      # `x` was assigned `42`; the inferred type for the read should be a Constant<42> or Nominal[Integer] form.
       expect(body).to match(/# Type\n\d+|# Type\nInteger/)
     end
 

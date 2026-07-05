@@ -15,10 +15,9 @@ if ENV["COVERAGE"]
     end
     report = rows.sort_by { |_, total, hit| hit.to_f / [total, 1].max }
 
-    # Opt-in structured dump for the self-mutation harness (tool/mutation/
-    # self_mutate.rb --coverage-gap): {lib-relative path => [executed line
-    # numbers]}. A mutation site on a line absent here is run by no spec, so it
-    # is provably test-unprotected without a per-mutant suite run.
+    # Opt-in structured dump for the self-mutation harness (tool/mutation/self_mutate.rb --coverage-gap): {lib-relative
+    # path => [executed line numbers]}. A mutation site on a line absent here is run by no spec, so it is provably
+    # test-unprotected without a per-mutant suite run.
     if ENV["COVERAGE_JSON"]
       require "json"
       covered = lib_files.to_h do |path, data|
@@ -45,19 +44,15 @@ end
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 
-# Silence MRI's once-per-process "Ractor API is experimental" warning
-# during test runs. Rigor uses Ractors as a committed production
-# feature (ADR-15 Phase 4 — `Analysis::Runner` worker pool), so the
-# warning is informational noise on every `make verify`. Suppressed
-# only here — downstream `rigortype` users keep the warning.
+# Silence MRI's once-per-process "Ractor API is experimental" warning during test runs. Rigor uses Ractors as a
+# committed production feature (ADR-15 Phase 4 — `Analysis::Runner` worker pool), so the warning is informational noise
+# on every `make verify`. Suppressed only here — downstream `rigortype` users keep the warning.
 Warning[:experimental] = false if Warning.respond_to?(:[]=)
 
-# ADR-51 WD7 — disable CI auto-detection for the whole suite so the many
-# `rigor check` text-output specs are deterministic regardless of whether
-# the suite itself runs under a CI (Rigor's own CI is GitHub Actions, which
-# would otherwise make `rigor check` augment its output with `::error`
-# annotations). The CiDetector specs opt back in per-example by setting the
-# platform env var + `RIGOR_CI_DETECT=1` and restoring both after.
+# ADR-51 WD7 — disable CI auto-detection for the whole suite so the many `rigor check` text-output specs are
+# deterministic regardless of whether the suite itself runs under a CI (Rigor's own CI is GitHub Actions, which would
+# otherwise make `rigor check` augment its output with `::error` annotations). The CiDetector specs opt back in
+# per-example by setting the platform env var + `RIGOR_CI_DETECT=1` and restoring both after.
 ENV["RIGOR_CI_DETECT"] = "0"
 
 require "rigor"
@@ -73,17 +68,12 @@ RSpec.configure do |config|
     meta[:type] = :runner
   end
 
-  # ADR-15 Phase 4b — `spec/rigor/analysis/runner_pool_spec.rb` is
-  # excluded from the default suite and runs as its own rspec
-  # process via `make test-ractor-pool` (part of `make verify` and
-  # CI). The original reason was real Ractor spawns destabilising
-  # LATER same-process specs (Bus Error in the inference path —
-  # likely RBS C-extension state interacting with main-Ractor GC
-  # after Ractor cleanup). Since the fork-backend default
-  # (86ed9129, `Runner#pool_backend`) the file spawns no Ractors
-  # unless RIGOR_POOL_BACKEND=ractor is exported; the exclusion is
-  # kept so an exported backend override can never destabilise the
-  # main suite. Set `RIGOR_INCLUDE_RACTOR_POOL=1` to opt the file
-  # back in to a same-process run.
+  # ADR-15 Phase 4b — `spec/rigor/analysis/runner_pool_spec.rb` is excluded from the default suite and runs as its own
+  # rspec process via `make test-ractor-pool` (part of `make verify` and CI). The original reason was real Ractor spawns
+  # destabilising LATER same-process specs (Bus Error in the inference path — likely RBS C-extension state interacting
+  # with main-Ractor GC after Ractor cleanup). Since the fork-backend default (86ed9129, `Runner#pool_backend`) the file
+  # spawns no Ractors unless RIGOR_POOL_BACKEND=ractor is exported; the exclusion is kept so an exported backend
+  # override can never destabilise the main suite. Set `RIGOR_INCLUDE_RACTOR_POOL=1` to opt the file back in to a
+  # same-process run.
   config.exclude_pattern = "spec/rigor/analysis/runner_pool_spec.rb" unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
 end

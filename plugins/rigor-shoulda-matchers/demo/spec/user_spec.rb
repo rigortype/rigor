@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
-# Worked example — rigor-shoulda-matchers validates the
-# columns / associations referenced by shoulda matchers
-# against the `:model_index` published by
-# `rigor-activerecord`. Activate both plugins for the cross-
-# check to fire; with `rigor-activerecord` alone, the column
-# / association names are silently accepted.
+# Worked example — rigor-shoulda-matchers validates the columns / associations referenced by shoulda
+# matchers against the `:model_index` published by `rigor-activerecord`. Activate both plugins for the
+# cross-check to fire; with `rigor-activerecord` alone, the column / association names are silently
+# accepted.
 
 RSpec.describe User do
   it { is_expected.to validate_presence_of(:email) }      # OK if `email` is a column

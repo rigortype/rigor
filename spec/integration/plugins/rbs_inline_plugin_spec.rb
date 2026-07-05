@@ -2,14 +2,10 @@
 
 # Integration spec for `plugins/rigor-rbs-inline/`.
 #
-# ADR-32 — the plugin calls the upstream `rbs-inline` library
-# to synthesise RBS from Ruby source files carrying
-# rbs-inline-shaped comments and contributes the result to the
-# RBS environment via the `source_rbs_synthesizer:` manifest
-# hook. This spec proves the end-to-end path: with the plugin
-# active, a `# @rbs name: T`-shaped parameter annotation
-# enforces the contract just like a hand-written `.rbs`
-# signature would.
+# ADR-32 — the plugin calls the upstream `rbs-inline` library to synthesise RBS from Ruby source files carrying
+# rbs-inline-shaped comments and contributes the result to the RBS environment via the
+# `source_rbs_synthesizer:` manifest hook. This spec proves the end-to-end path: with the plugin active, a
+# `# @rbs name: T`-shaped parameter annotation enforces the contract just like a hand-written `.rbs` signature would.
 
 require "spec_helper"
 
@@ -119,12 +115,10 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       RUBY
       result = run_plugin(source: source)
       info_diagnostics = result.diagnostics.select { |d| d.qualified_rule == "source-rbs-synthesis-failed" }
-      # NOTE: rbs-inline is generally permissive and may not raise on
-      # every garbage input. The contract this test asserts is: IF
-      # the synthesizer hits an error, THE engine surfaces it as an
-      # info diagnostic (and analysis continues). If rbs-inline
-      # accepts our garbage silently, this is a no-op assertion path
-      # and the test reverts to verifying no crash + no rule violation.
+      # NOTE: rbs-inline is generally permissive and may not raise on every garbage input. The contract this
+      # test asserts is: IF the synthesizer hits an error, THE engine surfaces it as an info diagnostic (and
+      # analysis continues). If rbs-inline accepts our garbage silently, this is a no-op assertion path and the
+      # test reverts to verifying no crash + no rule violation.
       expect(info_diagnostics.all? { |d| d.severity == :info }).to be(true)
       # In either branch, analysis must complete cleanly.
       expect(result.diagnostics).to all(have_attributes(severity: be_a(Symbol)))
@@ -153,8 +147,8 @@ RSpec.describe "plugins/rigor-rbs-inline" do
 
         AscDesc.new.ascdesc(:bad)
       RUBY
-      # Re-use the same `project_dir` across both runs so the
-      # cache key (which includes the source file path) is stable.
+      # Re-use the same `project_dir` across both runs so the cache key (which includes the source file path)
+      # is stable.
       Rigor::Plugin.unregister!
       run_plugin_in_dir(dir: project_dir, source: source, cache_store: cache_store)
       writes_before = cache_store.stats.fetch(:writes)

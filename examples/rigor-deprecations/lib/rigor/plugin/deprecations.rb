@@ -5,17 +5,12 @@ require "rigor/plugin"
 
 module Rigor
   module Plugin
-    # Example plugin: surfaces deprecation warnings at every
-    # call site that matches a user-declared method signature.
-    # The smallest worked example of the v0.1.0 plugin authoring
-    # surface, and the recommended starting point for "I want to
-    # write my own Rigor plugin" — under 80 lines of plugin
-    # code, no I/O, no cache, no engine query.
+    # Example plugin: surfaces deprecation warnings at every call site that matches a user-declared method signature.
+    # The smallest worked example of the v0.1.0 plugin authoring surface, and the recommended starting point for "I want
+    # to write my own Rigor plugin" — under 80 lines of plugin code, no I/O, no cache, no engine query.
     #
-    # The plugin's value is **user-extensibility**: a user
-    # extends Rigor's lint surface for their own deprecations
-    # by editing `.rigor.yml`, with no plugin-side code. The
-    # plugin is the engine; the rules are pure data.
+    # The plugin's value is **user-extensibility**: a user extends Rigor's lint surface for their own deprecations by
+    # editing `.rigor.yml`, with no plugin-side code. The plugin is the engine; the rules are pure data.
     #
     # ## Configuration
     #
@@ -34,11 +29,9 @@ module Rigor
     #               replacement: "Warning[:deprecated] = false"
     #               since: "v7.0"
     #
-    # `receiver:` matches the literal source text of the call's
-    # receiver (`User.find_by_sql(...)` matches `receiver: User`,
-    # `ActiveRecord::Base.find_by_sql(...)` matches
-    # `receiver: ActiveRecord::Base`). Omitting `receiver:`
-    # matches any receiver including no-receiver calls.
+    # `receiver:` matches the literal source text of the call's receiver (`User.find_by_sql(...)` matches `receiver:
+    # User`, `ActiveRecord::Base.find_by_sql(...)` matches `receiver: ActiveRecord::Base`). Omitting `receiver:` matches
+    # any receiver including no-receiver calls.
     #
     # ## Diagnostic
     #
@@ -68,10 +61,8 @@ module Rigor
         end
       end
 
-      # ADR-37 — the engine owns the AST walk and hands us every
-      # CallNode; we emit one diagnostic per call site that matches a
-      # configured deprecation. No hand-rolled traversal, no manual
-      # Diagnostic construction.
+      # ADR-37 — the engine owns the AST walk and hands us every CallNode; we emit one diagnostic per call site that
+      # matches a configured deprecation. No hand-rolled traversal, no manual Diagnostic construction.
       node_rule Prism::CallNode do |node, _scope, path|
         next [] if @entries.empty?
 

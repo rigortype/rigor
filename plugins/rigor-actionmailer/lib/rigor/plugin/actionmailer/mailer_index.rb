@@ -3,17 +3,13 @@
 module Rigor
   module Plugin
     class Actionmailer < Rigor::Plugin::Base
-      # Frozen catalogue of discovered Mailer classes, each
-      # carrying:
+      # Frozen catalogue of discovered Mailer classes, each carrying:
       #
-      # - the action methods it defines (arity envelope per
-      #   action; same shape as `rigor-activejob`'s
+      # - the action methods it defines (arity envelope per action; same shape as `rigor-activejob`'s
       #   `JobIndex::Entry`)
-      # - the source file path the class was declared in
-      #   (used to anchor missing-view diagnostics on the
-      #   mailer file)
-      # - the list of `(action, location)` pairs whose view
-      #   templates are missing from `app/views/`
+      # - the source file path the class was declared in (used to anchor missing-view diagnostics on
+      #   the mailer file)
+      # - the list of `(action, location)` pairs whose view templates are missing from `app/views/`
       class MailerIndex
         ActionEntry = Data.define(:method_name, :min_arity, :max_arity, :def_line, :def_column) do
           def arity_label
@@ -33,12 +29,10 @@ module Rigor
             actions[method_name.to_sym]
           end
 
-          # True when the mailer `include`s a module whose
-          # source we couldn't index (typically a gem-shipped
-          # concern that defines additional mailer actions).
-          # Analyzer downgrades `unknown-action` to silence in
-          # this case — the unresolved module may legitimately
-          # provide the action.
+          # True when the mailer `include`s a module whose source we couldn't index (typically a
+          # gem-shipped concern that defines additional mailer actions). Analyzer downgrades
+          # `unknown-action` to silence in this case — the unresolved module may legitimately provide
+          # the action.
           def unresolved_includes?
             !unresolved_includes.empty?
           end
@@ -61,8 +55,7 @@ module Rigor
           @by_name.key?(class_name.to_s)
         end
 
-        # @param file_path [String] absolute path of a mailer
-        #   file (canonicalised — see plugin entry's
+        # @param file_path [String] absolute path of a mailer file (canonicalised — see plugin entry's
         #   `harvest`)
         # @return [ClassEntry, nil]
         def find_by_file(file_path)

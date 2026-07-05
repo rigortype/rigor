@@ -61,8 +61,8 @@ module Rigor
         result = with_tempfile(source) do |tmppath|
           stdout = run_cli(["check", "--format=json", tmppath])
           data   = JSON.parse(stdout)
-          # Keep only diagnostics from the user's temp file; replace the raw
-          # temp path with the virtual "<playground>" label.
+          # Keep only diagnostics from the user's temp file; replace the raw temp path with the virtual
+          # "<playground>" label.
           diags = (data["diagnostics"] || []).filter_map do |d|
             next unless d["path"] == tmppath
 
@@ -88,9 +88,8 @@ module Rigor
         source = read_source(env)
         return too_large if source.bytesize > MAX_SOURCE_BYTES
 
-        # `annotate --format json` returns { "annotations": { line => type } }
-        # straight from the engine's line-type map — no `#=> <type>` text to
-        # reparse. Keys are 1-based line numbers as strings.
+        # `annotate --format json` returns { "annotations": { line => type } } straight from the engine's
+        # line-type map — no `#=> <type>` text to reparse. Keys are 1-based line numbers as strings.
         out = with_tempfile(source) { |path| run_cli(["annotate", "--format=json", path]) }
         json_response(200, JSON.parse(out))
       rescue JSON::ParserError

@@ -6,28 +6,24 @@ require "rspec"
 
 require_relative "../../../lib/rigor/playground/app"
 
-# ADR-29 backend smoke tests. Runs against an in-process
-# `Rigor::Playground::App` via `Rack::Test::Methods`; no Puma boot.
+# ADR-29 backend smoke tests. Runs against an in-process `Rigor::Playground::App` via `Rack::Test::Methods`;
+# no Puma boot.
 #
 # Run from `plugins/rigor-playground/`:
 #
 #   bundle exec rspec spec/rigor/playground/app_spec.rb
 #
-# These specs are intentionally separate from the main Rigor
-# spec suite (`spec/` at the project root) because the
-# playground backend has its own Gemfile (`puma`, `rack`,
-# `rack-test`) and a different `BUNDLE_GEMFILE` boundary. They
-# are NOT part of `make verify`.
+# These specs are intentionally separate from the main Rigor spec suite (`spec/` at the project root)
+# because the playground backend has its own Gemfile (`puma`, `rack`, `rack-test`) and a different
+# `BUNDLE_GEMFILE` boundary. They are NOT part of `make verify`.
 RSpec.describe Rigor::Playground::App do
   include Rack::Test::Methods
 
   let(:app) { described_class.new }
 
-  # ADR-32 example: a method with `# @rbs name: :asc | :desc`
-  # called with `:bad` must produce a `call.argument-type-mismatch`
-  # diagnostic, even WITHOUT the `# rbs_inline: enabled` magic
-  # comment — the playground sets `require_magic_comment: false`
-  # per ADR-29 WD4 amendment + ADR-32 WD10.
+  # ADR-32 example: a method with `# @rbs name: :asc | :desc` called with `:bad` must produce a
+  # `call.argument-type-mismatch` diagnostic, even WITHOUT the `# rbs_inline: enabled` magic comment — the
+  # playground sets `require_magic_comment: false` per ADR-29 WD4 amendment + ADR-32 WD10.
   let(:ascdesc_source) do
     <<~RUBY
       class AscDesc
@@ -85,8 +81,7 @@ RSpec.describe Rigor::Playground::App do
     end
   end
 
-  # ADR-29 slice 4 — the backend endpoint that the frontend's
-  # hoverTooltip extension consumes.
+  # ADR-29 slice 4 — the backend endpoint that the frontend's hoverTooltip extension consumes.
   describe "POST /type-of" do
     let(:source) { "x = \"hello\"\nputs x\n" }
 

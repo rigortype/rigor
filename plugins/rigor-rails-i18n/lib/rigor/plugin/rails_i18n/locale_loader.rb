@@ -7,27 +7,21 @@ require_relative "locale_index"
 module Rigor
   module Plugin
     class RailsI18n < Rigor::Plugin::Base
-      # Walks `locale_search_paths` for `.yml` / `.yaml`
-      # files, reads each through the trusted IoBoundary,
-      # parses with `YAML.safe_load`, and folds the resulting
-      # nested hash into a flat `dotted_key => Entry` table.
+      # Walks `locale_search_paths` for `.yml` / `.yaml` files, reads each through the trusted IoBoundary,
+      # parses with `YAML.safe_load`, and folds the resulting nested hash into a flat `dotted_key => Entry`
+      # table.
       #
-      # The top-level YAML key is the locale (`en:`, `ja:`,
-      # …). Anything underneath is recursively flattened into
-      # dotted keys (`users.welcome`, `errors.messages.blank`,
-      # …). For each leaf string, `%{var}` placeholders are
-      # extracted via a simple regex.
+      # The top-level YAML key is the locale (`en:`, `ja:`, …). Anything underneath is recursively
+      # flattened into dotted keys (`users.welcome`, `errors.messages.blank`, …). For each leaf string,
+      # `%{var}` placeholders are extracted via a simple regex.
       #
-      # Files that fail to parse are skipped with a load-error
-      # diagnostic surfaced through the plugin's error
-      # channel. Non-Hash YAML roots (e.g. a top-level
-      # sequence) are also skipped — the format is locale-keyed
-      # by convention.
+      # Files that fail to parse are skipped with a load-error diagnostic surfaced through the plugin's
+      # error channel. Non-Hash YAML roots (e.g. a top-level sequence) are also skipped — the format is
+      # locale-keyed by convention.
       class LocaleLoader
         PLACEHOLDER_RE = /%\{(?<name>[^}]+)\}/
 
-        # Errno classes that indicate "this file is not
-        # readable as a YAML locale" — swallowed so a single
+        # Errno classes that indicate "this file is not readable as a YAML locale" — swallowed so a single
         # bad path doesn't take down the rest of the index.
         IO_ERRORS = [Errno::ENOENT, Errno::EACCES, Errno::EISDIR].freeze
 
@@ -100,19 +94,15 @@ module Rigor
           end.sort
         end
 
-        # Recursively walks the per-locale subtree, yielding
-        # `[dotted_key, leaf_value]` for each leaf. Hash leaves are
-        # *not* recorded as entries themselves — only their
-        # descendants — but every leaf scalar / array IS recorded.
+        # Recursively walks the per-locale subtree, yielding `[dotted_key, leaf_value]` for each leaf. Hash
+        # leaves are *not* recorded as entries themselves — only their descendants — but every leaf scalar
+        # / array IS recorded.
         #
-        # `breadcrumbs` is a single mutable stack reused across the
-        # whole walk (push before recursing, pop after): for the
-        # 530-file / 14 MB Mastodon locale corpus the old
-        # `flat_map { flatten_tree(v, breadcrumbs + [k]) }` shape
-        # allocated a fresh breadcrumb Array at every node plus an
-        # intermediate result Array at every level — millions of
-        # short-lived objects and the run's top allocation site. The
-        # dotted key is still materialised once per leaf (it has to
+        # `breadcrumbs` is a single mutable stack reused across the whole walk (push before recursing, pop
+        # after): for the 530-file / 14 MB Mastodon locale corpus the old
+        # `flat_map { flatten_tree(v, breadcrumbs + [k]) }` shape allocated a fresh breadcrumb Array at
+        # every node plus an intermediate result Array at every level — millions of short-lived objects and
+        # the run's top allocation site. The dotted key is still materialised once per leaf (it has to
         # be); everything else is now allocation-free traversal.
         def each_flattened(node, breadcrumbs, &)
           if node.is_a?(Hash)
@@ -129,9 +119,8 @@ module Rigor
         def extract_placeholders(value)
           case value
           when String
-            # Most locale leaves carry no `%{var}`; skip the scan +
-            # flatten + to_set allocation trio for them. A string with
-            # no `%{` yields an empty placeholder set either way.
+            # Most locale leaves carry no `%{var}`; skip the scan + flatten + to_set allocation trio for
+            # them. A string with no `%{` yields an empty placeholder set either way.
             return Set.new unless value.include?("%{")
 
             value.scan(PLACEHOLDER_RE).flatten.to_set

@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# DO NOT run via `ruby errors_demo.rb` — analyse with
-# `bundle exec rigor check` to see rigor-rails-routes'
+# DO NOT run via `ruby errors_demo.rb` — analyse with `bundle exec rigor check` to see rigor-rails-routes'
 # diagnostics.
 
 def widgts_path = "/widgets"

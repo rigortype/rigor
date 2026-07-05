@@ -6,52 +6,40 @@ require "rigor/source/literals"
 module Rigor
   module Plugin
     class Rspec < Rigor::Plugin::Base
-      # Walks an RSpec spec file's AST and yields, for each
-      # describe / context block (including the outer
-      # `RSpec.describe`), a `Scope` value with the `let`
-      # and `subject` declarations recorded inside that
+      # Walks an RSpec spec file's AST and yields, for each describe / context block (including the outer
+      # `RSpec.describe`), a `Scope` value with the `let` and `subject` declarations recorded inside that
       # scope.
       #
-      # Scope hierarchy is preserved: each `Scope` carries
-      # a list of its `nested_scopes`. The analyzer uses the
-      # hierarchy to detect cross-scope shadowing.
+      # Scope hierarchy is preserved: each `Scope` carries a list of its `nested_scopes`. The analyzer uses
+      # the hierarchy to detect cross-scope shadowing.
       #
-      # Recognised scope methods (when called without a
-      # receiver, or with `RSpec` as the receiver):
+      # Recognised scope methods (when called without a receiver, or with `RSpec` as the receiver):
       #
-      # - `describe` / `context` — both open a new nested
-      #   scope.
+      # - `describe` / `context` — both open a new nested scope.
       # - `RSpec.describe` — the outermost scope.
       #
-      # Recognised declaration methods (inside any scope,
-      # called without a receiver):
+      # Recognised declaration methods (inside any scope, called without a receiver):
       #
-      # - `let(:name) { ... }` — caches the block result
-      #   per-example; recorded as a Declaration.
-      # - `let!(:name) { ... }` — same, but evaluated
-      #   eagerly via a `before` hook; same shape for our
+      # - `let(:name) { ... }` — caches the block result per-example; recorded as a Declaration.
+      # - `let!(:name) { ... }` — same, but evaluated eagerly via a `before` hook; same shape for our
       #   purposes.
-      # - `subject(:name) { ... }` — special-cases name
-      #   `:subject` when called without a name.
+      # - `subject(:name) { ... }` — special-cases name `:subject` when called without a name.
       module ScopeWalker
         SCOPE_METHODS = %i[describe context].freeze
         DECLARATION_METHODS = %i[let let! subject].freeze
 
         # @!attribute [r] kind
-        #   `:describe`, `:context`, or `:rspec_describe` for
-        #   the root.
+        #   `:describe`, `:context`, or `:rspec_describe` for the root.
         # @!attribute [r] declarations
         #   `Array<Declaration>` declared in this scope.
         # @!attribute [r] nested_scopes
         #   `Array<Scope>` nested under this scope.
         # @!attribute [r] location
-        #   `Prism::Location` of the call node that opened
-        #   this scope.
+        #   `Prism::Location` of the call node that opened this scope.
         Scope = Struct.new(:kind, :declarations, :nested_scopes, :location, keyword_init: true)
 
         # @!attribute [r] name
-        #   `Symbol` declared name (`:user`, `:subject`,
-        #   ...).
+        #   `Symbol` declared name (`:user`, `:subject`, ...).
         # @!attribute [r] kind
         #   `:let`, `:let!`, or `:subject`.
         # @!attribute [r] location
@@ -62,18 +50,15 @@ module Rigor
 
         module_function
 
-        # Walks the parsed file and returns an array of
-        # top-level scopes (each `RSpec.describe` is a
-        # separate root). Files with no recognised scopes
-        # return an empty array.
+        # Walks the parsed file and returns an array of top-level scopes (each `RSpec.describe` is a
+        # separate root). Files with no recognised scopes return an empty array.
         def collect_scopes(root)
           scopes = []
           walk_top_level(root, scopes)
           scopes
         end
 
-        # Walks every scope in a tree (root + descendants)
-        # and yields each in turn.
+        # Walks every scope in a tree (root + descendants) and yields each in turn.
         def each_scope(scope, &)
           yield scope
           scope.nested_scopes.each { |child| each_scope(child, &) }
@@ -89,8 +74,7 @@ module Rigor
           end
         end
 
-        # Returns true for `RSpec.describe ... do |...| ...
-        # end` calls.
+        # Returns true for `RSpec.describe ... do |...| ... end` calls.
         def rspec_describe_call?(node)
           return false unless node.is_a?(Prism::CallNode)
           return false unless node.name == :describe
@@ -100,10 +84,8 @@ module Rigor
           %w[RSpec ::RSpec].include?(receiver_name)
         end
 
-        # Returns true for `describe ... do ... end` /
-        # `context ... do ... end` (called without an
-        # explicit receiver — `RSpec.describe` is handled
-        # separately by `rspec_describe_call?`).
+        # Returns true for `describe ... do ... end` / `context ... do ... end` (called without an
+        # explicit receiver — `RSpec.describe` is handled separately by `rspec_describe_call?`).
         def nested_scope_call?(node)
           node.is_a?(Prism::CallNode) &&
             SCOPE_METHODS.include?(node.name) &&
@@ -117,9 +99,8 @@ module Rigor
             node.receiver.nil?
         end
 
-        # Constructs a Scope from a describe / context /
-        # RSpec.describe call node. Walks the block body
-        # for declarations + nested scopes.
+        # Constructs a Scope from a describe / context / RSpec.describe call node. Walks the block body for
+        # declarations + nested scopes.
         def build_scope(call_node, kind:)
           declarations = []
           nested = []
@@ -146,8 +127,7 @@ module Rigor
 
         def build_declaration(call_node)
           first_arg = call_node.arguments&.arguments&.first
-          # `subject(&block)` (no name) defaults to the
-          # implicit subject; record it as `:subject`.
+          # `subject(&block)` (no name) defaults to the implicit subject; record it as `:subject`.
           if first_arg.nil?
             return nil unless call_node.name == :subject
 

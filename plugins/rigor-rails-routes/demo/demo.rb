@@ -1,13 +1,10 @@
 # frozen_string_literal: true
 
-# Demo: rigor-rails-routes recognises every helper Rails would
-# generate from `config/routes.rb` (statically — no Rails
-# runtime). Run with `bundle exec rigor check` from this
-# directory.
+# Demo: rigor-rails-routes recognises every helper Rails would generate from `config/routes.rb`
+# (statically — no Rails runtime). Run with `bundle exec rigor check` from this directory.
 
-# Stubs so `ruby demo.rb` doesn't fail at runtime — the
-# plugin reads the call shapes statically and doesn't care
-# about the runtime values.
+# Stubs so `ruby demo.rb` doesn't fail at runtime — the plugin reads the call shapes statically and
+# doesn't care about the runtime values.
 def root_path = "/"
 def users_path = "/users"
 def user_path(_id) = "/users/x"
@@ -21,8 +18,8 @@ def admin_widget_path(_id) = "/admin/widgets/x"
 def about_path = "/about"
 def about_url = "https://example.invalid/about"
 
-# All recognised helpers. Each line surfaces an info diagnostic
-# from rigor-rails-routes naming the HTTP method + path.
+# All recognised helpers. Each line surfaces an info diagnostic from rigor-rails-routes naming the HTTP
+# method + path.
 puts root_path
 puts users_path
 puts user_path(1)

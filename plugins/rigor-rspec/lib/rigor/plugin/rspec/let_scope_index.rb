@@ -8,22 +8,17 @@ require_relative "scope_walker"
 module Rigor
   module Plugin
     class Rspec < Rigor::Plugin::Base
-      # Per-file index of RSpec scope hierarchy. Each
-      # describe scope carries:
+      # Per-file index of RSpec scope hierarchy. Each describe scope carries:
       #
-      # - `outer_range`: `Range[Integer]` of line numbers
-      #   covered by the describe's block body (start_line..end_line).
-      # - `describe_const`: the model constant string named in
-      #   `RSpec.describe SomeModel do` / `describe SomeModel do`,
-      #   or `nil` when the describe's first arg is a String
-      #   (`describe ".foo"`).
-      # - `lets`: `Hash{Symbol => Prism::BlockNode}` of `let(:name)
-      #   { ... }` and `subject(:name) { ... }` declarations.
-      #   `:subject` is the key for the implicit `subject { ... }`.
+      # - `outer_range`: `Range[Integer]` of line numbers covered by the describe's block body
+      #   (start_line..end_line).
+      # - `describe_const`: the model constant string named in `RSpec.describe SomeModel do` / `describe
+      #   SomeModel do`, or `nil` when the describe's first arg is a String (`describe ".foo"`).
+      # - `lets`: `Hash{Symbol => Prism::BlockNode}` of `let(:name) { ... }` and `subject(:name) { ... }`
+      #   declarations. `:subject` is the key for the implicit `subject { ... }`.
       #
-      # Used by the plugin's let-binding `dynamic_return`
-      # rule to bind `let`-named method-shape calls inside
-      # `it` bodies to the let block's inferred type.
+      # Used by the plugin's let-binding `dynamic_return` rule to bind `let`-named method-shape calls
+      # inside `it` bodies to the let block's inferred type.
       class LetScopeIndex
         Record = Struct.new(:outer_range, :describe_const, :lets, keyword_init: true) do
           def contains?(line) = outer_range.cover?(line)
@@ -38,27 +33,22 @@ module Rigor
           freeze
         end
 
-        # Returns every record whose outer_range contains the
-        # given line, ordered from outermost to innermost. The
-        # innermost wins on `let` name collisions per Ruby's
-        # method-resolution order (RSpec nested `let` shadows
-        # the outer `let`).
+        # Returns every record whose outer_range contains the given line, ordered from outermost to
+        # innermost. The innermost wins on `let` name collisions per Ruby's method-resolution order (RSpec
+        # nested `let` shadows the outer `let`).
         def records_at(line)
           @records.select { |rec| rec.contains?(line) }
         end
 
-        # ADR-52 slice 5a — every `let` / `subject` name declared
-        # anywhere in the file, across all describe scopes. Feeds the
-        # plugin's `dynamic_return file_methods:` gate: the engine only
-        # consults the rule for a call whose name appears here; the
-        # precise line-scoped resolution stays in `let_block_at`.
+        # ADR-52 slice 5a — every `let` / `subject` name declared anywhere in the file, across all describe
+        # scopes. Feeds the plugin's `dynamic_return file_methods:` gate: the engine only consults the rule
+        # for a call whose name appears here; the precise line-scoped resolution stays in `let_block_at`.
         # @return [Array<Symbol>]
         def let_names
           @records.flat_map { |rec| rec.lets.keys }.uniq
         end
 
-        # Resolves a `let` name at the given line by walking
-        # records innermost to outermost.
+        # Resolves a `let` name at the given line by walking records innermost to outermost.
         # @return [Prism::BlockNode, nil]
         def let_block_at(line, name)
           name_sym = name.to_sym
@@ -68,9 +58,8 @@ module Rigor
           nil
         end
 
-        # Resolves the `describe`-anchor constant name at the
-        # given line. The innermost describe with a constant
-        # anchor wins; describe-with-String anchors are skipped.
+        # Resolves the `describe`-anchor constant name at the given line. The innermost describe with a
+        # constant anchor wins; describe-with-String anchors are skipped.
         # @return [String, nil]
         def describe_const_at(line)
           records_at(line).reverse.each do |rec|
@@ -92,9 +81,8 @@ module Rigor
           if describe_call?(node)
             record = build_record(node, anchor)
             accumulator << record
-            # `describe_call?` already guarantees a `Prism::CallNode`; the
-            # explicit `is_a?` re-states it so the analyzer narrows `node`
-            # from `Prism::Node` and resolves `#block` (a CallNode method).
+            # `describe_call?` already guarantees a `Prism::CallNode`; the explicit `is_a?` re-states it so
+            # the analyzer narrows `node` from `Prism::Node` and resolves `#block` (a CallNode method).
             if node.is_a?(Prism::CallNode) && node.block&.body
               collect(node.block.body, anchor: record.describe_const || anchor, accumulator: accumulator)
             end
@@ -123,8 +111,7 @@ module Rigor
           return false unless ScopeWalker::SCOPE_METHODS.include?(node.name) || node.name == :describe
           return false unless node.block.is_a?(Prism::BlockNode)
 
-          # `RSpec.describe ...` has receiver = RSpec; bare
-          # `describe ... do` has nil receiver. Accept both.
+          # `RSpec.describe ...` has receiver = RSpec; bare `describe ... do` has nil receiver. Accept both.
           node.receiver.nil? || describe_receiver?(node.receiver)
         end
 
@@ -158,11 +145,9 @@ module Rigor
           end
         end
 
-        # Walks the describe's body shallowly: collects every
-        # top-level `let(:name) { ... }` / `subject(:name) { ... }`
-        # / `subject { ... }` declaration. Does NOT recurse into
-        # nested describe / context blocks — those have their
-        # own record built by `collect` above.
+        # Walks the describe's body shallowly: collects every top-level `let(:name) { ... }` /
+        # `subject(:name) { ... }` / `subject { ... }` declaration. Does NOT recurse into nested describe /
+        # context blocks — those have their own record built by `collect` above.
         def self.collect_lets(body)
           return {} unless body.is_a?(Prism::Node)
 

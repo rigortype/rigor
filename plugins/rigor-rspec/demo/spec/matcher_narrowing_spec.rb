@@ -1,12 +1,9 @@
 # frozen_string_literal: true
 
-# Pillar 2 Slice 1 demo — `expect(x).to MATCHER` narrows `x`
-# downstream so subsequent calls in the same `it` body resolve
-# against the narrowed type. Without this slice, `x` would
-# stay at its entry type (typically `untyped` for spec-local
-# bindings) and the downstream `.length` / `.upcase` calls
-# would either fall through `Dynamic[top]` or fire
-# `possible-nil-receiver`.
+# Pillar 2 Slice 1 demo — `expect(x).to MATCHER` narrows `x` downstream so subsequent calls in the same
+# `it` body resolve against the narrowed type. Without this slice, `x` would stay at its entry type
+# (typically `untyped` for spec-local bindings) and the downstream `.length` / `.upcase` calls would
+# either fall through `Dynamic[top]` or fire `possible-nil-receiver`.
 
 RSpec.describe "matcher narrowing" do
   it "narrows to String through be_a(String)" do

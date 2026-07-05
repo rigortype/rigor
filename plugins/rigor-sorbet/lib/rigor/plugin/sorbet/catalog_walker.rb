@@ -8,35 +8,26 @@ require_relative "sig_parser"
 module Rigor
   module Plugin
     class Sorbet < Rigor::Plugin::Base
-      # Walks a parsed Prism program looking for
-      # `sig { ... }` / `sig do ... end` calls that immediately
-      # precede a `def` (or a `def self.foo` / `class << self;
-      # def foo; end`). Each recognised pair is parsed by
-      # {SigParser} and recorded in the {Catalog} under its
-      # qualified `(class_name, method_name, kind)` key.
+      # Walks a parsed Prism program looking for `sig { ... }` / `sig do ... end` calls that immediately
+      # precede a `def` (or a `def self.foo` / `class << self; def foo; end`). Each recognised pair is
+      # parsed by {SigParser} and recorded in the {Catalog} under its qualified `(class_name, method_name,
+      # kind)` key.
       #
-      # Anything we don't recognise (a stray `sig { ... }` not
-      # followed by a `def`, a `def` with no preceding `sig`,
-      # malformed sig blocks, etc.) is reported back to the
-      # caller through `parse_errors:` so the plugin can emit a
-      # `plugin.sorbet.parse-error` diagnostic. Walking is
-      # otherwise infallible — a bad sig block does not abort
-      # the catalog build for the rest of the file.
+      # Anything we don't recognise (a stray `sig { ... }` not followed by a `def`, a `def` with no
+      # preceding `sig`, malformed sig blocks, etc.) is reported back to the caller through
+      # `parse_errors:` so the plugin can emit a `plugin.sorbet.parse-error` diagnostic. Walking is
+      # otherwise infallible — a bad sig block does not abort the catalog build for the rest of the file.
       module CatalogWalker
-        # Detected error during walking. `kind` is one of:
-        # `:no_block` / `:empty_block` / `:missing_returns_or_void`
-        # / `:duplicate_sig` / `:dangling_sig`.
+        # Detected error during walking. `kind` is one of: `:no_block` / `:empty_block` /
+        # `:missing_returns_or_void` / `:duplicate_sig` / `:dangling_sig`.
         ParseError = Data.define(:kind, :node, :path)
 
         module_function
 
         # @param root [Prism::Node] the file's program node.
-        # @param catalog [Catalog] mutable; signatures are
-        #   recorded into it.
-        # @param path [String] file path used for diagnostic
-        #   provenance.
-        # @return [Array<ParseError>] errors observed during the
-        #   walk; empty when the file is sig-clean.
+        # @param catalog [Catalog] mutable; signatures are recorded into it.
+        # @param path [String] file path used for diagnostic provenance.
+        # @return [Array<ParseError>] errors observed during the walk; empty when the file is sig-clean.
         def walk(root:, catalog:, path:)
           state = State.new(catalog: catalog, path: path)
           walk_node(root, state, lexical_path: [], in_singleton_class: false)
@@ -64,9 +55,8 @@ module Rigor
           when Prism::StatementsNode
             walk_statements(node, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
           when Prism::DefNode
-            # A `def` not preceded by a `sig` is fine; we just
-            # don't record anything for it. The interesting case
-            # is in `walk_statements`, which pairs sig+def.
+            # A `def` not preceded by a `sig` is fine; we just don't record anything for it. The
+            # interesting case is in `walk_statements`, which pairs sig+def.
           else
             node.compact_child_nodes.each do |child|
               walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
@@ -92,13 +82,10 @@ module Rigor
           end
         end
 
-        # The pair-finding loop. Walks a `StatementsNode`'s
-        # children left-to-right; when it encounters a `sig`
-        # call, it remembers it and consumes the very next
-        # `def` / `def self.foo` as the target. Anything between
-        # a sig and its def (a comment is fine — comments aren't
-        # AST nodes — but a method call would be a problem)
-        # leaves the sig dangling.
+        # The pair-finding loop. Walks a `StatementsNode`'s children left-to-right; when it encounters a
+        # `sig` call, it remembers it and consumes the very next `def` / `def self.foo` as the target.
+        # Anything between a sig and its def (a comment is fine — comments aren't AST nodes — but a
+        # method call would be a problem) leaves the sig dangling.
         def walk_statements(statements, state, lexical_path:, in_singleton_class:)
           pending_sig = nil
 
@@ -107,18 +94,15 @@ module Rigor
               record_def_with_sig(child, pending_sig, state, lexical_path, in_singleton_class)
               pending_sig = nil
             elsif pending_sig && attr_macro_call?(child)
-              # `sig { returns(T) }` above `attr_reader :name` /
-              # `attr_accessor` / `attr_writer` types the generated
-              # accessor(s). This is a first-class Sorbet idiom — not
-              # a dangling sig — so record the accessor signature(s)
-              # instead of warning.
+              # `sig { returns(T) }` above `attr_reader :name` / `attr_accessor` / `attr_writer` types
+              # the generated accessor(s). This is a first-class Sorbet idiom — not a dangling sig — so
+              # record the accessor signature(s) instead of warning.
               record_attr_with_sig(child, pending_sig, state, lexical_path, in_singleton_class)
               pending_sig = nil
             elsif pending_sig && (inner_def = visibility_wrapped_def(child))
-              # `sig { ... }` above `private def foo` /
-              # `private_class_method def self.foo` / `module_function
-              # def bar` — a visibility macro wrapping the very def the
-              # sig types. Record the inner def, not a dangling sig.
+              # `sig { ... }` above `private def foo` / `private_class_method def self.foo` /
+              # `module_function def bar` — a visibility macro wrapping the very def the sig types.
+              # Record the inner def, not a dangling sig.
               record_def_with_sig(inner_def, pending_sig, state, lexical_path, in_singleton_class)
               pending_sig = nil
             elsif sig_call?(child)
@@ -129,10 +113,8 @@ module Rigor
                 state.record_error(:dangling_sig, pending_sig)
                 pending_sig = nil
               end
-              # ADR-11 slice 8 — record `include` / `extend`
-              # declarations alongside the regular walk so the
-              # plugin's chain lookup can lift sigs declared
-              # on a mixed-in module to the host class.
+              # ADR-11 slice 8 — record `include` / `extend` declarations alongside the regular walk so
+              # the plugin's chain lookup can lift sigs declared on a mixed-in module to the host class.
               record_mixin_call(child, state, lexical_path) if mixin_call?(child) && !in_singleton_class
               walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
             end
@@ -141,12 +123,9 @@ module Rigor
           state.record_error(:dangling_sig, pending_sig) if pending_sig
         end
 
-        # `include Foo` / `extend Foo` / `include Foo, Bar` —
-        # the `include` and `extend` mixin macros that Tapioca-
-        # generated DSL RBIs depend on. Recognised when the
-        # call has no explicit receiver (top-level inside a
-        # class body) and every argument is a constant
-        # reference.
+        # `include Foo` / `extend Foo` / `include Foo, Bar` — the `include` and `extend` mixin macros that
+        # Tapioca-generated DSL RBIs depend on. Recognised when the call has no explicit receiver
+        # (top-level inside a class body) and every argument is a constant reference.
         def mixin_call?(node)
           return false unless node.is_a?(Prism::CallNode)
           return false unless %i[include extend].include?(node.name)
@@ -191,12 +170,10 @@ module Rigor
           private_class_method public_class_method module_function
         ].freeze
 
-        # `private def foo` / `private_class_method def self.bar` /
-        # `module_function def baz` — a receiverless visibility macro
-        # whose single argument is the `def` it wraps. Returns the
-        # inner `Prism::DefNode` (so a preceding sig types it), or nil.
-        # The def's own receiver still drives instance-vs-singleton, so
-        # `private_class_method def self.bar` records as singleton.
+        # `private def foo` / `private_class_method def self.bar` / `module_function def baz` — a
+        # receiverless visibility macro whose single argument is the `def` it wraps. Returns the inner
+        # `Prism::DefNode` (so a preceding sig types it), or nil. The def's own receiver still drives
+        # instance-vs-singleton, so `private_class_method def self.bar` records as singleton.
         def visibility_wrapped_def(node)
           return nil unless node.is_a?(Prism::CallNode) && node.receiver.nil?
           return nil unless VISIBILITY_MACROS.include?(node.name)
@@ -209,9 +186,8 @@ module Rigor
 
         ATTR_MACROS = %i[attr_reader attr_writer attr_accessor].freeze
 
-        # `attr_reader :a, :b` / `attr_writer` / `attr_accessor` —
-        # a receiverless attribute macro whose arguments are all
-        # symbol literals (the only shape a preceding `sig` types).
+        # `attr_reader :a, :b` / `attr_writer` / `attr_accessor` — a receiverless attribute macro whose
+        # arguments are all symbol literals (the only shape a preceding `sig` types).
         def attr_macro_call?(node)
           return false unless node.is_a?(Prism::CallNode) && node.receiver.nil?
           return false unless ATTR_MACROS.include?(node.name)
@@ -220,11 +196,9 @@ module Rigor
           !args.nil? && !args.empty? && args.all?(Prism::SymbolNode)
         end
 
-        # Records the method signature(s) a `sig` contributes to the
-        # accessor(s) it precedes: the reader `name` and/or the
-        # writer `name=`, each carrying the sig's `returns(...)`
-        # type. `attr_reader` emits the reader, `attr_writer` the
-        # writer, `attr_accessor` both — for every symbol argument.
+        # Records the method signature(s) a `sig` contributes to the accessor(s) it precedes: the reader
+        # `name` and/or the writer `name=`, each carrying the sig's `returns(...)` type. `attr_reader`
+        # emits the reader, `attr_writer` the writer, `attr_accessor` both — for every symbol argument.
         def record_attr_with_sig(attr_node, sig_call, state, lexical_path, in_singleton_class)
           parsed = SigParser.parse(sig_call)
           if parsed.is_a?(SigParser::ParseError)
@@ -273,10 +247,8 @@ module Rigor
           in_singleton_class || def_node.receiver.is_a?(Prism::SelfNode)
         end
 
-        # Resolves a constant-path node (`Foo::Bar`,
-        # `::Foo::Bar`) to its dot-separated name. Returns nil
-        # for the rare dynamic-prefix shape so the walker
-        # doesn't guess a qualified name in that case.
+        # Resolves a constant-path node (`Foo::Bar`, `::Foo::Bar`) to its dot-separated name. Returns nil
+        # for the rare dynamic-prefix shape so the walker doesn't guess a qualified name in that case.
         def qualified_name_for(node)
           case node
           when Prism::ConstantReadNode then node.name.to_s

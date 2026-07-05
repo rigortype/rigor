@@ -9,16 +9,12 @@ module Rigor
     class Rspec < Rigor::Plugin::Base
       # Per-file walker that:
       #
-      # 1. Collects every RSpec scope (each `RSpec.describe`
-      #    plus its nested `describe` / `context` blocks)
+      # 1. Collects every RSpec scope (each `RSpec.describe` plus its nested `describe` / `context` blocks)
       #    via {ScopeWalker}.
-      # 2. Reports duplicate `let(:name)` / `subject(:name)`
-      #    declarations within the same scope (the second
-      #    declaration wins at runtime — an easy
-      #    copy-paste bug).
-      # 3. Reports recursive self-references —
-      #    `let(:user) { user.something }` will infinite-loop
-      #    at runtime — an easy oversight.
+      # 2. Reports duplicate `let(:name)` / `subject(:name)` declarations within the same scope (the second
+      #    declaration wins at runtime — an easy copy-paste bug).
+      # 3. Reports recursive self-references — `let(:user) { user.something }` will infinite-loop at
+      #    runtime — an easy oversight.
       module Analyzer
         Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
 
@@ -49,11 +45,9 @@ module Rigor
         end
 
         def duplicate_diagnostics_for(path, name, decls)
-          # Report each subsequent occurrence; the first
-          # one is the "winner" only by literal source
-          # order, but RSpec lets the LAST declaration win
-          # at runtime, so flag everything after the first
-          # so the user can see the full list.
+          # Report each subsequent occurrence; the first one is the "winner" only by literal source order,
+          # but RSpec lets the LAST declaration win at runtime, so flag everything after the first so the
+          # user can see the full list.
           decls.drop(1).map do |decl|
             Diagnostic.new(
               path: path,
@@ -76,8 +70,7 @@ module Rigor
           end
         end
 
-        # Walks the declaration's block body looking for a
-        # call to its own name with no explicit receiver.
+        # Walks the declaration's block body looking for a call to its own name with no explicit receiver.
         # Returns true if at least one such call exists.
         def self_references?(decl)
           body = decl.block_node&.body

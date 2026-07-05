@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# DO NOT run via `rspec spec/errors_spec.rb` — analyse
-# with `bundle exec rigor check` to see rigor-rspec's
+# DO NOT run via `rspec spec/errors_spec.rb` — analyse with `bundle exec rigor check` to see rigor-rspec's
 # diagnostics.
 
 # rubocop:disable RSpec/OverwritingSetup, RSpec/LeadingSubject, RSpec/MultipleSubjects, RSpec/EmptyExampleGroup, RSpec/EmptyLineAfterSubject
@@ -17,15 +16,13 @@ def subject(_name = :subject, &); end
 def context(*, &); end
 
 RSpec.describe "Mistakes" do
-  # Duplicate `let(:user)` in the same scope —
-  # the second one wins at runtime, the first is
-  # silently shadowed:
+  # Duplicate `let(:user)` in the same scope — the second one wins at runtime, the first is silently
+  # shadowed:
   #   plugin.rspec.duplicate-let
   let(:user) { :alice }
   let(:user) { :bob }
 
-  # Self-referencing `let` — calls `tags` from inside its
-  # own block body, which infinite-loops at runtime:
+  # Self-referencing `let` — calls `tags` from inside its own block body, which infinite-loops at runtime:
   #   plugin.rspec.self-reference
   let(:tags) { tags.map(&:upcase) }
 

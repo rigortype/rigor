@@ -5,43 +5,35 @@ require "prism"
 module Rigor
   module Plugin
     class Sidekiq < Rigor::Plugin::Base
-      # Walks a parsed file's AST looking for
-      # `<WorkerClass>.perform_async(...)` /
-      # `.perform_inline(...)` / `.perform_in(time, ...)` /
-      # `.perform_at(time, ...)` calls and validates each
-      # against the {WorkerIndex}.
+      # Walks a parsed file's AST looking for `<WorkerClass>.perform_async(...)` / `.perform_inline(...)` /
+      # `.perform_in(time, ...)` / `.perform_at(time, ...)` calls and validates each against the
+      # {WorkerIndex}.
       #
       # Argument-shape rules:
       #
-      # - `perform_async` / `perform_inline` — every
-      #   argument is forwarded to `#perform`. Validate
-      #   `actual == #perform.arity`.
-      # - `perform_in(interval, ...args)` /
-      #   `perform_at(time, ...args)` — the FIRST argument
-      #   is the schedule (a Time / Integer / ActiveSupport
-      #   duration); the rest are forwarded to `#perform`.
+      # - `perform_async` / `perform_inline` — every argument is forwarded to `#perform`. Validate `actual
+      #   == #perform.arity`.
+      # - `perform_in(interval, ...args)` / `perform_at(time, ...args)` — the FIRST argument is the
+      #   schedule (a Time / Integer / ActiveSupport duration); the rest are forwarded to `#perform`.
       #   Validate `actual_args - 1 == #perform.arity`.
       module Analyzer
         # Methods that delegate to `#perform` 1:1.
         DIRECT_ENTRY_METHODS = %i[perform_async perform_inline].freeze
 
-        # Methods whose first argument is a schedule (the
-        # remaining args are forwarded to `#perform`).
+        # Methods whose first argument is a schedule (the remaining args are forwarded to `#perform`).
         SCHEDULED_ENTRY_METHODS = %i[perform_in perform_at].freeze
 
         ENTRY_METHODS = (DIRECT_ENTRY_METHODS + SCHEDULED_ENTRY_METHODS).freeze
 
-        # One worker-call observation: the kebab-case `rule`, `severity`,
-        # and human-readable `message`. Carries no path/location — the
-        # caller (the `node_rule` block) positions it via
+        # One worker-call observation: the kebab-case `rule`, `severity`, and human-readable `message`.
+        # Carries no path/location — the caller (the `node_rule` block) positions it via
         # `Plugin::Base#diagnostic`.
         Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
-        # The worker-call violations for a single call node (0..2), or
-        # `[]` when the node is not a `<Worker>.perform_*` entry call on a
-        # known worker. ADR-37: the engine owns the walk.
+        # The worker-call violations for a single call node (0..2), or `[]` when the node is not a
+        # `<Worker>.perform_*` entry call on a known worker. ADR-37: the engine owns the walk.
         #
         # @param call_node [Prism::Node]
         # @param worker_index [WorkerIndex]
@@ -77,8 +69,7 @@ module Rigor
 
         def arity_violation(call_node, entry)
           all_args = (call_node.arguments&.arguments || []).size
-          # Scheduled entries consume the first arg as the
-          # schedule; the rest are forwarded.
+          # Scheduled entries consume the first arg as the schedule; the rest are forwarded.
           forwarded_count = SCHEDULED_ENTRY_METHODS.include?(call_node.name) ? all_args - 1 : all_args
 
           if SCHEDULED_ENTRY_METHODS.include?(call_node.name) && all_args.zero?

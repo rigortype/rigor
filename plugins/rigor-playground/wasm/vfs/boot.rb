@@ -2,59 +2,51 @@
 
 # ADR-29 WD8/WD9 — the in-VM adapter packed into the ruby.wasm build.
 #
-# This is the wasm analogue of plugins/rigor-playground/lib/rigor/playground/app.rb:
-# it exposes the same four operations (check / annotate / annotate-lines /
-# type-of) but as in-process Ruby callable from JavaScript via `vm.eval`,
-# with no Rack, no HTTP, and no network. The frontend (index.html) sets the
-# request as a JSON string on a JS global, calls `vm.eval`, and reads the
-# returned JSON string back.
+# This is the wasm analogue of plugins/rigor-playground/lib/rigor/playground/app.rb: it exposes the same
+# four operations (check / annotate / annotate-lines / type-of) but as in-process Ruby callable from
+# JavaScript via `vm.eval`, with no Rack, no HTTP, and no network. The frontend (index.html) sets the
+# request as a JSON string on a JS global, calls `vm.eval`, and reads the returned JSON string back.
 #
-# Contract fidelity (ADR-29 WD2): every operation routes through
-# `Rigor::CLI.start(argv, out:, err:)` against StringIO buffers — byte-for-byte
-# the same invocation the backend's `run_cli` uses — so the JSON shapes are
-# identical between the server and the browser. Only the bytes' origin differs.
+# Contract fidelity (ADR-29 WD2): every operation routes through `Rigor::CLI.start(argv, out:, err:)`
+# against StringIO buffers — byte-for-byte the same invocation the backend's `run_cli` uses — so the JSON
+# shapes are identical between the server and the browser. Only the bytes' origin differs.
 
-# The nix/wasi runtime can default to US-ASCII; force UTF-8 so File.read and
-# JSON handle non-ASCII source. Mirrors app.rb's preamble.
+# The nix/wasi runtime can default to US-ASCII; force UTF-8 so File.read and JSON handle non-ASCII source.
+# Mirrors app.rb's preamble.
 Encoding.default_external = Encoding::UTF_8
 Encoding.default_internal = Encoding::UTF_8
 
 # ── WASI POSIX shim (ADR-29 WD6 condition ③) ────────────────────────────────
 #
 # WASI provides no flock(2) and a no-op fsync; the cache write path
-# (lib/rigor/cache/store.rb#atomically_replace) calls both. A single-VM
-# playground needs no cross-process atomicity, so neutralising these two
-# calls lets the existing content-keyed cache operate purely in the in-memory
-# WASI filesystem — which is a *feature*: it persists across keystrokes within
-# the page session, giving the RBS-environment reuse the WD8 perf note asks
-# for, without a bespoke persistent-Runner path. The shim is confined to this
-# wasm boot file; the engine is untouched. (Fallback if a ruby_wasm version's
-# memfs misbehaves on cache writes: see wasm/README.md — neutralise
-# Cache::Store#atomically_replace instead, which forces a pure no-op cache.)
+# (lib/rigor/cache/store.rb#atomically_replace) calls both. A single-VM playground needs no cross-process
+# atomicity, so neutralising these two calls lets the existing content-keyed cache operate purely in the
+# in-memory WASI filesystem — which is a *feature*: it persists across keystrokes within the page session,
+# giving the RBS-environment reuse the WD8 perf note asks for, without a bespoke persistent-Runner path.
+# The shim is confined to this wasm boot file; the engine is untouched. (Fallback if a ruby_wasm version's
+# memfs misbehaves on cache writes: see wasm/README.md — neutralise Cache::Store#atomically_replace
+# instead, which forces a pure no-op cache.)
 File.class_eval { def flock(*) = 0 }
 IO.class_eval   { def fsync(*) = 0 }
 
-# ruby.wasm runs with rubygems disabled (`Gem` is a stub that is never fully
-# loaded; `/bundle/setup` only unshifts $LOAD_PATH). Rigor's RBS environment
-# loader needs the real rubygems (`Gem::MissingSpecError`, `Gem::Requirement`,
-# …), and without it the RBS env builds EMPTY — the analysis then runs with
-# zero type information and flags nothing. A single require initialises it.
+# ruby.wasm runs with rubygems disabled (`Gem` is a stub that is never fully loaded; `/bundle/setup` only
+# unshifts $LOAD_PATH). Rigor's RBS environment loader needs the real rubygems (`Gem::MissingSpecError`,
+# `Gem::Requirement`, …), and without it the RBS env builds EMPTY — the analysis then runs with zero type
+# information and flags nothing. A single require initialises it.
 require "rubygems"
 require "json"
 require "fileutils"
 require "stringio"
 require "rigor/cli"
 
-# WASI exposes the packed gem + config tree (/bundle, /playground) READ-ONLY,
-# and the host (index.html / smoke.mjs) provides exactly one writable mount at
-# /work. Rigor's cache is cwd-relative (`<cwd>/.rigor/`) and the adapter writes
-# a per-request buffer file, so both need a writable cwd — stage one under
-# /work by copying the read-only config in and chdir-ing there.
+# WASI exposes the packed gem + config tree (/bundle, /playground) READ-ONLY, and the host (index.html /
+# smoke.mjs) provides exactly one writable mount at /work. Rigor's cache is cwd-relative (`<cwd>/.rigor/`)
+# and the adapter writes a per-request buffer file, so both need a writable cwd — stage one under /work by
+# copying the read-only config in and chdir-ing there.
 WASM_WORK_DIR = "/work"
 
-# `js` only exists in the browser ruby.wasm build. Guard the require so this
-# file can also be loaded under a plain wasmtime/WASI smoke run (WD6 ③ CI),
-# where the request is read from $stdin instead of a JS global.
+# `js` only exists in the browser ruby.wasm build. Guard the require so this file can also be loaded under
+# a plain wasmtime/WASI smoke run (WD6 ③ CI), where the request is read from $stdin instead of a JS global.
 begin
   require "js"
   HAS_JS = true
@@ -64,8 +56,8 @@ end
 
 module Rigor
   module Playground
-    # In-VM request handler. Stateless except for the buffer file it writes
-    # under the (packed, writable) working directory.
+    # In-VM request handler. Stateless except for the buffer file it writes under the (packed, writable)
+    # working directory.
     module Wasm
       MAX_SOURCE_BYTES = 64 * 1024            # mirrors app.rb
       BUFFER_PATH      = "buffer.rb"          # relative to Dir.pwd (/playground)
@@ -73,9 +65,8 @@ module Rigor
 
       module_function
 
-      # Browser entry point: read the request JSON from the JS global set by
-      # the frontend, dispatch, and return a JSON string. `kind` is one of
-      # "check" / "annotate" / "annotate-lines" / "type-of".
+      # Browser entry point: read the request JSON from the JS global set by the frontend, dispatch, and
+      # return a JSON string. `kind` is one of "check" / "annotate" / "annotate-lines" / "type-of".
       def dispatch(kind)
         req = JSON.parse(JS.global[:rigorRequestJson].to_s)
         run(kind, req)
@@ -83,8 +74,8 @@ module Rigor
         JSON.generate({ "error" => e.message })
       end
 
-      # Transport-agnostic core. `request` is a Hash with "source" and, for
-      # type-of, "line"/"column". Returns a JSON string.
+      # Transport-agnostic core. `request` is a Hash with "source" and, for type-of, "line"/"column".
+      # Returns a JSON string.
       def run(kind, request)
         source = request.fetch("source", "").to_s
         return too_large if source.bytesize > MAX_SOURCE_BYTES
@@ -122,9 +113,8 @@ module Rigor
 
       def annotate_lines(source)
         path = write_buffer(source)
-        # `annotate --format json` returns { "annotations": { line => type } }
-        # straight from the engine's line-type map — no `#=> <type>` text to
-        # reparse. Round-trip through parse/generate to validate.
+        # `annotate --format json` returns { "annotations": { line => type } } straight from the engine's
+        # line-type map — no `#=> <type>` text to reparse. Round-trip through parse/generate to validate.
         JSON.generate(JSON.parse(run_cli(["annotate", "--format=json", path])))
       rescue JSON::ParserError
         JSON.generate({ "annotations" => {} })
@@ -159,17 +149,15 @@ module Rigor
   end
 end
 
-# Stage the writable working dir: copy the packed (read-only) .rigor.yml into
-# /work and chdir there, so `Rigor::CLI.start`'s cwd-based config discovery
-# finds it (loads rigor-rbs-inline, strict severity) and the cwd-relative cache
-# + buffer writes land on the writable mount.
+# Stage the writable working dir: copy the packed (read-only) .rigor.yml into /work and chdir there, so
+# `Rigor::CLI.start`'s cwd-based config discovery finds it (loads rigor-rbs-inline, strict severity) and the
+# cwd-relative cache + buffer writes land on the writable mount.
 FileUtils.mkdir_p(WASM_WORK_DIR)
 FileUtils.cp(File.join(File.dirname(__FILE__), ".rigor.yml"), File.join(WASM_WORK_DIR, ".rigor.yml"))
 Dir.chdir(WASM_WORK_DIR)
 
-# Plain-WASI smoke path (WD6 ③): `wasmtime … -- /playground/boot.rb <kind>`
-# reads the source from stdin and prints the JSON result. No-ops in the
-# browser, where dispatch() is driven by JS instead.
+# Plain-WASI smoke path (WD6 ③): `wasmtime … -- /playground/boot.rb <kind>` reads the source from stdin and
+# prints the JSON result. No-ops in the browser, where dispatch() is driven by JS instead.
 if !HAS_JS && $PROGRAM_NAME == __FILE__ && !ARGV.empty?
   kind = ARGV[0]
   puts Rigor::Playground::Wasm.run(kind, { "source" => $stdin.read })

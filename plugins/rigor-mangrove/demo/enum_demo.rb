@@ -2,14 +2,12 @@
 
 # ADR-36 nested-class emission — Mangrove's `Enum` DSL.
 #
-# `variants do variant <Const>, <Type> end` mints a nested subclass
-# per variant; rigor-mangrove synthesises each one statically so the
-# variant constant resolves, `.new` dispatches, and the `#inner`
-# reader resolves to the declared payload type — no need to run
-# Mangrove's runtime `const_missing` / `class_eval`.
+# `variants do variant <Const>, <Type> end` mints a nested subclass per variant; rigor-mangrove synthesises
+# each one statically so the variant constant resolves, `.new` dispatches, and the `#inner` reader resolves
+# to the declared payload type — no need to run Mangrove's runtime `const_missing` / `class_eval`.
 #
-# `Mangrove::Enum` is the extend-marker the substrate keys on; the
-# real gem supplies it. The demo stubs it so the file stands alone.
+# `Mangrove::Enum` is the extend-marker the substrate keys on; the real gem supplies it. The demo stubs it
+# so the file stands alone.
 module Mangrove
   module Enum; end
 end

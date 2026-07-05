@@ -3,14 +3,11 @@
 module Rigor
   module Plugin
     class Pundit < Rigor::Plugin::Base
-      # Frozen catalogue of discovered Pundit policy classes
-      # keyed by policy class name (e.g. `"PostPolicy"`).
-      # Each entry tracks the set of predicate methods
-      # defined on the policy (instance-side `def name?`)
+      # Frozen catalogue of discovered Pundit policy classes keyed by policy class name (e.g. `"PostPolicy"`).
+      # Each entry tracks the set of predicate methods defined on the policy (instance-side `def name?`)
       # plus the source file path.
       #
-      # The analyzer maps a record's inferred type
-      # (`Nominal[Post]`) to the policy class name
+      # The analyzer maps a record's inferred type (`Nominal[Post]`) to the policy class name
       # (`"PostPolicy"`) and looks up the predicate.
       class PolicyIndex
         Entry = Data.define(:policy_class_name, :file_path, :predicate_methods) do
@@ -22,8 +19,7 @@ module Rigor
             predicate_methods.to_a.sort
           end
 
-          # Normalises an action symbol / string by ensuring
-          # a trailing `?`. `:update` and `:update?` both
+          # Normalises an action symbol / string by ensuring a trailing `?`. `:update` and `:update?` both
           # resolve to `update?`.
           def normalize(name)
             string = name.to_s

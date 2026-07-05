@@ -7,28 +7,20 @@ require_relative "worker_index"
 module Rigor
   module Plugin
     class Sidekiq < Rigor::Plugin::Base
-      # Walks the configured worker-search paths via the
-      # plugin's `IoBoundary`, parses each `.rb` file with
-      # Prism, and collects classes that `include
-      # Sidekiq::Job` (or one of the configured marker
-      # modules). For each discovered class, the discoverer
-      # also reads the `#perform` method's parameter list
-      # and computes the arity envelope.
+      # Walks the configured worker-search paths via the plugin's `IoBoundary`, parses each `.rb` file with
+      # Prism, and collects classes that `include Sidekiq::Job` (or one of the configured marker modules).
+      # For each discovered class, the discoverer also reads the `#perform` method's parameter list and
+      # computes the arity envelope.
       #
       # Limitations (intentional for v0.1.0):
       #
-      # - Only direct `include` matches against the
-      #   configured marker modules. `class MyWorker;
-      #   include Concerns::Sidekiqable; end` where
-      #   `Concerns::Sidekiqable` re-includes `Sidekiq::Job`
-      #   is NOT discovered. Add the intermediate module to
-      #   `worker_marker_modules` if needed.
-      # - The qualified class name is the lexical path
-      #   (`Admin::WelcomeWorker` for a class declared
-      #   inside `module Admin`).
-      # - `#perform` arity is read from the syntactic
-      #   parameter list. Methods built via
-      #   `define_method` are out of scope.
+      # - Only direct `include` matches against the configured marker modules. `class MyWorker; include
+      #   Concerns::Sidekiqable; end` where `Concerns::Sidekiqable` re-includes `Sidekiq::Job` is NOT
+      #   discovered. Add the intermediate module to `worker_marker_modules` if needed.
+      # - The qualified class name is the lexical path (`Admin::WelcomeWorker` for a class declared inside
+      #   `module Admin`).
+      # - `#perform` arity is read from the syntactic parameter list. Methods built via `define_method`
+      #   are out of scope.
       class WorkerDiscoverer
         def initialize(io_boundary:, search_paths:, marker_modules:)
           @io_boundary = io_boundary
@@ -101,9 +93,8 @@ module Rigor
           walk_for_workers(node.body, inner_path, &) if node.body
         end
 
-        # Returns true if the class body contains a top-level
-        # `include <Module>` call where `<Module>` matches
-        # one of the configured marker modules.
+        # Returns true if the class body contains a top-level `include <Module>` call where `<Module>`
+        # matches one of the configured marker modules.
         def includes_marker_module?(body)
           return false if body.nil?
 
@@ -137,9 +128,8 @@ module Rigor
           end
         end
 
-        # Returns the instance-side `def perform(...)` node
-        # from a class body, or `nil` when the class doesn't
-        # override `#perform`.
+        # Returns the instance-side `def perform(...)` node from a class body, or `nil` when the class
+        # doesn't override `#perform`.
         def lookup_perform_def(body)
           return nil if body.nil?
 
@@ -152,12 +142,9 @@ module Rigor
           nil
         end
 
-        # Builds a `WorkerIndex::Entry` from the discovered
-        # class's `#perform` def. When the class doesn't
-        # override `#perform`, we record an "any-arity"
-        # entry — Sidekiq itself doesn't supply a default
-        # `#perform`, so calling `perform_async` on a
-        # worker without one is the user's bug, not the
+        # Builds a `WorkerIndex::Entry` from the discovered class's `#perform` def. When the class doesn't
+        # override `#perform`, we record an "any-arity" entry — Sidekiq itself doesn't supply a default
+        # `#perform`, so calling `perform_async` on a worker without one is the user's bug, not the
         # plugin's call to flag without runtime context.
         def build_entry(class_name, perform_def)
           if perform_def.nil?

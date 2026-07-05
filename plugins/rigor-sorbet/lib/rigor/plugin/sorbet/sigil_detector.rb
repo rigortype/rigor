@@ -3,49 +3,36 @@
 module Rigor
   module Plugin
     class Sorbet < Rigor::Plugin::Base
-      # Reads Sorbet's `# typed: <level>` magic comment from the
-      # head of a file. Sorbet's own contract (per
-      # [`static.md`](https://sorbet.org/docs/static)) requires
-      # the sigil to appear at the top of the file before any
-      # Ruby code. We're slightly more lenient here — the sigil
-      # may appear after a few comment / blank lines (matching
-      # what Sorbet itself accepts in practice) but we stop
-      # scanning once we hit a non-comment, non-blank line.
+      # Reads Sorbet's `# typed: <level>` magic comment from the head of a file. Sorbet's own contract (per
+      # [`static.md`](https://sorbet.org/docs/static)) requires the sigil to appear at the top of the file
+      # before any Ruby code. We're slightly more lenient here — the sigil may appear after a few comment
+      # / blank lines (matching what Sorbet itself accepts in practice) but we stop scanning once we hit a
+      # non-comment, non-blank line.
       #
-      # Recognised levels: `:ignore` / `:false` / `:true` /
-      # `:strict` / `:strong`. Falls back to `:false` (Sorbet's
-      # default) when no sigil is present, matching how Sorbet
-      # treats sigil-less files.
+      # Recognised levels: `:ignore` / `:false` / `:true` / `:strict` / `:strong`. Falls back to `:false`
+      # (Sorbet's default) when no sigil is present, matching how Sorbet treats sigil-less files.
       #
-      # ADR-11 slice 5 uses this at catalog-harvest time:
-      # `# typed: ignore` files are skipped entirely; other
-      # levels gate both sig contributions (`:true`/`:strict`/
-      # `:strong` only) and per-call assertion recognition
-      # (`T.let` / `T.cast` / `T.must` / etc.) via
-      # `Sorbet#assertion_enforced_here?`.
+      # ADR-11 slice 5 uses this at catalog-harvest time: `# typed: ignore` files are skipped entirely;
+      # other levels gate both sig contributions (`:true`/`:strict`/`:strong` only) and per-call assertion
+      # recognition (`T.let` / `T.cast` / `T.must` / etc.) via `Sorbet#assertion_enforced_here?`.
       module SigilDetector
-        # Sorbet's strictness-level names. Stored as symbols to
-        # match the analyzer's existing convention for level
-        # identifiers; the `:true` / `:false` symbols here are
-        # level *names* (the textual sigil values) and are
-        # intentionally distinct from the `true` / `false`
-        # boolean literals.
+        # Sorbet's strictness-level names. Stored as symbols to match the analyzer's existing convention
+        # for level identifiers; the `:true` / `:false` symbols here are level *names* (the textual sigil
+        # values) and are intentionally distinct from the `true` / `false` boolean literals.
         VALID_LEVELS = %i[ignore false true strict strong].freeze
         DEFAULT_LEVEL = :false # rubocop:disable Lint/BooleanSymbol
         SIGIL_REGEX = /\A\s*#\s*typed\s*:\s*(ignore|false|true|strict|strong)\s*\z/
 
-        # Cap on how many lines we scan before giving up. Sorbet
-        # doesn't formally specify a cap, but the sigil
-        # convention is "near the top of the file"; 10 lines is
-        # generous and bounds the parse cost on enormous files.
+        # Cap on how many lines we scan before giving up. Sorbet doesn't formally specify a cap, but the
+        # sigil convention is "near the top of the file"; 10 lines is generous and bounds the parse cost
+        # on enormous files.
         MAX_HEAD_LINES = 10
 
         module_function
 
         # @param contents [String] raw file contents.
-        # @return [Symbol] one of {VALID_LEVELS}; defaults to
-        #   {DEFAULT_LEVEL} for sigil-less or malformed-sigil
-        #   files.
+        # @return [Symbol] one of {VALID_LEVELS}; defaults to {DEFAULT_LEVEL} for sigil-less or
+        #   malformed-sigil files.
         def detect(contents)
           return DEFAULT_LEVEL if contents.nil? || contents.empty?
 
@@ -57,9 +44,8 @@ module Rigor
 
             match = SIGIL_REGEX.match(stripped)
             return match[1].to_sym if match
-            # First non-blank line that isn't a sigil-shaped
-            # comment ends the scan: Sorbet's parser stops at
-            # the first directive-or-code line.
+            # First non-blank line that isn't a sigil-shaped comment ends the scan: Sorbet's parser stops
+            # at the first directive-or-code line.
             break unless stripped.start_with?("#")
           end
 
@@ -67,27 +53,20 @@ module Rigor
         end
 
         # @param level [Symbol]
-        # @return [Boolean] true when `# typed: ignore`. The
-        #   harvest pipeline calls this to short-circuit
+        # @return [Boolean] true when `# typed: ignore`. The harvest pipeline calls this to short-circuit
         #   walking the file's AST.
         def ignored?(level)
           level == :ignore
         end
 
-        # @return [Boolean] true when `level` is at or above the
-        #   `# typed: true` mark. Used by the
-        #   `enforce_sigil` config gate (default `true`): with
-        #   the gate on, only files marked `:true` / `:strict` /
-        #   `:strong` contribute their sigs to the catalog. The
-        #   `:false` (and sigil-less) levels still get walked
-        #   (so RBI files outside the project can be loaded
-        #   regardless), but their sig-derived narrowing is
-        #   suppressed — matching how Sorbet itself only
-        #   enforces type errors at `# typed: true`+. Assertion
-        #   recognisers (`T.let` / `T.cast` / `T.must` /
-        #   `T.bind` / `T.assert_type!`) are NOT gated by this:
-        #   the user wrote them deliberately, so the
-        #   recogniser still fires regardless of sigil.
+        # @return [Boolean] true when `level` is at or above the `# typed: true` mark. Used by the
+        #   `enforce_sigil` config gate (default `true`): with the gate on, only files marked `:true` /
+        #   `:strict` / `:strong` contribute their sigs to the catalog. The `:false` (and sigil-less)
+        #   levels still get walked (so RBI files outside the project can be loaded regardless), but their
+        #   sig-derived narrowing is suppressed — matching how Sorbet itself only enforces type errors at
+        #   `# typed: true`+. Assertion recognisers (`T.let` / `T.cast` / `T.must` / `T.bind` /
+        #   `T.assert_type!`) are NOT gated by this: the user wrote them deliberately, so the recogniser
+        #   still fires regardless of sigil.
         def enforced?(level)
           %i[true strict strong].include?(level)
         end

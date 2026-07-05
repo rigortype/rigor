@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-# DO NOT run via `ruby errors_demo.rb` — analyse with
-# `bundle exec rigor check` to see rigor-sorbet's diagnostics.
+# DO NOT run via `ruby errors_demo.rb` — analyse with `bundle exec rigor check` to see rigor-sorbet's
+# diagnostics.
 #
-# Each example is intentionally malformed at the `sig`-syntax
-# level, exercising the `plugin.sorbet.parse-error` warnings.
+# Each example is intentionally malformed at the `sig`-syntax level, exercising the
+# `plugin.sorbet.parse-error` warnings.
 
 module T
   module Sig

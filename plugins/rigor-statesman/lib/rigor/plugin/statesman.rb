@@ -6,29 +6,24 @@ require "rigor/source/literals"
 
 module Rigor
   module Plugin
-    # Example plugin: validates state-machine references.
-    # Demonstrates the **two-pass DSL analysis** pattern many
-    # plugins reuse:
+    # Example plugin: validates state-machine references. Demonstrates the **two-pass DSL analysis**
+    # pattern many plugins reuse:
     #
-    #   1. **Collect pass.** Walk the file once to gather every
-    #      state name declared inside a `state_machine do ... end`
-    #      block (`state :draft`, `state :submitted`, ...).
-    #   2. **Validate pass.** Walk the file again, validating each
-    #      `transition_to(:sym)` and `event :sym` reference against
-    #      the collected state set. Levenshtein distance ≤ 3 drives
-    #      the did-you-mean suggestions.
+    #   1. **Collect pass.** Walk the file once to gather every state name declared inside a
+    #      `state_machine do ... end` block (`state :draft`, `state :submitted`, ...).
+    #   2. **Validate pass.** Walk the file again, validating each `transition_to(:sym)` and `event :sym`
+    #      reference against the collected state set. Levenshtein distance ≤ 3 drives the did-you-mean
+    #      suggestions.
     #
-    # Useful for `aasm` / `statesman` / hand-rolled DSLs and any
-    # framework where declarations and uses live in the same
-    # file. The same skeleton lifts to GraphQL types,
-    # ActiveModel validations, route declarations — anywhere a
-    # declarative DSL produces a closed namespace and the rest
-    # of the file references that namespace by literal symbol.
+    # Useful for `aasm` / `statesman` / hand-rolled DSLs and any framework where declarations and uses
+    # live in the same file. The same skeleton lifts to GraphQL types, ActiveModel validations, route
+    # declarations — anywhere a declarative DSL produces a closed namespace and the rest of the file
+    # references that namespace by literal symbol.
     #
     # ## Configuration
     #
-    # Defaults match the `Statesman::Machine` API; override via
-    # `.rigor.yml` if your DSL uses different names:
+    # Defaults match the `Statesman::Machine` API; override via `.rigor.yml` if your DSL uses different
+    # names:
     #
     #     plugins:
     #       - gem: rigor-statesman
@@ -63,13 +58,11 @@ module Rigor
         @transition_method = config.fetch("transition_method").to_sym
       end
 
-      # ADR-37 — the two-pass shape made explicit. The collect pass
-      # (pass 1) runs once per file as the node-rule file context: it
-      # MUST complete before validation because a `transition_to` may
-      # precede the `state` that declares its target, so it cannot be a
-      # per-node rule in the engine's single forward walk. The validate
-      # pass (pass 2) is then a per-`CallNode` rule over the
-      # engine-owned walk — no hand-rolled traversal.
+      # ADR-37 — the two-pass shape made explicit. The collect pass (pass 1) runs once per file as the
+      # node-rule file context: it MUST complete before validation because a `transition_to` may precede
+      # the `state` that declares its target, so it cannot be a per-node rule in the engine's single
+      # forward walk. The validate pass (pass 2) is then a per-`CallNode` rule over the engine-owned walk
+      # — no hand-rolled traversal.
       node_file_context do |root, _scope|
         collect_states(root)
       end
@@ -86,10 +79,9 @@ module Rigor
 
       private
 
-      # Pass 1 — every `state :foo` declaration inside a
-      # `<dsl_method> do ... end` block on the file. Returns a
-      # frozen Set of state name Symbols. Walks via the engine's
-      # shared `Source::NodeWalker` rather than a hand-rolled traversal.
+      # Pass 1 — every `state :foo` declaration inside a `<dsl_method> do ... end` block on the file.
+      # Returns a frozen Set of state name Symbols. Walks via the engine's shared `Source::NodeWalker`
+      # rather than a hand-rolled traversal.
       def collect_states(root)
         states = Set.new
         Source::NodeWalker.each(root) do |node|

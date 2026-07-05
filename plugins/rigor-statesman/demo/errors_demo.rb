@@ -1,16 +1,14 @@
 # frozen_string_literal: true
 
-# Intentionally ill-typed file — demonstrates the diagnostics
-# rigor-statesman emits for unknown state references. DO NOT
-# run via `ruby errors_demo.rb` — the unknown states would
-# raise at runtime. Run `rigor check` instead.
+# Intentionally ill-typed file — demonstrates the diagnostics rigor-statesman emits for unknown state
+# references. DO NOT run via `ruby errors_demo.rb` — the unknown states would raise at runtime. Run
+# `rigor check` instead.
 
 require_relative "lib/runtime"
 
-# The plugin scopes states to the file. Repeat the
-# state_machine declaration here so the validator has
-# something to compare against — same shape a real Statesman
-# user would write in their `app/models/order.rb`.
+# The plugin scopes states to the file. Repeat the state_machine declaration here so the validator has
+# something to compare against — same shape a real Statesman user would write in their
+# `app/models/order.rb`.
 class Order
   state_machine do
     state :draft, initial: true

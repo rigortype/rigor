@@ -5,9 +5,8 @@ require "prism"
 module Rigor
   module Plugin
     class Sorbet < Rigor::Plugin::Base
-      # Maps Sorbet's type expressions (the AST inside a `sig`
-      # block's `params(...)` and `returns(...)` clauses) into
-      # Rigor's internal type carriers.
+      # Maps Sorbet's type expressions (the AST inside a `sig` block's `params(...)` and `returns(...)`
+      # clauses) into Rigor's internal type carriers.
       #
       # | Sorbet form              | Rigor carrier                            |
       # | ------------------------ | ---------------------------------------- |
@@ -32,18 +31,14 @@ module Rigor
       # | `{a: A, b: B}` (shape)   | `HashShape{a: A, b: B}` (closed)         |
       # | `Foo::Bar[A, B]` (user)  | `Nominal["Foo::Bar", [A, B]]`            |
       #
-      # Anything else (`T.proc`, `T.attached_class`,
-      # `T.self_type`, `T.type_parameter`, `T::Struct` / `T::Enum`
-      # subclasses, …) degrades silently to `Dynamic[top]`. The
-      # `dynamic.sorbet.unsupported` diagnostic for degraded
-      # forms is deferred.
+      # Anything else (`T.proc`, `T.attached_class`, `T.self_type`, `T.type_parameter`, `T::Struct` /
+      # `T::Enum` subclasses, …) degrades silently to `Dynamic[top]`. The `dynamic.sorbet.unsupported`
+      # diagnostic for degraded forms is deferred.
       module TypeTranslator
         BOOLEAN_NAME = "Boolean"
 
-        # `T::*` constants whose `[]` application maps directly
-        # onto a Rigor `Nominal` with the matching standard-
-        # library class name. Ordering matches the table above
-        # for ease of reading.
+        # `T::*` constants whose `[]` application maps directly onto a Rigor `Nominal` with the matching
+        # standard-library class name. Ordering matches the table above for ease of reading.
         T_GENERIC_CLASSES = {
           "Array" => "Array",
           "Hash" => "Hash",
@@ -58,8 +53,7 @@ module Rigor
         module_function
 
         # @param node [Prism::Node, nil]
-        # @return [Rigor::Type] never `nil`; unrecognised forms
-        #   degrade to `Type::Combinator.untyped`.
+        # @return [Rigor::Type] never `nil`; unrecognised forms degrade to `Type::Combinator.untyped`.
         def translate(node)
           return Rigor::Type::Combinator.untyped if node.nil?
 
@@ -86,8 +80,8 @@ module Rigor
           name = constant_path_name(node)
           return degraded if name.nil?
 
-          # Sorbet's `T::Boolean` is a special alias rather than a
-          # nominal class, expressed as the Boolean type alias.
+          # Sorbet's `T::Boolean` is a special alias rather than a nominal class, expressed as the Boolean
+          # type alias.
           return boolean_type if name == "T::Boolean"
 
           Rigor::Type::Combinator.nominal_of(name)
@@ -95,20 +89,16 @@ module Rigor
 
         # `Prism::CallNode` covers three distinct surfaces:
         #
-        # 1. `T.something(...)` — `untyped` / `anything` /
-        #    `noreturn` / `nilable` / `any` / `all` / `class_of`.
-        # 2. `T::SomeClass[...]` — the `[]` method on a generic
-        #    `T::*` constant (slice 3 widening). Maps to
-        #    `Nominal[name, type_args]`.
-        # 3. `Some::User::Generic[...]` — the `[]` method on any
-        #    OTHER constant (a user-defined generic application,
-        #    e.g. `Mangrove::Result::Ok[String, StandardError]`).
-        #    Maps to `Nominal[name, type_args]` so generic carriers
-        #    authored outside Sorbet's `T::*` set round-trip with
-        #    their instantiation intact (the unwrap-site receiver a
-        #    plugin like rigor-mangrove reads `type_args` from).
-        #    Without this branch such forms degraded to `untyped`,
-        #    silently dropping the receiver's generic arguments.
+        # 1. `T.something(...)` — `untyped` / `anything` / `noreturn` / `nilable` / `any` / `all` /
+        #    `class_of`.
+        # 2. `T::SomeClass[...]` — the `[]` method on a generic `T::*` constant (slice 3 widening). Maps
+        #    to `Nominal[name, type_args]`.
+        # 3. `Some::User::Generic[...]` — the `[]` method on any OTHER constant (a user-defined generic
+        #    application, e.g. `Mangrove::Result::Ok[String, StandardError]`). Maps to `Nominal[name,
+        #    type_args]` so generic carriers authored outside Sorbet's `T::*` set round-trip with their
+        #    instantiation intact (the unwrap-site receiver a plugin like rigor-mangrove reads `type_args`
+        #    from). Without this branch such forms degraded to `untyped`, silently dropping the
+        #    receiver's generic arguments.
         def translate_call(node)
           return translate_t_method(node) if sorbet_t_namespaced?(node.receiver)
           return translate_t_subscript(node) if sorbet_subscript?(node)
@@ -154,11 +144,9 @@ module Rigor
           Rigor::Type::Combinator.intersection(*args.map { |arg| translate(arg) })
         end
 
-        # `T.class_of(C)` — singleton-class type for a single
-        # constant. Sorbet docs note `T.class_of(MyInterface)`
-        # rarely means what users expect (it's the singleton
-        # class of `MyInterface`, not "any class implementing
-        # the interface"); we honour the literal meaning here
+        # `T.class_of(C)` — singleton-class type for a single constant. Sorbet docs note
+        # `T.class_of(MyInterface)` rarely means what users expect (it's the singleton class of
+        # `MyInterface`, not "any class implementing the interface"); we honour the literal meaning here
         # and translate to `Singleton[C]`.
         def translate_class_of(node)
           target = first_argument(node)
@@ -168,14 +156,10 @@ module Rigor
           Rigor::Type::Combinator.singleton_of(name)
         end
 
-        # Handles `T::Array[E]`, `T::Hash[K, V]`, etc. The Prism
-        # AST for `T::Array[Integer]` is a `CallNode` whose
-        # receiver is the `T::Array` `ConstantPathNode` and
-        # whose `name` is `:[]`. `T::Class[T]` lands here too;
-        # we collapse it to `Singleton[name]` (a deliberate
-        # narrowing — `T::Class` is structurally generic in
-        # Sorbet, but Rigor's `Singleton` carries class identity
-        # only).
+        # Handles `T::Array[E]`, `T::Hash[K, V]`, etc. The Prism AST for `T::Array[Integer]` is a
+        # `CallNode` whose receiver is the `T::Array` `ConstantPathNode` and whose `name` is `:[]`.
+        # `T::Class[T]` lands here too; we collapse it to `Singleton[name]` (a deliberate narrowing —
+        # `T::Class` is structurally generic in Sorbet, but Rigor's `Singleton` carries class identity only).
         def translate_t_subscript(node)
           base_name = sorbet_subscript_base(node.receiver)
           args = call_arguments(node).map { |arg| translate(arg) }
@@ -190,14 +174,11 @@ module Rigor
           end
         end
 
-        # A user-defined generic application — a `[]` call on a
-        # constant that is NOT `T`-rooted, e.g.
-        # `Mangrove::Result::Ok[String, StandardError]` or a
-        # top-level `Box[Integer]`. Translates to
-        # `Nominal[name, type_args]`, recursively translating each
-        # argument (so nested `T::Array[...]` inside a user generic
-        # still resolves). Ordered AFTER `translate_t_subscript` in
-        # `translate_call`, so the `T::*` forms never reach here.
+        # A user-defined generic application — a `[]` call on a constant that is NOT `T`-rooted, e.g.
+        # `Mangrove::Result::Ok[String, StandardError]` or a top-level `Box[Integer]`. Translates to
+        # `Nominal[name, type_args]`, recursively translating each argument (so nested `T::Array[...]`
+        # inside a user generic still resolves). Ordered AFTER `translate_t_subscript` in `translate_call`,
+        # so the `T::*` forms never reach here.
         def user_generic_subscript?(node)
           return false unless node.name == :[]
 
@@ -205,15 +186,14 @@ module Rigor
           return false unless receiver.is_a?(Prism::ConstantReadNode) ||
                               receiver.is_a?(Prism::ConstantPathNode)
 
-          # `T::Foo[...]` is handled by translate_t_subscript; only
-          # non-`T`-rooted constants are user generics.
+          # `T::Foo[...]` is handled by translate_t_subscript; only non-`T`-rooted constants are user
+          # generics.
           !sorbet_t_qualified?(receiver)
         end
 
         def translate_user_subscript(node)
-          # Parity with translate_constant_path: the constant's
-          # rendered name (carrying a leading `::` for absolute
-          # paths) becomes the nominal class name.
+          # Parity with translate_constant_path: the constant's rendered name (carrying a leading `::` for
+          # absolute paths) becomes the nominal class name.
           name = constant_path_name(node.receiver)
           return degraded if name.nil?
 
@@ -221,13 +201,10 @@ module Rigor
           Rigor::Type::Combinator.nominal_of(name, type_args: args)
         end
 
-        # `T::Class[T]` — Sorbet's "any class object whose
-        # instances are at least `T`". Rigor has no exact
-        # analogue (Singleton names a specific class); the
-        # closest faithful translation is `Singleton[name]`
-        # when `T` is a constant, or `Singleton[Object]` for
-        # broader applications. Lossy — the `dynamic.sorbet.degraded`
-        # diagnostic for this case is deferred.
+        # `T::Class[T]` — Sorbet's "any class object whose instances are at least `T`". Rigor has no exact
+        # analogue (Singleton names a specific class); the closest faithful translation is `Singleton[name]`
+        # when `T` is a constant, or `Singleton[Object]` for broader applications. Lossy — the
+        # `dynamic.sorbet.degraded` diagnostic for this case is deferred.
         def translate_t_class_subscript(args)
           inner = args.first
           return Rigor::Type::Combinator.singleton_of("Class") if inner.nil?
@@ -238,20 +215,16 @@ module Rigor
           end
         end
 
-        # Tuple types in `sig` position appear as bare array
-        # literals: `sig { returns([String, Integer]) }`. Each
-        # element is itself a type expression we translate
-        # recursively.
+        # Tuple types in `sig` position appear as bare array literals: `sig { returns([String, Integer]) }`.
+        # Each element is itself a type expression we translate recursively.
         def translate_tuple(node)
           elements = node.elements.map { |element| translate(element) }
           Rigor::Type::Combinator.tuple_of(*elements)
         end
 
-        # Shape types in `sig` position appear as bare hash
-        # literals with symbol keys:
-        # `sig { returns({a: Integer, b: String}) }`. Each
-        # value is a type expression; the resulting `HashShape`
-        # is closed (no extra keys allowed).
+        # Shape types in `sig` position appear as bare hash literals with symbol keys:
+        # `sig { returns({a: Integer, b: String}) }`. Each value is a type expression; the resulting
+        # `HashShape` is closed (no extra keys allowed).
         def translate_shape(node)
           pairs = []
           node.elements.each do |element|
@@ -263,9 +236,8 @@ module Rigor
           Rigor::Type::Combinator.hash_shape_of(pairs)
         end
 
-        # Renders a constant-path node (`Foo::Bar`, `::Foo::Bar`)
-        # as a `::`-joined String. Mirrors the helper used by
-        # rigor-activerecord's ModelDiscoverer for parity.
+        # Renders a constant-path node (`Foo::Bar`, `::Foo::Bar`) as a `::`-joined String. Mirrors the
+        # helper used by rigor-activerecord's ModelDiscoverer for parity.
         def constant_path_name(node)
           return nil if node.nil?
 
@@ -294,9 +266,8 @@ module Rigor
           receiver.is_a?(Prism::ConstantReadNode) && receiver.name == :T
         end
 
-        # `T::Array[Integer]` parses as `CallNode(receiver: T::Array, name: :[])`.
-        # The receiver is a `ConstantPathNode` rooted at the
-        # `T` constant.
+        # `T::Array[Integer]` parses as `CallNode(receiver: T::Array, name: :[])`. The receiver is a
+        # `ConstantPathNode` rooted at the `T` constant.
         def sorbet_subscript?(node)
           node.name == :[] && sorbet_t_qualified?(node.receiver)
         end
@@ -304,16 +275,14 @@ module Rigor
         def sorbet_t_qualified?(node)
           return false unless node.is_a?(Prism::ConstantPathNode)
 
-          # Walk to the root; require that it terminates at a
-          # `T` ConstantReadNode (not an absolute `::T`).
+          # Walk to the root; require that it terminates at a `T` ConstantReadNode (not an absolute `::T`).
           current = node
           current = current.parent while current.is_a?(Prism::ConstantPathNode)
           current.is_a?(Prism::ConstantReadNode) && current.name == :T
         end
 
-        # Strips the leading `T::` from a `T::Foo::Bar`
-        # constant-path node, returning `"Foo::Bar"`. Returns
-        # nil for shapes that aren't `T`-rooted.
+        # Strips the leading `T::` from a `T::Foo::Bar` constant-path node, returning `"Foo::Bar"`.
+        # Returns nil for shapes that aren't `T`-rooted.
         def sorbet_subscript_base(node)
           return nil unless sorbet_t_qualified?(node)
 
@@ -338,11 +307,9 @@ module Rigor
           Rigor::Type::Combinator.untyped
         end
 
-        # `T::Boolean` corresponds to the union of the singleton
-        # `true` / `false` values, matching how RBS's `bool`
-        # would translate. Built from `Constant[true]` /
-        # `Constant[false]` so the analyzer's flow-sensitive
-        # narrowing recognises the discriminating shape.
+        # `T::Boolean` corresponds to the union of the singleton `true` / `false` values, matching how
+        # RBS's `bool` would translate. Built from `Constant[true]` / `Constant[false]` so the analyzer's
+        # flow-sensitive narrowing recognises the discriminating shape.
         def boolean_type
           Rigor::Type::Combinator.union(
             Rigor::Type::Combinator.constant_of(true),

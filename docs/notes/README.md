@@ -55,6 +55,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-06-20 | [SKILL-driven onboarding (`rigor-next-steps`) — conference-app dogfood + rigor-survey field trial](20260620-skill-driven-onboarding-dogfood.md) |
 | 2026-06-20 | [OpenCode (ACP) cross-model validation — driving `rigor-next-steps` across 13 models](20260620-opencode-acp-cross-model-validation.md) |
 | 2026-07-04 | [Rails カバレッジ強化オンボーディング — sig-gen carrier トラップと engine-bound な天井（redmine / mastodon）](20260704-rails-coverage-onboarding-carrier-trap.md) |
+| 2026-07-06 | [Mastodon 型カバレッジ穴の provenance 分析 + sig-gen の RBS 妥当性クラッシュ](20260706-mastodon-coverage-provenance-and-siggen-rbs-validity.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

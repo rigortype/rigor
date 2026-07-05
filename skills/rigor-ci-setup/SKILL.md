@@ -11,25 +11,27 @@ metadata:
 # Rigor CI Setup
 
 Wire Rigor into a project's CI so type diagnostics appear **inline on the
-pull / merge request**, not just in the job log. This skill is for **users
-running Rigor on their own project** with the published `rigor` executable —
-Rigor is a tool, not a library, so it is **not** added to the project's
-`Gemfile` (see [ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)).
+pull / merge request**, not just in the job log. This skill is the
+*workflow* — detect the platform, choose the surface, apply the matching
+template, pin, gate, verify. It does **not** copy the CI YAML inline: the
+authoritative, version-matched templates live in the manual's CI chapter
+(`rigor docs ci`) and as ready-to-copy files, so this skill cannot drift
+out of date as `--format` surfaces and action versions move.
 
-If the project has no `.rigor.yml` yet, run the **rigor-project-init** skill
-first — this skill assumes `rigor check` already runs locally.
+This is for **users running Rigor on their own project** with the
+published `rigor` executable — Rigor is a tool, not a library, so it is
+**not** added to the project's `Gemfile`.
 
 ## First: load the version-current copy
 
-The CI templates, `--format` surfaces, and reviewdog reporters below are the
-fastest-moving detail in any skill (new output formats, changed flags, the
-supported Ruby). Follow the copy that ships with the **installed** Rigor,
-not any vendored or frozen copy of this file. Two version-matched sources,
-both offline once Rigor is installed:
+Follow the copy that ships with the **installed** Rigor, not any vendored
+or frozen copy of this file. Two version-matched sources, both offline once
+Rigor is installed:
 
 ```sh
 rigor skill --full rigor-ci-setup   # this skill's current workflow, in one call
-rigor docs ci                       # the manual's CI chapter (authoritative templates)
+rigor docs ci                       # the manual's CI chapter — the actual templates
+rigor docs --list manual | grep ci-templates   # ready-to-copy template files
 ```
 
 If you already loaded this skill *via* `rigor skill` you have the current
@@ -43,17 +45,17 @@ so a job that provisions the project's test Ruby (often 3.x, or a matrix)
 **cannot** also provision Rigor's 4.0 — the second `setup-ruby` clobbers the
 first. Always give Rigor a **separate job** (better: a separate workflow
 file, for its own triggers, concurrency, and status badge). Every template
-below does this.
+in `rigor docs ci` does this.
 
 ## Phase 0 — Detect the project's CI platform
 
 **Inspect the repository first; do not ask what you can detect.** Look for
 these markers from the project root and let them drive the platform choice:
 
-| Marker (check existence) | Platform → template |
+| Marker (check existence) | Platform |
 | --- | --- |
-| `.github/workflows/` directory exists | **GitHub Actions** (Phase 2 GitHub templates) |
-| `.gitlab-ci.yml` exists | **GitLab CI** (Phase 2 GitLab template) |
+| `.github/workflows/` directory exists | **GitHub Actions** |
+| `.gitlab-ci.yml` exists | **GitLab CI** |
 | `.circleci/config.yml` exists | **CircleCI** (generic recipe, `junit`) |
 | `Jenkinsfile` exists | **Jenkins** (generic recipe, `junit` / `checkstyle`) |
 | `bitbucket-pipelines.yml` / `azure-pipelines.yml` / `.drone.yml` | that platform (generic recipe) |
@@ -67,11 +69,11 @@ Concretely (the agent has file tools — use them):
   change the format / steps that are wrong or missing. The same applies to
   an existing `rigor` job inside `.gitlab-ci.yml`.
 - Check for an existing pin: `.github/rigor/Gemfile` (+ lockfile) means the
-  project already pins Rigor — keep it (Phase 4).
+  project already pins Rigor — keep it (Phase 3).
 - Check for `.rigor-baseline.yml` — if present, the project is in baseline
-  adoption mode, which changes the gate advice (Phase 5).
+  adoption mode, which changes the gate advice (Phase 4).
 - Grep existing CI files for `reviewdog` — if already used, prefer the
-  reviewdog path (Phase 3) for consistency.
+  reviewdog surface for consistency.
 
 **Routing:** exactly one platform marker → use it, state what you found, and
 proceed. Multiple (e.g. both `.github/workflows/` and `.gitlab-ci.yml`) →
@@ -79,238 +81,64 @@ tell the user both were found and ask which to wire (or do both). None → ask.
 
 ## Phase 1 — Pick the surface (what the reviewer should see)
 
-With the platform from Phase 0, pick the matching `--format` (confirm with
-the user only when the platform offers more than one good surface). All
-formats are pure renderings of the same diagnostics; the exit code is
-unchanged (`0` clean, `1` on errors), so the job still gates.
+All `--format` surfaces are pure renderings of the same diagnostics; the
+exit code is unchanged (`0` clean, `1` on errors), so the job still gates.
+The full format→platform table and severity mapping are in `rigor docs ci`;
+this is the *decision*:
 
-| Platform / goal | `--format` | How it surfaces |
-| --- | --- | --- |
-| **GitHub — the default** | `github` | `::error file=…::` workflow commands → inline PR-diff annotations. No upload, no permissions, works on **every** repo. |
-| GitHub — Security tab + persistent/deduped alerts | `sarif` | SARIF 2.1.0 via `upload-sarif`. **Requires code scanning** (see note) + `security-events: write`. |
-| GitHub/GitLab/Gerrit/Bitbucket/Gitea — PR/MR **review comments** | `checkstyle` (or `sarif`) piped to **reviewdog** | reviewdog posts comments. See Phase 3. |
-| GitLab — MR Code Quality widget | `gitlab` | Code Quality JSON published as a `codequality` report artifact. |
-| Any test-report CI (CircleCI, Jenkins, …) | `junit` | JUnit XML; every diagnostic is a `testcase` failure. |
+- **GitHub → lead with `github` (annotations).** It works on **every**
+  repository with zero setup — no upload, no permissions, no paid features.
+  In fact Rigor **auto-detects** GitHub Actions / TeamCity and emits native
+  annotations even without `--format`, so a plain `rigor check` already
+  annotates the PR (`--no-ci-detect` turns that off). Only upgrade when
+  there is a concrete reason:
+  - **`sarif`** (Security tab, deduped/persistent alerts) — *only when code
+    scanning is available*: a **public** repo (free) or a private repo with
+    **GitHub Advanced Security**. Without it `upload-sarif` fails. If you
+    cannot tell, **do not default to SARIF** — use `github` and offer SARIF
+    to a public-repo / GHAS user.
+  - **reviewdog** when the team wants threaded **review comments** filtered
+    to changed lines (works on private repos; needs a token — Phase 2).
+  - Annotation caveat: the run UI caps annotations per type, so on a first
+    adoption of a large codebase prefer the baseline gate (Phase 4) or
+    SARIF/reviewdog, which page through everything.
+- **GitLab →** `gitlab` (the MR Code Quality widget) or reviewdog.
+- **Any test-report CI (CircleCI, Jenkins, …) →** `junit`.
 
-**The GitHub default is `github` (annotations).** It is the one path that
-works on every repository with zero setup — no upload step, no extra
-permissions, no paid features — so lead with it unless the user asks for
-more. (It is also what PHPStan recommends for GitHub Actions.)
+## Phase 2 — Apply the matching template
 
-In fact, on GitHub Actions and TeamCity Rigor **auto-detects the CI and
-emits the native annotations even without `--format`** (it augments the
-default text output; ADR-51 WD7). So the simplest GitHub setup is the
-minimal workflow — plain `rigor check`, no `--format` — and you still get
-inline annotations. Pass `--format github` only when you want *just* the
-annotation stream (e.g. piping elsewhere); use `--no-ci-detect` to turn the
-augmentation off. Upgrade beyond annotations only when there is a concrete
-reason:
+Take the template for your (platform, surface) choice from `rigor docs ci`
+— or copy a ready file listed by `rigor docs --list manual | grep
+ci-templates` (GitHub annotations / SARIF / reviewdog, and GitLab). Copy it
+in, adjust nothing but the trigger unless asked, and pin the version next
+(Phase 3).
 
-- **`sarif`** *only when code scanning is available* — i.e. a **public**
-  repo (free) or a **private** repo with **GitHub Advanced Security /
-  Code Security** enabled. Without it, `upload-sarif` fails with
-  *"GitHub Advanced Security must be enabled for this repository"*. When
-  available it adds the Security tab, deduped + persistent alerts, and PR
-  alerts. If you cannot tell whether the repo is public or has GHAS, **do
-  not default to SARIF** — use `github`, and offer SARIF as an option to a
-  public-repo / GHAS user.
-- **reviewdog** when the team wants threaded **review comments** filtered to
-  the changed lines (works on private repos; needs a token, Phase 3).
+**reviewdog is platform-specific.** It reads Rigor's `checkstyle`
+(preferred — light, no code scanning) or `sarif`, but the `-reporter` must
+match the platform: `github-pr-review` posts only to GitHub,
+`gitlab-mr-discussion` only to GitLab — there is **no cross-platform
+reporter**. So a reviewdog setup is tied to one platform; for a repo
+mirrored across two, wire one reviewdog job per platform (or use each
+platform's native format). The reporter table, tokens, and the
+`-fail-level` / `-filter-mode` knobs are in `rigor docs ci` — keep
+`-filter-mode=added` to adopt on an existing codebase (the reviewdog
+analogue of a baseline).
 
-GitHub annotation caveat: the run UI shows only a limited number of
-annotations per type, so on a first adoption of a large codebase prefer the
-baseline gate (Phase 5) or SARIF/reviewdog, which page through everything.
+## Phase 3 — Pin Rigor's version (reproducible CI)
 
-Other platforms: **Code Quality** (`gitlab`) on GitLab; `junit` on the
-test-report CIs.
+The templates install the latest `rigortype` at run time. To pin it, use a
+**CI-only `Gemfile`** (`.github/rigor/Gemfile`, read only by the Rigor job,
+Dependabot-updatable) or a **pinned `gem install rigortype -v "X.Y.Z"`**.
+The exact recipe (the `BUNDLE_GEMFILE` wiring, the Dependabot entry) is in
+`rigor docs ci` § "Pinning Rigor's version".
 
-## Phase 2 — Drop in the workflow
+## Phase 4 — Gate behaviour (optional, with the user)
 
-Pick **one** template, copy it into the project, and adjust nothing but the
-trigger if asked. Pin the version later (Phase 4).
-
-### GitHub — inline annotations (no setup) — the default
-
-```yaml
-# .github/workflows/rigor.yml
-name: rigor
-on: [push, pull_request]
-jobs:
-  rigor:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "4.0"
-      - run: gem install rigortype
-      - run: rigor check --format github
-```
-
-### GitHub — SARIF → code scanning
-
-Use this **only if code scanning is available** for the repo — a public repo
-(free), or a private repo with GitHub Advanced Security / Code Security.
-Otherwise `upload-sarif` fails; use the annotations template above.
-
-```yaml
-# .github/workflows/rigor.yml
-name: rigor
-on: [push, pull_request]
-permissions:
-  contents: read
-  security-events: write   # required by upload-sarif
-jobs:
-  rigor:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "4.0"
-      - run: gem install rigortype
-      - run: rigor check --format sarif > rigor.sarif
-        continue-on-error: true        # so a non-zero exit still uploads
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: rigor.sarif
-```
-
-### GitLab — Code Quality widget
-
-```yaml
-# .gitlab-ci.yml
-rigor:
-  image: ruby:4.0
-  script:
-    - gem install rigortype
-    - rigor check --format gitlab > gl-code-quality-report.json
-  artifacts:
-    reports:
-      codequality: gl-code-quality-report.json
-    when: always
-```
-
-`--format gitlab` emits exactly the
-[Code Quality report format](https://docs.gitlab.com/ci/testing/code_quality/)
-GitLab requires: each finding carries `description`, `check_name`,
-`fingerprint` (a stable SHA-256, so a finding keeps its identity across
-runs), `severity` (`major`/`minor`/`info`), and `location.path` +
-`location.lines.begin`. Paths are repo-relative with no `./` prefix and the
-JSON has no BOM, both of which GitLab demands. For the MR widget to show a
-*diff* of new vs resolved findings, the report must exist on **both** the
-target (default) branch and the MR branch — the job above runs on each
-pipeline, which satisfies that automatically once it has run once on the
-default branch. (Note: a long-standing GitLab display bug can hide
-`check_name`; Rigor already folds the rule id into `description` as
-`… [rule]`, so the identifier shows regardless.)
-
-### Other runners (generic)
-
-Provision Ruby 4.0, `gem install rigortype`, then
-`rigor check --format junit > junit.xml` (or `checkstyle`, `json`) and
-publish the file with whatever artifact mechanism the platform offers.
-
-## Phase 3 — reviewdog (inline review comments)
-
-[reviewdog](https://github.com/reviewdog/reviewdog) turns Rigor's output
-into PR/MR review comments. It reads Rigor's `checkstyle` (preferred — light,
-no code scanning) or `sarif`, so the format is the same everywhere — **but
-the `-reporter` is platform-specific, so it must match the platform you
-detected in Phase 0.** Pick the reporter first, then the token/env it needs:
-
-| Phase 0 platform | `-reporter` | Token / env | Other needs |
-| --- | --- | --- | --- |
-| GitHub | `github-pr-review` (threaded comments) · `github-pr-check` (Check run) · `github-pr-annotations` | `REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}` | `permissions: pull-requests: write` |
-| GitLab | `gitlab-mr-discussion` (threaded) · `gitlab-mr-commit` | `REVIEWDOG_GITLAB_API_TOKEN` (a project/personal token) + `CI_API_V4_URL` | runs on MR pipelines |
-| Gerrit / Bitbucket / Gitea | `gerrit-change-review` · `bitbucket-code-report` · `gitea-pr-review` | the platform's token var (see reviewdog README) | — |
-
-There is **no cross-platform reviewdog reporter** — `github-*` posts only to
-GitHub, `gitlab-*` only to GitLab. So a reviewdog setup is always tied to one
-platform; if a project targets two (e.g. a GitHub mirror of a GitLab repo),
-wire one reviewdog job per platform, or use the platform-native format
-(`sarif` / `gitlab`) on each.
-
-Install reviewdog with
-[`reviewdog/action-setup`](https://github.com/reviewdog/action-setup) (GitHub)
-or `go install` / the binary (GitLab and others).
-
-**GitHub** (`.github/workflows/rigor.yml`):
-
-```yaml
-name: rigor
-on: [pull_request]
-permissions:
-  contents: read
-  pull-requests: write          # required for github-pr-review
-jobs:
-  rigor:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "4.0"
-      - run: gem install rigortype
-      - uses: reviewdog/action-setup@v1
-        with:
-          reviewdog_version: latest
-      - run: rigor check --format checkstyle | reviewdog -f=checkstyle -reporter=github-pr-review -fail-level=error
-        env:
-          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-**GitLab** (`.gitlab-ci.yml`) — install the reviewdog binary, then pipe:
-
-```yaml
-rigor:
-  image: ruby:4.0
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  variables:
-    REVIEWDOG_GITLAB_API_TOKEN: $RIGOR_REVIEWDOG_TOKEN   # a CI/CD variable you set
-  script:
-    - gem install rigortype
-    - wget -O - -q https://raw.githubusercontent.com/reviewdog/reviewdog/master/install.sh | sh -s -- -b /usr/local/bin
-    - rigor check --format checkstyle | reviewdog -f=checkstyle -reporter=gitlab-mr-discussion -fail-level=error
-```
-
-Knobs (both platforms):
-
-- **`-fail-level`** — `error` fails the step only on Rigor errors (matches
-  Rigor's exit code); `any` fails on warnings too; `none` is comment-only.
-  Default `error`.
-- **`-filter-mode`** — reviewdog's default `added` comments only on lines
-  the PR/MR changed; `nofilter` comments on everything. Keep `added` to adopt
-  on an existing codebase (the reviewdog analogue of Rigor's baseline).
-- **`checkstyle` vs `sarif`** — both work (`-f=checkstyle` / `-f=sarif`);
-  prefer `checkstyle` (lighter, no code scanning). Use `sarif` only if the
-  job *also* uploads to the GitHub Security tab and wants a single format.
-
-## Phase 4 — Pin Rigor's version (reproducible CI)
-
-The templates install the latest `rigortype` at run time. To pin it:
-
-- **CI-only `Gemfile` (recommended, Dependabot-updatable).** Commit
-  `.github/rigor/Gemfile` (`source "https://rubygems.org"` +
-  `gem "rigortype", "~> 0.1"`) and its lockfile, set
-  `env: BUNDLE_GEMFILE: .github/rigor/Gemfile` on the Rigor job, use
-  `ruby/setup-ruby` with `bundler-cache: true`, and run `bundle exec rigor
-  check …`. Add a Dependabot `bundler` entry scoped to `/.github/rigor`.
-  This file is read only by the Rigor job — it never enters the project's
-  resolution.
-- **Pinned `gem install`.** `gem install rigortype -v "X.Y.Z"`. Simple, but
-  Dependabot can't see it (manual updates).
-
-## Phase 5 — Gate behaviour (optional, with the user)
-
-- **Baseline adoption.** If the project uses `.rigor-baseline.yml`
-  (rigor-project-init / rigor-baseline-reduce), the same `rigor check`
-  honours it — CI fails only on *new* diagnostics. Add `--baseline-strict`
-  to also fail when the baseline has drifted loose (a CI gate that forces
+- **Baseline adoption.** If the project uses `.rigor-baseline.yml`, the same
+  `rigor check` honours it — CI fails only on *new* diagnostics. Add
+  `--baseline-strict` to also fail when the baseline drifts loose (forces
   regeneration). With reviewdog, `-filter-mode=added` plays the analogous
-  role for review comments.
+  role.
 - **Determinism.** Add `--no-cache` in CI if you want each run independent
   of any persisted `.rigor/cache`.
 
@@ -325,10 +153,11 @@ The templates install the latest `rigortype` at run time. To pin it:
 
 ## References
 
-- Manual: `rigor`'s CI chapter — read it **offline and version-matched**
-  with `rigor docs ci` (the copy-paste template files: `rigor docs
-  --list manual | grep ci-templates`). Web fallback, before Rigor is
-  installed: <https://github.com/rigortype/rigor/blob/master/docs/manual/11-ci.md>.
+- Manual: `rigor`'s CI chapter — the authoritative templates, severity
+  mapping, and pinning recipe, **offline and version-matched** with
+  `rigor docs ci` (ready files: `rigor docs --list manual | grep
+  ci-templates`). Web fallback, before Rigor is installed:
+  <https://github.com/rigortype/rigor/blob/master/docs/manual/11-ci.md>.
 - [ADR-51](https://github.com/rigortype/rigor/blob/master/docs/adr/51-ci-diagnostic-output-formats.md)
   — the output-format surface (the severity / identifier contract).
 - [ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)

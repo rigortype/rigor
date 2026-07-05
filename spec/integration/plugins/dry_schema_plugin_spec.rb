@@ -1,17 +1,13 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-dry-schema/`.
-# ADR-12 + the slicing plan in
+# Integration spec for `plugins/rigor-dry-schema/`. ADR-12 + the slicing plan in
 # `docs/design/20260517-dry-validation-slicing.md`.
 #
 # Slice 1 contract:
 #
-# 1. Walk the project for `Foo = Dry::Schema.{Params,JSON,define} { ... }`
-#    assignments.
-# 2. Inside each block, extract `required(:key).<predicate>(...)` and
-#    `optional(:key).<predicate>(...)` rows.
-# 3. Publish the resulting per-schema typed-key table as the
-#    `:dry_schema_table` ADR-9 cross-plugin fact.
+# 1. Walk the project for `Foo = Dry::Schema.{Params,JSON,define} { ... }` assignments.
+# 2. Inside each block, extract `required(:key).<predicate>(...)` and `optional(:key).<predicate>(...)` rows.
+# 3. Publish the resulting per-schema typed-key table as the `:dry_schema_table` ADR-9 cross-plugin fact.
 
 require "spec_helper"
 
@@ -160,8 +156,7 @@ RSpec.describe "rigor-dry-schema integration" do
         required(:name).filled(:string)
       end
     RUBY
-    # No `Types` module + no rigor-dry-types loaded → the constant
-    # reference doesn't resolve, key drops.
+    # No `Types` module + no rigor-dry-types loaded → the constant reference doesn't resolve, key drops.
     shape = run_and_read_fact(demo: demo).fetch("UnresolvedSchema")
     expect(shape.fetch(:required)).to eq(name: { type: "String", list: false })
   end
@@ -191,9 +186,8 @@ RSpec.describe "rigor-dry-schema integration" do
     expect(run_and_read_fact(demo: demo)).to be_nil
   end
 
-  # Runs the plugin(s) against a single-file project and returns
-  # the `:dry_schema_table` fact value. Optionally also loads
-  # rigor-dry-types (for the cross-plugin fact-resolution test).
+  # Runs the plugin(s) against a single-file project and returns the `:dry_schema_table` fact value. Optionally
+  # also loads rigor-dry-types (for the cross-plugin fact-resolution test).
   def run_and_read_fact(demo:, with_dry_types: false)
     Rigor::Plugin.unregister!
     captured_store = capture_fact_store!

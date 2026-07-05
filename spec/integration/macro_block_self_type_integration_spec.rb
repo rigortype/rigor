@@ -1,16 +1,13 @@
 # frozen_string_literal: true
 
-# Integration coverage for ADR-16 Tier A (block-as-method) engine
-# hook, slice 1b. Demonstrates the floor contract pinned by WD13:
-# when a registered plugin declares `block_as_methods:` for a class
-# that the user's app subclasses, bare identifiers inside the
-# matching DSL block resolve through the receiver's RBS rather
+# Integration coverage for ADR-16 Tier A (block-as-method) engine hook, slice 1b. Demonstrates the floor
+# contract pinned by WD13: when a registered plugin declares `block_as_methods:` for a class that the user's
+# app subclasses, bare identifiers inside the matching DSL block resolve through the receiver's RBS rather
 # than producing `call.undefined-method`.
 #
-# The Sinatra-flavoured fixture is the canonical real-world target
-# for Tier A. It uses an in-spec plugin class with a minimal RBS
-# stub for `Sinatra::Base` so the Tier A contract is observable
-# independent of `plugins/rigor-sinatra/` (slice 1c, now shipped).
+# The Sinatra-flavoured fixture is the canonical real-world target for Tier A. It uses an in-spec plugin class
+# with a minimal RBS stub for `Sinatra::Base` so the Tier A contract is observable independent of
+# `plugins/rigor-sinatra/` (slice 1c, now shipped).
 
 require "spec_helper"
 require "fileutils"
@@ -21,10 +18,8 @@ require "rigor/cache/store"
 require "rigor/configuration"
 
 RSpec.describe "ADR-16 Tier A — block-as-method engine hook" do
-  # Plugin under test. Declares the Tier A contract for
-  # `Sinatra::Base`'s `get` / `post` verbs. No diagnostics-of-its-
-  # own; the substrate's `self_type` narrowing is the entire
-  # delivery.
+  # Plugin under test. Declares the Tier A contract for `Sinatra::Base`'s `get` / `post` verbs. No
+  # diagnostics-of-its-own; the substrate's `self_type` narrowing is the entire delivery.
   let(:tier_a_plugin) do
     klass = Class.new(Rigor::Plugin::Base) do
       manifest(
@@ -42,10 +37,9 @@ RSpec.describe "ADR-16 Tier A — block-as-method engine hook" do
     klass
   end
 
-  # Minimal RBS for the fixture. `Sinatra::Base` exposes `redirect`,
-  # `params`, `halt`. The class method `get` accepts a path String
-  # and an optional block returning untyped — leaving the block's
-  # actual `self` to the Tier A hook to pin.
+  # Minimal RBS for the fixture. `Sinatra::Base` exposes `redirect`, `params`, `halt`. The class method `get`
+  # accepts a path String and an optional block returning untyped — leaving the block's actual `self` to the
+  # Tier A hook to pin.
   let(:sinatra_base_rbs) do
     <<~RBS
       module Sinatra
@@ -112,25 +106,19 @@ RSpec.describe "ADR-16 Tier A — block-as-method engine hook" do
       )
     end
 
-    # NOTE: "missing-method-on-substrate-narrowed-self surfaces as
-    # a diagnostic" is a separate analyzer-rule concern (the
-    # `call.undefined-method` rule is opt-in via the severity
-    # profile, not always-on). Tier A's contract is the *narrowing*;
-    # the downstream diagnostic policy is unchanged. The unit spec
-    # at `spec/rigor/inference/macro_block_self_type_spec.rb` covers
-    # the helper's positive and negative match cases; the
-    # integration here proves the engine consumes the helper's
-    # output for actual block-body resolution.
+    # NOTE: "missing-method-on-substrate-narrowed-self surfaces as a diagnostic" is a separate analyzer-rule
+    # concern (the `call.undefined-method` rule is opt-in via the severity profile, not always-on). Tier A's
+    # contract is the *narrowing*; the downstream diagnostic policy is unchanged. The unit spec at
+    # `spec/rigor/inference/macro_block_self_type_spec.rb` covers the helper's positive and negative match
+    # cases; the integration here proves the engine consumes the helper's output for actual block-body resolution.
   end
 
   describe "non-matching call shapes" do
-    # The substrate's correctness model is "Tier A narrows self_type
-    # only when (receiver_constraint matches, verb matches)." The
-    # negative-side observable is the *inference effect* — Type::Singleton
-    # of the outer class body is preserved inside the block — rather
-    # than a particular diagnostic. The unit-spec already proves the
-    # narrowing rules at the helper level; here we drive the engine
-    # through the same paths to confirm the wiring respects them.
+    # The substrate's correctness model is "Tier A narrows self_type only when (receiver_constraint matches,
+    # verb matches)." The negative-side observable is the *inference effect* — Type::Singleton of the outer
+    # class body is preserved inside the block — rather than a particular diagnostic. The unit-spec already
+    # proves the narrowing rules at the helper level; here we drive the engine through the same paths to
+    # confirm the wiring respects them.
 
     it "leaves verbs outside the manifest's `method_names:` list alone (Tier A does not fire)" do
       source = <<~RUBY
@@ -140,11 +128,9 @@ RSpec.describe "ADR-16 Tier A — block-as-method engine hook" do
           end
         end
       RUBY
-      # The engine produces SOME diagnostic about the unknown call
-      # path. The Tier A invariant we care about is that the helper's
-      # narrow_self_type_for returned nil for the `delete` verb;
-      # that's verified at the unit-spec layer. The integration spec
-      # here just exercises the end-to-end runner to confirm no
+      # The engine produces SOME diagnostic about the unknown call path. The Tier A invariant we care about is
+      # that the helper's narrow_self_type_for returned nil for the `delete` verb; that's verified at the
+      # unit-spec layer. The integration spec here just exercises the end-to-end runner to confirm no
       # exception is raised when Tier A declines.
       expect { run_analysis(source, plugin_class: tier_a_plugin) }.not_to raise_error
     end

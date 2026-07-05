@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-activestorage/`.
-# Mirrors the structure of the `rigor-activerecord` spec —
-# materialises model files on disk, runs the analyser, and
-# asserts both the diagnostic stream and the per-model
-# attachment index.
+# Integration spec for `plugins/rigor-activestorage/`. Mirrors the structure of the `rigor-activerecord` spec
+# — materialises model files on disk, runs the analyser, and asserts both the diagnostic stream and the
+# per-model attachment index.
 
 require "spec_helper"
 require "fileutils"
@@ -38,10 +36,9 @@ RSpec.describe "plugins/rigor-activestorage" do
   RBS
   # rubocop:enable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
 
-  # Materialises a project tree on disk + runs `rigor check`
-  # against `demo.rb`; returns `[result, attachment_index]`
-  # so specs can assert against the diagnostic stream AND
-  # the structured per-model state captured by the plugin.
+  # Materialises a project tree on disk + runs `rigor check` against `demo.rb`; returns
+  # `[result, attachment_index]` so specs can assert against the diagnostic stream AND the structured per-model
+  # state captured by the plugin.
   def run_as(source, models: { "app/models/application_record.rb" => APPLICATION_RECORD,
                                "app/models/user.rb" => USER_WITH_ATTACHMENTS,
                                "app/models/post.rb" => POST_WITHOUT_ATTACHMENTS },

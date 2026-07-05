@@ -1,16 +1,13 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-factorybot/`. Phase 1
-# (a) — self-contained validation of FactoryBot entry calls
-# against a per-run factory index.
+# Integration spec for `plugins/rigor-factorybot/`. Phase 1 (a) — self-contained validation of FactoryBot
+# entry calls against a per-run factory index.
 
 require "spec_helper"
 
 FACTORYBOT_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-factorybot/lib", __dir__)
-# `ACTIVERECORD_PLUGIN_LIB` is also defined by
-# `activerecord_plugin_spec.rb`. Guard against the double
-# definition so running both specs in the same process does
-# not warn `already initialized constant`.
+# `ACTIVERECORD_PLUGIN_LIB` is also defined by `activerecord_plugin_spec.rb`. Guard against the double
+# definition so running both specs in the same process does not warn `already initialized constant`.
 unless defined?(ACTIVERECORD_PLUGIN_LIB)
   ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-activerecord/lib", __dir__)
 end
@@ -181,8 +178,7 @@ RSpec.describe "plugins/rigor-factorybot" do
           RUBY
         }
       )
-      # `:only_in_trait` is declared inside `trait :admin do
-      # ... end`, which Phase 1 (a) doesn't recurse into.
+      # `:only_in_trait` is declared inside `trait :admin do ... end`, which Phase 1 (a) doesn't recurse into.
       # Hence the kwarg surfaces as `unknown-attribute`.
       err = plugin_diagnostics(result).find { |d| d.rule == "unknown-attribute" }
       expect(err).not_to be_nil
@@ -223,10 +219,8 @@ RSpec.describe "plugins/rigor-factorybot" do
     end
 
     it "accepts a column-only kwarg that's NOT in the factory's declared attributes" do
-      # The factory only declares `:name`. Without the AR
-      # cross-check, `:email` would surface as
-      # unknown-attribute. With Phase 1 (c) the email column
-      # is in the model's index, so the kwarg is accepted.
+      # The factory only declares `:name`. Without the AR cross-check, `:email` would surface as
+      # unknown-attribute. With Phase 1 (c) the email column is in the model's index, so the kwarg is accepted.
       run_factorybot_with_ar("FactoryBot.create(:user, email: \"x@y.z\")\n") do |result|
         unknown = result.diagnostics.select do |d|
           d.source_family == "plugin.factorybot" && d.rule == "unknown-attribute"
@@ -255,19 +249,13 @@ RSpec.describe "plugins/rigor-factorybot" do
     end
   end
 
-  # Pillar 2 Slice 3 — factory definitions as struct-shape
-  # facts. The `:factory_index` ADR-9 publication now carries
-  # per-factory `model_class` so downstream consumers (Slice
-  # 2's `let(:user) { create(:user) }` SUT binding, future
-  # `rigor-shoulda-matchers`-style cross-checks) can map a
-  # factory name to a Ruby class.
+  # Pillar 2 Slice 3 — factory definitions as struct-shape facts. The `:factory_index` ADR-9 publication now
+  # carries per-factory `model_class` so downstream consumers (Slice 2's `let(:user) { create(:user) }` SUT
+  # binding, future `rigor-shoulda-matchers`-style cross-checks) can map a factory name to a Ruby class.
   describe "Pillar 2 Slice 3 — factory entry model_class" do
-    # Drives the FactoryDiscoverer directly via a temp dir.
-    # The full integration through `producer :factory_index`
-    # is exercised by every downstream consumer spec (e.g.
-    # rspec_plugin_spec / shoulda_matchers_plugin_spec
-    # patterns) — these focused tests pin the Entry shape
-    # change.
+    # Drives the FactoryDiscoverer directly via a temp dir. The full integration through `producer
+    # :factory_index` is exercised by every downstream consumer spec (e.g. rspec_plugin_spec /
+    # shoulda_matchers_plugin_spec patterns) — these focused tests pin the Entry shape change.
     def factory_index_for(files)
       Dir.mktmpdir do |dir|
         files.each do |relative, contents|

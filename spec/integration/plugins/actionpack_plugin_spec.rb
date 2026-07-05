@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-actionpack/` (Phase 4
-# — route-helper consumption). Tests the cross-plugin
-# integration end to end: rigor-rails-routes parses
-# `config/routes.rb` and publishes the helper table; the
-# loader's ADR-9 topo sort runs `prepare` first; then
-# rigor-actionpack reads the published helper table and
+# Integration spec for `plugins/rigor-actionpack/` (Phase 4 — route-helper consumption). Tests the cross-plugin
+# integration end to end: rigor-rails-routes parses `config/routes.rb` and publishes the helper table; the
+# loader's ADR-9 topo sort runs `prepare` first; then rigor-actionpack reads the published helper table and
 # validates `*_path` / `*_url` calls inside controller files.
 
 require "spec_helper"
@@ -199,13 +196,10 @@ RSpec.describe "plugins/rigor-actionpack" do
   end
 
   describe "helper-call error diagnostics (canonically delegated to rigor-rails-routes)" do
-    # rigor-actionpack and rigor-rails-routes both consume the same
-    # `:helper_table` fact. To avoid every typo'd / wrong-arity
-    # helper call surfacing twice (once per plugin) on every
-    # Rails project, the actionpack plugin emits only the
-    # info-level route-resolution (`helper-call`) and defers
-    # `unknown-helper` / `wrong-helper-arity` to rigor-rails-routes.
-    # Mastodon pre-fix saw +301 duplicate errors from this overlap.
+    # rigor-actionpack and rigor-rails-routes both consume the same `:helper_table` fact. To avoid every
+    # typo'd / wrong-arity helper call surfacing twice (once per plugin) on every Rails project, the actionpack
+    # plugin emits only the info-level route-resolution (`helper-call`) and defers `unknown-helper` /
+    # `wrong-helper-arity` to rigor-rails-routes. Mastodon pre-fix saw +301 duplicate errors from this overlap.
     # These specs assert the new contract: rails-routes still fires.
     it "rigor-rails-routes fires `unknown-helper` with a did-you-mean suggestion on a typo" do
       source = "class C\n  def show\n    usres_path\n  end\nend\n"
@@ -229,12 +223,9 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "rigor-rails-routes fires the arity-mismatch diagnostic on overflow" do
-      # `about_path` is arity 0 — `accepts_arity?` allows
-      # `arity + 1` for the trailing-options-hash idiom, so we
-      # pass 2 explicit args to overflow past the `0 + 1`
-      # tolerance. Underflow (passing 0 args to a non-zero-arity
-      # helper) is silenced inside controller paths because of
-      # Rails' implicit-params-fill pattern.
+      # `about_path` is arity 0 — `accepts_arity?` allows `arity + 1` for the trailing-options-hash idiom, so
+      # we pass 2 explicit args to overflow past the `0 + 1` tolerance. Underflow (passing 0 args to a
+      # non-zero-arity helper) is silenced inside controller paths because of Rails' implicit-params-fill pattern.
       source = "class C\n  def show\n    about_path(1, 2)\n  end\nend\n"
       with_demo(source) do |result|
         err = result.diagnostics.find do |d|
@@ -282,9 +273,8 @@ RSpec.describe "plugins/rigor-actionpack" do
             end
           )
           result = runner.run
-          # The rails-routes plugin still validates the `usres_path`
-          # call (its own walker doesn't filter by path), but
-          # actionpack's path filter must skip the lib/ file.
+          # The rails-routes plugin still validates the `usres_path` call (its own walker doesn't filter by
+          # path), but actionpack's path filter must skip the lib/ file.
           ap_diags = result.diagnostics.select { |d| d.source_family == "plugin.actionpack" }
           expect(ap_diags).to be_empty
         end
@@ -384,10 +374,8 @@ RSpec.describe "plugins/rigor-actionpack" do
                            end
                          RUBY
                        }) do |result|
-        # `:show` and `:edit` are action names, NOT filter
-        # names — Phase 2 must NOT flag them as unknown
-        # filters. (Phase 2.5 will validate the action-name
-        # arguments separately.)
+        # `:show` and `:edit` are action names, NOT filter names — Phase 2 must NOT flag them as unknown
+        # filters. (Phase 2.5 will validate the action-name arguments separately.)
         unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-filter-method" }
         expect(unknown).to be_empty
       end
@@ -412,11 +400,9 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "resolves filter methods transitively through `include` chains (Mastodon shape)" do
-      # AccountsController includes SignatureAuthentication,
-      # SignatureAuthentication includes SignatureVerification,
-      # SignatureVerification defines `require_account_signature!`.
-      # Pre-fix all 177 such Mastodon call sites surfaced as
-      # `unknown-filter-method`.
+      # AccountsController includes SignatureAuthentication, SignatureAuthentication includes
+      # SignatureVerification, SignatureVerification defines `require_account_signature!`. Pre-fix all 177
+      # such Mastodon call sites surfaced as `unknown-filter-method`.
       with_controllers(controllers: {
                          "concerns/signature_verification.rb" => <<~RUBY,
                            module SignatureVerification
@@ -443,13 +429,10 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     # ──────────────────────────────────────────────────────
-    # Mastodon shape: `module Admin; class AccountsController
-    # < BaseController; end; end` (nested-module form).
-    # Pre-fix this registered the inner class as bare
-    # `AccountsController`, clobbering the top-level
-    # `app/controllers/accounts_controller.rb` entry. The fix
-    # threads the enclosing module qualifier through the AST
-    # walk so the entry's `class_name` is fully qualified.
+    # Mastodon shape: `module Admin; class AccountsController < BaseController; end; end` (nested-module form).
+    # Pre-fix this registered the inner class as bare `AccountsController`, clobbering the top-level
+    # `app/controllers/accounts_controller.rb` entry. The fix threads the enclosing module qualifier through
+    # the AST walk so the entry's `class_name` is fully qualified.
     # ──────────────────────────────────────────────────────
 
     it "qualifies a nested-module class declaration with its enclosing scope" do
@@ -477,10 +460,8 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "walks the full ancestor chain (multi-level inheritance)" do
-      # `Admin::AccountsController < Admin::BaseController <
-      # ApplicationController` — `require_user!` is defined on
-      # the GRANDPARENT. Pre-fix only the immediate parent was
-      # walked, so this case false-fired.
+      # `Admin::AccountsController < Admin::BaseController < ApplicationController` — `require_user!` is
+      # defined on the GRANDPARENT. Pre-fix only the immediate parent was walked, so this case false-fired.
       with_controllers(controllers: {
                          "application_controller.rb" => <<~RUBY,
                            class ApplicationController
@@ -534,9 +515,8 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "resolves skip_before_action :name through the ancestor chain" do
-      # The dominant Mastodon case (13 of 42 errors pre-fix):
-      # `skip_before_action :require_functional!` references
-      # a filter declared on the parent.
+      # The dominant Mastodon case (13 of 42 errors pre-fix): `skip_before_action :require_functional!`
+      # references a filter declared on the parent.
       with_controllers(controllers: {
                          "application_controller.rb" => <<~RUBY,
                            class ApplicationController
@@ -556,12 +536,9 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "suppresses unknown-filter-method when the controller includes a gem-shipped (unresolved) concern" do
-      # Devise / Pundit-style: the controller `include`s a module
-      # whose source isn't in `app/controllers/`. We can't see
-      # what methods that module provides, so an unrecognized
-      # `before_action :authenticate_user!` MUST stay silent —
-      # the method could legitimately come from the unresolved
-      # include.
+      # Devise / Pundit-style: the controller `include`s a module whose source isn't in `app/controllers/`. We
+      # can't see what methods that module provides, so an unrecognized `before_action :authenticate_user!`
+      # MUST stay silent — the method could legitimately come from the unresolved include.
       with_controllers(controllers: {
                          "application_controller.rb" => <<~RUBY
                            class ApplicationController
@@ -579,11 +556,9 @@ RSpec.describe "plugins/rigor-actionpack" do
     it "suppresses unknown-filter-method when the controller inherits from a gem-shipped (unresolved) parent" do
       # Devise/Doorkeeper-style:
       #   class Auth::ConfirmationsController < Devise::ConfirmationsController
-      # The gem-shipped parent's own ancestor chain is invisible
-      # to us, so a `skip_before_action :check_self_destruct!`
-      # against a filter that the parent's ancestors might
-      # legitimately define MUST stay silent — same rationale as
-      # the unresolved-include case above.
+      # The gem-shipped parent's own ancestor chain is invisible to us, so a `skip_before_action
+      # :check_self_destruct!` against a filter that the parent's ancestors might legitimately define MUST
+      # stay silent — same rationale as the unresolved-include case above.
       with_controllers(controllers: {
                          "auth/confirmations_controller.rb" => <<~RUBY
                            class Auth::ConfirmationsController < Devise::ConfirmationsController
@@ -805,13 +780,10 @@ RSpec.describe "plugins/rigor-actionpack" do
   end
 
   describe "nested-module controllers — analyzer matches discoverer qualification" do
-    # The `ControllerDiscoverer` (separate slice) qualifies a
-    # nested-module declaration as `Admin::DomainBlocksController`.
-    # The analyzer's `diagnose_filters` / `diagnose_renders`
-    # MUST resolve the same qualified name from the AST, or
-    # filter validation silently no-ops and render-target
-    # paths point at the wrong directory (`domain_blocks/` vs
-    # `admin/domain_blocks/`).
+    # The `ControllerDiscoverer` (separate slice) qualifies a nested-module declaration as
+    # `Admin::DomainBlocksController`. The analyzer's `diagnose_filters` / `diagnose_renders` MUST resolve the
+    # same qualified name from the AST, or filter validation silently no-ops and render-target paths point at
+    # the wrong directory (`domain_blocks/` vs `admin/domain_blocks/`).
 
     def with_nested_module_controller(path:, contents:, views: {})
       Dir.mktmpdir do |dir|

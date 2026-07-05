@@ -1,9 +1,7 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-rails-i18n/`.
-# Tier 1B of the Rails plugins roadmap. Reads
-# `config/locales/*.yml`, builds a flat `dotted_key`
-# catalogue per locale, and validates every literal-string
+# Integration spec for `plugins/rigor-rails-i18n/`. Tier 1B of the Rails plugins roadmap. Reads
+# `config/locales/*.yml`, builds a flat `dotted_key` catalogue per locale, and validates every literal-string
 # `t(...)` / `I18n.t(...)` call site.
 
 require "spec_helper"
@@ -12,10 +10,8 @@ RAILS_I18N_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-rails-i18n/lib"
 $LOAD_PATH.unshift(RAILS_I18N_PLUGIN_LIB) unless $LOAD_PATH.include?(RAILS_I18N_PLUGIN_LIB)
 require "rigor-rails-i18n"
 
-# `%{name}` is the I18n interpolation placeholder syntax —
-# RuboCop's `Style/FormatStringToken` would prefer
-# `%<name>s`, but here the YAML payload is data the plugin
-# parses, not a Ruby format string.
+# `%{name}` is the I18n interpolation placeholder syntax — RuboCop's `Style/FormatStringToken` would prefer
+# `%<name>s`, but here the YAML payload is data the plugin parses, not a Ruby format string.
 # rubocop:disable Style/FormatStringToken
 DEFAULT_LOCALES = {
   "config/locales/en.yml" => <<~YAML,
@@ -42,13 +38,10 @@ RSpec.describe "plugins/rigor-rails-i18n" do
 
   let(:plugin_class) { Rigor::Plugin::RailsI18n }
 
-  # Opt into the shared per-process `Cache::Store`. The plugin's
-  # `:locale_index` producer now passes an explicit
-  # `glob_descriptor` covering `config/locales/**/*.{yml,yaml}`,
-  # so cache entries invalidate when locale YAML files differ
-  # between examples — letting the malformed-YAML test surface a
-  # fresh load error rather than reading a healthy cache entry
-  # left over from a prior valid-YAML example.
+  # Opt into the shared per-process `Cache::Store`. The plugin's `:locale_index` producer now passes an
+  # explicit `glob_descriptor` covering `config/locales/**/*.{yml,yaml}`, so cache entries invalidate when
+  # locale YAML files differ between examples — letting the malformed-YAML test surface a fresh load error
+  # rather than reading a healthy cache entry left over from a prior valid-YAML example.
   let(:default_run_plugin_cache_store) { :shared }
 
   describe "recognised translation calls" do
@@ -98,10 +91,8 @@ RSpec.describe "plugins/rigor-rails-i18n" do
     end
 
     it "accepts a pluralization namespace whose CLDR subkeys exist" do
-      # Mastodon-derived regression: `t('accounts.posts', count: n)`
-      # resolves through `accounts.posts.{one,other}`. The parent
-      # `accounts.posts` itself has no leaf value, but it IS a
-      # valid pluralization namespace.
+      # Mastodon-derived regression: `t('accounts.posts', count: n)` resolves through `accounts.posts.{one,other}`.
+      # The parent `accounts.posts` itself has no leaf value, but it IS a valid pluralization namespace.
       result = run_plugin(
         source: "t('accounts.posts', count: 3)\n",
         files: {
@@ -281,10 +272,8 @@ RSpec.describe "plugins/rigor-rails-i18n" do
   end
 
   describe "view template lazy key expansion" do
-    # Use per-test cache to avoid cross-test pollution from the
-    # shared cache store (view_diagnostics is a new producer and
-    # the shared cache doesn't know how to invalidate it across
-    # different tmpdir-based tests).
+    # Use per-test cache to avoid cross-test pollution from the shared cache store (view_diagnostics is a new
+    # producer and the shared cache doesn't know how to invalidate it across different tmpdir-based tests).
     let(:default_run_plugin_cache_store) { nil }
 
     # rubocop:disable Style/FormatStringToken

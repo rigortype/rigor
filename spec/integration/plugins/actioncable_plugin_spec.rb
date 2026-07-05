@@ -1,9 +1,7 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-actioncable/`.
-# Tier 3F of the Rails plugins roadmap. Discovers channel
-# classes by walking `app/channels/` and validates
-# `<Channel>.broadcast_to(...)` and
+# Integration spec for `plugins/rigor-actioncable/`. Tier 3F of the Rails plugins roadmap. Discovers channel
+# classes by walking `app/channels/` and validates `<Channel>.broadcast_to(...)` and
 # `ActionCable.server.broadcast(stream_name, ...)` calls.
 
 require "spec_helper"
@@ -58,14 +56,11 @@ RSpec.describe "plugins/rigor-actioncable" do
 
   let(:plugin_class) { Rigor::Plugin::Actioncable }
 
-  # Opt into the shared per-process `Cache::Store`. The plugin's
-  # `:channel_index` producer now passes an explicit
-  # `glob_descriptor` covering `app/channels/**/*.rb`, so cache
-  # entries invalidate correctly when channel files differ between
-  # examples. Without that descriptor fix the shared cache served
-  # stale `ChannelIndex` data across examples (see
-  # `docs/CURRENT_WORK.md` § Open Engineering Items for the
-  # session that surfaced the bug).
+  # Opt into the shared per-process `Cache::Store`. The plugin's `:channel_index` producer now passes an
+  # explicit `glob_descriptor` covering `app/channels/**/*.rb`, so cache entries invalidate correctly when
+  # channel files differ between examples. Without that descriptor fix the shared cache served stale
+  # `ChannelIndex` data across examples (see `docs/CURRENT_WORK.md` § Open Engineering Items for the session
+  # that surfaced the bug).
   let(:default_run_plugin_cache_store) { :shared }
 
   describe "broadcast_to recognition" do
@@ -180,8 +175,7 @@ RSpec.describe "plugins/rigor-actioncable" do
         files: files_with_stream_for_channel,
         plugin_entry: DEFAULT_PLUGIN_ENTRY
       )
-      # No unknown-stream warning — the dynamic
-      # registration via `stream_for` suppresses it.
+      # No unknown-stream warning — the dynamic registration via `stream_for` suppresses it.
       diags = plugin_diagnostics(result)
       expect(diags.select { |d| d.rule == "unknown-stream" }).to be_empty
     end

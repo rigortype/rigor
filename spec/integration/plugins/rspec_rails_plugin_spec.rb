@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-rspec-rails/`.
-# v0.1.0 covers `have_http_status(int_or_symbol)` validation
-# only — the larger behavioral matcher surface (render_template
-# / route_to / redirect_to / have_enqueued_job / have_received)
-# is deferred per the README's "Deferred matchers" section.
+# Integration spec for `plugins/rigor-rspec-rails/`. v0.1.0 covers `have_http_status(int_or_symbol)` validation
+# only — the larger behavioral matcher surface (render_template / route_to / redirect_to / have_enqueued_job /
+# have_received) is deferred per the README's "Deferred matchers" section.
 
 require "spec_helper"
 
@@ -96,8 +94,7 @@ RSpec.describe "plugins/rigor-rspec-rails" do
     end
 
     it "is silent for the new :unprocessable_content alias (Rails 7.2+)" do
-      # Newer Rails uses `:unprocessable_content` as a synonym
-      # of `:unprocessable_entity` (422); recognise both.
+      # Newer Rails uses `:unprocessable_content` as a synonym of `:unprocessable_entity` (422); recognise both.
       diags = diagnostics_for("expect(response).to have_http_status(:unprocessable_content)\n")
       expect(diags).to be_empty
     end
@@ -135,8 +132,7 @@ RSpec.describe "plugins/rigor-rspec-rails" do
     end
 
     it "is silent for a String arg (Rails accepts string literals too)" do
-      # The plugin intentionally skips the String form rather
-      # than parse / validate the numeric content.
+      # The plugin intentionally skips the String form rather than parse / validate the numeric content.
       diags = diagnostics_for("expect(response).to have_http_status(\"200\")\n")
       have_diags = diags.select { |d| d.rule.start_with?("have_http_status") }
       expect(have_diags).to be_empty
@@ -145,11 +141,9 @@ RSpec.describe "plugins/rigor-rspec-rails" do
 
   describe "matcher invocation context" do
     it "fires on the bare `have_http_status(arg)` matcher form" do
-      # Some specs call `should have_http_status(404)` or use
-      # the matcher inside a custom matcher composition. The
-      # diagnostic should still fire because the matcher
-      # itself is recognised regardless of the surrounding
-      # chain.
+      # Some specs call `should have_http_status(404)` or use the matcher inside a custom matcher composition.
+      # The diagnostic should still fire because the matcher itself is recognised regardless of the
+      # surrounding chain.
       diags = diagnostics_for("should have_http_status(700)\n")
       err = diags.find { |d| d.rule == "have_http_status.out-of-range" }
       expect(err).not_to be_nil

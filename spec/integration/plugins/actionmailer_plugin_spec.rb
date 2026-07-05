@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-actionmailer/`.
-# Tier 1C of the Rails plugins roadmap. Discovers
-# ActionMailer subclasses by walking `app/mailers/` and
-# validates `Mailer.action(args)` call shape (method exists,
-# arity matches) and view template existence.
+# Integration spec for `plugins/rigor-actionmailer/`. Tier 1C of the Rails plugins roadmap. Discovers
+# ActionMailer subclasses by walking `app/mailers/` and validates `Mailer.action(args)` call shape (method
+# exists, arity matches) and view template existence.
 
 require "spec_helper"
 
@@ -42,13 +40,10 @@ RSpec.describe "plugins/rigor-actionmailer" do
 
   let(:plugin_class) { Rigor::Plugin::Actionmailer }
 
-  # Opt into the shared per-process `Cache::Store`. The plugin's
-  # `:mailer_index` producer now passes an explicit composed
-  # `glob_descriptor` covering both `app/mailers/**/*.rb` and
-  # every file under `app/views/`, so cache entries invalidate on
-  # mailer or view changes between examples. Without that fix the
-  # shared cache served stale `MailerIndex` data (missing-view
-  # discovery hid views added in later examples).
+  # Opt into the shared per-process `Cache::Store`. The plugin's `:mailer_index` producer now passes an
+  # explicit composed `glob_descriptor` covering both `app/mailers/**/*.rb` and every file under `app/views/`,
+  # so cache entries invalidate on mailer or view changes between examples. Without that fix the shared cache
+  # served stale `MailerIndex` data (missing-view discovery hid views added in later examples).
   let(:default_run_plugin_cache_store) { :shared }
 
   describe "recognised mailer calls" do
@@ -145,12 +140,9 @@ RSpec.describe "plugins/rigor-actionmailer" do
     end
 
     it "skips methods that follow a bare `private` (Mastodon AdminMailer shape)" do
-      # Mastodon's AdminMailer has `before_action :set_instance`
-      # plus `private` followed by `set_instance` /
-      # `process_params` / `set_locale` / `set_important_headers!`.
-      # None of those are mailer actions; pre-fix they surfaced
-      # as missing-view because the discoverer treated every
-      # instance `def` as an action.
+      # Mastodon's AdminMailer has `before_action :set_instance` plus `private` followed by `set_instance` /
+      # `process_params` / `set_locale` / `set_important_headers!`. None of those are mailer actions; pre-fix
+      # they surfaced as missing-view because the discoverer treated every instance `def` as an action.
       files = {
         "app/mailers/admin_mailer.rb" => <<~RUBY,
           class AdminMailer < ApplicationMailer
@@ -220,8 +212,7 @@ RSpec.describe "plugins/rigor-actionmailer" do
     end
 
     it "doesn't validate framework methods that happen to be called on the mailer" do
-      # `UserMailer.deliver_later` (no preceding action) is
-      # a framework-level call; we don't try to validate it
+      # `UserMailer.deliver_later` (no preceding action) is a framework-level call; we don't try to validate it
       # as an action.
       result = run_plugin(
         source: "UserMailer.deliver_later\n",

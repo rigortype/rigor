@@ -1,15 +1,11 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-shoulda-matchers/`.
-# Validates shoulda matchers against the :model_index
+# Integration spec for `plugins/rigor-shoulda-matchers/`. Validates shoulda matchers against the :model_index
 # cross-plugin fact (ADR-9) published by rigor-activerecord.
 #
-# Tests exercise the Analyzer module directly with a stub
-# model_index — the full integration through
-# rigor-activerecord's producer is covered by the
-# activerecord plugin spec; here we pin the matcher
-# recogniser shape independently so a future rigor-activerecord
-# refactor can't accidentally break the matcher contract.
+# Tests exercise the Analyzer module directly with a stub model_index — the full integration through
+# rigor-activerecord's producer is covered by the activerecord plugin spec; here we pin the matcher recogniser
+# shape independently so a future rigor-activerecord refactor can't accidentally break the matcher contract.
 
 require "spec_helper"
 
@@ -23,10 +19,8 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
 
   let(:plugin_class) { Rigor::Plugin::ShouldaMatchers }
 
-  # Minimal stub model_index. Mirrors the surface
-  # rigor-activerecord's ModelIndex exposes (`find` returning
-  # an Entry that responds to `column?` / `association?` /
-  # `association` / `column_names` / `association_names`).
+  # Minimal stub model_index. Mirrors the surface rigor-activerecord's ModelIndex exposes (`find` returning an
+  # Entry that responds to `column?` / `association?` / `association` / `column_names` / `association_names`).
   let(:user_entry) do
     Class.new do
       def initialize(columns:, associations:)
@@ -57,11 +51,10 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
     end.new(entries)
   end
 
-  # Drives the plugin's per-node path (ADR-37): the engine walks with
-  # ancestors and the Analyzer's per-node `violations_for` validates each
-  # matcher against the (innermost enclosing) describe-model anchor. This
-  # mirrors exactly what `node_rule` + `Base#diagnostic` do, returning
-  # real `Diagnostic` rows so the assertions below are unchanged.
+  # Drives the plugin's per-node path (ADR-37): the engine walks with ancestors and the Analyzer's per-node
+  # `violations_for` validates each matcher against the (innermost enclosing) describe-model anchor. This
+  # mirrors exactly what `node_rule` + `Base#diagnostic` do, returning real `Diagnostic` rows so the assertions
+  # below are unchanged.
   def diagnose(source, index: model_index)
     root = Prism.parse(source).value
     diagnostics = []
@@ -159,8 +152,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
     end
 
     it "fires association-kind-mismatch for belong_to on a :collection" do
-      # `posts` is a :collection association; `belong_to`
-      # expects :singular.
+      # `posts` is a :collection association; `belong_to` expects :singular.
       diags = diagnose(<<~RUBY)
         RSpec.describe User do
           it { should belong_to(:posts) }
@@ -205,8 +197,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
 
   describe "describe anchor resolution" do
     it "inherits the outer model anchor through a nested describe" do
-      # `describe ".active"` doesn't change the anchor; the
-      # column lookup still targets User.
+      # `describe ".active"` doesn't change the anchor; the column lookup still targets User.
       diags = diagnose(<<~RUBY)
         RSpec.describe User do
           describe ".active" do
@@ -220,10 +211,8 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
     end
 
     it "uses the nested model anchor when one is supplied" do
-      # Synthetic case: nested `describe Comment` inside
-      # `describe User`. Inside Comment's body, the anchor is
-      # Comment. We don't have Comment in the stub index, so
-      # nothing fires.
+      # Synthetic case: nested `describe Comment` inside `describe User`. Inside Comment's body, the anchor is
+      # Comment. We don't have Comment in the stub index, so nothing fires.
       diags = diagnose(<<~RUBY)
         RSpec.describe User do
           describe Comment do

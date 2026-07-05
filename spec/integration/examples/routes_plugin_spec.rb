@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# Integration spec for `examples/rigor-routes/`. Reference
-# coverage for the v0.1.0 slice 2 (`Plugin::IoBoundary`) and
-# slice 6 (`Plugin::Base.producer` / `#cache_for`) surfaces.
+# Integration spec for `examples/rigor-routes/`. Reference coverage for the v0.1.0 slice 2 (`Plugin::IoBoundary`)
+# and slice 6 (`Plugin::Base.producer` / `#cache_for`) surfaces.
 
 require "spec_helper"
 require "fileutils"
@@ -124,26 +123,20 @@ RSpec.describe "examples/rigor-routes" do
       expect(stats[:by_producer]["plugin.routes.route_table"][:writes]).to eq(1)
     end
 
-    # The runner-internal plugin loader diffs the global
-    # `Rigor::Plugin.registered` set across `require_gem!` to
-    # discover newly-registered plugins. Two consecutive
-    # `Runner.run` calls in the same test must therefore drop
-    # the registry between them, so the requirer's
-    # re-registration looks like a fresh registration to the
-    # loader. `run_plugin_in_dir` does NOT auto-unregister on
-    # entry (unlike `run_plugin`), so this helper handles the
-    # lifecycle explicitly.
+    # The runner-internal plugin loader diffs the global `Rigor::Plugin.registered` set across `require_gem!`
+    # to discover newly-registered plugins. Two consecutive `Runner.run` calls in the same test must therefore
+    # drop the registry between them, so the requirer's re-registration looks like a fresh registration to the
+    # loader. `run_plugin_in_dir` does NOT auto-unregister on entry (unlike `run_plugin`), so this helper
+    # handles the lifecycle explicitly.
     def run_routes_in_dir_twice(dir, source:, routes_yaml: DEFAULT_ROUTES_YAML)
       results = []
       2.times do |i|
         Rigor::Plugin.unregister!
         results << run_plugin_in_dir(
           dir: dir,
-          # Vary the analyzed source on the second run so the ADR-45
-          # whole-run result cache misses (a content change) and the
-          # per-producer `route_table` cache is actually re-consulted —
-          # otherwise the run-level hit shadows it. `routes.yml` is
-          # identical across runs, so the producer itself still hits.
+          # Vary the analyzed source on the second run so the ADR-45 whole-run result cache misses (a content
+          # change) and the per-producer `route_table` cache is actually re-consulted — otherwise the
+          # run-level hit shadows it. `routes.yml` is identical across runs, so the producer itself still hits.
           source: i.zero? ? source : "#{source}# run #{i}\n",
           cache_store: cache_store,
           files: { "config/routes.yml" => routes_yaml }

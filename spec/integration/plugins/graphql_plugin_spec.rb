@@ -1,15 +1,14 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-graphql/`.
-# Tier 3D per the Rails plugins roadmap.
+# Integration spec for `plugins/rigor-graphql/`. Tier 3D per the Rails plugins roadmap.
 #
 # Slice 1 contract:
 #
-# 1. Walk the project for `class T < GraphQL::Schema::Object`
-#    subclasses (including nested `module Types; class User < ...; end`).
+# 1. Walk the project for `class T < GraphQL::Schema::Object` subclasses (including nested `module Types;
+#    class User < ...; end`).
 # 2. Inside each, extract `field :name, Type, null: ...` declarations.
-# 3. Publish the resulting `{type_class_fqn => {field_name => {type:, nullable:}}}`
-#    table as the `:graphql_type_table` ADR-9 cross-plugin fact.
+# 3. Publish the resulting `{type_class_fqn => {field_name => {type:, nullable:}}}` table as the
+#    `:graphql_type_table` ADR-9 cross-plugin fact.
 
 require "spec_helper"
 
@@ -449,8 +448,7 @@ RSpec.describe "rigor-graphql integration" do
         field :name, String, null: false
       end
     RUBY
-    # `Container::Object` has the right tail name but wrong
-    # parent — must not register as a GraphQL type.
+    # `Container::Object` has the right tail name but wrong parent — must not register as a GraphQL type.
     expect(run_and_read_fact(demo: demo)).to be_nil
   end
 

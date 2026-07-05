@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-sorbet/`. Slice 1 of
-# ADR-11: ingests Sorbet `sig { ... }` blocks and contributes
-# the parsed return type at every call site.
+# Integration spec for `plugins/rigor-sorbet/`. Slice 1 of ADR-11: ingests Sorbet `sig { ... }` blocks and
+# contributes the parsed return type at every call site.
 
 require "spec_helper"
 
@@ -10,10 +9,9 @@ SORBET_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-sorbet/lib", __dir_
 $LOAD_PATH.unshift(SORBET_PLUGIN_LIB) unless $LOAD_PATH.include?(SORBET_PLUGIN_LIB)
 require "rigor-sorbet"
 
-# Stub stamp every demo source uses — `sorbet-runtime` is not
-# loaded in the test environment, so the spec defines `sig` /
-# `T::Sig` as no-ops at runtime. The plugin only reads the
-# syntactic shape; the runtime gem is independent.
+# Stub stamp every demo source uses — `sorbet-runtime` is not loaded in the test environment, so the spec
+# defines `sig` / `T::Sig` as no-ops at runtime. The plugin only reads the syntactic shape; the runtime gem is
+# independent.
 SIG_STUB = <<~RUBY
   module T
     module Sig
@@ -28,15 +26,11 @@ RSpec.describe "plugins/rigor-sorbet" do
 
   let(:plugin_class) { Rigor::Plugin::Sorbet }
 
-  # Opt into the shared per-process `Cache::Store`. This file
-  # has 48 `run_plugin` examples and the warm-cache savings
-  # dominate the cache I/O overhead: spec wall time drops
-  # 13.1 s → 3.9 s isolated (≈3× faster). Other plugin specs
-  # with fewer examples (typically 4–11) see net-neutral or
-  # net-negative parallel-mode behaviour from the shared cache
-  # because the cache I/O overhead exceeds the per-call env
-  # build savings; the shared-cache default in `plugin_helpers`
-  # stays opt-in for that reason.
+  # Opt into the shared per-process `Cache::Store`. This file has 48 `run_plugin` examples and the warm-cache
+  # savings dominate the cache I/O overhead: spec wall time drops 13.1 s → 3.9 s isolated (≈3× faster). Other
+  # plugin specs with fewer examples (typically 4–11) see net-neutral or net-negative parallel-mode behaviour
+  # from the shared cache because the cache I/O overhead exceeds the per-call env build savings; the
+  # shared-cache default in `plugin_helpers` stays opt-in for that reason.
   let(:default_run_plugin_cache_store) { :shared }
 
   describe "method signature contributions (slice 1)" do
@@ -142,11 +136,9 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
-  # A `sig { returns(T) }` above an `attr_reader` / `attr_writer` /
-  # `attr_accessor` types the generated accessor — a first-class
-  # Sorbet idiom (dependabot-core uses it pervasively). It must NOT
-  # warn as a dangling sig, and SHOULD contribute the accessor's
-  # type at call sites.
+  # A `sig { returns(T) }` above an `attr_reader` / `attr_writer` / `attr_accessor` types the generated
+  # accessor — a first-class Sorbet idiom (dependabot-core uses it pervasively). It must NOT warn as a dangling
+  # sig, and SHOULD contribute the accessor's type at call sites.
   describe "attribute-accessor sigs" do
     it "does not warn when a sig precedes an attr_reader" do
       source = <<~RUBY
@@ -214,11 +206,9 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
-  # A `sig { ... }` above a visibility-wrapped def — `private def foo`,
-  # `private_class_method def self.bar`, `module_function def baz` — is a
-  # common Ruby/Sorbet idiom (dependabot-core uses `private_class_method def
-  # self.x`). It must NOT warn as a dangling sig, and SHOULD type the wrapped
-  # method.
+  # A `sig { ... }` above a visibility-wrapped def — `private def foo`, `private_class_method def self.bar`,
+  # `module_function def baz` — is a common Ruby/Sorbet idiom (dependabot-core uses `private_class_method def
+  # self.x`). It must NOT warn as a dangling sig, and SHOULD type the wrapped method.
   describe "visibility-wrapped def sigs" do
     %w[private public protected private_class_method public_class_method module_function].each do |macro|
       it "does not warn for `#{macro} def`" do
@@ -290,15 +280,12 @@ RSpec.describe "plugins/rigor-sorbet" do
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end
 
-    # An enforced `sig { returns(T.untyped) }` is the author's explicit
-    # opt-out of return typing. The plugin's `dynamic_return` tier sits
-    # ahead of the engine's body-inference tiers in `MethodDispatcher`,
-    # so the contributed `Dynamic[top]` wins even when the body would
-    # fold to a precise value (`def thing; 1; end` → `Constant[1]`) —
-    # per the false-positive discipline, the opt-out outranks the
-    # foldable body's precision. The sigil gate still applies: in a
-    # sigil-less / `# typed: false` file Sorbet itself ignores the sig,
-    # so the engine's fold stands there (see the contrast example).
+    # An enforced `sig { returns(T.untyped) }` is the author's explicit opt-out of return typing. The plugin's
+    # `dynamic_return` tier sits ahead of the engine's body-inference tiers in `MethodDispatcher`, so the
+    # contributed `Dynamic[top]` wins even when the body would fold to a precise value (`def thing; 1; end` →
+    # `Constant[1]`) — per the false-positive discipline, the opt-out outranks the foldable body's precision.
+    # The sigil gate still applies: in a sigil-less / `# typed: false` file Sorbet itself ignores the sig, so
+    # the engine's fold stands there (see the contrast example).
     describe "`T.untyped` opt-out over a foldable body" do
       it "suppresses engine body-folding for an instance method (explicit receiver)" do
         source = <<~RUBY
@@ -443,14 +430,10 @@ RSpec.describe "plugins/rigor-sorbet" do
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end
 
-    # The fix that unblocks rigor-mangrove on the real
-    # Sorbet-sig chain: a non-`T::`-namespaced generic
-    # application in sig position now maps to
-    # `Nominal[name, type_args]` instead of degrading to
-    # `untyped`, so the receiver's generic arguments survive to
-    # the call site. Verified directly against the translator —
-    # the end-to-end chain (sig → translation → rigor-mangrove
-    # unwrap) is exercised by the survey fixture in
+    # The fix that unblocks rigor-mangrove on the real Sorbet-sig chain: a non-`T::`-namespaced generic
+    # application in sig position now maps to `Nominal[name, type_args]` instead of degrading to `untyped`, so
+    # the receiver's generic arguments survive to the call site. Verified directly against the translator — the
+    # end-to-end chain (sig → translation → rigor-mangrove unwrap) is exercised by the survey fixture in
     # `docs/notes/20260530-mangrove-library-survey.md`.
     describe "user-defined generic application (non-`T::`)" do
       def translate_sig_type(expr)
@@ -557,9 +540,8 @@ RSpec.describe "plugins/rigor-sorbet" do
   end
 
   describe "mixin chain resolution (ADR-11 slice 8)" do
-    # Tapioca's standard DSL RBI shape. Slice 8 lifts sigs
-    # declared on a `Generated*` module up to the host class
-    # via the recorded `include` / `extend` chain.
+    # Tapioca's standard DSL RBI shape. Slice 8 lifts sigs declared on a `Generated*` module up to the host
+    # class via the recorded `include` / `extend` chain.
 
     let(:tapioca_include_rbi) do
       <<~RBI
@@ -615,8 +597,7 @@ RSpec.describe "plugins/rigor-sorbet" do
         },
         paths: ["demo.rb", "app/models/post.rb"]
       )
-      # Plugin contributed `String` for `post.body`, so the
-      # chained `.upcase` resolves through String's RBS.
+      # Plugin contributed `String` for `post.body`, so the chained `.upcase` resolves through String's RBS.
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end
 
@@ -629,8 +610,7 @@ RSpec.describe "plugins/rigor-sorbet" do
         },
         paths: ["demo.rb", "app/models/post.rb"]
       )
-      # `extend M` lifts M's instance methods to singleton
-      # methods on the extending class. `Post.find` resolves
+      # `extend M` lifts M's instance methods to singleton methods on the extending class. `Post.find` resolves
       # via `GeneratedClassMethods#find`, returning `String`.
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end
@@ -656,10 +636,8 @@ RSpec.describe "plugins/rigor-sorbet" do
         },
         paths: ["demo.rb", "app/models/post.rb"]
       )
-      # `bogus` isn't in any chained module — the plugin
-      # contributes nothing and no spurious sig lands on the
-      # method. (`call.undefined-method` is silenced
-      # separately by Post being a non-RBS-known class.)
+      # `bogus` isn't in any chained module — the plugin contributes nothing and no spurious sig lands on the
+      # method. (`call.undefined-method` is silenced separately by Post being a non-RBS-known class.)
       expect(plugin_diagnostics(result)).to be_empty
     end
   end
@@ -681,8 +659,7 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     let(:mixed_rbi) do
-      # Adjacent malformed (no terminus) + well-formed sigs.
-      # Slice 4 contract: malformed silently degrades; the
+      # Adjacent malformed (no terminus) + well-formed sigs. Slice 4 contract: malformed silently degrades; the
       # well-formed sig in the same file is still recorded.
       <<~RBI
         # typed: true
@@ -716,8 +693,7 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "respects an empty `rbi_paths` to opt out of RBI loading entirely" do
-      # With rbi_paths: [] the plugin doesn't walk the RBI;
-      # the RBI's sig is therefore never recorded. We only
+      # With rbi_paths: [] the plugin doesn't walk the RBI; the RBI's sig is therefore never recorded. We only
       # assert that the opt-out doesn't crash the plugin.
       result = run_plugin(
         source: "#{SIG_STUB}Gem::Connection.open\n",
@@ -730,12 +706,10 @@ RSpec.describe "plugins/rigor-sorbet" do
 
   describe "sigil honoring (ADR-11 slice 5)" do
     it "skips a file marked `# typed: ignore` during catalog harvest" do
-      # The RBI declares Slug.default_length, but the file is
-      # `# typed: ignore` so rigor-sorbet must not record the
-      # sig. Without the contribution, the chained `.even?`
-      # call on the receiver wouldn't carry an Integer type;
-      # we assert the silent-degradation outcome (no plugin
-      # diagnostic about the missing contribution, no crash).
+      # The RBI declares Slug.default_length, but the file is `# typed: ignore` so rigor-sorbet must not record
+      # the sig. Without the contribution, the chained `.even?` call on the receiver wouldn't carry an Integer
+      # type; we assert the silent-degradation outcome (no plugin diagnostic about the missing contribution,
+      # no crash).
       ignored_rbi = <<~RBI
         # typed: ignore
         class Slug
@@ -753,12 +727,9 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "skips `# typed: false` sigs when enforce_sigil is on (default)" do
-      # Sorbet itself doesn't enforce types at `# typed: false`
-      # — sigs are parsed but not used to surface errors. Rigor
-      # mirrors that under the default `enforce_sigil: true`:
-      # the file's catalog entry is not recorded, so the
-      # chained `.bit_length` call falls back to RBS / nominal
-      # dispatch as if the sig wasn't there.
+      # Sorbet itself doesn't enforce types at `# typed: false` — sigs are parsed but not used to surface
+      # errors. Rigor mirrors that under the default `enforce_sigil: true`: the file's catalog entry is not
+      # recorded, so the chained `.bit_length` call falls back to RBS / nominal dispatch as if the sig wasn't there.
       typed_false_rbi = <<~RBI
         # typed: false
         class Greeter
@@ -768,10 +739,8 @@ RSpec.describe "plugins/rigor-sorbet" do
         end
       RBI
 
-      # Without the sig contribution, `Greeter.count.bit_length`
-      # has no inferred Integer return at the chained call —
-      # we ASSERT no plugin recognised the sig (the
-      # diagnostic-trace check stays empty), not that the
+      # Without the sig contribution, `Greeter.count.bit_length` has no inferred Integer return at the chained
+      # call — we ASSERT no plugin recognised the sig (the diagnostic-trace check stays empty), not that the
       # downstream call resolves.
       result = run_plugin(
         source: "#{SIG_STUB}Greeter.count\n",
@@ -823,9 +792,8 @@ RSpec.describe "plugins/rigor-sorbet" do
         end
       RBI
 
-      # Override default `enforce_sigil: true` via the plugin
-      # entry's config block. Now the `# typed: false` file's
-      # sig DOES contribute, so the chained `.even?` resolves.
+      # Override default `enforce_sigil: true` via the plugin entry's config block. Now the `# typed: false`
+      # file's sig DOES contribute, so the chained `.even?` resolves.
       result = run_plugin(
         source: "#{SIG_STUB}Lenient.value.even?\n",
         files: { "sorbet/rbi/shims/lenient.rbi" => typed_false_rbi },
@@ -836,17 +804,13 @@ RSpec.describe "plugins/rigor-sorbet" do
   end
 
   describe "per-call-site assertion gating (ADR-11 deferred follow-up)" do
-    # Sorbet itself only enforces type errors at `# typed: true`
-    # and above. The harvest-time `enforce_sigil` gate already
-    # mirrors that for cataloged sigs; this gate extends the
-    # same discipline to caller-side assertion recognisers
-    # (`T.let` / `T.cast` / `T.must` / `T.bind` /
-    # `T.assert_type!` / `T.reveal_type` / `T.unsafe`).
+    # Sorbet itself only enforces type errors at `# typed: true` and above. The harvest-time `enforce_sigil`
+    # gate already mirrors that for cataloged sigs; this gate extends the same discipline to caller-side
+    # assertion recognisers (`T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` / `T.reveal_type` /
+    # `T.unsafe`).
     #
-    # Behaviour observability: the suppressed `T.reveal_type`
-    # never records a `record_reveal_type_call`, so
-    # `diagnostics_for_file` emits no `reveal-type` :info
-    # diagnostic. We use that as the smoke signal: the
+    # Behaviour observability: the suppressed `T.reveal_type` never records a `record_reveal_type_call`, so
+    # `diagnostics_for_file` emits no `reveal-type` :info diagnostic. We use that as the smoke signal: the
     # diagnostic IS / IS-NOT present.
 
     it "fires assertion recognisers at `# typed: true` files (default enforce_sigil)" do
@@ -901,17 +865,13 @@ RSpec.describe "plugins/rigor-sorbet" do
   end
 
   describe "T.absurd exhaustiveness (ADR-11 slice 6)" do
-    # Slice 6 relies on Rigor's existing flow-sensitive
-    # narrowing to decide whether the discriminant has been
-    # narrowed to `bot` at the absurd call. `is_a?` narrowing
-    # is precise; `case`/`when` over symbols isn't (as of
-    # v0.1.3 — covered by an open-question in ADR-11). Tests
-    # use the precise pattern so they exercise the plugin's
-    # logic, not the engine's narrowing strength.
+    # Slice 6 relies on Rigor's existing flow-sensitive narrowing to decide whether the discriminant has been
+    # narrowed to `bot` at the absurd call. `is_a?` narrowing is precise; `case`/`when` over symbols isn't (as
+    # of v0.1.3 — covered by an open-question in ADR-11). Tests use the precise pattern so they exercise the
+    # plugin's logic, not the engine's narrowing strength.
 
     it "stays silent when the discriminant narrows to bot via `is_a?`" do
-      # `Constant<1>` minus `Integer` collapses to `bot`, so
-      # the else branch is unreachable and `T.absurd` is
+      # `Constant<1>` minus `Integer` collapses to `bot`, so the else branch is unreachable and `T.absurd` is
       # correct.
       source = <<~RUBY
         #{SIG_STUB}
@@ -927,8 +887,7 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "emits `absurd-reachable` when the discriminant remains reachable" do
-      # `Integer` minus `String` is `Integer`, not `bot`, so
-      # the else branch IS reachable — `T.absurd` is wrong.
+      # `Integer` minus `String` is `Integer`, not `bot`, so the else branch IS reachable — `T.absurd` is wrong.
       source = <<~RUBY
         #{SIG_STUB}
         val = T.let(1, Integer)
@@ -944,10 +903,8 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "stays silent when the engine determines the entire else branch is dead before typing" do
-      # `nil.nil?` is statically `true`, so the engine prunes
-      # the else branch entirely — the dynamic_return hook is
-      # never called for the `T.absurd` and our recorded set
-      # stays empty.
+      # `nil.nil?` is statically `true`, so the engine prunes the else branch entirely — the dynamic_return
+      # hook is never called for the `T.absurd` and our recorded set stays empty.
       source = <<~RUBY
         #{SIG_STUB}
         val = nil
@@ -1028,10 +985,9 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "leaves a non-Sorbet `T.let`-shaped call alone (different receiver)" do
-      # If the user's project defines its own `T` constant that
-      # is NOT Sorbet's, the plugin should not interfere. The
-      # recognizer keys on receiver name `T`; a renamed
-      # constant doesn't match and the call falls through.
+      # If the user's project defines its own `T` constant that is NOT Sorbet's, the plugin should not
+      # interfere. The recognizer keys on receiver name `T`; a renamed constant doesn't match and the call
+      # falls through.
       source = <<~RUBY
         #{SIG_STUB}
         module NotSorbet
@@ -1077,10 +1033,8 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "emits a `plugin.sorbet.reveal-type` :info diagnostic naming the inferred type" do
-      # Per-call-site assertion gating (ADR-11 deferred
-      # follow-up): the `T.reveal_type` recogniser only fires
-      # at files Sorbet itself would enforce. The sigil is
-      # required so the gate stays open.
+      # Per-call-site assertion gating (ADR-11 deferred follow-up): the `T.reveal_type` recogniser only fires
+      # at files Sorbet itself would enforce. The sigil is required so the gate stays open.
       source = <<~RUBY
         # typed: true
         #{SIG_STUB}
@@ -1113,8 +1067,7 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
 
     it "emits `plugin.sorbet.assert-type-mismatch` when the inferred type is provably incompatible" do
-      # Per-call-site assertion gating (ADR-11 deferred
-      # follow-up): the `T.assert_type!` mismatch check only
+      # Per-call-site assertion gating (ADR-11 deferred follow-up): the `T.assert_type!` mismatch check only
       # fires at files Sorbet itself would enforce.
       source = <<~RUBY
         # typed: true
@@ -1162,11 +1115,9 @@ RSpec.describe "plugins/rigor-sorbet" do
 
   describe "T.bind (T.bind / T.assert_type! priority slice 3)" do
     it "narrows self in a block via post_return_facts(target_kind: :self)" do
-      # Without T.bind, an implicit-self call to `upcase` at top
-      # level would emit `call.undefined-method` (default self
-      # is Object). After `T.bind(self, String)`, the engine
-      # narrows self to String, and `upcase` resolves on the
-      # narrowed self via the standard String method dispatch.
+      # Without T.bind, an implicit-self call to `upcase` at top level would emit `call.undefined-method`
+      # (default self is Object). After `T.bind(self, String)`, the engine narrows self to String, and
+      # `upcase` resolves on the narrowed self via the standard String method dispatch.
       source = <<~RUBY
         #{SIG_STUB}
         T.bind(self, String)

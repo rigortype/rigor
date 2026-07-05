@@ -1,14 +1,11 @@
 # frozen_string_literal: true
 
-# Catch drift between docs/manual/ prose and the implementation it
-# describes.  Three axes:
+# Catch drift between docs/manual/ prose and the implementation it describes.  Three axes:
 #
-#   1. CLI subcommands — every key in CLI::HANDLERS must appear in
-#      the CLI reference, and vice versa.
-#   2. Config keys — every top-level key in Configuration::DEFAULTS
-#      must be mentioned in the configuration reference.
-#   3. Rule IDs — every ID in CheckRules::ALL_RULES must appear in
-#      the diagnostic catalogue or the handbook errors chapter.
+#   1. CLI subcommands — every key in CLI::HANDLERS must appear in the CLI reference, and vice versa.
+#   2. Config keys — every top-level key in Configuration::DEFAULTS must be mentioned in the configuration reference.
+#   3. Rule IDs — every ID in CheckRules::ALL_RULES must appear in the diagnostic catalogue or the handbook
+#      errors chapter.
 #
 # These checks are purely textual — no Rigor analysis needed.
 
@@ -23,8 +20,8 @@ MANUAL_DRIFT_DOCS_ROOT    = File.expand_path("../../docs", __dir__)
 MANUAL_DRIFT_MANUAL_DIR   = File.join(MANUAL_DRIFT_DOCS_ROOT, "manual")
 MANUAL_DRIFT_HANDBOOK_DIR = File.join(MANUAL_DRIFT_DOCS_ROOT, "handbook")
 
-# Introspection helpers: emitted by the engine but documented in the
-# handbook type-inspection chapter (05), not the diagnostic catalogue.
+# Introspection helpers: emitted by the engine but documented in the handbook type-inspection chapter (05),
+# not the diagnostic catalogue.
 MANUAL_DRIFT_INTROSPECTION_RULES = %w[dump.type assert.type-mismatch].freeze
 
 RSpec.describe "manual accuracy" do
@@ -52,8 +49,7 @@ RSpec.describe "manual accuracy" do
 
     it "every DEFAULTS top-level key is mentioned in the reference" do
       missing = top_level_keys.reject do |key|
-        # Accept backtick forms, YAML-key form (key:), or dot-notation
-        # prefix (cache.path, bundler.lockfile, …).
+        # Accept backtick forms, YAML-key form (key:), or dot-notation prefix (cache.path, bundler.lockfile, …).
         config_doc.include?("`#{key}`") ||
           config_doc.include?("`#{key}:`") ||
           config_doc.include?("#{key}:") ||

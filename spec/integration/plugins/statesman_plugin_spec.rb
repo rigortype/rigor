@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-statesman/`. Reference
-# coverage for the two-pass DSL analysis pattern (collect
-# declarations, then validate references).
+# Integration spec for `plugins/rigor-statesman/`. Reference coverage for the two-pass DSL analysis pattern
+# (collect declarations, then validate references).
 
 require "spec_helper"
 

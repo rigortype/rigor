@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `examples/rigor-units/`. Loads the
-# example plugin source, drives a real `Analysis::Runner` over
-# inline source snippets, and pins the diagnostic shape per
-# recognised event. Treat the spec as the executable contract
-# for the README's "What the plugin recognises" section.
+# Integration spec for `examples/rigor-units/`. Loads the example plugin source, drives a real
+# `Analysis::Runner` over inline source snippets, and pins the diagnostic shape per recognised event. Treat the
+# spec as the executable contract for the README's "What the plugin recognises" section.
 
 require "spec_helper"
 
@@ -184,16 +182,12 @@ RSpec.describe "examples/rigor-units" do
   end
 
   describe "dynamic_return return-type contribution (v0.1.2)" do
-    # The plugin's MethodTable resolves `Distance / Time -> Speed`,
-    # `Distance + Distance -> Distance`, `Speed * Time -> Distance`,
-    # etc. The demo's RBS annotates these methods as `untyped`,
-    # so without the contribution downstream calls never surface
-    # dimensional errors. With the contribution, mis-using the
-    # result against the wrong dimension trips
-    # `call.undefined-method`. The unit-class declarations live
-    # in the demo's `sig/units.rbs`; the helpers re-materialise
-    # that file under a tmpdir so the test runs without leaking
-    # the demo's working directory.
+    # The plugin's MethodTable resolves `Distance / Time -> Speed`, `Distance + Distance -> Distance`,
+    # `Speed * Time -> Distance`, etc. The demo's RBS annotates these methods as `untyped`, so without the
+    # contribution downstream calls never surface dimensional errors. With the contribution, mis-using the
+    # result against the wrong dimension trips `call.undefined-method`. The unit-class declarations live in
+    # the demo's `sig/units.rbs`; the helpers re-materialise that file under a tmpdir so the test runs without
+    # leaking the demo's working directory.
     let(:units_rbs) { File.read(File.expand_path("../../../examples/rigor-units/demo/sig/units.rbs", __dir__)) }
 
     def with_units_sigs(source)

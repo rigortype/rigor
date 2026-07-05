@@ -1,20 +1,15 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-sinatra/`. ADR-16 slice 1c.
-# Exercises the substrate's Tier A path end-to-end:
+# Integration spec for `plugins/rigor-sinatra/`. ADR-16 slice 1c. Exercises the substrate's Tier A path end-to-end:
 #
 # 1. Load the example plugin via `rigor-sinatra`'s entry point.
-# 2. Run rigor against a Sinatra-flavoured fixture with a minimal
-#    Sinatra::Base RBS stub.
-# 3. Assert that bare identifiers inside the route block
-#    (`params`, `redirect`, `halt`) resolve through Sinatra::Base's
-#    RBS — i.e. the substrate has narrowed the block's self_type.
+# 2. Run rigor against a Sinatra-flavoured fixture with a minimal Sinatra::Base RBS stub.
+# 3. Assert that bare identifiers inside the route block (`params`, `redirect`, `halt`) resolve through
+#    Sinatra::Base's RBS — i.e. the substrate has narrowed the block's self_type.
 #
-# The integration spec at `spec/integration/macro_block_self_type_integration_spec.rb`
-# already proves the engine hook against an *in-spec* fake plugin;
-# this spec confirms the same path works through the *real example
-# plugin gem entry point* and that the manifest declaration is
-# wired correctly.
+# The integration spec at `spec/integration/macro_block_self_type_integration_spec.rb` already proves the
+# engine hook against an *in-spec* fake plugin; this spec confirms the same path works through the *real
+# example plugin gem entry point* and that the manifest declaration is wired correctly.
 
 require "spec_helper"
 

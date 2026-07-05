@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `examples/rigor-web/`. Reference coverage
-# for the ADR-28 path-scoped method-protocol contract surface:
-# the engine *provides* the contract's parameter type into a
-# matching method body, and the plugin *checks* method presence
-# plus return-type conformance.
+# Integration spec for `examples/rigor-web/`. Reference coverage for the ADR-28 path-scoped method-protocol
+# contract surface: the engine *provides* the contract's parameter type into a matching method body, and the
+# plugin *checks* method presence plus return-type conformance.
 
 require "spec_helper"
 
@@ -18,9 +16,8 @@ RSpec.describe "examples/rigor-web" do
 
   let(:plugin_class) { Rigor::Plugin::Web }
 
-  # Materialises `files` into a tmpdir and analyses `paths`. The
-  # plugin contributes its own Rack RBS via `signature_paths:`, so
-  # the spec does not pass any signatures itself.
+  # Materialises `files` into a tmpdir and analyses `paths`. The plugin contributes its own Rack RBS via
+  # `signature_paths:`, so the spec does not pass any signatures itself.
   def run_web(files:, paths:, config: nil)
     plugin_entry = config ? { "gem" => "rigor-web", "config" => config } : "rigor-web"
     run_plugin(source: "# entry point unused\n", files: files, paths: paths, plugin_entry: plugin_entry)
@@ -104,11 +101,9 @@ RSpec.describe "examples/rigor-web" do
     end
   end
 
-  # The provide half of the contract: inside a controller `#get`,
-  # the parameter is typed `Rack::Request`. The same body misusing
-  # the request surfaces a core diagnostic ONLY when the file is
-  # under the contract path — that difference proves the engine
-  # provides the parameter type.
+  # The provide half of the contract: inside a controller `#get`, the parameter is typed `Rack::Request`. The
+  # same body misusing the request surfaces a core diagnostic ONLY when the file is under the contract path —
+  # that difference proves the engine provides the parameter type.
   describe "parameter-type provision" do
     let(:body) do
       <<~RUBY

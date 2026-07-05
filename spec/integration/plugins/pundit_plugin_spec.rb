@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-pundit/`.
-# Tier 3B of the Rails plugins roadmap. Discovers Pundit
-# policy classes by walking `app/policies/` and validates
-# `authorize(record, :action)` / `policy(record)` /
-# `policy_scope(scope)` call sites against the discovered
-# policies.
+# Integration spec for `plugins/rigor-pundit/`. Tier 3B of the Rails plugins roadmap. Discovers Pundit policy
+# classes by walking `app/policies/` and validates `authorize(record, :action)` / `policy(record)` /
+# `policy_scope(scope)` call sites against the discovered policies.
 
 require "spec_helper"
 
@@ -41,9 +38,8 @@ DEFAULT_POLICIES = {
   RUBY
 }.freeze
 
-# Two revisions of the same policy file, used by the
-# cross-process cache-invalidation regression below. The second
-# adds an `archive?` predicate.
+# Two revisions of the same policy file, used by the cross-process cache-invalidation regression below. The
+# second adds an `archive?` predicate.
 POLICY_WITHOUT_ARCHIVE = <<~RUBY
   class ApplicationPolicy; end
   class PostPolicy < ApplicationPolicy
@@ -104,13 +100,10 @@ RSpec.describe "plugins/rigor-pundit" do
     end
 
     it "validates the policy class via the inferred type when the receiver is Nominal[T]" do
-      # `String.new("hi")` returns `Nominal[String]` (RBS
-      # gives us this for free); the plugin should map
-      # that to `StringPolicy`. There's no `StringPolicy`
-      # in the default fixtures, so we expect an
-      # `unknown-policy-class` rather than a successful
-      # `policy-call`. This shows the inferred-type path
-      # *does* fire when the type is statically known.
+      # `String.new("hi")` returns `Nominal[String]` (RBS gives us this for free); the plugin should map that
+      # to `StringPolicy`. There's no `StringPolicy` in the default fixtures, so we expect an
+      # `unknown-policy-class` rather than a successful `policy-call`. This shows the inferred-type path *does*
+      # fire when the type is statically known.
       result = run_plugin(
         source: %(authorize(String.new("hi"), :show)\n),
         files: DEFAULT_POLICIES
@@ -179,8 +172,7 @@ RSpec.describe "plugins/rigor-pundit" do
     end
 
     it "skips action validation when `authorize` has no second argument" do
-      # The implicit form: pundit looks up the action from
-      # the controller. We can still check the policy
+      # The implicit form: pundit looks up the action from the controller. We can still check the policy
       # class exists.
       result = run_plugin(
         source: "authorize(Post)\n",
@@ -230,24 +222,16 @@ RSpec.describe "plugins/rigor-pundit" do
     end
   end
 
-  # Regression: the `:policy_index` producer must pass an
-  # explicit `glob_descriptor(@policy_search_paths, "**/*.rb")`
-  # to `cache_for`. Without it the cache key only reflects files
-  # the `IoBoundary` happened to read in-process — empty at the
-  # producer's first call in a fresh process — so a persistent
-  # `Cache::Store` shared across `rigor check` runs served a
-  # STALE policy index when a policy file changed between
-  # processes (editing a policy returned the same cache key, a
-  # warm hit, and last session's predicates). See
-  # `docs/design/20260601-plugin-mechanism-pre-1.0-review.md`
-  # § 2.1.
+  # Regression: the `:policy_index` producer must pass an explicit `glob_descriptor(@policy_search_paths,
+  # "**/*.rb")` to `cache_for`. Without it the cache key only reflects files the `IoBoundary` happened to read
+  # in-process — empty at the producer's first call in a fresh process — so a persistent `Cache::Store` shared
+  # across `rigor check` runs served a STALE policy index when a policy file changed between processes (editing
+  # a policy returned the same cache key, a warm hit, and last session's predicates). See
+  # `docs/design/20260601-plugin-mechanism-pre-1.0-review.md` § 2.1.
   describe "cross-process cache invalidation" do
-    # Runs the pundit analyzer against `dir` using a FRESH
-    # `Cache::Store` rooted at `cache_root`. A fresh store with
-    # an empty in-process memo is the faithful simulation of a
-    # second `rigor check` process reading the same on-disk
-    # cache — the only configuration in which the missing
-    # descriptor surfaces as stale output.
+    # Runs the pundit analyzer against `dir` using a FRESH `Cache::Store` rooted at `cache_root`. A fresh store
+    # with an empty in-process memo is the faithful simulation of a second `rigor check` process reading the
+    # same on-disk cache — the only configuration in which the missing descriptor surfaces as stale output.
     def run_pundit(dir:, cache_root:, source:)
       Rigor::Plugin.unregister!
       File.write(File.join(dir, "demo.rb"), source)
@@ -282,18 +266,15 @@ RSpec.describe "plugins/rigor-pundit" do
           FileUtils.mkdir_p(File.dirname(policy_path))
           source = "authorize(Post, :archive)\n"
 
-          # Process 1: PostPolicy defines no `archive?`, so the
-          # call flags `unknown-policy-method`. This warms the
-          # on-disk cache.
+          # Process 1: PostPolicy defines no `archive?`, so the call flags `unknown-policy-method`. This warms
+          # the on-disk cache.
           File.write(policy_path, POLICY_WITHOUT_ARCHIVE)
           first = run_pundit(dir: dir, cache_root: cache_root, source: source)
           expect(unknown_policy_method(first)).not_to be_nil
 
-          # Add `archive?` to the policy, then run a fresh process
-          # against the same on-disk cache. With the
-          # `glob_descriptor` fix the changed digest invalidates
-          # the cached index and the call is now recognised;
-          # without it the stale index keeps flagging `archive`.
+          # Add `archive?` to the policy, then run a fresh process against the same on-disk cache. With the
+          # `glob_descriptor` fix the changed digest invalidates the cached index and the call is now
+          # recognised; without it the stale index keeps flagging `archive`.
           File.write(policy_path, POLICY_WITH_ARCHIVE)
           second = run_pundit(dir: dir, cache_root: cache_root, source: source)
           expect(unknown_policy_method(second)).to be_nil

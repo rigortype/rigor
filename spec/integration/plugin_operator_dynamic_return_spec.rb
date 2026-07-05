@@ -1,28 +1,21 @@
 # frozen_string_literal: true
 
-# Executable contract for the note
-# `docs/notes/20260603-phpstan-type-algebra-comparison.md` (§3 G1) and
-# ADR-42: a Ruby binary operator (`a + b`) is a `Prism::CallNode` named
-# `:+`, so it flows through the ordinary dispatch path where the plugin
-# `dynamic_return` tier (receiver-gated, method-name-agnostic) sits
-# between `ConstantFolding` and RBS. A plugin can therefore specify the
-# result type of a binary operation on a plugin-owned receiver WITHOUT
-# any operator-specific extension point — which is why ADR-42 records the
-# self/left-operand case as "already works" and scopes itself to the
-# coerce direction only.
+# Executable contract for the note `docs/notes/20260603-phpstan-type-algebra-comparison.md` (§3 G1) and ADR-42:
+# a Ruby binary operator (`a + b`) is a `Prism::CallNode` named `:+`, so it flows through the ordinary dispatch
+# path where the plugin `dynamic_return` tier (receiver-gated, method-name-agnostic) sits between
+# `ConstantFolding` and RBS. A plugin can therefore specify the result type of a binary operation on a
+# plugin-owned receiver WITHOUT any operator-specific extension point — which is why ADR-42 records the
+# self/left-operand case as "already works" and scopes itself to the coerce direction only.
 #
-# Observation method: the plugin contributes a CORE return type
-# (`String`) for the operator, because Rigor (by false-positive
-# discipline) does not raise `undefined-method` on bare user classes —
-# only on classes it fully models (core/RBS). So a downstream
-# `.nope_zzz` on the contributed type surfaces `undefined method
-# 'nope_zzz' for String` exactly when the contribution took effect.
+# Observation method: the plugin contributes a CORE return type (`String`) for the operator, because Rigor (by
+# false-positive discipline) does not raise `undefined-method` on bare user classes — only on classes it fully
+# models (core/RBS). So a downstream `.nope_zzz` on the contributed type surfaces `undefined method 'nope_zzz'
+# for String` exactly when the contribution took effect.
 #
-# The same spec pins the coerce-direction LIMITATION (ADR-42's subject):
-# `1 + money` dispatches on `Integer`, so a `receivers: ["Money"]` rule
-# does not fire; the result types as the left operand `Integer` (NOT the
-# contributed type and NOT `Dynamic`). That left-biased result is the
-# narrow false-positive surface ADR-42 scopes itself to.
+# The same spec pins the coerce-direction LIMITATION (ADR-42's subject): `1 + money` dispatches on `Integer`,
+# so a `receivers: ["Money"]` rule does not fire; the result types as the left operand `Integer` (NOT the
+# contributed type and NOT `Dynamic`). That left-biased result is the narrow false-positive surface ADR-42
+# scopes itself to.
 
 require "spec_helper"
 require "fileutils"
@@ -32,11 +25,10 @@ require "rigor/analysis/runner"
 require "rigor/configuration"
 
 RSpec.describe "plugin dynamic_return captures binary-operator sugar (ADR-42)" do
-  # A minimal plugin that contributes a return type for arithmetic
-  # operators on a plugin-owned `Money` receiver. It returns `String`
-  # (a core type) purely as an observable sentinel — `Money <op> Money`
-  # is not semantically a String; the point is that a core return type
-  # makes the contribution visible via downstream method resolution.
+  # A minimal plugin that contributes a return type for arithmetic operators on a plugin-owned `Money`
+  # receiver. It returns `String` (a core type) purely as an observable sentinel — `Money <op> Money` is not
+  # semantically a String; the point is that a core return type makes the contribution visible via downstream
+  # method resolution.
   let(:operator_plugin) do
     klass = Class.new(Rigor::Plugin::Base) do
       manifest(id: "optest", version: "0.1.0")
@@ -115,9 +107,8 @@ RSpec.describe "plugin dynamic_return captures binary-operator sugar (ADR-42)" d
     end
 
     it "declines (returns nil) for an operator outside its set, falling through to normal dispatch" do
-      # `==` is not in the rule's operator set, so the block returns nil
-      # and the engine resolves `Money == Money` itself (-> bool). The
-      # String contribution must NOT appear.
+      # `==` is not in the rule's operator set, so the block returns nil and the engine resolves
+      # `Money == Money` itself (-> bool). The String contribution must NOT appear.
       result = run_analysis(<<~RUBY)
         class Money; end
         a = Money.new
@@ -131,14 +122,11 @@ RSpec.describe "plugin dynamic_return captures binary-operator sugar (ADR-42)" d
 
   describe "coerce direction (ADR-42's scoped gap — NOT supported)" do
     it "does not fire for `Integer + Money`; the result types left-biased as Integer" do
-      # `1 + b` dispatches on Integer, so a `receivers: ["Money"]` rule
-      # cannot intervene. Rigor types the result as the left operand
-      # (Integer), NOT the contributed String and NOT Dynamic. Calling
-      # `.nope_zzz` therefore resolves against Integer. This left-biased
-      # result is the narrow false-positive surface ADR-42 addresses:
-      # had `b` defined a real method, calling it on `(1 + b)` would be
-      # flagged undefined-for-Integer despite working at runtime via
-      # `b.coerce`.
+      # `1 + b` dispatches on Integer, so a `receivers: ["Money"]` rule cannot intervene. Rigor types the
+      # result as the left operand (Integer), NOT the contributed String and NOT Dynamic. Calling `.nope_zzz`
+      # therefore resolves against Integer. This left-biased result is the narrow false-positive surface
+      # ADR-42 addresses: had `b` defined a real method, calling it on `(1 + b)` would be flagged
+      # undefined-for-Integer despite working at runtime via `b.coerce`.
       result = run_analysis(<<~RUBY)
         class Money; end
         b = Money.new

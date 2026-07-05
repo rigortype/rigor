@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-hanami/`.
-# Validates the ADR-28 provide-and-check pair for Hanami
-# actions: the engine provides `Hanami::Action::Request` /
-# `Hanami::Action::Response` into `#handle` bodies, and the
-# plugin checks that every class under `app/actions/` defines
-# `#handle`.
+# Integration spec for `plugins/rigor-hanami/`. Validates the ADR-28 provide-and-check pair for Hanami
+# actions: the engine provides `Hanami::Action::Request` / `Hanami::Action::Response` into `#handle` bodies,
+# and the plugin checks that every class under `app/actions/` defines `#handle`.
 
 require "spec_helper"
 
@@ -19,9 +16,8 @@ RSpec.describe "plugins/rigor-hanami" do
 
   let(:plugin_class) { Rigor::Plugin::Hanami }
 
-  # Materialises `files` into a tmpdir and analyses `paths`.
-  # The plugin contributes Hanami Action RBS via `signature_paths:`
-  # so no external sig is needed.
+  # Materialises `files` into a tmpdir and analyses `paths`. The plugin contributes Hanami Action RBS via
+  # `signature_paths:` so no external sig is needed.
   def run_hanami(files:, paths:, config: nil)
     plugin_entry = config ? { "gem" => "rigor-hanami", "config" => config } : "rigor-hanami"
     run_plugin(source: "# entry point\n", files: files, paths: paths, plugin_entry: plugin_entry)
@@ -96,10 +92,9 @@ RSpec.describe "plugins/rigor-hanami" do
     end
   end
 
-  # Proves the engine provides Hanami::Action::Request / Response
-  # types into the #handle body: calling a non-existent method on
-  # request surfaces a core diagnostic when the file is under the
-  # action path, but stays silent when it is outside.
+  # Proves the engine provides Hanami::Action::Request / Response types into the #handle body: calling a
+  # non-existent method on request surfaces a core diagnostic when the file is under the action path, but
+  # stays silent when it is outside.
   describe "parameter-type provision" do
     let(:body) do
       <<~RUBY

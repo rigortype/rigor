@@ -1,15 +1,12 @@
 # frozen_string_literal: true
 
-# Integration spec for `examples/rigor-lisp-eval/`. Loads the
-# example plugin source, drives a real `Analysis::Runner` over
-# the demo, and asserts the diagnostics the plugin emits per
-# call site. Treat the spec as the executable contract for the
-# README's "What the plugin recognises" section.
+# Integration spec for `examples/rigor-lisp-eval/`. Loads the example plugin source, drives a real
+# `Analysis::Runner` over the demo, and asserts the diagnostics the plugin emits per call site. Treat the spec
+# as the executable contract for the README's "What the plugin recognises" section.
 #
-# Boilerplate (`run_plugin`, `plugin_diagnostics`, requirer) is
-# in `spec/integration/examples/support/plugin_helpers.rb`.
-# Auto-included for every `*_plugin_spec.rb` file under this
-# directory.
+# Boilerplate (`run_plugin`, `plugin_diagnostics`, requirer) is in
+# `spec/integration/examples/support/plugin_helpers.rb`. Auto-included for every `*_plugin_spec.rb` file under
+# this directory.
 
 require "spec_helper"
 
@@ -89,10 +86,8 @@ RSpec.describe "examples/rigor-lisp-eval" do
   end
 
   describe "dynamic_return return-type contribution (v0.1.2)" do
-    # The plugin narrows `Lisp.eval(literal)` to a precise
-    # carrier so downstream call sites resolve against the
-    # inferred class — without the contribution, the RBS
-    # `untyped` return would silence every downstream miss.
+    # The plugin narrows `Lisp.eval(literal)` to a precise carrier so downstream call sites resolve against the
+    # inferred class — without the contribution, the RBS `untyped` return would silence every downstream miss.
     it "narrows the result so a non-Integer call surfaces a method-undefined diagnostic" do
       result = run_plugin(source: <<~RUBY)
         sum = Lisp.eval([:+, 1, 2])

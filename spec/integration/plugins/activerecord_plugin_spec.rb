@@ -1,21 +1,17 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-activerecord/`. Reference
-# coverage for the most architecturally complete v0.1.0 plugin
-# example — combines `rigor-routes`-style IoBoundary + cache
-# producer (twice — schema and model index), `rigor-lisp-eval`-
-# style Prism DSL interpretation (the schema parser), and
-# `rigor-statesman`-style two-pass discover-then-validate.
+# Integration spec for `plugins/rigor-activerecord/`. Reference coverage for the most architecturally complete
+# v0.1.0 plugin example — combines `rigor-routes`-style IoBoundary + cache producer (twice — schema and model
+# index), `rigor-lisp-eval`-style Prism DSL interpretation (the schema parser), and `rigor-statesman`-style
+# two-pass discover-then-validate.
 
 require "spec_helper"
 require "fileutils"
 require "tmpdir"
 
-# `ACTIVERECORD_PLUGIN_LIB` is also defined by
-# `factorybot_plugin_spec.rb` (which consumes the activerecord
-# plugin's `:model_index` facts). Guard against the double
-# definition so running both specs in the same process does
-# not warn `already initialized constant`.
+# `ACTIVERECORD_PLUGIN_LIB` is also defined by `factorybot_plugin_spec.rb` (which consumes the activerecord
+# plugin's `:model_index` facts). Guard against the double definition so running both specs in the same
+# process does not warn `already initialized constant`.
 unless defined?(ACTIVERECORD_PLUGIN_LIB)
   ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-activerecord/lib", __dir__)
 end
@@ -74,13 +70,10 @@ RSpec.describe "plugins/rigor-activerecord" do
     run_plugin(source: source, plugin_entry: plugin_entry, files: files)
   end
 
-  # Materialises the project files, runs the analyser
-  # directly, and returns `[result, model_index]` so the
-  # AR-extension specs can assert against BOTH the diagnostic
-  # stream and the structured per-model state (enums /
-  # scopes / validations / callbacks). The `model_index`
-  # accessor isn't surfaced through `run_plugin` because the
-  # other plugin examples don't need it.
+  # Materialises the project files, runs the analyser directly, and returns `[result, model_index]` so the
+  # AR-extension specs can assert against BOTH the diagnostic stream and the structured per-model state (enums
+  # / scopes / validations / callbacks). The `model_index` accessor isn't surfaced through `run_plugin` because
+  # the other plugin examples don't need it.
   def run_ar_with_index(source, models:, schema:)
     files = { "db/schema.rb" => schema, "demo.rb" => source }.merge(models)
     Dir.mktmpdir do |dir|
@@ -133,14 +126,10 @@ RSpec.describe "plugins/rigor-activerecord" do
   end
 
   describe "migration files are excluded from column validation" do
-    # Rails migration files (`db/migrate/<timestamp>_*.rb`)
-    # and post-migration files reference the EVOLVING schema
-    # at the time the migration ran. The current `db/schema.rb`
-    # may not have the columns those files mention (the
-    # migration's purpose was often to add/remove them).
-    # Validating these files against the current schema is a
-    # category error — the AR plugin must stay silent on
-    # them.
+    # Rails migration files (`db/migrate/<timestamp>_*.rb`) and post-migration files reference the EVOLVING
+    # schema at the time the migration ran. The current `db/schema.rb` may not have the columns those files
+    # mention (the migration's purpose was often to add/remove them). Validating these files against the
+    # current schema is a category error — the AR plugin must stay silent on them.
 
     let(:migration_source) { "Account.where(suspended: true)\n" }
 
@@ -165,9 +154,7 @@ RSpec.describe "plugins/rigor-activerecord" do
           )
           result = runner.run
           ar_diags = result.diagnostics.select { |d| d.source_family == "plugin.activerecord" }
-          # Only the schema-loading info / load-error
-          # diagnostics may pass through; no per-file column
-          # errors.
+          # Only the schema-loading info / load-error diagnostics may pass through; no per-file column errors.
           expect(ar_diags.select { |d| d.rule == "unknown-column" }).to be_empty
         end
       end
@@ -199,8 +186,7 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "still fires unknown-column on a regular app/ file (precision floor)" do
-      # `:emial` typo on User — pattern from the surrounding
-      # `unknown-column diagnostics` block, known to fire.
+      # `:emial` typo on User — pattern from the surrounding `unknown-column diagnostics` block, known to fire.
       diags = plugin_diagnostics(run_ar("User.where(emial: 'a')\n"))
       err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
@@ -317,10 +303,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "emits the load-error warning at most once across many analyzed files" do
-      # Solidus monorepo / Redmine (migrations-only) scale: hundreds
-      # of files, but `db/schema.rb` absence is a single
-      # project-global root cause. Pre-fix the plugin emitted
-      # `load-error` per file (346× on Redmine).
+      # Solidus monorepo / Redmine (migrations-only) scale: hundreds of files, but `db/schema.rb` absence is a
+      # single project-global root cause. Pre-fix the plugin emitted `load-error` per file (346× on Redmine).
       result = run_plugin(
         source: "User.find(1)\n",
         files: { "extra1.rb" => "stuff\n", "extra2.rb" => "more\n", "extra3.rb" => "again\n" }
@@ -330,12 +314,10 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "attempts the missing-schema read only once across many AR call sites" do
-      # Regression: `schema_table_or_nil` is invoked per AR call site via
-      # `model_index`; before memoizing the *failure* it re-read the
-      # missing schema and appended a fresh interpolated error string to
-      # `@load_errors` on every call, growing it without bound (measured:
-      # 4.2 M retained strings / ~1.5 GB on Redmine). The internal error
-      # list must stay at one entry no matter how many call sites run.
+      # Regression: `schema_table_or_nil` is invoked per AR call site via `model_index`; before memoizing the
+      # *failure* it re-read the missing schema and appended a fresh interpolated error string to
+      # `@load_errors` on every call, growing it without bound (measured: 4.2 M retained strings / ~1.5 GB on
+      # Redmine). The internal error list must stay at one entry no matter how many call sites run.
       source = (1..40).map { |i| "User.where(id: #{i})\n" }.join
       Dir.mktmpdir do |dir|
         materialize_files(dir, { "demo.rb" => source }) # no db/schema.rb
@@ -356,14 +338,11 @@ RSpec.describe "plugins/rigor-activerecord" do
   end
 
   describe "dynamic_return / #dynamic_return_type return-type contribution (v0.1.2)" do
-    # The plugin's `Model.find(id)` rule contributes
-    # `Nominal[Model]` so chained call sites resolve through
-    # the analyzer's normal dispatch — without the contribution
-    # the RBS-level untyped return would let any chained method
-    # name through silently. The `call.undefined-method` rule
-    # only fires when the receiver class is known to RBS, so the
-    # tests below ship an RBS sig for User (top-level
-    # `USER_RBS_FOR_NARROWING`) declaring its columns.
+    # The plugin's `Model.find(id)` rule contributes `Nominal[Model]` so chained call sites resolve through the
+    # analyzer's normal dispatch — without the contribution the RBS-level untyped return would let any chained
+    # method name through silently. The `call.undefined-method` rule only fires when the receiver class is
+    # known to RBS, so the tests below ship an RBS sig for User (top-level `USER_RBS_FOR_NARROWING`) declaring
+    # its columns.
     def run_ar_with_user_sig(source, schema: DEFAULT_SCHEMA, models: DEFAULT_MODELS)
       files = { "db/schema.rb" => schema, "sig/user.rbs" => USER_RBS_FOR_NARROWING }.merge(models)
       run_plugin(
@@ -387,10 +366,9 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "narrows `Model.where` to a relation whose `.find` extracts the element" do
-      # `where` → `ActiveRecord::Relation[User]`; `.find` → `User`,
-      # so a bad method on the extracted element surfaces on `User`.
-      # (`bit_length` is NOT flagged on the relation itself —
-      # `ActiveRecord::Relation` is an ADR-26 open receiver.)
+      # `where` → `ActiveRecord::Relation[User]`; `.find` → `User`, so a bad method on the extracted element
+      # surfaces on `User`. (`bit_length` is NOT flagged on the relation itself — `ActiveRecord::Relation` is
+      # an ADR-26 open receiver.)
       result = run_ar_with_user_sig(<<~RUBY)
         user = User.where(admin: true).find(1)
         user.bit_length
@@ -407,8 +385,7 @@ RSpec.describe "plugins/rigor-activerecord" do
         x = Object.find(1)
         x.upcase
       RUBY
-      # Object.find isn't a model — no contribution; the call
-      # falls through to the analyzer's normal dispatch.
+      # Object.find isn't a model — no contribution; the call falls through to the analyzer's normal dispatch.
       method_undefined = result.diagnostics.select do |d|
         d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("upcase")
       end
@@ -417,14 +394,10 @@ RSpec.describe "plugins/rigor-activerecord" do
   end
 
   describe "associations (has_many / belongs_to / has_one) — v0.1.5" do
-    # rigor-activerecord now records `has_many` / `belongs_to`
-    # / `has_one` declarations in the ModelIndex (and
-    # contributes `Nominal[Target] | nil` for the singular
-    # cases via `dynamic_return`). The integration
-    # spec asserts via the model-index lookup that the right
-    # rows landed; the singular return-type contribution is covered
-    # via direct unit specs on the plugin classes
-    # (`spec/examples/activerecord/` — not bundled here).
+    # rigor-activerecord now records `has_many` / `belongs_to` / `has_one` declarations in the ModelIndex (and
+    # contributes `Nominal[Target] | nil` for the singular cases via `dynamic_return`). The integration spec
+    # asserts via the model-index lookup that the right rows landed; the singular return-type contribution is
+    # covered via direct unit specs on the plugin classes (`spec/examples/activerecord/` — not bundled here).
 
     # rubocop:disable Lint/ConstantDefinitionInBlock, RSpec/LeakyConstantDeclaration
     POST_USER_MODELS = {
@@ -531,11 +504,9 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "publishes a non-nullable `Nominal[Target]` for a required belongs_to" do
-      # `belongs_to` is required (non-`nil`) by default since
-      # Rails 5, so `post.user` narrows to `Nominal[User]` with no
-      # nil arm. Spec the return type directly on the plugin
-      # instance — Rigor's diagnostic rule contract for chained
-      # calls is independent of the plugin's return-type publication.
+      # `belongs_to` is required (non-`nil`) by default since Rails 5, so `post.user` narrows to
+      # `Nominal[User]` with no nil arm. Spec the return type directly on the plugin instance — Rigor's
+      # diagnostic rule contract for chained calls is independent of the plugin's return-type publication.
       index = model_index_after_run(models: POST_USER_MODELS)
       runner_plugin = Rigor::Plugin::Activerecord.allocate
       runner_plugin.instance_variable_set(:@model_index, index)
@@ -555,8 +526,7 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "publishes a nullable `Nominal[Target] | nil` for has_one" do
-      # `has_one` genuinely returns `nil` when no associated
-      # record exists, so `user.profile` keeps the nil arm.
+      # `has_one` genuinely returns `nil` when no associated record exists, so `user.profile` keeps the nil arm.
       index = model_index_after_run(models: POST_USER_MODELS)
       runner_plugin = Rigor::Plugin::Activerecord.allocate
       runner_plugin.instance_variable_set(:@model_index, index)
@@ -638,11 +608,9 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "accepts a singular association name as a `find_by` / `where` key alias" do
-      # Mastodon-derived regression: `AccountPin.find_by(account: x)`
-      # passes the belongs_to association name `:account` instead of
-      # the FK column `:account_id`. ActiveRecord accepts both; the
-      # plugin should match. Pre-fix this was 100+ FPs on Mastodon's
-      # API controllers.
+      # Mastodon-derived regression: `AccountPin.find_by(account: x)` passes the belongs_to association name
+      # `:account` instead of the FK column `:account_id`. ActiveRecord accepts both; the plugin should match.
+      # Pre-fix this was 100+ FPs on Mastodon's API controllers.
       result = run_plugin(
         source: "Post.find_by(user: x); Post.where(user: y)\n",
         files: {
@@ -663,9 +631,8 @@ RSpec.describe "plugins/rigor-activerecord" do
         }
       )
       diags = plugin_diagnostics(result)
-      # `posts` would be a has_many (collection) association on a
-      # hypothetical reverse relationship; it's not declared here at
-      # all, so the plugin should still error.
+      # `posts` would be a has_many (collection) association on a hypothetical reverse relationship; it's not
+      # declared here at all, so the plugin should still error.
       expect(diags.find { |d| d.rule == "unknown-column" && d.message.include?("`posts`") }).not_to be_nil
     end
   end
@@ -767,10 +734,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "types an implicit-self `select(...)` inside a scope lambda as Relation[Model]" do
-      # The lambda body's `self_type` is `Singleton[Post]`, so
-      # `select(:title).group(:title)` opens a relation via the
-      # AR plugin instead of falling through to `Kernel#select`'s
-      # IO-multiplexer return (`Array[String]`).
+      # The lambda body's `self_type` is `Singleton[Post]`, so `select(:title).group(:title)` opens a relation
+      # via the AR plugin instead of falling through to `Kernel#select`'s IO-multiplexer return (`Array[String]`).
       source = <<~RUBY
         Post.published.merge(Post.where(title: 'x'))
       RUBY
@@ -865,13 +830,10 @@ RSpec.describe "plugins/rigor-activerecord" do
   end
 
   describe "ADR-9 :model_index publication" do
-    # Loads rigor-activerecord (the producer) alongside a
-    # synthetic consumer plugin that reads the published
-    # :model_index in its `prepare(services)` hook and emits
-    # a diagnostic naming the column set it sees. This is the
-    # same shape rigor-actionpack Phase 1 / rigor-factorybot
-    # Phase 1 (c) will use; the test pins the publication
-    # contract.
+    # Loads rigor-activerecord (the producer) alongside a synthetic consumer plugin that reads the published
+    # :model_index in its `prepare(services)` hook and emits a diagnostic naming the column set it sees. This
+    # is the same shape rigor-actionpack Phase 1 / rigor-factorybot Phase 1 (c) will use; the test pins the
+    # publication contract.
     let(:consumer_plugin) do
       klass = Class.new(Rigor::Plugin::Base) do
         manifest(
@@ -975,8 +937,7 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "adds only `<name>_id` for a non-polymorphic reference" do
-      # DEFAULT_SCHEMA's `posts` table has a plain
-      # `t.references "user"` — no `user_type` column exists.
+      # DEFAULT_SCHEMA's `posts` table has a plain `t.references "user"` — no `user_type` column exists.
       diags = plugin_diagnostics(run_ar("Post.where(user_type: 'x')\n"))
       expect(diags.find { |d| d.rule == "unknown-column" && d.message.include?("user_type") }).not_to be_nil
     end
@@ -1247,8 +1208,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "inherits the parent model's associations on the STI subclass" do
-      # `belongs_to :company` is declared on User; the child must
-      # accept `:company` as a query key or it is a false positive.
+      # `belongs_to :company` is declared on User; the child must accept `:company` as a query key or it is a
+      # false positive.
       diags = plugin_diagnostics(run_ar("Admin.find_by(company: x)\n", models: sti_models))
       expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
     end
@@ -1500,11 +1461,9 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "accepts the nested association name as a query key" do
-      # Mastodon-derived regression: `Report` declares its
-      # account belongs_to associations inside a
-      # `with_options class_name: 'Account'` block. Before the
-      # `with_options` descent every `Report.where(target_account:
-      # ...)` surfaced as a false `unknown-column`.
+      # Mastodon-derived regression: `Report` declares its account belongs_to associations inside a
+      # `with_options class_name: 'Account'` block. Before the `with_options` descent every
+      # `Report.where(target_account: ...)` surfaced as a false `unknown-column`.
       diags = plugin_diagnostics(
         run_ar("Report.where(target_account: a)\n", models: with_options_models, schema: reports_schema)
       )
@@ -1584,9 +1543,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "re-contributes the relation type for a scope invoked ON a relation" do
-      # `Post.where(...).published` — the receiver of `.published`
-      # is `ActiveRecord::Relation[Post]`; the scope keeps the
-      # element type through the chain.
+      # `Post.where(...).published` — the receiver of `.published` is `ActiveRecord::Relation[Post]`; the
+      # scope keeps the element type through the chain.
       _result, index = run_ar_with_index("x = 1\n", models: scope_models, schema: scope_schema)
       plugin = Rigor::Plugin::Activerecord.allocate
       plugin.instance_variable_set(:@model_index, index)
@@ -1604,9 +1562,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "keeps a chained relation query method type-checking cleanly" do
-      # `where` opens the relation; every chained query method
-      # resolves through the bundled `ActiveRecord::Relation` RBS,
-      # so the whole chain stays `Relation[User]`.
+      # `where` opens the relation; every chained query method resolves through the bundled
+      # `ActiveRecord::Relation` RBS, so the whole chain stays `Relation[User]`.
       result = run_ar(<<~RUBY)
         users = User.where(admin: true).order(:name).limit(10)
         users.first
@@ -1618,10 +1575,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "does not flag an unknown scope called on a typed relation (ADR-26 open receiver)" do
-      # `Post.where(...).some_undeclared_scope` — the relation is
-      # typed, but `ActiveRecord::Relation` is an open receiver, so
-      # an unenumerable scope call must NOT surface as
-      # `call.undefined-method`.
+      # `Post.where(...).some_undeclared_scope` — the relation is typed, but `ActiveRecord::Relation` is an
+      # open receiver, so an unenumerable scope call must NOT surface as `call.undefined-method`.
       result = run_ar(
         "Post.where(published: true).some_undeclared_scope\n",
         models: scope_models, schema: scope_schema
@@ -1633,9 +1588,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
 
     it "resolves the block element type through the relation end-to-end" do
-      # `where` → Relation[User] → Enumerable[User]#each yields
-      # User → the column accessor types `u.name` as String →
-      # `bit_length` is undefined on String.
+      # `where` → Relation[User] → Enumerable[User]#each yields User → the column accessor types `u.name` as
+      # String → `bit_length` is undefined on String.
       result = run_ar("User.where(admin: true).each { |u| u.name.bit_length }\n")
       undefined = result.diagnostics.find do |d|
         d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")

@@ -1,24 +1,19 @@
 # frozen_string_literal: true
 
-# Integration spec: runtime-value parity for the precision folds
-# catalogued by the `rigor-type-coverage-uplift` skill.
+# Integration spec: runtime-value parity for the precision folds catalogued by the `rigor-type-coverage-uplift`
+# skill.
 #
-# Every fold the skill adds (`ConstantFolding`, `ShapeDispatch`,
-# the `*_folding` singleton modules) claims a *precise* result
-# type for a statically-known call. This spec closes the loop:
-# for each catalogued expression it
+# Every fold the skill adds (`ConstantFolding`, `ShapeDispatch`, the `*_folding` singleton modules) claims a
+# *precise* result type for a statically-known call. This spec closes the loop: for each catalogued expression it
 #
 #   1. infers the type with the engine, and
 #   2. evaluates the SAME source with MRI,
 #
-# then asserts the inferred type is consistent with the value the
-# program actually produces. A fold that returns `Constant[4]`
-# when Ruby yields `5`, or `Array[Elem]` when Ruby yields an
-# `Enumerator`, fails here — the exact bug class that motivated
-# the block-less-overload fix in `OverloadSelector`.
+# then asserts the inferred type is consistent with the value the program actually produces. A fold that
+# returns `Constant[4]` when Ruby yields `5`, or `Array[Elem]` when Ruby yields an `Enumerator`, fails here —
+# the exact bug class that motivated the block-less-overload fix in `OverloadSelector`.
 #
-# Adding a new fold means adding one expression string to the
-# `FOLD_PARITY_CASES` table; no other wiring is needed.
+# Adding a new fold means adding one expression string to the `FOLD_PARITY_CASES` table; no other wiring is needed.
 
 require "spec_helper"
 require "tmpdir"
@@ -27,17 +22,14 @@ require "cgi"
 require "uri"
 require "date"
 
-# One environment for the whole file. `for_project` loads
-# `DEFAULT_LIBRARIES` (shellwords / cgi / uri / digest / ...),
-# which the stdlib-module folds need; RBS itself loads lazily on
-# the first inference query.
+# One environment for the whole file. `for_project` loads `DEFAULT_LIBRARIES` (shellwords / cgi / uri / digest /
+# ...), which the stdlib-module folds need; RBS itself loads lazily on the first inference query.
 FOLD_PARITY_SCOPE = Rigor::Scope.empty(
   environment: Rigor::Environment.for_project(root: Dir.mktmpdir)
 )
 
-# method group => list of expression sources. Each source is
-# parsed + typed by the engine AND `eval`-ed by MRI; the two
-# results must agree.
+# method group => list of expression sources. Each source is parsed + typed by the engine AND `eval`-ed by MRI;
+# the two results must agree.
 FOLD_PARITY_CASES = {
   "String — ConstantFolding unary/binary" => [
     '"Hello".upcase', '"Hello".downcase', '"hello".capitalize', '"hello".swapcase',
@@ -123,20 +115,17 @@ FOLD_PARITY_CASES = {
 }.freeze
 
 RSpec.describe "Fold runtime-value parity (integration)" do
-  # Infers the type of a single Ruby expression by typing the
-  # last statement of its parse tree under a pristine scope.
+  # Infers the type of a single Ruby expression by typing the last statement of its parse tree under a pristine
+  # scope.
   def infer(source)
     node = Prism.parse(source).value.statements.body.last
     FOLD_PARITY_SCOPE.type_of(node)
   end
 
-  # True when `value` (a real MRI runtime value) is a member of
-  # the inferred `type`. Precise carriers are compared
-  # structurally so a mismatch names the offending element; a
-  # `Nominal` carrier (e.g. an `Enumerator` from a block-less
-  # iteration call, or a still-imprecise `File.*` fold) is
-  # checked by class membership; a refinement carrier
-  # (`non-empty-string` and friends) is checked via `accepts`.
+  # True when `value` (a real MRI runtime value) is a member of the inferred `type`. Precise carriers are
+  # compared structurally so a mismatch names the offending element; a `Nominal` carrier (e.g. an `Enumerator`
+  # from a block-less iteration call, or a still-imprecise `File.*` fold) is checked by class membership; a
+  # refinement carrier (`non-empty-string` and friends) is checked via `accepts`.
   def value_consistent_with_type?(type, value)
     case type
     when Rigor::Type::Constant  then constant_matches?(type, value)
@@ -169,8 +158,7 @@ RSpec.describe "Fold runtime-value parity (integration)" do
     !klass.nil? && value.is_a?(klass)
   end
 
-  # Refinement / range carriers (`Difference`, `IntegerRange`,
-  # `Refined`): the scalar runtime value must be accepted.
+  # Refinement / range carriers (`Difference`, `IntegerRange`, `Refined`): the scalar runtime value must be accepted.
   def refinement_matches?(type, value)
     literal = scalar_literal_for(value)
     !literal.nil? && type.accepts(literal, mode: :gradual).yes?

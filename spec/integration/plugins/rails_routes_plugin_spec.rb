@@ -1,10 +1,8 @@
 # frozen_string_literal: true
 
-# Integration spec for `plugins/rigor-rails-routes/`.
-# Tier 1A of the Rails plugins roadmap. Statically interprets
-# `config/routes.rb`'s DSL via Prism and validates every
-# `*_path` / `*_url` call site against the resulting helper
-# table.
+# Integration spec for `plugins/rigor-rails-routes/`. Tier 1A of the Rails plugins roadmap. Statically
+# interprets `config/routes.rb`'s DSL via Prism and validates every `*_path` / `*_url` call site against the
+# resulting helper table.
 
 require "spec_helper"
 
@@ -65,9 +63,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "generates `new_admin_widget_path` not `admin_new_widget_path` (prefix before new/edit)" do
-      # Rails convention: new_ / edit_ prefix comes FIRST, then the namespace prefix.
-      # `namespace :admin { resources :widgets }` → `new_admin_widget_path`,
-      # not `admin_new_widget_path`.
+      # Rails convention: new_ / edit_ prefix comes FIRST, then the namespace prefix. `namespace :admin {
+      # resources :widgets }` → `new_admin_widget_path`, not `admin_new_widget_path`.
       result = run_plugin(
         source: "new_admin_widget_path\nedit_admin_widget_path(1)\n",
         files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
@@ -87,8 +84,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "recognises an anonymous `get` route by path-derived name (`login_path`)" do
-      # `get "/login", to: "sessions#new"` — no `as:` key; Rails derives
-      # the helper name from the path string.
+      # `get "/login", to: "sessions#new"` — no `as:` key; Rails derives the helper name from the path string.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           get "/login", to: "sessions#new"
@@ -179,9 +175,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "emits the load-error warning at most once across many analyzed files" do
-      # Solidus / Mastodon scale: hundreds of files, but `routes.rb`
-      # absence is a single project-global root cause. Pre-fix, the
-      # plugin emitted `load-error` per file (999× on Solidus).
+      # Solidus / Mastodon scale: hundreds of files, but `routes.rb` absence is a single project-global root
+      # cause. Pre-fix, the plugin emitted `load-error` per file (999× on Solidus).
       result = run_plugin(
         source: "users_path\n",
         files: { "extra1.rb" => "stuff\n", "extra2.rb" => "more\n", "extra3.rb" => "again\n" }
@@ -192,16 +187,11 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "handles uncountable-noun resources (`resources :news`, _index_ on index helper)" do
-      # `resources :news` with `singular == plural`: Rails
-      # generates `news_index_path` (collection / index, arity 0)
-      # and `news_path(:id)` (show, arity 1). The `_index_`
-      # suffix on the index helper disambiguates the two — it is
-      # added whenever `singular == plural`, INCLUDING for
-      # uncountable nouns. Redmine's
-      # `app/controllers/news_controller.rb` calls
-      # `news_index_path` and `project_news_index_path(@project)`
-      # for the index form; legitimate `news_path(@news)` calls
-      # the show.
+      # `resources :news` with `singular == plural`: Rails generates `news_index_path` (collection / index,
+      # arity 0) and `news_path(:id)` (show, arity 1). The `_index_` suffix on the index helper disambiguates
+      # the two — it is added whenever `singular == plural`, INCLUDING for uncountable nouns. Redmine's
+      # `app/controllers/news_controller.rb` calls `news_index_path` and `project_news_index_path(@project)`
+      # for the index form; legitimate `news_path(@news)` calls the show.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           resources :news, only: [:index, :show, :new, :edit]
@@ -222,8 +212,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
           resources :news, only: [:index, :show]
         end
       RUBY
-      # news_path accepts 0 (index) or 1 (show), plus one trailing options hash.
-      # 3 args exceeds even the most permissive interpretation.
+      # news_path accepts 0 (index) or 1 (show), plus one trailing options hash. 3 args exceeds even the most
+      # permissive interpretation.
       result = run_plugin(
         source: "news_path(1, 2, 3)\n",
         files: { "config/routes.rb" => routes_rb }
@@ -233,12 +223,10 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "registers the `as:` alias on root, both new and hash-rocket forms" do
-      # Redmine uses `root :to => 'welcome#index', :as => 'home'`
-      # at line 26 of config/routes.rb — the hash-rocket form is
-      # the legacy Ruby 1.8 idiom that still works in modern
-      # Rails. Pre-fix the parser registered only `root_path`,
-      # so all 230 call sites to `home_path` / `home_url` across
-      # Redmine surfaced as `unknown-helper`.
+      # Redmine uses `root :to => 'welcome#index', :as => 'home'` at line 26 of config/routes.rb — the
+      # hash-rocket form is the legacy Ruby 1.8 idiom that still works in modern Rails. Pre-fix the parser
+      # registered only `root_path`, so all 230 call sites to `home_path` / `home_url` across Redmine surfaced
+      # as `unknown-helper`.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           root :to => 'welcome#index', :as => 'home'
@@ -254,11 +242,9 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "accepts `only:` / `except:` as a single Symbol (not just Array)" do
-      # Mastodon, Solidus and many other Rails apps use the shorthand
-      # `resources :foo, only: :show` (Symbol) interchangeably with
-      # `only: [:show]` (Array). The parser must accept both — pre-fix,
-      # `Symbol#&` raised `NoMethodError` and the entire routes file
-      # failed to parse, bubbling up as a load-error against every
+      # Mastodon, Solidus and many other Rails apps use the shorthand `resources :foo, only: :show` (Symbol)
+      # interchangeably with `only: [:show]` (Array). The parser must accept both — pre-fix, `Symbol#&` raised
+      # `NoMethodError` and the entire routes file failed to parse, bubbling up as a load-error against every
       # analyzed file in the project.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
@@ -272,8 +258,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
       )
       diags = plugin_diagnostics(result)
       expect(diags.find { |d| d.rule == "load-error" }).to be_nil
-      # Both helpers should be recognised (info-level), proving the
-      # restrict_actions table built cleanly.
+      # Both helpers should be recognised (info-level), proving the restrict_actions table built cleanly.
       helper_names = diags.map(&:message).join("\n")
       expect(helper_names).to include("custom_css_path")
       expect(helper_names).to include("statuses_path")
@@ -291,9 +276,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "accepts user_path(1, 2) as valid (second arg can be options hash)" do
-      # Rails: `user_path(@user, anchor: 'top')` is arity 1 + options.
-      # Since Rigor cannot tell an options hash from a positional arg at
-      # the type level, it allows expected+1 args for every helper.
+      # Rails: `user_path(@user, anchor: 'top')` is arity 1 + options. Since Rigor cannot tell an options hash
+      # from a positional arg at the type level, it allows expected+1 args for every helper.
       result = run_plugin(
         source: "user_path(1, 2)\n",
         files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
@@ -303,8 +287,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "still catches a genuinely wrong arity (expected+2 args)" do
-      # user_path expects 1 segment; user_path(1, 2, 3) has 3 args —
-      # even allowing one trailing options hash, that is still one too many.
+      # user_path expects 1 segment; user_path(1, 2, 3) has 3 args — even allowing one trailing options hash,
+      # that is still one too many.
       result = run_plugin(
         source: "user_path(1, 2, 3)\n",
         files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
@@ -385,10 +369,9 @@ RSpec.describe "plugins/rigor-rails-routes" do
 
   describe "scope routing" do
     it "generates prefixed helpers for `scope as:` blocks" do
-      # `scope "/:event_slug", as: "event" do; resources :talks; end`
-      # is the conference-app kaigionrails pattern. Without the fix
-      # the parser ignored the `as:` prefix and registered `talks_path`
-      # instead of `event_talks_path`, producing unknown-helper FPs.
+      # `scope "/:event_slug", as: "event" do; resources :talks; end` is the conference-app kaigionrails
+      # pattern. Without the fix the parser ignored the `as:` prefix and registered `talks_path` instead of
+      # `event_talks_path`, producing unknown-helper FPs.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           scope "/:event_slug", as: "event" do
@@ -405,9 +388,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "does not register un-prefixed helpers for scope-body resources" do
-      # Pre-fix the parser processed the scope block as a plain block,
-      # registering `talks_path` / `talk_path` as if the resources were
-      # top-level — those helpers don't actually exist.
+      # Pre-fix the parser processed the scope block as a plain block, registering `talks_path` / `talk_path`
+      # as if the resources were top-level — those helpers don't actually exist.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           scope "/:event_slug", as: "event" do
@@ -490,9 +472,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "skips `get '/'` inside a scope (would produce an empty path-derived name)" do
-      # `get "/"` inside a scope derives as_name "" which, combined with
-      # a scope prefix, would produce a `event__path` double-underscore entry.
-      # The parser now returns early on empty derived names.
+      # `get "/"` inside a scope derives as_name "" which, combined with a scope prefix, would produce a
+      # `event__path` double-underscore entry. The parser now returns early on empty derived names.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           scope "/:event_slug", as: "event" do
@@ -507,10 +488,9 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "only: with non-show actions still registers the path helper" do
-    # Mastodon shape: `resource :inbox, only: [:create]` —
-    # Rails registers POST /inbox under the same `inbox_path`
-    # helper Rails uses for show forms; the plugin must too,
-    # otherwise the caller's `inbox_path` reads as unknown.
+    # Mastodon shape: `resource :inbox, only: [:create]` — Rails registers POST /inbox under the same
+    # `inbox_path` helper Rails uses for show forms; the plugin must too, otherwise the caller's `inbox_path`
+    # reads as unknown.
     it "registers the path helper for a singular resource with `only: [:create]`" do
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
@@ -523,9 +503,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "registers the show-shape path helper for plural resources with `except: [:show]`" do
-      # Mastodon `resources :roles, except: [:show]` — Rails
-      # generates PATCH / PUT / DELETE under `admin_role_path(id)`
-      # even though :show is excluded.
+      # Mastodon `resources :roles, except: [:show]` — Rails generates PATCH / PUT / DELETE under
+      # `admin_role_path(id)` even though :show is excluded.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           namespace :admin do
@@ -551,10 +530,9 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "singular resource with plural-looking name keeps the as-given name" do
-    # Mastodon shape: `resource :relationships, only: [:show, :update]`
-    # — singular DSL with a plural-looking name. Rails generates
-    # `relationships_path` (no singularising); the parser used
-    # to mangle this to `relationship_path`.
+    # Mastodon shape: `resource :relationships, only: [:show, :update]` — singular DSL with a plural-looking
+    # name. Rails generates `relationships_path` (no singularising); the parser used to mangle this to
+    # `relationship_path`.
     it "does not singularise a singular-resource's helper" do
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
@@ -567,8 +545,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "still derives the singular form from a plural-resources declaration" do
-      # Make sure the Bug B fix does not break the normal
-      # `resources :foos` → `foo_path(id)` derivation.
+      # Make sure the Bug B fix does not break the normal `resources :foos` → `foo_path(id)` derivation.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           resources :widgets
@@ -610,9 +587,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "finds a `private _url` method declared in a controller" do
-      # Mastodon's exact shape:
-      # `app/controllers/follower_accounts_controller.rb` has
-      # `private; def page_url(page) ... end`.
+      # Mastodon's exact shape: `app/controllers/follower_accounts_controller.rb` has `private; def
+      # page_url(page) ... end`.
       result = run_plugin(
         source: "page_url(1)\n",
         files: {
@@ -671,8 +647,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "still flags a misspelt helper that is neither in routes nor in app/helpers/" do
-      # Name MUST end in `_path` / `_url` to reach the rule
-      # at all — pick a name not present in either source.
+      # Name MUST end in `_path` / `_url` to reach the rule at all — pick a name not present in either source.
       result = run_plugin(
         source: "definitely_not_real_url('foo.png')\n",
         files: {
@@ -686,12 +661,9 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "includes `_path` / `_url` methods marked private (visibility-agnostic by design)" do
-      # Visibility-agnostic discovery: a `private def
-      # internal_path(arg)` IS registered so a paired view or
-      # cross-controller call site does not false-fire
-      # `unknown-helper`. The core engine's
-      # `call.undefined-method` rule still catches the case
-      # where the call's receiver genuinely cannot see the
+      # Visibility-agnostic discovery: a `private def internal_path(arg)` IS registered so a paired view or
+      # cross-controller call site does not false-fire `unknown-helper`. The core engine's
+      # `call.undefined-method` rule still catches the case where the call's receiver genuinely cannot see the
       # method.
       result = run_plugin(
         source: "internal_path('x')\n",
@@ -820,8 +792,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "with_options applies defaults to inner resources" do
-    # Mastodon's `with_options only: [:index], concerns:
-    # :batch do resources :links; resources :tags; ... end`
+    # Mastodon's `with_options only: [:index], concerns: :batch do resources :links; resources :tags; ... end`
     # — inner declarations inherit `only:` + `concerns:`.
 
     it "applies `only:` to a bare `resources :foo` inside the block" do
@@ -842,10 +813,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "applies `concerns:` defaults so concern bodies replay for inner resources" do
-      # The Mastodon shape: `concern :batch do collection {
-      # post :batch }; end` + `with_options only: [:index],
-      # concerns: :batch do resources :links; ... end` →
-      # `batch_links_path` registers.
+      # The Mastodon shape: `concern :batch do collection { post :batch }; end` + `with_options only: [:index],
+      # concerns: :batch do resources :links; ... end` → `batch_links_path` registers.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           namespace :admin do
@@ -917,10 +886,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
 
   describe "resources `as:` overrides the helper name root" do
     it "uses :as for the show helper when `only: [:show]`" do
-      # `resources :collections, only: [:show], as:
-      # :actor_collections` — Rails' show helper becomes
-      # `actor_collection_path(id)` (the URL stays
-      # `/collections/:id`).
+      # `resources :collections, only: [:show], as: :actor_collections` — Rails' show helper becomes
+      # `actor_collection_path(id)` (the URL stays `/collections/:id`).
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           resources :collections, only: [:show], as: :actor_collections
@@ -965,10 +932,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "silently skips a `mount` without `as:`" do
-      # `mount LetterOpenerWeb::Engine, at: 'letter_opener'`
-      # — no `as:`, so we don't fabricate a helper name.
-      # Include `resources :users` so the helper table isn't
-      # empty (the plugin silences all diagnostics on an
+      # `mount LetterOpenerWeb::Engine, at: 'letter_opener'` — no `as:`, so we don't fabricate a helper name.
+      # Include `resources :users` so the helper table isn't empty (the plugin silences all diagnostics on an
       # empty table to avoid noise on routes-less files).
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
@@ -1032,8 +997,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
 
   describe "irregular singulars (Latin / Greek plurals)" do
     it "singularises `media` to `medium` for `resources :media`" do
-      # Mastodon's `resources :media, only: [:show]` →
-      # `medium_path(id)` (arity 1). Pre-fix `media` was in
+      # Mastodon's `resources :media, only: [:show]` → `medium_path(id)` (arity 1). Pre-fix `media` was in
       # UNCOUNTABLE and the helper resolved as `media_path`.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
@@ -1050,13 +1014,10 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "concern-injected route bodies" do
-    # Mastodon shape: `concern :account_resources do ...
-    # end` then `resources :accounts, concerns:
-    # :account_resources do ... end` injects the concern body
-    # inside the accounts resource block. Pre-fix the parser
-    # silently skipped concern bodies (per v0.1.11's
-    # `:concern` no-op) — so every helper defined ONLY inside
-    # a concern surfaced as `unknown-helper` at the call site.
+    # Mastodon shape: `concern :account_resources do ... end` then `resources :accounts, concerns:
+    # :account_resources do ... end` injects the concern body inside the accounts resource block. Pre-fix the
+    # parser silently skipped concern bodies (per v0.1.11's `:concern` no-op) — so every helper defined ONLY
+    # inside a concern surfaced as `unknown-helper` at the call site.
 
     it "replays a single concern's body inside `concerns: :name`" do
       routes_rb = <<~RUBY
@@ -1098,9 +1059,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "replays the concern body with the resource's arity context" do
-      # `resources :accounts do concern body { resource :inbox } end`
-      # → `account_inbox_path(account_id)` arity 1 (the
-      # concern's resource picks up the outer `:account_id`).
+      # `resources :accounts do concern body { resource :inbox } end` → `account_inbox_path(account_id)`
+      # arity 1 (the concern's resource picks up the outer `:account_id`).
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           concern :inbox_target do
@@ -1119,8 +1079,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "still fires unknown-helper for a misspelt concern reference (precision floor)" do
-      # Concern not declared → bodies aren't replayed →
-      # call to a helper that would have come from a missing
+      # Concern not declared → bodies aren't replayed → call to a helper that would have come from a missing
       # concern still surfaces as unknown-helper.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
@@ -1137,10 +1096,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "singular `resource` adds the name to helper prefix for nested declarations" do
-    # Mastodon shape: `resource :instance, only: [:show] do
-    # scope module: :instances do resources :domain_blocks
-    # only: [:index]; end; end` — generates
-    # `api_v1_instance_domain_blocks_path` (NOT
+    # Mastodon shape: `resource :instance, only: [:show] do scope module: :instances do resources
+    # :domain_blocks only: [:index]; end; end` — generates `api_v1_instance_domain_blocks_path` (NOT
     # `api_v1_domain_blocks_path`).
 
     it "prefixes nested resources helpers with the singular resource's name" do
@@ -1182,10 +1139,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "does NOT contribute a `:id` arity segment for the singular parent" do
-      # `resource :instance do resources :domain_blocks end`
-      # → index helper takes 0 args (instance has no :id,
-      # domain_blocks index has no :id either). Precision
-      # floor against accidentally adding 1 to arity.
+      # `resource :instance do resources :domain_blocks end` → index helper takes 0 args (instance has no :id,
+      # domain_blocks index has no :id either). Precision floor against accidentally adding 1 to arity.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           resource :instance, only: [:show] do
@@ -1203,10 +1158,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "same-singular-plural names get the `_index_` suffix" do
-    # Rails appends `_index_` to the index helper when the
-    # singular form equals the plural form AND the name is not
-    # in the canonical UNCOUNTABLE list. The disambiguation
-    # exists because show/index would otherwise collide.
+    # Rails appends `_index_` to the index helper when the singular form equals the plural form AND the name
+    # is not in the canonical UNCOUNTABLE list. The disambiguation exists because show/index would otherwise collide.
 
     it "registers `<name>_index_path` for `resources :reblogged_by`" do
       routes_rb = <<~RUBY
@@ -1239,8 +1192,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "keeps UNCOUNTABLE-noun index under the bare name (no `_index_` suffix)" do
-      # `resources :news` → `news_path` for both index AND
-      # show (Rails-compatible). Precision floor against
+      # `resources :news` → `news_path` for both index AND show (Rails-compatible). Precision floor against
       # over-eager `_index_` suffixing.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
@@ -1257,13 +1209,10 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "member/collection block shorthand routes" do
-    # Mastodon shape: `resources :accounts do; member { post
-    # :memorialize }; end` inside a namespace. Rails generates
-    # `memorialize_admin_account_path(id)` (member) and
-    # `memorialize_admin_accounts_path` (collection). Pre-fix
-    # the parser silently skipped these because
-    # `handle_explicit_route` rejected the symbol-only call
-    # shape (`post :memorialize` with no path arg).
+    # Mastodon shape: `resources :accounts do; member { post :memorialize }; end` inside a namespace. Rails
+    # generates `memorialize_admin_account_path(id)` (member) and `memorialize_admin_accounts_path`
+    # (collection). Pre-fix the parser silently skipped these because `handle_explicit_route` rejected the
+    # symbol-only call shape (`post :memorialize` with no path arg).
 
     it "registers a member action helper inside `resources do member { post :action } end`" do
       routes_rb = <<~RUBY
@@ -1326,8 +1275,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "applies the correct arity to member actions (parent resource segments only)" do
-      # `resources :users do; resources :accounts do; member { post :memorialize }; end; end`
-      # → `memorialize_user_account_path(user_id, id)` arity 2.
+      # `resources :users do; resources :accounts do; member { post :memorialize }; end; end` →
+      # `memorialize_user_account_path(user_id, id)` arity 2.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           resources :users do
@@ -1349,13 +1298,10 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "shadowing locals suppress diagnostics" do
-    # When a file declares a local that shadows a route helper
-    # name (`let(:foo_url)`, `def foo_path`, `foo_url = ...`),
-    # the analyzer MUST treat the call as the local, not the
-    # registered helper. Mastodon's `spec/` has 200+ such
-    # patterns that pre-fix surfaced as bogus `unknown-helper`
-    # / `wrong-arity` against route helpers that happen to
-    # share the name.
+    # When a file declares a local that shadows a route helper name (`let(:foo_url)`, `def foo_path`, `foo_url
+    # = ...`), the analyzer MUST treat the call as the local, not the registered helper. Mastodon's `spec/` has
+    # 200+ such patterns that pre-fix surfaced as bogus `unknown-helper` / `wrong-arity` against route helpers
+    # that happen to share the name.
 
     it "skips unknown-helper for a `let(:foo_url)`-shadowed call" do
       result = run_plugin(
@@ -1372,8 +1318,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "skips wrong-arity for a `let(:helper_path)` that shadows a known route helper" do
-      # `resources :users` registers `user_path(id)` with
-      # arity 1; a `let(:user_path) { ... }` followed by
+      # `resources :users` registers `user_path(id)` with arity 1; a `let(:user_path) { ... }` followed by
       # `user_path` (no args) used to fire `wrong-arity`.
       result = run_plugin(
         source: <<~RUBY,
@@ -1420,8 +1365,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "still fires unknown-helper for a non-shadowed unknown name" do
-      # Precision floor — make sure the shadow check doesn't
-      # silently swallow real typos.
+      # Precision floor — make sure the shadow check doesn't silently swallow real typos.
       result = run_plugin(
         source: "definitely_not_a_real_path\n",
         files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
@@ -1432,11 +1376,9 @@ RSpec.describe "plugins/rigor-rails-routes" do
   end
 
   describe "arity check accepts kwargs-only call shapes" do
-    # Mastodon shape: a multi-segment route called via
-    # keyword args carrying every segment name —
-    # `short_account_status_url(account_username: u, id: i)`
-    # for `/@:account_username/:id`. Rails accepts this form;
-    # our strict positional-arity check used to false-fire.
+    # Mastodon shape: a multi-segment route called via keyword args carrying every segment name —
+    # `short_account_status_url(account_username: u, id: i)` for `/@:account_username/:id`. Rails accepts this
+    # form; our strict positional-arity check used to false-fire.
 
     let(:routes_with_kwargs_helper) do
       <<~RUBY
@@ -1465,8 +1407,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
 
     it "still fires wrong-arity when actual positional exceeds expected even with kwargs" do
-      # Precision floor: 3 positionals (over expected 2) plus
-      # trailing kwargs is still wrong.
+      # Precision floor: 3 positionals (over expected 2) plus trailing kwargs is still wrong.
       result = run_plugin(
         source: "short_account_status_url('a', 'b', 'c', id: 1)\n",
         files: { "config/routes.rb" => routes_with_kwargs_helper }
@@ -1478,9 +1419,8 @@ RSpec.describe "plugins/rigor-rails-routes" do
 
   describe "ADR-9 cross-plugin fact publication" do
     it "publishes the `:helper_table` fact during prepare" do
-      # FactStore is constructed once per Services / per run;
-      # capture it as the runner builds Services so we can
-      # read the fact back after `prepare` has fired.
+      # FactStore is constructed once per Services / per run; capture it as the runner builds Services so we
+      # can read the fact back after `prepare` has fired.
       captured_store = nil
       allow(Rigor::Plugin::Services).to receive(:new).and_wrap_original do |original, **kwargs|
         services = original.call(**kwargs)

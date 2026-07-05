@@ -1,13 +1,9 @@
 # frozen_string_literal: true
 
-# Integration spec: the engine should construct precise types
-# for small but realistic Ruby snippets. Each example is a
-# self-contained Ruby fixture under `spec/integration/fixtures/`
-# — readable on its own, runnable under MRI, and inspectable
-# through the `rigor type-of` CLI. The spec body uses a shared
-# `FixtureHarness` helper so adding a new scenario means
-# dropping a `.rb` file under `fixtures/` and adding a few
-# `expect` lines here.
+# Integration spec: the engine should construct precise types for small but realistic Ruby snippets. Each
+# example is a self-contained Ruby fixture under `spec/integration/fixtures/` — readable on its own, runnable
+# under MRI, and inspectable through the `rigor type-of` CLI. The spec body uses a shared `FixtureHarness`
+# helper so adding a new scenario means dropping a `.rb` file under `fixtures/` and adding a few `expect` lines here.
 
 require "spec_helper"
 require_relative "support/fixture_harness"
@@ -25,12 +21,9 @@ RSpec.describe "Rigor type construction (integration)" do
     let(:harness) { harness_for("parity") }
 
     it "binds `result` to the live-branch `Constant[:even]` when the predicate folds to true" do
-      # `4.even?` constant-folds to `Constant[true]`, so the
-      # else-branch is dead and the if-expression resolves to
-      # `Constant[:even]` only. The bool-valued path (when the
-      # receiver is a non-literal Integer) joins both edges into
-      # `Constant[:even] | Constant[:odd]` — the fixture itself
-      # `assert_type`s that case.
+      # `4.even?` constant-folds to `Constant[true]`, so the else-branch is dead and the if-expression resolves
+      # to `Constant[:even]` only. The bool-valued path (when the receiver is a non-literal Integer) joins both
+      # edges into `Constant[:even] | Constant[:odd]` — the fixture itself `assert_type`s that case.
       expect(harness.local(:result)).to eq(constant(:even))
     end
 
@@ -43,12 +36,10 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/module_singleton_call.rb — module/class singleton-method call resolution" do
     let(:harness) { harness_for("module_singleton_call") }
 
-    # Module-singleton call resolution (ADR-57 follow-up): a `def self.x` /
-    # `module_function` call on a module/class constant re-types the body
-    # with the call's args bound (constant args fold; a singleton helper
-    # called via implicit self resolves against the same singleton table),
-    # while a foreign / RBS-known singleton (`Math.sqrt`) stays
-    # catalog-typed. The fixture's `assert_type(...)` lines self-check.
+    # Module-singleton call resolution (ADR-57 follow-up): a `def self.x` / `module_function` call on a
+    # module/class constant re-types the body with the call's args bound (constant args fold; a singleton
+    # helper called via implicit self resolves against the same singleton table), while a foreign / RBS-known
+    # singleton (`Math.sqrt`) stays catalog-typed. The fixture's `assert_type(...)` lines self-check.
     it "resolves singleton-method calls (def self / module_function / implicit-self helper)" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
@@ -58,13 +49,11 @@ RSpec.describe "Rigor type construction (integration)" do
   describe "fixtures/constant_reduce_fold.rb — constant reduce/inject folding" do
     let(:harness) { harness_for("constant_reduce_fold") }
 
-    # Folds a fully-constant `reduce`/`inject` to its exact value. The
-    # fact2 chain (Range-literal bound-type folding → ReduceFolding's
-    # constant tier → ADR-57 per-call adoption) makes
-    # `def range_fact(n) = (1..n).reduce(1, :*); range_fact(5)` fold to
-    # `120` / `range_fact(0)` to `1` — the bound `(1..n)` types as
-    # `Constant[Range]` once `n` is pinned, even though the bound is a
-    # variable read rather than a literal IntegerNode.
+    # Folds a fully-constant `reduce`/`inject` to its exact value. The fact2 chain (Range-literal bound-type
+    # folding → ReduceFolding's constant tier → ADR-57 per-call adoption) makes
+    # `def range_fact(n) = (1..n).reduce(1, :*); range_fact(5)` fold to `120` / `range_fact(0)` to `1` — the
+    # bound `(1..n)` types as `Constant[Range]` once `n` is pinned, even though the bound is a variable read
+    # rather than a literal IntegerNode.
     it "produces no assert_type mismatches" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
@@ -239,8 +228,7 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     it "composes Phase 2 + filter_map + ternary branch elision into a precise survivor Tuple" do
-      # `[1,2,3].filter_map { |n| n.even? ? n.to_s : nil }`
-      # — only n=2 survives the per-position fold, so the
+      # `[1,2,3].filter_map { |n| n.even? ? n.to_s : nil }` — only n=2 survives the per-position fold, so the
       # answer is `Tuple[Constant["2"]]`.
       filter_mapped_evens = harness.local(:filter_mapped_evens)
       expect(filter_mapped_evens).to be_a(Rigor::Type::Tuple)
@@ -260,18 +248,16 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     it "treats per-position Constant scalars as single-element contributions in flat_map" do
-      # `[1, 2, 3].flat_map { |n| n.to_s }` — each per-position
-      # result is a `Constant<String>`, which contributes one
-      # element to the assembled Tuple.
+      # `[1, 2, 3].flat_map { |n| n.to_s }` — each per-position result is a `Constant<String>`, which
+      # contributes one element to the assembled Tuple.
       flat_scalar = harness.local(:flat_scalar)
       expect(flat_scalar).to be_a(Rigor::Type::Tuple)
       expect(flat_scalar.elements.map(&:value)).to eq(%w[1 2 3])
     end
 
     it "concatenates all-empty per-position Tuples into the empty Tuple" do
-      # `[1, 2, 3].flat_map { |_n| [] }` — every per-position
-      # result is `Tuple[]`, so the assembled answer is also `Tuple[]`.
-      # (`[]` resolves to `Tuple[]`, not `Nominal[Array]`.)
+      # `[1, 2, 3].flat_map { |_n| [] }` — every per-position result is `Tuple[]`, so the assembled answer is
+      # also `Tuple[]`. (`[]` resolves to `Tuple[]`, not `Nominal[Array]`.)
       flat_all_empty = harness.local(:flat_all_empty)
       expect(flat_all_empty).to be_a(Rigor::Type::Tuple)
       expect(flat_all_empty.elements).to be_empty
@@ -339,11 +325,9 @@ RSpec.describe "Rigor type construction (integration)" do
     let(:harness) { harness_for("block_map") }
 
     it "binds `strings` to a per-position Tuple of stringified literals" do
-      # `[1,2,3].map { |n| n.to_s }` folds to
-      # `Tuple[Constant["1"], Constant["2"], Constant["3"]]`,
-      # strictly tighter than the Array[union] projection.
-      # Wider receivers (e.g. `Nominal[Integer]`) still widen back
-      # to `Array[String]` via the RBS tier.
+      # `[1,2,3].map { |n| n.to_s }` folds to `Tuple[Constant["1"], Constant["2"], Constant["3"]]`, strictly
+      # tighter than the Array[union] projection. Wider receivers (e.g. `Nominal[Integer]`) still widen back to
+      # `Array[String]` via the RBS tier.
       strings = harness.local(:strings)
       expect(strings).to be_a(Rigor::Type::Tuple)
       expect(strings.elements.map(&:value)).to eq(%w[1 2 3])
@@ -405,11 +389,9 @@ RSpec.describe "Rigor type construction (integration)" do
     end
 
     it "exposes every `dump_type` call as an `:info` diagnostic the user can read" do
-      # The fixture intentionally uses only `assert_type` (no
-      # bare `dump_type` calls), so the info-severity dump
-      # surface starts empty here. The presence of the rule
-      # is what we are asserting; future fixtures may add
-      # dump_type calls.
+      # The fixture intentionally uses only `assert_type` (no bare `dump_type` calls), so the info-severity
+      # dump surface starts empty here. The presence of the rule is what we are asserting; future fixtures may
+      # add dump_type calls.
       info_dumps = harness.diagnostics.select { |d| d.severity == :info }
       expect(info_dumps).to be_an(Array)
     end
@@ -641,20 +623,16 @@ RSpec.describe "Rigor type construction (integration)" do
     let(:harness) { harness_for("param_extended") }
 
     it "flags exactly the call site whose argument fails the refinement (suppression verifies identification)" do
-      # The fixture uses `# rigor:disable argument-type-mismatch`
-      # on the offending call, so a clean run proves both that
-      # the rule fired against the override AND that the
-      # suppression-comment matches.
+      # The fixture uses `# rigor:disable argument-type-mismatch` on the offending call, so a clean run proves
+      # both that the rule fired against the override AND that the suppression-comment matches.
       arg_errors = harness.errors.select { |d| d.message.start_with?("argument type mismatch") }
       expect(arg_errors).to be_empty
     end
 
     it "applies the override inside the method body via MethodParameterBinder" do
-      # `assert_type` calls inside `normalise(id)` exercise the
-      # body-side narrowing: the binder must read the same
-      # override map and bind `id` to `non-empty-string` rather
-      # than the RBS-declared `String`. A miss surfaces as an
-      # `assert_type mismatch` diagnostic.
+      # `assert_type` calls inside `normalise(id)` exercise the body-side narrowing: the binder must read the
+      # same override map and bind `id` to `non-empty-string` rather than the RBS-declared `String`. A miss
+      # surfaces as an `assert_type mismatch` diagnostic.
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end
@@ -754,9 +732,8 @@ RSpec.describe "Rigor type construction (integration)" do
     let(:harness) { harness_for("always_raises") }
 
     it "flags every Integer-by-zero call (suppressions in the fixture verify identification)" do
-      # The fixture uses `# rigor:disable always-raises` on each
-      # raising line, so a clean run proves both that the rule
-      # fired AND that the suppression comment matches.
+      # The fixture uses `# rigor:disable always-raises` on each raising line, so a clean run proves both that
+      # the rule fired AND that the suppression comment matches.
       raises = harness.errors.select { |d| d.rule == "flow.always-raises" }
       expect(raises).to be_empty
     end
@@ -888,12 +865,9 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
-  # The fixtures below carry both an `assert_type` self-check
-  # (so the file is readable as documentation) and the
-  # finer-grained `harness.local` assertions above. The shared
-  # spec here only verifies the assert_type path; the type-
-  # specific assertions for each fixture live in their own
-  # `describe` block.
+  # The fixtures below carry both an `assert_type` self-check (so the file is readable as documentation) and
+  # the finer-grained `harness.local` assertions above. The shared spec here only verifies the assert_type
+  # path; the type-specific assertions for each fixture live in their own `describe` block.
   describe "self-asserting `assert_type` calls in converted fixtures" do
     %w[parity case_when compound_writes tuple_access hash_shape block_map block_filter tuple_map
        per_element_filter].each do |name|
@@ -1046,9 +1020,8 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/recursive_constant_fold.rb — ADR-55 slice 1 constant-arg unroll" do
       let(:harness) { harness_for("recursive_constant_fold") }
 
-      # factorial(5) → 120, the string builder → "***", and the
-      # constant-arg mutual recursion all fold; factorial(100) exhausts
-      # the 32-frame fuel and degrades to today's widened `Integer`.
+      # factorial(5) → 120, the string builder → "***", and the constant-arg mutual recursion all fold;
+      # factorial(100) exhausts the 32-frame fuel and degrades to today's widened `Integer`.
       it "folds constant-arg recursion and degrades gracefully on fuel exhaustion" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
@@ -1067,9 +1040,8 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/recursive_unroll_clamp.rb — ADR-55 WD1 precision-envelope clamps" do
       let(:harness) { harness_for("recursive_unroll_clamp") }
 
-      # (1) value-pinned self-call adoption is inert outside an unroll;
-      # (2) a guarded re-entry whose body folds to a non-pinned type
-      #     clamps back to the plain guard's `untyped`.
+      # (1) value-pinned self-call adoption is inert outside an unroll; (2) a guarded re-entry whose body folds
+      # to a non-pinned type clamps back to the plain guard's `untyped`.
       it "confines value-pinned adoption to the unroll envelope" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
@@ -1079,14 +1051,12 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/recursive_fixpoint_summary.rb — ADR-55 slice 2 fixpoint return summaries" do
       let(:harness) { harness_for("recursive_fixpoint_summary") }
 
-      # A non-constant-arg recursive method's in-cycle contribution is the
-      # method's real return type, not `Dynamic[top]`. The discriminating
-      # cases are the bare-self-call recursions: `passthrough → :done` (the
-      # fixpoint discovers the base case) and `pick → Dynamic[top]` (the
-      # bot-collapse floor for an explicit-return base case); an
-      # only-recursing method → `bot` (without hanging); mutual recursion
-      # terminates. Factorial / Builder are RBS-absorption anchors, not
-      # fixpoint discriminators (see the fixture's note).
+      # A non-constant-arg recursive method's in-cycle contribution is the method's real return type, not
+      # `Dynamic[top]`. The discriminating cases are the bare-self-call recursions: `passthrough → :done` (the
+      # fixpoint discovers the base case) and `pick → Dynamic[top]` (the bot-collapse floor for an
+      # explicit-return base case); an only-recursing method → `bot` (without hanging); mutual recursion
+      # terminates. Factorial / Builder are RBS-absorption anchors, not fixpoint discriminators (see the
+      # fixture's note).
       it "computes Dynamic-free recursive return summaries and terminates" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
@@ -1096,10 +1066,9 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/explicit_return_contribution.rb — ADR-57 slice 2 explicit-return inference" do
       let(:harness) { harness_for("explicit_return_contribution") }
 
-      # Explicit `return value` nodes (early returns, bare returns, and
-      # block-internal returns that exit the enclosing method) join the
-      # tail type in method-return inference; nested `def`/lambda are
-      # return barriers. Predicate helpers infer `bool`, not `Constant[true]`.
+      # Explicit `return value` nodes (early returns, bare returns, and block-internal returns that exit the
+      # enclosing method) join the tail type in method-return inference; nested `def`/lambda are return
+      # barriers. Predicate helpers infer `bool`, not `Constant[true]`.
       it "joins explicit returns into the inferred method return type" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
@@ -1109,19 +1078,17 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/overridable_method_no_fold.rb — ADR-57 N5 overridable-method adoption gate" do
       let(:harness) { harness_for("overridable_method_no_fold") }
 
-      # An implicit-self call to a method whose owner has a discovered
-      # subclass / includer redefining it degrades the adopted return to
-      # `Dynamic[top]` (template-method default is not a flow constant),
-      # while a method with no discovered override keeps folding to its
-      # base literal. The fixture's `assert_type`s pin both halves.
+      # An implicit-self call to a method whose owner has a discovered subclass / includer redefining it
+      # degrades the adopted return to `Dynamic[top]` (template-method default is not a flow constant), while
+      # a method with no discovered override keeps folding to its base literal. The fixture's `assert_type`s
+      # pin both halves.
       it "degrades the overridden self-call return but preserves the final-method fold" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
       end
 
-      # No always-truthy/falsey FP fires on the `directed?`-style template
-      # method: the guard read is `Dynamic[top]`, which the flow-constant
-      # rule never fires on (rgl's entire warning set).
+      # No always-truthy/falsey FP fires on the `directed?`-style template method: the guard read is
+      # `Dynamic[top]`, which the flow-constant rule never fires on (rgl's entire warning set).
       it "fires no flow.always-truthy-condition on the overridden template read" do
         flow_constants = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
         expect(flow_constants).to be_empty
@@ -1131,11 +1098,9 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/escaping_content_capture.rb — ADR-57 slice 2 escaping-block content widening" do
       let(:harness) { harness_for("escaping_content_capture") }
 
-      # An escaping / unknown block that content-mutates a captured outer
-      # local widens that local to its bare-collection floor (Hash →
-      # Hash[untyped, untyped], String → String, Array → Array[Dynamic[top]])
-      # instead of keeping the unsoundly-precise empty seed. A read-only
-      # capture is untouched.
+      # An escaping / unknown block that content-mutates a captured outer local widens that local to its
+      # bare-collection floor (Hash → Hash[untyped, untyped], String → String, Array → Array[Dynamic[top]])
+      # instead of keeping the unsoundly-precise empty seed. A read-only capture is untouched.
       it "widens content-mutated escaping captures to the Dynamic floor" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
@@ -1145,11 +1110,9 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/optional_tuple_destructure.rb — ADR-57 slice 3 optional-slot softening" do
       let(:harness) { harness_for("optional_tuple_destructure") }
 
-      # Destructuring a tuple slot flow typed as optional (`X | nil`) softens
-      # that slot to its non-`nil` part (FP discipline: a nil-able slot is
-      # almost always guarded by a correlated invariant flow cannot prove),
-      # while a pure slot keeps its precise type and a bare `nil` slot stays
-      # `nil`.
+      # Destructuring a tuple slot flow typed as optional (`X | nil`) softens that slot to its non-`nil` part
+      # (FP discipline: a nil-able slot is almost always guarded by a correlated invariant flow cannot prove),
+      # while a pure slot keeps its precise type and a bare `nil` slot stays `nil`.
       it "softens optional destructured slots without over-widening" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
@@ -1159,14 +1122,11 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/block_captured_writeback.rb — ADR-56 slice A captured-local write-back" do
       let(:harness) { harness_for("block_captured_writeback") }
 
-      # A non-escaping block that rebinds an outer local writes the
-      # continuation binding back (the capped fixpoint): accumulators widen
-      # to a base, a distinct-constant rebind keeps both pinned
-      # constituents (0-iteration soundness), `||=` keeps the pre-call
-      # `nil`, a no-write block keeps its exact constant (fast path), a
-      # compounding shape floors to `Dynamic[top]` at the cap, and an
-      # escaping block is unchanged. Before this slice every accumulator
-      # kept its WRONG pre-call constant — a spec-MUST violation.
+      # A non-escaping block that rebinds an outer local writes the continuation binding back (the capped
+      # fixpoint): accumulators widen to a base, a distinct-constant rebind keeps both pinned constituents
+      # (0-iteration soundness), `||=` keeps the pre-call `nil`, a no-write block keeps its exact constant
+      # (fast path), a compounding shape floors to `Dynamic[top]` at the cap, and an escaping block is
+      # unchanged. Before this slice every accumulator kept its WRONG pre-call constant — a spec-MUST violation.
       it "folds written captured locals back, soundly, without touching unwritten ones" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
@@ -1184,23 +1144,20 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/loop_body_fixpoint.rb — ADR-56 slice B loop-body fixpoint" do
       let(:harness) { harness_for("loop_body_fixpoint") }
 
-      # A `while` / `until` body that rebinds a loop-carried local folds its
-      # continuation binding through the same capped fixpoint slice A uses:
-      # accumulators widen to a base (never the historical unsound
-      # `1 | 2`), a body-first-assignment local degrades to `T | nil` for
-      # the 0-iteration path, and a compounding shape floors to
-      # `Dynamic[top]` at the cap. Before this slice every accumulator kept
-      # its WRONG single-pass constant — a spec-MUST violation.
+      # A `while` / `until` body that rebinds a loop-carried local folds its continuation binding through the
+      # same capped fixpoint slice A uses: accumulators widen to a base (never the historical unsound `1 | 2`),
+      # a body-first-assignment local degrades to `T | nil` for the 0-iteration path, and a compounding shape
+      # floors to `Dynamic[top]` at the cap. Before this slice every accumulator kept its WRONG single-pass
+      # constant — a spec-MUST violation.
       it "folds loop-carried locals back, soundly, across while / until / do-loop shapes" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty
       end
 
       it "joins the pushed element type of a receiver-content-mutated non-rebound local (slice C)" do
-        # `acc.push(m)` widens `acc`'s Tuple AND the slice-C content
-        # writeback joins the pushed `m` (→ `Integer`) into the element
-        # parameter, so the continuation is `Array[Integer]` — sounder and
-        # more precise than the pre-slice-C `Array[Dynamic[top]] | []`.
+        # `acc.push(m)` widens `acc`'s Tuple AND the slice-C content writeback joins the pushed `m` (→
+        # `Integer`) into the element parameter, so the continuation is `Array[Integer]` — sounder and more
+        # precise than the pre-slice-C `Array[Dynamic[top]] | []`.
         expect(harness.local(:acc)).to eq(
           Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
         )
@@ -1214,12 +1171,10 @@ RSpec.describe "Rigor type construction (integration)" do
     describe "fixtures/reduce_symbol.rb — Symbol-form reduce / inject return types" do
       let(:harness) { harness_for("reduce_symbol") }
 
-      # `(1..n).reduce(1, :*)`, `[1,2,3].reduce(:+)`, and friends carry no
-      # block, so the call used to fall to `Enumerable#reduce`'s
-      # `(untyped, Symbol) -> untyped` RBS overload and widen to
-      # `Dynamic[top]`. ReduceFolding dispatches the named operator on the
-      # accumulated element type and recovers the precise carrier
-      # (`Integer` / `String`) — strictly more informative, no diagnostic.
+      # `(1..n).reduce(1, :*)`, `[1,2,3].reduce(:+)`, and friends carry no block, so the call used to fall to
+      # `Enumerable#reduce`'s `(untyped, Symbol) -> untyped` RBS overload and widen to `Dynamic[top]`.
+      # ReduceFolding dispatches the named operator on the accumulated element type and recovers the precise
+      # carrier (`Integer` / `String`) — strictly more informative, no diagnostic.
       it "recovers a precise carrier for every Symbol-operand fold shape" do
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
         expect(mismatches).to be_empty

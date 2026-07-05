@@ -2,50 +2,41 @@
 
 require "spec_helper"
 
-# Structural guard: EVERY bundled plugin (`plugins/*`) and example
-# (`examples/*`) must load and register a valid plugin. The per-plugin
-# integration specs cover *behaviour*, but nothing enumerates the whole
-# set — so a newly-added plugin with no spec of its own, or one whose
-# gem entry / manifest breaks, could slip through CI unnoticed. This
-# spec globs both trees so no plugin escapes a load attempt, and is the
-# companion to `external_plugin_spec.rb` (which proves the *out-of-tree*
-# load path): together they guard that the plugin contract keeps working
-# for every shipped plugin and for third-party authors.
+# Structural guard: EVERY bundled plugin (`plugins/*`) and example (`examples/*`) must load and register a
+# valid plugin. The per-plugin integration specs cover *behaviour*, but nothing enumerates the whole set — so a
+# newly-added plugin with no spec of its own, or one whose gem entry / manifest breaks, could slip through CI
+# unnoticed. This spec globs both trees so no plugin escapes a load attempt, and is the companion to
+# `external_plugin_spec.rb` (which proves the *out-of-tree* load path): together they guard that the plugin
+# contract keeps working for every shipped plugin and for third-party authors.
 #
-# Loadability is exercised by `require`-ing each gem entry. `require` is
-# idempotent: a broken entry raises here when no other spec loaded it
-# first, and a loadable one never falsely fails — so "every entry is
-# loadable" holds regardless of which worker/order runs this file under
-# `make test-parallel`. Registration + manifest validity are then
-# asserted against the public `Rigor::Plugin` surface.
+# Loadability is exercised by `require`-ing each gem entry. `require` is idempotent: a broken entry raises here
+# when no other spec loaded it first, and a loadable one never falsely fails — so "every entry is loadable"
+# holds regardless of which worker/order runs this file under `make test-parallel`. Registration + manifest
+# validity are then asserted against the public `Rigor::Plugin` surface.
 
 # Repo root from spec/integration/.
 ALL_PLUGINS_REPO_ROOT = File.expand_path("../..", __dir__)
 
-# Directories under plugins/ and examples/ (trailing slash → dirs only,
-# so the README.md files are not picked up).
+# Directories under plugins/ and examples/ (trailing slash → dirs only, so the README.md files are not picked up).
 ALL_PLUGINS_DIRS = (
   Dir[File.join(ALL_PLUGINS_REPO_ROOT, "plugins", "*", "")] +
   Dir[File.join(ALL_PLUGINS_REPO_ROOT, "examples", "*", "")]
 ).sort.freeze
 
-# `rigor-playground` is a standalone Rack application, not a Rigor
-# plugin — it has no `lib/rigor-playground.rb` entry and registers no
-# `Plugin::Base`, so it is out of scope for this guard.
+# `rigor-playground` is a standalone Rack application, not a Rigor plugin — it has no `lib/rigor-playground.rb`
+# entry and registers no `Plugin::Base`, so it is out of scope for this guard.
 ALL_PLUGINS_SKIP = %w[rigor-playground].freeze
 
 ALL_PLUGINS_LOADABLE_DIRS = ALL_PLUGINS_DIRS.reject do |dir|
   ALL_PLUGINS_SKIP.include?(File.basename(dir))
 end.freeze
 
-# Meta-gems aggregate other plugins' entry points (`require
-# "rigor-rails-routes"` …) and register no checker plugin of their own,
-# so they are asserted only for clean loading, not for registration.
+# Meta-gems aggregate other plugins' entry points (`require "rigor-rails-routes"` …) and register no checker
+# plugin of their own, so they are asserted only for clean loading, not for registration.
 ALL_PLUGINS_META_GEM_IDS = %w[rails].freeze
 
-# Put every plugin's lib on the load path up front so a meta-gem entry
-# (which requires its sub-plugins by gem name) resolves regardless of
-# example order.
+# Put every plugin's lib on the load path up front so a meta-gem entry (which requires its sub-plugins by gem
+# name) resolves regardless of example order.
 ALL_PLUGINS_LOADABLE_DIRS.each do |dir|
   lib = File.join(dir, "lib")
   $LOAD_PATH.unshift(lib) if Dir.exist?(lib) && !$LOAD_PATH.include?(lib)
@@ -60,11 +51,10 @@ RSpec.describe "bundled plugins and examples all load (structural guard)" do
     File.basename(dir).sub(/\Arigor-/, "")
   end
 
-  # Every `Rigor::Plugin::*` constant that is a concrete plugin class
-  # whose declared manifest id matches `id`. Scanning the namespace
-  # (rather than the loader registry) keeps the assertion robust to other
-  # specs' `Rigor::Plugin.unregister!` calls — a required plugin's class
-  # constant persists even when the registry is cleared.
+  # Every `Rigor::Plugin::*` constant that is a concrete plugin class whose declared manifest id matches `id`.
+  # Scanning the namespace (rather than the loader registry) keeps the assertion robust to other specs'
+  # `Rigor::Plugin.unregister!` calls — a required plugin's class constant persists even when the registry is
+  # cleared.
   def plugin_class_for(id)
     Rigor::Plugin.constants
                  .map { |const| Rigor::Plugin.const_get(const) }
@@ -72,9 +62,8 @@ RSpec.describe "bundled plugins and examples all load (structural guard)" do
                  .find { |klass| safe_manifest_id(klass) == id }
   end
 
-  # A `Plugin::Base` subclass that never declared a manifest raises
-  # `ArgumentError` from `.manifest`; treat that as "not this id" rather
-  # than letting the scan blow up on an unrelated class.
+  # A `Plugin::Base` subclass that never declared a manifest raises `ArgumentError` from `.manifest`; treat that
+  # as "not this id" rather than letting the scan blow up on an unrelated class.
   def safe_manifest_id(klass)
     klass.manifest.id
   rescue ArgumentError
@@ -107,9 +96,8 @@ RSpec.describe "bundled plugins and examples all load (structural guard)" do
   end
 
   it "covers every plugins/* and examples/* directory" do
-    # Guards the guard: if a new top-level directory appears with no gem
-    # entry (and it is not the known Rack-app exception), surface it so
-    # the omission is a deliberate decision, not an oversight.
+    # Guards the guard: if a new top-level directory appears with no gem entry (and it is not the known
+    # Rack-app exception), surface it so the omission is a deliberate decision, not an oversight.
     skipped = ALL_PLUGINS_DIRS.map { |dir| File.basename(dir) } -
               ALL_PLUGINS_LOADABLE_DIRS.map { |dir| File.basename(dir) }
     expect(skipped).to eq(ALL_PLUGINS_SKIP)

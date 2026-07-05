@@ -4,11 +4,9 @@ module Rigor
   module Analysis
     # Immutable storage for flow-sensitive facts attached to a Scope snapshot.
     #
-    # Six buckets (see BUCKETS): local_binding, captured_local,
-    # object_content, global_storage, dynamic_origin, relational.
-    # Callers can record facts, invalidate all facts that mention a target,
-    # and conservatively join two stores by retaining only facts that both
-    # incoming edges share.
+    # Six buckets (see BUCKETS): local_binding, captured_local, object_content, global_storage, dynamic_origin,
+    # relational. Callers can record facts, invalidate all facts that mention a target, and conservatively
+    # join two stores by retaining only facts that both incoming edges share.
     class FactStore
       BUCKETS = %i[
         local_binding
@@ -48,13 +46,9 @@ module Rigor
       attr_reader :facts
 
       class << self
-        # ADR-15 Phase 4b.x — return the eagerly-loaded
-        # singleton-class `@empty` ivar. Lazy `@empty ||= new`
-        # would write to a class/module ivar from non-main
-        # Ractors and trip `Ractor::IsolationError`. The
-        # `@empty = new.freeze` at module body below
-        # pre-populates the ivar on the main Ractor at load
-        # time.
+        # ADR-15 Phase 4b.x — return the eagerly-loaded singleton-class `@empty` ivar. Lazy `@empty ||= new`
+        # would write to a class/module ivar from non-main Ractors and trip `Ractor::IsolationError`. The
+        # `@empty = new.freeze` at module body below pre-populates the ivar on the main Ractor at load time.
         attr_reader :empty
       end
 
@@ -131,11 +125,9 @@ module Rigor
         unique.freeze
       end
 
-      # `fact.target` is `Target | Array[Target]` per the carrier
-      # contract. Branching with an early return on the `Array`
-      # arm lets type narrowing collapse the post-return value to
-      # the bare `Target` case, so the wrapped tuple is `[Target]`
-      # and the union of return paths is exactly `Array[Target]`.
+      # `fact.target` is `Target | Array[Target]` per the carrier contract. Branching with an early return on
+      # the `Array` arm lets type narrowing collapse the post-return value to the bare `Target` case, so the
+      # wrapped tuple is `[Target]` and the union of return paths is exactly `Array[Target]`.
       def fact_targets(fact)
         target = fact.target
         return target if target.is_a?(Array)
@@ -143,11 +135,9 @@ module Rigor
         [target]
       end
 
-      # ADR-15 Phase 4b.x — eager-load the singleton `@empty`
-      # on the main Ractor at module-load time. Workers then
-      # READ the populated ivar without ever attempting a
-      # class/module ivar WRITE (which non-main Ractors are
-      # forbidden from doing).
+      # ADR-15 Phase 4b.x — eager-load the singleton `@empty` on the main Ractor at module-load time. Workers
+      # then READ the populated ivar without ever attempting a class/module ivar WRITE (which non-main
+      # Ractors are forbidden from doing).
       @empty = new.freeze
     end
   end

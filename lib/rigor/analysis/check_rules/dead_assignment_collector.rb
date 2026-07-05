@@ -5,71 +5,56 @@ require "prism"
 module Rigor
   module Analysis
     module CheckRules
-      # Walks a parse tree and collects every `LocalVariableWriteNode`
-      # inside a `DefNode` body whose target name is **never read**
-      # within the same body.
+      # Walks a parse tree and collects every `LocalVariableWriteNode` inside a `DefNode` body whose target
+      # name is **never read** within the same body.
       #
-      # The collector is the read-side companion to the
-      # `def.dead-assignment` rule. v0.1.2 ships the narrowest
-      # envelope that catches the most common typo / refactoring-
-      # leftover shape ("wrote and never used") without surfacing
-      # false positives:
+      # The collector is the read-side companion to the `def.dead-assignment` rule. v0.1.2 ships the
+      # narrowest envelope that catches the most common typo / refactoring-leftover shape ("wrote and never
+      # used") without surfacing false positives:
       #
-      # - Only `Prism::DefNode` bodies are scanned. Top-level
-      #   scripts and class-body assignments are skipped — their
-      #   variable surface bleeds across requires / introspection
-      #   in ways the rule cannot reason about.
-      # - Only plain `LocalVariableWriteNode` writes are
-      #   considered. Operator-writes (`x += 1`), and-/or-writes
-      #   (`x ||= 1`), and `MultiWriteNode` destructures (`a, b =
-      #   foo`) are skipped because their write semantics are
-      #   intertwined with reads or with a wider tuple binding.
-      # - The "is this name ever read" question is answered by
-      #   any `LocalVariableReadNode` anywhere in the def
-      #   subtree — so a closure capture, a `return x`, a
-      #   block-call argument, an interpolated string all count
-      #   as a read.
-      # - A write whose name starts with `_` is skipped per the
-      #   Ruby convention that `_` / `_foo` declares
+      # - Only `Prism::DefNode` bodies are scanned. Top-level scripts and class-body assignments are
+      #   skipped — their variable surface bleeds across requires / introspection in ways the rule cannot
+      #   reason about.
+      # - Only plain `LocalVariableWriteNode` writes are considered. Operator-writes (`x += 1`), and-/or-writes
+      #   (`x ||= 1`), and `MultiWriteNode` destructures (`a, b = foo`) are skipped because their write
+      #   semantics are intertwined with reads or with a wider tuple binding.
+      # - The "is this name ever read" question is answered by any `LocalVariableReadNode` anywhere in the
+      #   def subtree — so a closure capture, a `return x`, a block-call argument, an interpolated string all
+      #   count as a read.
+      # - A write whose name starts with `_` is skipped per the Ruby convention that `_` / `_foo` declares
       #   "intentionally unused".
-      # - The last statement of a def body is skipped — Ruby's
-      #   implicit return treats `def foo; x = 1; end` as
-      #   returning `1`, so the trailing write is intentional.
+      # - The last statement of a def body is skipped — Ruby's implicit return treats `def foo; x = 1; end`
+      #   as returning `1`, so the trailing write is intentional.
       class DeadAssignmentCollector
-        # ADR-53 Track B — the node classes the shared {RuleWalk}
-        # dispatches to this collector. The legacy walk visits EVERY
-        # `DefNode` (it descends into all of them, nested defs included,
-        # processing each separately — `gather_*` barrier at nested defs
-        # so an outer def never sees an inner def's locals), so the
-        # collector needs no context gate: it fires at every `def` the
-        # shared full DFS reaches, exactly like the legacy walk.
+        # ADR-53 Track B — the node classes the shared {RuleWalk} dispatches to this collector. The legacy
+        # walk visits EVERY `DefNode` (it descends into all of them, nested defs included, processing each
+        # separately — `gather_*` barrier at nested defs so an outer def never sees an inner def's locals),
+        # so the collector needs no context gate: it fires at every `def` the shared full DFS reaches,
+        # exactly like the legacy walk.
         NODE_CLASSES = [Prism::DefNode].freeze
 
-        # Returns `Array<{def_class:, def_name:, write_node:}>`
-        # — one entry per dead-assignment write. Empty when
-        # the tree has no qualifying writes.
+        # Returns `Array<{def_class:, def_name:, write_node:}>` — one entry per dead-assignment write. Empty
+        # when the tree has no qualifying writes.
         def initialize(scope_index)
           @scope_index = scope_index
           @results = []
         end
 
-        # Legacy single-collector walk — kept as the oracle the ADR-53
-        # Track B equivalence harness compares {RuleWalk} against; deleted
-        # when Track B completes.
+        # Legacy single-collector walk — kept as the oracle the ADR-53 Track B equivalence harness compares
+        # {RuleWalk} against; deleted when Track B completes.
         def collect(root)
           walk_for_def_nodes(root)
           @results.freeze
         end
 
-        # {RuleWalk} entry point: the legacy walk's per-`def` logic,
-        # invoked at every `def` under the shared traversal contract. The
-        # `context` is unused — this collector processes all defs.
+        # {RuleWalk} entry point: the legacy walk's per-`def` logic, invoked at every `def` under the shared
+        # traversal contract. The `context` is unused — this collector processes all defs.
         def visit(def_node, _context = nil)
           collect_def_assignments(def_node)
         end
 
-        # The accumulated result, frozen the same way `#collect` returns
-        # it — used by {RuleWalk}-driven callers after the walk completes.
+        # The accumulated result, frozen the same way `#collect` returns it — used by {RuleWalk}-driven
+        # callers after the walk completes.
         def results
           @results.freeze
         end
@@ -103,9 +88,8 @@ module Rigor
           return accumulator unless node.is_a?(Prism::Node)
 
           accumulator << node.name if node.is_a?(Prism::LocalVariableReadNode)
-          # Operator/and/or-writes implicitly read the prior
-          # binding — count them too so `x = 1; x ||= 2; x` /
-          # similar shapes don't trip the rule.
+          # Operator/and/or-writes implicitly read the prior binding — count them too so `x = 1; x ||= 2; x`
+          # / similar shapes don't trip the rule.
           accumulator << node.name if reading_assignment?(node)
 
           node.compact_child_nodes.each { |child| gather_read_names(child, accumulator) }
@@ -122,8 +106,7 @@ module Rigor
           return accumulator unless node.is_a?(Prism::Node)
 
           accumulator << node if node.is_a?(Prism::LocalVariableWriteNode)
-          # Don't recurse into nested DefNodes — their bodies
-          # carry their own dead-assignment scope and the
+          # Don't recurse into nested DefNodes — their bodies carry their own dead-assignment scope and the
           # outer walker visits them separately.
           return accumulator if node.is_a?(Prism::DefNode) && !accumulator.last.equal?(node)
 
@@ -131,10 +114,8 @@ module Rigor
           accumulator
         end
 
-        # Returns the final statement of a body node, descending
-        # into wrappers Ruby preserves verbatim (`begin ... end`
-        # blocks). Used to skip the implicit-return write at the
-        # tail of a method body.
+        # Returns the final statement of a body node, descending into wrappers Ruby preserves verbatim
+        # (`begin ... end` blocks). Used to skip the implicit-return write at the tail of a method body.
         def trailing_statement(body)
           case body
           when Prism::StatementsNode then body.body.last

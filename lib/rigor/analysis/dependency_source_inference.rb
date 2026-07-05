@@ -13,16 +13,12 @@ module Rigor
     #
     # The namespace coordinates three components:
     #
-    # - {GemResolver} maps a
-    #   `Configuration::Dependencies::Entry` to either a frozen
-    #   `Resolved(gem_name, version, gem_dir, mode, roots)` or an
-    #   `Unresolvable(gem_name, reason)` value.
-    # - {Builder.build} folds a `Configuration::Dependencies`
-    #   into a frozen {Index} carrying the partitioned outcomes.
-    # - {Index} holds the per-run state the dispatcher tier
-    #   consults via `#contribution_for`; the method table is
-    #   fully populated by {Walker} walking each resolved gem's
-    #   `roots:`.
+    # - {GemResolver} maps a `Configuration::Dependencies::Entry` to either a frozen
+    #   `Resolved(gem_name, version, gem_dir, mode, roots)` or an `Unresolvable(gem_name, reason)` value.
+    # - {Builder.build} folds a `Configuration::Dependencies` into a frozen {Index} carrying the partitioned
+    #   outcomes.
+    # - {Index} holds the per-run state the dispatcher tier consults via `#contribution_for`; the method table
+    #   is fully populated by {Walker} walking each resolved gem's `roots:`.
     module DependencySourceInference
     end
   end

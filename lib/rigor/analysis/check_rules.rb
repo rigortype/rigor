@@ -1207,15 +1207,12 @@ module Rigor
           build_undefined_method_diagnostic(path, call_node, receiver_type)
         end
 
-        # An arm that makes a sound "undefined on every arm" verdict
-        # impossible: a non-class surface (Dynamic / Top / Bot), a singleton
-        # (slice 1 reasons about instance arms only), the generic metaclass
-        # `Class` / `Module` (a value typed as one is *some* class/module object
-        # whose singleton methods cannot be enumerated from the metaclass — e.g.
-        # `plugin_class : Class` really holds a `Plugin` subclass with
-        # `.manifest`), an unbounded receiver (ADR-26 open class or a synthesized
-        # stub), or a module mixin whose Object-inherited methods the per-arm
-        # lookup would miss.
+        # An arm that makes a sound "undefined on every arm" verdict impossible: a non-class surface
+        # (Dynamic / Top / Bot), a singleton (slice 1 reasons about instance arms only), the generic
+        # metaclass `Class` / `Module` (a value typed as one is *some* class/module object whose singleton
+        # methods cannot be enumerated from the metaclass — e.g. `plugin_class : Class` really holds a
+        # `Plugin` subclass with `.manifest`), an unbounded receiver (ADR-26 open class or a synthesized
+        # stub), or a module mixin whose Object-inherited methods the per-arm lookup would miss.
         METACLASS_ARMS = %w[Class Module].to_set.freeze
         private_constant :METACLASS_ARMS
 
@@ -1229,15 +1226,11 @@ module Rigor
           module_mixin_receiver?(member, scope)
         end
 
-        # Slice 7 phase 19 — PHPStan-style `dump_type(value)`.
-        # When the engine recognises a call to `dump_type` (with
-        # any of the supported receiver shapes — implicit self
-        # after `include Rigor::Testing`, `Rigor::Testing.dump_type`,
-        # or `Rigor.dump_type`), it emits an `:info` diagnostic
-        # showing the inferred type of the argument expression.
-        # The diagnostic does NOT count toward `Result#error_count`
-        # so a fixture peppered with `dump_type` calls still
-        # passes `rigor check`.
+        # Slice 7 phase 19 — PHPStan-style `dump_type(value)`. When the engine recognises a call to
+        # `dump_type` (with any of the supported receiver shapes — implicit self after `include
+        # Rigor::Testing`, `Rigor::Testing.dump_type`, or `Rigor.dump_type`), it emits an `:info` diagnostic
+        # showing the inferred type of the argument expression. The diagnostic does NOT count toward
+        # `Result#error_count` so a fixture peppered with `dump_type` calls still passes `rigor check`.
         def dump_type_diagnostic(path, call_node, scope_index)
           return nil unless rigor_testing_call?(call_node, :dump_type)
           return nil if call_node.arguments.nil? || call_node.arguments.arguments.empty?
@@ -1257,14 +1250,11 @@ module Rigor
           )
         end
 
-        # Slice 7 phase 19 — PHPStan-style `assert_type("...", value)`.
-        # The first argument MUST be a string literal containing
-        # the expected `Type#describe(:short)` rendering. When
-        # the inferred type's short description does not equal
-        # the expected literal, an `:error`-severity diagnostic
-        # is emitted; matching calls produce no output. This
-        # lets a fixture document its expected types inline:
-        # subsequent `rigor check` runs flag any drift.
+        # Slice 7 phase 19 — PHPStan-style `assert_type("...", value)`. The first argument MUST be a
+        # string literal containing the expected `Type#describe(:short)` rendering. When the inferred
+        # type's short description does not equal the expected literal, an `:error`-severity diagnostic is
+        # emitted; matching calls produce no output. This lets a fixture document its expected types
+        # inline: subsequent `rigor check` runs flag any drift.
         def assert_type_diagnostic(path, call_node, scope_index)
           return nil unless rigor_testing_call?(call_node, :assert_type)
           return nil if call_node.arguments.nil? || call_node.arguments.arguments.size < 2
@@ -1289,21 +1279,16 @@ module Rigor
         #   `Testing.dump_type(x)`
         #   `Rigor.dump_type(x)`
         #   `Rigor::Testing.dump_type(x)`
-        # The receiver check is purely structural — we do not
-        # consult RBS — because the helpers are no-op stubs the
-        # user MAY shadow with their own definition; a name
-        # clash is the deliberate trade-off for ergonomic
-        # invocation.
+        # The receiver check is purely structural — we do not consult RBS — because the helpers are no-op
+        # stubs the user MAY shadow with their own definition; a name clash is the deliberate trade-off for
+        # ergonomic invocation.
         RIGOR_TESTING_RECEIVERS = ["Rigor", "Rigor::Testing", "Testing"].freeze
         private_constant :RIGOR_TESTING_RECEIVERS
 
-        # The dump/assert helpers' own implementation methods
-        # call back into `Testing.dump_type` / `assert_type` to
-        # share the no-op runtime stub. We do NOT want those
-        # internal calls to surface diagnostics — they are
-        # reflexive plumbing, not user assertions. This filter
-        # skips diagnostics when the call site's `self_type` is
-        # the `Rigor` or `Rigor::Testing` module itself.
+        # The dump/assert helpers' own implementation methods call back into `Testing.dump_type` /
+        # `assert_type` to share the no-op runtime stub. We do NOT want those internal calls to surface
+        # diagnostics — they are reflexive plumbing, not user assertions. This filter skips diagnostics
+        # when the call site's `self_type` is the `Rigor` or `Rigor::Testing` module itself.
         SELF_REFERENTIAL_SCOPES = ["Rigor", "Rigor::Testing"].freeze
         private_constant :SELF_REFERENTIAL_SCOPES
 
@@ -1348,20 +1333,17 @@ module Rigor
           )
         end
 
-        # Diagnoses calls that the analyzer can prove will always
-        # raise. Today the only triggering shape is integer
-        # division/modulo by a literal zero divisor:
+        # Diagnoses calls that the analyzer can prove will always raise. Today the only triggering shape is
+        # integer division/modulo by a literal zero divisor:
         #
         #   5 / 0          # => ZeroDivisionError
         #   x.modulo(0)    # => ZeroDivisionError when x: Integer
         #   xs.size % 0    # same — non_negative_int / Constant[0]
         #
-        # Float divmod by zero returns Infinity/NaN at runtime, so
-        # the rule restricts to Integer-rooted receivers (`Constant`,
-        # `IntegerRange`, `Nominal[Integer]`). The argument MUST be a
-        # `Constant<Integer>` whose value is exactly zero — a
-        # `Union[Constant[0], Constant[2]]` divisor "may" raise,
-        # which we surface separately (future slice).
+        # Float divmod by zero returns Infinity/NaN at runtime, so the rule restricts to Integer-rooted
+        # receivers (`Constant`, `IntegerRange`, `Nominal[Integer]`). The argument MUST be a
+        # `Constant<Integer>` whose value is exactly zero — a `Union[Constant[0], Constant[2]]` divisor
+        # "may" raise, which we surface separately (future slice).
         INTEGER_RAISING_OPERATORS = %i[/ % div modulo divmod].freeze
         private_constant :INTEGER_RAISING_OPERATORS
 
@@ -1414,41 +1396,27 @@ module Rigor
           )
         end
 
-        # v0.1.2 — `flow.unreachable-branch`. Fires when an
-        # `IfNode` / `UnlessNode` whose predicate is a literal
-        # `true` / `false` / `nil` (or a literal numeric /
-        # string / symbol whose Ruby truthiness is known
-        # at-a-glance) has an observable dead branch. The
-        # diagnostic points at the dead branch (not the
-        # predicate) so the squiggle lands on the code that
-        # never runs.
+        # v0.1.2 — `flow.unreachable-branch`. Fires when an `IfNode` / `UnlessNode` whose predicate is a
+        # literal `true` / `false` / `nil` (or a literal numeric / string / symbol whose Ruby truthiness is
+        # known at-a-glance) has an observable dead branch. The diagnostic points at the dead branch (not
+        # the predicate) so the squiggle lands on the code that never runs.
         #
         # Conservative envelope — by deliberate v0.1.2 design:
-        # - Only **literal-shaped** predicates fire. Inferred-
-        #   constant predicates (`x.method?` that happens to
-        #   fold to `Constant<bool>`) are intentionally
-        #   skipped — Rigor's loop / mutation / RBS-strictness
-        #   modelling is incomplete enough that an inferred
-        #   constant can be a false positive (e.g. accumulator
-        #   `arr << x` doesn't widen the carrier; defensive
-        #   `module.name.nil?` checks against anonymous-class
-        #   nil that the RBS `Module#name -> String` sig hides).
-        #   The literal-only envelope captures the clear
-        #   "user wrote `if false`" case without false alarms.
-        # - Empty dead branches (e.g. `if false; end` with no
-        #   body) are skipped — there is no useful location to
-        #   point at.
-        # - Postfix-`if` / `unless` modifiers with a literal
-        #   predicate ARE flagged (`expr if false` body never
-        #   runs, exactly like the block form).
-        # - Elsif chains (`subsequent` is itself an `IfNode`)
-        #   ARE flagged — the entire downstream chain is
-        #   unreachable when the outer predicate is a constant
-        #   literal.
+        # - Only **literal-shaped** predicates fire. Inferred-constant predicates (`x.method?` that happens
+        #   to fold to `Constant<bool>`) are intentionally skipped — Rigor's loop / mutation /
+        #   RBS-strictness modelling is incomplete enough that an inferred constant can be a false positive
+        #   (e.g. accumulator `arr << x` doesn't widen the carrier; defensive `module.name.nil?` checks
+        #   against anonymous-class nil that the RBS `Module#name -> String` sig hides). The literal-only
+        #   envelope captures the clear "user wrote `if false`" case without false alarms.
+        # - Empty dead branches (e.g. `if false; end` with no body) are skipped — there is no useful
+        #   location to point at.
+        # - Postfix-`if` / `unless` modifiers with a literal predicate ARE flagged (`expr if false` body
+        #   never runs, exactly like the block form).
+        # - Elsif chains (`subsequent` is itself an `IfNode`) ARE flagged — the entire downstream chain is
+        #   unreachable when the outer predicate is a constant literal.
         #
-        # Broadening to inferred-constant predicates is queued
-        # for a later v0.1.x release once the loop / mutation
-        # gaps named above are closed.
+        # Broadening to inferred-constant predicates is queued for a later v0.1.x release once the loop /
+        # mutation gaps named above are closed.
         def unreachable_branch_diagnostic(path, node, scope_index)
           scope = scope_index[node]
           return nil if scope.nil?
@@ -1462,12 +1430,9 @@ module Rigor
           build_unreachable_branch_diagnostic(path, dead_branch, polarity)
         end
 
-        # Returns `:truthy` / `:falsey` for a syntactically-
-        # literal predicate, or nil for anything else.
-        # `TrueNode`, `FalseNode`, `NilNode` are the
-        # unambiguous cases. Numeric / string / symbol literals
-        # are always truthy in Ruby (any non-`false` / non-`nil`
-        # value is truthy, including `0` and `""`).
+        # Returns `:truthy` / `:falsey` for a syntactically-literal predicate, or nil for anything else.
+        # `TrueNode`, `FalseNode`, `NilNode` are the unambiguous cases. Numeric / string / symbol literals
+        # are always truthy in Ruby (any non-`false` / non-`nil` value is truthy, including `0` and `""`).
         TRUTHY_LITERAL_NODES = [
           Prism::TrueNode, Prism::IntegerNode, Prism::FloatNode,
           Prism::StringNode, Prism::SymbolNode, Prism::RegularExpressionNode
@@ -1484,26 +1449,19 @@ module Rigor
           nil
         end
 
-        # v0.1.2 — `def.method-visibility-mismatch`. Fires when
-        # an explicit-receiver `Prism::CallNode` targets a
-        # user-class method whose `discovered_method_visibilities`
-        # entry is `:private`. The rule is intentionally narrow:
+        # v0.1.2 — `def.method-visibility-mismatch`. Fires when an explicit-receiver `Prism::CallNode`
+        # targets a user-class method whose `discovered_method_visibilities` entry is `:private`. The rule
+        # is intentionally narrow:
         #
-        # - Only `:private`. `:protected` access depends on
-        #   subclass tracking the engine does not yet model;
-        #   broadening waits for that surface.
-        # - Only user classes whose visibility table the indexer
-        #   built. RBS-known classes (stdlib, gems) are NOT
-        #   consulted yet — RBS visibility is reliable but
-        #   surfacing it would broaden the rule to a level the
-        #   per-rule false-positive triage hasn't covered.
-        # - Implicit-self calls are skipped (always allowed for
-        #   private). Calls whose receiver is `Prism::SelfNode`
-        #   are also skipped — Ruby 2.7+ permits `self.foo` for
-        #   private methods.
-        # - Receiver MUST resolve to a `Type::Nominal` so the
-        #   rule has a single class identity to query. Unions /
-        #   Dynamic / shape carriers are skipped.
+        # - Only `:private`. `:protected` access depends on subclass tracking the engine does not yet
+        #   model; broadening waits for that surface.
+        # - Only user classes whose visibility table the indexer built. RBS-known classes (stdlib, gems)
+        #   are NOT consulted yet — RBS visibility is reliable but surfacing it would broaden the rule to a
+        #   level the per-rule false-positive triage hasn't covered.
+        # - Implicit-self calls are skipped (always allowed for private). Calls whose receiver is
+        #   `Prism::SelfNode` are also skipped — Ruby 2.7+ permits `self.foo` for private methods.
+        # - Receiver MUST resolve to a `Type::Nominal` so the rule has a single class identity to query.
+        #   Unions / Dynamic / shape carriers are skipped.
         def visibility_mismatch_diagnostic(path, call_node, scope_index)
           return nil unless explicit_non_self_receiver?(call_node.receiver)
 
@@ -1538,20 +1496,15 @@ module Rigor
           )
         end
 
-        # Pulls a single concrete class name from an ivar write's
-        # rvalue type. Returns nil when the type is too unstable
-        # to compare (Union / Dynamic / IntegerRange / etc.).
-        # `concrete_class_name` already covers Nominal / Singleton
-        # / Constant / Tuple / HashShape; the wrapper exists so
-        # the ivar rule can extend the envelope (or apply
-        # different filters) without disturbing the call rules.
+        # Pulls a single concrete class name from an ivar write's rvalue type. Returns nil when the type is
+        # too unstable to compare (Union / Dynamic / IntegerRange / etc.). `concrete_class_name` already
+        # covers Nominal / Singleton / Constant / Tuple / HashShape; the wrapper exists so the ivar rule can
+        # extend the envelope (or apply different filters) without disturbing the call rules.
         #
-        # `TrueClass` / `FalseClass` are both normalised to
-        # `"bool"` here so the common boolean-flag idiom
-        # (`@loaded = false` in `initialize` then `@loaded = true`
-        # on first work) doesn't fire the mismatch rule. A real
-        # `bool → String` drift still trips because the second
-        # write's `ivar_class_for` returns `"String"`.
+        # `TrueClass` / `FalseClass` are both normalised to `"bool"` here so the common boolean-flag idiom
+        # (`@loaded = false` in `initialize` then `@loaded = true` on first work) doesn't fire the mismatch
+        # rule. A real `bool → String` drift still trips because the second write's `ivar_class_for` returns
+        # `"String"`.
         def ivar_class_for(type)
           name = concrete_class_name(type)
           return "bool" if %w[TrueClass FalseClass].include?(name)
@@ -1615,8 +1568,8 @@ module Rigor
           )
         end
 
-        # Returns the dead-branch node for a literal-predicate
-        # if/unless, or nil when no observable branch is dead.
+        # Returns the dead-branch node for a literal-predicate if/unless, or nil when no observable branch
+        # is dead.
         def unreachable_branch_for(node, truthy)
           dead =
             case node
@@ -2136,30 +2089,22 @@ module Rigor
           )
         end
 
-        # ADR-8 § "`def.return-type-mismatch` rule" — flags a
-        # `def m(...) ... end` whose body's last expression's
-        # type cannot satisfy the RBS-declared return type.
-        # Conservative envelope (v0.1.x first cut):
+        # ADR-8 § "`def.return-type-mismatch` rule" — flags a `def m(...) ... end` whose body's last
+        # expression's type cannot satisfy the RBS-declared return type. Conservative envelope (v0.1.x
+        # first cut):
         #
-        # - Skips methods without an RBS declaration. The rule
-        #   has no contract to compare against for source-only
-        #   methods.
-        # - Skips methods whose enclosing class isn't a
-        #   `Type::Singleton` self_type that we can name (top-
-        #   level / module-level methods land outside the rule).
-        # - Skips methods whose body's last expression is
-        #   absent or types as `Dynamic[top]` (the analyzer's
-        #   fail-soft fallback) — emitting on `Dynamic[top]`
-        #   would be noise.
-        # - Compares the inferred body type against the
-        #   declared return via `accepts?`:
+        # - Skips methods without an RBS declaration. The rule has no contract to compare against for
+        #   source-only methods.
+        # - Skips methods whose enclosing class isn't a `Type::Singleton` self_type that we can name
+        #   (top-level / module-level methods land outside the rule).
+        # - Skips methods whose body's last expression is absent or types as `Dynamic[top]` (the
+        #   analyzer's fail-soft fallback) — emitting on `Dynamic[top]` would be noise.
+        # - Compares the inferred body type against the declared return via `accepts?`:
         #     :yes   → silent
-        #     :no    → emit at :error (severity_profile may
-        #              re-stamp; default `balanced` keeps the
+        #     :no    → emit at :error (severity_profile may re-stamp; default `balanced` keeps the
         #              authored severity).
-        #     :maybe → emit at :warning. Promoted to :error
-        #              under `severity_profile: strict` per
-        #              ADR-8 § "Severity profile".
+        #     :maybe → emit at :warning. Promoted to :error under `severity_profile: strict` per ADR-8 §
+        #              "Severity profile".
         def return_type_mismatch_diagnostic(path, def_node, scope_index)
           return nil if def_node.body.nil?
 
@@ -2181,9 +2126,8 @@ module Rigor
           build_return_type_mismatch_diagnostic(path, def_node, declared, inferred, severity)
         end
 
-        # The body of a `def` is the last `Prism::StatementsNode`
-        # child (or a single expression for one-liner defs).
-        # Take the last statement; that's the implicit return.
+        # The body of a `def` is the last `Prism::StatementsNode` child (or a single expression for
+        # one-liner defs). Take the last statement; that's the implicit return.
         def body_last_expression(body)
           case body
           when Prism::StatementsNode then body.body.last
@@ -2192,28 +2136,18 @@ module Rigor
           end
         end
 
-        # Pulls the declared RBS return type for the def. The
-        # enclosing class name comes from the def's scope's
-        # `self_type`; the method name is on the def itself.
-        # `def self.foo` is a singleton method — dispatched
-        # through `Reflection.singleton_method_definition`;
-        # plain `def foo` uses `instance_method_definition`.
-        # Method overloads contribute their union of declared
-        # return types (any one of them satisfying the body
-        # silences the rule).
+        # Pulls the declared RBS return type for the def. The enclosing class name comes from the def's
+        # scope's `self_type`; the method name is on the def itself. `def self.foo` is a singleton method
+        # — dispatched through `Reflection.singleton_method_definition`; plain `def foo` uses
+        # `instance_method_definition`. Method overloads contribute their union of declared return types
+        # (any one of them satisfying the body silences the rule).
         #
-        # v0.1.2 — when the RBS sig carries a
-        # `%a{rigor:v1:return: <refinement>}` annotation
-        # (recognised by `RbsExtended.read_return_type_override`),
-        # the refinement carrier replaces the RBS-declared
-        # return for this rule. Annotation-driven refinements
-        # — `non-empty-string`, `positive-int`, `non-empty-
-        # array[Integer]`, etc. — are stricter than the
-        # underlying RBS class, so a body whose inferred type
-        # the bare RBS sig would accept may still fail the
-        # refinement (e.g. `def name; ""; end` returns
-        # `Constant[""]`, accepted by `String` but rejected by
-        # `non-empty-string`).
+        # v0.1.2 — when the RBS sig carries a `%a{rigor:v1:return: <refinement>}` annotation (recognised by
+        # `RbsExtended.read_return_type_override`), the refinement carrier replaces the RBS-declared return
+        # for this rule. Annotation-driven refinements — `non-empty-string`, `positive-int`,
+        # `non-empty-array[Integer]`, etc. — are stricter than the underlying RBS class, so a body whose
+        # inferred type the bare RBS sig would accept may still fail the refinement (e.g. `def name; "";
+        # end` returns `Constant[""]`, accepted by `String` but rejected by `non-empty-string`).
         def declared_return_type(def_node, scope_index)
           scope = scope_index[def_node]
           return nil if scope.nil?
@@ -2253,16 +2187,12 @@ module Rigor
           type.is_a?(Type::Dynamic) || (type.respond_to?(:top?) && type.top?.yes?)
         end
 
-        # Returns the severity to emit at, or nil to stay
-        # silent. The first-cut implementation only fires on
-        # proven (`:no`) mismatches; `:maybe` is treated as
-        # silent until the analyzer's narrowing becomes precise
-        # enough to avoid noise on common patterns (`{}` →
-        # declared `Hash[K, V]`, `Set.new` → declared
-        # `Set[Symbol]`, …). ADR-8's promise to emit on
-        # `:maybe` under `severity_profile: strict` is
-        # deferred to a follow-up that lands together with the
-        # narrowing precision improvements.
+        # Returns the severity to emit at, or nil to stay silent. The first-cut implementation only fires
+        # on proven (`:no`) mismatches; `:maybe` is treated as silent until the analyzer's narrowing
+        # becomes precise enough to avoid noise on common patterns (`{}` → declared `Hash[K, V]`,
+        # `Set.new` → declared `Set[Symbol]`, …). ADR-8's promise to emit on `:maybe` under
+        # `severity_profile: strict` is deferred to a follow-up that lands together with the narrowing
+        # precision improvements.
         def compare_return(declared, inferred)
           result = declared.accepts(inferred)
           return :error if result.no?
@@ -2282,22 +2212,17 @@ module Rigor
           )
         end
 
-        # ADR-35 slice 1 — `def.override-visibility-reduced`. The
-        # Liskov signature rule for visibility: an instance-method
-        # override MUST NOT reduce the visibility it inherits
-        # (public → protected/private, or protected → private),
-        # because a caller holding the supertype that invokes the
-        # method breaks when handed the subtype.
+        # ADR-35 slice 1 — `def.override-visibility-reduced`. The Liskov signature rule for visibility: an
+        # instance-method override MUST NOT reduce the visibility it inherits (public → protected/private,
+        # or protected → private), because a caller holding the supertype that invokes the method breaks
+        # when handed the subtype.
         #
-        # Slice-1 scope (ADR-35 WD1, visibility carve-out): both the
-        # override and the shadowed method must have a STATICALLY
-        # OBSERVABLE visibility. The override's visibility is read
-        # from the source-discovered table; the parent is resolved
-        # against the project-discovered ancestor chain (user-source
-        # classes / modules only — RBS-known ancestors, whose
-        # accessibility RBS models as public/private only, are a
-        # deferred follow-on). When either side is not observable
-        # the rule stays silent.
+        # Slice-1 scope (ADR-35 WD1, visibility carve-out): both the override and the shadowed method must
+        # have a STATICALLY OBSERVABLE visibility. The override's visibility is read from the
+        # source-discovered table; the parent is resolved against the project-discovered ancestor chain
+        # (user-source classes / modules only — RBS-known ancestors, whose accessibility RBS models as
+        # public/private only, are a deferred follow-on). When either side is not observable the rule stays
+        # silent.
         def override_visibility_diagnostic(path, def_node, scope_index)
           return nil unless def_node.receiver.nil? # instance methods only
 
@@ -2317,8 +2242,8 @@ module Rigor
           return nil if parent.nil?
 
           parent_class, parent_visibility = parent
-          # Unknown ancestor visibility (e.g. the defining file was not
-          # in the analyzed set) → cannot prove a reduction, stay silent.
+          # Unknown ancestor visibility (e.g. the defining file was not in the analyzed set) → cannot
+          # prove a reduction, stay silent.
           return nil if parent_visibility.nil?
           return nil unless visibility_reduced?(parent_visibility, override_visibility)
 
@@ -2327,9 +2252,8 @@ module Rigor
           )
         end
 
-        # Returns true when `override_visibility` is strictly more
-        # restrictive than `parent_visibility` under the
-        # public > protected > private ordering.
+        # Returns true when `override_visibility` is strictly more restrictive than `parent_visibility`
+        # under the public > protected > private ordering.
         def visibility_reduced?(parent_visibility, override_visibility)
           parent_rank = VISIBILITY_RANK[parent_visibility]
           override_rank = VISIBILITY_RANK[override_visibility]
@@ -2338,14 +2262,11 @@ module Rigor
           override_rank < parent_rank
         end
 
-        # Breadth-first walk of the project-discovered ancestor chain
-        # (included / prepended modules first, then the superclass —
-        # Ruby's MRO ordering), yielding each resolved ancestor class
-        # name nearest-first. Returns the first truthy value the block
-        # produces, or nil. Cross-file: the chain is followed through
-        # the scope tables the runner seeds from the project pre-pass
-        # (ADR-24 WD1). Cycle-guarded and node-count-capped. Mirrors
-        # `ExpressionTyper#resolve_user_def_through_ancestors`.
+        # Breadth-first walk of the project-discovered ancestor chain (included / prepended modules first,
+        # then the superclass — Ruby's MRO ordering), yielding each resolved ancestor class name
+        # nearest-first. Returns the first truthy value the block produces, or nil. Cross-file: the chain
+        # is followed through the scope tables the runner seeds from the project pre-pass (ADR-24 WD1).
+        # Cycle-guarded and node-count-capped. Mirrors `ExpressionTyper#resolve_user_def_through_ancestors`.
         def each_project_ancestor(scope, class_name)
           queue = ancestor_class_names(scope, class_name)
           seen = { class_name.to_s => true }
@@ -2366,25 +2287,22 @@ module Rigor
           nil
         end
 
-        # `[defining_class, visibility]` for the nearest user-source
-        # ancestor that defines an instance method `method_name`, or nil.
+        # `[defining_class, visibility]` for the nearest user-source ancestor that defines an instance
+        # method `method_name`, or nil.
         def nearest_ancestor_visibility(scope, class_name, method_name)
           each_project_ancestor(scope, class_name) do |ancestor|
-            # Stop at the nearest ancestor that DEFINES the method; its
-            # visibility may be nil (unknown) — the caller treats unknown
-            # as "cannot prove a reduction" and stays silent. Never
-            # fabricate `:public` from a missing entry (that produced a
-            # large false-positive cluster on cross-file Rails concerns).
+            # Stop at the nearest ancestor that DEFINES the method; its visibility may be nil (unknown) —
+            # the caller treats unknown as "cannot prove a reduction" and stays silent. Never fabricate
+            # `:public` from a missing entry (that produced a large false-positive cluster on cross-file
+            # Rails concerns).
             [ancestor, scope.discovered_method_visibility(ancestor, method_name)] if scope.user_def_for(ancestor,
                                                                                                         method_name)
           end
         end
 
-        # Direct ancestors of `class_name` as project-discovered,
-        # qualified names: included / prepended modules first, then
-        # the superclass. As-written names are resolved against the
-        # subclass's lexical nesting; names that resolve to no
-        # project class/module (RBS-known / third-party) are dropped.
+        # Direct ancestors of `class_name` as project-discovered, qualified names: included / prepended
+        # modules first, then the superclass. As-written names are resolved against the subclass's lexical
+        # nesting; names that resolve to no project class/module (RBS-known / third-party) are dropped.
         def ancestor_class_names(scope, class_name)
           names = []
           scope.includes_of(class_name).each do |raw|
@@ -2435,33 +2353,26 @@ module Rigor
           )
         end
 
-        # ADR-35 slice 2 — `def.override-return-widened`. The Liskov
-        # signature rule for returns (covariance): an override may
-        # *narrow* the return it inherits (return a more specific type)
-        # but MUST NOT *widen* it. A caller holding the supertype uses
-        # the result as the parent's return type; a wider override
-        # return breaks that use.
+        # ADR-35 slice 2 — `def.override-return-widened`. The Liskov signature rule for returns
+        # (covariance): an override may *narrow* the return it inherits (return a more specific type) but
+        # MUST NOT *widen* it. A caller holding the supertype uses the result as the parent's return type;
+        # a wider override return breaks that use.
         #
-        # WD1 gate (proper, type-direction): both the override and the
-        # shadowed ancestor method must carry an explicitly-authored
-        # RBS signature. The override side is gated by
-        # `defined_on?` (the RBS method is declared on the overriding
-        # class itself, not merely inherited); the parent side is the
-        # nearest project-discovered ancestor whose RBS declares the
-        # method. Inference-only either side → silent.
+        # WD1 gate (proper, type-direction): both the override and the shadowed ancestor method must carry
+        # an explicitly-authored RBS signature. The override side is gated by `defined_on?` (the RBS
+        # method is declared on the overriding class itself, not merely inherited); the parent side is the
+        # nearest project-discovered ancestor whose RBS declares the method. Inference-only either side →
+        # silent.
         #
-        # Fires only on a proven (`:no`) widening; generic / `untyped`
-        # / `self` parent returns degrade to `Dynamic[Top]` and accept
-        # everything, so they stay silent (FP-safe). `self`/`instance`
-        # are translated with `self_type: nil` on both sides, so a
-        # parent `-> self` and an override `-> self` never fire.
-        # The authored-override resolution shared by the Liskov override
-        # rules (`def.override-return-widened` and
-        # `def.override-param-narrowed`): the def must be an instance method
-        # whose own class declares it in RBS, and a project-discovered
-        # ancestor must also declare it. Returns
-        # `[scope, override_method, parent_class, parent_method]`, or nil
-        # (the rule does not fire) when any gate is unmet.
+        # Fires only on a proven (`:no`) widening; generic / `untyped` / `self` parent returns degrade to
+        # `Dynamic[Top]` and accept everything, so they stay silent (FP-safe). `self`/`instance` are
+        # translated with `self_type: nil` on both sides, so a parent `-> self` and an override `-> self`
+        # never fire.
+        # The authored-override resolution shared by the Liskov override rules
+        # (`def.override-return-widened` and `def.override-param-narrowed`): the def must be an instance
+        # method whose own class declares it in RBS, and a project-discovered ancestor must also declare
+        # it. Returns `[scope, override_method, parent_class, parent_method]`, or nil (the rule does not
+        # fire) when any gate is unmet.
         def resolve_authored_override(def_node, scope_index)
           return nil unless def_node.receiver.nil? # instance methods only (singleton: follow-on)
 
@@ -2502,9 +2413,8 @@ module Rigor
           )
         end
 
-        # `[defining_class, RBS::Definition::Method]` for the nearest
-        # project-discovered ancestor whose RBS declares `method_name`
-        # (not the starting class's own declaration), or nil.
+        # `[defining_class, RBS::Definition::Method]` for the nearest project-discovered ancestor whose
+        # RBS declares `method_name` (not the starting class's own declaration), or nil.
         def nearest_ancestor_method_def(scope, class_name, method_name)
           each_project_ancestor(scope, class_name) do |ancestor|
             method_def = safe_instance_method_definition(ancestor, method_name, scope)
@@ -2518,8 +2428,8 @@ module Rigor
           nil
         end
 
-        # True when `method_def`'s RBS declaration lives on `class_name`
-        # itself (rather than being inherited from an ancestor).
+        # True when `method_def`'s RBS declaration lives on `class_name` itself (rather than being
+        # inherited from an ancestor).
         def defined_on?(method_def, class_name)
           defined_in = method_def.defined_in
           return false if defined_in.nil?
@@ -2544,23 +2454,17 @@ module Rigor
           )
         end
 
-        # ADR-35 slice 3 — `def.override-param-narrowed`. The Liskov
-        # signature rule for parameters (contravariance): an override
-        # may *widen* a parameter (accept a supertype — accepting more
-        # is safe) but MUST NOT *narrow* it. A caller holding the
-        # supertype passes a parent-typed argument; a narrowed override
-        # parameter cannot accept it.
+        # ADR-35 slice 3 — `def.override-param-narrowed`. The Liskov signature rule for parameters
+        # (contravariance): an override may *widen* a parameter (accept a supertype — accepting more is
+        # safe) but MUST NOT *narrow* it. A caller holding the supertype passes a parent-typed argument; a
+        # narrowed override parameter cannot accept it.
         #
-        # Direction (ADR-35 WD3, corrected): fire on
-        # `override_param.accepts(parent_param) == :no` — the override's
-        # (narrowed) slot cannot accept the wider parent argument type.
-        # WD4: type comparison at matching POSITIONAL parameter indices
-        # only; arity / keyword-requiredness divergence is out of scope
-        # for v1. Same WD1 both-sides-authored gate as slice 2;
-        # `untyped` / unbound-generic / interface parent params degrade
-        # to `Dynamic[Top]` and are skipped (FP-safe). To avoid
-        # overload-arm ambiguity, both sides must have exactly one
-        # method type.
+        # Direction (ADR-35 WD3, corrected): fire on `override_param.accepts(parent_param) == :no` — the
+        # override's (narrowed) slot cannot accept the wider parent argument type. WD4: type comparison at
+        # matching POSITIONAL parameter indices only; arity / keyword-requiredness divergence is out of
+        # scope for v1. Same WD1 both-sides-authored gate as slice 2; `untyped` / unbound-generic /
+        # interface parent params degrade to `Dynamic[Top]` and are skipped (FP-safe). To avoid
+        # overload-arm ambiguity, both sides must have exactly one method type.
         def override_param_narrowed_diagnostic(path, def_node, scope_index)
           resolved = resolve_authored_override(def_node, scope_index)
           return nil if resolved.nil?
@@ -2578,13 +2482,11 @@ module Rigor
           )
         end
 
-        # Translated positional (required + optional) parameter types of
-        # a method's single method type, or nil when the method is
-        # overloaded (multiple method types — arm mapping is ambiguous)
-        # or the parameter list is not introspectable. Per-position
-        # translation failures yield `nil` at that slot (skipped by the
-        # comparison). `self`/`instance` translate with `self_type: nil`
-        # (→ `Dynamic[Top]`), matching the return-side handling.
+        # Translated positional (required + optional) parameter types of a method's single method type, or
+        # nil when the method is overloaded (multiple method types — arm mapping is ambiguous) or the
+        # parameter list is not introspectable. Per-position translation failures yield `nil` at that slot
+        # (skipped by the comparison). `self`/`instance` translate with `self_type: nil` (→
+        # `Dynamic[Top]`), matching the return-side handling.
         def positional_param_types(method_def)
           method_types = method_def.method_types
           return nil unless method_types.size == 1
@@ -2601,13 +2503,11 @@ module Rigor
           end
         end
 
-        # Index of the first positional parameter the override narrows
-        # relative to the parent, or nil. A position is a violation when
-        # the override's slot cannot accept the parent's argument type
-        # (`override_param.accepts(parent_param) == :no`). Positions
-        # where either side is missing/untranslatable, or the parent
-        # type degraded to `Dynamic[Top]` (untyped / unbound generic /
-        # interface), are skipped.
+        # Index of the first positional parameter the override narrows relative to the parent, or nil. A
+        # position is a violation when the override's slot cannot accept the parent's argument type
+        # (`override_param.accepts(parent_param) == :no`). Positions where either side is
+        # missing/untranslatable, or the parent type degraded to `Dynamic[Top]` (untyped / unbound generic
+        # / interface), are skipped.
         def first_narrowed_param_index(override_params, parent_params)
           count = [override_params.size, parent_params.size].min
           count.times do |i|

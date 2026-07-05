@@ -4,35 +4,25 @@ require "rbconfig"
 
 module Rigor
   module Analysis
-    # End-of-run telemetry for the `rigor check` CLI's `--stats`
-    # output. Captures four cheap-to-measure groups:
+    # End-of-run telemetry for the `rigor check` CLI's `--stats` output. Captures four cheap-to-measure groups:
     #
-    # - **Check targets** — the Ruby files the analyser actually
-    #   walks for diagnostics (`expand_paths` output).
-    # - **Type universe** — RBS class/module declarations the
-    #   analyser had visibility of, broken down by source:
-    #   `project_sig` (declarations whose source file lives under
-    #   the configured `signature_paths`) vs `bundled` (RBS core,
-    #   stdlib libraries, gem-bundled RBS — everything outside
-    #   the project's own `sig/` tree).
-    # - **Gem source-walk** — the ADR-10
-    #   `dependencies.source_inference` catalogue. Reports the
-    #   class count and the number of opt-in gems contributing.
+    # - **Check targets** — the Ruby files the analyser actually walks for diagnostics (`expand_paths` output).
+    # - **Type universe** — RBS class/module declarations the analyser had visibility of, broken down by
+    #   source: `project_sig` (declarations whose source file lives under the configured `signature_paths`)
+    #   vs `bundled` (RBS core, stdlib libraries, gem-bundled RBS — everything outside the project's own
+    #   `sig/` tree).
+    # - **Gem source-walk** — the ADR-10 `dependencies.source_inference` catalogue. Reports the class count
+    #   and the number of opt-in gems contributing.
     # - **Process** — wall-clock seconds + peak resident set size.
     #
-    # The split between "check targets" and "type universe" makes
-    # explicit that the analyser's diagnostic surface is bounded
-    # by the user-controlled `paths:` configuration; the (typically
-    # much larger) RBS class universe is symbol-discovery, not a
-    # diagnostic surface.
+    # The split between "check targets" and "type universe" makes explicit that the analyser's diagnostic
+    # surface is bounded by the user-controlled `paths:` configuration; the (typically much larger) RBS
+    # class universe is symbol-discovery, not a diagnostic surface.
     #
-    # Stats collection is intentionally cheap: wall + RSS are
-    # single syscalls, target file count is already in
-    # `expand_paths`, gem source-walk uses
-    # `Index#class_to_gem.size`, and the RBS class breakdown
-    # walks `class_decl_paths` (a frozen `Hash<String, String>`
-    # populated once per environment by the RBS loader; ~1000-2000
-    # entries × one `String#start_with?`).
+    # Stats collection is intentionally cheap: wall + RSS are single syscalls, target file count is already
+    # in `expand_paths`, gem source-walk uses `Index#class_to_gem.size`, and the RBS class breakdown walks
+    # `class_decl_paths` (a frozen `Hash<String, String>` populated once per environment by the RBS loader;
+    # ~1000-2000 entries × one `String#start_with?`).
     class RunStats
       attr_reader :wall_seconds, :peak_rss_bytes,
                   :target_files,
@@ -56,13 +46,10 @@ module Rigor
         freeze
       end
 
-      # Reports the process's resident set size in bytes. Source
-      # ordering: `/proc/self/status` (Linux — reads `VmHWM:`,
-      # the peak RSS the kernel records) first; otherwise
-      # `ps -o rss= -p <pid>` (macOS / BSD — reports CURRENT
-      # RSS, the closest universally-available proxy). Returns
-      # nil when neither route works so the formatter can render
-      # `unavailable` instead of misleading zero.
+      # Reports the process's resident set size in bytes. Source ordering: `/proc/self/status` (Linux — reads
+      # `VmHWM:`, the peak RSS the kernel records) first; otherwise `ps -o rss= -p <pid>` (macOS / BSD —
+      # reports CURRENT RSS, the closest universally-available proxy). Returns nil when neither route works
+      # so the formatter can render `unavailable` instead of misleading zero.
       def self.peak_rss_bytes
         from_proc = read_vmhwm_from_proc
         return from_proc unless from_proc.nil?
@@ -96,22 +83,17 @@ module Rigor
         nil
       end
 
-      # Source-attribution sentinel produced by `RBS::Environment`
-      # entries restored from a cached blob (Marshal-loaded
-      # `RBS::Environment` loses real file-path attribution; every
-      # buffer reports `"<cached>"`). When every entry carries
-      # this sentinel the partition_classes routine returns
-      # `[0, total]` AND `attribution_available: false`, which
-      # the format routine consumes to suppress the misleading
-      # breakdown row.
+      # Source-attribution sentinel produced by `RBS::Environment` entries restored from a cached blob
+      # (Marshal-loaded `RBS::Environment` loses real file-path attribution; every buffer reports
+      # `"<cached>"`). When every entry carries this sentinel the partition_classes routine returns `[0,
+      # total]` AND `attribution_available: false`, which the format routine consumes to suppress the
+      # misleading breakdown row.
       CACHED_SENTINEL = "<cached>"
 
-      # Computes `(project_sig, bundled)` counts from a frozen
-      # `Hash<class_name => source_path>` snapshot and the
-      # configured `signature_paths`. `project_sig` is the count
-      # of classes whose source path begins with any of the
-      # signature path prefixes (after expansion to absolute
-      # paths); `bundled` is the remainder.
+      # Computes `(project_sig, bundled)` counts from a frozen `Hash<class_name => source_path>` snapshot and
+      # the configured `signature_paths`. `project_sig` is the count of classes whose source path begins
+      # with any of the signature path prefixes (after expansion to absolute paths); `bundled` is the
+      # remainder.
       def self.partition_classes(class_decl_paths:, signature_paths:)
         prefixes = Array(signature_paths).map { |p| File.expand_path(p.to_s) }
         return [0, class_decl_paths.size] if prefixes.empty?
@@ -124,33 +106,28 @@ module Rigor
         [project, class_decl_paths.size - project]
       end
 
-      # True when at least one entry in `class_decl_paths` carries
-      # a real source file path (i.e. not the cached-sentinel
-      # marker). Used by callers to decide whether the
-      # `project_sig` / `bundled` split is meaningful.
+      # True when at least one entry in `class_decl_paths` carries a real source file path (i.e. not the
+      # cached-sentinel marker). Used by callers to decide whether the `project_sig` / `bundled` split is
+      # meaningful.
       def self.attribution_available?(class_decl_paths:)
         return false if class_decl_paths.empty?
 
         class_decl_paths.each_value.any? { |path| path != CACHED_SENTINEL }
       end
 
-      # Writes a human-facing rendering of the stats to `out`
-      # (typically `$stderr` from the CLI). Format is intentionally
-      # plain text — JSON consumers should parse the structured
-      # output of `rigor check --format=json` and consult `stats`
-      # there.
+      # Writes a human-facing rendering of the stats to `out` (typically `$stderr` from the CLI). Format is
+      # intentionally plain text — JSON consumers should parse the structured output of `rigor check
+      # --format=json` and consult `stats` there.
       def format(out, prefix: "")
         out.puts("#{prefix}Check targets")
         out.puts("#{prefix}  Ruby source files: #{@target_files}")
         out.puts("#{prefix}Type universe (symbol discovery; not analyzed for diagnostics)")
         out.puts("#{prefix}  RBS classes available: #{@rbs_classes_total}")
         if @rbs_classes_total.zero?
-          # A normal run always loads the bundled core+stdlib RBS (~1300+
-          # classes), so zero means the environment failed to build (most
-          # often a duplicate declaration in `signature_paths:`) and fell
-          # back to empty — type coverage is then near-useless but the run
-          # still "succeeds". Surface it loudly so a broken setup is not
-          # read as a clean analysis (the 20260620 field trial: redmine
+          # A normal run always loads the bundled core+stdlib RBS (~1300+ classes), so zero means the
+          # environment failed to build (most often a duplicate declaration in `signature_paths:`) and fell
+          # back to empty — type coverage is then near-useless but the run still "succeeds". Surface it
+          # loudly so a broken setup is not read as a clean analysis (the 20260620 field trial: redmine
           # would otherwise wire a 0-coverage check into CI).
           out.puts("#{prefix}  WARNING: the RBS environment is empty — it failed to build or loaded no")
           out.puts("#{prefix}           signatures, so type coverage is severely limited (most diagnostics")

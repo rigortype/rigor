@@ -19,69 +19,49 @@ require_relative "erb_template_detector"
 
 module Rigor
   module Analysis
-    # ADR-15 Phase 4a — per-worker analysis substrate.
-    # [ADR-15](../../../docs/adr/15-ractor-concurrency.md)
-    # § Phase 4 carves the Ractor-isolated worker pool into sub-phases;
-    # 4a/4b/4c all landed, but the Ractor pool (4b) is blocked by Ruby
-    # Bug #22075 (UAF) — the active pool backend is fork (ADR-15 Amendment).
-    # This class exists so the per-worker ownership boundary is testable
-    # independently of any pool coordinator.
+    # ADR-15 Phase 4a — per-worker analysis substrate. [ADR-15](../../../docs/adr/15-ractor-concurrency.md) §
+    # Phase 4 carves the Ractor-isolated worker pool into sub-phases; 4a/4b/4c all landed, but the Ractor
+    # pool (4b) is blocked by Ruby Bug #22075 (UAF) — the active pool backend is fork (ADR-15 Amendment).
+    # This class exists so the per-worker ownership boundary is testable independently of any pool
+    # coordinator.
     #
     # The constructor takes only `Ractor.shareable?` inputs:
     #
-    # - `configuration` — Phase 2a ({Rigor::Configuration} is
-    #   `Ractor.shareable?`).
-    # - `cache_store` — the fork backend passes the parent runner's
-    #   pre-built Store (`cache_store: @cache_store` in PoolCoordinator);
-    #   workers share it rather than building their own at `cache_root`.
-    # - `plugin_blueprints` — Phase 3a
-    #   (`Array<Plugin::Blueprint>` is `Ractor.shareable?`).
+    # - `configuration` — Phase 2a ({Rigor::Configuration} is `Ractor.shareable?`).
+    # - `cache_store` — the fork backend passes the parent runner's pre-built Store (`cache_store:
+    #   @cache_store` in PoolCoordinator); workers share it rather than building their own at `cache_root`.
+    # - `plugin_blueprints` — Phase 3a (`Array<Plugin::Blueprint>` is `Ractor.shareable?`).
     # - `explain` — Boolean.
-    # - `synthetic_method_index` / `project_patched_methods` /
-    #   `project_scope_seed` — optional (default `nil` / `{}`). NOT
-    #   `Ractor.shareable?` (the seed tables carry Prism def nodes),
-    #   so the Ractor pool path leaves them unset; the fork backend
-    #   (ADR-15 Amendment), which builds the session pre-fork on the
-    #   parent, threads the runner's project-scan results through so
-    #   per-file inference matches the sequential path exactly.
-    #   `project_scope_seed` is `Runner#project_scope_seed_tables` —
-    #   the cross-file discovery tables `seed_project_scope` applies
-    #   to every per-file scope on the sequential path; without it a
-    #   worker cannot resolve calls to methods defined in OTHER
-    #   project files and emits `call.undefined-method` false
-    #   positives the sequential path does not.
+    # - `synthetic_method_index` / `project_patched_methods` / `project_scope_seed` — optional (default `nil`
+    #   / `{}`). NOT `Ractor.shareable?` (the seed tables carry Prism def nodes), so the Ractor pool path
+    #   leaves them unset; the fork backend (ADR-15 Amendment), which builds the session pre-fork on the
+    #   parent, threads the runner's project-scan results through so per-file inference matches the
+    #   sequential path exactly. `project_scope_seed` is `Runner#project_scope_seed_tables` — the cross-file
+    #   discovery tables `seed_project_scope` applies to every per-file scope on the sequential path;
+    #   without it a worker cannot resolve calls to methods defined in OTHER project files and emits
+    #   `call.undefined-method` false positives the sequential path does not.
     #
     # Internally the session OWNS (and never shares):
     #
     # - {Rigor::Plugin::Services} bound to the per-worker Store.
-    # - {Rigor::Plugin::Registry} materialised from the blueprints
-    #   via {Rigor::Plugin::Registry.materialize}; each plugin
-    #   instance, with its mutable per-run accumulators
-    #   (`@reachable_absurd_nodes`, `*_index`, …) lives entirely
-    #   inside this session.
-    # - {Rigor::RbsExtended::Reporter} +
-    #   {Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter}
-    #   (Mutex-bearing; intentionally per-worker — the runner
-    #   merges entries post-pool via {#drain_reporters}).
-    # - {Rigor::Environment} threaded with the per-worker reporters
-    #   so reporter writes from inference / dispatcher accumulate
-    #   into the worker's own state.
+    # - {Rigor::Plugin::Registry} materialised from the blueprints via {Rigor::Plugin::Registry.materialize};
+    #   each plugin instance, with its mutable per-run accumulators (`@reachable_absurd_nodes`, `*_index`,
+    #   …) lives entirely inside this session.
+    # - {Rigor::RbsExtended::Reporter} + {Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter}
+    #   (Mutex-bearing; intentionally per-worker — the runner merges entries post-pool via
+    #   {#drain_reporters}).
+    # - {Rigor::Environment} threaded with the per-worker reporters so reporter writes from inference /
+    #   dispatcher accumulate into the worker's own state.
     #
-    # Plugin `prepare` runs ONCE at construction time so each
-    # worker is "warm" by the time `#analyze` is first called. Any
-    # raise from `prepare` is captured into {#prepare_diagnostics}
-    # so the runner can surface them alongside the per-file
-    # diagnostic stream.
+    # Plugin `prepare` runs ONCE at construction time so each worker is "warm" by the time `#analyze` is
+    # first called. Any raise from `prepare` is captured into {#prepare_diagnostics} so the runner can
+    # surface them alongside the per-file diagnostic stream.
     #
-    # Equivalence contract (proven by spec): given identical
-    # `(configuration, cache_store, plugin_blueprints)`, the
-    # multiset of diagnostics from
-    # `paths.flat_map { |p| session.analyze(p) }` plus
-    # {#prepare_diagnostics} plus reporter drains MUST equal the
-    # corresponding subset of {Rigor::Analysis::Runner#run}'s
-    # output (modulo severity-profile re-stamping, which the
-    # session leaves to the caller because it is a per-run
-    # aggregate concern).
+    # Equivalence contract (proven by spec): given identical `(configuration, cache_store,
+    # plugin_blueprints)`, the multiset of diagnostics from `paths.flat_map { |p| session.analyze(p) }` plus
+    # {#prepare_diagnostics} plus reporter drains MUST equal the corresponding subset of
+    # {Rigor::Analysis::Runner#run}'s output (modulo severity-profile re-stamping, which the session leaves
+    # to the caller because it is a per-run aggregate concern).
     class WorkerSession # rubocop:disable Metrics/ClassLength
       attr_reader :configuration, :cache_store, :services, :plugin_registry,
                   :dependency_source_index, :environment,
@@ -89,16 +69,12 @@ module Rigor
                   :prepare_diagnostics
 
       # @param configuration [Rigor::Configuration]
-      # @param cache_store [Rigor::Cache::Store, nil] persistent
-      #   cache the session exposes to plugin-side producers and
-      #   the RBS loader. Pass `nil` to disable caching.
-      # @param plugin_blueprints [Array<Rigor::Plugin::Blueprint>]
-      #   replay descriptors. Empty array yields a session with
-      #   no plugin contributions.
-      # @param explain [Boolean] when true, `#analyze` additionally
-      #   emits one `:info` `fallback` diagnostic per
-      #   directly-unrecognised node, mirroring
-      #   {Rigor::Analysis::Runner#explain_diagnostics}.
+      # @param cache_store [Rigor::Cache::Store, nil] persistent cache the session exposes to plugin-side
+      #   producers and the RBS loader. Pass `nil` to disable caching.
+      # @param plugin_blueprints [Array<Rigor::Plugin::Blueprint>] replay descriptors. Empty array yields a
+      #   session with no plugin contributions.
+      # @param explain [Boolean] when true, `#analyze` additionally emits one `:info` `fallback` diagnostic
+      #   per directly-unrecognised node, mirroring {Rigor::Analysis::Runner#explain_diagnostics}.
       def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength,Metrics/ParameterLists
                      plugin_blueprints: [], explain: false, buffer: nil,
                      synthetic_method_index: nil, project_patched_methods: nil,
@@ -110,18 +86,14 @@ module Rigor
         @synthetic_method_index = synthetic_method_index
         @project_patched_methods = project_patched_methods
         @project_scope_seed = project_scope_seed || {}
-        # ADR-32 WD4 — full project file list (frozen
-        # Array<String>) for env-build-time invocation of any
+        # ADR-32 WD4 — full project file list (frozen Array<String>) for env-build-time invocation of any
         # loaded plugin's `source_rbs_synthesizer` callable.
         @source_files = source_files
 
-        # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths`
-        # is process-global state. Writing it from a non-main
-        # Ractor would raise `Ractor::IsolationError`, so the
-        # session does NOT touch it — the CALLER (typically
-        # {Rigor::Analysis::Runner#run}) is responsible for
-        # setting it on the main Ractor before spawning the
-        # pool. The substrate stays Ractor-safe by construction.
+        # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths` is process-global
+        # state. Writing it from a non-main Ractor would raise `Ractor::IsolationError`, so the session does
+        # NOT touch it — the CALLER (typically {Rigor::Analysis::Runner#run}) is responsible for setting it
+        # on the main Ractor before spawning the pool. The substrate stays Ractor-safe by construction.
         @rbs_extended_reporter = RbsExtended::Reporter.new
         @boundary_cross_reporter = DependencySourceInference::BoundaryCrossReporter.new
         @source_rbs_synthesis_reporter = Plugin::SourceRbsSynthesisReporter.new
@@ -158,11 +130,9 @@ module Rigor
         @prepare_diagnostics = run_plugin_prepare.freeze
       end
 
-      # Equivalent of {Rigor::Analysis::Runner#analyze_file} +
-      # `plugin_emitted_diagnostics` + `explain_diagnostics`.
-      # Returns a flat `Array<Diagnostic>` for the file. Severity
-      # profile re-stamping is intentionally NOT applied — that
-      # is a per-run aggregate concern handled by the caller.
+      # Equivalent of {Rigor::Analysis::Runner#analyze_file} + `plugin_emitted_diagnostics` +
+      # `explain_diagnostics`. Returns a flat `Array<Diagnostic>` for the file. Severity profile re-stamping
+      # is intentionally NOT applied — that is a per-run aggregate concern handled by the caller.
       def analyze(path)
         parse_result = parse_source(path)
         unless parse_result.errors.empty?
@@ -192,11 +162,9 @@ module Rigor
         [analyzer_error(path, "internal analyzer error: #{e.class}: #{e.message}")]
       end
 
-      # Read-once snapshot of the per-worker reporters so the
-      # caller (or the eventual Phase 4b pool aggregator) can
-      # merge into a single coordinator-side reporter. Both
-      # reporters dedupe at write time, so a post-hoc concat +
-      # de-dup at the entry-key level is sound.
+      # Read-once snapshot of the per-worker reporters so the caller (or the eventual Phase 4b pool
+      # aggregator) can merge into a single coordinator-side reporter. Both reporters dedupe at write time,
+      # so a post-hoc concat + de-dup at the entry-key level is sound.
       def drain_reporters
         {
           rbs_extended: {
@@ -210,21 +178,18 @@ module Rigor
 
       private
 
-      # Mirrors {Runner#seed_project_scope}: applies the cross-file
-      # pre-pass discovery tables the constructor received (fork
-      # backend only — see the class comment) to a fresh per-file
-      # scope, so worker-side inference resolves project-internal
-      # cross-file calls exactly like the sequential path.
+      # Mirrors {Runner#seed_project_scope}: applies the cross-file pre-pass discovery tables the
+      # constructor received (fork backend only — see the class comment) to a fresh per-file scope, so
+      # worker-side inference resolves project-internal cross-file calls exactly like the sequential path.
       def seed_project_scope(scope)
         return scope if @project_scope_seed.empty?
 
         scope.with_discovery(scope.discovery.with(**@project_scope_seed))
       end
 
-      # See {Runner#parse_source}. Same contract: if `@buffer`
-      # binds `path` to a physical file, read the physical bytes
-      # but stamp the parse buffer's `filepath:` as the LOGICAL
-      # path so downstream diagnostics carry the logical path.
+      # See {Runner#parse_source}. Same contract: if `@buffer` binds `path` to a physical file, read the
+      # physical bytes but stamp the parse buffer's `filepath:` as the LOGICAL path so downstream
+      # diagnostics carry the logical path.
       def parse_source(path)
         physical = @buffer ? @buffer.resolve(path) : path
         return Prism.parse_file(physical, version: @configuration.target_ruby) if physical == path
@@ -232,9 +197,8 @@ module Rigor
         Prism.parse(File.read(physical), filepath: path, version: @configuration.target_ruby)
       end
 
-      # Mirrors {Runner#build_trust_policy}. Deriving trust inside
-      # the session keeps the substrate decoupled from the
-      # coordinator; configuration is already Ractor-shareable.
+      # Mirrors {Runner#build_trust_policy}. Deriving trust inside the session keeps the substrate decoupled
+      # from the coordinator; configuration is already Ractor-shareable.
       def build_trust_policy
         trusted_gems = @configuration.plugins.map { |entry| trusted_gem_name(entry) }.uniq
         roots = [Dir.pwd]
@@ -302,11 +266,10 @@ module Rigor
         end
       end
 
-      # ADR-52 WD4 + ADR-53 B4 — single engine-owned walk per file drives
-      # both the plugin node rules (bucketed per plugin in registry order,
-      # plugin-major emission) and the built-in node collectors
-      # (`node_collectors`, populated in place). Runs even with no node-rule
-      # plugins so the collectors still get driven (converged path).
+      # ADR-52 WD4 + ADR-53 B4 — single engine-owned walk per file drives both the plugin node rules
+      # (bucketed per plugin in registry order, plugin-major emission) and the built-in node collectors
+      # (`node_collectors`, populated in place). Runs even with no node-rule plugins so the collectors still
+      # get driven (converged path).
       def node_rule_results_by_plugin(path, root, scope, node_collectors, scope_index)
         walk = @plugin_registry.node_rule_walk
         driver = node_collectors && CheckRules.node_collector_driver(node_collectors)
@@ -325,9 +288,8 @@ module Rigor
 
       def collect_plugin_diagnostics(plugin, path, root, scope, node_result)
         raw = Array(plugin.diagnostics_for_file(path: path, scope: scope, root: root))
-        # A node-rule context/rule raise isolates the whole plugin's
-        # node-rule contribution, matching the old combined per-plugin
-        # rescue (which discarded `diagnostics_for_file` output too).
+        # A node-rule context/rule raise isolates the whole plugin's node-rule contribution, matching the
+        # old combined per-plugin rescue (which discarded `diagnostics_for_file` output too).
         raise node_result.error if node_result&.error
 
         raw += node_result.diagnostics if node_result

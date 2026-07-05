@@ -5,44 +5,29 @@ require "prism"
 module Rigor
   module Analysis
     module CheckRules
-      # Walks a parse tree and collects every `IfNode` / `UnlessNode`
-      # whose predicate folds to a `Type::Constant` AND is NOT
-      # disqualified by the rule's conservative envelope.
+      # Walks a parse tree and collects every `IfNode` / `UnlessNode` whose predicate folds to a
+      # `Type::Constant` AND is NOT disqualified by the rule's conservative envelope.
       #
-      # The companion rule (`flow.always-truthy-condition`) is
-      # the inferred-constant counterpart to
-      # `flow.unreachable-branch` (which only fires on syntactic
-      # literals). The literal-only rule was the v0.1.2 first-cut
-      # because Rigor's incomplete loop / mutation / RBS-strictness
-      # modelling produces inferred constants that look real but
-      # are pragmatically false-positives. This collector adds two
-      # surgical skips to bring the inferred-constant case in
-      # without resurfacing those false positives:
+      # The companion rule (`flow.always-truthy-condition`) is the inferred-constant counterpart to
+      # `flow.unreachable-branch` (which only fires on syntactic literals). The literal-only rule was the
+      # v0.1.2 first-cut because Rigor's incomplete loop / mutation / RBS-strictness modelling produces
+      # inferred constants that look real but are pragmatically false-positives. This collector adds two
+      # surgical skips to bring the inferred-constant case in without resurfacing those false positives:
       #
-      # - **Inside a loop / block**: predicates nested inside
-      #   `WhileNode` / `UntilNode` / `ForNode` / `BlockNode`
-      #   ancestors. Mutation tracking through loop bodies is
-      #   incomplete (`shift = 0; loop { shift += 7 }` keeps
-      #   `shift` at `Constant<7>` per the analyzer), so a
-      #   `Constant<bool>` predicate inside the loop body is
-      #   suspect.
-      # - **Defensive predicate calls**: `.nil?` / `.empty?` /
-      #   `.zero?` / `.any?` / `.none?` / `.all?`. These read
-      #   like the user explicitly checking for a runtime
-      #   condition that the type system already proves can't
-      #   happen — Rigor's strict-on-returns RBS often disagrees
-      #   with the user's defensive check (e.g. `Module#name`
-      #   returns `String` per RBS but anonymous classes really
-      #   do return `nil`). Skipping these forms keeps the rule
-      #   useful for genuine logic errors without faulting
-      #   defensive code.
+      # - **Inside a loop / block**: predicates nested inside `WhileNode` / `UntilNode` / `ForNode` /
+      #   `BlockNode` ancestors. Mutation tracking through loop bodies is incomplete (`shift = 0; loop {
+      #   shift += 7 }` keeps `shift` at `Constant<7>` per the analyzer), so a `Constant<bool>` predicate
+      #   inside the loop body is suspect.
+      # - **Defensive predicate calls**: `.nil?` / `.empty?` / `.zero?` / `.any?` / `.none?` / `.all?`. These
+      #   read like the user explicitly checking for a runtime condition that the type system already proves
+      #   can't happen — Rigor's strict-on-returns RBS often disagrees with the user's defensive check (e.g.
+      #   `Module#name` returns `String` per RBS but anonymous classes really do return `nil`). Skipping
+      #   these forms keeps the rule useful for genuine logic errors without faulting defensive code.
       #
-      # Also skipped (so the literal-only `unreachable-branch`
-      # rule doesn't double-fire alongside this one):
+      # Also skipped (so the literal-only `unreachable-branch` rule doesn't double-fire alongside this one):
       #
-      # - Predicates whose direct AST shape is a literal
-      #   (`TrueNode` / `FalseNode` / `NilNode` / numeric / string
-      #   / symbol / regexp).
+      # - Predicates whose direct AST shape is a literal (`TrueNode` / `FalseNode` / `NilNode` / numeric /
+      #   string / symbol / regexp).
       class AlwaysTruthyConditionCollector
         DEFENSIVE_PREDICATES = %i[nil? empty? zero? any? none? all? respond_to?].freeze
         LOOP_OR_BLOCK_NODE_CLASSES = [
@@ -56,34 +41,30 @@ module Rigor
 
         Result = Data.define(:node, :polarity)
 
-        # ADR-53 Track B — the node classes the shared {RuleWalk}
-        # dispatches to this collector, and the context gate under which
-        # the walk suppresses it (loop / block bodies — see the envelope
-        # above). The legacy walk's `!in_loop_or_block` guard is now the
-        # walk's `:loop_or_block` gate, applied before `#visit`.
+        # ADR-53 Track B — the node classes the shared {RuleWalk} dispatches to this collector, and the
+        # context gate under which the walk suppresses it (loop / block bodies — see the envelope above). The
+        # legacy walk's `!in_loop_or_block` guard is now the walk's `:loop_or_block` gate, applied before
+        # `#visit`.
         NODE_CLASSES = [Prism::IfNode, Prism::UnlessNode].freeze
         RULE_WALK_GATES = [:loop_or_block].freeze
 
-        # @return [Array<Result>] one entry per qualifying
-        #   predicate. Empty when the tree carries no firing
+        # @return [Array<Result>] one entry per qualifying predicate. Empty when the tree carries no firing
         #   predicates.
         def initialize(scope_index)
           @scope_index = scope_index
           @results = []
         end
 
-        # Legacy single-collector walk — kept as the oracle the
-        # ADR-53 Track B equivalence harness compares {RuleWalk}
-        # against; deleted when Track B completes.
+        # Legacy single-collector walk — kept as the oracle the ADR-53 Track B equivalence harness compares
+        # {RuleWalk} against; deleted when Track B completes.
         def collect(root)
           walk(root, in_loop_or_block: false)
           @results.freeze
         end
 
-        # {RuleWalk} entry point: the per-node logic of the legacy walk,
-        # invoked under the same traversal contract. The `context` is
-        # unused — the loop / block suppression this collector relied on
-        # is the walk's `:loop_or_block` gate now.
+        # {RuleWalk} entry point: the per-node logic of the legacy walk, invoked under the same traversal
+        # contract. The `context` is unused — the loop / block suppression this collector relied on is the
+        # walk's `:loop_or_block` gate now.
         def visit(node, _context = nil)
           collect_predicate(node)
         end

@@ -7,42 +7,33 @@ require_relative "../type_node"
 
 module Rigor
   module Builtins
-    # Canonical-name registry for the imported-built-in
-    # refinement catalogue. See `imported-built-in-types.md`
-    # in `docs/type-specification/` for the full catalogue
+    # Canonical-name registry for the imported-built-in refinement catalogue. See
+    # `imported-built-in-types.md` in `docs/type-specification/` for the full catalogue
     # rationale and the kebab-case naming rule.
     #
-    # Maps kebab-case names (`non-empty-string`, `positive-int`,
-    # `non-empty-array`, …) to the Rigor type each name denotes.
-    # The registry is the single integration point for:
+    # Maps kebab-case names (`non-empty-string`, `positive-int`, `non-empty-array`, …) to the
+    # Rigor type each name denotes. The registry is the single integration point for:
     #
     # - The `rigor:v1:return:` RBS::Extended directive
-    #   ([`Rigor::RbsExtended.read_return_type_override`](../rbs_extended.rb)),
-    #   which overrides a method's RBS-declared return type
-    #   with a refinement carrier.
-    # - Future `RBS::Extended` directives that accept a
-    #   refinement name in any type position (`param:`,
-    #   `assert: x is non-empty-string`, …).
-    # - The display side: `Type::Difference#describe` already
-    #   recognises the same shapes and prints the kebab-case
-    #   spelling without consulting the registry.
+    #   ([`Rigor::RbsExtended.read_return_type_override`](../rbs_extended.rb)), which overrides
+    #   a method's RBS-declared return type with a refinement carrier.
+    # - Future `RBS::Extended` directives that accept a refinement name in any type position
+    #   (`param:`, `assert: x is non-empty-string`, …).
+    # - The display side: `Type::Difference#describe` already recognises the same shapes and
+    #   prints the kebab-case spelling without consulting the registry.
     #
-    # Names not in the registry resolve to `nil`; callers
-    # decide whether to fall back to the RBS-declared type or
-    # raise a parse error.
+    # Names not in the registry resolve to `nil`; callers decide whether to fall back to the
+    # RBS-declared type or raise a parse error.
     #
     # The registry covers two surfaces:
     #
-    # - **No-argument refinement names** (`non-empty-string`,
-    #   `non-zero-int`, `lowercase-string`, …) live in `REGISTRY`
-    #   and resolve through `lookup(name)`.
+    # - **No-argument refinement names** (`non-empty-string`, `non-zero-int`,
+    #   `lowercase-string`, …) live in `REGISTRY` and resolve through `lookup(name)`.
     # - **Parameterised refinement payloads** (`non-empty-array[Integer]`,
-    #   `non-empty-hash[Symbol, Integer]`, `int<5, 10>`) are
-    #   accepted by `parse(payload)`. The full grammar is documented
-    #   on `Parser`. The two surfaces share `REGISTRY` for the
-    #   no-arg head names; the parameterised head names live in
-    #   `PARAMETERISED_TYPE_BUILDERS` (square-bracket form, type
-    #   args) and `PARAMETERISED_INT_BUILDERS` (angle-bracket form,
+    #   `non-empty-hash[Symbol, Integer]`, `int<5, 10>`) are accepted by `parse(payload)`. The
+    #   full grammar is documented on `Parser`. The two surfaces share `REGISTRY` for the
+    #   no-arg head names; the parameterised head names live in `PARAMETERISED_TYPE_BUILDERS`
+    #   (square-bracket form, type args) and `PARAMETERISED_INT_BUILDERS` (angle-bracket form,
     #   integer bounds).
     module ImportedRefinements
       REGISTRY = {
@@ -70,10 +61,9 @@ module Rigor
       }.freeze
       private_constant :REGISTRY
 
-      # `name[T]` / `name[K, V]` — type-arg parameterised
-      # refinements. Each builder takes an `Array<Rigor::Type>`
-      # and returns a `Rigor::Type` (or `nil` on arity / shape
-      # mismatch so the caller surfaces a parse failure).
+      # `name[T]` / `name[K, V]` — type-arg parameterised refinements. Each builder takes an
+      # `Array<Rigor::Type>` and returns a `Rigor::Type` (or `nil` on arity / shape mismatch
+      # so the caller surfaces a parse failure).
       PARAMETERISED_TYPE_BUILDERS = {
         "non-empty-array" => lambda { |args|
           return nil unless args.size == 1
@@ -85,12 +75,10 @@ module Rigor
 
           Type::Combinator.non_empty_hash(args[0], args[1])
         },
-        # v0.0.7 — `key_of[T]` and `value_of[T]` type functions.
-        # Each takes a single type argument and projects the
-        # known-keys (resp. known-values) union out of `T`. See
-        # `Type::Combinator.key_of` for the per-shape projection
-        # rules. Use `lower_snake` per the
-        # imported-built-in-types.md type-function naming rule.
+        # v0.0.7 — `key_of[T]` and `value_of[T]` type functions. Each takes a single type
+        # argument and projects the known-keys (resp. known-values) union out of `T`. See
+        # `Type::Combinator.key_of` for the per-shape projection rules. Use `lower_snake` per
+        # the imported-built-in-types.md type-function naming rule.
         "key_of" => lambda { |args|
           return nil unless args.size == 1
 
@@ -101,32 +89,27 @@ module Rigor
 
           Type::Combinator.value_of(args.first)
         },
-        # `int_mask[1, 2, 4]` — every integer representable by
-        # a bitwise OR over the listed flags. Each arg must be a
-        # `Constant<Integer>`; the parser wraps integer literals
-        # for this purpose. Builder declines on any non-integer
-        # arg.
+        # `int_mask[1, 2, 4]` — every integer representable by a bitwise OR over the listed
+        # flags. Each arg must be a `Constant<Integer>`; the parser wraps integer literals for
+        # this purpose. Builder declines on any non-integer arg.
         "int_mask" => lambda { |args|
           flags = args.map { |arg| arg.is_a?(Type::Constant) && arg.value.is_a?(Integer) ? arg.value : nil }
           return nil if flags.any?(&:nil?)
 
           Type::Combinator.int_mask(flags)
         },
-        # `int_mask_of[T]` — derives the closure from a finite
-        # integer literal type (single Constant<Integer> or a
-        # Union of them).
+        # `int_mask_of[T]` — derives the closure from a finite integer literal type (single
+        # Constant<Integer> or a Union of them).
         "int_mask_of" => lambda { |args|
           return nil unless args.size == 1
 
           Type::Combinator.int_mask_of(args.first)
         },
-        # ADR-13 § "Canonical type-function additions" — five
-        # shape-projection type functions that the
-        # `rigor-typescript-utility-types` plugin (and any other
-        # plugin that ships a shape-projection vocabulary) maps
-        # onto. Phase A handles `HashShape` carriers; non-shape
-        # inputs return the input unchanged (the lossy-projection
-        # diagnostic lands in slice 5).
+        # ADR-13 § "Canonical type-function additions" — five shape-projection type functions
+        # that the `rigor-typescript-utility-types` plugin (and any other plugin that ships a
+        # shape-projection vocabulary) maps onto. Phase A handles `HashShape` carriers;
+        # non-shape inputs return the input unchanged (the lossy-projection diagnostic lands
+        # in slice 5).
         "pick_of" => lambda { |args|
           return nil unless args.size == 2
 
@@ -155,12 +138,10 @@ module Rigor
       }.freeze
       private_constant :PARAMETERISED_TYPE_BUILDERS
 
-      # `name<min, max>` — integer-bound parameterised
-      # refinements. Each builder takes an `Array<Integer>` and
-      # returns a `Rigor::Type` (or `nil`). Bounds are signed
-      # integer literals; `min` MUST be ≤ `max` for the carrier
-      # to construct successfully (`Type::IntegerRange` enforces
-      # the invariant).
+      # `name<min, max>` — integer-bound parameterised refinements. Each builder takes an
+      # `Array<Integer>` and returns a `Rigor::Type` (or `nil`). Bounds are signed integer
+      # literals; `min` MUST be ≤ `max` for the carrier to construct successfully
+      # (`Type::IntegerRange` enforces the invariant).
       PARAMETERISED_INT_BUILDERS = {
         "int" => lambda { |bounds|
           return nil unless bounds.size == 2
@@ -173,39 +154,32 @@ module Rigor
       module_function
 
       # @param name [String] kebab-case refinement name.
-      # @return [Rigor::Type, nil] the matching refinement
-      #   carrier, or `nil` if the name is not registered.
+      # @return [Rigor::Type, nil] the matching refinement carrier, or `nil` if the name is
+      #   not registered.
       def lookup(name)
         builder = REGISTRY[name.to_s]
         builder&.call
       end
 
-      # @param payload [String] the trailing payload of a
-      #   `rigor:v1:return:` (or sibling) directive. Accepts
-      #   the bare-name forms `lookup` already handles plus the
+      # @param payload [String] the trailing payload of a `rigor:v1:return:` (or sibling)
+      #   directive. Accepts the bare-name forms `lookup` already handles plus the
       #   parameterised forms documented on {Parser}.
       # @param name_scope [Rigor::TypeNode::NameScope, nil]
-      #   ADR-13 slice 3 — when provided, the parser consults the
-      #   scope's `#resolver` chain after the built-in registry
-      #   and built-in parametric forms but before the RBS Nominal
-      #   fallback. `nil` (default) preserves the slice-1 / slice-2
-      #   behaviour of consulting only built-ins + RBS.
+      #   ADR-13 slice 3 — when provided, the parser consults the scope's `#resolver` chain
+      #   after the built-in registry and built-in parametric forms but before the RBS
+      #   Nominal fallback. `nil` (default) preserves the slice-1 / slice-2 behaviour of
+      #   consulting only built-ins + RBS.
       # @param reporter [Rigor::RbsExtended::Reporter, nil]
-      #   ADR-13 slice 3b — collector that the Resolver feeds
-      #   `dynamic.shape.lossy-projection` events into when a
-      #   shape-projection head (`pick_of`, `omit_of`,
-      #   `partial_of`, `required_of`, `readonly_of`) is applied
-      #   to a carrier that does not preserve shape information.
-      #   `nil` (default) suppresses event accumulation; legacy
-      #   call sites that have no reporter to thread keep the
-      #   pre-slice-3b silent fall-through.
-      # @param source_location [RBS::Location, nil] location
-      #   attribution for the events the Resolver records. Carries
-      #   the annotation's filename / line / column so the runner
+      #   ADR-13 slice 3b — collector that the Resolver feeds `dynamic.shape.lossy-projection`
+      #   events into when a shape-projection head (`pick_of`, `omit_of`, `partial_of`,
+      #   `required_of`, `readonly_of`) is applied to a carrier that does not preserve shape
+      #   information. `nil` (default) suppresses event accumulation; legacy call sites that
+      #   have no reporter to thread keep the pre-slice-3b silent fall-through.
+      # @param source_location [RBS::Location, nil] location attribution for the events the
+      #   Resolver records. Carries the annotation's filename / line / column so the runner
       #   can stamp diagnostics with the user-visible source site.
-      # @return [Rigor::Type, nil] the resolved refinement
-      #   carrier, or `nil` when the payload is unparseable or
-      #   names a refinement / class no registered source resolved.
+      # @return [Rigor::Type, nil] the resolved refinement carrier, or `nil` when the payload
+      #   is unparseable or names a refinement / class no registered source resolved.
       def parse(payload, name_scope: nil, reporter: nil, source_location: nil)
         Parser.new(
           payload.to_s,
@@ -251,16 +225,14 @@ module Rigor
       #
       # Whitespace between tokens is ignored. The parser fails
       # soft (returns `nil` from `parse`) on any deviation so the
-      # `RBS::Extended` directive site can fall back to the
-      # RBS-declared type rather than crash on a typo.
+      # `RBS::Extended` directive site can fall back to the RBS-declared type rather than
+      # crash on a typo.
       #
-      # ADR-13 slice 3 split the original "scan + resolve" loop
-      # into two passes: the parser emits a {Rigor::TypeNode} AST,
-      # and a sibling {Resolver} walks the AST to produce a
-      # {Rigor::Type} carrier — consulting the built-in registry,
-      # the plugin {Rigor::TypeNode::ResolverChain}, and finally
-      # the RBS Nominal fallback in that order. Plugin resolvers
-      # never see partial parses.
+      # ADR-13 slice 3 split the original "scan + resolve" loop into two passes: the parser
+      # emits a {Rigor::TypeNode} AST, and a sibling {Resolver} walks the AST to produce a
+      # {Rigor::Type} carrier — consulting the built-in registry, the plugin
+      # {Rigor::TypeNode::ResolverChain}, and finally the RBS Nominal fallback in that order.
+      # Plugin resolvers never see partial parses.
       class Parser
         def initialize(input, name_scope: nil, reporter: nil, source_location: nil)
           @scanner = StringScanner.new(input.strip)
@@ -275,11 +247,10 @@ module Rigor
           ast = parse_type_ast
           return nil if ast.nil?
 
-          # v0.0.7 — trailing `[K]` indexed-access projects into
-          # the parsed type. Multiple `[K]` segments chain
-          # (`Tuple[A, B, C][1][0]`). Each segment wraps the
-          # previous AST in an {IndexedAccess} node so the chain
-          # composes cleanly through the resolver pass.
+          # v0.0.7 — trailing `[K]` indexed-access projects into the parsed type. Multiple
+          # `[K]` segments chain (`Tuple[A, B, C][1][0]`). Each segment wraps the previous AST
+          # in an {IndexedAccess} node so the chain composes cleanly through the resolver
+          # pass.
           ast = parse_indexed_access_chain_ast(ast)
           return nil if ast.nil?
           return nil unless @scanner.eos?
@@ -289,21 +260,17 @@ module Rigor
 
         private
 
-        # Refinement names use kebab-case (`non-empty-string`),
-        # type-function names use lower_snake (`key_of`,
-        # `value_of`, `int_mask`). The regex accepts both shapes;
-        # the registry lookup decides which family the name
-        # belongs to.
+        # Refinement names use kebab-case (`non-empty-string`), type-function names use
+        # lower_snake (`key_of`, `value_of`, `int_mask`). The regex accepts both shapes; the
+        # registry lookup decides which family the name belongs to.
         SIMPLE_NAME = /[a-z][a-z0-9_-]*/
         CLASS_NAME = /[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*/
         SIGNED_INT = /-?\d+/
-        # ADR-13 follow-up — literal-key tokens at type-arg
-        # position. Symbol literals match Ruby's bare-symbol
-        # identifier shape (`:name`); string literals are
-        # double-quoted without escape sequences (the most
-        # common TS-style key-union shape). The `?<value>`
-        # capture lets the parser pull the inner text without
-        # post-stripping the delimiter.
+        # ADR-13 follow-up — literal-key tokens at type-arg position. Symbol literals match
+        # Ruby's bare-symbol identifier shape (`:name`); string literals are double-quoted
+        # without escape sequences (the most common TS-style key-union shape). The
+        # `?<value>` capture lets the parser pull the inner text without post-stripping the
+        # delimiter.
         SYMBOL_LITERAL = /:(?<value>[a-zA-Z_][a-zA-Z0-9_]*[?!=]?)/
         STRING_LITERAL = /"(?<value>[^"\\]*)"/
         private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT, :SYMBOL_LITERAL, :STRING_LITERAL
@@ -431,10 +398,9 @@ module Rigor
           end
         end
 
-        # Class-name-headed type argument with optional `[T_1,
-        # …]` type-args tail. Used so `key_of[Hash[Symbol,
-        # Integer]]` parses as the projection of a parameterised
-        # nominal carrier rather than rejecting the inner brackets.
+        # Class-name-headed type argument with optional `[T_1, …]` type-args tail. Used so
+        # `key_of[Hash[Symbol, Integer]]` parses as the projection of a parameterised nominal
+        # carrier rather than rejecting the inner brackets.
         def parse_class_arg_tail_ast(class_name)
           return TypeNode::Identifier.new(name: class_name) unless @scanner.peek(1) == "["
 
@@ -460,8 +426,8 @@ module Rigor
       end
       private_constant :Parser
 
-      # AST → {Rigor::Type} resolver. ADR-13's resolution order
-      # for every named-type production:
+      # AST → {Rigor::Type} resolver. ADR-13's resolution order for every named-type
+      # production:
       #
       #   1. Built-in `ImportedRefinements.lookup` (no-arg
       #      refinements like `non-empty-string`).
@@ -473,16 +439,14 @@ module Rigor
       #   4. RBS Nominal fallback for class-shaped names
       #      (PascalCase head, with or without type args).
       #
-      # Returns `nil` when every step declined — preserves the
-      # parser's fail-soft contract so callers fall back to the
-      # RBS-declared type instead of raising.
+      # Returns `nil` when every step declined — preserves the parser's fail-soft contract so
+      # callers fall back to the RBS-declared type instead of raising.
       class Resolver
-        # ADR-13 slice 3b — heads that consume a shape-bearing
-        # first argument. When the first arg is not a `HashShape`
-        # / `Tuple` (per {Rigor::Type::Combinator.shape_projection_lossy?}),
-        # the projection degrades to "input unchanged" and the
-        # Resolver records a `dynamic.shape.lossy-projection`
-        # event on the reporter (if any).
+        # ADR-13 slice 3b — heads that consume a shape-bearing first argument. When the first
+        # arg is not a `HashShape` / `Tuple` (per
+        # {Rigor::Type::Combinator.shape_projection_lossy?}), the projection degrades to
+        # "input unchanged" and the Resolver records a `dynamic.shape.lossy-projection` event
+        # on the reporter (if any).
         SHAPE_PROJECTION_HEADS = %w[pick_of omit_of partial_of required_of readonly_of].freeze
         private_constant :SHAPE_PROJECTION_HEADS
 
@@ -494,10 +458,9 @@ module Rigor
           @source_location = source_location
         end
 
-        # ADR-13 follow-up — every leaf-literal AST node
-        # (`IntegerLiteral` / `SymbolLiteral` / `StringLiteral`)
-        # carries a Ruby value that lifts directly to a
-        # `Constant<value>` carrier through the same helper.
+        # ADR-13 follow-up — every leaf-literal AST node (`IntegerLiteral` / `SymbolLiteral` /
+        # `StringLiteral`) carries a Ruby value that lifts directly to a `Constant<value>`
+        # carrier through the same helper.
         LITERAL_AST_NODES = [
           TypeNode::IntegerLiteral, TypeNode::SymbolLiteral, TypeNode::StringLiteral
         ].freeze
@@ -513,13 +476,11 @@ module Rigor
           end
         end
 
-        # ADR-13 follow-up — resolves each node recursively and
-        # folds into a `Type::Combinator.union(...)`. When any
-        # node resolves to `nil` (unknown name, plugin decline,
-        # RBS Nominal fallback miss), the whole union collapses
-        # to `nil` so the caller falls back to the underlying
-        # RBS-declared type rather than a half-resolved Union
-        # carrier.
+        # ADR-13 follow-up — resolves each node recursively and folds into a
+        # `Type::Combinator.union(...)`. When any node resolves to `nil` (unknown name,
+        # plugin decline, RBS Nominal fallback miss), the whole union collapses to `nil` so
+        # the caller falls back to the underlying RBS-declared type rather than a
+        # half-resolved Union carrier.
         def resolve_union(node)
           resolved = node.nodes.map { |child| resolve_ast(child) }
           return nil if resolved.any?(&:nil?)
@@ -527,14 +488,12 @@ module Rigor
           Type::Combinator.union(*resolved)
         end
 
-        # Public {Rigor::Plugin::TypeNodeResolver}-shaped interface
-        # so a {Rigor::TypeNode::NameScope} can point its
-        # `#resolver` at the Resolver itself. Plugin resolvers
-        # call `scope.resolver.resolve(arg, scope)` to recursively
-        # resolve a nested argument through the FULL pass
-        # (built-in registry → plugin chain → RBS fallback), not
-        # just back through the chain. The `_scope` argument is
-        # ignored — the Resolver owns the scope state internally.
+        # Public {Rigor::Plugin::TypeNodeResolver}-shaped interface so a
+        # {Rigor::TypeNode::NameScope} can point its `#resolver` at the Resolver itself.
+        # Plugin resolvers call `scope.resolver.resolve(arg, scope)` to recursively resolve a
+        # nested argument through the FULL pass (built-in registry → plugin chain → RBS
+        # fallback), not just back through the chain. The `_scope` argument is ignored — the
+        # Resolver owns the scope state internally.
         def resolve(node, _scope)
           resolve_ast(node)
         end
@@ -599,13 +558,11 @@ module Rigor
           result
         end
 
-        # ADR-13 slice 3b — record one `dynamic.shape.lossy-projection`
-        # event per (head, source_location) pair when the projection
-        # actually degraded. The builders return the source carrier
-        # unchanged on non-HashShape / non-Tuple receivers (see
-        # `Type::Combinator.pick_of` / `omit_of` and the
-        # HashShape-only `partial_of` / `required_of` /
-        # `readonly_of`), so detection is "first arg was lossy".
+        # ADR-13 slice 3b — record one `dynamic.shape.lossy-projection` event per (head,
+        # source_location) pair when the projection actually degraded. The builders return
+        # the source carrier unchanged on non-HashShape / non-Tuple receivers (see
+        # `Type::Combinator.pick_of` / `omit_of` and the HashShape-only `partial_of` /
+        # `required_of` / `readonly_of`), so detection is "first arg was lossy".
         def record_lossy_projection_if_applicable(node, args, result)
           return if @reporter.nil?
           return if result.nil?

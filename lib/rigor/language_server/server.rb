@@ -5,14 +5,11 @@ require_relative "buffer_table"
 
 module Rigor
   module LanguageServer
-    # LSP server lifecycle state machine + JSON-RPC method dispatcher.
-    # State machine: `:uninitialized` → `:initialized` → `:shutdown`
-    # → `:exited`. {#dispatch} routes (method, params) to the matching
-    # handler and returns the response payload (`nil` for notifications);
-    # out-of-state requests return `InvalidRequest` (-32002) /
-    # `MethodNotFound` (-32601). Full v1 capability surface (document
-    # sync, publishDiagnostics, hover, completion, sig-help, folding,
-    # selection, and watched-file invalidation) is implemented.
+    # LSP server lifecycle state machine + JSON-RPC method dispatcher. State machine: `:uninitialized` →
+    # `:initialized` → `:shutdown` → `:exited`. {#dispatch} routes (method, params) to the matching handler and
+    # returns the response payload (`nil` for notifications); out-of-state requests return `InvalidRequest`
+    # (-32002) / `MethodNotFound` (-32601). Full v1 capability surface (document sync, publishDiagnostics,
+    # hover, completion, sig-help, folding, selection, and watched-file invalidation) is implemented.
     class Server # rubocop:disable Metrics/ClassLength
       # JSON-RPC error codes per LSP spec § "Response Message".
       ERROR_PARSE_ERROR      = -32_700
@@ -24,16 +21,13 @@ module Rigor
       ERROR_SERVER_NOT_INITIALIZED = -32_002
       ERROR_INVALID_REQUEST_AFTER_SHUTDOWN = -32_600
 
-      # `TextDocumentSyncKind::Full = 1`. Slice 10 (deferred)
-      # promotes to `Incremental = 2`.
+      # `TextDocumentSyncKind::Full = 1`. Slice 10 (deferred) promotes to `Incremental = 2`.
       TEXT_DOCUMENT_SYNC_FULL = 1
 
-      # Methods callable BEFORE `initialize`. Per LSP spec § 3 only
-      # `initialize` and `exit` are allowed pre-initialization; every
-      # other request returns `ServerNotInitialized`. We also accept
-      # `shutdown` so a sequence like `initialize → shutdown → exit`
-      # (the conformance harness) round-trips even when the client
-      # skips real work.
+      # Methods callable BEFORE `initialize`. Per LSP spec § 3 only `initialize` and `exit` are allowed
+      # pre-initialization; every other request returns `ServerNotInitialized`. We also accept `shutdown` so a
+      # sequence like `initialize → shutdown → exit` (the conformance harness) round-trips even when the
+      # client skips real work.
       PRE_INITIALIZE_METHODS = %w[initialize shutdown exit].freeze
 
       attr_reader :state, :exit_code, :buffer_table, :publisher,
@@ -45,13 +39,11 @@ module Rigor
       #   resolves `textDocument/completion`. Nil → `MethodNotFound`.
       # @param signature_help_provider [Rigor::LanguageServer::SignatureHelpProvider, nil]
       #   resolves `textDocument/signatureHelp`. Nil → `MethodNotFound`.
-      # @param project_context [Rigor::LanguageServer::ProjectContext, nil]
-      #   the per-session cache of `Environment` + `Cache::Store`
-      #   the providers read on every request. When present,
-      #   `workspace/didChangeWatchedFiles` and
-      #   `workspace/didChangeConfiguration` invalidate the cache;
-      #   nil means "no project context": each request rebuilds env
-      #   from scratch (mainly for specs and backward compatibility).
+      # @param project_context [Rigor::LanguageServer::ProjectContext, nil] the per-session cache of
+      #   `Environment` + `Cache::Store` the providers read on every request. When present,
+      #   `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration` invalidate the cache; nil
+      #   means "no project context": each request rebuilds env from scratch (mainly for specs and backward
+      #   compatibility).
       def initialize(buffer_table: BufferTable.new, publisher: nil, # rubocop:disable Metrics/ParameterLists
                      hover_provider: nil, document_symbol_provider: nil,
                      completion_provider: nil, signature_help_provider: nil,
@@ -143,10 +135,9 @@ module Rigor
         end
       end
 
-      # Per LSP spec § "Server lifecycle / initialize": the server
-      # responds with its capabilities. Each later slice extends
-      # `advertised_capabilities` with the handler it wires;
-      # clients asking for unadvertised methods get `MethodNotFound`.
+      # Per LSP spec § "Server lifecycle / initialize": the server responds with its capabilities. Each later
+      # slice extends `advertised_capabilities` with the handler it wires; clients asking for unadvertised
+      # methods get `MethodNotFound`.
       def handle_initialize(_params)
         @state = :initialized
         {
@@ -169,20 +160,17 @@ module Rigor
         caps[:documentSymbolProvider] = true if @document_symbol_provider
         if @completion_provider
           caps[:completionProvider] = {
-            # `.` for method completion; `:` for constant-path
-            # completion (slice 6). The server detects which form
-            # by looking one character back when `:` triggers.
+            # `.` for method completion; `:` for constant-path completion (slice 6). The server detects which
+            # form by looking one character back when `:` triggers.
             triggerCharacters: [".", ":"],
-            # v1 eager — full payload returned on first request.
-            # Resolve becomes relevant if large enumerations
-            # (Object descendants) become noticeable.
+            # v1 eager — full payload returned on first request. Resolve becomes relevant if large
+            # enumerations (Object descendants) become noticeable.
             resolveProvider: false
           }
         end
         if @signature_help_provider
           caps[:signatureHelpProvider] = {
-            # `(` opens the argument list; `,` advances to the
-            # next argument. Editors retrigger on both.
+            # `(` opens the argument list; `,` advances to the next argument. Editors retrigger on both.
             triggerCharacters: ["(", ","]
           }
         end
@@ -191,17 +179,15 @@ module Rigor
         caps
       end
 
-      # `initialized` is a notification — no response body. Slice 7
-      # will hook this to register `workspace/didChangeWatchedFiles`
-      # if the client advertised the capability.
+      # `initialized` is a notification — no response body. Slice 7 will hook this to register
+      # `workspace/didChangeWatchedFiles` if the client advertised the capability.
       def handle_initialized
         nil
       end
 
       def handle_shutdown
         @state = :shutdown
-        # Drop any in-flight debounced publishes so they don't
-        # fire after the client has stopped listening.
+        # Drop any in-flight debounced publishes so they don't fire after the client has stopped listening.
         @publisher&.cancel_pending
         nil
       end
@@ -212,10 +198,9 @@ module Rigor
         nil
       end
 
-      # textDocument/didOpen notification. Per LSP spec § the
-      # `textDocument` payload carries `uri`, `languageId`,
-      # `version`, and the full initial `text`. Triggers a
-      # `publishDiagnostics` push when a publisher is wired.
+      # textDocument/didOpen notification. Per LSP spec § the `textDocument` payload carries `uri`,
+      # `languageId`, `version`, and the full initial `text`. Triggers a `publishDiagnostics` push when a
+      # publisher is wired.
       def handle_did_open(params)
         doc = params.fetch(:textDocument)
         uri = doc.fetch(:uri)
@@ -228,12 +213,10 @@ module Rigor
         nil
       end
 
-      # textDocument/didChange under FULL sync. Each `contentChanges`
-      # entry carries only `{ text: }`; the LAST entry is the new
-      # full document text. Per LSP spec § "FULL sync" the array
-      # MUST be exactly one entry in practice — we still take
-      # `.last` defensively for clients that pad. Triggers
-      # `publishDiagnostics` afterwards.
+      # textDocument/didChange under FULL sync. Each `contentChanges` entry carries only `{ text: }`; the LAST
+      # entry is the new full document text. Per LSP spec § "FULL sync" the array MUST be exactly one entry in
+      # practice — we still take `.last` defensively for clients that pad. Triggers `publishDiagnostics`
+      # afterwards.
       def handle_did_change(params)
         doc = params.fetch(:textDocument)
         changes = params.fetch(:contentChanges)
@@ -249,13 +232,10 @@ module Rigor
         nil
       end
 
-      # textDocument/hover REQUEST. Slice 5 returns either a
-      # `Hover` payload (markdown contents wrapping type +
-      # erased-RBS info) or nil when no expression is at the
-      # queried position. Nil maps to `result: null` per LSP
-      # spec; clients suppress the popup. Returns
-      # `MethodNotFound` when no hover_provider is wired (slice
-      # 1-4 behaviour).
+      # textDocument/hover REQUEST. Slice 5 returns either a `Hover` payload (markdown contents wrapping type
+      # + erased-RBS info) or nil when no expression is at the queried position. Nil maps to `result: null`
+      # per LSP spec; clients suppress the popup. Returns `MethodNotFound` when no hover_provider is wired
+      # (slice 1-4 behaviour).
       def handle_hover(params)
         return method_not_found("textDocument/hover") unless @hover_provider
 
@@ -268,29 +248,25 @@ module Rigor
         )
       end
 
-      # workspace/didChangeWatchedFiles NOTIFICATION. Invalidates
-      # the ProjectContext so cached pre-pass / Environment is
-      # rebuilt on the next request. Slice 7's floor: any watched
-      # file change triggers a full context rebuild. Per-file
-      # surgical invalidation (per design doc § "Project context
-      # refresh") is a follow-up; this is the LSP-correct floor.
+      # workspace/didChangeWatchedFiles NOTIFICATION. Invalidates the ProjectContext so cached pre-pass /
+      # Environment is rebuilt on the next request. Slice 7's floor: any watched file change triggers a full
+      # context rebuild. Per-file surgical invalidation (per design doc § "Project context refresh") is a
+      # follow-up; this is the LSP-correct floor.
       def handle_did_change_watched_files(_params)
         @project_context&.invalidate!
         nil
       end
 
-      # workspace/didChangeConfiguration NOTIFICATION. The payload
-      # shape is client-specific; v1 ignores the payload and
-      # invalidates the context so the next read picks up any
-      # external config changes (.rigor.yml / Gemfile.lock / etc).
+      # workspace/didChangeConfiguration NOTIFICATION. The payload shape is client-specific; v1 ignores the
+      # payload and invalidates the context so the next read picks up any external config changes
+      # (.rigor.yml / Gemfile.lock / etc).
       def handle_did_change_configuration(_params)
         @project_context&.invalidate!
         nil
       end
 
-      # textDocument/selectionRange REQUEST. Routes to the
-      # selection-range provider when wired; `MethodNotFound`
-      # otherwise.
+      # textDocument/selectionRange REQUEST. Routes to the selection-range provider when wired;
+      # `MethodNotFound` otherwise.
       def handle_selection_range(params)
         return method_not_found("textDocument/selectionRange") unless @selection_range_provider
 
@@ -299,8 +275,7 @@ module Rigor
         @selection_range_provider.provide(doc.fetch(:uri), positions)
       end
 
-      # textDocument/foldingRange REQUEST. Routes to the
-      # folding-range provider when wired; `MethodNotFound`
+      # textDocument/foldingRange REQUEST. Routes to the folding-range provider when wired; `MethodNotFound`
       # otherwise.
       def handle_folding_range(params)
         return method_not_found("textDocument/foldingRange") unless @folding_range_provider
@@ -309,8 +284,7 @@ module Rigor
         @folding_range_provider.provide(doc.fetch(:uri))
       end
 
-      # textDocument/signatureHelp REQUEST. Routes to the
-      # signature-help provider when wired; `MethodNotFound`
+      # textDocument/signatureHelp REQUEST. Routes to the signature-help provider when wired; `MethodNotFound`
       # otherwise.
       def handle_signature_help(params)
         return method_not_found("textDocument/signatureHelp") unless @signature_help_provider
@@ -326,8 +300,8 @@ module Rigor
         )
       end
 
-      # textDocument/completion REQUEST. Routes to the completion
-      # provider when wired; `MethodNotFound` otherwise.
+      # textDocument/completion REQUEST. Routes to the completion provider when wired; `MethodNotFound`
+      # otherwise.
       def handle_completion(params)
         return method_not_found("textDocument/completion") unless @completion_provider
 
@@ -342,9 +316,8 @@ module Rigor
         )
       end
 
-      # textDocument/documentSymbol REQUEST. Returns the
-      # `DocumentSymbol[]` outline for the buffer at the requested
-      # URI. Returns `MethodNotFound` when no provider is wired.
+      # textDocument/documentSymbol REQUEST. Returns the `DocumentSymbol[]` outline for the buffer at the
+      # requested URI. Returns `MethodNotFound` when no provider is wired.
       def handle_document_symbol(params)
         return method_not_found("textDocument/documentSymbol") unless @document_symbol_provider
 
@@ -352,10 +325,9 @@ module Rigor
         @document_symbol_provider.provide(doc.fetch(:uri))
       end
 
-      # textDocument/didClose. Drops the buffer table entry AND
-      # publishes an empty diagnostic set so clients clear inline
-      # markers — per LSP spec § "publishDiagnostics" the standard
-      # way to indicate "no diagnostics remain for this URI".
+      # textDocument/didClose. Drops the buffer table entry AND publishes an empty diagnostic set so clients
+      # clear inline markers — per LSP spec § "publishDiagnostics" the standard way to indicate "no
+      # diagnostics remain for this URI".
       def handle_did_close(params)
         doc = params.fetch(:textDocument)
         uri = doc.fetch(:uri)

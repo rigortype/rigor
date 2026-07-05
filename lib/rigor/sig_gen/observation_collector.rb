@@ -10,37 +10,26 @@ require_relative "../inference/scope_indexer"
 
 module Rigor
   module SigGen
-    # ADR-14 slice 3 — caller-side argument-type observation
-    # collector.
+    # ADR-14 slice 3 — caller-side argument-type observation collector.
     #
-    # Walks the user-supplied `--observe=PATH...` tree (default
-    # `spec/`), parses every `.rb` file with `Prism`, scope-
-    # indexes it the same way the main generator does, and
-    # records the per-call-site argument-type tuples for every
-    # `Prism::CallNode` whose receiver types as a
-    # `Type::Nominal`. The {Generator} consumes the resulting
-    # map to render `--params=observed` RBS:
+    # Walks the user-supplied `--observe=PATH...` tree (default `spec/`), parses every `.rb` file with `Prism`,
+    # scope- indexes it the same way the main generator does, and records the per-call-site argument-type tuples
+    # for every `Prism::CallNode` whose receiver types as a `Type::Nominal`. The {Generator} consumes the
+    # resulting map to render `--params=observed` RBS:
     #
-    # @return [Hash{[class_name, method_name] =>
-    #   Array<Array<Rigor::Type>>}]
+    # @return [Hash{[class_name, method_name] => Array<Array<Rigor::Type>>}]
     #
-    # ADR-5 clause 2 compliance: the observed union is the
-    # MOST PERMISSIVE parameter contract the existing callers
-    # prove sufficient — by construction it accepts every type
-    # any caller has already passed. The collector only
-    # surfaces the data; the default `--params=untyped` keeps
-    # the observation inert until the user opts in.
+    # ADR-5 clause 2 compliance: the observed union is the MOST PERMISSIVE parameter contract the existing
+    # callers prove sufficient — by construction it accepts every type any caller has already passed. The
+    # collector only surfaces the data; the default `--params=untyped` keeps the observation inert until the
+    # user opts in.
     #
     # MVP scope:
-    # - Explicit-receiver calls only (`foo.bar(args)`). Implicit-
-    #   self calls inside class bodies and RSpec-style
-    #   `let` / `subject` bindings ride on slice 5's optional
-    #   `rigor-rspec` integration.
-    # - Calls whose receiver does not type as a `Type::Nominal`
-    #   (e.g. `(some_dynamic).bar(...)`) are skipped — the
-    #   collector cannot attribute them to a specific class.
-    # - Zero-argument calls give no observation; methods are
-    #   matched by `(class_name, method_name)` only.
+    # - Explicit-receiver calls only (`foo.bar(args)`). Implicit-self calls inside class bodies and RSpec-style
+    #   `let` / `subject` bindings ride on slice 5's optional `rigor-rspec` integration.
+    # - Calls whose receiver does not type as a `Type::Nominal` (e.g. `(some_dynamic).bar(...)`) are skipped —
+    #   the collector cannot attribute them to a specific class.
+    # - Zero-argument calls give no observation; methods are matched by `(class_name, method_name)` only.
     class ObservationCollector # rubocop:disable Metrics/ClassLength
       # @param configuration [Rigor::Configuration]
       # @param paths [Array<String>] observe paths (files /
@@ -104,11 +93,9 @@ module Rigor
         walk_calls(parse_result.value, scope_index, bindings, observations)
       end
 
-      # Pre-walks `@source_paths` to collect every qualified
-      # class / module declaration. The result seeds the
-      # `discovered_classes` table on each observe-tree scope so
-      # `Foo.new` and `Foo` resolve to the right singleton carrier
-      # even when no RBS sig describes `Foo` yet.
+      # Pre-walks `@source_paths` to collect every qualified class / module declaration. The result seeds the
+      # `discovered_classes` table on each observe-tree scope so `Foo.new` and `Foo` resolve to the right
+      # singleton carrier even when no RBS sig describes `Foo` yet.
       def preindex_source_classes
         accumulator = {}
         resolve_paths(@source_paths).each { |path| harvest_classes_from(path, accumulator) }
@@ -122,8 +109,7 @@ module Rigor
 
         walk_class_decls(parse_result.value, [], accumulator)
       rescue StandardError
-        # Source-side harvest failures are tolerated silently
-        # — the collector still runs on whichever files
+        # Source-side harvest failures are tolerated silently — the collector still runs on whichever files
         # parsed cleanly.
       end
 
@@ -180,13 +166,10 @@ module Rigor
         observations[key] << observation
       end
 
-      # ADR-14 follow-up (A): `.new` → `:initialize` routing.
-      # `MethodCatalog.new(path: ...)` types its receiver as
-      # `Type::Singleton[MethodCatalog]` and its call name as
-      # `:new`, but the *implicit* effect at runtime is a call
-      # to `MethodCatalog#initialize(path: ...)`. Route the
-      # observation under `[class_name, :initialize]` so the
-      # initialize-stub renderer can consult it.
+      # ADR-14 follow-up (A): `.new` → `:initialize` routing. `MethodCatalog.new(path: ...)` types its receiver
+      # as `Type::Singleton[MethodCatalog]` and its call name as `:new`, but the *implicit* effect at runtime is
+      # a call to `MethodCatalog#initialize(path: ...)`. Route the observation under `[class_name, :initialize]`
+      # so the initialize-stub renderer can consult it.
       def observation_key(call_node, receiver_type)
         if receiver_type.is_a?(Type::Singleton) && call_node.name == :new
           [receiver_type.class_name, :initialize]
@@ -195,20 +178,15 @@ module Rigor
         end
       end
 
-      # ADR-14 slice 5 — RSpec-aware receiver typing.
-      # Resolves a CallNode receiver against the collected
-      # `bindings` map (built by {#collect_rspec_bindings})
-      # before falling back to ordinary `scope.type_of`. The
+      # ADR-14 slice 5 — RSpec-aware receiver typing. Resolves a CallNode receiver against the collected
+      # `bindings` map (built by {#collect_rspec_bindings}) before falling back to ordinary `scope.type_of`. The
       # three RSpec-shaped receivers we recognise:
       #
-      # - Bare-name CallNode (`subject`, `other`, ...) whose
-      #   name matches a `subject` / `let(:name)` binding —
+      # - Bare-name CallNode (`subject`, `other`, ...) whose name matches a `subject` / `let(:name)` binding —
       #   return the binding's recorded type.
-      # - `described_class.new(...)` chain — when the
-      #   surrounding `describe Foo do … end` resolved `Foo`,
+      # - `described_class.new(...)` chain — when the surrounding `describe Foo do … end` resolved `Foo`,
       #   return `Type::Nominal[Foo]`.
-      # - Anything else — pass through to `scope.type_of`,
-      #   matching slice-3 behaviour.
+      # - Anything else — pass through to `scope.type_of`, matching slice-3 behaviour.
       def resolve_receiver_type(receiver, scope, bindings)
         return resolve_described_class_new(bindings) if described_class_new?(receiver)
         return bindings[receiver.name] if bound_call?(receiver, bindings)
@@ -246,21 +224,14 @@ module Rigor
           node.block.nil?
       end
 
-      # Walks the spec file for `describe X do … end` /
-      # `RSpec.describe X do … end` blocks plus the
-      # `subject` / `let(:name)` declarations inside them.
-      # Returns a flat map `{ binding_name (Symbol) => Type }`
-      # plus a synthetic `:described_class` slot keyed off
-      # the nearest enclosing `describe`.
+      # Walks the spec file for `describe X do … end` / `RSpec.describe X do … end` blocks plus the
+      # `subject` / `let(:name)` declarations inside them. Returns a flat map `{ binding_name (Symbol) => Type }`
+      # plus a synthetic `:described_class` slot keyed off the nearest enclosing `describe`.
       #
-      # The recogniser is intentionally lightweight: it does
-      # not enforce RSpec scope rules across `describe` /
-      # `context` blocks. Nested `describe` declarations
-      # overwrite the outer `described_class` for the
-      # remainder of the walk; same-name `let` bindings are
-      # last-wins. This matches the typical one-spec-file
-      # shape ADR-14 slice 5 targets without re-implementing
-      # the `rigor-rspec` plugin's full scope analyser.
+      # The recogniser is intentionally lightweight: it does not enforce RSpec scope rules across `describe` /
+      # `context` blocks. Nested `describe` declarations overwrite the outer `described_class` for the
+      # remainder of the walk; same-name `let` bindings are last-wins. This matches the typical one-spec-file
+      # shape ADR-14 slice 5 targets without re-implementing the `rigor-rspec` plugin's full scope analyser.
       def collect_rspec_bindings(root, scope_index)
         bindings = {}
         walk_rspec_bindings(root, bindings, scope_index)
@@ -339,12 +310,9 @@ module Rigor
         end
       end
 
-      # ADR-14 follow-up (B): walks a call's argument list
-      # separating positional from keyword arguments and
-      # returning an {ObservedCall} carrier. Splat /
-      # forwarded / block arguments still abort the
-      # observation (`nil`) — those don't map cleanly to a
-      # single per-position type the renderer can union.
+      # ADR-14 follow-up (B): walks a call's argument list separating positional from keyword arguments and
+      # returning an {ObservedCall} carrier. Splat / forwarded / block arguments still abort the observation
+      # (`nil`) — those don't map cleanly to a single per-position type the renderer can union.
       def collect_args(call_node, scope)
         positional = []
         keyword = {}

@@ -4,24 +4,16 @@ module Rigor
   module SigGen
     # Per-source-file outcome of a `rigor sig-gen --write` run.
     #
-    # The writer reports back what it did so the renderer (and
-    # the CLI's exit-status logic) can summarise actions and
-    # surface user-authored-skip decisions without having to
-    # re-parse the produced files.
+    # The writer reports back what it did so the renderer (and the CLI's exit-status logic) can summarise
+    # actions and surface user-authored-skip decisions without having to re-parse the produced files.
     #
     # - `source_path` — original `.rb` file.
-    # - `target_path` — `.rbs` file the writer was responsible
-    #   for (`nil` when the source path falls outside the
-    #   project signature tree, in which case `action` is
-    #   `:skipped_outside_sig_root`).
-    # - `action` — one of `:created` / `:updated` / `:noop` /
-    #   `:skipped_outside_sig_root`.
-    # - `applied` — the {MethodCandidate}s that actually
-    #   landed on disk.
-    # - `skipped` — the {MethodCandidate}s the writer
-    #   declined (e.g. tighter-return without `--overwrite`).
-    #   Each entry pairs the candidate with a skip reason
-    #   keyword (`:user_authored`).
+    # - `target_path` — `.rbs` file the writer was responsible for (`nil` when the source path falls outside
+    #   the project signature tree, in which case `action` is `:skipped_outside_sig_root`).
+    # - `action` — one of `:created` / `:updated` / `:noop` / `:skipped_outside_sig_root`.
+    # - `applied` — the {MethodCandidate}s that actually landed on disk.
+    # - `skipped` — the {MethodCandidate}s the writer declined (e.g. tighter-return without `--overwrite`). Each
+    #   entry pairs the candidate with a skip reason keyword (`:user_authored`).
     class WriteResult
       attr_reader :source_path, :target_path, :action, :applied, :skipped
 

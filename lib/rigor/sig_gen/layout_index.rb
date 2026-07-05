@@ -4,29 +4,22 @@ require "rbs"
 
 module Rigor
   module SigGen
-    # Pre-scans every `.rbs` file under the configured
-    # `signature_paths` to build a `qualified_class_name →
+    # Pre-scans every `.rbs` file under the configured `signature_paths` to build a `qualified_class_name →
     # sig_file_path` map.
     #
-    # ADR-14 path-mapper limitation surfaced repeatedly during
-    # the self-dogfood: the existing rigor `sig/` consolidates
-    # multiple `.rb` sources into one `.rbs` file (e.g.
-    # `sig/rigor/type.rbs` declares all 14 `Type::*` classes,
-    # `sig/rigor.rbs` declares `CLI::TypeOfCommand` and
-    # `CLI::TypeScanCommand`). The naive 1:1 mapper writes new
-    # files alongside the existing consolidated ones, producing
+    # ADR-14 path-mapper limitation surfaced repeatedly during the self-dogfood: the existing rigor `sig/`
+    # consolidates multiple `.rb` sources into one `.rbs` file (e.g. `sig/rigor/type.rbs` declares all 14
+    # `Type::*` classes, `sig/rigor.rbs` declares `CLI::TypeOfCommand` and `CLI::TypeScanCommand`). The naive
+    # 1:1 mapper writes new files alongside the existing consolidated ones, producing
     # `RBS::DuplicatedMethodDefinition` errors at lookup time.
     #
-    # The index lets {PathMapper} route a candidate to the
-    # consolidated sig file when the class is already declared
-    # there, falling back to the 1:1 mirror only when the
-    # class has no existing declaration anywhere under the
-    # signature tree.
+    # The index lets {PathMapper} route a candidate to the consolidated sig file when the class is already
+    # declared there, falling back to the 1:1 mirror only when the class has no existing declaration anywhere
+    # under the signature tree.
     #
-    # First-found wins on duplicate declarations across files;
-    # RBS itself allows the same class to be declared in
-    # multiple files for additive member contributions, but
-    # the writer only needs one canonical target per class.
+    # First-found wins on duplicate declarations across files; RBS itself allows the same class to be declared
+    # in multiple files for additive member contributions, but the writer only needs one canonical target per
+    # class.
     class LayoutIndex
       # @param signature_paths [Array<String, Pathname>, nil]
       #   the `.rigor.yml`-configured signature directories.
@@ -84,8 +77,7 @@ module Rigor
         _, _, decls = RBS::Parser.parse_signature(source)
         record_decls(decls, [], rbs_path, accumulator)
       rescue StandardError
-        # Bad RBS file — skip silently; the user's `rigor
-        # check` run will surface the real parse error
+        # Bad RBS file — skip silently; the user's `rigor check` run will surface the real parse error
         # elsewhere.
       end
 

@@ -21,11 +21,9 @@ require_relative "../type/hash_shape"
 
 module Rigor
   module LanguageServer
-    # Answers `textDocument/completion` requests. Provides method
-    # completion for `obj.|` (known-type receiver → RBS-known methods),
-    # constant-path completion, hash-key completion, Union / Intersection /
-    # Refined / Shape receiver handling, and parse-recovery fallback for
-    # malformed buffers (sentinel injection).
+    # Answers `textDocument/completion` requests. Provides method completion for `obj.|` (known-type receiver
+    # → RBS-known methods), constant-path completion, hash-key completion, Union / Intersection / Refined /
+    # Shape receiver handling, and parse-recovery fallback for malformed buffers (sentinel injection).
     #
     # LSP `CompletionItemKind` values used:
     # - 2 = Method, 5 = Field, 7 = Class, 9 = Module, 21 = Constant.
@@ -54,9 +52,8 @@ module Rigor
         path, entry = buffer_for(uri)
         return nil if entry.nil?
 
-        # Slice B4 — parse recovery. The common mid-edit buffer
-        # (`obj.` / `Foo::`) doesn't parse cleanly; try inserting
-        # a sentinel name at the cursor before falling through.
+        # Slice B4 — parse recovery. The common mid-edit buffer (`obj.` / `Foo::`) doesn't parse cleanly; try
+        # inserting a sentinel name at the cursor before falling through.
         bytes_to_parse, locate_at = parse_attempt_bytes(entry.bytes, line, character)
         parse_result = Prism.parse(bytes_to_parse, filepath: path,
                                                    version: @project_context.configuration.target_ruby)
@@ -69,17 +66,14 @@ module Rigor
 
         case node
         when Prism::CallNode
-          # `hash[:|` patches to `hash[:KEY_SENTINEL]`, an index
-          # access call whose argument is the sentinel symbol;
-          # NodeLocator at the sentinel returns the inner CallNode
-          # for `[]`. Hash-key completion wins when the call is an
-          # index access on a HashShape carrier; otherwise fall
-          # through to method completion.
+          # `hash[:|` patches to `hash[:KEY_SENTINEL]`, an index access call whose argument is the sentinel
+          # symbol; NodeLocator at the sentinel returns the inner CallNode for `[]`. Hash-key completion wins
+          # when the call is an index access on a HashShape carrier; otherwise fall through to method
+          # completion.
           hash_key_completion_for(node, parse_result.value, path) ||
             method_completion_for(node, parse_result.value, path)
         when Prism::SymbolNode
-          # The sentinel symbol's NodeLocator hit; walk up via the
-          # AST to find the enclosing `[]` call.
+          # The sentinel symbol's NodeLocator hit; walk up via the AST to find the enclosing `[]` call.
           hash_key_completion_for_symbol(node, parse_result.value, path)
         when Prism::ConstantPathNode
           constant_path_completion_for(node, path)
@@ -88,34 +82,25 @@ module Rigor
 
       private
 
-      # Slice B4 — parse recovery. Returns `[bytes, [line, character]]`:
-      # the source to feed Prism plus the cursor position the
-      # caller should locate against. When the original buffer
-      # parses cleanly we return it verbatim; when it doesn't AND
-      # the cursor sits at a mid-edit `.` / `::` trigger, we
-      # splice a sentinel identifier into the source so Prism's
-      # AST captures the receiver / parent constant cleanly.
+      # Slice B4 — parse recovery. Returns `[bytes, [line, character]]`: the source to feed Prism plus the
+      # cursor position the caller should locate against. When the original buffer parses cleanly we return it
+      # verbatim; when it doesn't AND the cursor sits at a mid-edit `.` / `::` trigger, we splice a sentinel
+      # identifier into the source so Prism's AST captures the receiver / parent constant cleanly.
       #
-      # The sentinel is a syntactically-unique identifier the
-      # NodeLocator can find without ambiguity. We choose lower /
-      # upper case based on whether the trigger was `.` (method
-      # name — lowercase identifier) or `::` (constant path —
-      # uppercase identifier).
-      # Sentinels need to be parseable as their target shape:
-      # method sentinel is a lower-snake identifier; constant
-      # sentinel MUST start with an uppercase letter (Ruby
-      # constants reject `_`-leading names — `Process::__Foo`
-      # parses as a method call, not a constant path).
+      # The sentinel is a syntactically-unique identifier the NodeLocator can find without ambiguity. We
+      # choose lower / upper case based on whether the trigger was `.` (method name — lowercase identifier) or
+      # `::` (constant path — uppercase identifier). Sentinels need to be parseable as their target shape:
+      # method sentinel is a lower-snake identifier; constant sentinel MUST start with an uppercase letter
+      # (Ruby constants reject `_`-leading names — `Process::__Foo` parses as a method call, not a constant
+      # path).
       SENTINEL_METHOD   = "__rigor_lsp_sentinel__"
       SENTINEL_CONSTANT = "RigorLspSentinelXyz"
       SENTINEL_HASH_KEY = "__rigor_lsp_key__"
       private_constant :SENTINEL_METHOD, :SENTINEL_CONSTANT, :SENTINEL_HASH_KEY
 
       def parse_attempt_bytes(original_bytes, line, character)
-        # Cheap probe: try original first. Most editor sessions
-        # call completion in mid-keystroke where parse fails, but
-        # some land on a clean buffer (e.g. the trigger fires
-        # right after the user picked an item).
+        # Cheap probe: try original first. Most editor sessions call completion in mid-keystroke where parse
+        # fails, but some land on a clean buffer (e.g. the trigger fires right after the user picked an item).
         if Prism.parse(original_bytes).errors.empty?
           [original_bytes, [line, character]]
         else
@@ -136,23 +121,18 @@ module Rigor
         return [original_bytes, [line, character]] if sentinel.nil?
 
         lines[line] = "#{prefix}#{sentinel}#{suffix}"
-        # The cursor stays at the same column — Prism's AST now
-        # has a node whose name occupies [character, character +
-        # sentinel.size). NodeLocator at that column returns the
-        # enclosing call / path.
+        # The cursor stays at the same column — Prism's AST now has a node whose name occupies [character,
+        # character + sentinel.size). NodeLocator at that column returns the enclosing call / path.
         [lines.join, [line, character]]
       end
 
       def sentinel_for_prefix(prefix)
-        # Strip trailing whitespace before checking for the
-        # trigger character; users often type the dot then a
-        # space mid-edit.
+        # Strip trailing whitespace before checking for the trigger character; users often type the dot then
+        # a space mid-edit.
         stripped = prefix.rstrip
-        # `[:` covers `hash[:|` symbol-key access — splice both
-        # the key name AND the closing `]` so Prism gets a
-        # complete index expression. The closing bracket is part
-        # of the sentinel string for this case (vs the bare
-        # identifier sentinels for `.` / `::`).
+        # `[:` covers `hash[:|` symbol-key access — splice both the key name AND the closing `]` so Prism gets
+        # a complete index expression. The closing bracket is part of the sentinel string for this case (vs
+        # the bare identifier sentinels for `.` / `::`).
         return "#{SENTINEL_HASH_KEY}]" if stripped.end_with?("[:")
         return SENTINEL_METHOD if stripped.end_with?(".")
         return SENTINEL_CONSTANT if stripped.end_with?("::")
@@ -170,12 +150,10 @@ module Rigor
         method_completions(receiver_type, receiver_scope)
       end
 
-      # Slice D1 — `hash[:|` hash-key completion. Triggers when
-      # the cursor is on the synthetic key inside a `[]` call AND
-      # the receiver's inferred type is a `Type::HashShape`. Returns
-      # nil for any other receiver carrier so the dispatcher falls
-      # through to method completion (which still surfaces Hash's
-      # methods for genuine method calls on a hash receiver).
+      # Slice D1 — `hash[:|` hash-key completion. Triggers when the cursor is on the synthetic key inside a
+      # `[]` call AND the receiver's inferred type is a `Type::HashShape`. Returns nil for any other receiver
+      # carrier so the dispatcher falls through to method completion (which still surfaces Hash's methods for
+      # genuine method calls on a hash receiver).
       def hash_key_completion_for(call_node, root, path)
         return nil unless call_node.name == :[]
 
@@ -189,10 +167,9 @@ module Rigor
         hash_key_items(receiver_type)
       end
 
-      # When NodeLocator returns the sentinel SymbolNode directly
-      # (rather than the enclosing CallNode), walk up the AST for
-      # the smallest `[]` call containing the symbol's location.
-      # Re-walks the root once; cheap for LSP-sized buffers.
+      # When NodeLocator returns the sentinel SymbolNode directly (rather than the enclosing CallNode), walk
+      # up the AST for the smallest `[]` call containing the symbol's location. Re-walks the root once; cheap
+      # for LSP-sized buffers.
       def hash_key_completion_for_symbol(symbol_node, root, path)
         call_node = enclosing_index_call(root, symbol_node)
         return nil if call_node.nil?
@@ -230,12 +207,10 @@ module Rigor
         end
       end
 
-      # Slice B2 — `Foo::|` constant-path completion. The cursor
-      # sits on a `ConstantPathNode` whose `parent` resolves to a
-      # class / module FQN; we enumerate every known class whose
-      # name is an immediate child of that parent. Top-level
-      # constants (`::Foo`) and parent-less paths are not yet
-      # supported (queued for slice 6 follow-up).
+      # Slice B2 — `Foo::|` constant-path completion. The cursor sits on a `ConstantPathNode` whose `parent`
+      # resolves to a class / module FQN; we enumerate every known class whose name is an immediate child of
+      # that parent. Top-level constants (`::Foo`) and parent-less paths are not yet supported (queued for
+      # slice 6 follow-up).
       def constant_path_completion_for(const_path_node, path)
         parent_fqn = parent_fqn_of(const_path_node)
         return nil if parent_fqn.nil?
@@ -248,10 +223,8 @@ module Rigor
       end
 
       def parent_fqn_of(const_path_node)
-        # ConstantPathNode#parent is the LHS of the `::`. For
-        # `Foo::Bar` it's the ConstantReadNode for `Foo`; for
-        # `Foo::Bar::Baz` it's a ConstantPathNode. We render
-        # either to the dotted FQN string.
+        # ConstantPathNode#parent is the LHS of the `::`. For `Foo::Bar` it's the ConstantReadNode for `Foo`;
+        # for `Foo::Bar::Baz` it's a ConstantPathNode. We render either to the dotted FQN string.
         parent = const_path_node.parent
         return nil if parent.nil?
 
@@ -268,24 +241,18 @@ module Rigor
         end
       end
 
-      # Walks `RbsLoader#known_class_names_set` for entries whose
-      # FQN is `parent_fqn::<one segment>` — the immediate children.
-      # Deeper descendants are filtered out so the popup shows
-      # only the next-level constants the user can directly write.
-      # `known_class_names_set` is private on RbsLoader per the
-      # type-system's internal API discipline; the LSP layer is a
-      # trusted internal consumer and `send` is the documented
-      # escape hatch (same pattern as `Type::Refined#canonical_name`
-      # in slice A4).
+      # Walks `RbsLoader#known_class_names_set` for entries whose FQN is `parent_fqn::<one segment>` — the
+      # immediate children. Deeper descendants are filtered out so the popup shows only the next-level
+      # constants the user can directly write. `known_class_names_set` is private on RbsLoader per the
+      # type-system's internal API discipline; the LSP layer is a trusted internal consumer and `send` is the
+      # documented escape hatch (same pattern as `Type::Refined#canonical_name` in slice A4).
       def enumerate_constant_children(parent_fqn, scope)
         loader = scope.environment.rbs_loader
         return [] if loader.nil?
 
         names = loader.send(:known_class_names_set)
-        # RBS canonical names carry a leading `::` (so the table
-        # holds `::Process::Status` etc.). Match against both
-        # forms so the prefix walk works regardless of which form
-        # the caller passes.
+        # RBS canonical names carry a leading `::` (so the table holds `::Process::Status` etc.). Match
+        # against both forms so the prefix walk works regardless of which form the caller passes.
         prefix = "::#{parent_fqn}::"
         names.filter_map do |fqn|
           next nil unless fqn.start_with?(prefix)
@@ -324,21 +291,15 @@ module Rigor
         Inference::ScopeIndexer.index(root, default_scope: scope)
       end
 
-      # Returns an Array<Hash> of LSP `CompletionItem`s for every
-      # public method callable on the receiver. Slice B3 extends
-      # the slice-B1 floor with:
-      # - `Type::Refined` / `Type::Difference` — enumerate the
-      #   underlying nominal (refinement narrows the value set,
-      #   not the method set).
-      # - `Type::Tuple` / `Type::HashShape` — enumerate the
-      #   nominal ancestor (`Array` / `Hash`); element-type-aware
-      #   completion is queued.
-      # - `Type::Union` — intersection of methods on each member
-      #   (only methods guaranteed to dispatch on every union case).
-      #   Conservative default per design doc § "Union receiver
-      #   completion".
-      # - `Type::Intersection` — union of methods on each member
-      #   (anything callable on at least one member).
+      # Returns an Array<Hash> of LSP `CompletionItem`s for every public method callable on the receiver.
+      # Slice B3 extends the slice-B1 floor with:
+      # - `Type::Refined` / `Type::Difference` — enumerate the underlying nominal (refinement narrows the
+      #   value set, not the method set).
+      # - `Type::Tuple` / `Type::HashShape` — enumerate the nominal ancestor (`Array` / `Hash`);
+      #   element-type-aware completion is queued.
+      # - `Type::Union` — intersection of methods on each member (only methods guaranteed to dispatch on every
+      #   union case). Conservative default per design doc § "Union receiver completion".
+      # - `Type::Intersection` — union of methods on each member (anything callable on at least one member).
       def method_completions(receiver_type, scope)
         method_set, kind = enumerate_method_set(receiver_type, scope)
         return nil if method_set.nil? || method_set.empty?
@@ -350,13 +311,10 @@ module Rigor
         end
       end
 
-      # Returns `[{Symbol => RBS::Definition::Method}, :instance | :singleton]`
-      # for the receiver. Composite carriers (Union / Intersection /
-      # Refined / shape carriers) reduce to instance-method
-      # enumeration; the receiver-class label that lands in each
-      # CompletionItem's `detail` still comes from each method's
-      # own `defs.first.implemented_in`, so the rendered prefix
-      # stays accurate per-method.
+      # Returns `[{Symbol => RBS::Definition::Method}, :instance | :singleton]` for the receiver. Composite
+      # carriers (Union / Intersection / Refined / shape carriers) reduce to instance-method enumeration; the
+      # receiver-class label that lands in each CompletionItem's `detail` still comes from each method's own
+      # `defs.first.implemented_in`, so the rendered prefix stays accurate per-method.
       def enumerate_method_set(receiver_type, scope)
         case receiver_type
         when Type::Singleton
@@ -379,11 +337,9 @@ module Rigor
         end
       end
 
-      # Union receiver — keep only methods present in EVERY
-      # member's set. Conservative semantically (every method
-      # returned is callable on every member) and prevents
-      # `obj.upcase` from appearing on a `String | Integer`
-      # union where only one side answers `upcase`.
+      # Union receiver — keep only methods present in EVERY member's set. Conservative semantically (every
+      # method returned is callable on every member) and prevents `obj.upcase` from appearing on a
+      # `String | Integer` union where only one side answers `upcase`.
       def intersect_member_methods(members, scope)
         member_sets = members.filter_map { |m| enumerate_method_set(m, scope).first }
         return nil if member_sets.empty?
@@ -392,9 +348,8 @@ module Rigor
         member_sets.first.slice(*common_names)
       end
 
-      # Intersection receiver — accumulate every method declared on
-      # ANY member. A value of type `A & B` is callable through both
-      # interfaces; the completion popup MAY show either's methods.
+      # Intersection receiver — accumulate every method declared on ANY member. A value of type `A & B` is
+      # callable through both interfaces; the completion popup MAY show either's methods.
       def union_member_methods(members, scope)
         members.filter_map { |m| enumerate_method_set(m, scope).first }.reduce({}, :merge)
       end
@@ -420,10 +375,8 @@ module Rigor
           detail: detail,
           insertText: label,
           filterText: label,
-          # Inherited methods rank below own-class methods; the
-          # `defs.first.implemented_in` carries the declaring
-          # class. Inheritance-distance ranking is queued (design
-          # doc § "sortText").
+          # Inherited methods rank below own-class methods; the `defs.first.implemented_in` carries the
+          # declaring class. Inheritance-distance ranking is queued (design doc § "sortText").
           sortText: "1_#{label}"
         }
       end

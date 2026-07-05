@@ -2,16 +2,14 @@
 
 module Rigor
   module AST
-    # A virtual node that wraps a Rigor::Type. Allows callers to ask
-    # "what would the analyzer infer at this position if the value's type
-    # were T?" without constructing a real Prism expression.
+    # A virtual node that wraps a Rigor::Type. Allows callers to ask "what would the analyzer infer at this
+    # position if the value's type were T?" without constructing a real Prism expression.
     #
-    # Rigor::Scope#type_of(TypeNode.new(t)) MUST return a structurally-
-    # equal t. The engine MUST NOT modify or annotate the wrapped type.
+    # Rigor::Scope#type_of(TypeNode.new(t)) MUST return a structurally-equal t. The engine MUST NOT modify or
+    # annotate the wrapped type.
     #
-    # Inspired by PHPStan's TypeExpr (a synthetic Expr that returns a
-    # specific Type from $scope->getType). The Rigor counterpart is
-    # spelled "TypeNode" to align with Prism's "Node" suffix convention.
+    # Inspired by PHPStan's TypeExpr (a synthetic Expr that returns a specific Type from $scope->getType). The
+    # Rigor counterpart is spelled "TypeNode" to align with Prism's "Node" suffix convention.
     class TypeNode
       include Node
 

@@ -2,16 +2,13 @@
 
 module Rigor
   class Scope
-    # ADR-53 Track A — the seed-time discovery context every Scope snapshot
-    # carries by a single reference. Holds the tables the index-time
-    # pre-passes (`Inference::ScopeIndexer` per file, plus the cross-file
-    # project pre-pass) populate and that no control-flow transition ever
-    # varies: `Scope#==` ignores them and `Scope#join` copies them from the
-    # receiver unexamined, which is the membership litmus the ADR fixes.
+    # ADR-53 Track A — the seed-time discovery context every Scope snapshot carries by a single reference. Holds
+    # the tables the index-time pre-passes (`Inference::ScopeIndexer` per file, plus the cross-file project
+    # pre-pass) populate and that no control-flow transition ever varies: `Scope#==` ignores them and
+    # `Scope#join` copies them from the receiver unexamined, which is the membership litmus the ADR fixes.
     #
-    # Immutable (`Data` instances are frozen); deriving a seeded index goes
-    # through `#with(table_name: table)`. `Scope` exposes each table through
-    # its existing reader surface, so engine call sites and plugins are
+    # Immutable (`Data` instances are frozen); deriving a seeded index goes through `#with(table_name: table)`.
+    # `Scope` exposes each table through its existing reader surface, so engine call sites and plugins are
     # unaffected by the extraction.
     DiscoveryIndex = Data.define(
       :declared_types,
@@ -38,8 +35,8 @@ module Rigor
       EMPTY_TABLE = {}.freeze
       private_constant :EMPTY_NODE_TABLE, :EMPTY_TABLE
 
-      # The shared all-empty index `Scope.empty` (and every scope that never
-      # sees a seeding pass) points at — one allocation per process.
+      # The shared all-empty index `Scope.empty` (and every scope that never sees a seeding pass) points at — one
+      # allocation per process.
       EMPTY = new(
         declared_types: EMPTY_NODE_TABLE,
         class_ivars: EMPTY_TABLE,
@@ -57,14 +54,12 @@ module Rigor
         discovered_class_sources: EMPTY_TABLE,
         data_member_layouts: EMPTY_TABLE,
         struct_member_layouts: EMPTY_TABLE,
-        # ADR-67 WD3 — the call-site parameter-inference table, keyed by
-        # `[class_name, method_name, kind]` (the same `(class, method, kind)`
-        # triple {Inference::ParameterInferenceCollector} records and that
-        # `build_method_entry_scope` reconstructs from the lexical class path).
-        # The value is a `{param_name(Symbol) => Rigor::Type}` map of the union
-        # of resolved call-site argument types. Empty on every normal run; only
-        # the `coverage --protection` collection pass populates it today, so a
-        # `check` run leaves it empty and seeds nothing (byte-identical).
+        # ADR-67 WD3 — the call-site parameter-inference table, keyed by `[class_name, method_name, kind]` (the
+        # same `(class, method, kind)` triple {Inference::ParameterInferenceCollector} records and that
+        # `build_method_entry_scope` reconstructs from the lexical class path). The value is a
+        # `{param_name(Symbol) => Rigor::Type}` map of the union of resolved call-site argument types. Empty on
+        # every normal run; only the `coverage --protection` collection pass populates it today, so a `check` run
+        # leaves it empty and seeds nothing (byte-identical).
         param_inferred_types: EMPTY_TABLE
       )
     end

@@ -2,17 +2,13 @@
 
 module Rigor
   module SigGen
-    # The five classifications a candidate method falls into
-    # after the generator has compared the inferred return
-    # type against the project's existing RBS.
+    # The five classifications a candidate method falls into after the generator has compared the inferred
+    # return type against the project's existing RBS.
     #
-    # The strings are the diagnostic-family identifiers ADR-14
-    # reserves under `sig.*`; the MVP carries them as plain
-    # symbols on the method candidate and renders the matching
-    # identifier in JSON / text output. They are added to the
-    # diagnostic family hierarchy in `docs/type-specification/
-    # diagnostic-policy.md` even though slice 1 does not yet
-    # emit them as diagnostics.
+    # The strings are the diagnostic-family identifiers ADR-14 reserves under `sig.*`; the MVP carries them as
+    # plain symbols on the method candidate and renders the matching identifier in JSON / text output. They are
+    # added to the diagnostic family hierarchy in `docs/type-specification/diagnostic-policy.md` even though
+    # slice 1 does not yet emit them as diagnostics.
     module Classification
       NEW_FILE = :new_file
       NEW_METHOD = :new_method

@@ -7,34 +7,27 @@ require "rigor/source/literals"
 module Rigor
   module Plugin
     class Factorybot < Rigor::Plugin::Base
-      # Per-file walker — visits every `FactoryBot.<entry>(...)`
-      # call (and the `FactoryGirl` legacy alias) and validates
-      # the factory name + the keyword-argument attribute keys
-      # against the per-run {FactoryIndex}.
+      # Per-file walker — visits every `FactoryBot.<entry>(...)` call (and the `FactoryGirl` legacy alias)
+      # and validates the factory name + the keyword-argument attribute keys against the per-run
+      # {FactoryIndex}.
       #
-      # Recognised entry methods cover the canonical create /
-      # build / build_stubbed / attributes_for family; the same
-      # validation applies to every entry (the runtime semantics
-      # differ — one persists, one returns a hash — but the
-      # call-site shape is identical from the static check's
-      # perspective).
+      # Recognised entry methods cover the canonical create / build / build_stubbed / attributes_for
+      # family; the same validation applies to every entry (the runtime semantics differ — one persists,
+      # one returns a hash — but the call-site shape is identical from the static check's perspective).
       module Analyzer
         ENTRY_METHODS = %i[create build build_stubbed attributes_for create_list build_list build_stubbed_list].freeze
 
-        # One violation. Carries its own `location` because a single
-        # entry call yields diagnostics at different positions — the
-        # matcher/method name (`message_loc`) for factory-call /
-        # unknown-factory, and the attribute key node for
-        # unknown-attribute. The caller positions each via
-        # `Plugin::Base#diagnostic(node, location:)`.
+        # One violation. Carries its own `location` because a single entry call yields diagnostics at
+        # different positions — the matcher/method name (`message_loc`) for factory-call /
+        # unknown-factory, and the attribute key node for unknown-attribute. The caller positions each
+        # via `Plugin::Base#diagnostic(node, location:)`.
         Violation = Data.define(:location, :message, :severity, :rule)
 
         module_function
 
-        # The violations for a single entry call (`FactoryBot.create(...)`
-        # etc.), or `[]` when the node is not an entry call or its first
-        # argument is not a literal factory name. ADR-37: the engine owns
-        # the walk.
+        # The violations for a single entry call (`FactoryBot.create(...)` etc.), or `[]` when the node
+        # is not an entry call or its first argument is not a literal factory name. ADR-37: the engine
+        # owns the walk.
         #
         # @param call_node [Prism::Node]
         # @param factory_index [FactoryIndex]
@@ -80,20 +73,14 @@ module Rigor
             [factory_call_violation(call_node, factory_name, entry)]
         end
 
-        # The keyword-argument attribute keys come from the
-        # trailing `Prism::KeywordHashNode` (Ruby's
-        # `name: "value"` syntax). Each AssocNode whose key is
-        # a `Prism::SymbolNode` is treated as a literal
-        # attribute reference.
+        # The keyword-argument attribute keys come from the trailing `Prism::KeywordHashNode` (Ruby's
+        # `name: "value"` syntax). Each AssocNode whose key is a `Prism::SymbolNode` is treated as a
+        # literal attribute reference.
         #
-        # When `model_index` (the cross-plugin `:model_index`
-        # fact published by rigor-activerecord) is present,
-        # the effective accepted key set is the UNION of the
-        # factory's declared attributes plus the corresponding
-        # model's columns. FactoryBot's runtime accepts any AR
-        # attribute regardless of whether the factory declared
-        # it, so the cross-check broadens the acceptance
-        # accordingly.
+        # When `model_index` (the cross-plugin `:model_index` fact published by rigor-activerecord) is
+        # present, the effective accepted key set is the UNION of the factory's declared attributes plus
+        # the corresponding model's columns. FactoryBot's runtime accepts any AR attribute regardless of
+        # whether the factory declared it, so the cross-check broadens the acceptance accordingly.
         def unknown_attribute_violations(call_node, entry, model_index)
           accepted_keys, suggestion_dictionary = effective_keys(entry, model_index)
           attr_spell_checker = DidYouMean::SpellChecker.new(dictionary: suggestion_dictionary)
@@ -119,10 +106,8 @@ module Rigor
           [(factory_keys + model_columns).uniq.freeze, (factory_keys + model_columns).uniq.freeze]
         end
 
-        # Convention: `:user` → `User`, `:order_item` →
-        # `OrderItem`. Mirrors rigor-actionpack Phase 1's
-        # convention; namespaced models (`:admin_user` →
-        # `Admin::User`) are deferred.
+        # Convention: `:user` → `User`, `:order_item` → `OrderItem`. Mirrors rigor-actionpack Phase 1's
+        # convention; namespaced models (`:admin_user` → `Admin::User`) are deferred.
         def model_class_for(factory_name)
           factory_name.to_s.split("_").map(&:capitalize).join
         end

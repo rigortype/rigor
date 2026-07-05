@@ -9,11 +9,9 @@ require_relative "app/models/comment"
 #
 #   RUBYLIB=$PWD/../lib bundle exec rigor check
 #
-# rigor-activerecord reads `db/schema.rb` once (via
-# Plugin::IoBoundary), discovers the AR models under
-# `app/models/`, builds a model index, and validates each
-# `Model.find` / `.find_by` / `.where` call against the
-# resolved table's columns.
+# rigor-activerecord reads `db/schema.rb` once (via Plugin::IoBoundary), discovers the AR models under
+# `app/models/`, builds a model index, and validates each `Model.find` / `.find_by` / `.where` call
+# against the resolved table's columns.
 
 # ---- Recognised calls ----
 

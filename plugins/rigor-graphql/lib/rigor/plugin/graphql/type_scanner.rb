@@ -6,17 +6,13 @@ require "rigor/source/literals"
 module Rigor
   module Plugin
     class Graphql < Rigor::Plugin::Base
-      # Walks project source for `class T < GraphQL::Schema::Object`
-      # subclasses and emits a `{type_class_fqn => {field_name => {type:, nullable:}}}`
-      # table covering every `field :name, Type, null: ...` declaration
-      # inside the class body.
+      # Walks project source for `class T < GraphQL::Schema::Object` subclasses and emits a
+      # `{type_class_fqn => {field_name => {type:, nullable:}}}` table covering every `field :name, Type,
+      # null: ...` declaration inside the class body.
       module TypeScanner
-        # The canonical GraphQL scalar type names accepted as
-        # `field`'s second positional argument. The plugin maps
-        # each to the underlying Ruby class name so downstream
-        # consumers can cross-reference against Ruby types
-        # without re-implementing the GraphQL→Ruby coercion
-        # table.
+        # The canonical GraphQL scalar type names accepted as `field`'s second positional argument. The
+        # plugin maps each to the underlying Ruby class name so downstream consumers can cross-reference
+        # against Ruby types without re-implementing the GraphQL→Ruby coercion table.
         CANONICAL_TYPES = {
           "String" => "String",
           "Integer" => "Integer",
@@ -26,21 +22,17 @@ module Rigor
           "ID" => "String"
         }.freeze
 
-        # The base class name a Schema::Object subclass MUST
-        # inherit from to be recognised. Match is on the
-        # rightmost segment of the superclass constant chain so
-        # both `GraphQL::Schema::Object` and the locally-aliased
-        # `BaseObject = GraphQL::Schema::Object` shape work when
-        # the alias's RHS is the canonical path.
+        # The base class name a Schema::Object subclass MUST inherit from to be recognised. Match is on
+        # the rightmost segment of the superclass constant chain so both `GraphQL::Schema::Object` and
+        # the locally-aliased `BaseObject = GraphQL::Schema::Object` shape work when the alias's RHS is
+        # the canonical path.
         SCHEMA_OBJECT_TAIL = "Object"
         SCHEMA_ENUM_TAIL = "Enum"
         SCHEMA_INPUT_OBJECT_TAIL = "InputObject"
         SCHEMA_MUTATION_TAIL = "Mutation"
-        # Common path-segment for `Schema::Object` / `Schema::Enum`
-        # / `Schema::InputObject` / `Schema::Mutation`; the
-        # second-to-last segment must be `Schema` (either
-        # fully-qualified `GraphQL::Schema::X` or lexically nested
-        # `Schema::X` inside `module GraphQL`).
+        # Common path-segment for `Schema::Object` / `Schema::Enum` / `Schema::InputObject` /
+        # `Schema::Mutation`; the second-to-last segment must be `Schema` (either fully-qualified
+        # `GraphQL::Schema::X` or lexically nested `Schema::X` inside `module GraphQL`).
         SCHEMA_PARENT_SEGMENTS = %w[Schema GraphQL].freeze
         private_constant :SCHEMA_OBJECT_TAIL, :SCHEMA_ENUM_TAIL,
                          :SCHEMA_INPUT_OBJECT_TAIL, :SCHEMA_MUTATION_TAIL,
@@ -48,15 +40,12 @@ module Rigor
 
         module_function
 
-        # @param paths [Array<String>] absolute paths to `.rb` files
-        #   the project's `paths:` resolves to.
-        # @return [Hash{Symbol => Hash}] frozen 4-key result:
-        #   `:types` (per-`Schema::Object` field table),
-        #   `:enums` (per-`Schema::Enum` value list),
-        #   `:input_objects` (per-`Schema::InputObject` argument table),
-        #   `:mutations` (per-`Schema::Mutation` arguments+fields table).
-        #   Any subset may be empty when no recognisable declaration
-        #   of that kind is found.
+        # @param paths [Array<String>] absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @return [Hash{Symbol => Hash}] frozen 4-key result: `:types` (per-`Schema::Object` field
+        #   table), `:enums` (per-`Schema::Enum` value list), `:input_objects`
+        #   (per-`Schema::InputObject` argument table), `:mutations` (per-`Schema::Mutation`
+        #   arguments+fields table). Any subset may be empty when no recognisable declaration of that
+        #   kind is found.
         def scan(paths:)
           acc = empty_accumulator
           paths.each do |path|
@@ -97,10 +86,9 @@ module Rigor
         end
         private_class_method :scan_file
 
-        # Walks the AST collecting `class X < GraphQL::Schema::Object`,
-        # `Schema::Enum`, `Schema::InputObject`, and `Schema::Mutation`
-        # decls at any nesting level. Returns a 4-key hash so the
-        # caller can publish multiple cross-plugin facts from one walk.
+        # Walks the AST collecting `class X < GraphQL::Schema::Object`, `Schema::Enum`,
+        # `Schema::InputObject`, and `Schema::Mutation` decls at any nesting level. Returns a 4-key hash
+        # so the caller can publish multiple cross-plugin facts from one walk.
         def collect_definitions(node, qualified_prefix)
           return empty_accumulator if node.nil?
 
@@ -154,10 +142,9 @@ module Rigor
         end
         private_class_method :collect_module_node
 
-        # `class X < GraphQL::Schema::<Tail>` matches when the
-        # superclass's last two path segments are `Schema::<Tail>`.
-        # Matches both `< GraphQL::Schema::<Tail>` (fully qualified)
-        # and `< Schema::<Tail>` (lexically inside `module GraphQL`).
+        # `class X < GraphQL::Schema::<Tail>` matches when the superclass's last two path segments are
+        # `Schema::<Tail>`. Matches both `< GraphQL::Schema::<Tail>` (fully qualified) and `<
+        # Schema::<Tail>` (lexically inside `module GraphQL`).
         def schema_subclass?(class_node, tail)
           superclass = class_node.superclass
           return false if superclass.nil?
@@ -193,19 +180,16 @@ module Rigor
         end
         private_class_method :statement_nodes
 
-        # Walks every top-level `value "..."` call inside an
-        # enum subclass body and returns the value names as an
-        # Array<String>. Both shapes graphql-ruby accepts work:
+        # Walks every top-level `value "..."` call inside an enum subclass body and returns the value
+        # names as an Array<String>. Both shapes graphql-ruby accepts work:
         #
         #     value "ACTIVE"
         #     value "DISABLED", value: :off, description: "..."
         #
-        # The first positional must be a String literal — the
-        # graphql-ruby `value` API also accepts a Symbol form
-        # (`value :ACTIVE`) but the documented idiom is String.
-        # Only the GraphQL-side value name is stored; the optional
-        # `value:` kwarg (Ruby-side override) and `description:`
-        # are omitted from the published table.
+        # The first positional must be a String literal — the graphql-ruby `value` API also accepts a
+        # Symbol form (`value :ACTIVE`) but the documented idiom is String. Only the GraphQL-side value
+        # name is stored; the optional `value:` kwarg (Ruby-side override) and `description:` are
+        # omitted from the published table.
         def collect_values(body)
           return [] if body.nil?
 
@@ -220,13 +204,10 @@ module Rigor
         end
         private_class_method :collect_values
 
-        # Walks every top-level `argument :name, Type, required: ...`
-        # call inside an InputObject (or Mutation) subclass body and
-        # returns the per-argument shape table. Argument syntax
-        # mirrors `field` except the nullability axis is named
-        # `required:` (default `false` — per graphql-ruby's
-        # `argument` default; the OPPOSITE polarity of `field`'s
-        # `null:`).
+        # Walks every top-level `argument :name, Type, required: ...` call inside an InputObject (or
+        # Mutation) subclass body and returns the per-argument shape table. Argument syntax mirrors
+        # `field` except the nullability axis is named `required:` (default `false` — per graphql-ruby's
+        # `argument` default; the OPPOSITE polarity of `field`'s `null:`).
         #
         #     argument :name, String, required: true
         #     argument :tags, [String], required: false
@@ -270,10 +251,9 @@ module Rigor
         end
         private_class_method :parse_argument_call
 
-        # Mirror of `extract_nullability` but reads the `required:`
-        # kwarg, defaulting to `false` (graphql-ruby's argument
-        # default — the OPPOSITE polarity of `field`'s `null:` /
-        # nullability default).
+        # Mirror of `extract_nullability` but reads the `required:` kwarg, defaulting to `false`
+        # (graphql-ruby's argument default — the OPPOSITE polarity of `field`'s `null:` / nullability
+        # default).
         # rubocop:disable Naming/PredicateMethod  -- extractor returns the literal required value
         def extract_required_flag(args)
           kwargs = args.last
@@ -293,12 +273,10 @@ module Rigor
         # rubocop:enable Naming/PredicateMethod
         private_class_method :extract_required_flag
 
-        # `field :name, Type, null: false` shape. The first
-        # positional is a Symbol (field name); the second is a
-        # constant reference (GraphQL type) OR a single-element
-        # ArrayNode (`[Type]`) for GraphQL list types; `null:` is
-        # the nullability keyword (defaults to TRUE per
-        # graphql-ruby's field defaults so we mirror that).
+        # `field :name, Type, null: false` shape. The first positional is a Symbol (field name); the
+        # second is a constant reference (GraphQL type) OR a single-element ArrayNode (`[Type]`) for
+        # GraphQL list types; `null:` is the nullability keyword (defaults to TRUE per graphql-ruby's
+        # field defaults so we mirror that).
         def parse_field_call(node)
           args = node.arguments&.arguments
           return nil if args.nil? || args.size < 2
@@ -320,13 +298,10 @@ module Rigor
         end
         private_class_method :parse_field_call
 
-        # Resolves the `Type` positional argument to a
-        # `{type: "ClassName", list: bool}` tuple. ArrayNode
-        # forms (`[String]` / `[Types::User]`) unwrap the single
-        # element and mark `list: true`. Bare constant refs are
-        # not lists. Returns nil for unrecognised shapes (string
-        # types `"User"`, Proc lazy types, etc.) so callers drop
-        # the field.
+        # Resolves the `Type` positional argument to a `{type: "ClassName", list: bool}` tuple.
+        # ArrayNode forms (`[String]` / `[Types::User]`) unwrap the single element and mark `list: true`.
+        # Bare constant refs are not lists. Returns nil for unrecognised shapes (string types `"User"`,
+        # Proc lazy types, etc.) so callers drop the field.
         def resolve_field_type(node)
           if node.is_a?(Prism::ArrayNode)
             element = node.elements.first
@@ -354,9 +329,8 @@ module Rigor
         end
         private_class_method :resolve_constant_type
 
-        # Defaults to `true` (matches graphql-ruby's `field`
-        # default nullability). Looks for an explicit `null:`
-        # keyword and reads its boolean literal.
+        # Defaults to `true` (matches graphql-ruby's `field` default nullability). Looks for an explicit
+        # `null:` keyword and reads its boolean literal.
         # rubocop:disable Naming/PredicateMethod  -- extractor returns the literal nullability value
         def extract_nullability(args)
           kwargs = args.last
@@ -376,9 +350,8 @@ module Rigor
         # rubocop:enable Naming/PredicateMethod
         private_class_method :extract_nullability
 
-        # Returns the constant chain as an Array of String
-        # segments (`["GraphQL", "Schema", "Object"]`). Empty
-        # array for unrecognised node kinds.
+        # Returns the constant chain as an Array of String segments (`["GraphQL", "Schema", "Object"]`).
+        # Empty array for unrecognised node kinds.
         def constant_path_segments(node)
           case node
           when Prism::ConstantReadNode then [node.name.to_s]
@@ -397,9 +370,8 @@ module Rigor
         end
         private_class_method :constant_path_segments
 
-        # Joined `::`-form of {.constant_path_segments}. Returns
-        # nil for unrecognised node kinds (so callers can short-
-        # circuit).
+        # Joined `::`-form of {.constant_path_segments}. Returns nil for unrecognised node kinds (so
+        # callers can short-circuit).
         def constant_name_for(node)
           segments = constant_path_segments(node)
           segments.empty? ? nil : segments.join("::")

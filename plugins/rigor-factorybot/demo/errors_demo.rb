@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-# Demo: each call here triggers an error path
-# rigor-factorybot Phase 1 (a) emits.
+# Demo: each call here triggers an error path rigor-factorybot Phase 1 (a) emits.
 
 module FactoryBot
   def self.create(*, **) = nil
@@ -14,6 +13,5 @@ FactoryBot.create(:usre)
 # `:user` is real but `:rol` is not — should suggest `:role`.
 FactoryBot.create(:user, name: "Alice", rol: "admin")
 
-# `:post` exists but `:headline` isn't an attribute — should
-# suggest `:title`.
+# `:post` exists but `:headline` isn't an attribute — should suggest `:title`.
 FactoryBot.build(:post, headline: "Hello")

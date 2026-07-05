@@ -8,54 +8,38 @@ require_relative "mailer_index"
 module Rigor
   module Plugin
     class Actionmailer < Rigor::Plugin::Base
-      # Walks the configured mailer-search paths via the
-      # plugin's `IoBoundary`, parses each `.rb` file with
-      # Prism, and collects classes whose immediate superclass
-      # is one of the configured base classes.
+      # Walks the configured mailer-search paths via the plugin's `IoBoundary`, parses each `.rb` file
+      # with Prism, and collects classes whose immediate superclass is one of the configured base
+      # classes.
       #
       # For each discovered class, the discoverer:
       #
-      # - Reads the instance-side `def` nodes and records each
-      #   one as an action method, capturing the arity envelope.
-      # - For each (class, action) pair, attempts to read every
-      #   candidate view template under
-      #   `app/views/<mailer_underscore>/<action>.{html,text}.erb`.
-      #   Existing templates feed the IoBoundary's cache
-      #   descriptor (so the cache invalidates when the
-      #   template changes); missing templates are recorded so
-      #   the plugin can surface a diagnostic on the mailer
-      #   class definition.
+      # - Reads the instance-side `def` nodes and records each one as an action method, capturing the
+      #   arity envelope.
+      # - For each (class, action) pair, attempts to read every candidate view template under
+      #   `app/views/<mailer_underscore>/<action>.{html,text}.erb`. Existing templates feed the
+      #   IoBoundary's cache descriptor (so the cache invalidates when the template changes); missing
+      #   templates are recorded so the plugin can surface a diagnostic on the mailer class definition.
       #
       # Limitations (intentional for v0.1.0):
       #
-      # - Direct-superclass match only. `class CustomerMailer
-      #   < BaseMailer` where `BaseMailer < ApplicationMailer`
-      #   is NOT discovered. Add `BaseMailer` to
-      #   `mailer_base_classes` if needed.
-      # - Action methods are read from the syntactic instance-
-      #   side `def` list. Methods built via `define_method`,
-      #   `private`, or non-action helpers (e.g. methods
-      #   starting with `_`) are out of scope. The discoverer
-      #   filters obvious non-actions (`initialize`, names
-      #   prefixed with `_`).
-      # - Adding a brand-new view file under
-      #   `app/views/<mailer>/` will NOT invalidate the
-      #   cached index until something the mailer file
-      #   touches changes. This is the standard read-tracking
-      #   trade-off — only files we successfully read get
-      #   digested into the descriptor.
+      # - Direct-superclass match only. `class CustomerMailer < BaseMailer` where `BaseMailer <
+      #   ApplicationMailer` is NOT discovered. Add `BaseMailer` to `mailer_base_classes` if needed.
+      # - Action methods are read from the syntactic instance-side `def` list. Methods built via
+      #   `define_method`, `private`, or non-action helpers (e.g. methods starting with `_`) are out of
+      #   scope. The discoverer filters obvious non-actions (`initialize`, names prefixed with `_`).
+      # - Adding a brand-new view file under `app/views/<mailer>/` will NOT invalidate the cached index
+      #   until something the mailer file touches changes. This is the standard read-tracking trade-off
+      #   — only files we successfully read get digested into the descriptor.
       class MailerDiscoverer
         DEFAULT_VIEWS_ROOT = "app/views"
         VIEW_FORMATS = %w[html text].freeze
         VIEW_EXTENSIONS = %w[erb haml slim].freeze
 
         # @param io_boundary [Rigor::Plugin::IoBoundary]
-        # @param search_paths [Array<String>] absolute or
-        #   project-relative paths to scan for mailers.
-        # @param base_classes [Array<String>] direct
-        #   superclasses that mark a class as a mailer.
-        # @param views_root [String] absolute or project-
-        #   relative path to the views directory (typically
+        # @param search_paths [Array<String>] absolute or project-relative paths to scan for mailers.
+        # @param base_classes [Array<String>] direct superclasses that mark a class as a mailer.
+        # @param views_root [String] absolute or project-relative path to the views directory (typically
         #   `app/views`).
         def initialize(io_boundary:, search_paths:, base_classes:, views_root: DEFAULT_VIEWS_ROOT)
           @io_boundary = io_boundary
@@ -66,11 +50,9 @@ module Rigor
 
         # @return [MailerIndex]
         def discover
-          # Two-pass: first collect every module's defs (for
-          # the include-following step), then build per-class
-          # entries that pull in actions from include'd modules.
-          # GitLab's `Notify` mailer derives every action from
-          # `Emails::*` concerns under `app/mailers/emails/`.
+          # Two-pass: first collect every module's defs (for the include-following step), then build
+          # per-class entries that pull in actions from include'd modules. GitLab's `Notify` mailer
+          # derives every action from `Emails::*` concerns under `app/mailers/emails/`.
           module_actions = {} # module_fqn => Hash<Symbol, ActionEntry>
           class_visits = []   # collected (class_name, path, def_nodes, includes)
 
@@ -135,10 +117,8 @@ module Rigor
           walk_for_mailers(node.body, inner_path, &) if node.body
         end
 
-        # Collects qualified-constant names passed to `include
-        # X` calls inside the class body. Used to look up
-        # concern-module action definitions (GitLab's
-        # `Notify` mailer derives every action from
+        # Collects qualified-constant names passed to `include X` calls inside the class body. Used to
+        # look up concern-module action definitions (GitLab's `Notify` mailer derives every action from
         # `Emails::Issues`, `Emails::MergeRequests`, etc.).
         def collect_includes(body)
           return [] if body.nil?
@@ -155,10 +135,9 @@ module Rigor
           names
         end
 
-        # Walks the AST collecting every module's instance-side
-        # def nodes by fully-qualified module name. The same
-        # `collect_action_defs` filter applies (private /
-        # `_`-prefixed / callback-target methods skipped).
+        # Walks the AST collecting every module's instance-side def nodes by fully-qualified module
+        # name. The same `collect_action_defs` filter applies (private / `_`-prefixed / callback-target
+        # methods skipped).
         def collect_module_actions(node, lexical_path, accumulator)
           return if node.nil?
 
@@ -210,25 +189,18 @@ module Rigor
           end
         end
 
-        # Returns the instance-side `def` nodes that look like
-        # mailer actions. Filters non-actions:
+        # Returns the instance-side `def` nodes that look like mailer actions. Filters non-actions:
         # - `initialize`
-        # - methods starting with `_` (Ruby convention for
-        #   private/internal)
+        # - methods starting with `_` (Ruby convention for private/internal)
         # - `def self.<name>` (singleton-side)
-        # - methods after a bare `private` (or
-        #   `public` → `private` transition) — these are
-        #   internal helpers, not actions
+        # - methods after a bare `private` (or `public` → `private` transition) — these are internal
+        #   helpers, not actions
         # - methods named as a `private :foo` argument
-        # - methods named as a callback target
-        #   (`before_action :name`, `after_action`,
-        #   `around_action`)
+        # - methods named as a callback target (`before_action :name`, `after_action`, `around_action`)
         #
-        # Pre-fix, Mastodon's `AdminMailer#process_params` /
-        # `set_instance` / `set_locale` / `set_important_headers!`
-        # all surfaced as missing-view because the bare `private`
-        # keyword wasn't honoured. ~19 false positives across
-        # Mastodon's mailers.
+        # Pre-fix, Mastodon's `AdminMailer#process_params` / `set_instance` / `set_locale` /
+        # `set_important_headers!` all surfaced as missing-view because the bare `private` keyword
+        # wasn't honoured. ~19 false positives across Mastodon's mailers.
         CALLBACK_DECLARATIONS = %i[before_action after_action around_action].freeze
         private_constant :CALLBACK_DECLARATIONS
 
@@ -252,11 +224,9 @@ module Rigor
           end
         end
 
-        # First pass over the class body: collect (a) names
-        # passed to `private :foo` / `protected :foo` (explicit
-        # visibility-on-existing-method form), and (b) Symbol
-        # arguments to callback declarations
-        # (`before_action :setup`, etc.).
+        # First pass over the class body: collect (a) names passed to `private :foo` / `protected :foo`
+        # (explicit visibility-on-existing-method form), and (b) Symbol arguments to callback
+        # declarations (`before_action :setup`, etc.).
         def collect_visibility_and_callbacks(body)
           private_names = []
           callback_names = []
@@ -278,10 +248,9 @@ module Rigor
           [private_names.to_set, callback_names.to_set]
         end
 
-        # Returns the new visibility scope state after observing
-        # `node`. Bare `private` / `protected` / `public` switch
-        # state; the `private :foo` arg-bearing form does NOT
-        # (already handled by `collect_visibility_and_callbacks`).
+        # Returns the new visibility scope state after observing `node`. Bare `private` / `protected` /
+        # `public` switch state; the `private :foo` arg-bearing form does NOT (already handled by
+        # `collect_visibility_and_callbacks`).
         def next_visibility(node, current)
           return current unless node.is_a?(Prism::CallNode)
           return current unless node.receiver.nil?
@@ -301,11 +270,9 @@ module Rigor
             [entry.method_name, entry]
           end
 
-          # Merge actions from include'd modules (pre-collected
-          # in `module_actions` keyed by fully-qualified name).
-          # Unresolvable includes are tracked; `unresolved_includes?`
-          # (consumed by the analyzer) downgrades `unknown-action`
-          # to silence when any include remains unresolved.
+          # Merge actions from include'd modules (pre-collected in `module_actions` keyed by
+          # fully-qualified name). Unresolvable includes are tracked; `unresolved_includes?` (consumed
+          # by the analyzer) downgrades `unknown-action` to silence when any include remains unresolved.
           unresolved_includes = []
           includes.each do |include_name|
             inc_actions = module_actions[include_name]
@@ -357,17 +324,14 @@ module Rigor
         end
 
         # Checks whether *any* template under
-        # `app/views/<underscore>/<action>.{html,text}.{erb,haml,slim}`
-        # exists, by attempting to read each candidate via the
-        # IoBoundary. Successful reads are recorded by the
-        # boundary; failed reads (missing file or access
-        # denied) are swallowed.
+        # `app/views/<underscore>/<action>.{html,text}.{erb,haml,slim}` exists, by attempting to read
+        # each candidate via the IoBoundary. Successful reads are recorded by the boundary; failed reads
+        # (missing file or access denied) are swallowed.
         def view_exists?(class_name, action_name)
           views_root_absolute = File.expand_path(@views_root)
-          # ADR-39: the real ActiveSupport::Inflector resolves the mailer's
-          # view directory (`Foo::BarMailer` → `foo/bar_mailer`), so a
-          # divergence from Rails' real underscore can't point the
-          # missing-view check at the wrong directory.
+          # ADR-39: the real ActiveSupport::Inflector resolves the mailer's view directory
+          # (`Foo::BarMailer` → `foo/bar_mailer`), so a divergence from Rails' real underscore can't
+          # point the missing-view check at the wrong directory.
           underscore_path = Rigor::Plugin::Inflector.underscore(class_name.delete_prefix("::"))
           mailer_dir = File.join(views_root_absolute, underscore_path)
 

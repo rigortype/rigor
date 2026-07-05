@@ -6,43 +6,34 @@ require "prism"
 module Rigor
   module Plugin
     class Actioncable < Rigor::Plugin::Base
-      # Walks a parsed file's AST looking for ActionCable
-      # entry-point calls and validates each against the
-      # {ChannelIndex}.
+      # Walks a parsed file's AST looking for ActionCable entry-point calls and validates each against
+      # the {ChannelIndex}.
       #
       # Recognised shapes:
       #
-      # - `<ChannelClass>.broadcast_to(record, data)` —
-      #   class-targeted broadcast. The class must exist in
-      #   the index.
-      # - `ActionCable.server.broadcast(stream_name, data)`
-      #   — string-targeted broadcast. When `stream_name`
-      #   is a literal string and the index has at least
-      #   one channel with no dynamic stream registrations,
-      #   we check that the name appears in
-      #   `index.all_stream_names`. Otherwise the
-      #   `unknown-stream` warning is suppressed (we can't
-      #   prove absence).
+      # - `<ChannelClass>.broadcast_to(record, data)` — class-targeted broadcast. The class must exist
+      #   in the index.
+      # - `ActionCable.server.broadcast(stream_name, data)` — string-targeted broadcast. When
+      #   `stream_name` is a literal string and the index has at least one channel with no dynamic
+      #   stream registrations, we check that the name appears in `index.all_stream_names`. Otherwise
+      #   the `unknown-stream` warning is suppressed (we can't prove absence).
       module Analyzer
-        # `ActionCable.server.broadcast(...)` — the receiver
-        # path we recognise as a server-targeted broadcast.
-        # Single-symbol form (just `broadcast`) is too
-        # ambiguous to validate.
+        # `ActionCable.server.broadcast(...)` — the receiver path we recognise as a server-targeted
+        # broadcast. Single-symbol form (just `broadcast`) is too ambiguous to validate.
         SERVER_BROADCAST_RECEIVER_NAMES = %w[
           ActionCable.server
           ::ActionCable.server
         ].freeze
 
-        # One broadcast observation. Carries no path/location — the
-        # caller (the `node_rule` block) positions it via
-        # `Plugin::Base#diagnostic`.
+        # One broadcast observation. Carries no path/location — the caller (the `node_rule` block)
+        # positions it via `Plugin::Base#diagnostic`.
         Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
-        # The broadcast violations for a single call node, or `[]` when
-        # the node is not a `broadcast_to` / `ActionCable.server.broadcast`
-        # call this plugin recognises. ADR-37: the engine owns the walk.
+        # The broadcast violations for a single call node, or `[]` when the node is not a
+        # `broadcast_to` / `ActionCable.server.broadcast` call this plugin recognises. ADR-37: the
+        # engine owns the walk.
         #
         # @param call_node [Prism::Node]
         # @param channel_index [ChannelIndex]
@@ -61,10 +52,8 @@ module Rigor
           class_name = constant_receiver_name(call_node.receiver)
           return [] if class_name.nil?
 
-          # broadcast_to with a class-name receiver that
-          # doesn't end in "Channel" is almost certainly
-          # not ActionCable — pass through silently to
-          # avoid flagging unrelated `broadcast_to` methods.
+          # broadcast_to with a class-name receiver that doesn't end in "Channel" is almost certainly
+          # not ActionCable — pass through silently to avoid flagging unrelated `broadcast_to` methods.
           return [] unless class_name.end_with?("Channel")
 
           entry = channel_index.find(class_name) || channel_index.find("::#{class_name}")
@@ -127,8 +116,7 @@ module Rigor
           )
         end
 
-        # Renders an `A.b.c` chain as a string (used to
-        # detect `ActionCable.server`). Returns nil for
+        # Renders an `A.b.c` chain as a string (used to detect `ActionCable.server`). Returns nil for
         # non-chained nodes.
         def call_chain_string(node)
           parts = []

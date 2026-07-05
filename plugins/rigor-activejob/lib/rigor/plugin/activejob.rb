@@ -8,14 +8,12 @@ require_relative "activejob/analyzer"
 
 module Rigor
   module Plugin
-    # rigor-activejob — validates `Job.perform_later(...)` /
-    # `.perform_now(...)` / `.perform(...)` argument arity
-    # against the discovered `#perform` definitions.
+    # rigor-activejob — validates `Job.perform_later(...)` / `.perform_now(...)` / `.perform(...)`
+    # argument arity against the discovered `#perform` definitions.
     #
     # Tier 1D of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
-    # Statically discovers ActiveJob subclasses by walking
-    # the configured `job_search_paths` and parsing each
-    # file with Prism — no `active_job` runtime dependency.
+    # Statically discovers ActiveJob subclasses by walking the configured `job_search_paths` and
+    # parsing each file with Prism — no `active_job` runtime dependency.
     #
     # ## Configuration
     #
@@ -27,16 +25,12 @@ module Rigor
     #
     # ## Limitations (v0.1.0)
     #
-    # - Direct-superclass match only. `class WelcomeJob <
-    #   BaseJob` where `BaseJob < ApplicationJob` is NOT
-    #   discovered. Add `BaseJob` to `job_base_classes` if
-    #   needed.
-    # - The `#perform` arity is read from the syntactic
-    #   parameter list. Methods built via `define_method`
-    #   are out of scope.
-    # - Required keyword arguments are recognised but not
-    #   validated at the call site (positional arity only
-    #   for v0.1.0).
+    # - Direct-superclass match only. `class WelcomeJob < BaseJob` where `BaseJob < ApplicationJob` is
+    #   NOT discovered. Add `BaseJob` to `job_base_classes` if needed.
+    # - The `#perform` arity is read from the syntactic parameter list. Methods built via
+    #   `define_method` are out of scope.
+    # - Required keyword arguments are recognised but not validated at the call site (positional arity
+    #   only for v0.1.0).
     class Activejob < Rigor::Plugin::Base
       manifest(
         id: "activejob",
@@ -48,11 +42,10 @@ module Rigor
         }
       )
 
-      # Cached: discovered job index. `watch:` (ADR-60 WD3) covers
-      # every `.rb` under `job_search_paths` so the cache invalidates
-      # when a job is added, removed, or edited; the discoverer's
-      # in-block `IoBoundary` reads are captured into the record-and-
-      # validate dependency descriptor after the block runs.
+      # Cached: discovered job index. `watch:` (ADR-60 WD3) covers every `.rb` under `job_search_paths`
+      # so the cache invalidates when a job is added, removed, or edited; the discoverer's in-block
+      # `IoBoundary` reads are captured into the record-and-validate dependency descriptor after the
+      # block runs.
       producer :job_index, watch: -> { [[@job_search_paths, "**/*.rb"]] } do |_params|
         JobDiscoverer.new(
           io_boundary: io_boundary,
@@ -66,9 +59,8 @@ module Rigor
         @job_base_classes = Array(config.fetch("job_base_classes")).map(&:to_s)
       end
 
-      # File-level only: the load-error emission. Per-call arity
-      # validation runs over the engine-owned walk via the node_rule
-      # below (ADR-37). The job index is lazily loaded + memoised by
+      # File-level only: the load-error emission. Per-call arity validation runs over the engine-owned
+      # walk via the node_rule below (ADR-37). The job index is lazily loaded + memoised by
       # `producer_value`, shared by both surfaces.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = producer_value(:job_index)

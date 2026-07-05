@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
-# Demo: rigor-activejob recognises every `Job.perform_later`
-# / `.perform_now` / `.perform` call and validates arity
-# against the discovered `#perform`. Run with `bundle exec
-# rigor check` from this directory.
+# Demo: rigor-activejob recognises every `Job.perform_later` / `.perform_now` / `.perform` call and
+# validates arity against the discovered `#perform`. Run with `bundle exec rigor check` from this
+# directory.
 
-# `WelcomeEmailJob#perform(user_id, locale = "en")` →
-# arity 1..2.
+# `WelcomeEmailJob#perform(user_id, locale = "en")` → arity 1..2.
 WelcomeEmailJob.perform_later(123)
 WelcomeEmailJob.perform_later(123, "ja")
 WelcomeEmailJob.perform_now(123)

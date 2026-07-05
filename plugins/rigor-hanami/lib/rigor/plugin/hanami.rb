@@ -9,37 +9,28 @@ module Rigor
   module Plugin
     # rigor-hanami — enforces the Hanami::Action protocol.
     #
-    # Hanami 3.x actions inherit from `Hanami::Action` and
-    # define a single entry-point:
+    # Hanami 3.x actions inherit from `Hanami::Action` and define a single entry-point:
     #
     #   def handle(request, response)
     #     response.status = 200
     #     response.body = "Hello"
     #   end
     #
-    # The method is void — the response is mutated in-place;
-    # the return value is discarded by the framework.
+    # The method is void — the response is mutated in-place; the return value is discarded by the
+    # framework.
     #
-    # This plugin uses the **ADR-28 path-scoped
-    # method-protocol contract** to:
+    # This plugin uses the **ADR-28 path-scoped method-protocol contract** to:
     #
-    # 1. **Provide** `Hanami::Action::Request` and
-    #    `Hanami::Action::Response` as the types of the
-    #    first and second parameters of every `#handle`
-    #    method defined inside `app/actions/**/*.rb`.
-    #    The engine substitutes these types for the usual
-    #    `Dynamic[Top]` fallback, so misuse of `request` or
-    #    `response` inside an action body surfaces as a
-    #    core diagnostic.
+    # 1. **Provide** `Hanami::Action::Request` and `Hanami::Action::Response` as the types of the first
+    #    and second parameters of every `#handle` method defined inside `app/actions/**/*.rb`. The
+    #    engine substitutes these types for the usual `Dynamic[Top]` fallback, so misuse of `request` or
+    #    `response` inside an action body surfaces as a core diagnostic.
     #
-    # 2. **Check** that every class under `app/actions/`
-    #    defines `#handle`. Missing definitions emit
+    # 2. **Check** that every class under `app/actions/` defines `#handle`. Missing definitions emit
     #    `missing-handle-method`.
     #
-    # Return-type conformance is NOT checked — Hanami
-    # actions are void by contract, and checking a void
-    # return would produce false positives on every `if`
-    # branch that doesn't end with an explicit `nil`.
+    # Return-type conformance is NOT checked — Hanami actions are void by contract, and checking a void
+    # return would produce false positives on every `if` branch that doesn't end with an explicit `nil`.
     #
     # ## Configuration
     #
@@ -55,10 +46,8 @@ module Rigor
     # | action class defines no `#handle`        | `:error` | `missing-handle-method` |
     # | `request` / `response` misuse in body    | core engine diagnostic  |
     #
-    # A misused `request` or `response` (e.g.
-    # `request.no_such_method`) surfaces as a standard
-    # engine `call.undefined-method` diagnostic once the
-    # plugin provides the parameter types.
+    # A misused `request` or `response` (e.g. `request.no_such_method`) surfaces as a standard engine
+    # `call.undefined-method` diagnostic once the plugin provides the parameter types.
     class Hanami < Rigor::Plugin::Base
       manifest(
         id: "hanami",
@@ -91,20 +80,17 @@ module Rigor
           end
       end
 
-      # ADR-28: override so the per-project `action_path` config
-      # reaches both the engine's parameter-provision tier and
-      # this plugin's check half.
+      # ADR-28: override so the per-project `action_path` config reaches both the engine's
+      # parameter-provision tier and this plugin's check half.
       def protocol_contracts
         @protocol_contracts || manifest.protocol_contracts
       end
 
-      # ADR-37 — per-class-node validation over the engine-owned walk.
-      # Each `Prism::ClassNode` is checked against every contract
-      # independently, so the plugin no longer ships its own `class_nodes`
-      # traversal; `ActionChecker#check_class` keeps the per-class
-      # contract logic. (A per-class contract check is exactly what
-      # `node_rule` is for — the return type is void, so no `scope`
-      # query is needed.)
+      # ADR-37 — per-class-node validation over the engine-owned walk. Each `Prism::ClassNode` is checked
+      # against every contract independently, so the plugin no longer ships its own `class_nodes`
+      # traversal; `ActionChecker#check_class` keeps the per-class contract logic. (A per-class contract
+      # check is exactly what `node_rule` is for — the return type is void, so no `scope` query is
+      # needed.)
       node_rule Prism::ClassNode do |node, _scope, path|
         contracts = protocol_contracts
         next [] if contracts.empty?

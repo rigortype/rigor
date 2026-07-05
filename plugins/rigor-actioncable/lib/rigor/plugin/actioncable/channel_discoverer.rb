@@ -7,36 +7,27 @@ require_relative "channel_index"
 module Rigor
   module Plugin
     class Actioncable < Rigor::Plugin::Base
-      # Walks the configured channel-search paths via the
-      # plugin's `IoBoundary`, parses each `.rb` file with
-      # Prism, and collects classes whose immediate
-      # superclass is one of the configured base classes.
+      # Walks the configured channel-search paths via the plugin's `IoBoundary`, parses each `.rb` file
+      # with Prism, and collects classes whose immediate superclass is one of the configured base
+      # classes.
       #
       # For each discovered channel, the discoverer:
       #
-      # - Records every public instance-side `def` whose
-      #   name isn't an ActionCable framework hook
-      #   (`subscribed`, `unsubscribed`, `_`-prefixed).
-      #   These are the action methods clients can invoke
+      # - Records every public instance-side `def` whose name isn't an ActionCable framework hook
+      #   (`subscribed`, `unsubscribed`, `_`-prefixed). These are the action methods clients can invoke
       #   via `subscription.perform("action_name", data)`.
-      # - Records every literal-string `stream_from "name"`
-      #   call as a registered stream name.
-      # - Sets `dynamic_streams: true` when the channel has
-      #   ANY non-literal `stream_from` argument (or a
-      #   `stream_for` call) so the analyzer knows it can't
-      #   be sure of every stream name.
+      # - Records every literal-string `stream_from "name"` call as a registered stream name.
+      # - Sets `dynamic_streams: true` when the channel has ANY non-literal `stream_from` argument (or a
+      #   `stream_for` call) so the analyzer knows it can't be sure of every stream name.
       #
       # Intentional limitations:
       #
       # - Direct-superclass match only.
-      # - Public-vs-private is not tracked; the framework
-      #   hooks (`subscribed`/`unsubscribed`) are excluded
-      #   by name. Methods marked `private` after a
-      #   `private` keyword would still appear in the
+      # - Public-vs-private is not tracked; the framework hooks (`subscribed`/`unsubscribed`) are
+      #   excluded by name. Methods marked `private` after a `private` keyword would still appear in the
       #   `action_methods` set.
-      # - `stream_for(record)` (model-scoped streams) is
-      #   recognised as setting `dynamic_streams: true` but
-      #   not introspected further.
+      # - `stream_for(record)` (model-scoped streams) is recognised as setting `dynamic_streams: true`
+      #   but not introspected further.
       class ChannelDiscoverer
         FRAMEWORK_HOOKS = %i[subscribed unsubscribed].to_set.freeze
 
@@ -126,12 +117,9 @@ module Rigor
           )
         end
 
-        # Walks the channel body recursively (so
-        # `stream_from` / `stream_for` calls inside
-        # `subscribed` / helper methods are picked up).
-        # Returns `[Array<String>, bool]` — the literal
-        # stream names + whether any dynamic registration
-        # was seen.
+        # Walks the channel body recursively (so `stream_from` / `stream_for` calls inside `subscribed`
+        # / helper methods are picked up). Returns `[Array<String>, bool]` — the literal stream names +
+        # whether any dynamic registration was seen.
         def collect_stream_registrations(node, names: [], dynamic: false)
           return [names, dynamic] if node.nil?
 
@@ -145,8 +133,7 @@ module Rigor
                 dynamic = true
               end
             when :stream_for
-              # Model-scoped stream — name is computed from
-              # the record at runtime; treat as dynamic.
+              # Model-scoped stream — name is computed from the record at runtime; treat as dynamic.
               dynamic = true
             end
           end

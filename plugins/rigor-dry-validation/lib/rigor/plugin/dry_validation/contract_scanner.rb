@@ -5,18 +5,15 @@ require "prism"
 module Rigor
   module Plugin
     class DryValidation < Rigor::Plugin::Base
-      # Walks project source for `class T < Dry::Validation::Contract`
-      # subclasses and returns the contract class FQN set.
+      # Walks project source for `class T < Dry::Validation::Contract` subclasses and returns the
+      # contract class FQN set.
       #
-      # Recognition tightness: the superclass match accepts EITHER
-      # the fully-qualified `Dry::Validation::Contract` (3-segment
-      # path) OR the lexical-nested `Validation::Contract`
-      # (2-segment path, when the class body lives inside
-      # `module Dry`). The bare `< Contract` form (1-segment)
-      # is NOT recognised — too ambiguous; users who deeply nest
-      # under `Dry::Validation` should use the explicit form.
-      # Unrelated `< MyApp::Validation::Contract` shapes with the
-      # same tail do NOT register.
+      # Recognition tightness: the superclass match accepts EITHER the fully-qualified
+      # `Dry::Validation::Contract` (3-segment path) OR the lexical-nested `Validation::Contract`
+      # (2-segment path, when the class body lives inside `module Dry`). The bare `< Contract` form
+      # (1-segment) is NOT recognised — too ambiguous; users who deeply nest under `Dry::Validation`
+      # should use the explicit form. Unrelated `< MyApp::Validation::Contract` shapes with the same tail
+      # do NOT register.
       module ContractScanner
         CONTRACT_FULL_PATH = %w[Dry Validation Contract].freeze
         CONTRACT_LEXICAL_DRY_PATH = %w[Validation Contract].freeze
@@ -24,10 +21,8 @@ module Rigor
 
         module_function
 
-        # @param paths [Array<String>] absolute paths to `.rb`
-        #   files the project's `paths:` resolves to.
-        # @return [Array<String>] frozen, sorted list of
-        #   recognized contract class FQNs (e.g.
+        # @param paths [Array<String>] absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @return [Array<String>] frozen, sorted list of recognized contract class FQNs (e.g.
         #   `["App::NewUserContract", "Types::EmailContract"]`).
         def scan(paths:)
           contracts = []
@@ -77,11 +72,9 @@ module Rigor
         end
         private_class_method :collect_module_node
 
-        # Matches superclasses whose constant chain is EXACTLY
-        # `Dry::Validation::Contract` (full path) OR EXACTLY
-        # `Validation::Contract` (lexical-Dry path). Other shapes
-        # — including same-tail-but-different-root chains and
-        # the ambiguous bare `Contract` — do not match.
+        # Matches superclasses whose constant chain is EXACTLY `Dry::Validation::Contract` (full path) OR
+        # EXACTLY `Validation::Contract` (lexical-Dry path). Other shapes — including
+        # same-tail-but-different-root chains and the ambiguous bare `Contract` — do not match.
         def contract_subclass?(class_node)
           superclass = class_node.superclass
           return false if superclass.nil?

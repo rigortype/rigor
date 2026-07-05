@@ -21,30 +21,23 @@ module Rigor
       #     end
       #   end
       #
-      # `t.references "x"` becomes an `x_id` integer column
-      # (foreign-key indices and constraints are ignored — only the
-      # column shape matters for type inference); add a `polymorphic:
-      # true` option and an `x_type` string column is emitted too.
-      # `t.timestamps` adds `created_at` and `updated_at` datetime
-      # columns. `t.column "x", :type` is the generic column form.
-      # Any other `t.<method> "name"` call is treated as a column
-      # whose type symbol is the method name — unknown types degrade
-      # to `Object` per `SchemaTable.ruby_type_for` rather than being
-      # dropped. Only the structural calls in {NON_COLUMN_METHODS}
-      # (indexes, constraints, foreign keys) are skipped.
+      # `t.references "x"` becomes an `x_id` integer column (foreign-key indices and constraints are
+      # ignored — only the column shape matters for type inference); add a `polymorphic: true` option and
+      # an `x_type` string column is emitted too. `t.timestamps` adds `created_at` and `updated_at`
+      # datetime columns. `t.column "x", :type` is the generic column form. Any other `t.<method> "name"`
+      # call is treated as a column whose type symbol is the method name — unknown types degrade to
+      # `Object` per `SchemaTable.ruby_type_for` rather than being dropped. Only the structural calls in
+      # {NON_COLUMN_METHODS} (indexes, constraints, foreign keys) are skipped.
       #
-      # Designed for the Prism interpretation pattern from
-      # rigor-lisp-eval — recursive descent on the AST, no eval.
+      # Designed for the Prism interpretation pattern from rigor-lisp-eval — recursive descent on the AST,
+      # no eval.
       class SchemaParser
         TIMESTAMPS_COLUMNS = %w[created_at updated_at].freeze
 
-        # Structural `t.<method>` calls inside a `create_table`
-        # block that declare indexes / constraints rather than
-        # columns. Everything NOT in this set that carries a
-        # literal column name is treated as a column declaration
-        # so a real column is never silently dropped — a dropped
-        # column turns every query against it into a false
-        # `unknown-column` diagnostic.
+        # Structural `t.<method>` calls inside a `create_table` block that declare indexes / constraints
+        # rather than columns. Everything NOT in this set that carries a literal column name is treated as
+        # a column declaration so a real column is never silently dropped — a dropped column turns every
+        # query against it into a false `unknown-column` diagnostic.
         NON_COLUMN_METHODS = %i[
           index check_constraint exclusion_constraint
           unique_constraint foreign_key primary_keys
@@ -114,10 +107,9 @@ module Rigor
           false
         end
 
-        # Walks the block body collecting `t.<method>(...)` calls.
-        # Skips nested blocks (e.g. inside `if`-conditioned columns)
-        # only at the top level — for richer schema constructs the
-        # parser falls back silently.
+        # Walks the block body collecting `t.<method>(...)` calls. Skips nested blocks (e.g. inside
+        # `if`-conditioned columns) only at the top level — for richer schema constructs the parser falls
+        # back silently.
         def collect_column_calls(node, &)
           return if node.nil?
 
@@ -139,13 +131,11 @@ module Rigor
           when :column
             parse_generic_column(call_node)
           else
-            # Structural DSL call (index / constraint / FK) —
-            # not a column.
+            # Structural DSL call (index / constraint / FK) — not a column.
             return nil if NON_COLUMN_METHODS.include?(method)
 
-            # Any other `t.<method> "name"` is a column. The
-            # method name is the type symbol; unknown types
-            # degrade to `Object` rather than dropping the column.
+            # Any other `t.<method> "name"` is a column. The method name is the type symbol; unknown
+            # types degrade to `Object` rather than dropping the column.
             parse_typed_column(method, call_node)
           end
         end
@@ -162,11 +152,9 @@ module Rigor
           )
         end
 
-        # `t.references "x"` adds an `x_id` integer column.
-        # `t.references "x", polymorphic: true` additionally adds
-        # an `x_type` string column — without it every
-        # `where(x_type: ...)` on the polymorphic owner surfaces
-        # as a false `unknown-column`.
+        # `t.references "x"` adds an `x_id` integer column. `t.references "x", polymorphic: true`
+        # additionally adds an `x_type` string column — without it every `where(x_type: ...)` on the
+        # polymorphic owner surfaces as a false `unknown-column`.
         def parse_references_column(call_node)
           name = string_argument(call_node, 0)
           return nil if name.nil?
@@ -184,10 +172,9 @@ module Rigor
           keyword_true?(call_node, :polymorphic)
         end
 
-        # Returns true iff `call_node` has a `name: true` keyword
-        # argument. Used to detect schema modifiers like
-        # `t.bigint "status_ids", array: true` (Postgres array
-        # column) and `t.references "x", polymorphic: true`.
+        # Returns true iff `call_node` has a `name: true` keyword argument. Used to detect schema
+        # modifiers like `t.bigint "status_ids", array: true` (Postgres array column) and `t.references
+        # "x", polymorphic: true`.
         def keyword_true?(call_node, name)
           return false if call_node.arguments.nil?
 
@@ -204,9 +191,8 @@ module Rigor
           false
         end
 
-        # `t.column "name", "type"` / `t.column "name", :type` —
-        # the explicit generic column form. The type lives in the
-        # second argument; an absent type degrades to `:string`.
+        # `t.column "name", "type"` / `t.column "name", :type` — the explicit generic column form. The
+        # type lives in the second argument; an absent type degrades to `:string`.
         def parse_generic_column(call_node)
           name = string_argument(call_node, 0)
           return nil if name.nil?

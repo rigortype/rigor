@@ -4,26 +4,21 @@ require "rigor/plugin"
 
 module Rigor
   module Plugin
-    # ADR-16 Tier B worked plugin: recognises Devise's model-side
-    # `devise :strategy_a, :strategy_b` DSL on `ActiveRecord::Base`
-    # subclasses and explodes each strategy's module RBS into the
-    # calling class.
+    # ADR-16 Tier B worked plugin: recognises Devise's model-side `devise :strategy_a, :strategy_b` DSL on
+    # `ActiveRecord::Base` subclasses and explodes each strategy's module RBS into the calling class.
     #
-    # Per the per-library survey (§ Devise), Devise's `devise(*modules)`
-    # at `lib/devise/models.rb:79-112` is a **table-driven include
-    # sequence**: each Symbol argument resolves through
-    # `Devise::Models.const_get(m.to_s.classify)` to a concrete
-    # `Devise::Models::*` module, which is then mixed into the
-    # calling class. The substrate replays the same shape
-    # statically — the manifest's `modules_by_symbol:` mirrors
-    # Devise's `lib/devise/modules.rb` and the pre-pass scanner
-    # synthesises one SyntheticMethod per (calling class, included
-    # module instance method) pair into the SyntheticMethodIndex.
+    # Per the per-library survey (§ Devise), Devise's `devise(*modules)` at `lib/devise/models.rb:79-112`
+    # is a **table-driven include sequence**: each Symbol argument resolves through
+    # `Devise::Models.const_get(m.to_s.classify)` to a concrete `Devise::Models::*` module, which is then
+    # mixed into the calling class. The substrate replays the same shape statically — the manifest's
+    # `modules_by_symbol:` mirrors Devise's `lib/devise/modules.rb` and the pre-pass scanner synthesises
+    # one SyntheticMethod per (calling class, included module instance method) pair into the
+    # SyntheticMethodIndex.
     #
     # ## Reach
     #
-    # The full set of strategies Devise registers via
-    # `Devise.add_module` at gem load (per `lib/devise/modules.rb`):
+    # The full set of strategies Devise registers via `Devise.add_module` at gem load (per
+    # `lib/devise/modules.rb`):
     #
     # - `:database_authenticatable` — password + email auth core
     # - `:recoverable` — password-reset flow
@@ -37,41 +32,31 @@ module Rigor
     # - `:omniauthable` — OmniAuth providers
     # - `:authenticatable` — always-included base module
     #
-    # The substrate's pre-pass scanner consults each module's RBS
-    # via `Environment::RbsLoader#instance_definition` to enumerate
-    # method names. A user project providing real Devise via
-    # Bundler will see methods like `valid_password?`,
-    # `send_reset_password_instructions`, etc. resolve through the
-    # synthetic-method tier without `call.undefined-method`.
+    # The substrate's pre-pass scanner consults each module's RBS via `Environment::RbsLoader#instance_definition`
+    # to enumerate method names. A user project providing real Devise via Bundler will see methods like
+    # `valid_password?`, `send_reset_password_instructions`, etc. resolve through the synthetic-method
+    # tier without `call.undefined-method`.
     #
     # ## Precision tier
     #
-    # The scanner records `origin_module:` in each synthetic
-    # method's provenance. The dispatcher's slice-6a TierB path
-    # (`promote_via_origin_module`) redispatches on
-    # `Nominal[origin_module]` via `RbsDispatch`, so Devise's
-    # authored RBS return types win: `valid_password?` returns
-    # `bool`, not `Dynamic[T]`. Unknown return types degrade
-    # gracefully to `Dynamic[T]`.
+    # The scanner records `origin_module:` in each synthetic method's provenance. The dispatcher's
+    # slice-6a TierB path (`promote_via_origin_module`) redispatches on `Nominal[origin_module]` via
+    # `RbsDispatch`, so Devise's authored RBS return types win: `valid_password?` returns `bool`, not
+    # `Dynamic[T]`. Unknown return types degrade gracefully to `Dynamic[T]`.
     #
     # ## Scope
     #
-    # - Recognises model-side `devise :a, :b` on any AR::Base
-    #   subclass; trait symbol set mirrors `lib/devise/modules.rb`.
-    # - `Devise::Models::Authenticatable` is always_included
-    #   (matches Devise's `with_options model: true`).
-    # - Unknown trait symbols silently skipped (per slice-3
-    #   design judgment (2)). User initializers that call
-    #   `Devise.add_module :my_strategy, ...` are NOT seen — that
-    #   path requires a separate scanner for `config/initializers/`
-    #   and is deferred.
-    # - Controller-side helpers (`current_user`, `authenticate_user!`,
-    #   etc.) are Tier C work, NOT Tier B; deferred to a future
-    #   slice that consumes ADR-9 fact-store entries from a
-    #   `rigor-rails-routes`-style walker.
-    # - Per-strategy `ClassMethods` extend (Devise's `extend
-    #   Mod::ClassMethods` pattern) is NOT yet wired — slice 3
-    #   covers instance methods only per WD13 floor.
+    # - Recognises model-side `devise :a, :b` on any AR::Base subclass; trait symbol set mirrors
+    #   `lib/devise/modules.rb`.
+    # - `Devise::Models::Authenticatable` is always_included (matches Devise's `with_options model: true`).
+    # - Unknown trait symbols silently skipped (per slice-3 design judgment (2)). User initializers that
+    #   call `Devise.add_module :my_strategy, ...` are NOT seen — that path requires a separate scanner
+    #   for `config/initializers/` and is deferred.
+    # - Controller-side helpers (`current_user`, `authenticate_user!`, etc.) are Tier C work, NOT Tier B;
+    #   deferred to a future slice that consumes ADR-9 fact-store entries from a `rigor-rails-routes`-style
+    #   walker.
+    # - Per-strategy `ClassMethods` extend (Devise's `extend Mod::ClassMethods` pattern) is NOT yet wired
+    #   — slice 3 covers instance methods only per WD13 floor.
     class Devise < Rigor::Plugin::Base
       manifest(
         id: "devise",

@@ -1,19 +1,16 @@
 # frozen_string_literal: true
 
-# Demo controller exercising the route-helper call shapes
-# rigor-actionpack Phase 4 recognises:
+# Demo controller exercising the route-helper call shapes rigor-actionpack Phase 4 recognises:
 #
 # - bare helper (`users_path`)
 # - helper with positional argument (`user_path(@user)`)
 # - nested helper (`user_post_path(@user, @post)`)
 # - namespaced helper (`admin_widget_path(@widget)`)
 # - the `_url` form is recognised the same way
-# - keyword-only options (`format: :json`) don't count
-#   against arity
+# - keyword-only options (`format: :json`) don't count against arity
 #
-# The `redirect_to`, `link_to`, etc. shapes are pass-through:
-# Rigor sees the `*_path` argument before it reaches the
-# framework method.
+# The `redirect_to`, `link_to`, etc. shapes are pass-through: Rigor sees the `*_path` argument before
+# it reaches the framework method.
 
 class UsersController < ApplicationController
   before_action :authenticate!
@@ -46,22 +43,19 @@ class UsersController < ApplicationController
   end
 
   def render_template
-    # Phase 3 — `:show` resolves to `app/views/users/show.html.erb`
-    # if that view exists.
+    # Phase 3 — `:show` resolves to `app/views/users/show.html.erb` if that view exists.
     render :show
   end
 
   def render_partial
-    # Phase 3 — `partial: "user"` resolves to
-    # `app/views/users/_user.html.erb`.
+    # Phase 3 — `partial: "user"` resolves to `app/views/users/_user.html.erb`.
     render partial: "user"
   end
 
   private
 
   def authenticate!
-    # Filter callback — defined here so the before_action /
-    # skip_before_action references resolve.
+    # Filter callback — defined here so the before_action / skip_before_action references resolve.
   end
 
   def set_user

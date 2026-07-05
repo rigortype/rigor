@@ -5,15 +5,12 @@ require "prism"
 module Rigor
   module Plugin
     class DryTypes < Rigor::Plugin::Base
-      # Walks project source for `module X; include Dry.Types(); end`
-      # shapes and emits a `{ "<X>::<Alias>" => "<UnderlyingClass>" }`
-      # alias table covering the dry-types canonical-shortcut names.
-      # See {DryTypes} module-docstring for the floor / ceiling
-      # scoping.
+      # Walks project source for `module X; include Dry.Types(); end` shapes and emits a
+      # `{ "<X>::<Alias>" => "<UnderlyingClass>" }` alias table covering the dry-types canonical-shortcut
+      # names. See {DryTypes} module-docstring for the floor / ceiling scoping.
       module AliasScanner
-        # The canonical-shortcut names dry-types exposes through
-        # `include Dry.Types()`. Mirrors `Dry::Types.type_keys`
-        # from the upstream gem.
+        # The canonical-shortcut names dry-types exposes through `include Dry.Types()`. Mirrors
+        # `Dry::Types.type_keys` from the upstream gem.
         CANONICAL_ALIASES = {
           "String" => "String",
           "Integer" => "Integer",
@@ -32,29 +29,21 @@ module Rigor
           "Any" => "Object"
         }.freeze
 
-        # Slice 2 — nested-category aliases. dry-types installs
-        # four parallel coercion categories: `Coercible::*`
-        # (everything-to-target coercion), `Strict::*` (no
-        # coercion; raise if mismatch), `Params::*` (HTTP /
-        # query-string-style coercion, used by Hanami / Roda /
-        # dry-web in request handling), `JSON::*` (JSON-shape
-        # coercion). Each category exposes the same set of names
-        # as the canonical shortcuts above, plus a few additions
-        # that are category-specific (`Params::Nil`,
-        # `JSON::Symbol`). For Rigor's purposes the underlying
-        # class is the same regardless of category — coercion
-        # semantics are a runtime concern. We register every
-        # `<module>::<Category>::<Name>` mapping the upstream gem
-        # publishes so call-site references work uniformly.
+        # Slice 2 — nested-category aliases. dry-types installs four parallel coercion categories:
+        # `Coercible::*` (everything-to-target coercion), `Strict::*` (no coercion; raise if mismatch),
+        # `Params::*` (HTTP / query-string-style coercion, used by Hanami / Roda / dry-web in request
+        # handling), `JSON::*` (JSON-shape coercion). Each category exposes the same set of names as the
+        # canonical shortcuts above, plus a few additions that are category-specific (`Params::Nil`,
+        # `JSON::Symbol`). For Rigor's purposes the underlying class is the same regardless of category —
+        # coercion semantics are a runtime concern. We register every `<module>::<Category>::<Name>`
+        # mapping the upstream gem publishes so call-site references work uniformly.
         NESTED_CATEGORIES = %w[Coercible Strict Params JSON].freeze
         private_constant :NESTED_CATEGORIES
 
         module_function
 
-        # @param paths [Array<String>] absolute paths to `.rb`
-        #   files the project's `paths:` resolves to.
-        # @return [Hash{String => String}] frozen
-        #   `{aliased_name => underlying_class_name}` map. Empty
+        # @param paths [Array<String>] absolute paths to `.rb` files the project's `paths:` resolves to.
+        # @return [Hash{String => String}] frozen `{aliased_name => underlying_class_name}` map. Empty
         #   when no `include Dry.Types()` declaration is found.
         def scan(paths:)
           results = paths.flat_map { |path| scan_file(path) }
@@ -64,16 +53,16 @@ module Rigor
           base = canonical_table(modules)
           results.each do |result|
             result[:compositions].each do |const_name, underlying|
-              # Each result's compositions are scoped under that
-              # result's enclosing module (`Types::Email`, etc.).
+              # Each result's compositions are scoped under that result's enclosing module
+              # (`Types::Email`, etc.).
               base["#{result[:module_name]}::#{const_name}"] ||= underlying
             end
           end
           base.freeze
         end
 
-        # Populates the canonical-shortcut + nested-category
-        # table (15 + 15 × 4 = 75 entries per alias module).
+        # Populates the canonical-shortcut + nested-category table (15 + 15 × 4 = 75 entries per alias
+        # module).
         def canonical_table(modules)
           modules.each_with_object({}) do |module_name, acc|
             CANONICAL_ALIASES.each do |alias_name, underlying|
@@ -96,22 +85,18 @@ module Rigor
             { module_name: module_info[:module_name], compositions: compositions }
           end
         rescue StandardError
-          # Missing-file / parse failures degrade to "no
-          # contribution from this file"; the plugin's
-          # user-visible surface is the published fact, and
-          # dropping unparseable files keeps the fact stable.
+          # Missing-file / parse failures degrade to "no contribution from this file"; the plugin's
+          # user-visible surface is the published fact, and dropping unparseable files keeps the fact
+          # stable.
           []
         end
         private_class_method :scan_file
 
-        # Walks a Prism AST collecting alias-module info:
-        # `{module_name:, body:}` for every `module X; include
-        # Dry.Types(); …end` shape. Tracks the enclosing module
-        # chain so a nested `module App; module Types; include
-        # Dry.Types(); end; end` publishes `"App::Types"` as the
-        # alias scope. The `body:` field is the
-        # `Prism::StatementsNode` (or nil) we re-walk later for
-        # user-authored compositions (slice 3).
+        # Walks a Prism AST collecting alias-module info: `{module_name:, body:}` for every `module X;
+        # include Dry.Types(); …end` shape. Tracks the enclosing module chain so a nested `module App;
+        # module Types; include Dry.Types(); end; end` publishes `"App::Types"` as the alias scope. The
+        # `body:` field is the `Prism::StatementsNode` (or nil) we re-walk later for user-authored
+        # compositions (slice 3).
         def collect_alias_modules(node, qualified_prefix)
           return [] unless node.is_a?(Prism::Node)
 
@@ -127,9 +112,8 @@ module Rigor
                       end
             current + children
           when Prism::ClassNode
-            # Module-level declarations win; we don't recurse into
-            # class bodies for `include Dry.Types()` because the
-            # canonical pattern is module-level.
+            # Module-level declarations win; we don't recurse into class bodies for `include
+            # Dry.Types()` because the canonical pattern is module-level.
             []
           else
             node.compact_child_nodes.flat_map { |c| collect_alias_modules(c, qualified_prefix) }
@@ -137,31 +121,20 @@ module Rigor
         end
         private_class_method :collect_alias_modules
 
-        # Slice 3 — user-authored composition recognition.
-        # Walks the alias-module body for `Email =
-        # String.constrained(...)` shapes. Each
-        # `ConstantWriteNode` whose RHS is a method chain
-        # rooted on a canonical-shortcut name (`String`,
-        # `Integer`, …) — or on a nested-category form
-        # (`Strict::String` etc.) — registers the LHS under
-        # the canonical head's underlying class. Unions
-        # (`String | Integer`) and intersections are skipped
-        # (no single underlying class).
+        # Slice 3 — user-authored composition recognition. Walks the alias-module body for `Email =
+        # String.constrained(...)` shapes. Each `ConstantWriteNode` whose RHS is a method chain rooted on
+        # a canonical-shortcut name (`String`, `Integer`, …) — or on a nested-category form
+        # (`Strict::String` etc.) — registers the LHS under the canonical head's underlying class. Unions
+        # (`String | Integer`) and intersections are skipped (no single underlying class).
         #
-        # Slice 4 — transitive composition resolution. After
-        # the direct (slice-3) pass collects compositions
-        # whose RHS root is canonical, a second pass walks the
-        # remaining `ConstantWriteNode`s for RHS shapes that
-        # resolve THROUGH an already-published composition —
-        # e.g. `ManagerEmail = Email` (bare reference) or
-        # `ManagerEmail = Email.constrained(min_size: 3)`
-        # (method chain rooted on a composition LHS). Cycle
-        # detection: `A = B; B = A` resolves neither (each
-        # LHS's resolution walk sees itself in the visited
-        # set and bails). Unknown references (`ManagerEmail =
-        # NotAComposition`) silently drop — the user is free
-        # to assign any constant to any other; the plugin only
-        # publishes facts when the underlying class is known.
+        # Slice 4 — transitive composition resolution. After the direct (slice-3) pass collects
+        # compositions whose RHS root is canonical, a second pass walks the remaining
+        # `ConstantWriteNode`s for RHS shapes that resolve THROUGH an already-published composition —
+        # e.g. `ManagerEmail = Email` (bare reference) or `ManagerEmail = Email.constrained(min_size: 3)`
+        # (method chain rooted on a composition LHS). Cycle detection: `A = B; B = A` resolves neither
+        # (each LHS's resolution walk sees itself in the visited set and bails). Unknown references
+        # (`ManagerEmail = NotAComposition`) silently drop — the user is free to assign any constant to
+        # any other; the plugin only publishes facts when the underlying class is known.
         def collect_compositions(body)
           return {} if body.nil?
 
@@ -188,14 +161,10 @@ module Rigor
         end
         private_class_method :collect_compositions
 
-        # Slice-4 helper. Returns the un-resolved RHS root
-        # constant name (not necessarily a CANONICAL_ALIASES
-        # entry) for transitive resolution. Mirrors
-        # {composition_head_canonical} but accepts any
-        # `ConstantReadNode` / `ConstantPathNode` tail rather
-        # than canonical-only. Declines on union / intersection
-        # operators for the same single-underlying-class
-        # reason.
+        # Slice-4 helper. Returns the un-resolved RHS root constant name (not necessarily a
+        # CANONICAL_ALIASES entry) for transitive resolution. Mirrors {composition_head_canonical} but
+        # accepts any `ConstantReadNode` / `ConstantPathNode` tail rather than canonical-only. Declines on
+        # union / intersection operators for the same single-underlying-class reason.
         def transitive_reference_name(node)
           case node
           when Prism::ConstantReadNode
@@ -211,14 +180,10 @@ module Rigor
         end
         private_class_method :transitive_reference_name
 
-        # Slice-4 helper. Resolves `lhs`'s RHS through the
-        # `direct` (slice-3) compositions table, chaining
-        # through `ref_edges` for transitive references.
-        # Returns the canonical underlying-class name (e.g.
-        # `"String"`) or nil when no chain ends at a direct
-        # composition. Cycles silently return nil — every step
-        # adds the current lhs to `visited` and bails on
-        # re-entry.
+        # Slice-4 helper. Resolves `lhs`'s RHS through the `direct` (slice-3) compositions table, chaining
+        # through `ref_edges` for transitive references. Returns the canonical underlying-class name
+        # (e.g. `"String"`) or nil when no chain ends at a direct composition. Cycles silently return nil
+        # — every step adds the current lhs to `visited` and bails on re-entry.
         def resolve_transitive_ref(lhs, direct, ref_edges, visited:)
           return nil if visited.include?(lhs)
 
@@ -231,25 +196,19 @@ module Rigor
         end
         private_class_method :resolve_transitive_ref
 
-        # Walks an RHS expression looking for the canonical
-        # shortcut name at the root of a method chain. Returns
-        # the canonical name (`"String"` etc.) or nil.
+        # Walks an RHS expression looking for the canonical shortcut name at the root of a method chain.
+        # Returns the canonical name (`"String"` etc.) or nil.
         #
         # Recognised shapes (recursively on `node.receiver`):
         #
-        # - Bare `String` / `Integer` — `Prism::ConstantReadNode`
-        #   whose name is in `CANONICAL_ALIASES`.
-        # - `Strict::String` / `Coercible::Integer` / etc. —
-        #   `Prism::ConstantPathNode` whose tail is in
+        # - Bare `String` / `Integer` — `Prism::ConstantReadNode` whose name is in `CANONICAL_ALIASES`.
+        # - `Strict::String` / `Coercible::Integer` / etc. — `Prism::ConstantPathNode` whose tail is in
         #   `CANONICAL_ALIASES`.
-        # - `String.constrained(...)` / `.optional` /
-        #   `.default(...)` / arbitrary single-arg method —
+        # - `String.constrained(...)` / `.optional` / `.default(...)` / arbitrary single-arg method —
         #   recurse on the receiver.
         #
-        # Declines on `String | Integer` (union, `:|`) and
-        # `String & Foo` (intersection, `:&`) so the alias
-        # table doesn't claim a single underlying class for
-        # a multi-class composition.
+        # Declines on `String | Integer` (union, `:|`) and `String & Foo` (intersection, `:&`) so the
+        # alias table doesn't claim a single underlying class for a multi-class composition.
         def composition_head_canonical(node)
           case node
           when Prism::ConstantReadNode
@@ -266,12 +225,10 @@ module Rigor
         end
         private_class_method :composition_head_canonical
 
-        # `include Dry.Types()` at the top of the module body is the
-        # canonical alias declaration. We accept the call anywhere
-        # in the body (some projects guard it with a `if defined?`
-        # check). The argument list must be empty (or a kwargs-only
-        # `default: :nominal` style accepted by upstream; we treat
-        # both as "alias-installing").
+        # `include Dry.Types()` at the top of the module body is the canonical alias declaration. We
+        # accept the call anywhere in the body (some projects guard it with a `if defined?` check). The
+        # argument list must be empty (or a kwargs-only `default: :nominal` style accepted by upstream;
+        # we treat both as "alias-installing").
         def contains_dry_types_include?(body)
           return false if body.nil?
 
@@ -295,10 +252,9 @@ module Rigor
         end
         private_class_method :tree_walk
 
-        # Matches `include Dry.Types()` (with or without kwargs).
-        # The receiver of the include call MUST be implicit
-        # (i.e., called on `self`), and the argument MUST be a
-        # method call on the `Dry` constant naming `Types`.
+        # Matches `include Dry.Types()` (with or without kwargs). The receiver of the include call MUST
+        # be implicit (i.e., called on `self`), and the argument MUST be a method call on the `Dry`
+        # constant naming `Types`.
         def include_call_targeting_dry_types?(node)
           return false unless node.is_a?(Prism::CallNode)
           return false unless node.name == :include && node.receiver.nil?
@@ -319,11 +275,9 @@ module Rigor
         end
         private_class_method :dry_types_call?
 
-        # Resolves a `Prism::ConstantPathNode` /
-        # `Prism::ConstantReadNode` chain to its dot-separated
-        # name (e.g. `"App::Types"`). Returns nil for the
-        # dynamic-prefix shape so the scanner treats those as
-        # opaque rather than guessing.
+        # Resolves a `Prism::ConstantPathNode` / `Prism::ConstantReadNode` chain to its dot-separated
+        # name (e.g. `"App::Types"`). Returns nil for the dynamic-prefix shape so the scanner treats
+        # those as opaque rather than guessing.
         def qualified_name_for(node)
           case node
           when Prism::ConstantReadNode then node.name.to_s

@@ -6,10 +6,8 @@ require "rigor/source/literals"
 module Rigor
   module Plugin
     class Activestorage < Rigor::Plugin::Base
-      # Walks the configured model search paths via the plugin's
-      # `IoBoundary`, parses each `.rb` file with Prism, and
-      # collects `has_one_attached` / `has_many_attached`
-      # declarations.
+      # Walks the configured model search paths via the plugin's `IoBoundary`, parses each `.rb` file
+      # with Prism, and collects `has_one_attached` / `has_many_attached` declarations.
       #
       # Returns rows the {AttachmentIndex} consumes:
       #
@@ -19,17 +17,13 @@ module Rigor
       #
       # Limitations (intentional for v0.1.0 of the plugin):
       #
-      # - The walker matches any class declaration that
-      #   contains a `has_*_attached` call. Whether the class
-      #   IS an ActiveRecord model is not verified here —
-      #   `rigor-activerecord` provides that check via its
-      #   own model index. The analyser is intentionally
-      #   lenient so the plugin runs standalone in projects
-      #   that haven't loaded `rigor-activerecord` yet.
-      # - Only Symbol-literal attachment names are recognised.
-      #   `has_one_attached(args)` or computed names decline.
-      # - Modules (`class Admin::User`) are recognised; the
-      #   resulting class name is the lexical path
+      # - The walker matches any class declaration that contains a `has_*_attached` call. Whether the
+      #   class IS an ActiveRecord model is not verified here — `rigor-activerecord` provides that check
+      #   via its own model index. The analyser is intentionally lenient so the plugin runs standalone in
+      #   projects that haven't loaded `rigor-activerecord` yet.
+      # - Only Symbol-literal attachment names are recognised. `has_one_attached(args)` or computed names
+      #   decline.
+      # - Modules (`class Admin::User`) are recognised; the resulting class name is the lexical path
       #   (`Admin::User`).
       class AttachmentDiscoverer
         ATTACHMENT_METHODS = {

@@ -5,17 +5,13 @@ require "prism"
 module Rigor
   module Plugin
     class Activestorage < Rigor::Plugin::Base
-      # Per-file walker. Emits one `:info` `attachment-call`
-      # diagnostic per recognised attachment access on a
-      # known AR class. The diagnostic surfaces what the
-      # plugin recognised so users can verify the model →
-      # attachment mapping the plugin sees.
+      # Per-file walker. Emits one `:info` `attachment-call` diagnostic per recognised attachment access
+      # on a known AR class. The diagnostic surfaces what the plugin recognised so users can verify the
+      # model → attachment mapping the plugin sees.
       #
-      # No `:error` diagnostics here — the `dynamic_return`
-      # return-type narrowing carries the type-checking value.
-      # An `unknown-attachment` rule (similar to
-      # `rigor-activerecord`'s `unknown-column`) is deferred:
-      # it requires a coupled receiver-class narrowing pass.
+      # No `:error` diagnostics here — the `dynamic_return` return-type narrowing carries the
+      # type-checking value. An `unknown-attachment` rule (similar to `rigor-activerecord`'s
+      # `unknown-column`) is deferred: it requires a coupled receiver-class narrowing pass.
       class Analyzer
         attr_reader :diagnostics
 
@@ -47,10 +43,8 @@ module Rigor
                         @attachment_index.attachments_for("::#{owner}")
           return if attachments.nil?
 
-          # Only flag when the method matches a known
-          # attachment name (the `dynamic_return` rule
-          # provides the narrowing; the diagnostic just
-          # confirms the recognition).
+          # Only flag when the method matches a known attachment name (the `dynamic_return` rule provides
+          # the narrowing; the diagnostic just confirms the recognition).
           attachment = attachments.find { |a| a[:name] == node.name.to_s }
           return if attachment.nil?
 

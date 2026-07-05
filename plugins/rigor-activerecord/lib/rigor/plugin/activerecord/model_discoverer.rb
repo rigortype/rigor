@@ -6,20 +6,15 @@ require "rigor/source/literals"
 module Rigor
   module Plugin
     class Activerecord < Rigor::Plugin::Base
-      # Walks the configured model search paths via the plugin's
-      # `IoBoundary`, parses each `.rb` file with Prism, and
-      # collects class declarations that resolve to ActiveRecord
-      # models.
+      # Walks the configured model search paths via the plugin's `IoBoundary`, parses each `.rb` file with
+      # Prism, and collects class declarations that resolve to ActiveRecord models.
       #
-      # Discovery is a two-step pass. First every class declaration
-      # is captured as a *candidate* (its name, its superclass
-      # name, and its DSL metadata). Then a fixpoint marks a
-      # candidate as a model when its superclass is a configured
-      # base class OR (transitively) the class name of another
-      # model — this is what makes single-table-inheritance
-      # subclasses (`class Admin < User`) discoverable. Each STI
-      # child carries an `sti_parent:` pointer the {ModelIndex}
-      # uses to inherit the root model's table and DSL surface.
+      # Discovery is a two-step pass. First every class declaration is captured as a *candidate* (its
+      # name, its superclass name, and its DSL metadata). Then a fixpoint marks a candidate as a model
+      # when its superclass is a configured base class OR (transitively) the class name of another model
+      # — this is what makes single-table-inheritance subclasses (`class Admin < User`) discoverable.
+      # Each STI child carries an `sti_parent:` pointer the {ModelIndex} uses to inherit the root model's
+      # table and DSL surface.
       #
       # Returns rows the {ModelIndex} consumes:
       #
@@ -28,21 +23,16 @@ module Rigor
       #
       # Limitations (intentional for v0.1.0 of the plugin):
       #
-      # - `self.table_name = "..."` recognised only when the RHS
-      #   is a String literal. Computed names
+      # - `self.table_name = "..."` recognised only when the RHS is a String literal. Computed names
       #   (`self.table_name = "#{tenant}_users"`) are skipped.
-      # - Modules (`class Admin::User < ApplicationRecord`) are
-      #   recognised; the resulting class name is the lexical
-      #   path (`Admin::User`).
-      # - The STI fixpoint matches a superclass name against model
-      #   class names tolerating a leading `::`; richer constant
-      #   resolution (relative namespacing) is not modelled.
+      # - Modules (`class Admin::User < ApplicationRecord`) are recognised; the resulting class name is
+      #   the lexical path (`Admin::User`).
+      # - The STI fixpoint matches a superclass name against model class names tolerating a leading `::`;
+      #   richer constant resolution (relative namespacing) is not modelled.
       class ModelDiscoverer
         # @param io_boundary [Rigor::Plugin::IoBoundary]
-        # @param search_paths [Array<String>] absolute or
-        #   project-relative paths.
-        # @param base_classes [Array<String>] superclass names that
-        #   identify a class as an AR model.
+        # @param search_paths [Array<String>] absolute or project-relative paths.
+        # @param base_classes [Array<String>] superclass names that identify a class as an AR model.
         def initialize(io_boundary:, search_paths:, base_classes:)
           @io_boundary = io_boundary
           @search_paths = search_paths
@@ -64,17 +54,13 @@ module Rigor
 
         private
 
-        # Fixpoint over the captured class candidates: a candidate
-        # is a model when its superclass is a configured base
-        # class, or — transitively — the class name of an
-        # already-known model. The second arm is what discovers
-        # STI subclasses; the matched parent name is stamped onto
-        # the row as `sti_parent:` so the {ModelIndex} can inherit
-        # the root model's table and association surface.
+        # Fixpoint over the captured class candidates: a candidate is a model when its superclass is a
+        # configured base class, or — transitively — the class name of an already-known model. The
+        # second arm is what discovers STI subclasses; the matched parent name is stamped onto the row as
+        # `sti_parent:` so the {ModelIndex} can inherit the root model's table and association surface.
         #
-        # Non-model classes (POROs, service objects that happen to
-        # live under `app/models/`) never enter `model_names` and
-        # are dropped.
+        # Non-model classes (POROs, service objects that happen to live under `app/models/`) never enter
+        # `model_names` and are dropped.
         def resolve_models(candidates)
           model_names = {}
           sti_parent = {}
@@ -108,9 +94,8 @@ module Rigor
           end
         end
 
-        # Resolves a superclass NAME against the set of known
-        # model class names, tolerating a leading `::`. Returns
-        # the matched model class name, or nil.
+        # Resolves a superclass NAME against the set of known model class names, tolerating a leading
+        # `::`. Returns the matched model class name, or nil.
         def model_match(superclass_name, model_names)
           return superclass_name if model_names.key?(superclass_name)
 
@@ -146,11 +131,9 @@ module Rigor
           end
         end
 
-        # Captures EVERY class declaration as a candidate — the
-        # `resolve_models` fixpoint decides afterwards which ones
-        # are models. The DSL metadata is extracted eagerly; for a
-        # non-model class it is simply discarded when the candidate
-        # is dropped.
+        # Captures EVERY class declaration as a candidate — the `resolve_models` fixpoint decides
+        # afterwards which ones are models. The DSL metadata is extracted eagerly; for a non-model class
+        # it is simply discarded when the candidate is dropped.
         def visit_class(node, lexical_path, &)
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
@@ -183,8 +166,7 @@ module Rigor
           walk_for_classes(node.body, inner_path, &) if node.body
         end
 
-        # Renders a constant-path node (`Admin::User`,
-        # `::ApplicationRecord`) as a String. Returns nil for
+        # Renders a constant-path node (`Admin::User`, `::ApplicationRecord`) as a String. Returns nil for
         # shapes the discoverer chooses not to handle.
         def constant_path_name(node)
           return nil if node.nil?
@@ -208,9 +190,8 @@ module Rigor
           end
         end
 
-        # Looks for `self.table_name = "..."` at the top level of
-        # the class body. Returns the literal String when found,
-        # nil otherwise.
+        # Looks for `self.table_name = "..."` at the top level of the class body. Returns the literal
+        # String when found, nil otherwise.
         def lookup_table_name_override(body)
           return nil if body.nil?
 
@@ -224,19 +205,14 @@ module Rigor
           nil
         end
 
-        # Recognised single-instance and collection association
-        # DSL methods. The kind drives the eventual return-type
-        # contribution: singular associations narrow to
-        # `Nominal[Target] | nil`, plural ones narrow to
-        # `ActiveRecord::Relation[Target]`.
+        # Recognised single-instance and collection association DSL methods. The kind drives the eventual
+        # return-type contribution: singular associations narrow to `Nominal[Target] | nil`, plural ones
+        # narrow to `ActiveRecord::Relation[Target]`.
         #
-        # `composed_of` value-object aggregations and
-        # `delegated_type` roles are folded in here too — both
-        # accept the association name as a `where` / `find_by`
-        # query key, so omitting them turns every such query into
-        # a false `unknown-column`. `composed_of` resolves to its
-        # value class (a real target); `delegated_type` is
-        # polymorphic (no single target).
+        # `composed_of` value-object aggregations and `delegated_type` roles are folded in here too — both
+        # accept the association name as a `where` / `find_by` query key, so omitting them turns every
+        # such query into a false `unknown-column`. `composed_of` resolves to its value class (a real
+        # target); `delegated_type` is polymorphic (no single target).
         ASSOCIATION_METHODS = {
           belongs_to: :singular,
           has_one: :singular,
@@ -247,28 +223,21 @@ module Rigor
         }.freeze
         private_constant :ASSOCIATION_METHODS
 
-        # Association DSL methods that are ALWAYS polymorphic —
-        # the accessor has no single static target class.
-        # `belongs_to` / `has_one` become polymorphic only with
-        # an explicit `polymorphic: true` option.
+        # Association DSL methods that are ALWAYS polymorphic — the accessor has no single static target
+        # class. `belongs_to` / `has_one` become polymorphic only with an explicit `polymorphic: true`
+        # option.
         POLYMORPHIC_BY_DEFAULT = %i[delegated_type].freeze
         private_constant :POLYMORPHIC_BY_DEFAULT
 
-        # Class-body declaration calls — the top-level `CallNode`s
-        # PLUS those nested inside a `with_options(...) do … end`
-        # block. `with_options` is Rails' idiom for sharing
-        # options across a group of `belongs_to` / `validates` /
-        # etc. declarations; without descending into it every
-        # association / enum / validation declared inside is
-        # invisible to the discoverer, turning `where(<assoc>:
-        # ...)` into a false `unknown-column`. Nested
-        # `with_options` blocks recurse.
+        # Class-body declaration calls — the top-level `CallNode`s PLUS those nested inside a
+        # `with_options(...) do … end` block. `with_options` is Rails' idiom for sharing options across a
+        # group of `belongs_to` / `validates` / etc. declarations; without descending into it every
+        # association / enum / validation declared inside is invisible to the discoverer, turning
+        # `where(<assoc>: ...)` into a false `unknown-column`. Nested `with_options` blocks recurse.
         #
-        # The options the `with_options` call itself carries (e.g.
-        # `with_options class_name: 'Account'`) are NOT merged into
-        # the nested calls — discovering the declaration name is
-        # what clears the false positive; the merged-option target
-        # precision is a separate refinement.
+        # The options the `with_options` call itself carries (e.g. `with_options class_name: 'Account'`)
+        # are NOT merged into the nested calls — discovering the declaration name is what clears the
+        # false positive; the merged-option target precision is a separate refinement.
         def declaration_calls(body)
           return [] if body.nil?
 
@@ -283,17 +252,13 @@ module Rigor
           end
         end
 
-        # Walks the class body for association DSL calls and
-        # returns a list of rows shaped:
+        # Walks the class body for association DSL calls and returns a list of rows shaped:
         #
         #     { name: "user", kind: :singular, target: "User" }
         #
-        # The `target` is resolved from an explicit
-        # `class_name: "Foo"` option when supplied, otherwise
-        # inferred from the association name via
-        # {Inflector.classify}. Calls whose first arg is not a
-        # Symbol literal (or whose `class_name:` is a non-literal
-        # expression) decline rather than guess.
+        # The `target` is resolved from an explicit `class_name: "Foo"` option when supplied, otherwise
+        # inferred from the association name via {Inflector.classify}. Calls whose first arg is not a
+        # Symbol literal (or whose `class_name:` is a non-literal expression) decline rather than guess.
         def lookup_associations(body)
           return [] if body.nil?
 
@@ -319,10 +284,8 @@ module Rigor
           polymorphic = POLYMORPHIC_BY_DEFAULT.include?(node.name) ||
                         association_option(args, "polymorphic") == true
 
-          # A polymorphic association has no single static target
-          # class — `target` is nil and the flow contribution
-          # declines to narrow rather than inventing a wrong
-          # `Nominal[<classified-name>]`.
+          # A polymorphic association has no single static target class — `target` is nil and the flow
+          # contribution declines to narrow rather than inventing a wrong `Nominal[<classified-name>]`.
           if polymorphic
             target = nil
           else
@@ -334,15 +297,12 @@ module Rigor
             nullable: association_nullable?(node.name, args) }
         end
 
-        # Whether a `:singular` association's accessor can return
-        # `nil`. `has_one` genuinely can (no associated record →
-        # `nil`). `belongs_to` is **required (non-`nil`) by default
-        # since Rails 5** (`belongs_to_required_by_default`); it
-        # becomes nullable only when the call passes `optional: true`
-        # or `required: false`. `composed_of` is non-nullable
-        # unless `allow_nil: true`. `delegated_type` roles are
-        # required. A non-literal option value declines to the
-        # default rather than guessing.
+        # Whether a `:singular` association's accessor can return `nil`. `has_one` genuinely can (no
+        # associated record → `nil`). `belongs_to` is **required (non-`nil`) by default since Rails 5**
+        # (`belongs_to_required_by_default`); it becomes nullable only when the call passes
+        # `optional: true` or `required: false`. `composed_of` is non-nullable unless `allow_nil: true`.
+        # `delegated_type` roles are required. A non-literal option value declines to the default rather
+        # than guessing.
         def association_nullable?(method_name, args)
           case method_name
           when :has_one
@@ -357,9 +317,8 @@ module Rigor
           end
         end
 
-        # Reads a literal boolean association option (`optional:` /
-        # `required:`). Returns `true` / `false` for a literal, or
-        # `nil` when the key is absent or its value is non-literal.
+        # Reads a literal boolean association option (`optional:` / `required:`). Returns `true` / `false`
+        # for a literal, or `nil` when the key is absent or its value is non-literal.
         def association_option(args, key)
           args.each do |arg|
             next unless arg.is_a?(Prism::KeywordHashNode)
@@ -388,10 +347,9 @@ module Rigor
           nil
         end
 
-        # `enum status: { active: 0, archived: 1 }` (Rails ≤6)
-        # and `enum :status, [:active, :archived]` (Rails 7+).
-        # Returns `Hash<column_name => Array<Symbol>>`.
-        # Non-literal forms decline rather than guess.
+        # `enum status: { active: 0, archived: 1 }` (Rails ≤6) and `enum :status, [:active, :archived]`
+        # (Rails 7+). Returns `Hash<column_name => Array<Symbol>>`. Non-literal forms decline rather than
+        # guess.
         def lookup_enums(body)
           return {} if body.nil?
 
@@ -445,10 +403,9 @@ module Rigor
           end
         end
 
-        # `scope :active, -> { ... }`. Records the scope name
-        # only (the body is intentionally NOT introspected —
-        # the caller contributes `ActiveRecord::Relation[Model]`
-        # based on the name alone via `class_scope_return_type`).
+        # `scope :active, -> { ... }`. Records the scope name only (the body is intentionally NOT
+        # introspected — the caller contributes `ActiveRecord::Relation[Model]` based on the name alone
+        # via `class_scope_return_type`).
         def lookup_scopes(body)
           return [] if body.nil?
 
@@ -468,11 +425,9 @@ module Rigor
           scopes.freeze
         end
 
-        # `validates :name, presence: true, length: { maximum: 100 }`.
-        # Records the attribute name (the validator option set
-        # is ignored — the value here is the diagnostic
-        # `validates :unknown_attr` surfacing when the attribute
-        # isn't a column on the table).
+        # `validates :name, presence: true, length: { maximum: 100 }`. Records the attribute name (the
+        # validator option set is ignored — the value here is the diagnostic `validates :unknown_attr`
+        # surfacing when the attribute isn't a column on the table).
         def lookup_validations(body)
           return [] if body.nil?
 
@@ -487,10 +442,9 @@ module Rigor
           attrs.uniq.freeze
         end
 
-        # `before_save :foo`, `after_create :bar`, etc. Records
-        # the referenced method name (a Symbol literal). The
-        # diagnostic value is "did you forget to `def` this?".
-        # Block callbacks (`before_save { ... }`) decline.
+        # `before_save :foo`, `after_create :bar`, etc. Records the referenced method name (a Symbol
+        # literal). The diagnostic value is "did you forget to `def` this?". Block callbacks
+        # (`before_save { ... }`) decline.
         CALLBACK_METHODS = %i[
           before_validation after_validation
           before_save after_save around_save
@@ -517,12 +471,10 @@ module Rigor
           targets.freeze
         end
 
-        # `alias_attribute :new_name, :old_name`. Records the
-        # mapping so the analyzer accepts the alias as a query
-        # key — without it every `where(<alias>: ...)` /
-        # `find_by(<alias>: ...)` call surfaces as a false
-        # `unknown-column`. Returns `Hash<alias => target>`;
-        # non-Symbol-literal forms decline rather than guess.
+        # `alias_attribute :new_name, :old_name`. Records the mapping so the analyzer accepts the alias
+        # as a query key — without it every `where(<alias>: ...)` / `find_by(<alias>: ...)` call surfaces
+        # as a false `unknown-column`. Returns `Hash<alias => target>`; non-Symbol-literal forms decline
+        # rather than guess.
         def lookup_aliases(body)
           return {} if body.nil?
 
@@ -543,10 +495,8 @@ module Rigor
           aliases.freeze
         end
 
-        # Collects every Symbol-literal positional argument
-        # from a CallNode. Used by both `lookup_validations`
-        # and `lookup_callbacks` to extract the attribute /
-        # method name list.
+        # Collects every Symbol-literal positional argument from a CallNode. Used by both
+        # `lookup_validations` and `lookup_callbacks` to extract the attribute / method name list.
         def symbol_args(node)
           args = node.arguments&.arguments
           return [] if args.nil?

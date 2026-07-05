@@ -5,17 +5,13 @@
 #   cp .rigor.dist.yml .rigor.yml
 #   RUBYLIB=$PWD/../lib bundle exec rigor check
 #
-# The canonical Dry::Validation::Contract subclass shapes:
-# fully-qualified and lexical-Dry-nested. With the plugin
-# enabled, rigor's `prepare(services)` hook scans this file,
-# sees both subclasses, and publishes the
-# `:dry_validation_contracts` fact = ["EmailContract",
-# "NewUserContract"].
+# The canonical Dry::Validation::Contract subclass shapes: fully-qualified and lexical-Dry-nested. With
+# the plugin enabled, rigor's `prepare(services)` hook scans this file, sees both subclasses, and
+# publishes the `:dry_validation_contracts` fact = ["EmailContract", "NewUserContract"].
 #
-# The shipped RBS overlay (sig/dry_validation.rbs, wired via
-# the `signature_paths:` config) types `contract.call(input)`
-# as returning `Dry::Validation::Result`, so the chained
-# `.success?` / `.to_h` queries below resolve cleanly.
+# The shipped RBS overlay (sig/dry_validation.rbs, wired via the `signature_paths:` config) types
+# `contract.call(input)` as returning `Dry::Validation::Result`, so the chained `.success?` / `.to_h`
+# queries below resolve cleanly.
 
 class NewUserContract < Dry::Validation::Contract
   params do
@@ -36,8 +32,8 @@ end
 #     end
 #   end
 #
-# Omitted from this demo so the file doesn't redefine the
-# `Dry::Validation::Contract` stub the RBS overlay also describes.
+# Omitted from this demo so the file doesn't redefine the `Dry::Validation::Contract` stub the RBS
+# overlay also describes.
 
 result = NewUserContract.new.call(email: "alice@example.com", age: 17)
 if result.success?

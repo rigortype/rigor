@@ -8,13 +8,10 @@ require_relative "factory_index"
 module Rigor
   module Plugin
     class Factorybot < Rigor::Plugin::Base
-      # Walks `factory_search_paths` and parses each `.rb` file
-      # into a {FactoryIndex}. The search-path list contains
-      # both directory paths (recursively walked) and direct
-      # file paths (read once); the typical default
-      # `["spec/factories", "spec/factories.rb"]` covers both
-      # the multi-file convention RSpec uses today and the
-      # legacy single-file form.
+      # Walks `factory_search_paths` and parses each `.rb` file into a {FactoryIndex}. The search-path
+      # list contains both directory paths (recursively walked) and direct file paths (read once); the
+      # typical default `["spec/factories", "spec/factories.rb"]` covers both the multi-file convention
+      # RSpec uses today and the legacy single-file form.
       #
       # The walker recognises:
       #
@@ -22,21 +19,16 @@ module Rigor
       # - `factory "users" do ... end` — string form
       # - `factory :users, aliases: [:author] do ... end` — alias form
       #
-      # Inside a factory block, attribute declarations come in
-      # several shapes. Only literal-name forms are recognised
-      # (Symbol arg / String arg):
+      # Inside a factory block, attribute declarations come in several shapes. Only literal-name forms
+      # are recognised (Symbol arg / String arg):
       #
-      # - `name { "Alice" }` — implicit attribute via
-      #   `method_missing` with a block (FactoryBot's modern
+      # - `name { "Alice" }` — implicit attribute via `method_missing` with a block (FactoryBot's modern
       #   syntax)
-      # - `name "Alice"` — implicit attribute via
-      #   `method_missing` with a positional argument (legacy)
-      # - `add_attribute(:name) { "Alice" }` — the explicit
-      #   form
+      # - `name "Alice"` — implicit attribute via `method_missing` with a positional argument (legacy)
+      # - `add_attribute(:name) { "Alice" }` — the explicit form
       #
-      # Sequences (`sequence(:email) { ... }`), associations
-      # (`association :author`), traits, and parent / child
-      # relationships are deferred to later slices.
+      # Sequences (`sequence(:email) { ... }`), associations (`association :author`), traits, and parent
+      # / child relationships are deferred to later slices.
       class FactoryDiscoverer
         def initialize(io_boundary:, search_paths:)
           @io_boundary = io_boundary
@@ -83,12 +75,10 @@ module Rigor
           nil
         end
 
-        # Yields `(factory_name, [attribute_names])` for every
-        # `factory :name do ... end` call discovered in the
-        # subtree. The walker recurses into top-level wrapping
-        # blocks (`FactoryBot.define do ... end`) and into
-        # arbitrary container nodes so factories inside `module`
-        # / `class` blocks are still picked up.
+        # Yields `(factory_name, [attribute_names])` for every `factory :name do ... end` call
+        # discovered in the subtree. The walker recurses into top-level wrapping blocks
+        # (`FactoryBot.define do ... end`) and into arbitrary container nodes so factories inside
+        # `module` / `class` blocks are still picked up.
         def walk_for_factories(node, &)
           return unless node.is_a?(Prism::Node)
 
@@ -116,26 +106,20 @@ module Rigor
           Rigor::Source::Literals.symbol_or_string_name(call_node.arguments&.arguments&.first)
         end
 
-        # Resolves the model class name for the factory.
-        # Three sources, in priority order:
+        # Resolves the model class name for the factory. Three sources, in priority order:
         #
-        # 1. Explicit `class: <Const>` keyword arg —
-        #    ConstantReadNode / ConstantPathNode value.
-        # 2. Explicit `class: "<name>"` keyword arg — String
-        #    value (supports `"Admin::User"`).
-        # 3. Inflected from the factory name — `:user` →
-        #    `"User"`, `:admin_user` → `"AdminUser"`. The
-        #    factory name is already singular by FactoryBot
-        #    convention, so we only need camelization.
+        # 1. Explicit `class: <Const>` keyword arg — ConstantReadNode / ConstantPathNode value.
+        # 2. Explicit `class: "<name>"` keyword arg — String value (supports `"Admin::User"`).
+        # 3. Inflected from the factory name — `:user` → `"User"`, `:admin_user` → `"AdminUser"`. The
+        #    factory name is already singular by FactoryBot convention, so we only need camelization.
         #
         # Returns a String (the canonical class name).
         def factory_model_class(call_node, factory_name)
           explicit = explicit_class_option(call_node)
           return explicit if explicit
 
-          # ADR-39: the real ActiveSupport::Inflector camelizes the factory
-          # name to its class (`admin_user` → `AdminUser`,
-          # `admin/user` → `Admin::User`), so the model-class fallback
+          # ADR-39: the real ActiveSupport::Inflector camelizes the factory name to its class
+          # (`admin_user` → `AdminUser`, `admin/user` → `Admin::User`), so the model-class fallback
           # matches Rails' real convention rather than an approximation.
           Rigor::Plugin::Inflector.camelize(factory_name)
         end
@@ -188,10 +172,9 @@ module Rigor
           attributes
         end
 
-        # Walks the block body collecting attribute names. Only
-        # top-level statements are examined — attributes inside
-        # `trait :admin do ... end` or other nested blocks are
-        # not collected (traits deferred to a follow-up).
+        # Walks the block body collecting attribute names. Only top-level statements are examined —
+        # attributes inside `trait :admin do ... end` or other nested blocks are not collected (traits
+        # deferred to a follow-up).
         def collect_attributes_from(node, accumulator)
           return unless node.is_a?(Prism::Node)
 
@@ -204,15 +187,14 @@ module Rigor
 
         def record_attribute(node, accumulator)
           return unless node.is_a?(Prism::CallNode) && node.receiver.nil?
-          # Skip association / sequence / trait / framework
-          # methods — only plain attribute declarations are recorded.
+          # Skip association / sequence / trait / framework methods — only plain attribute declarations
+          # are recorded.
           return if SKIPPED_METHODS.include?(node.name)
 
           name = if node.name == :add_attribute
                    literal_name_arg(node)
                  else
-                   # method_missing form: the call's method
-                   # name IS the attribute name.
+                   # method_missing form: the call's method name IS the attribute name.
                    node.name.to_s
                  end
           accumulator << name if name

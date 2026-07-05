@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
-# Demo: rigor-factorybot recognises every entry method shape
-# in the FactoryBot family. Run with `bundle exec rigor check`
-# from this directory.
+# Demo: rigor-factorybot recognises every entry method shape in the FactoryBot family. Run with
+# `bundle exec rigor check` from this directory.
 
-# Stub so `ruby demo.rb` doesn't fail at runtime — the plugin
-# reads the call shape statically.
+# Stub so `ruby demo.rb` doesn't fail at runtime — the plugin reads the call shape statically.
 module FactoryBot
   def self.create(*, **) = nil
   def self.build(*, **) = nil

@@ -18,14 +18,13 @@ require_relative "options"
 
 module Rigor
   class CLI
-    # `rigor doctor` — classify existing project findings into setup-problem
-    # vs clean-run with a routed next action (ADR-77 WD1).
+    # `rigor doctor` — classify existing project findings into setup-problem vs clean-run with a routed next action
+    # (ADR-77 WD1).
     #
     # It is a presentation/aggregation layer over data `rigor check` already
     # produces — no new analysis pass and no new diagnostic rule.  The
-    # command runs a scoped analysis to gather stats, audits the
-    # configuration, validates plugins, and checks baseline drift, then
-    # reports a small fixed set of checks with a hint for each failure.
+    # command runs a scoped analysis to gather stats, audits the configuration, validates plugins, and checks baseline
+    # drift, then reports a small fixed set of checks with a hint for each failure.
     class DoctorCommand < Command # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor doctor [options]"
 
@@ -100,8 +99,8 @@ module Rigor
       end
 
       # ------------------------------------------------------------------
-      # Individual checks — each returns an Array of finding Hashes.
-      # A finding has: :check, :status (:pass/:fail/:warn), :message, :hint
+      # Individual checks — each returns an Array of finding Hashes. A finding has: :check, :status (:pass/:fail/:warn),
+      # :message, :hint
       # ------------------------------------------------------------------
 
       def audit_config(configuration)
@@ -219,8 +218,8 @@ module Rigor
         ]
       end
 
-      # True when Rails is in Gemfile.lock but the config enables no
-      # Rails plugin — the same probe {ProjectStateProbe} uses.
+      # True when Rails is in Gemfile.lock but the config enables no Rails plugin — the same probe {ProjectStateProbe}
+      # uses.
       def rails_unconfigured?(_configuration)
         config_path = Configuration.discover
         return false if config_path.nil?

@@ -4,20 +4,15 @@ require_relative "command"
 
 module Rigor
   class CLI
-    # `rigor skill` — discover and print the SKILL.md files
-    # bundled with the `rigortype` gem.
+    # `rigor skill` — discover and print the SKILL.md files bundled with the `rigortype` gem.
     #
-    # Rigor ships a small set of Agent Skills under `skills/` that
-    # walk an AI coding agent through onboarding (`rigor-project-init`),
-    # baseline reduction (`rigor-baseline-reduce`), and authoring a
-    # plugin (`rigor-plugin-author`). When Rigor is installed via
-    # `mise` / `gem install` / etc. the SKILL files live inside the
-    # gem checkout — the project being analysed has no copy, so an
-    # AI agent has no a priori way to find them.
+    # Rigor ships a small set of Agent Skills under `skills/` that walk an AI coding agent through onboarding
+    # (`rigor-project-init`), baseline reduction (`rigor-baseline-reduce`), and authoring a plugin
+    # (`rigor-plugin-author`). When Rigor is installed via `mise` / `gem install` / etc. the SKILL files live inside the
+    # gem checkout — the project being analysed has no copy, so an AI agent has no a priori way to find them.
     #
-    # Grammar (mirrors `rigor docs`): the positional slot is always a
-    # skill *name*; alternative outputs are flags, so a skill named
-    # `list` or `path` can never be shadowed by a verb.
+    # Grammar (mirrors `rigor docs`): the positional slot is always a skill *name*; alternative outputs are flags, so a
+    # skill named `list` or `path` can never be shadowed by a verb.
     #
     # - `rigor skill`              — list bundled skills (the default).
     # - `rigor skill <name>`       — print the SKILL.md body (header + body).
@@ -42,11 +37,9 @@ module Rigor
     #                                the SKILL. Also spelled `describe`, and
     #                                surfaced top-level as `rigor describe`.
     #
-    # The pre-v0.3.0 verb spellings `rigor skill list` / `print <name>` /
-    # `path <name>` still work but emit a stderr deprecation notice; they
-    # are removed in v0.3.0 (see docs/ROADMAP.md § "Scheduled CLI
-    # deprecations"). `describe` is a no-argument action, not a name-slot
-    # verb, so it stays first-class alongside `--describe`.
+    # The pre-v0.3.0 verb spellings `rigor skill list` / `print <name>` / `path <name>` still work but emit a stderr
+    # deprecation notice; they are removed in v0.3.0 (see docs/ROADMAP.md § "Scheduled CLI deprecations"). `describe` is
+    # a no-argument action, not a name-slot verb, so it stays first-class alongside `--describe`.
     class SkillCommand < Command
       USAGE = <<~USAGE
         Usage: rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]
@@ -74,13 +67,12 @@ module Rigor
           rigor skill path <name>    ->  rigor skill --path <name>
       USAGE
 
-      # The bundled skills live at `<gem_root>/skills/`. From
-      # `lib/rigor/cli/skill_command.rb` that is three directories up.
+      # The bundled skills live at `<gem_root>/skills/`. From `lib/rigor/cli/skill_command.rb` that is three directories
+      # up.
       SKILLS_ROOT = File.expand_path("../../../skills", __dir__)
 
-      # The verb subcommands the flags superseded keep working with a
-      # stderr deprecation notice until this version drops them. Each maps
-      # to the canonical advice printed and the flag it rewrites to.
+      # The verb subcommands the flags superseded keep working with a stderr deprecation notice until this version drops
+      # them. Each maps to the canonical advice printed and the flag it rewrites to.
       LEGACY_VERB_REMOVAL = "v0.3.0"
       LEGACY_VERBS = {
         "list" => { old: "list",         advice: "--list", flag: "--list" },
@@ -120,8 +112,8 @@ module Rigor
 
       private
 
-      # Translate a deprecated verb spelling into its flag form, warning
-      # once on stderr, so the dispatch above only handles canonical forms.
+      # Translate a deprecated verb spelling into its flag form, warning once on stderr, so the dispatch above only
+      # handles canonical forms.
       def rewrite_legacy_verb!
         spec = LEGACY_VERBS[@argv.first]
         return unless spec
@@ -159,14 +151,11 @@ module Rigor
         0
       end
 
-      # `rigor skill --full <name>` — the whole current procedure in one
-      # call: the SKILL.md body followed by each `references/*.md` inline.
-      # This is what the thinned SKILL bodies point a *frozen* copy at — a
-      # vendored copy of a skill (installed via `npx skills`) may lag the
-      # gem, so re-fetching the complete body here guarantees the reader
-      # follows the version that shipped with the installed Rigor, without
-      # needing a file-reading tool or reading a possibly-stale co-located
-      # `references/`.
+      # `rigor skill --full <name>` — the whole current procedure in one call: the SKILL.md body followed by each
+      # `references/*.md` inline. This is what the thinned SKILL bodies point a *frozen* copy at — a vendored copy of a
+      # skill (installed via `npx skills`) may lag the gem, so re-fetching the complete body here guarantees the reader
+      # follows the version that shipped with the installed Rigor, without needing a file-reading tool or reading a
+      # possibly-stale co-located `references/`.
       def run_full(name)
         return usage_error("`--full` requires a skill name") if name.nil?
 
@@ -197,13 +186,10 @@ module Rigor
         0
       end
 
-      # `rigor skill --describe` (also spelled `describe`) — ADR-73's
-      # live "brain", delegated to {SkillDescribe}: it probes the current
-      # project's state with cheap presence checks (it never runs `rigor
-      # check`), recommends the next skill to run, and prints every
-      # bundled skill's current frontmatter description, so the
-      # `rigor-next-steps` SKILL can route without copying any
-      # version-coupled guidance into itself.
+      # `rigor skill --describe` (also spelled `describe`) — ADR-73's live "brain", delegated to {SkillDescribe}: it
+      # probes the current project's state with cheap presence checks (it never runs `rigor check`), recommends the next
+      # skill to run, and prints every bundled skill's current frontmatter description, so the `rigor-next-steps` SKILL
+      # can route without copying any version-coupled guidance into itself.
       def run_describe
         require_relative "skill_describe"
 
@@ -211,10 +197,9 @@ module Rigor
         0
       end
 
-      # The header that precedes the SKILL.md body when an agent
-      # runs `rigor skill <name>`. Kept as `# `-prefixed comment lines
-      # so the combined output remains parseable as markdown — anything
-      # below `---` (the SKILL frontmatter marker) is unchanged.
+      # The header that precedes the SKILL.md body when an agent runs `rigor skill <name>`. Kept as `# `-prefixed
+      # comment lines so the combined output remains parseable as markdown — anything below `---` (the SKILL frontmatter
+      # marker) is unchanged.
       def render_print_header(skill)
         references_dir = File.join(File.dirname(skill.fetch(:path)), "references")
         ref_line = if File.directory?(references_dir)
@@ -247,14 +232,12 @@ module Rigor
         discover_skills.find { |s| s.fetch(:name) == name }
       end
 
-      # The `references/*.md` files bundled alongside a skill, sorted so the
-      # `NN-` prefixes drive read order.
+      # The `references/*.md` files bundled alongside a skill, sorted so the `NN-` prefixes drive read order.
       def reference_files(skill)
         dir = File.join(File.dirname(skill.fetch(:path)), "references")
         return [] unless File.directory?(dir)
 
-        # `Dir.glob` returns lexicographically sorted paths (Ruby 3.0+),
-        # so the `NN-` prefixes already drive read order.
+        # `Dir.glob` returns lexicographically sorted paths (Ruby 3.0+), so the `NN-` prefixes already drive read order.
         Dir.glob(File.join(dir, "*.md"))
       end
 

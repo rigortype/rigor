@@ -4,46 +4,34 @@ require_relative "triage/hint"
 require_relative "triage/catalogue"
 
 module Rigor
-  # ADR-23 — diagnostic triage. Aggregates a `rigor check`
-  # diagnostic stream into the data behind the `rigor triage`
-  # report: a rule-ID distribution, per-file hotspots, and the
-  # heuristic hint catalogue ({Triage::Catalogue}).
+  # ADR-23 — diagnostic triage. Aggregates a `rigor check` diagnostic stream into the data behind the `rigor triage`
+  # report: a rule-ID distribution, per-file hotspots, and the heuristic hint catalogue ({Triage::Catalogue}).
   #
-  # Pure over the diagnostic stream — no second analysis pass, no
-  # analyzer internals. `Triage.analyze` is the single entry point;
-  # rendering is {CLI::TriageRenderer}'s job.
+  # Pure over the diagnostic stream — no second analysis pass, no analyzer internals. `Triage.analyze` is the single
+  # entry point; rendering is {CLI::TriageRenderer}'s job.
   module Triage
     UNCATEGORISED = "(uncategorised)"
 
     Summary = Data.define(:total, :error, :warning, :info)
     RuleCount = Data.define(:rule, :count)
     Hotspot = Data.define(:file, :count, :by_rule)
-    # A (receiver-class, method) dispatch target the diagnostics
-    # cluster on, built from the structured `Diagnostic#receiver_type`
-    # / `#method_name` fields — never from message-string parsing.
-    # `receiver` is nil for method-only diagnostics (a toplevel call,
-    # a `def`-side return / override finding that has no call
-    # receiver); `files` is the distinct-file count (a systemic vs.
-    # localised signal); `rules` is the per-rule breakdown.
+    # A (receiver-class, method) dispatch target the diagnostics cluster on, built from the structured
+    # `Diagnostic#receiver_type` / `#method_name` fields — never from message-string parsing. `receiver` is nil for
+    # method-only diagnostics (a toplevel call, a `def`-side return / override finding that has no call receiver);
+    # `files` is the distinct-file count (a systemic vs. localised signal); `rules` is the per-rule breakdown.
     Selector = Data.define(:receiver, :method_name, :count, :files, :rules)
     Report = Data.define(:summary, :distribution, :selectors, :hotspots, :hints, :include_info)
 
     module_function
 
-    # WD6 (ADR-23): the volume views — distribution / selectors /
-    # hotspots — route only the *actionable* diagnostics (error +
-    # warning) by default. Plugin-emitted `:info` diagnostics are
-    # overwhelmingly recognition trace (`plugin.activerecord.model-call`,
-    # `plugin.rails-routes.helper`, …) — positive "Rigor resolved this
-    # call" records, not problems — and on a real Rails app they swamp
-    # the genuine error/warning signal (the field trip: 257 of 267
-    # diagnostics were such trace) and invert the hotspot ranking
-    # towards the files with the *most working* code. The summary still
-    # reports the full info count, and `include_info: true` (the
-    # `--include-info` flag) restores the pre-v0.2.3 behaviour. Hints
-    # always see the full stream so the `gem-without-rbs` notice (an
-    # info-severity `rbs.coverage.missing-gem`) survives; the
-    # count-based H5/H6 recognisers guard against info themselves so
+    # WD6 (ADR-23): the volume views — distribution / selectors / hotspots — route only the *actionable* diagnostics
+    # (error + warning) by default. Plugin-emitted `:info` diagnostics are overwhelmingly recognition trace
+    # (`plugin.activerecord.model-call`, `plugin.rails-routes.helper`, …) — positive "Rigor resolved this call" records,
+    # not problems — and on a real Rails app they swamp the genuine error/warning signal (the field trip: 257 of 267
+    # diagnostics were such trace) and invert the hotspot ranking towards the files with the *most working* code. The
+    # summary still reports the full info count, and `include_info: true` (the `--include-info` flag) restores the
+    # pre-v0.2.3 behaviour. Hints always see the full stream so the `gem-without-rbs` notice (an info-severity
+    # `rbs.coverage.missing-gem`) survives; the count-based H5/H6 recognisers guard against info themselves so
     # recognition trace never reads as a bug.
     #
     # @param diagnostics [Array<Analysis::Diagnostic>]
@@ -63,8 +51,8 @@ module Rigor
       )
     end
 
-    # Diagnostics without a `rule` (parse errors, internal-analyzer
-    # errors) bucket under a single sentinel rather than vanishing.
+    # Diagnostics without a `rule` (parse errors, internal-analyzer errors) bucket under a single sentinel rather than
+    # vanishing.
     def rule_key(diagnostic)
       diagnostic.qualified_rule || UNCATEGORISED
     end
@@ -85,15 +73,11 @@ module Rigor
                  .sort_by { |row| [-row.count, row.rule] }
     end
 
-    # The class/method aggregation axis (ADR-23 follow-up). Groups
-    # every diagnostic that carries a `method_name` by its
-    # `(receiver_type, method_name)` pair so a consumer can answer
-    # "which method / class concentrates the diagnostics?" with a
-    # `jq` query over the JSON instead of parsing message text.
-    # Method-only diagnostics (nil `receiver_type`) keep a null
-    # `receiver` and still group by method. The full list is
-    # returned uncapped — the JSON is the agent-facing surface; the
-    # text renderer caps its own rows.
+    # The class/method aggregation axis (ADR-23 follow-up). Groups every diagnostic that carries a `method_name` by its
+    # `(receiver_type, method_name)` pair so a consumer can answer "which method / class concentrates the diagnostics?"
+    # with a `jq` query over the JSON instead of parsing message text. Method-only diagnostics (nil `receiver_type`)
+    # keep a null `receiver` and still group by method. The full list is returned uncapped — the JSON is the
+    # agent-facing surface; the text renderer caps its own rows.
     def build_selectors(diagnostics)
       diagnostics.select(&:method_name)
                  .group_by { |d| [normalize_receiver(d.receiver_type) || d.receiver_type, d.method_name.to_s] }
@@ -101,16 +85,12 @@ module Rigor
                  .sort_by { |s| [-s.count, s.receiver.to_s, s.method_name] }
     end
 
-    # Folds a receiver token — a `Diagnostic#receiver_type` display
-    # string or a message-parsed token — to the class the diagnostics
-    # should bucket under, so the selector axis does not fragment one
-    # method across every distinct literal receiver. String / integer
-    # / float / symbol literals collapse to their class; `singleton(C)`
-    # and a bare `C` fold to `C`; a generic `C[...]` keeps the
-    # `Array[String]` element form (the AR-relation heuristic keys on
-    # it). Returns nil for a token it cannot reduce to a class (a
-    # union display, an inferred shape) — the caller keeps the raw
-    # string then, never losing the row. Shared with {Catalogue}.
+    # Folds a receiver token — a `Diagnostic#receiver_type` display string or a message-parsed token — to the class the
+    # diagnostics should bucket under, so the selector axis does not fragment one method across every distinct literal
+    # receiver. String / integer / float / symbol literals collapse to their class; `singleton(C)` and a bare `C` fold
+    # to `C`; a generic `C[...]` keeps the `Array[String]` element form (the AR-relation heuristic keys on it). Returns
+    # nil for a token it cannot reduce to a class (a union display, an inferred shape) — the caller keeps the raw string
+    # then, never losing the row. Shared with {Catalogue}.
     def normalize_receiver(token)
       return nil if token.nil?
 
@@ -170,9 +150,8 @@ module Rigor
           { "file" => h.file, "count" => h.count, "by_rule" => h.by_rule }
         end,
         "hints" => report.hints.map(&:to_h),
-        # WD6: false means distribution / selectors / hotspots above
-        # exclude `:info` (their counts will not sum to summary.total);
-        # the summary's `info` field still reports the full count.
+        # WD6: false means distribution / selectors / hotspots above exclude `:info` (their counts will not sum to
+        # summary.total); the summary's `info` field still reports the full count.
         "include_info" => report.include_info
       }
     end

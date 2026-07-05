@@ -14,11 +14,9 @@ require_relative "cli/diagnostic_formats"
 require_relative "cli/ci_detector"
 
 module Rigor
-  # The CLI class is a dispatcher: each `run_*` method delegates to a
-  # command-specific class once the command grows beyond a few lines (see
-  # {CLI::TypeOfCommand} and {CLI::CheckCommand}). It necessarily grows by
-  # one delegator + one help line per command, so — like the command
-  # classes it fans out to — it carries an explicit ClassLength exemption.
+  # The CLI class is a dispatcher: each `run_*` method delegates to a command-specific class once the command grows
+  # beyond a few lines (see {CLI::TypeOfCommand} and {CLI::CheckCommand}). It necessarily grows by one delegator + one
+  # help line per command, so — like the command classes it fans out to — it carries an explicit ClassLength exemption.
   class CLI # rubocop:disable Metrics/ClassLength
     EXIT_USAGE = 64
 
@@ -94,11 +92,9 @@ module Rigor
     end
 
     def run_init
-      # Default destination is `.rigor.dist.yml` — the
-      # project-default config that gets committed. Developers
-      # who want a personal override layer create `.rigor.yml`
-      # alongside it (auto-discovery prefers `.rigor.yml` when
-      # both are present; no implicit merge).
+      # Default destination is `.rigor.dist.yml` — the project-default config that gets committed. Developers who want a
+      # personal override layer create `.rigor.yml` alongside it (auto-discovery prefers `.rigor.yml` when both are
+      # present; no implicit merge).
       options = {
         force: false,
         path: ".rigor.dist.yml"
@@ -123,16 +119,11 @@ module Rigor
       0
     end
 
-    # `rigor init`'s template ships empty `plugins:` so a fresh
-    # init has nothing to validate — but the moment the user adds
-    # any plugin entry, the activation-failure surfaces enumerated
-    # in `rigor plugins`'s docstring become real. Point them at
-    # the verification command + the canonical readiness flow so
-    # silent failures (the cwd / Gemfile / signature_paths
-    # mismatches that surfaced during the Mastodon trial) get
-    # caught the first time the user wires a plugin, not the first
-    # time `rigor check` reports false positives that should have
-    # been covered.
+    # `rigor init`'s template ships empty `plugins:` so a fresh init has nothing to validate — but the moment the user
+    # adds any plugin entry, the activation-failure surfaces enumerated in `rigor plugins`'s docstring become real.
+    # Point them at the verification command + the canonical readiness flow so silent failures (the cwd / Gemfile /
+    # signature_paths mismatches that surfaced during the Mastodon trial) get caught the first time the user wires a
+    # plugin, not the first time `rigor check` reports false positives that should have been covered.
     def print_init_next_steps(path)
       @out.puts ""
       @out.puts "Next steps:"
@@ -142,10 +133,8 @@ module Rigor
       @out.puts "  3. Run `rigor check` to analyse your code."
     end
 
-    # Renders the starter `.rigor.yml` body. The template
-    # serialises `Configuration::DEFAULTS` (so the on-disk file
-    # round-trips through `Configuration.load`) and prepends a
-    # short header that points the user at the keys they are
+    # Renders the starter `.rigor.yml` body. The template serialises `Configuration::DEFAULTS` (so the on-disk file
+    # round-trips through `Configuration.load`) and prepends a short header that points the user at the keys they are
     # most likely to want to edit.
     def init_template
       <<~YAML
@@ -291,10 +280,9 @@ module Rigor
       CLI::SkillCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
-    # `rigor describe` — a top-level alias for `rigor skill describe`,
-    # the entry point most users reach for first. Surfaced because a
-    # bare `rigor describe` is the intuitive guess (the onboarding field
-    # trial saw it tried and met "Unknown command").
+    # `rigor describe` — a top-level alias for `rigor skill describe`, the entry point most users reach for first.
+    # Surfaced because a bare `rigor describe` is the intuitive guess (the onboarding field trial saw it tried and met
+    # "Unknown command").
     def run_describe
       require_relative "cli/skill_command"
 

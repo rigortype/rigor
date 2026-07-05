@@ -6,11 +6,9 @@ require_relative "../version"
 
 module Rigor
   class CLI
-    # CI-native diagnostic output formats (ADR-51). Each renders an
-    # `Analysis::Result` to a string a CI platform consumes to surface
-    # diagnostics inline in a pull / merge request, rather than only in the
-    # job log. They read the same `Diagnostic` fields as `--format json`
-    # (path / line / column / severity / qualified rule / message) and add
+    # CI-native diagnostic output formats (ADR-51). Each renders an `Analysis::Result` to a string a CI platform
+    # consumes to surface diagnostics inline in a pull / merge request, rather than only in the job log. They read the
+    # same `Diagnostic` fields as `--format json` (path / line / column / severity / qualified rule / message) and add
     # no new information — only a platform-native rendering of it.
     #
     #   sarif      — SARIF 2.1.0 (cross-platform; GitHub code-scanning, any
@@ -23,11 +21,9 @@ module Rigor
     #                reviewdog (`-f=checkstyle`) and Jenkins/etc. consume
     #   junit      — JUnit XML, the test-report format many CI systems render
     #
-    # Severity maps once per format from Rigor's `:error` / `:warning` /
-    # `:info`; the qualified rule (`<source_family>.<rule>` or the bare rule
-    # for the builtin family) is the stable identifier, nil only for the
-    # ruleless producers (parse / internal errors), which each format
-    # degrades gracefully.
+    # Severity maps once per format from Rigor's `:error` / `:warning` / `:info`; the qualified rule
+    # (`<source_family>.<rule>` or the bare rule for the builtin family) is the stable identifier, nil only for the
+    # ruleless producers (parse / internal errors), which each format degrades gracefully.
     module DiagnosticFormats
       FORMATS = %w[sarif github gitlab checkstyle junit teamcity].freeze
 
@@ -37,8 +33,7 @@ module Rigor
         FORMATS.include?(format)
       end
 
-      # Renders `result` in the named CI format. Callers gate on
-      # {.supports?} first; an unrecognised format returns nil.
+      # Renders `result` in the named CI format. Callers gate on {.supports?} first; an unrecognised format returns nil.
       def render(result, format)
         case format
         when "sarif" then Sarif.new(result).render
@@ -50,9 +45,8 @@ module Rigor
         end
       end
 
-      # XML attribute / text escaping shared by the Checkstyle and JUnit
-      # formatters. Covers the five predefined XML entities so a diagnostic
-      # message carrying `<`, `&`, or a quote can't break the document.
+      # XML attribute / text escaping shared by the Checkstyle and JUnit formatters. Covers the five predefined XML
+      # entities so a diagnostic message carrying `<`, `&`, or a quote can't break the document.
       module XmlEscaping
         ENTITIES = { "&" => "&amp;", "<" => "&lt;", ">" => "&gt;",
                      '"' => "&quot;", "'" => "&apos;" }.freeze
@@ -62,15 +56,14 @@ module Rigor
         end
       end
 
-      # SARIF 2.1.0 — the OASIS static-analysis interchange format. GitHub's
-      # `codeql-action/upload-sarif` ingests it to render findings on the PR
-      # diff and in the Security tab; it is the cross-platform anchor format.
+      # SARIF 2.1.0 — the OASIS static-analysis interchange format. GitHub's `codeql-action/upload-sarif` ingests it to
+      # render findings on the PR diff and in the Security tab; it is the cross-platform anchor format.
       class Sarif
         SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
         INFORMATION_URI = "https://github.com/rigortype/rigor"
 
-        # SARIF defines exactly three result levels; Rigor's `:info` is a
-        # `note` (the SARIF spelling for advisory findings).
+        # SARIF defines exactly three result levels; Rigor's `:info` is a `note` (the SARIF spelling for advisory
+        # findings).
         LEVELS = { error: "error", warning: "warning", info: "note" }.freeze
 
         def initialize(result)
@@ -103,9 +96,8 @@ module Rigor
           }
         end
 
-        # The distinct rule ids seen in this run, declared so consumers can
-        # cross-reference each result's `ruleId`. Id-only is a valid minimal
-        # SARIF rule object; richer per-rule metadata is a later enrichment.
+        # The distinct rule ids seen in this run, declared so consumers can cross-reference each result's `ruleId`.
+        # Id-only is a valid minimal SARIF rule object; richer per-rule metadata is a later enrichment.
         def rules
           @result.diagnostics.filter_map(&:qualified_rule).uniq.map { |id| { "id" => id } }
         end
@@ -121,9 +113,8 @@ module Rigor
           entry
         end
 
-        # Rigor lines / columns are already 1-based, matching SARIF's
-        # 1-based `startLine` / `startColumn`. Paths are project-relative;
-        # SARIF URIs use forward slashes on every platform.
+        # Rigor lines / columns are already 1-based, matching SARIF's 1-based `startLine` / `startColumn`. Paths are
+        # project-relative; SARIF URIs use forward slashes on every platform.
         def location_for(diagnostic)
           {
             "physicalLocation" => {
@@ -134,9 +125,8 @@ module Rigor
         end
       end
 
-      # GitHub Actions workflow commands — `::<level> file=…,line=…,col=…,
-      # title=…::<message>` lines the runner parses out of stdout and turns
-      # into inline PR annotations, with no separate upload step.
+      # GitHub Actions workflow commands — `::<level> file=…,line=…,col=…, title=…::<message>` lines the runner parses
+      # out of stdout and turns into inline PR annotations, with no separate upload step.
       class GithubActions
         # GitHub's annotation levels; Rigor's `:info` is a `notice`.
         LEVELS = { error: "error", warning: "warning", info: "notice" }.freeze
@@ -160,26 +150,24 @@ module Rigor
           "::#{level} #{props.join(',')}::#{escape_data(diagnostic.message)}"
         end
 
-        # GitHub's documented workflow-command escaping: `%` and the CR / LF
-        # that would otherwise terminate the command line, for message data.
+        # GitHub's documented workflow-command escaping: `%` and the CR / LF that would otherwise terminate the command
+        # line, for message data.
         def escape_data(value)
           value.to_s.gsub("%", "%25").gsub("\r", "%0D").gsub("\n", "%0A")
         end
 
-        # Property values additionally escape the `,` (property separator)
-        # and `:` (command terminator) so a path or rule id can carry them.
+        # Property values additionally escape the `,` (property separator) and `:` (command terminator) so a path or
+        # rule id can carry them.
         def escape_property(value)
           escape_data(value).gsub(",", "%2C").gsub(":", "%3A")
         end
       end
 
-      # GitLab Code Quality report — the CodeClimate-subset JSON array GitLab
-      # reads from a `codequality` CI artifact to populate the merge-request
-      # Code Quality widget.
+      # GitLab Code Quality report — the CodeClimate-subset JSON array GitLab reads from a `codequality` CI artifact to
+      # populate the merge-request Code Quality widget.
       class GitlabCodeQuality
-        # GitLab's severity vocabulary (a CodeClimate subset). Rigor maps
-        # error → major, warning → minor, info → info; `critical` / `blocker`
-        # are left for a louder future tier.
+        # GitLab's severity vocabulary (a CodeClimate subset). Rigor maps error → major, warning → minor, info → info;
+        # `critical` / `blocker` are left for a louder future tier.
         SEVERITIES = { error: "major", warning: "minor", info: "info" }.freeze
 
         def initialize(result)
@@ -205,17 +193,16 @@ module Rigor
           }
         end
 
-        # The rule id is folded into the description (the widget shows it)
-        # because Code Quality has no dedicated rule field.
+        # The rule id is folded into the description (the widget shows it) because Code Quality has no dedicated rule
+        # field.
         def description(diagnostic)
           rule_id = diagnostic.qualified_rule
           rule_id ? "#{diagnostic.message} [#{rule_id}]" : diagnostic.message
         end
 
-        # GitLab dedups findings by fingerprint and tracks them across runs
-        # by it, so it must be stable for an unchanged finding and unique per
-        # finding. Hashing the locating tuple (path, rule, line, column,
-        # message) satisfies both — order-independent, no run-volatile input.
+        # GitLab dedups findings by fingerprint and tracks them across runs by it, so it must be stable for an unchanged
+        # finding and unique per finding. Hashing the locating tuple (path, rule, line, column, message) satisfies both
+        # — order-independent, no run-volatile input.
         def fingerprint(diagnostic)
           payload = [diagnostic.path, diagnostic.qualified_rule, diagnostic.line,
                      diagnostic.column, diagnostic.message].join(" ")
@@ -223,12 +210,10 @@ module Rigor
         end
       end
 
-      # Checkstyle XML — the lint-interchange format a wide range of tools
-      # read, most usefully reviewdog (`-f=checkstyle`), which then posts to
-      # any of its reporters (GitHub PR review, GitLab MR, Gerrit, …). Errors
-      # are grouped by file; the qualified rule rides in `source` (the rule
-      # code reviewdog surfaces). Checkstyle's native severities are
-      # `error` / `warning` / `info`, so Rigor's map through unchanged.
+      # Checkstyle XML — the lint-interchange format a wide range of tools read, most usefully reviewdog
+      # (`-f=checkstyle`), which then posts to any of its reporters (GitHub PR review, GitLab MR, Gerrit, …). Errors are
+      # grouped by file; the qualified rule rides in `source` (the rule code reviewdog surfaces). Checkstyle's native
+      # severities are `error` / `warning` / `info`, so Rigor's map through unchanged.
       class Checkstyle
         include XmlEscaping
 
@@ -258,12 +243,10 @@ module Rigor
         end
       end
 
-      # JUnit XML — the test-report format GitHub's test reporting, GitLab,
-      # Jenkins, and CircleCI render. Following the established linter
-      # convention (rubocop / eslint / PHPStan): every diagnostic is a
-      # `testcase` carrying a `failure` typed by its severity, so all of them
-      # are visible in the report. The exit code (errors only) remains the
-      # gate; this view is for surfacing, not gating.
+      # JUnit XML — the test-report format GitHub's test reporting, GitLab, Jenkins, and CircleCI render. Following the
+      # established linter convention (rubocop / eslint / PHPStan): every diagnostic is a `testcase` carrying a
+      # `failure` typed by its severity, so all of them are visible in the report. The exit code (errors only) remains
+      # the gate; this view is for surfacing, not gating.
       class Junit
         include XmlEscaping
 
@@ -299,11 +282,9 @@ module Rigor
         end
       end
 
-      # TeamCity inspection service messages — the `##teamcity[…]` lines a
-      # TeamCity build agent parses out of the build log into its Inspections
-      # view. The one stdout-native format (besides `github`) that
-      # CI-detection auto-emits. One `inspectionType` declares the category;
-      # each diagnostic is an `inspection` typed by severity.
+      # TeamCity inspection service messages — the `##teamcity[…]` lines a TeamCity build agent parses out of the build
+      # log into its Inspections view. The one stdout-native format (besides `github`) that CI-detection auto-emits. One
+      # `inspectionType` declares the category; each diagnostic is an `inspection` typed by severity.
       class Teamcity
         SEVERITIES = { error: "ERROR", warning: "WARNING", info: "INFO" }.freeze
 

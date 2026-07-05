@@ -4,27 +4,21 @@ require "yaml"
 
 module Rigor
   class CLI
-    # The presence-only project-state probe behind `rigor skill describe`
-    # (ADR-73 WD2). It stats files and opens only config / CI / lockfiles
-    # — it runs no analysis — so it is cheap and side-effect-free, and an
-    # agent can run it freely at any point. Split from {SkillDescribe} so
-    # the routing/rendering class stays focused.
+    # The presence-only project-state probe behind `rigor skill describe` (ADR-73 WD2). It stats files and opens only
+    # config / CI / lockfiles — it runs no analysis — so it is cheap and side-effect-free, and an agent can run it
+    # freely at any point. Split from {SkillDescribe} so the routing/rendering class stays focused.
     class ProjectStateProbe
-      # Config / baseline filenames the probe stats for. `CONFIG_FILENAMES`
-      # mirrors `Configuration::DISCOVERY_ORDER` (developer-local override
-      # first, committed default second) so the probe agrees with what
-      # `rigor check` would auto-discover.
+      # Config / baseline filenames the probe stats for. `CONFIG_FILENAMES` mirrors `Configuration::DISCOVERY_ORDER`
+      # (developer-local override first, committed default second) so the probe agrees with what `rigor check` would
+      # auto-discover.
       CONFIG_FILENAMES = %w[.rigor.yml .rigor.dist.yml].freeze
       BASELINE_FILENAME = ".rigor-baseline.yml"
-      # `rbs collection install`'s lockfile — Rigor auto-detects it at the
-      # project root and feeds each gem's community RBS into the signature
-      # paths, so its presence is the signal that the gem-RBS gap has been
-      # addressed.
+      # `rbs collection install`'s lockfile — Rigor auto-detects it at the project root and feeds each gem's community
+      # RBS into the signature paths, so its presence is the signal that the gem-RBS gap has been addressed.
       RBS_COLLECTION_LOCKFILE = "rbs_collection.lock.yaml"
 
-      # `Gemfile.lock` substrings that mark a Rails app, and the bundled
-      # Rails-family plugin ids — used to spot a configured Rails project
-      # that has not enabled any Rails plugin (a `rigor-plugin-tune` cue).
+      # `Gemfile.lock` substrings that mark a Rails app, and the bundled Rails-family plugin ids — used to spot a
+      # configured Rails project that has not enabled any Rails plugin (a `rigor-plugin-tune` cue).
       RAILS_LOCK_MARKERS = %w[railties actionpack activerecord actioncable].freeze
       RAILS_PLUGIN_MARKERS = %w[
         rigor-activerecord rigor-actionpack rigor-actionmailer rigor-activejob
@@ -53,11 +47,9 @@ module Rigor
 
       private
 
-      # True when Rails is in `Gemfile.lock` but the (present) config
-      # enables no Rails plugin — so `rigor-plugin-tune` (wiring the
-      # ActiveRecord / routes / i18n plugins) buys more than community RBS
-      # would (the 20260620 field trial's strap case). Only fires on an
-      # already-configured project; an un-configured Rails app routes to
+      # True when Rails is in `Gemfile.lock` but the (present) config enables no Rails plugin — so `rigor-plugin-tune`
+      # (wiring the ActiveRecord / routes / i18n plugins) buys more than community RBS would (the 20260620 field trial's
+      # strap case). Only fires on an already-configured project; an un-configured Rails app routes to
       # `rigor-project-init`, which selects the plugins itself.
       def rails_unconfigured?(config)
         return false if config.nil?
@@ -75,8 +67,7 @@ module Rigor
         false
       end
 
-      # `:wired` (a CI config mentions `rigor`), `:unwired` (a CI config
-      # exists but does not), or `:none`.
+      # `:wired` (a CI config mentions `rigor`), `:unwired` (a CI config exists but does not), or `:none`.
       def ci_state
         files = ci_config_files
         return :none if files.empty?
@@ -84,11 +75,9 @@ module Rigor
         files.any? { |path| file_mentions_rigor?(path) } ? :wired : :unwired
       end
 
-      # Editor-LSP signal — `:wired` (a committed `.vscode/` config names
-      # `rigor`), `:unwired` (a `.vscode/` is present but does not), or
-      # `:none`. Only VS Code is detectable here: Neovim / Emacs / Helix
-      # configs live in the user's home, not the repo, so editor-setup is
-      # otherwise a catalogue-only destination.
+      # Editor-LSP signal — `:wired` (a committed `.vscode/` config names `rigor`), `:unwired` (a `.vscode/` is present
+      # but does not), or `:none`. Only VS Code is detectable here: Neovim / Emacs / Helix configs live in the user's
+      # home, not the repo, so editor-setup is otherwise a catalogue-only destination.
       def editor_state
         vscode = File.join(@root, ".vscode")
         return :none unless File.directory?(vscode)
@@ -99,11 +88,9 @@ module Rigor
         files.any? { |path| file_mentions_rigor?(path) } ? :wired : :unwired
       end
 
-      # MCP-client signal — `:wired` (a committed project MCP config names
-      # `rigor`), `:unwired` (one is present but does not), or `:none`.
-      # Only the project-scoped configs are detectable (`.mcp.json`,
-      # `.cursor/mcp.json`); user-level client configs live in $HOME, so
-      # mcp-setup is otherwise a catalogue-only destination.
+      # MCP-client signal — `:wired` (a committed project MCP config names `rigor`), `:unwired` (one is present but does
+      # not), or `:none`. Only the project-scoped configs are detectable (`.mcp.json`, `.cursor/mcp.json`); user-level
+      # client configs live in $HOME, so mcp-setup is otherwise a catalogue-only destination.
       def mcp_state
         files = [".mcp.json", File.join(".cursor", "mcp.json")]
                 .map { |rel| File.join(@root, rel) }
@@ -127,20 +114,16 @@ module Rigor
       end
     end
 
-    # Builds the `rigor skill describe` report (ADR-73): a {ProjectStateProbe}
-    # snapshot, a recommended next skill, and the live catalogue of bundled
-    # skills with their current frontmatter descriptions. Extracted from
-    # {SkillCommand} so the command stays a thin dispatcher and this — the
-    # "live brain" — owns the routing.
+    # Builds the `rigor skill describe` report (ADR-73): a {ProjectStateProbe} snapshot, a recommended next skill, and
+    # the live catalogue of bundled skills with their current frontmatter descriptions. Extracted from {SkillCommand} so
+    # the command stays a thin dispatcher and this — the "live brain" — owns the routing.
     class SkillDescribe
-      # The entry-point SKILL itself — excluded from the catalogue because
-      # it is the skill being run, not a destination.
+      # The entry-point SKILL itself — excluded from the catalogue because it is the skill being run, not a destination.
       ENTRY_POINT_SKILL = "rigor-next-steps"
 
-      # Adoption-journey order for the catalogue and the order the
-      # recommendation decision tree walks. `rigor-ask` sits last: it is
-      # the journey-agnostic "answer a question about Rigor" companion the
-      # agent can offer at any point, never a presence-recommended step.
+      # Adoption-journey order for the catalogue and the order the recommendation decision tree walks. `rigor-ask` sits
+      # last: it is the journey-agnostic "answer a question about Rigor" companion the agent can offer at any point,
+      # never a presence-recommended step.
       CATALOG_ORDER = %w[
         rigor-project-init
         rigor-rbs-setup
@@ -180,17 +163,16 @@ module Rigor
 
       private
 
-      # The skills offered as "what to do next", in adoption-journey order.
-      # The entry-point skill is excluded, and unknown skills sort after
-      # the known journey, alphabetically.
+      # The skills offered as "what to do next", in adoption-journey order. The entry-point skill is excluded, and
+      # unknown skills sort after the known journey, alphabetically.
       def catalog_skills
         @skills
           .reject { |skill| skill.fetch(:name) == ENTRY_POINT_SKILL }
           .sort_by { |skill| [CATALOG_ORDER.index(skill.fetch(:name)) || CATALOG_ORDER.size, skill.fetch(:name)] }
       end
 
-      # The decision tree (ADR-73 WD2). Returns `{ skill:, reason: }` for
-      # the recommended next step, or nil when no catalogue skill matches.
+      # The decision tree (ADR-73 WD2). Returns `{ skill:, reason: }` for the recommended next step, or nil when no
+      # catalogue skill matches.
       def recommend(state, catalog)
         name, reason = recommended_name_and_reason(state)
         skill = catalog.find { |candidate| candidate.fetch(:name) == name }
@@ -208,14 +190,11 @@ module Rigor
           ["rigor-rbs-setup", "your gems ship no community RBS yet — install it so Rigor stops typing them as Dynamic."]
         elsif state.fetch(:ci) != :wired
           ["rigor-ci-setup", "Rigor is configured but not wired into CI — lock in the regression guard."]
-        # A present baseline is deliberately NOT a recommendation trigger.
-        # A baseline is a healthy, finished onboarding state, not a problem to
-        # work off; pushing every baselined project to "reduce it" turns a
-        # working build into a chore and tempts scattering `# rigor:disable`
-        # through the code to make a number go down — means over ends.
-        # `rigor-baseline-reduce` stays in the catalogue for the intermediate
-        # user who *chooses* to invest in it; the headline routes to genuinely
-        # additive steps instead.
+        # A present baseline is deliberately NOT a recommendation trigger. A baseline is a healthy, finished onboarding
+        # state, not a problem to work off; pushing every baselined project to "reduce it" turns a working build into a
+        # chore and tempts scattering `# rigor:disable` through the code to make a number go down — means over ends.
+        # `rigor-baseline-reduce` stays in the catalogue for the intermediate user who *chooses* to invest in it; the
+        # headline routes to genuinely additive steps instead.
         elsif state.fetch(:editor) == :unwired
           ["rigor-editor-setup",
            "you have an editor config but no Rigor LSP — wire `rigor lsp` for live diagnostics and hover types."]
@@ -314,10 +293,8 @@ module Rigor
         PROMPT
       end
 
-      # The one-line essence of a skill's frontmatter `description`, read
-      # live from the SKILL.md so the catalogue can never go stale relative
-      # to the shipped skill. Drops the `Triggers:` / `NOT for` tail and
-      # caps the length.
+      # The one-line essence of a skill's frontmatter `description`, read live from the SKILL.md so the catalogue can
+      # never go stale relative to the shipped skill. Drops the `Triggers:` / `NOT for` tail and caps the length.
       def catalog_blurb(path)
         text = frontmatter(path).fetch("description", "").to_s.strip.tr("\n", " ").squeeze(" ")
         head = text.split(/\s*Triggers?:/, 2).first.to_s.strip
@@ -331,9 +308,8 @@ module Rigor
         "#{(text[0, limit] || '').rstrip}…"
       end
 
-      # Parse a SKILL.md's leading `---`-delimited YAML frontmatter. Returns
-      # {} on any missing or malformed block so the catalogue degrades to a
-      # name-only entry rather than raising.
+      # Parse a SKILL.md's leading `---`-delimited YAML frontmatter. Returns {} on any missing or malformed block so the
+      # catalogue degrades to a name-only entry rather than raising.
       def frontmatter(path)
         text = File.read(path)
         return {} unless text.start_with?("---\n")

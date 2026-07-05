@@ -7,11 +7,9 @@ module Rigor
   module MCP
     # JSON-RPC 2.0 dispatcher for the MCP server.
     #
-    # Each public `handle` call takes a parsed request hash and returns
-    # a response hash (or nil for notifications that require no reply).
-    # Tool implementations delegate to `CLI.new(argv, out:, err:).run`
-    # with StringIO capture — every tool stays in sync with its CLI
-    # counterpart automatically (ADR-33 WD4).
+    # Each public `handle` call takes a parsed request hash and returns a response hash (or nil for notifications that
+    # require no reply). Tool implementations delegate to `CLI.new(argv, out:, err:).run` with StringIO capture — every
+    # tool stays in sync with its CLI counterpart automatically (ADR-33 WD4).
     class Server # rubocop:disable Metrics/ClassLength
       PROTOCOL_VERSION = "2024-11-05"
 
@@ -142,8 +140,7 @@ module Rigor
         @err = err
       end
 
-      # Dispatches a parsed JSON-RPC request hash.
-      # Returns nil for notifications (requests without an `id`).
+      # Dispatches a parsed JSON-RPC request hash. Returns nil for notifications (requests without an `id`).
       def handle(request)
         id = request["id"]
         method_name = request["method"]

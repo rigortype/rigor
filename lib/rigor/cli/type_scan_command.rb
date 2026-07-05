@@ -16,11 +16,9 @@ module Rigor
   class CLI
     # Executes the `rigor type-scan` command.
     #
-    # The command walks every Prism node in one or more files, runs
-    # `Rigor::Scope#type_of` on each, and reports per-node-class coverage of
-    # the inference engine's directly recognized classes. It is the project's
-    # primary CI gate for tracking how much of an input source the engine can
-    # name without falling back to `Dynamic[Top]`.
+    # The command walks every Prism node in one or more files, runs `Rigor::Scope#type_of` on each, and reports
+    # per-node-class coverage of the inference engine's directly recognized classes. It is the project's primary CI gate
+    # for tracking how much of an input source the engine can name without falling back to `Dynamic[Top]`.
     class TypeScanCommand < Command
       USAGE = "Usage: rigor type-scan [options] PATH..."
 
@@ -78,9 +76,8 @@ module Rigor
         accumulator.to_report(paths, options)
       end
 
-      # Builds a project-aware environment that auto-detects `<cwd>/sig`
-      # by default and honours the configuration's `libraries:` /
-      # `signature_paths:` keys when present.
+      # Builds a project-aware environment that auto-detects `<cwd>/sig` by default and honours the configuration's
+      # `libraries:` / `signature_paths:` keys when present.
       def project_environment(configuration)
         Environment.for_project(
           libraries: configuration.libraries,
@@ -108,8 +105,7 @@ module Rigor
         report.unrecognized_ratio > threshold ? 1 : 0
       end
 
-      # Internal helper that accumulates per-file scan results into the
-      # totals carried by `Report`.
+      # Internal helper that accumulates per-file scan results into the totals carried by `Report`.
       class ScanAccumulator
         def initialize
           @visits = Hash.new(0)

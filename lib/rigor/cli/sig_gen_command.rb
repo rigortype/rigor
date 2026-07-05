@@ -11,30 +11,20 @@ module Rigor
   class CLI
     # Executes the `rigor sig-gen` command — ADR-14 slices 1–3.
     #
-    # Walks the given paths (or `configuration.paths` when none
-    # are supplied), classifies every reachable instance method
-    # via {Rigor::SigGen::Generator}, and either prints the
-    # resulting RBS skeletons / unified-style diffs (`--print`,
-    # `--diff`; slice 1) or writes them to the project signature
-    # tree via {Rigor::SigGen::Writer} (`--write`; slice 2).
+    # Walks the given paths (or `configuration.paths` when none are supplied), classifies every reachable instance
+    # method via {Rigor::SigGen::Generator}, and either prints the resulting RBS skeletons / unified-style diffs
+    # (`--print`, `--diff`; slice 1) or writes them to the project signature tree via {Rigor::SigGen::Writer}
+    # (`--write`; slice 2).
     #
-    # `--write` follows the established Ruby community
-    # convention: `lib/foo/bar.rb` → `sig/foo/bar.rbs`. New
-    # methods are inserted into the matching class declaration
-    # just before its closing `end`; new classes are appended
-    # to the file; non-existent target files are created. User-
-    # authored declarations are NEVER replaced unless
-    # `--overwrite` is set AND the candidate is a
-    # `tighter-return`.
+    # `--write` follows the established Ruby community convention: `lib/foo/bar.rb` → `sig/foo/bar.rbs`. New methods are
+    # inserted into the matching class declaration just before its closing `end`; new classes are appended to the file;
+    # non-existent target files are created. User-authored declarations are NEVER replaced unless `--overwrite` is set
+    # AND the candidate is a `tighter-return`.
     #
-    # Parameter policy defaults to `untyped`. `--params=observed`
-    # (slice 3) opts in to caller-side observation harvesting:
-    # the `ObservationCollector` walks `--observe=PATH...`
-    # (default `spec/` when no flag is given AND a `spec/`
-    # directory exists), unions per-position arg types, and the
-    # generator emits the union per ADR-5 clause 2.
-    # `--params=observed-strict` stays reserved-but-inert until
-    # the capability-role catalog ships (rejected with a usage
+    # Parameter policy defaults to `untyped`. `--params=observed` (slice 3) opts in to caller-side observation
+    # harvesting: the `ObservationCollector` walks `--observe=PATH...` (default `spec/` when no flag is given AND a
+    # `spec/` directory exists), unions per-position arg types, and the generator emits the union per ADR-5 clause 2.
+    # `--params=observed-strict` stays reserved-but-inert until the capability-role catalog ships (rejected with a usage
     # error so the surface stays stable).
     class SigGenCommand < Command
       USAGE = "Usage: rigor sig-gen [options] [paths]"
@@ -86,10 +76,8 @@ module Rigor
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
       end
 
-      # Slice 3 — collect call-site argument observations when
-      # `--params=observed` is set. When `--observe=PATH` is
-      # not specified, default to `spec/` (skipped silently
-      # when the directory is absent).
+      # Slice 3 — collect call-site argument observations when `--params=observed` is set. When `--observe=PATH` is not
+      # specified, default to `spec/` (skipped silently when the directory is absent).
       def collect_observations(configuration, options)
         return {} if options.fetch(:params) != "observed"
 

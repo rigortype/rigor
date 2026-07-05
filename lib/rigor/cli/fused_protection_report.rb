@@ -2,15 +2,13 @@
 
 module Rigor
   class CLI
-    # ADR-70 — aggregates per-file {Protection::MutationScanner::FusedFileResult}
-    # into a project-level **fused** protection report: how many type-visible
-    # breakages were caught by the type checker, how many of the *type-survivors*
-    # were caught by the test suite, and which sites neither axis caught — the
-    # ranked "add a type OR a test here" list.
+    # ADR-70 — aggregates per-file {Protection::MutationScanner::FusedFileResult} into a project-level **fused**
+    # protection report: how many type-visible breakages were caught by the type checker, how many of the
+    # *type-survivors* were caught by the test suite, and which sites neither axis caught — the ranked "add a type OR a
+    # test here" list.
     #
-    # Framing (ADR-63 / ADR-62 Criterion A, extended): the payload is the
-    # **attribution** — which protection axis is missing — never raw survival.
-    # An unprotected site is "add protection here", never "your code is broken".
+    # Framing (ADR-63 / ADR-62 Criterion A, extended): the payload is the **attribution** — which protection axis is
+    # missing — never raw survival. An unprotected site is "add protection here", never "your code is broken".
     FusedFileProtection = Data.define(:path, :type_killed, :test_killed, :unprotected, :ratio)
     UnprotectedBreakage = Data.define(:method_name, :count, :examples)
 

@@ -7,12 +7,10 @@ require_relative "renderable"
 
 module Rigor
   class CLI
-    # Renders a `TypeOfCommand::Result` as either human-readable text or a
-    # machine-readable JSON document.
+    # Renders a `TypeOfCommand::Result` as either human-readable text or a machine-readable JSON document.
     #
-    # The renderer is a separate concern from the command itself so that future
-    # output formats (sexp, lsp-style hover payloads, color decoration) can
-    # plug in without disturbing argument parsing or the inference call site.
+    # The renderer is a separate concern from the command itself so that future output formats (sexp, lsp-style hover
+    # payloads, color decoration) can plug in without disturbing argument parsing or the inference call site.
     class TypeOfRenderer
       include Renderable
 

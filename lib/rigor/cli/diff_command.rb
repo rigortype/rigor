@@ -7,10 +7,8 @@ require "optionparser"
 
 module Rigor
   class CLI
-    # Executes `rigor diff <baseline.json> [paths...]`. Compares
-    # the current `rigor check` diagnostics against a saved
-    # baseline JSON (the output of a previous `rigor check
-    # --format=json` run) and prints the delta:
+    # Executes `rigor diff <baseline.json> [paths...]`. Compares the current `rigor check` diagnostics against a saved
+    # baseline JSON (the output of a previous `rigor check --format=json` run) and prints the delta:
     #
     # - **new** — diagnostics in the current run that were not
     #   in the baseline (typically a regression introduced in
@@ -18,19 +16,13 @@ module Rigor
     # - **fixed** — diagnostics in the baseline that no longer
     #   appear in the current run (typically progress).
     #
-    # Identity for matching is the tuple
-    # `(path, line, column, rule, source_family, message)`.
-    # An edit that moves a diagnostic to a new line surfaces as
-    # one fixed + one new pair, which lines up with the user's
-    # mental model of "you changed the line, the analyzer's
-    # position changed too."
+    # Identity for matching is the tuple `(path, line, column, rule, source_family, message)`. An edit that moves a
+    # diagnostic to a new line surfaces as one fixed + one new pair, which lines up with the user's mental model of "you
+    # changed the line, the analyzer's position changed too."
     #
-    # CI usage: commit a `rigor.baseline.json` produced once
-    # with `rigor check --format=json > rigor.baseline.json`,
-    # then run `rigor diff rigor.baseline.json` in CI. Exit code
-    # is `1` when any new diagnostic appears, `0` otherwise —
-    # so adding new errors fails CI but legacy errors recorded
-    # in the baseline don't.
+    # CI usage: commit a `rigor.baseline.json` produced once with `rigor check --format=json > rigor.baseline.json`,
+    # then run `rigor diff rigor.baseline.json` in CI. Exit code is `1` when any new diagnostic appears, `0` otherwise —
+    # so adding new errors fails CI but legacy errors recorded in the baseline don't.
     class DiffCommand < Command
       USAGE = "Usage: rigor diff [options] <baseline.json> [paths...]"
 
@@ -77,10 +69,8 @@ module Rigor
         options
       end
 
-      # Runs `rigor check` against the remaining argv (or the
-      # configured paths) and returns the diagnostics array.
-      # Reuses the analyzer + configuration plumbing the
-      # check-command path uses.
+      # Runs `rigor check` against the remaining argv (or the configured paths) and returns the diagnostics array.
+      # Reuses the analyzer + configuration plumbing the check-command path uses.
       def run_current(options)
         require_relative "../analysis/runner"
         require_relative "../configuration"

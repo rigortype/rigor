@@ -14,16 +14,12 @@ require_relative "command"
 
 module Rigor
   class CLI
-    # `rigor plugins` — reports the activation status of every
-    # plugin entry in `.rigor.yml` so users (and the
-    # `rigor-project-init` SKILL, CI gates, `rigor init`) can
-    # verify their plugin configuration is actually doing what
+    # `rigor plugins` — reports the activation status of every plugin entry in `.rigor.yml` so users (and the
+    # `rigor-project-init` SKILL, CI gates, `rigor init`) can verify their plugin configuration is actually doing what
     # they think.
     #
-    # The command is read-only and idempotent: it loads the
-    # project's `.rigor.yml` (same discovery as `rigor check`),
-    # runs `Plugin::Loader.load` to attempt instantiation, then
-    # prints a table of:
+    # The command is read-only and idempotent: it loads the project's `.rigor.yml` (same discovery as `rigor check`),
+    # runs `Plugin::Loader.load` to attempt instantiation, then prints a table of:
     #
     # - load status (`loaded` / `load-error` with reason);
     # - resolved manifest id, version, description;
@@ -39,13 +35,12 @@ module Rigor
     #   class — `node_rule` node types, `dynamic_return` receivers,
     #   `narrowing_facts` methods.
     #
-    # `--capabilities` switches to a focused catalogue of just the
-    # narrow-protocol gate values + produced/consumed facts (ADR-37
-    # § "Machine-readable capability catalogue") — the AI-legibility
-    # surface that lets an agent enumerate what every plugin does.
+    # `--capabilities` switches to a focused catalogue of just the narrow-protocol gate values + produced/consumed facts
+    # (ADR-37 § "Machine-readable capability catalogue") — the AI-legibility surface that lets an agent enumerate what
+    # every plugin does.
     #
-    # Output formats: `text` (default, human-readable table) and
-    # `json` (for tooling — SKILLs, CI gates, editor integrations).
+    # Output formats: `text` (default, human-readable table) and `json` (for tooling — SKILLs, CI gates, editor
+    # integrations).
     #
     # Exit codes:
     # - `0` — every configured plugin loaded.
@@ -83,13 +78,10 @@ module Rigor
 
       private
 
-      # Picks the renderer view. `--capabilities` switches to the
-      # focused extension-protocol catalogue (ADR-37 § "Machine-readable
-      # capability catalogue") — per plugin, only the gate values that
-      # tell a reader (or an AI agent) exactly what the plugin
-      # contributes: the node-rule node types, the dynamic-return
-      # receivers, the type-specifier methods, and the produced /
-      # consumed facts. The default view stays the full activation report.
+      # Picks the renderer view. `--capabilities` switches to the focused extension-protocol catalogue (ADR-37 §
+      # "Machine-readable capability catalogue") — per plugin, only the gate values that tell a reader (or an AI agent)
+      # exactly what the plugin contributes: the node-rule node types, the dynamic-return receivers, the type-specifier
+      # methods, and the produced / consumed facts. The default view stays the full activation report.
       def render(renderer, options)
         json = options.fetch(:format) == "json"
         if options.fetch(:capabilities)
@@ -120,22 +112,18 @@ module Rigor
         raise OptionParser::InvalidArgument, "unsupported format: #{options.fetch(:format)}"
       end
 
-      # Runs the plugin loader against the project configuration
-      # and returns a row per declared plugin entry. Each row is
-      # a plain Hash with the fields enumerated in the class
-      # docstring so the renderer (text + JSON) reads from a
+      # Runs the plugin loader against the project configuration and returns a row per declared plugin entry. Each row
+      # is a plain Hash with the fields enumerated in the class docstring so the renderer (text + JSON) reads from a
       # single shape.
       #
-      # The loader catches require / init failures and surfaces
-      # them through `registry.load_errors`; we merge those back
+      # The loader catches require / init failures and surfaces them through `registry.load_errors`; we merge those back
       # into the per-entry rows by matching on `plugin_ref`.
       def build_rows(configuration)
         services = build_services(configuration)
         registry = Plugin::Loader.load(configuration: configuration, services: services)
 
         rows = configuration.plugins.map { |entry| row_for_entry(entry, registry) }
-        # Surface registry-level errors that did not bind to an
-        # entry (e.g. dependency-cycle errors that name multiple
+        # Surface registry-level errors that did not bind to an entry (e.g. dependency-cycle errors that name multiple
         # plugins). The renderer treats these as "orphan" errors.
         orphan_errors = orphan_load_errors(registry, rows)
         rows + orphan_errors
@@ -154,18 +142,15 @@ module Rigor
         gem_name = entry_gem_name(entry)
         config = entry_config(entry)
         plugin = registry.plugins.find do |p|
-          # The loader has already matched the entry to a plugin
-          # class; we can identify it by either the gem name (when
-          # the entry was a String) or the explicit id (when the
-          # entry was a Hash with `id:`).
+          # The loader has already matched the entry to a plugin class; we can identify it by either the gem name (when
+          # the entry was a String) or the explicit id (when the entry was a Hash with `id:`).
           plugin_matches_entry?(p, gem_name, entry_id(entry))
         end
 
         if plugin
           loaded_row(plugin, gem_name, config)
         else
-          # Find the load error whose plugin_ref names this entry
-          # (the ref is set by Loader to the gem name on require
+          # Find the load error whose plugin_ref names this entry (the ref is set by Loader to the gem name on require
           # failures and to the manifest id on later failures).
           error = registry.load_errors.find do |e|
             ref = e.plugin_ref.to_s
@@ -178,8 +163,7 @@ module Rigor
       def plugin_matches_entry?(plugin, gem_name, entry_id)
         return true if entry_id && plugin.manifest.id == entry_id
 
-        # A bare gem entry conventionally has manifest.id equal to
-        # the gem name with the `rigor-` prefix stripped.
+        # A bare gem entry conventionally has manifest.id equal to the gem name with the `rigor-` prefix stripped.
         derived_id = gem_name.delete_prefix("rigor-")
         [derived_id, gem_name].include?(plugin.manifest.id)
       end
@@ -192,12 +176,10 @@ module Rigor
           .merge(load_error: nil)
       end
 
-      # ADR-37 narrow extension protocols. Unlike the 10 declarative
-      # manifest fields, these are class-level DSLs (`node_rule` /
-      # `dynamic_return` / `narrowing_facts`), so they are read off the
-      # plugin class rather than the manifest. The gate values — node
-      # types, receiver class names, specified method names — are the
-      # greppable, enumerable surface the capability catalogue exposes.
+      # ADR-37 narrow extension protocols. Unlike the 10 declarative manifest fields, these are class-level DSLs
+      # (`node_rule` / `dynamic_return` / `narrowing_facts`), so they are read off the plugin class rather than the
+      # manifest. The gate values — node types, receiver class names, specified method names — are the greppable,
+      # enumerable surface the capability catalogue exposes.
       def narrow_protocol_fields(plugin)
         klass = plugin.class
         {
@@ -269,10 +251,8 @@ module Rigor
         }
       end
 
-      # For each `signature_paths:` directory the plugin resolves
-      # against its gem root, report the absolute path and a
-      # quick `.rbs`-file count. The count is a sanity signal:
-      # an empty bundle directory loads silently today but
+      # For each `signature_paths:` directory the plugin resolves against its gem root, report the absolute path and a
+      # quick `.rbs`-file count. The count is a sanity signal: an empty bundle directory loads silently today but
       # contributes nothing.
       def signature_path_rows(plugin)
         plugin.signature_paths.map do |abs|
@@ -317,10 +297,8 @@ module Rigor
         end
       end
 
-      # Build orphan-error rows for load errors whose `plugin_ref`
-      # did not bind to any configured plugin entry (e.g. a
-      # dependency-cycle naming a plugin we already accounted for
-      # but reported alongside another). De-duplicates against
+      # Build orphan-error rows for load errors whose `plugin_ref` did not bind to any configured plugin entry (e.g. a
+      # dependency-cycle naming a plugin we already accounted for but reported alongside another). De-duplicates against
       # errors we already attached.
       def orphan_load_errors(registry, rows)
         attached_refs = rows.compact.flat_map { |row| [row[:gem], row[:id]].compact }.to_set

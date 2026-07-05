@@ -4,23 +4,17 @@ require_relative "command"
 
 module Rigor
   class CLI
-    # `rigor plugin` (singular) — discover and read the plugin source
-    # bundled with the `rigortype` gem.
+    # `rigor plugin` (singular) — discover and read the plugin source bundled with the `rigortype` gem.
     #
-    # Rigor ships ~30 production plugins under `plugins/` and a set of
-    # tutorial plugins under `examples/`. When Rigor is installed via
-    # `mise` / `gem install` the gem checkout is on disk, so a plugin
-    # author (or an AI coding agent following the `rigor-plugin-author`
-    # skill) can read a real, working plugin as a worked example —
-    # instead of guessing the `Rigor::Plugin::Base` surface from prose.
-    # This command outputs the absolute paths so they can be found and
-    # read regardless of where the gem landed.
+    # Rigor ships ~30 production plugins under `plugins/` and a set of tutorial plugins under `examples/`. When Rigor is
+    # installed via `mise` / `gem install` the gem checkout is on disk, so a plugin author (or an AI coding agent
+    # following the `rigor-plugin-author` skill) can read a real, working plugin as a worked example — instead of
+    # guessing the `Rigor::Plugin::Base` surface from prose. This command outputs the absolute paths so they can be
+    # found and read regardless of where the gem landed.
     #
-    # It is deliberately distinct from `rigor plugins` (plural), which
-    # reports the activation status of the plugins configured in *your*
-    # `.rigor.yml`. This command (singular) browses the plugins bundled
-    # in the *toolchain*. Mnemonic: "plugins" = my config; "plugin" =
-    # the catalogue I can learn from.
+    # It is deliberately distinct from `rigor plugins` (plural), which reports the activation status of the plugins
+    # configured in *your* `.rigor.yml`. This command (singular) browses the plugins bundled in the *toolchain*.
+    # Mnemonic: "plugins" = my config; "plugin" = the catalogue I can learn from.
     #
     # Subcommands:
     #
@@ -39,13 +33,10 @@ module Rigor
     #
     # `rigor plugin` with no subcommand is an alias for `list`.
     #
-    # **Docker / cross-filesystem note.** Every path printed is resolved
-    # at runtime from this file's location, so it is correct *on the
-    # filesystem where `rigor` runs*. If you run `rigor` inside a
-    # container but read files from the host (or vice versa), the paths
-    # will not resolve — read them from the same environment that ran
-    # the command (`rigor plugin print` inlines the body for exactly
-    # this case: it works with no file-reading tool at all).
+    # **Docker / cross-filesystem note.** Every path printed is resolved at runtime from this file's location, so it is
+    # correct *on the filesystem where `rigor` runs*. If you run `rigor` inside a container but read files from the host
+    # (or vice versa), the paths will not resolve — read them from the same environment that ran the command (`rigor
+    # plugin print` inlines the body for exactly this case: it works with no file-reading tool at all).
     class PluginCommand < Command
       USAGE = <<~USAGE
         Usage: rigor plugin <subcommand> [args]
@@ -67,9 +58,8 @@ module Rigor
           rigor plugin root
       USAGE
 
-      # The bundled plugins/examples/source live at `<gem_root>/...`.
-      # From `lib/rigor/cli/plugin_command.rb` the gem root is three
-      # directories up (matching SkillCommand::SKILLS_ROOT).
+      # The bundled plugins/examples/source live at `<gem_root>/...`. From `lib/rigor/cli/plugin_command.rb` the gem
+      # root is three directories up (matching SkillCommand::SKILLS_ROOT).
       GEM_ROOT     = File.expand_path("../../..", __dir__)
       PLUGINS_ROOT = File.join(GEM_ROOT, "plugins")
       EXAMPLES_ROOT = File.join(GEM_ROOT, "examples")
@@ -168,9 +158,8 @@ module Rigor
         0
       end
 
-      # The header that precedes the plugin body when an author runs
-      # `rigor plugin print <name>`. `# `-prefixed so the combined
-      # output stays readable; the Ruby body below it is unchanged.
+      # The header that precedes the plugin body when an author runs `rigor plugin print <name>`. `# `-prefixed so the
+      # combined output stays readable; the Ruby body below it is unchanged.
       def render_print_header(plugin)
         dir = plugin.fetch(:path)
         sig = File.join(dir, "sig")
@@ -202,8 +191,7 @@ module Rigor
         end
       end
 
-      # Match the directory name with or without the conventional
-      # `rigor-` prefix, so both `rigor-activerecord` and
+      # Match the directory name with or without the conventional `rigor-` prefix, so both `rigor-activerecord` and
       # `activerecord` resolve.
       def find(name)
         all = discover(PLUGINS_ROOT) + discover(EXAMPLES_ROOT)

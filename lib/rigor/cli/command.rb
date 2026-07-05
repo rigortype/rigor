@@ -4,16 +4,12 @@ module Rigor
   class CLI
     # Base class for the `rigor <subcommand>` command objects.
     #
-    # Every subcommand captured the same invariant wiring — the argument
-    # vector plus the output and error streams — in an identical
-    # `initialize(argv:, out:, err:)`, and defaulted the streams
-    # inconsistently (some to `$stdout` / `$stderr`, most not at all).
-    # Centralising it here gives one consistent shape and lets a test
-    # instantiate a command with just `argv:` (the streams default so a
-    # spec can pass a `StringIO` for one and ignore the other).
+    # Every subcommand captured the same invariant wiring — the argument vector plus the output and error streams — in
+    # an identical `initialize(argv:, out:, err:)`, and defaulted the streams inconsistently (some to `$stdout` /
+    # `$stderr`, most not at all). Centralising it here gives one consistent shape and lets a test instantiate a command
+    # with just `argv:` (the streams default so a spec can pass a `StringIO` for one and ignore the other).
     #
-    # Subclasses read the `@argv` / `@out` / `@err` ivars directly, as
-    # they did before.
+    # Subclasses read the `@argv` / `@out` / `@err` ivars directly, as they did before.
     class Command
       def initialize(argv:, out: $stdout, err: $stderr)
         @argv = argv
@@ -23,11 +19,9 @@ module Rigor
 
       private
 
-      # Expands `args` (a mix of files and directories) into a unique
-      # list of `.rb` paths, recursing into directories. Returns nil —
-      # after writing `<command_name>: not a file or directory: <arg>` to
-      # `@err` — on the first arg that is neither. Shared by the
-      # path-walking commands (`type-scan`, `coverage`).
+      # Expands `args` (a mix of files and directories) into a unique list of `.rb` paths, recursing into directories.
+      # Returns nil — after writing `<command_name>: not a file or directory: <arg>` to `@err` — on the first arg that
+      # is neither. Shared by the path-walking commands (`type-scan`, `coverage`).
       def collect_paths(args, command_name:)
         paths = []
         args.each do |arg|

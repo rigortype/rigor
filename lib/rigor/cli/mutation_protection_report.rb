@@ -2,16 +2,13 @@
 
 module Rigor
   class CLI
-    # ADR-63 Tier 2 — aggregates per-file {Protection::MutationScanner}
-    # results into a project-level *effectiveness* report: the kill ratio (when
-    # a type-visible bug was introduced, how often Rigor caught it), the per-file
-    # breakdown, and a ranked "add a type here" list keyed by the method whose
-    # breakage Rigor most often *missed* — the sites where a receiver annotation
-    # would buy real catching power.
+    # ADR-63 Tier 2 — aggregates per-file {Protection::MutationScanner} results into a project-level *effectiveness*
+    # report: the kill ratio (when a type-visible bug was introduced, how often Rigor caught it), the per-file
+    # breakdown, and a ranked "add a type here" list keyed by the method whose breakage Rigor most often *missed* — the
+    # sites where a receiver annotation would buy real catching power.
     #
-    # The framing is load-bearing (ADR-63 Criterion A / ADR-62 Criterion A): the
-    # number is *effectiveness*, the survivors are *missed breakages / where to
-    # add a type*, never "your code is broken".
+    # The framing is load-bearing (ADR-63 Criterion A / ADR-62 Criterion A): the number is *effectiveness*, the
+    # survivors are *missed breakages / where to add a type*, never "your code is broken".
     FileEffectiveness = Data.define(:path, :killed, :survived, :ratio)
     MissedBreakage = Data.define(:method_name, :count, :examples)
 

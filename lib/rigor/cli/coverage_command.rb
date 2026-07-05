@@ -31,12 +31,11 @@ module Rigor
   class CLI
     # Executes the `rigor coverage` command.
     #
-    # Walks every Prism node in one or more files, infers its type via
-    # `Rigor::Scope#type_of`, and classifies the result into precision tiers
-    # (constant / nominal / shaped / refined / bot / dynamic_specific /
+    # Walks every Prism node in one or more files, infers its type via `Rigor::Scope#type_of`, and classifies the result
+    # into precision tiers (constant / nominal / shaped / refined / bot / dynamic_specific /
     # dynamic_top / top).  Reports aggregate and per-file statistics so
-    # maintainers can track type-precision trends and SKILL pipelines can
-    # measure the impact of adding new constant-fold or shape-dispatch rules.
+    # maintainers can track type-precision trends and SKILL pipelines can measure the impact of adding new constant-fold
+    # or shape-dispatch rules.
     #
     # Exit codes:
     #   0  — scan complete, precision ratio ≥ threshold (or no threshold given)
@@ -47,8 +46,8 @@ module Rigor
 
       USAGE = "Usage: rigor coverage [options] PATH..."
 
-      # ADR-70 — the default test runner hook for `--with-tests`. The
-      # conventional Ruby test task; override with `--test-command`.
+      # ADR-70 — the default test runner hook for `--with-tests`. The conventional Ruby test task; override with
+      # `--test-command`.
       DEFAULT_TEST_COMMAND = %w[bundle exec rake].freeze
 
       # @return [Integer] CLI exit status.
@@ -153,9 +152,8 @@ module Rigor
         accumulator.to_report
       end
 
-      # Seed the protection scan's scope with the same cross-file facts
-      # `rigor check` resolves against, so a receiver reads the type it
-      # actually has rather than a stripped-scope `Dynamic`:
+      # Seed the protection scan's scope with the same cross-file facts `rigor check` resolves against, so a receiver
+      # reads the type it actually has rather than a stripped-scope `Dynamic`:
       #
       # - `discovered_classes` — a project constant referring to a class
       #   defined in a *sibling* file (`Account`, `User`) types as
@@ -168,8 +166,8 @@ module Rigor
       #   parameter) counts as protected when its call sites resolve to
       #   concrete argument types.
       #
-      # Both span the scanned `paths` only (no whole-project pre-pass) —
-      # a site that gains neither is classified exactly as before.
+      # Both span the scanned `paths` only (no whole-project pre-pass) — a site that gains neither is classified exactly
+      # as before.
       def scope_with_inferred_params(paths, configuration, environment)
         base = Scope.empty(environment: environment)
         seed = {}
@@ -206,24 +204,19 @@ module Rigor
         CoverageScan.precision_report(files: paths, configuration: Configuration.load(options.fetch(:config)))
       end
 
-      # Delegated to the shared scan module (see {CoverageScan}); the
-      # protection path below reuses both, and `rigor check --coverage`
-      # reuses `precision_report` over the same machinery.
+      # Delegated to the shared scan module (see {CoverageScan}); the protection path below reuses both, and `rigor
+      # check --coverage` reuses `precision_report` over the same machinery.
       def project_environment(configuration)
         CoverageScan.project_environment(configuration)
       end
 
-      # The protection scan must see the same receiver types `rigor check`
-      # does — including plugin-contributed `dynamic_return` types (a
-      # controller's `params` → `ActionController::Parameters`, a
-      # `Model.where` → `ActiveRecord::Relation[Model]`). The bare
-      # `project_environment` carries only the RBS environment (no plugin
-      # registry), so every plugin-typed receiver reads `Dynamic` and its
-      # dispatch site is miscounted as *unprotected* — a systematic
-      # undercount of what Rigor actually types on a plugin-using project.
-      # `ProjectContext` builds the plugin-aware environment (registry
-      # materialised + the per-run prepare pass that primes producers like
-      # the controller / model index) exactly as the LSP and the runner do.
+      # The protection scan must see the same receiver types `rigor check` does — including plugin-contributed
+      # `dynamic_return` types (a controller's `params` → `ActionController::Parameters`, a `Model.where` →
+      # `ActiveRecord::Relation[Model]`). The bare `project_environment` carries only the RBS environment (no plugin
+      # registry), so every plugin-typed receiver reads `Dynamic` and its dispatch site is miscounted as *unprotected* —
+      # a systematic undercount of what Rigor actually types on a plugin-using project. `ProjectContext` builds the
+      # plugin-aware environment (registry materialised + the per-run prepare pass that primes producers like the
+      # controller / model index) exactly as the LSP and the runner do.
       def plugin_aware_environment(configuration)
         LanguageServer::ProjectContext.new(configuration: configuration).environment
       end

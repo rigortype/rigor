@@ -11,15 +11,12 @@ module Rigor
   class CLI
     # Executes `rigor show-bleedingedge` (ADR-50 § WD2).
     #
-    # Prints the bleeding-edge overlay — the Rigor-maintained set of the
-    # next major's queued changes ({Rigor::BleedingEdge}) — as an
-    # explicit list, and reports which of them the project's
-    # `bleeding_edge:` configuration adopts. The overlay is empty in this
-    # release, so the command currently reports an empty set; it becomes
-    # the inspection surface ADR-50 describes once a feature is queued.
+    # Prints the bleeding-edge overlay — the Rigor-maintained set of the next major's queued changes
+    # ({Rigor::BleedingEdge}) — as an explicit list, and reports which of them the project's `bleeding_edge:`
+    # configuration adopts. The overlay is empty in this release, so the command currently reports an empty set; it
+    # becomes the inspection surface ADR-50 describes once a feature is queued.
     #
-    # Read-only: it loads `.rigor.yml` to resolve the active selection
-    # but runs no analysis.
+    # Read-only: it loads `.rigor.yml` to resolve the active selection but runs no analysis.
     class ShowBleedingedgeCommand < Command
       USAGE = "Usage: rigor show-bleedingedge [options]"
 

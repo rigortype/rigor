@@ -10,12 +10,10 @@ require_relative "coverage_report"
 
 module Rigor
   class CLI
-    # Shared type-precision scan behind both `rigor coverage` (the
-    # dedicated command) and `rigor check --coverage` (the in-run
-    # coverage block). Walks each file's AST, types every expression via
-    # `Scope#type_of`, and accumulates the precision-tier breakdown into a
-    # `CoverageReport`. Extracted so the two surfaces stay byte-identical
-    # on the same file set.
+    # Shared type-precision scan behind both `rigor coverage` (the dedicated command) and `rigor check --coverage` (the
+    # in-run coverage block). Walks each file's AST, types every expression via `Scope#type_of`, and accumulates the
+    # precision-tier breakdown into a `CoverageReport`. Extracted so the two surfaces stay byte-identical on the same
+    # file set.
     module CoverageScan
       module_function
 
@@ -37,11 +35,9 @@ module Rigor
         )
       end
 
-      # Parses one file and feeds the scan result (or a parse-error
-      # record) into `accumulator`. `scanner` / `accumulator` are a
-      # matched pair — a `PrecisionScanner` + `CoverageAccumulator`, or a
-      # `ProtectionScanner` + `ProtectionAccumulator` — both of which
-      # respond to `scan(node)` and `absorb(path, result)`.
+      # Parses one file and feeds the scan result (or a parse-error record) into `accumulator`. `scanner` /
+      # `accumulator` are a matched pair — a `PrecisionScanner` + `CoverageAccumulator`, or a `ProtectionScanner` +
+      # `ProtectionAccumulator` — both of which respond to `scan(node)` and `absorb(path, result)`.
       def scan_into(path, scanner, accumulator, configuration)
         source = File.read(path)
         parse_result = Prism.parse(source, filepath: path, version: configuration.target_ruby)

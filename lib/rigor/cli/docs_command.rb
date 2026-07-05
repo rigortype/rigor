@@ -4,33 +4,25 @@ require_relative "command"
 
 module Rigor
   class CLI
-    # `rigor docs` — serve the documentation bundled with the
-    # `rigortype` gem OFFLINE (ADR-74). The skills (`rigor skill <name>`)
-    # already ride in the gem; this is the doc twin, so once Rigor is
-    # installed an agent can read the guidance the SKILL-driven UX routes
-    # to without the network. The canonical web copy is
-    # rigor.typedduck.fail/llms.txt; the gem ships `docs/install.md`,
-    # `docs/llms.txt`, and the full user-facing **manual** and
-    # **handbook** (the drive-Rigor chapters — the contributor-facing
-    # ADR / spec / notes corpus stays web-only).
+    # `rigor docs` — serve the documentation bundled with the `rigortype` gem OFFLINE (ADR-74). The skills (`rigor skill
+    # <name>`) already ride in the gem; this is the doc twin, so once Rigor is installed an agent can read the guidance
+    # the SKILL-driven UX routes to without the network. The canonical web copy is rigor.typedduck.fail/llms.txt; the
+    # gem ships `docs/install.md`, `docs/llms.txt`, and the full user-facing **manual** and **handbook** (the
+    # drive-Rigor chapters — the contributor-facing ADR / spec / notes corpus stays web-only).
     #
-    # Grammar (mirrors `rigor skill`): the positional slot is always a
-    # doc *name*; alternative outputs are flags, so a page named `list`
-    # or `path` can never be shadowed by a verb.
+    # Grammar (mirrors `rigor skill`): the positional slot is always a doc *name*; alternative outputs are flags, so a
+    # page named `list` or `path` can never be shadowed by a verb.
     #
     # - `rigor docs`                  — print the bundled `llms.txt` index.
     # - `rigor docs <name>`           — print a doc page to stdout.
     # - `rigor docs --path <name>`    — one-line absolute path, for a Read tool.
     # - `rigor docs --list [<cat>]`   — table of name + path (optionally one category).
     #
-    # `<name>` resolves a category-qualified path (`handbook/03-narrowing`),
-    # a prefixed basename (`03-narrowing`), or a short name (`narrowing`,
-    # when it is unique across categories).
+    # `<name>` resolves a category-qualified path (`handbook/03-narrowing`), a prefixed basename (`03-narrowing`), or a
+    # short name (`narrowing`, when it is unique across categories).
     #
-    # The pre-v0.3.0 verb spellings `rigor docs list` / `rigor docs path
-    # <name>` still work but emit a stderr deprecation notice; they are
-    # removed in v0.3.0 (see docs/ROADMAP.md § "Scheduled CLI
-    # deprecations").
+    # The pre-v0.3.0 verb spellings `rigor docs list` / `rigor docs path <name>` still work but emit a stderr
+    # deprecation notice; they are removed in v0.3.0 (see docs/ROADMAP.md § "Scheduled CLI deprecations").
     class DocsCommand < Command
       USAGE = <<~USAGE
         Usage: rigor docs [<name>] [--path <name>] [--list [<category>]]
@@ -60,16 +52,14 @@ module Rigor
           rigor docs path <name>    ->  rigor docs --path <name>
       USAGE
 
-      # The bundled docs live at `<gem_root>/docs/`. From
-      # `lib/rigor/cli/docs_command.rb` that is three directories up.
+      # The bundled docs live at `<gem_root>/docs/`. From `lib/rigor/cli/docs_command.rb` that is three directories up.
       DOCS_ROOT = File.expand_path("../../../docs", __dir__)
       MANUAL_ROOT = File.join(DOCS_ROOT, "manual")
       HANDBOOK_ROOT = File.join(DOCS_ROOT, "handbook")
       LLMS_INDEX = File.join(DOCS_ROOT, "llms.txt")
 
-      # The verb subcommands the flags superseded keep working with a
-      # stderr deprecation notice until this version drops them. Each maps
-      # to the canonical advice printed and the flag it rewrites to.
+      # The verb subcommands the flags superseded keep working with a stderr deprecation notice until this version drops
+      # them. Each maps to the canonical advice printed and the flag it rewrites to.
       LEGACY_VERB_REMOVAL = "v0.3.0"
       LEGACY_VERBS = {
         "list" => { old: "list",        advice: "--list",        flag: "--list" },
@@ -102,8 +92,8 @@ module Rigor
 
       private
 
-      # Translate a deprecated verb spelling into its flag form, warning
-      # once on stderr, so the dispatch above only handles canonical forms.
+      # Translate a deprecated verb spelling into its flag form, warning once on stderr, so the dispatch above only
+      # handles canonical forms.
       def rewrite_legacy_verb!
         spec = LEGACY_VERBS[@argv.first]
         return unless spec
@@ -154,9 +144,8 @@ module Rigor
         doc = resolve_doc(name)
         return doc if doc.is_a?(Integer) # error status, already reported
 
-        # ASCII-only provenance header: the doc body is read with the
-        # external encoding (US-ASCII under a C locale), so a UTF-8 header
-        # would set the output buffer to UTF-8 and clash with the body.
+        # ASCII-only provenance header: the doc body is read with the external encoding (US-ASCII under a C locale), so
+        # a UTF-8 header would set the output buffer to UTF-8 and clash with the body.
         @out.puts("<!-- rigor docs #{doc.fetch(:name)} (rigortype #{Rigor::VERSION}, offline) -->")
         @out.puts
         @out.write(File.read(doc.fetch(:path)))
@@ -173,9 +162,8 @@ module Rigor
         0
       end
 
-      # Resolve a query to a single doc. Exact relative-path and
-      # prefixed-basename aliases are unique; a short (prefix-stripped)
-      # name is accepted only when one category owns it.
+      # Resolve a query to a single doc. Exact relative-path and prefixed-basename aliases are unique; a short
+      # (prefix-stripped) name is accepted only when one category owns it.
       #
       # @return [Hash, Integer] the doc entry, or an error exit status
       #   after the error has been written to `@err`.
@@ -193,10 +181,8 @@ module Rigor
         end
       end
 
-      # Every bundled doc, each carrying the aliases `rigor docs <name>`
-      # accepts and the category used by `--list`. `install.md` sits at
-      # the docs root (category `guide`); the rest are manual / handbook
-      # chapters.
+      # Every bundled doc, each carrying the aliases `rigor docs <name>` accepts and the category used by `--list`.
+      # `install.md` sits at the docs root (category `guide`); the rest are manual / handbook chapters.
       def discover_docs
         paths = [File.join(DOCS_ROOT, "install.md")]
         paths += Dir.glob(File.join(MANUAL_ROOT, "**", "*.md")) # Dir.glob is already sorted
@@ -215,11 +201,11 @@ module Rigor
           relative: relative,
           path: path,
           category: category,
-          # Always-unique addresses: the `docs/`-relative path and the
-          # prefixed basename. `handbook/03-narrowing` and `03-narrowing`.
+          # Always-unique addresses: the `docs/`-relative path and the prefixed basename. `handbook/03-narrowing` and
+          # `03-narrowing`.
           exact_aliases: [relative, base].uniq,
-          # The prefix-stripped short name (`narrowing`); ambiguous when
-          # two categories carry the same chapter slug (`plugins`).
+          # The prefix-stripped short name (`narrowing`); ambiguous when two categories carry the same chapter slug
+          # (`plugins`).
           short_name: short
         }
       end

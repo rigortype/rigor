@@ -4,15 +4,11 @@ require "json"
 
 module Rigor
   class CLI
-    # Renderer for `rigor plugins`. Produces a human-readable
-    # text table and a JSON representation from the same row
-    # shape (the Hash documented on
-    # {Rigor::CLI::PluginsCommand#loaded_row}).
+    # Renderer for `rigor plugins`. Produces a human-readable text table and a JSON representation from the same row
+    # shape (the Hash documented on {Rigor::CLI::PluginsCommand#loaded_row}).
     #
-    # The two formats carry the same content; JSON is meant for
-    # tooling (SKILLs, CI, editor integrations) while text is
-    # for interactive inspection. Rows are printed in the order
-    # the loader resolved them.
+    # The two formats carry the same content; JSON is meant for tooling (SKILLs, CI, editor integrations) while text is
+    # for interactive inspection. Rows are printed in the order the loader resolved them.
     class PluginsRenderer # rubocop:disable Metrics/ClassLength
       def initialize(rows:, configuration_path:)
         @rows = rows
@@ -42,12 +38,10 @@ module Rigor
         )
       end
 
-      # ADR-37 § "Machine-readable capability catalogue" — the focused
-      # per-plugin extension-protocol dump. Only loaded plugins appear
-      # (a plugin that failed to load contributes no capabilities), and
-      # each carries only the gate values an agent enumerates to learn
-      # what the plugin does: node-rule node types, dynamic-return
-      # receivers, type-specifier methods, and produced / consumed facts.
+      # ADR-37 § "Machine-readable capability catalogue" — the focused per-plugin extension-protocol dump. Only loaded
+      # plugins appear (a plugin that failed to load contributes no capabilities), and each carries only the gate values
+      # an agent enumerates to learn what the plugin does: node-rule node types, dynamic-return receivers,
+      # type-specifier methods, and produced / consumed facts.
       def capabilities_json
         JSON.pretty_generate(
           {
@@ -84,9 +78,8 @@ module Rigor
         lines
       end
 
-      # The non-empty capability surfaces for a plugin, each as a
-      # `label: a, b, c` string. Data-driven so the catalogue stays a
-      # single source of truth shared between the text and JSON views.
+      # The non-empty capability surfaces for a plugin, each as a `label: a, b, c` string. Data-driven so the catalogue
+      # stays a single source of truth shared between the text and JSON views.
       def capability_surfaces(row)
         [
           ["node_rule", row[:node_rule_types]],
@@ -169,9 +162,8 @@ module Rigor
         lines
       end
 
-      # ADR-37 narrow extension protocols (node_rule / dynamic_return /
-      # narrowing_facts). Surfaced in the full report alongside the
-      # declarative surfaces; `--capabilities` is the focused view.
+      # ADR-37 narrow extension protocols (node_rule / dynamic_return / narrowing_facts). Surfaced in the full report
+      # alongside the declarative surfaces; `--capabilities` is the focused view.
       def narrow_protocol_lines(row)
         lines = []
         lines << "        node_rule: #{row[:node_rule_types].join(', ')}" if row[:node_rule_types].any?

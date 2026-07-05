@@ -4,35 +4,27 @@ require_relative "../type"
 
 module Rigor
   module Inference
-    # ADR-16 Tier A — engine hook. Consults every registered
-    # plugin manifest's `block_as_methods` entries to decide
-    # whether a block call site qualifies for `Scope#self_type`
-    # narrowing.
+    # ADR-16 Tier A — engine hook. Consults every registered plugin manifest's `block_as_methods`
+    # entries to decide whether a block call site qualifies for `Scope#self_type` narrowing.
     #
     # The match contract for a class-level DSL like Sinatra's
     # `class MyApp < Sinatra::Base; get '/foo' do ... end; end`:
     #
-    # - the call's lexical receiver type is `Singleton[X]`
-    #   (the implicit-self in a class body, or an explicit
-    #   `MyApp.get(...)` call);
-    # - the underlying class `X` equals or inherits from the
-    #   entry's `receiver_constraint`;
+    # - the call's lexical receiver type is `Singleton[X]` (the implicit-self in a class body, or
+    #   an explicit `MyApp.get(...)` call);
+    # - the underlying class `X` equals or inherits from the entry's `receiver_constraint`;
     # - the call's method name is in the entry's `method_names`.
     #
-    # On a match the helper returns the **instance** type of
-    # the receiver class (`Nominal[X]`) — the narrowed
-    # `self_type` for the block body, matching Sinatra's
-    # runtime semantics where `Sinatra::Base#generate_method`
-    # turns the block into an instance method of the user's
-    # app class.
+    # On a match the helper returns the **instance** type of the receiver class (`Nominal[X]`) —
+    # the narrowed `self_type` for the block body, matching Sinatra's runtime semantics where
+    # `Sinatra::Base#generate_method` turns the block into an instance method of the user's app
+    # class.
     #
-    # Slice 1b ships the floor only (per ADR-16 § WD13):
-    # bare-identifier method lookups inside the block resolve
-    # through the inference engine's normal `self_type`-driven
-    # path, so methods declared on `Sinatra::Base` (RBS or
-    # otherwise) become visible. Precision additions —
-    # parameter-typed block params, declared per-verb argument
-    # contracts — are ceiling concerns for later slices.
+    # Slice 1b ships the floor only (per ADR-16 § WD13): bare-identifier method lookups inside the
+    # block resolve through the inference engine's normal `self_type`-driven path, so methods
+    # declared on `Sinatra::Base` (RBS or otherwise) become visible. Precision additions —
+    # parameter-typed block params, declared per-verb argument contracts — are ceiling concerns
+    # for later slices.
     module MacroBlockSelfType
       module_function
 
@@ -51,12 +43,9 @@ module Rigor
         receiver_class_name = singleton_receiver_class_name(receiver_type)
         return nil if receiver_class_name.nil?
 
-        # ADR-52 WD1 — the verb-keyed table compiled at registry build
-        # replaces the per-call plugins × block_as_methods linear scan.
-        # Entries arrive in (plugin registration, declaration) order, so
-        # the first ancestry match below is the same entry the previous
-        # walk returned; the method-name membership the old `matches?` checked
-        # is guaranteed by the table key.
+        # ADR-52 WD1 — the verb-keyed table compiled at registry build. Entries arrive in
+        # (plugin registration, declaration) order; the method-name membership is guaranteed
+        # by the table key.
         entries = registry.contribution_index.block_entries_for(call_node.name)
         entries.each do |entry|
           if receiver_class_inherits_from?(receiver_class_name, entry.receiver_constraint, environment)
@@ -66,12 +55,10 @@ module Rigor
         nil
       end
 
-      # Tier A's match contract is intentionally narrow:
-      # class-level DSL calls (receiver is `Singleton[X]`) only.
-      # Instance-receiver calls and DSL forms whose block body
-      # binds a different `self` (Concern's `included do`,
-      # `instance_eval { ... }`) are handled by later slices
-      # (Concern walker, Tier D, etc.) — not Tier A.
+      # Tier A's match contract is intentionally narrow: class-level DSL calls (receiver is
+      # `Singleton[X]`) only. Instance-receiver calls and DSL forms whose block body binds a
+      # different `self` (Concern's `included do`, `instance_eval { ... }`) are handled by later
+      # slices (Concern walker, Tier D, etc.) — not Tier A.
       def singleton_receiver_class_name(receiver_type)
         return nil unless receiver_type.is_a?(Type::Singleton)
 

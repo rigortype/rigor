@@ -9,49 +9,42 @@ require_relative "rbs_type_translator"
 
 module Rigor
   module Inference
-    # Builds the entry scope of a method body by translating the method's
-    # parameter list into a `name -> Rigor::Type` map.
+    # Builds the entry scope of a method body by translating the method's parameter list into a
+    # `name -> Rigor::Type` map.
     #
-    # Parameter types come from the surrounding class's RBS signature
-    # when one is available; otherwise every parameter defaults to
-    # `Dynamic[Top]`. The default is the Slice 1 fail-soft answer for
-    # unknown values, so a method whose RBS signature is missing or
-    # whose parameters cannot be matched still binds every name into
-    # the scope (a method body whose `Local x` reads return
-    # `Dynamic[Top]` instead of falling through to the unbound-local
-    # `Dynamic[Top]` event is the same observable type, but the
-    # binding presence is what later slices need to attach narrowing
-    # facts to).
+    # Parameter types come from the surrounding class's RBS signature when one is available;
+    # otherwise every parameter defaults to `Dynamic[Top]`. The default is the Slice 1 fail-soft
+    # answer for unknown values, so a method whose RBS signature is missing or whose parameters
+    # cannot be matched still binds every name into the scope (a method body whose `Local x`
+    # reads return `Dynamic[Top]` instead of falling through to the unbound-local
+    # `Dynamic[Top]` event is the same observable type, but the binding presence is what later
+    # slices need to attach narrowing facts to).
     #
-    # The class context (`class_path:`) and `singleton:` flag are
-    # supplied by the caller (the StatementEvaluator) which threads
-    # them as the lexical class scope. The binder makes no assumption
-    # about how that context was computed; it only uses it to build
-    # the `(class_name, method_name)` lookup key for
-    # `Rigor::Environment::RbsLoader#instance_method` /
-    # `#singleton_method`.
+    # The class context (`class_path:`) and `singleton:` flag are supplied by the caller (the
+    # StatementEvaluator) which threads them as the lexical class scope. The binder makes no
+    # assumption about how that context was computed; it only uses it to build the
+    # `(class_name, method_name)` lookup key for `Rigor::Environment::RbsLoader#instance_method`
+    # / `#singleton_method`.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
-    # Leaf-name extraction for a destructured positional parameter
-    # (`Prism::MultiTargetNode`). Stateless; lifted out of
-    # {MethodParameterBinder} so the binder's class length stays in
+    # Leaf-name extraction for a destructured positional parameter (`Prism::MultiTargetNode`).
+    # Stateless; lifted out of {MethodParameterBinder} so the binder's class length stays in
     # budget.
     module Destructure
       module_function
 
-      # Collect every leaf local name a `MultiTargetNode` binds,
-      # recursing through nested destructures (`((a, b), c)`) and the
-      # splat slot (`(a, *rest)`). Targets without a `#name` (an
-      # index/call write target, vanishingly rare in a parameter
-      # position) are skipped — there is no local to bind.
+      # Collect every leaf local name a `MultiTargetNode` binds, recursing through nested
+      # destructures (`((a, b), c)`) and the splat slot (`(a, *rest)`). Targets without a
+      # `#name` (an index/call write target, vanishingly rare in a parameter position) are
+      # skipped — there is no local to bind.
       def target_names(multi_target)
         entries = multi_target.lefts + [multi_target.rest, *multi_target.rights].compact
         entries.flat_map { |entry| names_for_entry(entry) }
       end
 
       def names_for_entry(entry)
-        # A splat sub-target (`*rest` inside the destructure) wraps its
-        # real target in a `SplatNode#expression`; unwrap it.
+        # A splat sub-target (`*rest` inside the destructure) wraps its real target in a
+        # `SplatNode#expression`; unwrap it.
         entry = entry.expression if entry.is_a?(Prism::SplatNode) && entry.expression
         return [] if entry.nil?
         return target_names(entry) if entry.is_a?(Prism::MultiTargetNode)
@@ -63,19 +56,15 @@ module Rigor
 
     class MethodParameterBinder
       # @param environment [Rigor::Environment]
-      # @param class_path [String, nil] the qualified name of the class
-      #   the method is defined in (e.g., `"Foo::Bar"`), or `nil` for a
-      #   top-level `def` outside any class. When `nil` (or when the
-      #   class is unknown to RBS), every parameter falls back to
-      #   `Dynamic[Top]`.
-      # @param singleton [Boolean] `true` when the def is a singleton
-      #   method (either `def self.foo` or a `def foo` inside
-      #   `class << self`); routes the lookup through
+      # @param class_path [String, nil] the qualified name of the class the method is defined in
+      #   (e.g., `"Foo::Bar"`), or `nil` for a top-level `def` outside any class. When `nil` (or
+      #   when the class is unknown to RBS), every parameter falls back to `Dynamic[Top]`.
+      # @param singleton [Boolean] `true` when the def is a singleton method (either `def
+      #   self.foo` or a `def foo` inside `class << self`); routes the lookup through
       #   `RbsLoader#singleton_method`.
-      # @param source_path [String, nil] the project-relative path of
-      #   the file the method is defined in. Used to match ADR-28
-      #   path-scoped protocol contracts; `nil` (the default for
-      #   synthetic / probe scopes) disables the contract tier.
+      # @param source_path [String, nil] the project-relative path of the file the method is
+      #   defined in. Used to match ADR-28 path-scoped protocol contracts; `nil` (the default
+      #   for synthetic / probe scopes) disables the contract tier.
       def initialize(environment:, class_path:, singleton:, source_path: nil)
         @environment = environment
         @class_path = class_path
@@ -84,9 +73,8 @@ module Rigor
       end
 
       # @param def_node [Prism::DefNode]
-      # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter
-      #   name to bound type. Anonymous parameters (`*` and `**` without
-      #   a name) are skipped.
+      # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter name to bound type.
+      #   Anonymous parameters (`*` and `**` without a name) are skipped.
       def bind(def_node)
         slots = collect_slots(def_node.parameters)
         types = default_types_for(slots)
@@ -94,19 +82,15 @@ module Rigor
         rbs_method = lookup_rbs_method(def_node)
         if rbs_method
           apply_rbs_overloads(types, slots, rbs_method.method_types) unless rbs_method.method_types.empty?
-          # `rigor:v1:param: <name> <refinement>` annotations
-          # tighten the bound type for matching slots. Applied
-          # after the RBS-overload pass so the override is the
-          # authoritative answer regardless of what the RBS
-          # signature declared.
+          # `rigor:v1:param: <name> <refinement>` annotations tighten the bound type for matching
+          # slots. Applied after the RBS-overload pass so the override is the authoritative
+          # answer regardless of what the RBS signature declared.
           apply_param_overrides(types, slots, rbs_method)
         end
-        # ADR-28 — a path-scoped protocol contract supplies the
-        # parameter type for a matching `def`. Applied last (most
-        # authoritative) and regardless of RBS presence: the
-        # methods a contract targets — controller actions and the
-        # like — typically have no RBS signature at all, so this
-        # tier must run even when `rbs_method` is nil.
+        # ADR-28 — a path-scoped protocol contract supplies the parameter type for a matching
+        # `def`. Applied last (most authoritative) and regardless of RBS presence: the methods a
+        # contract targets — controller actions and the like — typically have no RBS signature
+        # at all, so this tier must run even when `rbs_method` is nil.
         apply_protocol_contract(types, slots, def_node)
         types
       end
@@ -120,14 +104,11 @@ module Rigor
       POSITIONAL_KINDS = %i[required_positional optional_positional].freeze
       private_constant :POSITIONAL_KINDS
 
-      # Walk the Prism `ParametersNode` and emit one slot per named
-      # parameter, in declaration order. Anonymous slots (rest /
-      # keyword-rest with no name) are skipped because we have no
-      # local name to bind. The slot's `:index` is the positional
-      # index for required/optional/trailing positionals (used to look
-      # up the matching RBS function param) and is `nil` for the
-      # singleton kinds (`:rest_positional`, `:rest_keyword`,
-      # `:block`).
+      # Walk the Prism `ParametersNode` and emit one slot per named parameter, in declaration
+      # order. Anonymous slots (rest / keyword-rest with no name) are skipped because we have no
+      # local name to bind. The slot's `:index` is the positional index for
+      # required/optional/trailing positionals (used to look up the matching RBS function param)
+      # and is `nil` for the singleton kinds (`:rest_positional`, `:rest_keyword`, `:block`).
       def collect_slots(params_node)
         return [] if params_node.nil?
 
@@ -153,17 +134,14 @@ module Rigor
         slots
       end
 
-      # A destructured positional parameter — `def f((a, b))` — is a
-      # `Prism::MultiTargetNode` in the `requireds`/`posts` list, not a
-      # `RequiredParameterNode`, so it has no `#name`. Bind each leaf
-      # sub-target local to `Dynamic[Top]` (a `:destructured_positional`
-      # slot with no RBS index) instead of crashing on a blind `.name`.
-      # Binding the names at all is what matters: it keeps the
-      # destructured locals present in the entry scope so the body's
-      # reads of them don't fall through to undefined-local noise. The
-      # element types are not cheaply available from the parameter list
-      # alone (no RBS function param maps onto a destructured slot), so
-      # `Dynamic[Top]` is the sound default.
+      # A destructured positional parameter — `def f((a, b))` — is a `Prism::MultiTargetNode` in
+      # the `requireds`/`posts` list, not a `RequiredParameterNode`, so it has no `#name`. Bind
+      # each leaf sub-target local to `Dynamic[Top]` (a `:destructured_positional` slot with no
+      # RBS index) instead of crashing on a blind `.name`. Binding the names at all is what
+      # matters: it keeps the destructured locals present in the entry scope so the body's reads
+      # of them don't fall through to undefined-local noise. The element types are not cheaply
+      # available from the parameter list alone (no RBS function param maps onto a destructured
+      # slot), so `Dynamic[Top]` is the sound default.
       def append_positional_slot(slots, kind, param, index)
         if param.is_a?(Prism::MultiTargetNode)
           Destructure.target_names(param).each do |name|
@@ -207,9 +185,8 @@ module Rigor
         return nil if @class_path.nil?
 
         method_name = def_node.name
-        # `def self.foo` always means a singleton method on the
-        # immediate enclosing class. `def foo` inside `class << self`
-        # is also a singleton method (the StatementEvaluator threads
+        # `def self.foo` always means a singleton method on the immediate enclosing class. `def
+        # foo` inside `class << self` is also a singleton method (the StatementEvaluator threads
         # the `singleton:` flag through this case).
         if def_node.receiver.is_a?(Prism::SelfNode) || @singleton
           Rigor::Reflection.singleton_method_definition(@class_path, method_name, environment: @environment)
@@ -218,13 +195,11 @@ module Rigor
         end
       end
 
-      # Bind each parameter slot to the union of the matching parameter
-      # types across every overload that *has* that slot. Overloads
-      # that omit the slot (e.g., `Array#first` has both `()` and
-      # `(int)` overloads — only the second matches a `def first(n)`
-      # redefinition) are silently skipped, so the binder defaults to
-      # the most informative type the RBS signature provides without
-      # having to know which overload the runtime will pick.
+      # Bind each parameter slot to the union of the matching parameter types across every
+      # overload that *has* that slot. Overloads that omit the slot (e.g., `Array#first` has
+      # both `()` and `(int)` overloads — only the second matches a `def first(n)` redefinition)
+      # are silently skipped, so the binder defaults to the most informative type the RBS
+      # signature provides without having to know which overload the runtime will pick.
       def apply_rbs_overloads(types, slots, method_types)
         slots.each do |slot|
           next if slot.name.nil?
@@ -236,13 +211,11 @@ module Rigor
         end
       end
 
-      # Reads the override map off the method's annotations and
-      # replaces the binding for any slot whose name appears in
-      # the map. Anonymous slots are skipped (no name to match).
-      # The override is used verbatim — no `:rest_*` re-wrapping —
-      # so authors who tighten a `*rest` parameter to e.g.
-      # `non-empty-array[Integer]` describe the parameter binding
-      # they actually want, not its element type.
+      # Reads the override map off the method's annotations and replaces the binding for any
+      # slot whose name appears in the map. Anonymous slots are skipped (no name to match). The
+      # override is used verbatim — no `:rest_*` re-wrapping — so authors who tighten a `*rest`
+      # parameter to e.g. `non-empty-array[Integer]` describe the parameter binding they
+      # actually want, not its element type.
       def apply_param_overrides(types, slots, rbs_method)
         override_map = RbsExtended.param_type_override_map(rbs_method, environment: @environment)
         return if override_map.empty?
@@ -257,13 +230,11 @@ module Rigor
         end
       end
 
-      # ADR-28 — when a path-scoped protocol contract targets this
-      # `def` (file path matches the contract's `path_glob`, method
-      # name + singleton-ness match), replace each contracted
-      # positional slot's binding with the contract's declared type.
-      # The type name resolves against the environment lazily here;
-      # an unresolvable name (the protocol's RBS not loaded) falls
-      # through to whatever the prior tiers bound, fail-soft.
+      # ADR-28 — when a path-scoped protocol contract targets this `def` (file path matches the
+      # contract's `path_glob`, method name + singleton-ness match), replace each contracted
+      # positional slot's binding with the contract's declared type. The type name resolves
+      # against the environment lazily here; an unresolvable name (the protocol's RBS not
+      # loaded) falls through to whatever the prior tiers bound, fail-soft.
       def apply_protocol_contract(types, slots, def_node)
         return if @source_path.nil?
 
@@ -311,17 +282,14 @@ module Rigor
         wrap_for_kind(bound, kind)
       end
 
-      # Dispatch table from slot kind to a small lambda that pulls the
-      # matching RBS parameter type out of an `RBS::Types::Function`.
-      # The hash keeps `rbs_type_for_slot` linear (one lookup, one
-      # call) so the cyclomatic-complexity budget does not balloon as
-      # future slices add more parameter kinds (e.g., `**Symbol kw` is
-      # a candidate for a stricter route in Slice 5+).
-      # Match keyword parameters by name across both required and
-      # optional keyword maps. RBS may declare a keyword as optional
-      # (`?by:`) while the Ruby `def` lists it as required (or vice
-      # versa); the binding is by-name regardless of which side
-      # defines it.
+      # Dispatch table from slot kind to a small lambda that pulls the matching RBS parameter
+      # type out of an `RBS::Types::Function`. The hash keeps `rbs_type_for_slot` linear (one
+      # lookup, one call) so the cyclomatic-complexity budget does not balloon as future slices
+      # add more parameter kinds (e.g., `**Symbol kw` is a candidate for a stricter route in
+      # Slice 5+).
+      # Match keyword parameters by name across both required and optional keyword maps. RBS may
+      # declare a keyword as optional (`?by:`) while the Ruby `def` lists it as required (or
+      # vice versa); the binding is by-name regardless of which side defines it.
       KEYWORD_PROVIDER = Ractor.make_shareable(lambda do |fn, slot|
         fn.required_keywords[slot.name]&.type || fn.optional_keywords[slot.name]&.type
       end)
@@ -355,11 +323,10 @@ module Rigor
         provider.call(function, slot)
       end
 
-      # The variable bound to a `*rest` parameter is the *Array* of
-      # rest-positional arguments, not a single element. Likewise
-      # `**kw` is bound to a `Hash[Symbol, V]`. Wrap the translated
-      # element/value type accordingly so `rest` reads as
-      # `Array[Integer]` rather than `Integer`.
+      # The variable bound to a `*rest` parameter is the *Array* of rest-positional arguments,
+      # not a single element. Likewise `**kw` is bound to a `Hash[Symbol, V]`. Wrap the
+      # translated element/value type accordingly so `rest` reads as `Array[Integer]` rather
+      # than `Integer`.
       def wrap_for_kind(translated, kind)
         case kind
         when :rest_positional

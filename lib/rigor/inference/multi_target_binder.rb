@@ -8,57 +8,45 @@ module Rigor
   module Inference
     # Slice 5 phase 2 sub-phase 2 destructuring binder.
     #
-    # `Rigor::Inference::MultiTargetBinder` decomposes a tuple-shaped
-    # right-hand side type against a Prism multi-target tree and
-    # produces a `name -> Rigor::Type` binding map. The binder is
-    # shared between two surfaces:
+    # `Rigor::Inference::MultiTargetBinder` decomposes a tuple-shaped right-hand side type
+    # against a Prism multi-target tree and produces a `name -> Rigor::Type` binding map. The
+    # binder is shared between two surfaces:
     #
-    # 1. `Rigor::Inference::StatementEvaluator#eval_multi_write` for
-    #    the statement-level `a, b = rhs` form (`Prism::MultiWriteNode`).
-    # 2. `Rigor::Inference::BlockParameterBinder` for nested
-    #    destructuring inside block parameter lists
-    #    (`Prism::MultiTargetNode` under `BlockParametersNode#requireds`).
+    # 1. `Rigor::Inference::StatementEvaluator#eval_multi_write` for the statement-level `a, b =
+    #    rhs` form (`Prism::MultiWriteNode`).
+    # 2. `Rigor::Inference::BlockParameterBinder` for nested destructuring inside block parameter
+    #    lists (`Prism::MultiTargetNode` under `BlockParametersNode#requireds`).
     #
-    # Both Prism nodes share the same `lefts` / `rest` (a
-    # `Prism::SplatNode`) / `rights` triple, so the binder treats them
-    # uniformly. The binder is pure: it MUST NOT mutate its inputs and
+    # Both Prism nodes share the same `lefts` / `rest` (a `Prism::SplatNode`) / `rights` triple,
+    # so the binder treats them uniformly. The binder is pure: it MUST NOT mutate its inputs and
     # MUST return a fresh `Hash` on every call.
     #
-    # The binder threads `Type::Tuple` decompositions when the
-    # right-hand side carrier is a known-arity tuple. Other carriers
-    # (`Nominal[Array]`, `Dynamic[Top]`, `Top`, `Bot`, ...) collapse
-    # to `Dynamic[Top]` per slot — Slice 5 phase 2 sub-phase 2 stays
-    # conservative on dynamic-arity right-hand sides until the
-    # narrower receiver-shape lattice lands.
+    # The binder threads `Type::Tuple` decompositions when the right-hand side carrier is a
+    # known-arity tuple. Other carriers (`Nominal[Array]`, `Dynamic[Top]`, `Top`, `Bot`, ...)
+    # collapse to `Dynamic[Top]` per slot — Slice 5 phase 2 sub-phase 2 stays conservative on
+    # dynamic-arity right-hand sides until the narrower receiver-shape lattice lands.
     #
     # Targets the binder recognises:
     #
-    # - `Prism::LocalVariableTargetNode` — used by the statement-level
-    #   `a, b = rhs` form. Binds `target.name` to its slice of the
-    #   right-hand side.
-    # - `Prism::RequiredParameterNode` — used by block-parameter
-    #   destructuring (`|(a, b), c|`). Prism encodes the inner names
-    #   of a block-side `MultiTargetNode` as parameter nodes rather
-    #   than target nodes; the binder treats them uniformly with
-    #   their `LocalVariableTargetNode` cousins because they carry
-    #   the same `name:` field and the same observable semantics
-    #   (binding a fresh local in the block-entry scope).
-    # - `Prism::MultiTargetNode` — recurses with the slot's type as
-    #   the new right-hand side.
-    # - `Prism::SplatNode` (used for `rest`) — its `expression` MUST
-    #   be a `Prism::LocalVariableTargetNode` or a
-    #   `Prism::RequiredParameterNode` to be observable; an anonymous
-    #   `*` splat or a non-local target is skipped.
+    # - `Prism::LocalVariableTargetNode` — used by the statement-level `a, b = rhs` form. Binds
+    #   `target.name` to its slice of the right-hand side.
+    # - `Prism::RequiredParameterNode` — used by block-parameter destructuring (`|(a, b), c|`).
+    #   Prism encodes the inner names of a block-side `MultiTargetNode` as parameter nodes
+    #   rather than target nodes; the binder treats them uniformly with their
+    #   `LocalVariableTargetNode` cousins because they carry the same `name:` field and the
+    #   same observable semantics (binding a fresh local in the block-entry scope).
+    # - `Prism::MultiTargetNode` — recurses with the slot's type as the new right-hand side.
+    # - `Prism::SplatNode` (used for `rest`) — its `expression` MUST be a
+    #   `Prism::LocalVariableTargetNode` or a `Prism::RequiredParameterNode` to be observable;
+    #   an anonymous `*` splat or a non-local target is skipped.
     #
-    # Other target kinds (`InstanceVariableTargetNode`,
-    # `ConstantTargetNode`, `IndexTargetNode`, `CallTargetNode`,
-    # `ConstantPathTargetNode`, `ImplicitRestNode`, ...) MUST be
-    # silently skipped: they have no observable contribution to the
-    # local-variable scope the StatementEvaluator threads.
+    # Other target kinds (`InstanceVariableTargetNode`, `ConstantTargetNode`,
+    # `IndexTargetNode`, `CallTargetNode`, `ConstantPathTargetNode`, `ImplicitRestNode`, ...)
+    # MUST be silently skipped: they have no observable contribution to the local-variable scope
+    # the StatementEvaluator threads.
     #
-    # See docs/internal-spec/inference-engine.md for the binding
-    # contract and docs/adr/4-type-inference-engine.md for the slice
-    # rationale.
+    # See docs/internal-spec/inference-engine.md for the binding contract and
+    # docs/adr/4-type-inference-engine.md for the slice rationale.
     module MultiTargetBinder
       module_function
 
@@ -85,11 +73,10 @@ module Rigor
           rights.each_with_index { |t, i| bind_target(t, backs[i], bindings) }
         end
 
-        # Decomposes the right-hand side type into the per-slot
-        # types. Returns a `[fronts, rest_type, backs]` triple, with
-        # `fronts` and `backs` each an ordered array of length
-        # `front_count`/`back_count`, and `rest_type` either a
-        # `Rigor::Type` (when `rest_present:` is true) or `nil`.
+        # Decomposes the right-hand side type into the per-slot types. Returns a `[fronts,
+        # rest_type, backs]` triple, with `fronts` and `backs` each an ordered array of length
+        # `front_count`/`back_count`, and `rest_type` either a `Rigor::Type` (when
+        # `rest_present:` is true) or `nil`.
         def decompose(rhs_type, front_count, back_count, rest_present:)
           if rhs_type.is_a?(Type::Tuple)
             decompose_tuple(rhs_type, front_count, back_count, rest_present: rest_present)
@@ -113,28 +100,24 @@ module Rigor
           [fronts, rest_type, backs]
         end
 
-        # The per-slot type for index `i` of a tuple decomposition, FP-safely
-        # softened: a missing slot is `nil` (the runtime value of an
-        # over-destructured positional), and a PRESENT but nil-bearing slot
-        # (`X | nil`) is softened to its non-`nil` part — for a heterogeneous
-        # `Tuple` whose optional slot was made optional by flow.
+        # The per-slot type for index `i` of a tuple decomposition, FP-safely softened: a
+        # missing slot is `nil` (the runtime value of an over-destructured positional), and a
+        # PRESENT but nil-bearing slot (`X | nil`) is softened to its non-`nil` part — for a
+        # heterogeneous `Tuple` whose optional slot was made optional by flow.
         #
-        # Rationale (ADR-57 slice 3 work-item 2): a destructure of a tuple
-        # element that flow typed as optional is almost always guarded by a
-        # CORRELATED invariant the flow engine cannot prove. The canonical case
-        # is haml's `parse_tag`, which returns `[..., last_line || @line.index
-        # + 1]` — a 9-tuple whose `last_line` slot widens to `Dynamic[top]?`
-        # through a loop-nested destructure; at the call site `..., last_line =
-        # parse_tag(text); raise(..., last_line - 1) if parse && value.empty?`
-        # the `last_line` is nil ONLY when an earlier element is too, and the
-        # guard short-circuits — but that correlation lives across slots, so
-        # per-slot flow sees `last_line` as nil-able and `last_line - 1` fires a
-        # spurious `possible nil receiver`. Manufacturing a `T?` for every
-        # destructured slot frightens working code; FP discipline (the program
-        # works) outranks the worst-case per-slot reading, so we drop the `nil`
-        # from a destructured slot and keep the non-`nil` constituent (a bare
-        # `nil` slot stays `nil` — there is nothing to soften). A pure non-
-        # optional element keeps its precise type unchanged.
+        # Rationale (ADR-57 slice 3 work-item 2): a destructure of a tuple element that flow
+        # typed as optional is almost always guarded by a CORRELATED invariant the flow engine
+        # cannot prove. The canonical case is haml's `parse_tag`, which returns `[...,
+        # last_line || @line.index + 1]` — a 9-tuple whose `last_line` slot widens to
+        # `Dynamic[top]?` through a loop-nested destructure; at the call site `..., last_line =
+        # parse_tag(text); raise(..., last_line - 1) if parse && value.empty?` the `last_line`
+        # is nil ONLY when an earlier element is too, and the guard short-circuits — but that
+        # correlation lives across slots, so per-slot flow sees `last_line` as nil-able and
+        # `last_line - 1` fires a spurious `possible nil receiver`. Manufacturing a `T?` for
+        # every destructured slot frightens working code; FP discipline (the program works)
+        # outranks the worst-case per-slot reading, so we drop the `nil` from a destructured slot
+        # and keep the non-`nil` constituent (a bare `nil` slot stays `nil` — there is nothing to
+        # soften). A pure non-optional element keeps its precise type unchanged.
         def slot_type(elements, index)
           element = elements[index]
           return Type::Combinator.constant_of(nil) if element.nil?

@@ -6,11 +6,9 @@ require_relative "acceptance_router"
 
 module Rigor
   module Type
-    # The dynamic-origin wrapper: marks values whose type came from an
-    # unchecked source. Carries a static facet that records the analyzer's
-    # best static knowledge. See docs/type-specification/value-lattice.md
-    # for the algebra and docs/type-specification/special-types.md for the
-    # untyped/Dynamic[T] relationship.
+    # The dynamic-origin wrapper: marks values whose type came from an unchecked source. Carries a static
+    # facet that records the analyzer's best static knowledge. See docs/type-specification/value-lattice.md
+    # for the algebra and docs/type-specification/special-types.md for the untyped/Dynamic[T] relationship.
     #
     # Construct via Rigor::Type::Combinator.dynamic(static_facet).
     class Dynamic

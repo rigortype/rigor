@@ -6,35 +6,26 @@ require_relative "acceptance_router"
 
 module Rigor
   module Type
-    # `Difference[base, removed]` — the value set of `base` minus
-    # the value set of `removed`. Implements the point-removal
-    # half of the OQ3 refinement-carrier strategy
-    # ([ADR-3](docs/adr/3-type-representation.md), Working
-    # Decision Option C):
+    # `Difference[base, removed]` — the value set of `base` minus the value set of `removed`. Implements
+    # the point-removal half of the OQ3 refinement-carrier strategy ([ADR-3](docs/adr/3-type-representation.md),
+    # Working Decision Option C):
     #
     #   non-empty-string   = Difference[Nominal[String], Constant[""]]
     #   non-zero-int       = Difference[Nominal[Integer], Constant[0]]
     #   non-empty-array[T] = Difference[Nominal[Array, [T]], Tuple[]]
     #   non-empty-hash[K,V] = Difference[Nominal[Hash, [K,V]], HashShape{}]
     #
-    # The carrier itself is structural: it stores `base` and
-    # `removed` as inner `Type` references and answers projection
-    # / acceptance / display questions by composing those inner
-    # answers per the lattice algebra in
-    # [`value-lattice.md`](docs/type-specification/value-lattice.md).
-    # The canonical-name registry (display side) lives in
-    # `Rigor::Type::Combinator` and prints kebab-case names like
-    # `non-empty-string` for the recognised shapes; unrecognised
-    # differences fall back to the raw `base - removed`
-    # operator form per [`type-operators.md`](docs/type-specification/type-operators.md).
+    # The carrier itself is structural: it stores `base` and `removed` as inner `Type` references and
+    # answers projection / acceptance / display questions by composing those inner answers per the
+    # lattice algebra in [`value-lattice.md`](docs/type-specification/value-lattice.md). The
+    # canonical-name registry (display side) lives in `Rigor::Type::Combinator` and prints kebab-case
+    # names like `non-empty-string` for the recognised shapes; unrecognised differences fall back to the
+    # raw `base - removed` operator form per [`type-operators.md`](docs/type-specification/type-operators.md).
     #
-    # Construction goes through `Type::Combinator.difference` /
-    # `Combinator.non_empty_string` etc. — direct `.new` calls
-    # are an internal contract; callers MUST ensure both bounds
-    # are valid `Rigor::Type` values and that `removed` is a
-    # subtype-or-equal of `base` (otherwise the difference does
-    # not narrow anything and a normalisation upstream should
-    # collapse to `base`).
+    # Construction goes through `Type::Combinator.difference` / `Combinator.non_empty_string` etc. —
+    # direct `.new` calls are an internal contract; callers MUST ensure both bounds are valid
+    # `Rigor::Type` values and that `removed` is a subtype-or-equal of `base` (otherwise the difference
+    # does not narrow anything and a normalisation upstream should collapse to `base`).
     class Difference
       attr_reader :base, :removed
 
@@ -51,8 +42,8 @@ module Rigor
         "#{base.describe(verbosity)} - #{removed.describe(verbosity)}"
       end
 
-      # Erases to the base nominal: every refinement MUST erase
-      # to its base per [`rbs-erasure.md`](docs/type-specification/rbs-erasure.md).
+      # Erases to the base nominal: every refinement MUST erase to its base per
+      # [`rbs-erasure.md`](docs/type-specification/rbs-erasure.md).
       def erase_to_rbs
         base.erase_to_rbs
       end
@@ -81,15 +72,13 @@ module Rigor
 
       private
 
-      # Renders the kebab-case shorthand for recognised
-      # imported-built-in shapes. Parameterised bases keep their
-      # type-args in the canonical form (`non-empty-array[T]`,
-      # `non-empty-hash[K, V]`) so element-precision survives the
-      # display round-trip. Unrecognised shapes fall back to the
-      # raw `base - removed` operator form.
+      # Renders the kebab-case shorthand for recognised imported-built-in shapes. Parameterised bases
+      # keep their type-args in the canonical form (`non-empty-array[T]`, `non-empty-hash[K, V]`) so
+      # element-precision survives the display round-trip. Unrecognised shapes fall back to the raw
+      # `base - removed` operator form.
       #
-      # The recognised set is kept in sync with the imported-built-in
-      # catalogue ([`imported-built-in-types.md`](docs/type-specification/imported-built-in-types.md)).
+      # The recognised set is kept in sync with the imported-built-in catalogue
+      # ([`imported-built-in-types.md`](docs/type-specification/imported-built-in-types.md)).
       def canonical_name
         return nil unless base.is_a?(Nominal)
 

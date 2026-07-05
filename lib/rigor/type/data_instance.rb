@@ -7,26 +7,21 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # A `Data.define` value instance (ADR-48) — `Point.new(1, 2)`. Models a
-    # closed, total, class-tagged member map (member name -> value type).
-    # HashShape-shaped, but nominal: a `DataInstance` tagged `Point` is a
-    # different type from one tagged `Line` even with identical members,
-    # and it erases to its class nominal rather than an RBS record.
+    # A `Data.define` value instance (ADR-48) — `Point.new(1, 2)`. Models a closed, total, class-tagged
+    # member map (member name -> value type). HashShape-shaped, but nominal: a `DataInstance` tagged
+    # `Point` is a different type from one tagged `Line` even with identical members, and it erases to
+    # its class nominal rather than an RBS record.
     #
-    # `Data` instances are frozen, so the member map is sound for the
-    # instance's whole lifetime — the reason `Data` is the first target
-    # (a `Struct` instance can be mutated through a setter or `[]=`, which
-    # would invalidate the map; that follow-up is deferred — see ADR-48).
+    # `Data` instances are frozen, so the member map is sound for the instance's whole lifetime — the
+    # reason `Data` is the first target (a `Struct` instance can be mutated through a setter or `[]=`,
+    # which would invalidate the map; that follow-up is deferred — see ADR-48).
     #
-    # Member reads fold to the member's type (`Point.new(1, 2).x` ->
-    # `Constant[1]`); `[]`, `to_h`, `deconstruct`, `deconstruct_keys`,
-    # `members`, and `with` project precisely. Methods this carrier does
-    # not fold project to the `Data` nominal (or the tagged class) through
-    # {RbsDispatch}'s `receiver_descriptor`, so non-member calls resolve
-    # without mis-firing undefined-method.
+    # Member reads fold to the member's type (`Point.new(1, 2).x` -> `Constant[1]`); `[]`, `to_h`,
+    # `deconstruct`, `deconstruct_keys`, `members`, and `with` project precisely. Methods this carrier
+    # does not fold project to the `Data` nominal (or the tagged class) through {RbsDispatch}'s
+    # `receiver_descriptor`, so non-member calls resolve without mis-firing undefined-method.
     #
-    # Equality and hashing are structural over the (member -> type) map and
-    # the class name.
+    # Equality and hashing are structural over the (member -> type) map and the class name.
     #
     # See docs/adr/48-data-struct-value-folding.md.
     class DataInstance
@@ -65,9 +60,8 @@ module Rigor
         "#{class_name || 'Data'}(#{rendered.join(', ')})"
       end
 
-      # Erases to the tagging class nominal (conservative: the structural
-      # members are not RBS-expressible as a class instance). The
-      # anonymous case erases to the `Data` supertype.
+      # Erases to the tagging class nominal (conservative: the structural members are not RBS-expressible
+      # as a class instance). The anonymous case erases to the `Data` supertype.
       def erase_to_rbs
         name = class_name
         return "Data" if name.nil?

@@ -7,23 +7,18 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # The class object produced by `Data.define(:x, :y)` (ADR-48). Models
-    # the *class*, not an instance — the value bound to `Point` in
-    # `Point = Data.define(:x, :y)` or the anonymous superclass in
-    # `class Point < Data.define(:x, :y)`. Parameterised by the ordered
-    # member-name list so that `Point.new(...)` can materialise a precise
-    # {DataInstance}.
+    # The class object produced by `Data.define(:x, :y)` (ADR-48). Models the *class*, not an instance —
+    # the value bound to `Point` in `Point = Data.define(:x, :y)` or the anonymous superclass in `class
+    # Point < Data.define(:x, :y)`. Parameterised by the ordered member-name list so that `Point.new(...)`
+    # can materialise a precise {DataInstance}.
     #
-    # `class_name` carries the binding name when known (the named-subclass
-    # form, ADR-48 slice 3) and is `nil` for the anonymous result of a bare
-    # `Data.define(...)` before it is assigned to a constant. It tags the
-    # instances `.new` produces; it does not change the carrier's folding
-    # behaviour.
+    # `class_name` carries the binding name when known (the named-subclass form, ADR-48 slice 3) and is
+    # `nil` for the anonymous result of a bare `Data.define(...)` before it is assigned to a constant. It
+    # tags the instances `.new` produces; it does not change the carrier's folding behaviour.
     #
-    # Equality and hashing are structural over the member list and the
-    # class name. Two distinct `Data.define(:x)` results are equal *as
-    # types* — they describe the same shape; the engine distinguishes the
-    # constants they are bound to by the binding, not by the carrier.
+    # Equality and hashing are structural over the member list and the class name. Two distinct
+    # `Data.define(:x)` results are equal *as types* — they describe the same shape; the engine
+    # distinguishes the constants they are bound to by the binding, not by the carrier.
     #
     # See docs/adr/48-data-struct-value-folding.md.
     class DataClass

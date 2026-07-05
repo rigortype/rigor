@@ -7,23 +7,18 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # An instance type for a Ruby class or module. The class is identified by
-    # its fully-qualified Ruby name; the registry attached to the
-    # environment owns the class lookup.
+    # An instance type for a Ruby class or module. The class is identified by its fully-qualified Ruby
+    # name; the registry attached to the environment owns the class lookup.
     #
-    # Slice 4 phase 2d adds `type_args`: an ordered, frozen array of
-    # `Rigor::Type` values that carry the receiver's generic
-    # instantiation. The empty array is the canonical "raw" form
-    # (`Nominal[Array]`); a non-empty array represents an applied
-    # generic (`Nominal[Array, [Integer]]`). Two Nominals are
-    # structurally equal only when their `class_name` AND `type_args`
-    # match, so the raw form and any applied form are intentionally
-    # distinct values. Acceptance routes treat the raw form leniently
-    # for backward compatibility with phase 2b call sites that have not
-    # yet learned to carry generics.
+    # Slice 4 phase 2d adds `type_args`: an ordered, frozen array of `Rigor::Type` values that carry the
+    # receiver's generic instantiation. The empty array is the canonical "raw" form (`Nominal[Array]`); a
+    # non-empty array represents an applied generic (`Nominal[Array, [Integer]]`). Two Nominals are
+    # structurally equal only when their `class_name` AND `type_args` match, so the raw form and any
+    # applied form are intentionally distinct values. Acceptance routes treat the raw form leniently for
+    # backward compatibility with phase 2b call sites that have not yet learned to carry generics.
     #
-    # Type arguments MUST be `Rigor::Type` instances. The constructor
-    # freezes the array; callers MUST NOT mutate it after construction.
+    # Type arguments MUST be `Rigor::Type` instances. The constructor freezes the array; callers MUST NOT
+    # mutate it after construction.
     #
     # See docs/type-specification/rbs-compatible-types.md.
     class Nominal

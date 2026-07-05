@@ -5,23 +5,19 @@ require_relative "../value_semantics"
 
 module Rigor
   module Type
-    # Immutable value object returned by `Rigor::Type#accepts(other, mode:)`.
-    # Carries the three-valued answer alongside the boundary mode the answer
-    # was computed under and an ordered list of textual reasons describing
-    # which rules fired.
+    # Immutable value object returned by `Rigor::Type#accepts(other, mode:)`. Carries the three-valued
+    # answer alongside the boundary mode the answer was computed under and an ordered list of textual
+    # reasons describing which rules fired.
     #
-    # AcceptsResult is the dual of `SubtypeResult` (Slice 5+). Acceptance
-    # answers "is `other` passable to `self` at a method-parameter or
-    # assignment boundary?", consulting the gradual-typing rules in
-    # docs/type-specification/value-lattice.md when `mode` is `:gradual`,
-    # and the strict subset relation when `mode` is `:strict`. Phase 2c
-    # ships full `:gradual` semantics; `:strict` is reserved for later
+    # AcceptsResult is the dual of `SubtypeResult` (Slice 5+). Acceptance answers "is `other` passable to
+    # `self` at a method-parameter or assignment boundary?", consulting the gradual-typing rules in
+    # docs/type-specification/value-lattice.md when `mode` is `:gradual`, and the strict subset relation
+    # when `mode` is `:strict`. Phase 2c ships full `:gradual` semantics; `:strict` is reserved for later
     # slices and currently raises ArgumentError.
     #
-    # Reasons are stored as plain strings for now. Slice 5+ MAY upgrade
-    # them to structured records (rule id, supporting facts, dynamic
-    # provenance); callers MUST treat the reasons array as opaque except
-    # for human-readable logging.
+    # Reasons are stored as plain strings for now. Slice 5+ MAY upgrade them to structured records (rule
+    # id, supporting facts, dynamic provenance); callers MUST treat the reasons array as opaque except for
+    # human-readable logging.
     #
     # See docs/internal-spec/internal-type-api.md ("Result Value Objects").
     class AcceptsResult

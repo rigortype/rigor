@@ -9,23 +9,18 @@ module Rigor
   module Type
     # A `Method` carrier that tracks the bound `(receiver, name)` pair.
     #
-    # Ruby's `Object#method(name)` returns a `Method` instance whose
-    # later `.call` / `.()` / `[]` dispatches `name` on the original
-    # receiver. The plain RBS `Method` nominal cannot carry that
-    # binding, so call sites on the resulting `Method` collapse to
-    # `untyped` — losing the per-method precision the original
-    # receiver supports.
+    # Ruby's `Object#method(name)` returns a `Method` instance whose later `.call` / `.()` / `[]`
+    # dispatches `name` on the original receiver. The plain RBS `Method` nominal cannot carry that
+    # binding, so call sites on the resulting `Method` collapse to `untyped` — losing the per-method
+    # precision the original receiver supports.
     #
-    # `BoundMethod` keeps the binding so the dispatcher can substitute
-    # the original `(receiver, name)` dispatch at `.call` / `.()` /
-    # `[]` time. The carrier erases to `Method` at the RBS boundary so
-    # downstream RBS interop (e.g. passing the value into a method
-    # whose parameter is typed `::Method`) stays compatible — the
-    # binding is only consulted when Rigor itself dispatches.
+    # `BoundMethod` keeps the binding so the dispatcher can substitute the original `(receiver, name)`
+    # dispatch at `.call` / `.()` / `[]` time. The carrier erases to `Method` at the RBS boundary so
+    # downstream RBS interop (e.g. passing the value into a method whose parameter is typed `::Method`)
+    # stays compatible — the binding is only consulted when Rigor itself dispatches.
     #
-    # See `lib/rigor/inference/method_dispatcher/method_folding.rb`
-    # for the forward (`Object#method(:sym)`) and backward
-    # (`BoundMethod#call`) folding tiers that consume / produce this
+    # See `lib/rigor/inference/method_dispatcher/method_folding.rb` for the forward
+    # (`Object#method(:sym)`) and backward (`BoundMethod#call`) folding tiers that consume / produce this
     # carrier.
     class BoundMethod
       attr_reader :receiver_type, :method_name

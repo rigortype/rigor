@@ -5,36 +5,29 @@ require_relative "../value_semantics"
 
 module Rigor
   module Type
-    # A defunctionalised higher-kinded type application — the abstract
-    # "apply type-constructor `uri` to argument list `args`" carrier.
+    # A defunctionalised higher-kinded type application — the abstract "apply type-constructor `uri` to
+    # argument list `args`" carrier.
     #
-    # `uri` is a namespaced `Symbol` of the form `:author::name`
-    # (e.g. `:"json::value"`, `:"dry_monads::result"`); the `::`
-    # namespace separator is mandatory per ADR-20 WD1 to prevent
+    # `uri` is a namespaced `Symbol` of the form `:author::name` (e.g. `:"json::value"`,
+    # `:"dry_monads::result"`); the `::` namespace separator is mandatory per ADR-20 WD1 to prevent
     # cross-plugin tag collisions.
     #
-    # `args` is an ordered, frozen `Array` of `Rigor::Type` values
-    # carrying the application's argument list. At least one argument
-    # is required; arity-zero "HKT" forms are not modelled by this
-    # carrier (use a plain type alias instead).
+    # `args` is an ordered, frozen `Array` of `Rigor::Type` values carrying the application's argument
+    # list. At least one argument is required; arity-zero "HKT" forms are not modelled by this carrier
+    # (use a plain type alias instead).
     #
-    # `bound` is a `Rigor::Type` representing the value Rigor MUST
-    # erase to when this `App` cannot be reduced — registered at
-    # `%a{rigor:v1:hkt_register}` time, defaulting to
-    # `Rigor::Type::Dynamic[Rigor::Type::Top]` per ADR-20 D5 / WD2. It
-    # also drives the lattice probes (`top` / `bot` / `dynamic`) and
-    # the acceptance fallback while no reduction is wired (Slice 1).
+    # `bound` is a `Rigor::Type` representing the value Rigor MUST erase to when this `App` cannot be
+    # reduced — registered at `%a{rigor:v1:hkt_register}` time, defaulting to
+    # `Rigor::Type::Dynamic[Rigor::Type::Top]` per ADR-20 D5 / WD2. It also drives the lattice probes
+    # (`top` / `bot` / `dynamic`) and the acceptance fallback while no reduction is wired (Slice 1).
     #
-    # Slice 1 ships the carrier as **opaque**: every operation
-    # delegates to `bound` since no reduction surface exists yet. Slice
-    # 2 introduces the conditional / indexed-access evaluator that
-    # reduces `App` to its registered body before delegating; the
-    # carrier shape stays identical.
+    # Slice 1 ships the carrier as **opaque**: every operation delegates to `bound` since no reduction
+    # surface exists yet. Slice 2 introduces the conditional / indexed-access evaluator that reduces `App`
+    # to its registered body before delegating; the carrier shape stays identical.
     #
-    # Display form per ADR-20 OQ5: bare RBS-style `uri[arg1, arg2]`,
-    # not the wrapped `App[uri, [arg1, arg2]]` faithful form. Two
-    # `App` values are structurally equal iff their `uri`, `args`,
-    # AND `bound` match.
+    # Display form per ADR-20 OQ5: bare RBS-style `uri[arg1, arg2]`, not the wrapped `App[uri, [arg1,
+    # arg2]]` faithful form. Two `App` values are structurally equal iff their `uri`, `args`, AND `bound`
+    # match.
     #
     # See docs/adr/20-lightweight-hkt.md.
     class App
@@ -91,9 +84,8 @@ module Rigor
         "#<Rigor::Type::App #{describe(:short)} (bound=#{bound.describe(:short)})>"
       end
 
-      # ADR-20 Slice 2a — reduce this application against a
-      # registry. Returns the reducer's output (`bound` when
-      # reduction is blocked or fuel exhausts).
+      # ADR-20 Slice 2a — reduce this application against a registry. Returns the reducer's output
+      # (`bound` when reduction is blocked or fuel exhausts).
       def reduce(registry, fuel: nil)
         fuel ||= Inference::HktReducer::DEFAULT_FUEL
         registry.reduce(self, fuel: fuel)

@@ -5,48 +5,37 @@ require_relative "../inference/rbs_type_translator"
 
 module Rigor
   module RbsExtended
-    # Verifies every `rigor:v1:conforms-to <Interface>` class- /
-    # module-level directive in the loaded RBS environment (spec:
-    # `docs/type-specification/rbs-extended.md` § "Explicit
-    # conformance directive"). For each annotated class, the
-    # directive asserts the class satisfies the named structural
-    # interface as a *checked design assertion* — independent of
-    # whether any current call site exercises that requirement.
-    # Multiple directives on one class combine as an intersection:
-    # each interface is checked independently.
+    # Verifies every `rigor:v1:conforms-to <Interface>` class- / module-level directive in the loaded RBS
+    # environment (spec: `docs/type-specification/rbs-extended.md` § "Explicit conformance directive"). For each
+    # annotated class, the directive asserts the class satisfies the named structural interface as a *checked
+    # design assertion* — independent of whether any current call site exercises that requirement. Multiple
+    # directives on one class combine as an intersection: each interface is checked independently.
     #
     # ## Two checked tiers
     #
-    # 1. **Presence** (FP-free): an interface method the class provably does
-    #    NOT provide anywhere in its RBS-resolved method set (own, inherited,
-    #    included) is a definitive non-conformance.
-    # 2. **Signature compatibility** (covariant return / contravariant
-    #    params): for a method the class DOES provide, the provided RBS
-    #    signature must be a behavioural subtype of the interface's required
-    #    one. Both sides are *authored* RBS (the class in `signature_paths:`
-    #    RBS, the interface in a loaded `sig`/library), so this is the same
-    #    FP-safe both-sides-authored construction as the
-    #    [ADR-35](../../../docs/adr/35-override-signature-compatibility.md)
-    #    `def.override-*` rules — not the inferred-signature comparison whose
-    #    FP risk justified deferring it. Conservative: single-method-type
-    #    (non-overloaded) signatures only, `Dynamic[Top]` positions skipped,
-    #    fires only on a proven `accepts(...).no?` violation.
+    # 1. **Presence** (FP-free): an interface method the class provably does NOT provide anywhere in its
+    #    RBS-resolved method set (own, inherited, included) is a definitive non-conformance.
+    # 2. **Signature compatibility** (covariant return / contravariant params): for a method the class DOES
+    #    provide, the provided RBS signature must be a behavioural subtype of the interface's required one. Both
+    #    sides are *authored* RBS (the class in `signature_paths:` RBS, the interface in a loaded `sig`/library),
+    #    so this is the same FP-safe both-sides-authored construction as the
+    #    [ADR-35](../../../docs/adr/35-override-signature-compatibility.md) `def.override-*` rules — not the
+    #    inferred-signature comparison whose FP risk justified deferring it. Conservative: single-method-type
+    #    (non-overloaded) signatures only, `Dynamic[Top]` positions skipped, fires only on a proven
+    #    `accepts(...).no?` violation.
     #
     # ## Output records (all drained by {Rigor::Analysis::Runner})
     #
-    # - `Unsatisfied` — the class is missing one or more required interface
-    #   methods. Surfaces as `rbs_extended.unsatisfied-conformance`.
-    # - `IncompatibleSignature` — a provided method's signature violates the
-    #   interface contract (return widened, or a parameter narrowed). Same
-    #   rule, signature-specific message.
-    # - `UnresolvedInterface` — the named interface is not loaded (a typo, or
-    #   the defining library / `sig` set is not on the RBS load path).
-    #   Surfaces as `dynamic.rbs-extended.unresolved` `:info`, the fail-soft
-    #   channel the other directive parsers use, so a bad name never silently
-    #   disables the author's assertion.
+    # - `Unsatisfied` — the class is missing one or more required interface methods. Surfaces as
+    #   `rbs_extended.unsatisfied-conformance`.
+    # - `IncompatibleSignature` — a provided method's signature violates the interface contract (return widened,
+    #   or a parameter narrowed). Same rule, signature-specific message.
+    # - `UnresolvedInterface` — the named interface is not loaded (a typo, or the defining library / `sig` set is
+    #   not on the RBS load path). Surfaces as `dynamic.rbs-extended.unresolved` `:info`, the fail-soft channel
+    #   the other directive parsers use, so a bad name never silently disables the author's assertion.
     #
-    # Fail-soft throughout: a class whose own definition cannot be built (RBS
-    # error) is skipped rather than reported.
+    # Fail-soft throughout: a class whose own definition cannot be built (RBS error) is skipped rather than
+    # reported.
     module ConformanceChecker
       Unsatisfied = Data.define(:class_name, :interface_name, :missing_methods, :location)
       IncompatibleSignature = Data.define(:class_name, :interface_name, :method_name, :detail, :location)
@@ -113,14 +102,11 @@ module Rigor
         end
       end
 
-      # Returns a human-readable mismatch detail when `provided` is NOT a
-      # behavioural subtype of the `required` (interface) signature, else
-      # nil. Mirrors the ADR-35 override checks: covariant return,
-      # contravariant params, single method type only, `Dynamic[Top]`
-      # positions skipped (fires only on a proven `accepts(...).no?`).
-      # Also checks arity divergence and keyword-requiredness divergence
-      # (positional-type comparison only was the initial scope; these
-      # extend it to the cases that cause runtime ArgumentError).
+      # Returns a human-readable mismatch detail when `provided` is NOT a behavioural subtype of the `required`
+      # (interface) signature, else nil. Mirrors the ADR-35 override checks: covariant return, contravariant
+      # params, single method type only, `Dynamic[Top]` positions skipped (fires only on a proven
+      # `accepts(...).no?`). Also checks arity divergence and keyword-requiredness divergence (positional-type
+      # comparison only was the initial scope; these extend it to the cases that cause runtime ArgumentError).
       def signature_mismatch(required_method, provided_method)
         return nil unless required_method.method_types.size == 1
         return nil unless provided_method.method_types.size == 1
@@ -158,14 +144,13 @@ module Rigor
         nil
       end
 
-      # Checks positional-count divergence — cases that would cause a
-      # runtime `ArgumentError` even when every declared type matches.
-      # Skipped when either side has a rest parameter (`*args`) since
-      # that makes the arity range unbounded. Two violation shapes:
-      # (a) provided requires MORE positionals than the interface allows
-      #     (caller passes ≤ interface total → provided raises);
-      # (b) provided accepts FEWER positionals than the interface requires
-      #     (caller passes ≥ interface required → provided raises).
+      # Checks positional-count divergence — cases that would cause a runtime `ArgumentError` even when every
+      # declared type matches. Skipped when either side has a rest parameter (`*args`) since that makes the
+      # arity range unbounded. Two violation shapes:
+      # (a) provided requires MORE positionals than the interface allows (caller passes ≤ interface total →
+      #     provided raises);
+      # (b) provided accepts FEWER positionals than the interface requires (caller passes ≥ interface required →
+      #     provided raises).
       def arity_detail(required_method, provided_method)
         req_func = required_method.method_types.first.type
         prov_func = provided_method.method_types.first.type
@@ -193,11 +178,10 @@ module Rigor
       end
 
       # Checks keyword-requiredness divergence.
-      # (a) A keyword the interface requires that the provided method does
-      #     not accept at all → callers will pass it, provided will raise.
-      # (b) A keyword the provided method requires that the interface does
-      #     not mention → callers following the interface won't pass it,
-      #     provided will raise.
+      # (a) A keyword the interface requires that the provided method does not accept at all → callers will pass
+      #     it, provided will raise.
+      # (b) A keyword the provided method requires that the interface does not mention → callers following the
+      #     interface won't pass it, provided will raise.
       # Skipped when either side has a keyword rest (`**kwargs`).
       def keyword_detail(required_method, provided_method)
         req_func, prov_func = keyword_funcs(required_method, provided_method)
@@ -245,13 +229,11 @@ module Rigor
         (func.required_positionals + func.optional_positionals).map { |param| translate(param.type) }
       end
 
-      # Resolves the (possibly namespace-relative) `interface_name` against
-      # the declaring class's namespace chain, mirroring Ruby constant
-      # lookup: `conforms-to _Foo` inside `Bar::Baz` tries `Bar::Baz::_Foo`,
-      # `Bar::_Foo`, then top-level `_Foo` (longest prefix first). Returns
-      # the first interface definition that resolves, or nil. (A leading
-      # `::` is already stripped by the parser, so an intended-absolute name
-      # still resolves via the trailing top-level candidate.)
+      # Resolves the (possibly namespace-relative) `interface_name` against the declaring class's namespace
+      # chain, mirroring Ruby constant lookup: `conforms-to _Foo` inside `Bar::Baz` tries `Bar::Baz::_Foo`,
+      # `Bar::_Foo`, then top-level `_Foo` (longest prefix first). Returns the first interface definition that
+      # resolves, or nil. (A leading `::` is already stripped by the parser, so an intended-absolute name still
+      # resolves via the trailing top-level candidate.)
       def resolve_interface(rbs_loader, class_name, interface_name)
         candidate_interface_names(class_name, interface_name).each do |candidate|
           defn = rbs_loader.interface_definition(candidate)
@@ -265,11 +247,9 @@ module Rigor
         prefixes.map { |prefix| "#{prefix}::#{interface_name}" } + [interface_name]
       end
 
-      # Namespace prefixes of a qualified name, longest first:
-      # `"Bar::Baz"` → `["Bar::Baz", "Bar"]`. Covers both the
-      # `class Bar::Baz` and the `module Bar; class Baz` nesting shapes
-      # (a superset of `Module.nesting`, which the directive's resolved
-      # class name does not record).
+      # Namespace prefixes of a qualified name, longest first: `"Bar::Baz"` → `["Bar::Baz", "Bar"]`. Covers both
+      # the `class Bar::Baz` and the `module Bar; class Baz` nesting shapes (a superset of `Module.nesting`,
+      # which the directive's resolved class name does not record).
       def namespace_prefixes(class_name)
         parts = normalize(class_name).split("::")
         (1..parts.size).to_a.reverse.map { |count| parts.first(count).join("::") }

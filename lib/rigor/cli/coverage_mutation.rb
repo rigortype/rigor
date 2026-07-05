@@ -5,19 +5,16 @@ require "prism"
 
 module Rigor
   class CLI
-    # ADR-63 Tier 2 + ADR-70 — the mutation-effectiveness and fused static∪dynamic
-    # protection paths, factored out of {CoverageCommand} to keep that command
-    # focused on dispatch. Mixed in, so each method runs in the command instance
-    # (using `@out` / `@err` / `@argv` / `collect_paths` / `determine_protection_exit`
-    # and the Protection + LanguageServer collaborators the command requires).
+    # ADR-63 Tier 2 + ADR-70 — the mutation-effectiveness and fused static∪dynamic protection paths, factored out of
+    # {CoverageCommand} to keep that command focused on dispatch. Mixed in, so each method runs in the command instance
+    # (using `@out` / `@err` / `@argv` / `collect_paths` / `determine_protection_exit` and the Protection +
+    # LanguageServer collaborators the command requires).
     module CoverageMutation
       private
 
-      # ADR-63 Tier 2 — the mutation-effectiveness deep dive. Builds the RBS
-      # environment + project pre-pass once (the warm loop), then re-analyses
-      # each target file's mutants against its clean baseline. Defaults to the
-      # git-changed `.rb` files; explicit paths override (and enable the
-      # whole-project opt-in, which is minutes).
+      # ADR-63 Tier 2 — the mutation-effectiveness deep dive. Builds the RBS environment + project pre-pass once (the
+      # warm loop), then re-analyses each target file's mutants against its clean baseline. Defaults to the git-changed
+      # `.rb` files; explicit paths override (and enable the whole-project opt-in, which is minutes).
       def run_mutation_protection(options)
         explicit = collect_paths(@argv, command_name: "coverage")
         return CLI::EXIT_USAGE if explicit.nil?
@@ -36,8 +33,8 @@ module Rigor
         determine_protection_exit(report, options)
       end
 
-      # A `--limit` sample makes the report an estimate (per-file ratios over a
-      # random N of the mutations). Say so on stderr — stdout stays clean for JSON.
+      # A `--limit` sample makes the report an estimate (per-file ratios over a random N of the mutations). Say so on
+      # stderr — stdout stays clean for JSON.
       def note_sampling(options)
         return unless options[:limit]
 
@@ -47,10 +44,9 @@ module Rigor
         )
       end
 
-      # ADR-70 — the fused static∪dynamic deep dive. The type pass is the ADR-63
-      # Tier 2 warm loop; each type-survivor is then run against the project's
-      # test suite (the runner hook). The suite MUST pass on clean code first, or
-      # "a mutant survived" is meaningless — abort with a clear message if not.
+      # ADR-70 — the fused static∪dynamic deep dive. The type pass is the ADR-63 Tier 2 warm loop; each type-survivor is
+      # then run against the project's test suite (the runner hook). The suite MUST pass on clean code first, or "a
+      # mutant survived" is meaningless — abort with a clear message if not.
       def run_fused_protection(paths, options)
         configuration = Configuration.load(options.fetch(:config))
         test_oracle = Protection::TestSuiteOracle.new(command: options.fetch(:test_command))
@@ -117,9 +113,8 @@ module Rigor
         accumulator.absorb(scanner.scan_file(path, source: source))
       end
 
-      # The git-changed (modified / added / untracked) `.rb` files that exist on
-      # disk — the default Tier 2 scope. Returns [] outside a git work tree or
-      # when git is unavailable; the caller then reports "nothing to measure".
+      # The git-changed (modified / added / untracked) `.rb` files that exist on disk — the default Tier 2 scope.
+      # Returns [] outside a git work tree or when git is unavailable; the caller then reports "nothing to measure".
       def changed_ruby_files
         output = git_status_porcelain
         return [] if output.nil?

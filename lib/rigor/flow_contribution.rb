@@ -3,33 +3,26 @@
 require_relative "flow_contribution/element"
 
 module Rigor
-  # The public packaging of a flow contribution at a single call edge.
-  # Plugins, `RBS::Extended` annotations, and built-in narrowing rules
-  # all hand the analyzer this same bundle shape; the inference engine
-  # merges contributions through the policy described in
-  # [ADR-2 § "Plugin Contribution Merging"](../../docs/adr/2-extension-api.md)
-  # rather than letting any one source override another silently.
+  # The public packaging of a flow contribution at a single call edge. Plugins, `RBS::Extended` annotations,
+  # and built-in narrowing rules all hand the analyzer this same bundle shape; the inference engine merges
+  # contributions through the policy described in
+  # [ADR-2 § "Plugin Contribution Merging"](../../docs/adr/2-extension-api.md) rather than letting any one
+  # source override another silently.
   #
-  # Eight content slots plus a {Provenance} block. A slot left as `nil`
-  # (or, for collection-shaped slots, an empty collection) means the
-  # contribution does not assert anything in that dimension; the merge
-  # policy treats it as absent.
+  # Eight content slots plus a {Provenance} block. A slot left as `nil` (or, for collection-shaped slots, an
+  # empty collection) means the contribution does not assert anything in that dimension; the merge policy
+  # treats it as absent.
   #
-  # The struct is the only shape plugin authors need to learn. Richer
-  # or more permissive shapes are not part of the first public
-  # contract — see ADR-2 § "Flow Contribution Bundle" for the binding
-  # definition.
+  # The struct is the only shape plugin authors need to learn. Richer or more permissive shapes are not part
+  # of the first public contract — see ADR-2 § "Flow Contribution Bundle" for the binding definition.
   #
-  # `to_element_list` and `Merger` are implemented; plugin authors
-  # should not depend on the `Element` shape — the bundle is the
-  # public contract.
+  # `to_element_list` and `Merger` are implemented; plugin authors should not depend on the `Element` shape —
+  # the bundle is the public contract.
   class FlowContribution
-    # Provenance carries the metadata every contribution needs for
-    # diagnostic attribution and cache invalidation. `source_family`
-    # mirrors {Rigor::Analysis::Diagnostic::DEFAULT_SOURCE_FAMILY};
-    # `descriptor` is the {Rigor::Cache::Descriptor} this
-    # contribution attaches to (or `nil` when the contribution does
-    # not need its own cache slice).
+    # Provenance carries the metadata every contribution needs for diagnostic attribution and cache
+    # invalidation. `source_family` mirrors {Rigor::Analysis::Diagnostic::DEFAULT_SOURCE_FAMILY}; `descriptor`
+    # is the {Rigor::Cache::Descriptor} this contribution attaches to (or `nil` when the contribution does not
+    # need its own cache slice).
     class Provenance < Data.define(:source_family, :plugin_id, :node, :descriptor)
       def self.builtin
         new(source_family: :builtin, plugin_id: nil, node: nil, descriptor: nil)
@@ -49,27 +42,20 @@ module Rigor
 
     attr_reader(*SLOT_NAMES, :provenance)
 
-    # @param return_type [Object, nil] normal-edge return type. Use
-    #   `nil` when the contribution does not refine the return type
-    #   selected from the RBS contract.
-    # @param truthy_facts [Array, nil] facts that hold only on the
-    #   truthy control-flow edge. Edge-local: a truthy-edge fact does
-    #   NOT imply its falsey-edge complement (ADR-2 § "Plugin
-    #   Contribution Merging").
+    # @param return_type [Object, nil] normal-edge return type. Use `nil` when the contribution does not
+    #   refine the return type selected from the RBS contract.
+    # @param truthy_facts [Array, nil] facts that hold only on the truthy control-flow edge. Edge-local: a
+    #   truthy-edge fact does NOT imply its falsey-edge complement (ADR-2 § "Plugin Contribution Merging").
     # @param falsey_facts [Array, nil] dual of `truthy_facts`.
-    # @param post_return_facts [Array, nil] facts that hold after the
-    #   call returns normally on every edge — the carrier for
-    #   assertion-style contributions.
-    # @param mutations [Array, nil] receiver and argument mutation
-    #   effects.
-    # @param invalidations [Array, nil] targeted fact invalidations
-    #   beyond what mutation effects already imply.
-    # @param exceptional [Object, nil] non-returning, raising, or
-    #   unreachable effect.
-    # @param role_conformance [Array, nil] capability-role conformance
-    #   facts the contribution provides.
-    # @param provenance [Provenance] source-family, plugin-id, node,
-    #   and cache-descriptor metadata. Defaults to `Provenance.builtin`.
+    # @param post_return_facts [Array, nil] facts that hold after the call returns normally on every edge —
+    #   the carrier for assertion-style contributions.
+    # @param mutations [Array, nil] receiver and argument mutation effects.
+    # @param invalidations [Array, nil] targeted fact invalidations beyond what mutation effects already
+    #   imply.
+    # @param exceptional [Object, nil] non-returning, raising, or unreachable effect.
+    # @param role_conformance [Array, nil] capability-role conformance facts the contribution provides.
+    # @param provenance [Provenance] source-family, plugin-id, node, and cache-descriptor metadata. Defaults
+    #   to `Provenance.builtin`.
     # rubocop:disable Metrics/ParameterLists
     def initialize(return_type: nil, truthy_facts: nil, falsey_facts: nil,
                    post_return_facts: nil, mutations: nil, invalidations: nil,
@@ -88,9 +74,8 @@ module Rigor
       freeze
     end
 
-    # @return [Boolean] true when every content slot is unset (nil or
-    #   an empty collection). Provenance does not count toward
-    #   emptiness — an empty bundle still carries source attribution.
+    # @return [Boolean] true when every content slot is unset (nil or an empty collection). Provenance does
+    #   not count toward emptiness — an empty bundle still carries source attribution.
     def empty?
       SLOT_NAMES.all? { |slot| slot_empty?(public_send(slot)) }
     end
@@ -101,10 +86,9 @@ module Rigor
       end
     end
 
-    # Flattens this bundle into a tagged element list keyed by
-    # `(target, edge, kind)`. The flattening is mechanical and
-    # round-trippable through {Merger.merge}: feeding the result
-    # back through the merger produces an equivalent bundle.
+    # Flattens this bundle into a tagged element list keyed by `(target, edge, kind)`. The flattening is
+    # mechanical and round-trippable through {Merger.merge}: feeding the result back through the merger
+    # produces an equivalent bundle.
     #
     # Layout:
     #
@@ -150,11 +134,9 @@ module Rigor
       Element.new(target: target, edge: edge, kind: kind, payload: payload, provenance: provenance)
     end
 
-    # Best-effort target extraction. Payloads that expose a
-    # `#target` accessor (typed-fact carriers, mutation effects)
-    # provide their own; everything else falls through with the
-    # payload itself as the merge key, which keeps deduplication
-    # well-defined for opaque entries.
+    # Best-effort target extraction. Payloads that expose a `#target` accessor (typed-fact carriers, mutation
+    # effects) provide their own; everything else falls through with the payload itself as the merge key,
+    # which keeps deduplication well-defined for opaque entries.
     def fact_target(payload)
       return payload.target if payload.respond_to?(:target)
 

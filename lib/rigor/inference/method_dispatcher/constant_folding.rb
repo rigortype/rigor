@@ -24,27 +24,21 @@ require_relative "../builtins/exception_catalog"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Slice 2 rule book that folds method calls on `Rigor::Type::Constant`
-      # receivers (and unions of them) into another `Constant` (or a small
-      # `Union[Constant, …]`) whenever:
+      # Slice 2 rule book that folds method calls on `Rigor::Type::Constant` receivers (and unions of them)
+      # into another `Constant` (or a small `Union[Constant, …]`) whenever:
       #
-      # * the receiver is a recognised scalar literal, OR a `Union` whose
-      #   members are all `Constant`,
+      # * the receiver is a recognised scalar literal, OR a `Union` whose members are all `Constant`,
       # * arguments (zero or one) are likewise `Constant` or `Union[Constant…]`,
       # * the method name is in the curated whitelist for the receiver's class,
-      # * the operation cannot accidentally explode the analyzer (we cap
-      #   string-fold output at `STRING_FOLD_BYTE_LIMIT` bytes, the input
-      #   cartesian product at `UNION_FOLD_INPUT_LIMIT`, and the deduped
-      #   output union at `UNION_FOLD_OUTPUT_LIMIT`), and
-      # * the actual Ruby invocation does not raise on at least one
-      #   receiver/argument combination.
+      # * the operation cannot accidentally explode the analyzer (we cap string-fold output at
+      #   `STRING_FOLD_BYTE_LIMIT` bytes, the input cartesian product at `UNION_FOLD_INPUT_LIMIT`, and the
+      #   deduped output union at `UNION_FOLD_OUTPUT_LIMIT`), and
+      # * the actual Ruby invocation does not raise on at least one receiver/argument combination.
       #
-      # Anything else returns `nil`, signalling "no rule matched" so the
-      # caller (`MethodDispatcher`) falls back to `Dynamic[Top]` and records a
-      # fail-soft event. Slice 4 (RBS-backed) layers another dispatch tier
-      # behind this rule book, but the constant-folding semantics defined
-      # here MUST NOT regress: any value reachable by literal arithmetic at
-      # parse time is meant to be foldable independent of RBS data.
+      # Anything else returns `nil`, signalling "no rule matched" so the caller (`MethodDispatcher`) falls
+      # back to `Dynamic[Top]` and records a fail-soft event. Slice 4 (RBS-backed) layers another dispatch
+      # tier behind this rule book, but the constant-folding semantics defined here MUST NOT regress: any
+      # value reachable by literal arithmetic at parse time is meant to be foldable independent of RBS data.
       module ConstantFolding # rubocop:disable Metrics/ModuleLength
         module_function
 
@@ -52,12 +46,10 @@ module Rigor
           :+, :-, :*, :/, :%, :**, :&, :|, :^, :<<, :>>,
           :<, :<=, :>, :>=, :==, :!=, :<=>,
           :gcd, :lcm, :fdiv, :quo, :ceildiv, :[],
-          # Integer bit-test predicates (`(self & mask) <=> mask|0`). The
-          # catalog marks them `:dispatch` only because a non-Integer mask
-          # would route through `to_int`; a concrete Integer literal never
-          # does, so the fold is pure here — the sibling of the already-folded
-          # bit-reference `:[]`. Integer-only, but Float-safe to list: a Float
-          # receiver has no such method, so `invoke_binary` rescues the
+          # Integer bit-test predicates (`(self & mask) <=> mask|0`). The catalog marks them `:dispatch` only
+          # because a non-Integer mask would route through `to_int`; a concrete Integer literal never does,
+          # so the fold is pure here — the sibling of the already-folded bit-reference `:[]`. Integer-only,
+          # but Float-safe to list: a Float receiver has no such method, so `invoke_binary` rescues the
           # `NoMethodError` to nil and the RBS tier answers.
           :allbits?, :anybits?, :nobits?
         ].freeze
@@ -66,76 +58,60 @@ module Rigor
           :start_with?, :end_with?, :include?,
           :delete_prefix, :delete_suffix,
           :match?, :index, :rindex, :center, :ljust, :rjust,
-          # 1-arg pure transforms/queries whose output never exceeds the
-          # input: `delete`/`squeeze` shrink the string, `count` → Integer.
+          # 1-arg pure transforms/queries whose output never exceeds the input: `delete`/`squeeze` shrink
+          # the string, `count` → Integer.
           :delete, :count, :squeeze,
-          # ASCII / Unicode-case-fold comparison — deterministic, no
-          # locale read: `casecmp` → -1/0/1, `casecmp?` → bool/nil.
+          # ASCII / Unicode-case-fold comparison — deterministic, no locale read: `casecmp` → -1/0/1,
+          # `casecmp?` → bool/nil.
           :casecmp, :casecmp?
         ].freeze
         SYMBOL_BINARY  = Set[:==, :!=, :<=>, :<, :<=, :>, :>=].freeze
         BOOL_BINARY    = Set[:&, :|, :^, :==, :!=, :===].freeze
         NIL_BINARY     = Set[:==, :!=].freeze
-        # Rational arithmetic / ordering are exact and pure. Division
-        # (`/`) and `**` may return a `Float`/`Complex` for some operands,
-        # all of which are foldable `Constant` value classes. `==` / `!=`
-        # are deliberately EXCLUDED: `Rational#==` (`nurat_eqeq_p`) routes
-        # through `rb_funcall(:==)` on the operands — user-redefinable —
-        # so the catalog classifies it `:dispatch` and the equality stays
+        # Rational arithmetic / ordering are exact and pure. Division (`/`) and `**` may return a
+        # `Float`/`Complex` for some operands, all of which are foldable `Constant` value classes. `==` /
+        # `!=` are deliberately EXCLUDED: `Rational#==` (`nurat_eqeq_p`) routes through `rb_funcall(:==)` on
+        # the operands — user-redefinable — so the catalog classifies it `:dispatch` and the equality stays
         # the RBS `bool`. (The set would otherwise bypass that gate.)
         RATIONAL_BINARY = Set[
           :+, :-, :*, :/, :**, :<=>, :<, :<=, :>, :>=,
           :div, :modulo, :%, :remainder, :fdiv, :quo
         ].freeze
-        # Complex arithmetic. `ops_for` gains a `Complex` branch so these
-        # reach the binary fold path (Complex was previously unary-only).
-        # `/` and `**` stay foldable (Complex result). `==` / `!=` are
-        # excluded for the same reason as Rational (`nucomp_eqeq_p`
-        # delegates to operand `==`); ordering is undefined for Complex.
+        # Complex arithmetic. `ops_for` gains a `Complex` branch so these reach the binary fold path
+        # (Complex was previously unary-only). `/` and `**` stay foldable (Complex result). `==` / `!=` are
+        # excluded for the same reason as Rational (`nucomp_eqeq_p` delegates to operand `==`); ordering is
+        # undefined for Complex.
         COMPLEX_BINARY = Set[:+, :-, :*, :/, :**].freeze
 
-        # `Set#&` and its alias `Set#intersection` are leaf-pure for a
-        # concrete Set operand exactly like their siblings `|` / `-` / `^`
-        # (all `:leaf` in the catalog), but the catalog flags
-        # `set_i_intersection`'s C body `block_dependent` — it drives Set's
-        # own internal iterator — so the catalog tier declines and the
-        # intersection alone fails to fold. A concrete Set argument's `each`
-        # is the pure core method, so the fold is sound; the hand-rolled
-        # allow-list is the right tool, mirroring the bit-test predicates.
-        # (The other binary set ops keep folding through the catalog.)
+        # `Set#&` and its alias `Set#intersection` are leaf-pure for a concrete Set operand exactly like
+        # their siblings `|` / `-` / `^` (all `:leaf` in the catalog), but the catalog flags
+        # `set_i_intersection`'s C body `block_dependent` — it drives Set's own internal iterator — so the
+        # catalog tier declines and the intersection alone fails to fold. A concrete Set argument's `each`
+        # is the pure core method, so the fold is sound; the hand-rolled allow-list is the right tool,
+        # mirroring the bit-test predicates. (The other binary set ops keep folding through the catalog.)
         SET_BINARY = Set[:&, :intersection].freeze
 
         # v0.0.3 C — pure unary catalogue. Each method must:
         # - take zero arguments,
         # - have no side effects,
-        # - never raise on the type's full domain (or be
-        #   guarded by `safe?` below),
-        # - return a value safe to materialise as a
-        #   `Constant` (no large strings, no host objects).
+        # - never raise on the type's full domain (or be guarded by `safe?` below),
+        # - return a value safe to materialise as a `Constant` (no large strings, no host objects).
         #
-        # The catalogue is the prerequisite for aggressive
-        # constant folding through user methods: once
-        # `Constant[3].odd?` folds to `Constant[true]`, the
-        # inter-procedural inference path landed in v0.0.2
-        # #5 carries the constant through the body of a
-        # user-defined `def is_odd(n) = n.odd?` so
-        # `Parity.new.is_odd(3)` types as `Constant[true]`
-        # rather than the RBS-widened `bool`.
-        # NOTE: `:hash` is deliberately NOT in any of these sets.
-        # `Object#hash` (and the `String`/`Symbol`/`Integer`/`Float`
-        # overrides) is salted with a per-process SipHash seed, so
-        # `"abc".hash` returns a different Integer in every Ruby
-        # process. Folding it to a `Constant` would bake one process's
-        # value into the type (and the on-disk cache), making the
-        # result non-deterministic across runs — a violation of the
-        # purity contract this catalogue rests on. A literal's `.hash`
-        # therefore stays the RBS-widened `Integer`. The deterministic
-        # siblings `:inspect` / `:to_s` remain folded.
+        # The catalogue is the prerequisite for aggressive constant folding through user methods: once
+        # `Constant[3].odd?` folds to `Constant[true]`, the inter-procedural inference path landed in
+        # v0.0.2 #5 carries the constant through the body of a user-defined `def is_odd(n) = n.odd?` so
+        # `Parity.new.is_odd(3)` types as `Constant[true]` rather than the RBS-widened `bool`.
+        # NOTE: `:hash` is deliberately NOT in any of these sets. `Object#hash` (and the
+        # `String`/`Symbol`/`Integer`/`Float` overrides) is salted with a per-process SipHash seed, so
+        # `"abc".hash` returns a different Integer in every Ruby process. Folding it to a `Constant` would
+        # bake one process's value into the type (and the on-disk cache), making the result
+        # non-deterministic across runs — a violation of the purity contract this catalogue rests on. A
+        # literal's `.hash` therefore stays the RBS-widened `Integer`. The deterministic siblings
+        # `:inspect` / `:to_s` remain folded.
         INTEGER_UNARY = Set[
           :odd?, :even?, :zero?, :positive?, :negative?,
-          # `finite?` / `infinite?` are total on Integer (`true` / `nil`
-          # always) and round out the numeric predicate family — the Float
-          # sibling already folds them. `nonzero?` returns `self` (non-zero)
+          # `finite?` / `infinite?` are total on Integer (`true` / `nil` always) and round out the numeric
+          # predicate family — the Float sibling already folds them. `nonzero?` returns `self` (non-zero)
           # or `nil`, both foldable Constants.
           :finite?, :infinite?, :nonzero?,
           :succ, :pred, :next, :abs, :magnitude,
@@ -149,18 +125,15 @@ module Rigor
           :abs, :magnitude, :floor, :ceil, :round, :truncate,
           :next_float, :prev_float,
           :to_s, :to_i, :to_int, :to_f, :to_r, :rationalize,
-          # `numerator` / `denominator` expose the rational
-          # decomposition of the float (`2.5.numerator → 5`,
-          # `.denominator → 2`) — pure arithmetic, the Float siblings
-          # of the already-folded Rational accessors. The non-finite
-          # edges stay sound: `Infinity.numerator → Infinity` /
-          # `.denominator → 1` fold to the same value Ruby returns, and
-          # `NaN.numerator → NaN` is declined by `foldable_constant_value?`.
+          # `numerator` / `denominator` expose the rational decomposition of the float (`2.5.numerator → 5`,
+          # `.denominator → 2`) — pure arithmetic, the Float siblings of the already-folded Rational
+          # accessors. The non-finite edges stay sound: `Infinity.numerator → Infinity` /
+          # `.denominator → 1` fold to the same value Ruby returns, and `NaN.numerator → NaN` is declined by
+          # `foldable_constant_value?`.
           :numerator, :denominator,
-          # `arg` / `angle` / `phase` (aliases) return the complex
-          # argument of the real number: `0` for `self >= 0`, `Math::PI`
-          # for `self < 0`. Pure sign test, deterministic; a NaN
-          # receiver yields NaN which `foldable_constant_value?` declines.
+          # `arg` / `angle` / `phase` (aliases) return the complex argument of the real number: `0` for
+          # `self >= 0`, `Math::PI` for `self < 0`. Pure sign test, deterministic; a NaN receiver yields NaN
+          # which `foldable_constant_value?` declines.
           :arg, :angle, :phase,
           :inspect, :-@, :+@
         ].freeze
@@ -171,19 +144,17 @@ module Rigor
           :to_s, :to_str, :to_sym, :intern,
           :to_i, :to_f, :ord, :chr, :hex, :oct, :succ, :next,
           :sum, :inspect,
-          # `shellescape` is the String-receiver twin of the already-folded
-          # `Shellwords.escape` — deterministic shell-quoting, no global
-          # state. The `shellwords` library is loaded process-wide via
-          # `shellwords_folding`, so the method is always defined here.
+          # `shellescape` is the String-receiver twin of the already-folded `Shellwords.escape` —
+          # deterministic shell-quoting, no global state. The `shellwords` library is loaded process-wide
+          # via `shellwords_folding`, so the method is always defined here.
           :shellescape
         ].freeze
         SYMBOL_UNARY = Set[
           :to_s, :to_sym, :to_proc, :length, :size,
           :empty?, :upcase, :downcase, :capitalize,
           :swapcase, :succ, :next, :inspect,
-          # `name` (the frozen-string accessor), `id2name` (alias of
-          # `to_s`), and `intern` (alias of `to_sym`) are pure reads of the
-          # symbol's text — siblings of the already-folded `to_s` / `to_sym`.
+          # `name` (the frozen-string accessor), `id2name` (alias of `to_s`), and `intern` (alias of
+          # `to_sym`) are pure reads of the symbol's text — siblings of the already-folded `to_s` / `to_sym`.
           :name, :id2name, :intern
         ].freeze
         BOOL_UNARY = Set[:!, :to_s, :inspect, :&, :|, :^].freeze
@@ -205,28 +176,23 @@ module Rigor
 
         STRING_FOLD_BYTE_LIMIT = 4096
 
-        # Input cartesian product hard cap. Keeps fold cost bounded even
-        # when the receiver and argument are both `Union[Constant…]`.
-        # 5 × 5 = 25 inputs is permitted; 6 × 6 = 36 is not. The user-
-        # facing payoff (a precise small enum) drops off fast past this
-        # range and CRuby method invocation cost adds up.
+        # Input cartesian product hard cap. Keeps fold cost bounded even when the receiver and argument are
+        # both `Union[Constant…]`. 5 × 5 = 25 inputs is permitted; 6 × 6 = 36 is not. The user-facing payoff
+        # (a precise small enum) drops off fast past this range and CRuby method invocation cost adds up.
         UNION_FOLD_INPUT_LIMIT = 32
 
-        # Output cardinality cap on the deduped result union. A single
-        # binary op on a small range can collapse: `[1,2,3] + [2,4,6]`
-        # produces 9 raw pairs but only 7 distinct sums. The output cap
-        # is what ultimately limits how wide an inferred type gets.
+        # Output cardinality cap on the deduped result union. A single binary op on a small range can
+        # collapse: `[1,2,3] + [2,4,6]` produces 9 raw pairs but only 7 distinct sums. The output cap is
+        # what ultimately limits how wide an inferred type gets.
         UNION_FOLD_OUTPUT_LIMIT = 8
 
         # ADR-78 — reflexive over-fold guard.
-        # Reflective dispatch (`public_send` / `send` / `__send__`) must
-        # NOT constant-fold unless the method-name argument is itself a
-        # value-pinned literal `Constant[Symbol]`. With a runtime-variable
-        # method name the dispatched method is not statically determined,
-        # so the call degrades to the RBS result (`untyped`) — exactly as
-        # it does without the guard, but explicit so a later shape-carrier
-        # preservation tier (ADR-76 WD2) cannot surface an over-fold as a
-        # spurious `flow.always-truthy-condition`.
+        # Reflective dispatch (`public_send` / `send` / `__send__`) must NOT constant-fold unless the
+        # method-name argument is itself a value-pinned literal `Constant[Symbol]`. With a runtime-variable
+        # method name the dispatched method is not statically determined, so the call degrades to the RBS
+        # result (`untyped`) — exactly as it does without the guard, but explicit so a later shape-carrier
+        # preservation tier (ADR-76 WD2) cannot surface an over-fold as a spurious
+        # `flow.always-truthy-condition`.
         REFLECTIVE_SEND_METHODS = %i[public_send send __send__].to_set.freeze
 
         # @return [Rigor::Type::Constant, Rigor::Type::Union, Rigor::Type::IntegerRange, nil]
@@ -239,13 +205,10 @@ module Rigor
             first_arg = args.first
             return nil unless first_arg.is_a?(Type::Constant) && first_arg.value.is_a?(Symbol)
           end
-          # v0.0.7 — `String#%` against a `Tuple` / `HashShape`
-          # argument runs Ruby's format-string engine when both
-          # sides are statically constant. The standard
-          # `numeric_set_of` path bails on Tuple / HashShape
-          # arguments because they are not scalar-Constant
-          # carriers, so the special-case sits ahead of the
-          # numeric path.
+          # v0.0.7 — `String#%` against a `Tuple` / `HashShape` argument runs Ruby's format-string engine
+          # when both sides are statically constant. The standard `numeric_set_of` path bails on Tuple /
+          # HashShape arguments because they are not scalar-Constant carriers, so the special-case sits
+          # ahead of the numeric path.
           format_lift = try_fold_string_format(receiver, method_name, args)
           return format_lift if format_lift
 
@@ -258,20 +221,14 @@ module Rigor
           dispatch_by_arity(receiver_set, method_name, arg_sets)
         end
 
-        # `Constant<String> % …` — runs the actual `String#%`
-        # operation when both sides are statically known. The
-        # argument may be:
-        # - A `Type::Constant` whose value is a scalar (Integer
-        #   / Float / String / Symbol). Already handled by the
-        #   numeric path; this method declines so the standard
-        #   binary path picks it up.
-        # - A `Type::Tuple` whose elements are all `Constant`.
-        #   Materialises the elements as a Ruby Array and runs
-        #   the format.
-        # - A `Type::HashShape` with no optional keys whose
-        #   values are all `Constant`. Materialises a Ruby Hash
-        #   and runs the format. Symbol keys are kept as
-        #   Symbols (matching Ruby's `%{key}` resolution).
+        # `Constant<String> % …` — runs the actual `String#%` operation when both sides are statically
+        # known. The argument may be:
+        # - A `Type::Constant` whose value is a scalar (Integer / Float / String / Symbol). Already handled
+        #   by the numeric path; this method declines so the standard binary path picks it up.
+        # - A `Type::Tuple` whose elements are all `Constant`. Materialises the elements as a Ruby Array
+        #   and runs the format.
+        # - A `Type::HashShape` with no optional keys whose values are all `Constant`. Materialises a Ruby
+        #   Hash and runs the format. Symbol keys are kept as Symbols (matching Ruby's `%{key}` resolution).
         # Anything else declines so the RBS tier widens.
         def try_fold_string_format(receiver, method_name, args)
           return nil unless method_name == :%
@@ -318,8 +275,8 @@ module Rigor
         end
 
         # Normalises an input type into one of:
-        # - `Array<Object>` for a `Constant` (1-element) or
-        #   `Union[Constant…]` (n-element) — concrete values to enumerate.
+        # - `Array<Object>` for a `Constant` (1-element) or `Union[Constant…]` (n-element) — concrete values
+        #   to enumerate.
         # - `Type::IntegerRange` — bounded interval.
         # - `nil` — the input shape is not foldable.
         def numeric_set_of(type)
@@ -328,20 +285,18 @@ module Rigor
           when Type::Union
             return type.members.map(&:value) if type.members.all?(Type::Constant)
 
-            # A union that mixes `Constant<Integer>` and `IntegerRange`
-            # members (e.g. an accumulator's running fixpoint assumption
-            # `1 | int<1, 6>`) folds as the bounding interval. The
-            # range-arithmetic path (`try_fold_binary_range`) then keeps
-            # the result an `IntegerRange` instead of bailing to Dynamic.
+            # A union that mixes `Constant<Integer>` and `IntegerRange` members (e.g. an accumulator's
+            # running fixpoint assumption `1 | int<1, 6>`) folds as the bounding interval. The
+            # range-arithmetic path (`try_fold_binary_range`) then keeps the result an `IntegerRange`
+            # instead of bailing to Dynamic.
             union_integer_bounds(type)
           when Type::IntegerRange then type
           end
         end
 
-        # Returns the bounding `IntegerRange` over a union whose members
-        # are each an Integer `Constant` or an `IntegerRange`; `nil`
-        # otherwise (a Float constant or any non-numeric member declines,
-        # so precision is never silently lost).
+        # Returns the bounding `IntegerRange` over a union whose members are each an Integer `Constant` or
+        # an `IntegerRange`; `nil` otherwise (a Float constant or any non-numeric member declines, so
+        # precision is never silently lost).
         def union_integer_bounds(union)
           lowers = []
           uppers = []
@@ -359,9 +314,8 @@ module Rigor
               return nil
             end
           end
-          # `IntegerRange#lower`/`#upper` surface an unbounded edge as
-          # `±Float::INFINITY`; `integer_range` wants the `±∞` *sentinel*,
-          # so map the extremum back.
+          # `IntegerRange#lower`/`#upper` surface an unbounded edge as `±Float::INFINITY`; `integer_range`
+          # wants the `±∞` *sentinel*, so map the extremum back.
           Type::Combinator.integer_range(infinity_to_sentinel(lowers.min),
                                          infinity_to_sentinel(uppers.max))
         end
@@ -391,13 +345,10 @@ module Rigor
           end
         end
 
-        # `Integer#divmod` and `Float#divmod` return a 2-element array
-        # `[quotient, remainder]`. We project that into
-        # `Tuple[Constant[q], Constant[r]]` so downstream rules see
-        # the precise element types. Union/range receivers are
-        # widened per-position: each tuple slot carries the union of
-        # quotients (resp. remainders) over every safe input pair.
-        # Range inputs are not yet folded — they bail to nil.
+        # `Integer#divmod` and `Float#divmod` return a 2-element array `[quotient, remainder]`. We project
+        # that into `Tuple[Constant[q], Constant[r]]` so downstream rules see the precise element types.
+        # Union/range receivers are widened per-position: each tuple slot carries the union of quotients
+        # (resp. remainders) over every safe input pair. Range inputs are not yet folded — they bail to nil.
         def try_fold_divmod(left, right)
           pairs = collect_divmod_pairs(left, right)
           return nil unless pairs && !pairs.empty?
@@ -418,10 +369,9 @@ module Rigor
           end
         end
 
-        # Returns `[[quotient, remainder]]` (single-element array
-        # wrapping the tuple) on success; `nil` to signal "skip this
-        # pair". The wrapping mirrors `invoke_binary` so we can
-        # use `flat_map` and not lose legitimate 0/false elements.
+        # Returns `[[quotient, remainder]]` (single-element array wrapping the tuple) on success; `nil` to
+        # signal "skip this pair". The wrapping mirrors `invoke_binary` so we can use `flat_map` and not
+        # lose legitimate 0/false elements.
         def invoke_divmod(receiver_value, arg_value)
           return nil unless receiver_value.is_a?(Numeric) && arg_value.is_a?(Numeric)
 
@@ -442,12 +392,10 @@ module Rigor
           special = try_fold_unary_special(receiver_values, method_name)
           return special if special
 
-          # Type-level allow check on every receiver. If one member's
-          # type does not have the method in its allow list (e.g.
-          # `Union[String, nil].nil?` — `:nil?` is not in
-          # `STRING_UNARY`), bail the fold so the RBS tier answers.
-          # Silently dropping the unsafe member would lie about the
-          # remaining receivers' behaviour.
+          # Type-level allow check on every receiver. If one member's type does not have the method in its
+          # allow list (e.g. `Union[String, nil].nil?` — `:nil?` is not in `STRING_UNARY`), bail the fold so
+          # the RBS tier answers. Silently dropping the unsafe member would lie about the remaining
+          # receivers' behaviour.
           return nil unless receiver_values.all? { |rv| unary_method_allowed?(rv, method_name) }
 
           results = receiver_values.flat_map do |rv|
@@ -456,12 +404,10 @@ module Rigor
           build_constant_type(results, source: receiver_values)
         end
 
-        # The carrier-specific unary lifts — Range-to-Tuple, the
-        # Array-returning String / Pathname / Regexp / Set / Integer /
-        # Numeric folds — that produce a precise structural type before
-        # the generic scalar `invoke_unary` path. The first match wins;
-        # nil means none applied and the caller falls through to the
-        # scalar allow-list path.
+        # The carrier-specific unary lifts — Range-to-Tuple, the Array-returning String / Pathname / Regexp
+        # / Set / Integer / Numeric folds — that produce a precise structural type before the generic
+        # scalar `invoke_unary` path. The first match wins; nil means none applied and the caller falls
+        # through to the scalar allow-list path.
         def try_fold_unary_special(receiver_values, method_name)
           try_fold_range_constant_unary(receiver_values, method_name) ||
             try_fold_string_array_unary(receiver_values, method_name) ||
@@ -472,28 +418,22 @@ module Rigor
             try_fold_integer_array_unary(receiver_values, method_name) ||
             try_fold_numeric_array_unary(receiver_values, method_name)
         end
-        # v0.0.7 — `Constant<Range>#to_a` and the no-arg
-        # `first` / `last` / `min` / `max` short-circuit through a
-        # Range-specific arm that catalog dispatch cannot reach:
-        # - `to_a` returns an Array (not foldable through
-        #   `foldable_constant_value?`) — lift to `Tuple[Constant…]`
-        #   when the cardinality fits within `RANGE_TO_A_LIMIT`.
-        # - `first` / `last` / `min` / `max` are catalog-classified
-        #   `:block_dependent` because of the optional-block forms,
-        #   but the no-arg form is pure for finite integer ranges.
+        # v0.0.7 — `Constant<Range>#to_a` and the no-arg `first` / `last` / `min` / `max` short-circuit
+        # through a Range-specific arm that catalog dispatch cannot reach:
+        # - `to_a` returns an Array (not foldable through `foldable_constant_value?`) — lift to
+        #   `Tuple[Constant…]` when the cardinality fits within `RANGE_TO_A_LIMIT`.
+        # - `first` / `last` / `min` / `max` are catalog-classified `:block_dependent` because of the
+        #   optional-block forms, but the no-arg form is pure for finite integer ranges.
         #
-        # Only fires on a single-receiver Range with finite integer
-        # endpoints; mixed unions fall through so the existing
-        # union-of-Constants path keeps the rest of the arms.
+        # Only fires on a single-receiver Range with finite integer endpoints; mixed unions fall through so
+        # the existing union-of-Constants path keeps the rest of the arms.
         RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length, :entries, :minmax,
                                  :sum].freeze
-        # 1-arg head/tail projections on a `Constant<Range>`. `first(n)` /
-        # `take(n)` return the first `n` elements, `last(n)` the final `n`,
-        # and `min(n)` / `max(n)` the n smallest / largest (for an ascending
-        # integer range `min(n) == first(n)` and `max(n) == last(n).reverse`)
-        # — each lifts to a per-position `Tuple[Constant[Integer]…]`. The
-        # no-arg `first` / `last` / `min` / `max` stay on the unary path
-        # (single Integer endpoint).
+        # 1-arg head/tail projections on a `Constant<Range>`. `first(n)` / `take(n)` return the first `n`
+        # elements, `last(n)` the final `n`, and `min(n)` / `max(n)` the n smallest / largest (for an
+        # ascending integer range `min(n) == first(n)` and `max(n) == last(n).reverse`) — each lifts to a
+        # per-position `Tuple[Constant[Integer]…]`. The no-arg `first` / `last` / `min` / `max` stay on the
+        # unary path (single Integer endpoint).
         RANGE_FOLD_BINARY_METHODS = Set[:first, :last, :take, :min, :max].freeze
         RANGE_TO_A_LIMIT = 16
         private_constant :RANGE_FOLD_METHODS, :RANGE_FOLD_BINARY_METHODS, :RANGE_TO_A_LIMIT
@@ -516,10 +456,9 @@ module Rigor
           when :last, :max then range_endpoint_constant(range, :last)
           when :count, :size, :length then Type::Combinator.constant_of(range.to_a.size)
           when :minmax then range_minmax_tuple(range)
-          # `range.sum` is closed-form (Gauss) for an integer range, so a
-          # huge range still costs O(1) and yields a single Integer — no
-          # materialisation, no cap needed. Endless ranges are already
-          # excluded by the Integer-endpoint guard in the caller.
+          # `range.sum` is closed-form (Gauss) for an integer range, so a huge range still costs O(1) and
+          # yields a single Integer — no materialisation, no cap needed. Endless ranges are already excluded
+          # by the Integer-endpoint guard in the caller.
           when :sum then Type::Combinator.constant_of(range.sum)
           end
         end
@@ -554,9 +493,8 @@ module Rigor
           )
         end
 
-        # `(1..10).first(3)` / `.take(3)` / `.last(3)` — the 1-arg head /
-        # tail forms. `first`/`last` already fold no-arg through the unary
-        # path; this is the n-arg sibling, mirroring the Tuple carrier's
+        # `(1..10).first(3)` / `.take(3)` / `.last(3)` — the 1-arg head / tail forms. `first`/`last` already
+        # fold no-arg through the unary path; this is the n-arg sibling, mirroring the Tuple carrier's
         # `first(n)`/`take(n)` handlers. Lifts to `Tuple[Constant…]`.
         def try_fold_range_constant_binary(receiver_values, method_name, arg_values)
           return nil unless RANGE_FOLD_BINARY_METHODS.include?(method_name)
@@ -573,11 +511,9 @@ module Rigor
 
         def range_take_tuple(range, method_name, count)
           return nil unless count.is_a?(Integer) && !count.negative?
-          # `first(n)`/`last(n)`/`take(n)`/`min(n)`/`max(n)` materialise at
-          # most `min(n, size)` elements; cap that count so a huge `n` (or
-          # range) never blows up the Constant. `Range#size` and the head/
-          # tail projections are O(n) for integer endpoints (no full
-          # materialisation).
+          # `first(n)`/`last(n)`/`take(n)`/`min(n)`/`max(n)` materialise at most `min(n, size)` elements; cap
+          # that count so a huge `n` (or range) never blows up the Constant. `Range#size` and the head/tail
+          # projections are O(n) for integer endpoints (no full materialisation).
           return nil if [count, range.size].min > RANGE_TO_A_LIMIT
 
           values = range_head_tail(range, method_name, count)
@@ -586,10 +522,9 @@ module Rigor
           Type::Combinator.tuple_of(*values.map { |v| Type::Combinator.constant_of(v) })
         end
 
-        # The n elements a head/tail projection selects, in Ruby's order.
-        # For an ascending integer range `min(n)` is the leading `n`
-        # (`first(n)`) and `max(n)` the trailing `n` reversed (descending),
-        # so neither needs the full sort `Array#min`/`#max` would do.
+        # The n elements a head/tail projection selects, in Ruby's order. For an ascending integer range
+        # `min(n)` is the leading `n` (`first(n)`) and `max(n)` the trailing `n` reversed (descending), so
+        # neither needs the full sort `Array#min`/`#max` would do.
         def range_head_tail(range, method_name, count)
           case method_name
           when :last then range.last(count)
@@ -619,77 +554,62 @@ module Rigor
           end
           build_constant_type(results, source: receiver_values + arg_values)
         end
-        # v0.0.7 — `Constant<String>#chars` / `bytes` / `codepoints` /
-        # `grapheme_clusters` / `lines` / `split` (no-arg) return a Ruby
-        # Array of foldable scalars; `foldable_constant_value?` rejects Array
-        # results, so the standard unary path declines. Lift the
-        # Array to a per-position `Tuple[Constant…]` directly,
-        # capped at `STRING_ARRAY_LIFT_LIMIT` to keep the result
-        # bounded for long strings. (`codepoints` yields per-character
-        # Integer codepoints, the sibling of the byte-valued `bytes`;
-        # `grapheme_clusters` is the extended-grapheme sibling of `chars`.)
-        # `shellsplit` is the String-receiver twin of the already-folded
-        # `Shellwords.split` — lifts the token Array to a Tuple. Raises
-        # `ArgumentError` on unmatched quotes, which `try_fold_string_array_unary`
-        # rescues to nil (RBS tier widens). `shellwords` is loaded process-wide
-        # via `shellwords_folding`.
+        # v0.0.7 — `Constant<String>#chars` / `bytes` / `codepoints` / `grapheme_clusters` / `lines` /
+        # `split` (no-arg) return a Ruby Array of foldable scalars; `foldable_constant_value?` rejects
+        # Array results, so the standard unary path declines. Lift the Array to a per-position
+        # `Tuple[Constant…]` directly, capped at `STRING_ARRAY_LIFT_LIMIT` to keep the result bounded for
+        # long strings. (`codepoints` yields per-character Integer codepoints, the sibling of the
+        # byte-valued `bytes`; `grapheme_clusters` is the extended-grapheme sibling of `chars`.)
+        # `shellsplit` is the String-receiver twin of the already-folded `Shellwords.split` — lifts the
+        # token Array to a Tuple. Raises `ArgumentError` on unmatched quotes, which
+        # `try_fold_string_array_unary` rescues to nil (RBS tier widens). `shellwords` is loaded
+        # process-wide via `shellwords_folding`.
         STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :codepoints, :grapheme_clusters,
                                          :lines, :split, :shellsplit].freeze
-        # `partition` / `rpartition` always return a fixed 3-element
-        # `[head, separator, tail]` Array whose members are substrings of
-        # the receiver (bounded by the input), so they lift to a precise
-        # 3-slot `Tuple[Constant…]`.
+        # `partition` / `rpartition` always return a fixed 3-element `[head, separator, tail]` Array whose
+        # members are substrings of the receiver (bounded by the input), so they lift to a precise 3-slot
+        # `Tuple[Constant…]`.
         STRING_ARRAY_BINARY_METHODS = Set[:split, :scan, :partition, :rpartition].freeze
         STRING_ARRAY_LIFT_LIMIT = 32
         private_constant :STRING_ARRAY_UNARY_METHODS,
                          :STRING_ARRAY_BINARY_METHODS,
                          :STRING_ARRAY_LIFT_LIMIT
 
-        # `Constant<Regexp>#names` returns an Array of capture-group name
-        # strings. Lifted to a Tuple so downstream narrowing can project
-        # per-element types. The catalog classifies the C body as `:leaf`
+        # `Constant<Regexp>#names` returns an Array of capture-group name strings. Lifted to a Tuple so
+        # downstream narrowing can project per-element types. The catalog classifies the C body as `:leaf`
         # so it is safe to evaluate at fold time; no `$~` side effect.
         REGEXP_ARRAY_UNARY_METHODS = Set[:names].freeze
         private_constant :REGEXP_ARRAY_UNARY_METHODS
 
-        # `Constant<Set>#to_a` returns an Array of the set's elements.
-        # Ruby 3.2+ Set is C-implemented with a Hash as its backing store,
-        # so element ordering is deterministic (insertion order).
-        # The catalog marks `to_a` as `:dispatch` (it calls through to the
-        # internal hash), so this dedicated handler bypasses the catalog gate.
+        # `Constant<Set>#to_a` returns an Array of the set's elements. Ruby 3.2+ Set is C-implemented with a
+        # Hash as its backing store, so element ordering is deterministic (insertion order). The catalog
+        # marks `to_a` as `:dispatch` (it calls through to the internal hash), so this dedicated handler
+        # bypasses the catalog gate.
         SET_ARRAY_UNARY_METHODS = Set[:to_a, :entries].freeze
         private_constant :SET_ARRAY_UNARY_METHODS
 
-        # `Constant<Integer>#digits` returns the base-10 (or base-n with
-        # an argument — only the no-arg form is folded here) place
-        # values as a little-endian Array of Integers. Lifted to a
-        # Tuple so downstream rules see the precise per-position type.
-        # `digits` raises `Math::DomainError` on a negative receiver,
-        # so the negative case bails to the RBS tier.
+        # `Constant<Integer>#digits` returns the base-10 (or base-n with an argument — only the no-arg form
+        # is folded here) place values as a little-endian Array of Integers. Lifted to a Tuple so downstream
+        # rules see the precise per-position type. `digits` raises `Math::DomainError` on a negative
+        # receiver, so the negative case bails to the RBS tier.
         INTEGER_ARRAY_UNARY_METHODS = Set[:digits].freeze
         private_constant :INTEGER_ARRAY_UNARY_METHODS
 
-        # 1-arg Integer methods that return an Array of foldable
-        # Integers: `digits(base)` (base-n place values; raises on a
-        # negative receiver or base < 2 → declines) and `gcdlcm(other)`
-        # (the fixed `[gcd, lcm]` pair). Both are pure arithmetic; the
-        # result lifts to a `Tuple[Constant[Integer]…]`.
+        # 1-arg Integer methods that return an Array of foldable Integers: `digits(base)` (base-n place
+        # values; raises on a negative receiver or base < 2 → declines) and `gcdlcm(other)` (the fixed
+        # `[gcd, lcm]` pair). Both are pure arithmetic; the result lifts to a `Tuple[Constant[Integer]…]`.
         INTEGER_ARRAY_BINARY_METHODS = Set[:digits, :gcdlcm].freeze
         private_constant :INTEGER_ARRAY_BINARY_METHODS
 
-        # v0.0.7 — `Constant<Pathname>` delegates to a curated set
-        # of pure path-manipulation methods. Pathname is immutable
-        # in Ruby (per its docstring) and the catalog classifies
-        # most methods `:dispatch` because the C body delegates to
-        # File / Dir / FileTest. The methods listed here are
-        # filesystem-independent — they read only `@path` — so
-        # invoking them at fold time produces a deterministic
-        # result regardless of the host filesystem state.
+        # v0.0.7 — `Constant<Pathname>` delegates to a curated set of pure path-manipulation methods.
+        # Pathname is immutable in Ruby (per its docstring) and the catalog classifies most methods
+        # `:dispatch` because the C body delegates to File / Dir / FileTest. The methods listed here are
+        # filesystem-independent — they read only `@path` — so invoking them at fold time produces a
+        # deterministic result regardless of the host filesystem state.
         #
-        # Filesystem-touching methods (`exist?`, `file?`, `read`,
-        # `stat`, …) are intentionally NOT folded: their answer
-        # depends on the analysis machine's filesystem, which is
-        # neither stable nor relevant to the analyzed program.
+        # Filesystem-touching methods (`exist?`, `file?`, `read`, `stat`, …) are intentionally NOT folded:
+        # their answer depends on the analysis machine's filesystem, which is neither stable nor relevant to
+        # the analyzed program.
         PATHNAME_PURE_UNARY = Set[
           :to_s, :to_path, :to_str,
           :basename, :dirname, :extname, :cleanpath,
@@ -699,22 +619,19 @@ module Rigor
         PATHNAME_PURE_BINARY = Set[
           :+, :join, :sub_ext, :<=>, :==, :eql?, :===,
           :relative_path_from,
-          # `/` is the exact alias of `+` (`def /(other) = self + other`),
-          # the idiomatic path-join operator (`dir / "file"`). `basename`'s
-          # 1-arg suffix-stripping form (`path.basename(".rb")` → the stem)
-          # is the binary sibling of the already-folded no-arg `basename` —
-          # both are pure `@path` string manipulation, no filesystem read.
+          # `/` is the exact alias of `+` (`def /(other) = self + other`), the idiomatic path-join operator
+          # (`dir / "file"`). `basename`'s 1-arg suffix-stripping form (`path.basename(".rb")` → the stem)
+          # is the binary sibling of the already-folded no-arg `basename` — both are pure `@path` string
+          # manipulation, no filesystem read.
           :/, :basename
         ].freeze
         private_constant :PATHNAME_PURE_UNARY, :PATHNAME_PURE_BINARY
 
-        # `Constant<Pathname>#split` returns the fixed 2-element
-        # `[dirname, basename]` pair (both Pathname), the path-string
-        # split of `File.split`. Lifted to `Tuple[Constant[Pathname],
-        # Constant[Pathname]]`. Filesystem-independent — reads only
-        # `@path` — so it is deterministic at fold time, the
-        # Array-returning sibling of the scalar `basename` / `dirname`
-        # folds (which `try_fold_pathname_unary` already covers).
+        # `Constant<Pathname>#split` returns the fixed 2-element `[dirname, basename]` pair (both Pathname),
+        # the path-string split of `File.split`. Lifted to `Tuple[Constant[Pathname], Constant[Pathname]]`.
+        # Filesystem-independent — reads only `@path` — so it is deterministic at fold time, the
+        # Array-returning sibling of the scalar `basename` / `dirname` folds (which
+        # `try_fold_pathname_unary` already covers).
         PATHNAME_ARRAY_UNARY_METHODS = Set[:split].freeze
         private_constant :PATHNAME_ARRAY_UNARY_METHODS
 
@@ -750,10 +667,9 @@ module Rigor
           nil
         end
 
-        # `Constant<Pathname>#split` — lift the `[dirname, basename]`
-        # Pathname pair to a Tuple[Constant[Pathname], Constant[Pathname]].
-        # Pure path-string manipulation (no filesystem read); both
-        # elements are Pathname, a foldable Constant class.
+        # `Constant<Pathname>#split` — lift the `[dirname, basename]` Pathname pair to a
+        # Tuple[Constant[Pathname], Constant[Pathname]]. Pure path-string manipulation (no filesystem
+        # read); both elements are Pathname, a foldable Constant class.
         def try_fold_pathname_array_unary(receiver_values, method_name)
           return nil unless PATHNAME_ARRAY_UNARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1
@@ -778,10 +694,9 @@ module Rigor
           nil
         end
 
-        # `Constant<Regexp>#names` — lift the Array[String] of named-capture
-        # group names to a Tuple[Constant[String]…]. Safe to evaluate at fold
-        # time: the C body reads only the regexp's internal names table,
-        # writes no global state, and always returns an Array of frozen Strings.
+        # `Constant<Regexp>#names` — lift the Array[String] of named-capture group names to a
+        # Tuple[Constant[String]…]. Safe to evaluate at fold time: the C body reads only the regexp's
+        # internal names table, writes no global state, and always returns an Array of frozen Strings.
         def try_fold_regexp_array_unary(receiver_values, method_name)
           return nil unless REGEXP_ARRAY_UNARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1
@@ -794,10 +709,9 @@ module Rigor
           nil
         end
 
-        # `Constant<Set>#to_a` / `#entries` — lift the Array of set elements
-        # to a Tuple[Constant[…]…] when every element is a foldable scalar.
-        # Ruby 3.2+ Set is C-implemented; element order is deterministic
-        # (insertion order), so the result is stable across invocations.
+        # `Constant<Set>#to_a` / `#entries` — lift the Array of set elements to a Tuple[Constant[…]…] when
+        # every element is a foldable scalar. Ruby 3.2+ Set is C-implemented; element order is
+        # deterministic (insertion order), so the result is stable across invocations.
         def try_fold_set_array_unary(receiver_values, method_name)
           return nil unless SET_ARRAY_UNARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1
@@ -810,11 +724,10 @@ module Rigor
           nil
         end
 
-        # `Constant<Integer>#digits` — lift the Array of base-10 place
-        # values to a Tuple[Constant[Integer]…]. Safe to evaluate at
-        # fold time: the C body is pure arithmetic. Negative receivers
-        # raise `Math::DomainError`; the fold declines so the RBS tier
-        # answers with `Array[Integer]`.
+        # `Constant<Integer>#digits` — lift the Array of base-10 place values to a
+        # Tuple[Constant[Integer]…]. Safe to evaluate at fold time: the C body is pure arithmetic. Negative
+        # receivers raise `Math::DomainError`; the fold declines so the RBS tier answers with
+        # `Array[Integer]`.
         def try_fold_integer_array_unary(receiver_values, method_name)
           return nil unless INTEGER_ARRAY_UNARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1
@@ -828,11 +741,9 @@ module Rigor
           nil
         end
 
-        # `Constant<Integer>#digits(base)` / `#gcdlcm(other)` — the
-        # 1-arg Array-returning Integer methods. `digits(base)` declines
-        # on a negative receiver (the unary path's guard); other domain
-        # errors (base < 2) raise and are rescued. `gcdlcm` is total over
-        # Integer args.
+        # `Constant<Integer>#digits(base)` / `#gcdlcm(other)` — the 1-arg Array-returning Integer methods.
+        # `digits(base)` declines on a negative receiver (the unary path's guard); other domain errors
+        # (base < 2) raise and are rescued. `gcdlcm` is total over Integer args.
         def try_fold_integer_array_binary(receiver_values, method_name, arg_values)
           return nil unless INTEGER_ARRAY_BINARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1 && arg_values.size == 1
@@ -847,18 +758,16 @@ module Rigor
           nil
         end
 
-        # `Constant<Complex>#rect` / `#rectangular` — lifts `[real, imaginary]`
-        # to `Tuple[Constant[re], Constant[im]]`. Both components are always
-        # numeric (Integer or Float for literal complexes), so they satisfy
-        # `foldable_constant_value?`.
+        # `Constant<Complex>#rect` / `#rectangular` — lifts `[real, imaginary]` to
+        # `Tuple[Constant[re], Constant[im]]`. Both components are always numeric (Integer or Float for
+        # literal complexes), so they satisfy `foldable_constant_value?`.
         #
-        # `Constant<Complex>#polar` — lifts `[abs, arg]` to
-        # `Tuple[Constant[Float], Constant[Float]]`. Evaluated at fold time
-        # via `Complex#polar` (which calls `Math.hypot` and `Math.atan2`).
+        # `Constant<Complex>#polar` — lifts `[abs, arg]` to `Tuple[Constant[Float], Constant[Float]]`.
+        # Evaluated at fold time via `Complex#polar` (which calls `Math.hypot` and `Math.atan2`).
         # Deterministic: reads only the receiver's real and imaginary parts.
         #
-        # Rational receivers also support `rect` / `rectangular` / `polar`:
-        # `Rational(r,1).rect` → `[r, 0]`, `Rational(r,1).polar` → `[abs, arg]`.
+        # Rational receivers also support `rect` / `rectangular` / `polar`: `Rational(r,1).rect` →
+        # `[r, 0]`, `Rational(r,1).polar` → `[abs, arg]`.
         NUMERIC_ARRAY_UNARY_METHODS = Set[:rect, :rectangular, :polar].freeze
         private_constant :NUMERIC_ARRAY_UNARY_METHODS
 
@@ -874,9 +783,8 @@ module Rigor
           nil
         end
 
-        # `Constant<String>#split(arg)` / `#scan(arg)` — lift the
-        # Array result to a Tuple when both sides are statically
-        # known and the cardinality fits.
+        # `Constant<String>#split(arg)` / `#scan(arg)` — lift the Array result to a Tuple when both sides
+        # are statically known and the cardinality fits.
         def try_fold_string_array_binary(receiver_values, method_name, arg_values)
           return nil unless STRING_ARRAY_BINARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1 && arg_values.size == 1
@@ -899,17 +807,14 @@ module Rigor
           Type::Combinator.tuple_of(*result.map { |v| Type::Combinator.constant_of(v) })
         end
 
-        # 2-arg fold dispatch. Used by `Comparable#between?(min, max)`,
-        # `Comparable#clamp(min, max)`, and `Integer#pow(exp, mod)` —
-        # methods the catalog classifies `:leaf` but that the prior
-        # 0/1-arg switch could not reach.
+        # 2-arg fold dispatch. Used by `Comparable#between?(min, max)`, `Comparable#clamp(min, max)`, and
+        # `Integer#pow(exp, mod)` — methods the catalog classifies `:leaf` but that the prior 0/1-arg switch
+        # could not reach.
         #
-        # v0.0.6 — IntegerRange-shaped receivers participate in
-        # `Comparable#between?` and `Comparable#clamp` folds.
-        # `int<a,b>.between?(min, max)` decides three-valued via
-        # the receiver's bounds against scalar args; `int<a,b>.clamp`
-        # narrows the receiver's bounds against the bracket. Other
-        # ternary methods over IntegerRange operands still decline.
+        # v0.0.6 — IntegerRange-shaped receivers participate in `Comparable#between?` and
+        # `Comparable#clamp` folds. `int<a,b>.between?(min, max)` decides three-valued via the receiver's
+        # bounds against scalar args; `int<a,b>.clamp` narrows the receiver's bounds against the bracket.
+        # Other ternary methods over IntegerRange operands still decline.
         def try_fold_ternary(receiver_set, method_name, arg_sets)
           return try_fold_ternary_range(receiver_set, method_name, arg_sets) if receiver_set.is_a?(Type::IntegerRange)
           return nil if arg_sets.any?(Type::IntegerRange)
@@ -917,11 +822,9 @@ module Rigor
           try_fold_ternary_set(receiver_set, method_name, arg_sets)
         end
 
-        # Receiver IntegerRange + two scalar `Constant<Integer>`
-        # args — the only IntegerRange-aware ternary fold today.
-        # `between?` returns Trinary truthiness over the bracket;
-        # `clamp` returns the intersected IntegerRange (or a
-        # collapsed Constant if the result pins a single point).
+        # Receiver IntegerRange + two scalar `Constant<Integer>` args — the only IntegerRange-aware ternary
+        # fold today. `between?` returns Trinary truthiness over the bracket; `clamp` returns the
+        # intersected IntegerRange (or a collapsed Constant if the result pins a single point).
         def try_fold_ternary_range(range, method_name, arg_sets)
           return nil unless arg_sets.all?(Array)
 
@@ -957,12 +860,9 @@ module Rigor
 
         # `int<a,b>.clamp(min, max)`:
         # - new_lower = max(a, min), new_upper = min(b, max).
-        # - When new_lower > new_upper the bracket excluded the
-        #   range entirely; the call still returns one of the
-        #   bracket bounds at runtime, but Rigor is strictly less
-        #   precise here than Ruby — decline so the RBS tier
-        #   widens to plain Integer rather than the dispatcher
-        #   inventing a value.
+        # - When new_lower > new_upper the bracket excluded the range entirely; the call still returns one
+        #   of the bracket bounds at runtime, but Rigor is strictly less precise here than Ruby — decline
+        #   so the RBS tier widens to plain Integer rather than the dispatcher inventing a value.
         def range_clamp(range, min_arg, max_arg)
           new_lower = clamp_lower_bound(range.lower, min_arg)
           new_upper = clamp_upper_bound(range.upper, max_arg)
@@ -1017,15 +917,12 @@ module Rigor
           catalog_allows?(receiver_value, method_name)
         end
 
-        # Builds a Constant or Union[Constant…] from a flat list of
-        # Ruby values. When the deduped set exceeds
-        # `UNION_FOLD_OUTPUT_LIMIT` and every result is an Integer,
-        # widens to the bounding `IntegerRange` instead of returning
-        # nil — that is the graceful escape valve for additions over
-        # disjoint integer ranges. The `source` array is used only as
-        # a hint that the result set's "Integer-ness" was already
-        # implied by the inputs (so the widening fallback only fires
-        # for arithmetic over integers).
+        # Builds a Constant or Union[Constant…] from a flat list of Ruby values. When the deduped set
+        # exceeds `UNION_FOLD_OUTPUT_LIMIT` and every result is an Integer, widens to the bounding
+        # `IntegerRange` instead of returning nil — that is the graceful escape valve for additions over
+        # disjoint integer ranges. The `source` array is used only as a hint that the result set's
+        # "Integer-ness" was already implied by the inputs (so the widening fallback only fires for
+        # arithmetic over integers).
         def build_constant_type(values, source: nil)
           return nil if values.empty?
 
@@ -1041,11 +938,9 @@ module Rigor
           constants.size == 1 ? constants.first : Type::Combinator.union(*constants)
         end
 
-        # Widening fallback: when every successful result is an
-        # Integer, return the bounding `IntegerRange` rather than
-        # losing the answer entirely. The fallback is also gated on
-        # the input set being all-integers, so a fold whose results
-        # happen to land on integers but whose receivers were Floats
+        # Widening fallback: when every successful result is an Integer, return the bounding `IntegerRange`
+        # rather than losing the answer entirely. The fallback is also gated on the input set being
+        # all-integers, so a fold whose results happen to land on integers but whose receivers were Floats
         # does not silently change shape.
         def widen_to_integer_range(values, source)
           return nil unless values.all?(Integer)
@@ -1054,9 +949,8 @@ module Rigor
           Type::Combinator.integer_range(values.min, values.max)
         end
 
-        # Reserved hook: present so future `:strict` modes can raise
-        # rather than silently returning nil. Today it always returns
-        # nil so behaviour is unchanged.
+        # Reserved hook: present so future `:strict` modes can raise rather than silently returning nil.
+        # Today it always returns nil so behaviour is unchanged.
         def raise_if_strict
           nil
         end
@@ -1068,9 +962,8 @@ module Rigor
         RANGE_ADDITIVE = Set[:+, :-].freeze
         RANGE_COMPARISON = Set[:<, :<=, :>, :>=, :==, :!=].freeze
 
-        # Per-operator dispatch table for binary range ops. Each
-        # value is a method symbol on `ConstantFolding` taking
-        # `(left, right)` and returning a `Type` or `nil`.
+        # Per-operator dispatch table for binary range ops. Each value is a method symbol on
+        # `ConstantFolding` taking `(left, right)` and returning a `Type` or `nil`.
         BINARY_RANGE_HANDLERS = {
           :* => :range_multiply,
           :/ => :range_divide,
@@ -1089,11 +982,9 @@ module Rigor
           nil
         end
 
-        # Promotes an array-of-values input to an `IntegerRange` when
-        # every value is an `Integer`. Used so a mixed `Constant +
-        # IntegerRange` call can be reduced to range × range
-        # arithmetic. Returns `nil` for non-Integer arrays so a
-        # `Constant[Float]` does not silently degrade.
+        # Promotes an array-of-values input to an `IntegerRange` when every value is an `Integer`. Used so a
+        # mixed `Constant + IntegerRange` call can be reduced to range × range arithmetic. Returns `nil` for
+        # non-Integer arrays so a `Constant[Float]` does not silently degrade.
         def ensure_integer_range(operand)
           case operand
           when Type::IntegerRange then operand
@@ -1113,10 +1004,9 @@ module Rigor
           build_integer_range(lower, upper)
         end
 
-        # Range × Range. Computes the four corner products with
-        # `safe_mul` so that `0 × ±∞` is treated as 0 rather than
-        # NaN — that captures the algebraic truth that the actual
-        # range elements are integers, never literal infinity.
+        # Range × Range. Computes the four corner products with `safe_mul` so that `0 × ±∞` is treated as 0
+        # rather than NaN — that captures the algebraic truth that the actual range elements are integers,
+        # never literal infinity.
         def range_multiply(left, right)
           corners = [
             safe_mul(left.lower, right.lower),
@@ -1127,21 +1017,18 @@ module Rigor
           build_integer_range(corners.min, corners.max)
         end
 
-        # 0 dominates: 0 × anything (including ±∞) is 0. Without this
-        # special case Ruby's `0 * Float::INFINITY` is `NaN`, which
-        # would corrupt `min`/`max`.
+        # 0 dominates: 0 × anything (including ±∞) is 0. Without this special case Ruby's
+        # `0 * Float::INFINITY` is `NaN`, which would corrupt `min`/`max`.
         def safe_mul(left, right)
           return 0 if left.zero? || right.zero?
 
           left * right
         end
 
-        # Range ÷ Range using Ruby's integer floor division. If the
-        # right range covers 0 the operation may raise
-        # `ZeroDivisionError`, so the fold bails (caller falls back
-        # to RBS-widened `Integer`). When both inputs are finite we
-        # compute the four corner quotients; the universal-on-one-side
-        # case is handled by treating ±∞ ÷ n as ±∞ and n ÷ ±∞ as 0.
+        # Range ÷ Range using Ruby's integer floor division. If the right range covers 0 the operation may
+        # raise `ZeroDivisionError`, so the fold bails (caller falls back to RBS-widened `Integer`). When
+        # both inputs are finite we compute the four corner quotients; the universal-on-one-side case is
+        # handled by treating ±∞ ÷ n as ±∞ and n ÷ ±∞ as 0.
         def range_divide(left, right)
           return nil if right.covers?(0)
 
@@ -1166,10 +1053,9 @@ module Rigor
           numer.to_i.div(denom.to_i).to_f
         end
 
-        # Range % Range. Only the `(any range) % (positive constant n)`
-        # and `(any range) % (negative constant n)` cases are folded
-        # precisely — the former narrows to `int<0, n-1>`, the latter
-        # to `int<n+1, 0>`. Other shapes fall back to nil.
+        # Range % Range. Only the `(any range) % (positive constant n)` and `(any range) % (negative
+        # constant n)` cases are folded precisely — the former narrows to `int<0, n-1>`, the latter to
+        # `int<n+1, 0>`. Other shapes fall back to nil.
         def range_modulo(_left, right)
           return nil unless right.finite? && right.min == right.max
 
@@ -1183,10 +1069,9 @@ module Rigor
           end
         end
 
-        # Builds an `IntegerRange` from numeric `lower`/`upper`
-        # endpoints. Collapses single-point finite ranges to a
-        # `Constant` so downstream rules (which prefer the more
-        # specific carrier) see the most precise result.
+        # Builds an `IntegerRange` from numeric `lower`/`upper` endpoints. Collapses single-point finite
+        # ranges to a `Constant` so downstream rules (which prefer the more specific carrier) see the most
+        # precise result.
         def build_integer_range(lower, upper)
           min = lower == -Float::INFINITY ? Type::IntegerRange::NEG_INFINITY : Integer(lower)
           max = upper == Float::INFINITY ? Type::IntegerRange::POS_INFINITY : Integer(upper)
@@ -1260,10 +1145,9 @@ module Rigor
         RANGE_UNARY_SHIFTS = Set[:succ, :next, :pred].freeze
         RANGE_UNARY_PARITY = Set[:even?, :odd?].freeze
 
-        # `(method_name) -> handler symbol` for the unary range
-        # surface that does not need extra context. The grouped
-        # categories (predicates / shifts / parity) stay separate
-        # because they share dispatch logic.
+        # `(method_name) -> handler symbol` for the unary range surface that does not need extra context.
+        # The grouped categories (predicates / shifts / parity) stay separate because they share dispatch
+        # logic.
         UNARY_RANGE_DIRECT = {
           abs: :range_unary_abs,
           magnitude: :range_unary_abs,
@@ -1295,10 +1179,8 @@ module Rigor
           range
         end
 
-        # `even?`/`odd?` on a single-point range collapses to an
-        # exact `Constant[bool]`. Any range spanning ≥ 2 integers
-        # contains both an even and an odd value, so the result is
-        # `Union[true, false]`.
+        # `even?`/`odd?` on a single-point range collapses to an exact `Constant[bool]`. Any range spanning
+        # ≥ 2 integers contains both an even and an odd value, so the result is `Union[true, false]`.
         def range_unary_parity(range, method_name)
           if range.finite? && range.min == range.max
             value = range.min.public_send(method_name)
@@ -1308,11 +1190,10 @@ module Rigor
           end
         end
 
-        # Integer#bit_length is non-negative and bounded by the
-        # bit_length of the wider endpoint. For half-open ranges the
-        # upper bound is unknown (any large integer is reachable), so
-        # we widen to non_negative_int. Negative endpoints map via
-        # `~n` semantics; using the magnitude is a safe upper bound.
+        # Integer#bit_length is non-negative and bounded by the bit_length of the wider endpoint. For
+        # half-open ranges the upper bound is unknown (any large integer is reachable), so we widen to
+        # non_negative_int. Negative endpoints map via `~n` semantics; using the magnitude is a safe upper
+        # bound.
         def range_unary_bit_length(range)
           return Type::Combinator.non_negative_int unless range.finite?
 
@@ -1377,9 +1258,8 @@ module Rigor
 
         # ----------------------------------------------------------------
 
-        # Returns `[value]` on success, `nil` to signal "skip this pair".
-        # The 1-element-array shape lets callers distinguish a successful
-        # `false`/`nil` fold from a skipped pair when chaining via
+        # Returns `[value]` on success, `nil` to signal "skip this pair". The 1-element-array shape lets
+        # callers distinguish a successful `false`/`nil` fold from a skipped pair when chaining via
         # `flat_map`.
         def invoke_binary(receiver_value, method_name, arg_value)
           return nil unless safe?(receiver_value, method_name, arg_value)
@@ -1390,10 +1270,9 @@ module Rigor
           nil
         end
 
-        # Returns `[value]` on success, `nil` to signal "skip this triple".
-        # Mirrors `invoke_binary` but for the 2-argument shape; the wrap
-        # convention lets callers `flat_map` without losing
-        # legitimate `false`/`nil` folds.
+        # Returns `[value]` on success, `nil` to signal "skip this triple". Mirrors `invoke_binary` but for
+        # the 2-argument shape; the wrap convention lets callers `flat_map` without losing legitimate
+        # `false`/`nil` folds.
         def invoke_ternary(receiver_value, method_name, av0, av1)
           return nil unless ternary_method_allowed?(receiver_value, method_name)
 
@@ -1403,8 +1282,7 @@ module Rigor
           nil
         end
 
-        # Returns `[value]` on success, `nil` to signal "skip". See
-        # `invoke_binary` for why we wrap.
+        # Returns `[value]` on success, `nil` to signal "skip". See `invoke_binary` for why we wrap.
         def invoke_unary(receiver_value, method_name)
           return nil unless unary_safe?(receiver_value, method_name)
           return nil if string_unary_blow_up?(receiver_value, method_name)
@@ -1421,29 +1299,21 @@ module Rigor
           catalog_allows?(receiver_value, method_name)
         end
 
-        # Consults the offline numeric catalog (data/builtins/ruby_core/
-        # numeric.yml) as a superset of the hand-rolled unary/binary
-        # allow lists. The catalog's `leaf` / `trivial` /
-        # `leaf_when_numeric` entries promise the underlying CRuby
-        # implementation does not call back into user-redefinable
-        # Ruby methods, so executing them on a literal Integer/Float
-        # is safe regardless of monkey-patching.
+        # Consults the offline numeric catalog (data/builtins/ruby_core/numeric.yml) as a superset of the
+        # hand-rolled unary/binary allow lists. The catalog's `leaf` / `trivial` / `leaf_when_numeric`
+        # entries promise the underlying CRuby implementation does not call back into user-redefinable Ruby
+        # methods, so executing them on a literal Integer/Float is safe regardless of monkey-patching.
         #
         # Resolution order:
         #
-        # 1. Primary class catalog (e.g. NUMERIC_CATALOG for an
-        #    Integer receiver). When the catalog has an entry —
-        #    even one classified `:dispatch` — that answer wins.
-        #    The class's direct `rb_define_method` registration is
-        #    authoritative; we MUST NOT fall through to a module
-        #    catalog and risk over-folding.
-        # 2. Module catalogs (Comparable, Enumerable, …) that the
-        #    receiver's class includes by ancestry. Reached only
-        #    when the primary catalog has NO entry for the method
-        #    — typically because the method is inherited purely
-        #    through `include Comparable` / `include Enumerable`
-        #    (e.g. `Integer#between?` / `Integer#clamp` are not in
-        #    numeric.yml because the Init block does not
+        # 1. Primary class catalog (e.g. NUMERIC_CATALOG for an Integer receiver). When the catalog has an
+        #    entry — even one classified `:dispatch` — that answer wins. The class's direct
+        #    `rb_define_method` registration is authoritative; we MUST NOT fall through to a module catalog
+        #    and risk over-folding.
+        # 2. Module catalogs (Comparable, Enumerable, …) that the receiver's class includes by ancestry.
+        #    Reached only when the primary catalog has NO entry for the method — typically because the
+        #    method is inherited purely through `include Comparable` / `include Enumerable` (e.g.
+        #    `Integer#between?` / `Integer#clamp` are not in numeric.yml because the Init block does not
         #    `rb_define_method` them on Integer).
         def catalog_allows?(receiver_value, method_name)
           catalog, class_name = catalog_for(receiver_value)
@@ -1455,11 +1325,9 @@ module Rigor
           end
         end
 
-        # `(Module, catalog, class_name)` triples consulted as a
-        # fallthrough when the primary class catalog has no entry.
-        # Each triple's Module is matched against the receiver
-        # class's ancestor chain at lookup time; the catalog
-        # corresponds to the module-mode YAML at
+        # `(Module, catalog, class_name)` triples consulted as a fallthrough when the primary class catalog
+        # has no entry. Each triple's Module is matched against the receiver class's ancestor chain at
+        # lookup time; the catalog corresponds to the module-mode YAML at
         # `data/builtins/ruby_core/<topic>.yml`.
         MODULE_CATALOGS = Ractor.make_shareable([
                                                   [Comparable, Builtins::COMPARABLE_CATALOG, "Comparable"],
@@ -1467,10 +1335,9 @@ module Rigor
                                                 ])
         private_constant :MODULE_CATALOGS
 
-        # Returns the `(catalog, class_name)` pairs for every
-        # registered module that is in the receiver's ancestor
-        # chain. The receiver's class's `Module#ancestors` is
-        # cached by Ruby; the `Set` membership check is cheap.
+        # Returns the `(catalog, class_name)` pairs for every registered module that is in the receiver's
+        # ancestor chain. The receiver's class's `Module#ancestors` is cached by Ruby; the `Set` membership
+        # check is cheap.
         def module_catalogs_for(receiver_value)
           ancestors = Set.new(receiver_value.class.ancestors)
           MODULE_CATALOGS.filter_map do |mod, catalog, class_name|
@@ -1478,18 +1345,13 @@ module Rigor
           end
         end
 
-        # `(catalog, class_name)` per receiver class. The class_name
-        # is what each catalog's RBS-rooted entries are keyed by.
-        # `catalog_for` walks this table in declaration order so
-        # subclasses (Symbol < String) hit their dedicated entry
-        # before any base-class fallback would, and adding a new
-        # class is a one-line addition rather than another `when`
-        # arm on a growing case statement.
-        # Subclass-before-superclass ordering: `DateTime < Date`,
-        # so the `DateTime` row MUST come before the `Date` row.
-        # Otherwise a `DateTime` receiver would match the `Date`
-        # arm first and the catalog would consult the Date entry
-        # in `DATE_CATALOG` for the wrong class.
+        # `(catalog, class_name)` per receiver class. The class_name is what each catalog's RBS-rooted
+        # entries are keyed by. `catalog_for` walks this table in declaration order so subclasses
+        # (Symbol < String) hit their dedicated entry before any base-class fallback would, and adding a
+        # new class is a one-line addition rather than another `when` arm on a growing case statement.
+        # Subclass-before-superclass ordering: `DateTime < Date`, so the `DateTime` row MUST come before the
+        # `Date` row. Otherwise a `DateTime` receiver would match the `Date` arm first and the catalog would
+        # consult the Date entry in `DATE_CATALOG` for the wrong class.
         CATALOG_BY_CLASS = Ractor.make_shareable([
                                                    [Integer, [Builtins::NUMERIC_CATALOG, "Integer"]],
                                                    [Float,    [Builtins::NUMERIC_CATALOG, "Float"]],
@@ -1517,8 +1379,7 @@ module Rigor
                                                  ])
         private_constant :CATALOG_BY_CLASS
 
-        # Returns `[catalog, class_name]` for receivers we have a
-        # catalog for; nil otherwise.
+        # Returns `[catalog, class_name]` for receivers we have a catalog for; nil otherwise.
         def catalog_for(receiver_value)
           CATALOG_BY_CLASS.each do |klass, entry|
             return entry if receiver_value.is_a?(klass)
@@ -1540,26 +1401,20 @@ module Rigor
           end
         end
 
-        # `String#reverse` / `#swapcase` / `#succ` etc. produce a string
-        # at least as large as the receiver. The binary `:+` / `:*` paths
-        # have their own `string_blow_up?` output guard; this is the unary
-        # analogue — decline to fold a unary String op whose receiver is
-        # already at or beyond `STRING_FOLD_BYTE_LIMIT`, since the folded
-        # output would be just as large and constant-materialising it buys
-        # no precision worth the bytes. Non-String receivers never blow up
-        # through a unary op, so they pass.
+        # `String#reverse` / `#swapcase` / `#succ` etc. produce a string at least as large as the receiver.
+        # The binary `:+` / `:*` paths have their own `string_blow_up?` output guard; this is the unary
+        # analogue — decline to fold a unary String op whose receiver is already at or beyond
+        # `STRING_FOLD_BYTE_LIMIT`, since the folded output would be just as large and constant-materialising
+        # it buys no precision worth the bytes. Non-String receivers never blow up through a unary op, so
+        # they pass.
         def string_unary_blow_up?(receiver_value, _method_name)
           receiver_value.is_a?(String) && receiver_value.bytesize >= STRING_FOLD_BYTE_LIMIT
         end
 
-        # Scalar / String / Symbol values fold; everything
-        # else (Array, Hash, Proc, Range, ...) is held back
-        # because `Type::Constant` does not model those
-        # carriers and surfacing one would mis-type
-        # downstream calls. `Range`, `Array`, and friends
-        # have their own shape carriers; this method picks
-        # the conservative envelope of "values that already
-        # round-trip through `Type::Combinator.constant_of`".
+        # Scalar / String / Symbol values fold; everything else (Array, Hash, Proc, Range, ...) is held back
+        # because `Type::Constant` does not model those carriers and surfacing one would mis-type downstream
+        # calls. `Range`, `Array`, and friends have their own shape carriers; this method picks the
+        # conservative envelope of "values that already round-trip through `Type::Combinator.constant_of`".
         FOLDABLE_CONSTANT_CLASSES = [
           Integer, Float, Rational, Complex, String, Symbol,
           Regexp, Pathname, ::Set, Date, Time,
@@ -1570,11 +1425,10 @@ module Rigor
         def foldable_constant_value?(value)
           return false unless FOLDABLE_CONSTANT_CLASSES.any? { |klass| value.is_a?(klass) }
 
-          # A NaN result (`0.0 / 0.0`, `Float::NAN`-propagating arithmetic,
-          # or a NaN-bearing Complex) is non-reflexive under `==`, so a
-          # `Constant[NaN]` would break the `==` / `eql?` / `hash` contract
-          # `build_constant_type` relies on for union dedup. Decline the
-          # fold and let the RBS tier answer with the widened class.
+          # A NaN result (`0.0 / 0.0`, `Float::NAN`-propagating arithmetic, or a NaN-bearing Complex) is
+          # non-reflexive under `==`, so a `Constant[NaN]` would break the `==` / `eql?` / `hash` contract
+          # `build_constant_type` relies on for union dedup. Decline the fold and let the RBS tier answer
+          # with the widened class.
           return false if value.is_a?(Float) && value.nan?
           return false if value.is_a?(Complex) && complex_nan?(value)
 
@@ -1612,8 +1466,8 @@ module Rigor
           end
         end
 
-        # Integer / 0 and Integer % 0 raise; Float / 0 and Float / 0.0 return
-        # Float::INFINITY or NaN, which are valid `Constant[Float]` values.
+        # Integer / 0 and Integer % 0 raise; Float / 0 and Float / 0.0 return Float::INFINITY or NaN, which
+        # are valid `Constant[Float]` values.
         def integer_division_by_zero?(receiver_value, method_name, arg_value)
           return false unless %i[/ %].include?(method_name)
           return false unless receiver_value.is_a?(Integer)
@@ -1632,10 +1486,9 @@ module Rigor
           end
         end
 
-        # `"x".center(width)` / `#ljust` / `#rjust` produce a string
-        # of `max(width, len)` characters. A literal `width` far
-        # larger than the receiver would materialise a huge Constant;
-        # cap it at the same byte limit the concat / repeat paths use.
+        # `"x".center(width)` / `#ljust` / `#rjust` produce a string of `max(width, len)` characters. A
+        # literal `width` far larger than the receiver would materialise a huge Constant; cap it at the same
+        # byte limit the concat / repeat paths use.
         def string_pad_blow_up?(arg_value)
           arg_value.is_a?(Integer) && arg_value > STRING_FOLD_BYTE_LIMIT
         end

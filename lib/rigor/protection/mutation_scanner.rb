@@ -7,24 +7,20 @@ require_relative "diagnostic_oracle"
 
 module Rigor
   module Protection
-    # ADR-63 Tier 2 — the mutation *effectiveness* tier (the truth tier behind
-    # Tier 1's static {Inference::ProtectionScanner} proxy). For one file it
-    # answers the question Tier 1 only bounds: when a type-visible bug is
-    # introduced at a dispatch site, does Rigor actually catch it?
+    # ADR-63 Tier 2 — the mutation *effectiveness* tier (the truth tier behind Tier 1's static
+    # {Inference::ProtectionScanner} proxy). For one file it answers the question Tier 1 only bounds: when a
+    # type-visible bug is introduced at a dispatch site, does Rigor actually catch it?
     #
-    # Mechanism (the ADR-62 warm loop, narrowed to per-file measurement):
-    # generate the type-visible mutations ({Mutator}), keep only those whose
-    # receiver Rigor holds a concrete type for (the type-aware filter — the
-    # FP-safe meaning-maker; an unresolved receiver is kept), then for each ask
-    # the **kill oracle** whether the mutant is caught. The oracle is the ADR-69
-    # seam: {#scan_file} uses the {DiagnosticOracle} (a *new Rigor diagnostic* =
-    # a kill); {#scan_file_fused} additionally consults a {TestSuiteOracle} on the
-    # type-survivors (ADR-70 — the dynamic protection axis).
+    # Mechanism (the ADR-62 warm loop, narrowed to per-file measurement): generate the type-visible mutations
+    # ({Mutator}), keep only those whose receiver Rigor holds a concrete type for (the type-aware filter — the
+    # FP-safe meaning-maker; an unresolved receiver is kept), then for each ask the **kill oracle** whether the
+    # mutant is caught. The oracle is the ADR-69 seam: {#scan_file} uses the {DiagnosticOracle} (a *new Rigor
+    # diagnostic* = a kill); {#scan_file_fused} additionally consults a {TestSuiteOracle} on the type-survivors
+    # (ADR-70 — the dynamic protection axis).
     #
-    # The expensive builds (RBS environment + the whole-project pre-pass scan)
-    # are paid ONCE by the caller and threaded into the {DiagnosticOracle}; each
-    # mutant reuses them through `Runner.new(prebuilt:)#run_source` (in-memory
-    # overlay, no disk write).
+    # The expensive builds (RBS environment + the whole-project pre-pass scan) are paid ONCE by the caller and
+    # threaded into the {DiagnosticOracle}; each mutant reuses them through `Runner.new(prebuilt:)#run_source`
+    # (in-memory overlay, no disk write).
     class MutationScanner
       # A surviving mutation site — a breakage Rigor did not catch.
       SurvivingSite = Data.define(:line, :receiver, :method_name, :operator)
@@ -33,21 +29,19 @@ module Rigor
         # Mutations actually analysed (parse-invalid mutants are not counted).
         def total = killed + survived
 
-        # Effectiveness ratio; a file with no type-relevant mutation is
-        # vacuously fully effective (no breakage was available to miss).
+        # Effectiveness ratio; a file with no type-relevant mutation is vacuously fully effective (no breakage
+        # was available to miss).
         def ratio = total.zero? ? 1.0 : killed.to_f / total
       end
 
-      # ADR-70 — one type-survivor classified by the dynamic (test) axis.
-      # `protection` is `:test` (a test caught it) or `:none` (unprotected — the
-      # "add a type OR a test here" sites).
+      # ADR-70 — one type-survivor classified by the dynamic (test) axis. `protection` is `:test` (a test caught
+      # it) or `:none` (unprotected — the "add a type OR a test here" sites).
       FusedSite = Data.define(:line, :receiver, :method_name, :operator, :protection)
 
-      # ADR-70 — the per-file fused classification. The gradual short-circuit
-      # collapses the conceptual "doubly-protected" bucket into `type_killed`:
-      # a mutant the type checker already kills never reaches the suite, because
-      # the static net already suffices and re-running the suite to learn a test
-      # *would also* catch it is wasted work. So the observed buckets are three.
+      # ADR-70 — the per-file fused classification. The gradual short-circuit collapses the conceptual
+      # "doubly-protected" bucket into `type_killed`: a mutant the type checker already kills never reaches the
+      # suite, because the static net already suffices and re-running the suite to learn a test *would also*
+      # catch it is wasted work. So the observed buckets are three.
       FusedFileResult = Data.define(:path, :type_killed, :test_killed, :sites) do
         # The unprotected sites (neither a type nor a test caught the breakage).
         def unprotected = sites.size
@@ -101,11 +95,10 @@ module Rigor
         FileResult.new(path: path, killed: killed, survived: sites.size, sites: sites)
       end
 
-      # ADR-70 — the fused static∪dynamic measurement. Runs the type pass
-      # (the {DiagnosticOracle}); for every mutant the type checker did **not**
-      # kill, asks `test_oracle` whether the project's test suite catches it.
-      # The expensive suite run is paid only for type-survivors (the gradual
-      # short-circuit), so the cost is proportional to the protection hole.
+      # ADR-70 — the fused static∪dynamic measurement. Runs the type pass (the {DiagnosticOracle}); for every
+      # mutant the type checker did **not** kill, asks `test_oracle` whether the project's test suite catches it.
+      # The expensive suite run is paid only for type-survivors (the gradual short-circuit), so the cost is
+      # proportional to the protection hole.
       # @param test_oracle [TestSuiteOracle]
       # @return [FusedFileResult]
       def scan_file_fused(path, test_oracle:, source: nil)
@@ -134,10 +127,9 @@ module Rigor
 
       private
 
-      # The mutations to measure: the biteable filter (concrete-type sites only;
-      # the FP-safe default — an unresolved receiver is kept) or, under the
-      # `:all` selector (ADR-69 Seam 2), every dispatch site including Dynamic
-      # receivers. Optionally sampled.
+      # The mutations to measure: the biteable filter (concrete-type sites only; the FP-safe default — an
+      # unresolved receiver is kept) or, under the `:all` selector (ADR-69 Seam 2), every dispatch site including
+      # Dynamic receivers. Optionally sampled.
       def kept_mutations(source, path)
         mutator = Mutator.new(source)
         muts = mutator.mutations

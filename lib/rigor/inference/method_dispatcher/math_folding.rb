@@ -6,43 +6,34 @@ require_relative "singleton_folding"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Folds `Math` module-function calls on statically known numeric
-      # constants.
+      # Folds `Math` module-function calls on statically known numeric constants.
       #
-      # `Math` is a pure, side-effect-free module whose functions are
-      # deterministic over their inputs — the same number always
-      # produces the same result. When every relevant argument is a
-      # `Constant` carrying a `Numeric` value, the analyzer evaluates
-      # the call at inference time and returns the concrete result.
+      # `Math` is a pure, side-effect-free module whose functions are deterministic over their inputs — the
+      # same number always produces the same result. When every relevant argument is a `Constant` carrying
+      # a `Numeric` value, the analyzer evaluates the call at inference time and returns the concrete
+      # result.
       #
       # === Supported methods
       #
-      # * Single-argument transcendental functions (`sqrt`, `cbrt`,
-      #   `exp`, `log2`, `log10`, `log1p`, `expm1`, `sin`, `cos`,
-      #   `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`,
-      #   `asinh`, `acosh`, `atanh`, `erf`, `erfc`, `gamma`) — return
-      #   `Constant[Float]`.
+      # * Single-argument transcendental functions (`sqrt`, `cbrt`, `exp`, `log2`, `log10`, `log1p`,
+      #   `expm1`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`,
+      #   `atanh`, `erf`, `erfc`, `gamma`) — return `Constant[Float]`.
       #
-      # * Two-argument functions (`atan2`, `hypot`, `ldexp`) — return
-      #   `Constant[Float]`.
+      # * Two-argument functions (`atan2`, `hypot`, `ldexp`) — return `Constant[Float]`.
       #
-      # * `log(x)` / `log(x, base)` — variadic; folds the 1- and
-      #   2-argument forms to `Constant[Float]`.
+      # * `log(x)` / `log(x, base)` — variadic; folds the 1- and 2-argument forms to `Constant[Float]`.
       #
-      # * `frexp(x)` / `lgamma(x)` — return a two-element array, lifted
-      #   to `Tuple[Constant[Float], Constant[Integer]]`.
+      # * `frexp(x)` / `lgamma(x)` — return a two-element array, lifted to
+      #   `Tuple[Constant[Float], Constant[Integer]]`.
       #
       # === Non-constant / unsupported cases
       #
-      # Any call where the receiver is not `Singleton[Math]`, an
-      # argument is not a numeric `Constant`, the method is not in the
-      # supported set, or the Ruby call raises `Math::DomainError` /
-      # `RangeError` (domain-error inputs like `Math.sqrt(-1)`) returns
-      # `nil`, deferring to the next dispatcher tier.
+      # Any call where the receiver is not `Singleton[Math]`, an argument is not a numeric `Constant`, the
+      # method is not in the supported set, or the Ruby call raises `Math::DomainError` / `RangeError`
+      # (domain-error inputs like `Math.sqrt(-1)`) returns `nil`, deferring to the next dispatcher tier.
       #
-      # An infinite or NaN result (`Math.log(0.0)` → `-Infinity`) is
-      # still folded — `Constant[Float]` carries those values, matching
-      # `ConstantFolding`'s treatment of `Float / 0`.
+      # An infinite or NaN result (`Math.log(0.0)` → `-Infinity`) is still folded — `Constant[Float]`
+      # carries those values, matching `ConstantFolding`'s treatment of `Float / 0`.
       module MathFolding
         MATH_UNARY = Set[
           :sqrt, :cbrt, :exp, :log2, :log10, :log1p, :expm1,
@@ -64,8 +55,7 @@ module Rigor
           args = context.args
           return nil unless SingletonFolding.receiver?(receiver, "Math")
 
-          # `log` is variadic (1 or 2 args), so it cannot live in the
-          # fixed-arity sets above.
+          # `log` is variadic (1 or 2 args), so it cannot live in the fixed-arity sets above.
           return fold_log(args) if method_name == :log
           return fold_unary(method_name, args) if MATH_UNARY.include?(method_name)
           return fold_binary(method_name, args) if MATH_BINARY.include?(method_name)
@@ -74,8 +64,8 @@ module Rigor
           nil
         end
 
-        # Unwraps a numeric `Constant` argument to its Ruby value.
-        # Returns nil for any non-`Constant` or non-`Numeric` carrier.
+        # Unwraps a numeric `Constant` argument to its Ruby value. Returns nil for any non-`Constant` or
+        # non-`Numeric` carrier.
         def numeric_constant(arg)
           return nil unless arg.is_a?(Type::Constant)
 
@@ -106,8 +96,7 @@ module Rigor
           nil
         end
 
-        # `Math.log(x)` and `Math.log(x, base)` — the only variadic
-        # `Math` function.
+        # `Math.log(x)` and `Math.log(x, base)` — the only variadic `Math` function.
         def fold_log(args)
           return nil unless [1, 2].include?(args.size)
 
@@ -119,8 +108,8 @@ module Rigor
           nil
         end
 
-        # `Math.frexp` / `Math.lgamma` return a two-element array;
-        # lift it to `Tuple[Constant[Float], Constant[Integer]]`.
+        # `Math.frexp` / `Math.lgamma` return a two-element array; lift it to
+        # `Tuple[Constant[Float], Constant[Integer]]`.
         def fold_tuple_unary(method_name, args)
           return nil unless args.size == 1
 

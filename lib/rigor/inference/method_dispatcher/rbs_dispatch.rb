@@ -9,110 +9,80 @@ require_relative "overload_selector"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Slice 4 dispatch tier that consults RBS method signatures.
-      # Sits behind {ConstantFolding}, so anything the constant folder
-      # already proves (e.g., `1 + 2 == 3`) keeps its full Constant
-      # precision; only the calls the folder cannot prove fall through
-      # to RBS.
+      # Slice 4 dispatch tier that consults RBS method signatures. Sits behind {ConstantFolding}, so
+      # anything the constant folder already proves (e.g., `1 + 2 == 3`) keeps its full Constant precision;
+      # only the calls the folder cannot prove fall through to RBS.
       #
-      # Phase 2b extends the dispatcher to recognise `Singleton[Foo]`
-      # receivers, routing those calls through `singleton_method`
-      # instead of `instance_method`. The constant `Foo` therefore now
-      # resolves to `Singleton[Foo]`, and `Foo.new` / `Foo.bar` look up
-      # the corresponding *class* methods.
+      # Phase 2b extends the dispatcher to recognise `Singleton[Foo]` receivers, routing those calls
+      # through `singleton_method` instead of `instance_method`. The constant `Foo` therefore now resolves
+      # to `Singleton[Foo]`, and `Foo.new` / `Foo.bar` look up the corresponding *class* methods.
       #
-      # Phase 2c adds argument-typed overload selection: instead of
-      # always returning `method_types.first`, the dispatcher delegates
-      # to {OverloadSelector} which filters overloads by positional
-      # arity and consults `Rigor::Type#accepts` for each parameter.
-      # When no overload accepts the actual argument types, the
-      # selector falls back to the first overload so the existing
-      # phase-1/2b behavior is preserved.
+      # Phase 2c adds argument-typed overload selection: instead of always returning `method_types.first`,
+      # the dispatcher delegates to {OverloadSelector} which filters overloads by positional arity and
+      # consults `Rigor::Type#accepts` for each parameter. When no overload accepts the actual argument
+      # types, the selector falls back to the first overload so the existing phase-1/2b behavior is
+      # preserved.
       #
-      # Phase 2d adds generics instantiation. Receivers carry an
-      # ordered `type_args` array on `Rigor::Type::Nominal`. The
-      # dispatcher zips the receiver's `type_args` against the class's
-      # declared type-parameter names (`Array` -> `[:Elem]`, `Hash` ->
-      # `[:K, :V]`, ...) to build a substitution map; that map is then
-      # threaded through {RbsTypeTranslator} so a return type like
-      # `::Array[Elem]` resolves to `Nominal["Array", [Integer]]`
-      # rather than degrading the variable to `Dynamic[Top]`. When
-      # arities mismatch (raw receiver, partial generics) the map is
-      # left empty and free variables degrade as before.
+      # Phase 2d adds generics instantiation. Receivers carry an ordered `type_args` array on
+      # `Rigor::Type::Nominal`. The dispatcher zips the receiver's `type_args` against the class's declared
+      # type-parameter names (`Array` -> `[:Elem]`, `Hash` -> `[:K, :V]`, ...) to build a substitution map;
+      # that map is then threaded through {RbsTypeTranslator} so a return type like `::Array[Elem]`
+      # resolves to `Nominal["Array", [Integer]]` rather than degrading the variable to `Dynamic[Top]`.
+      # When arities mismatch (raw receiver, partial generics) the map is left empty and free variables
+      # degrade as before.
       #
-      # Slice 5 phase 1 projects shape-carrying receivers onto their
-      # underlying nominal so the existing dispatch + substitution
-      # machinery works without duplication: `Tuple[Integer, String]`
-      # dispatches as `Array[Integer | String]`, and
-      # `HashShape{a: Integer}` dispatches as `Hash[Symbol, Integer]`.
-      # Tuple/HashShape element precision (e.g., `tuple[0]` returning
-      # the precise member) is handled by the preceding `ShapeDispatch`
-      # tier.
+      # Slice 5 phase 1 projects shape-carrying receivers onto their underlying nominal so the existing
+      # dispatch + substitution machinery works without duplication: `Tuple[Integer, String]` dispatches as
+      # `Array[Integer | String]`, and `HashShape{a: Integer}` dispatches as `Hash[Symbol, Integer]`.
+      # Tuple/HashShape element precision (e.g., `tuple[0]` returning the precise member) is handled by the
+      # preceding `ShapeDispatch` tier.
       #
       # Remaining limitations:
       #
-      # * `block_type:` is ignored; method types that constrain the
-      #   block return type are not yet honored.
-      # * Keyword arguments are not threaded through call_arg_types,
-      #   so overloads with required keywords are skipped (they cannot
-      #   match the empty kwargs we send).
-      # * Method-level type parameters (e.g., `def foo[T]: (T) -> T`)
-      #   are not bound; their variables remain `Dynamic[Top]` after
-      #   substitution.
+      # * `block_type:` is ignored; method types that constrain the block return type are not yet honored.
+      # * Keyword arguments are not threaded through call_arg_types, so overloads with required keywords
+      #   are skipped (they cannot match the empty kwargs we send).
+      # * Method-level type parameters (e.g., `def foo[T]: (T) -> T`) are not bound; their variables remain
+      #   `Dynamic[Top]` after substitution.
       #
       # See docs/adr/4-type-inference-engine.md for the broader plan.
       # rubocop:disable Metrics/ModuleLength
       module RbsDispatch
         module_function
 
-        # ADR-43 — ancestor classes whose RBS is authoritative and
-        # COMPLETE, so a call a subclass makes that the ancestor's RBS
-        # does not declare is a genuine mistake rather than a gap.
-        # Membership unlocks inherited-method resolution (and thus
-        # `call.undefined-method`) for Ruby-source subclasses of these
-        # classes; every other RBS ancestor stays on the Dynamic
-        # fallback. Seeded with the plugin contract base — this repo
-        # owns both the class and `sig/rigor/plugin/base.rbs`, and the
-        # `lib` self-check keeps them in lock-step. NOT a place for
-        # third-party/core classes whose objects answer to methods
-        # their RBS omits (`ActionController::Base`, `Hash`, …).
+        # ADR-43 — ancestor classes whose RBS is authoritative and COMPLETE, so a call a subclass makes
+        # that the ancestor's RBS does not declare is a genuine mistake rather than a gap. Membership
+        # unlocks inherited-method resolution (and thus `call.undefined-method`) for Ruby-source
+        # subclasses of these classes; every other RBS ancestor stays on the Dynamic fallback. Seeded with
+        # the plugin contract base — this repo owns both the class and `sig/rigor/plugin/base.rbs`, and
+        # the `lib` self-check keeps them in lock-step. NOT a place for third-party/core classes whose
+        # objects answer to methods their RBS omits (`ActionController::Base`, `Hash`, …).
         ALLOWED_RBS_COMPLETE_ANCESTORS = ["Rigor::Plugin::Base"].freeze
 
         # @param receiver [Rigor::Type]
         # @param method_name [Symbol]
         # @param args [Array<Rigor::Type>]
         # @param environment [Rigor::Environment]
-        # @param block_type [Rigor::Type, nil] inferred block return
-        #   type, propagated from `MethodDispatcher.dispatch`. When
-        #   non-nil, the selector prefers a block-bearing overload
-        #   and binds the method-level type parameter that the
-        #   block's return type references to `block_type` (Slice 6
-        #   phase C sub-phase 2).
-        # @param self_type_override [Rigor::Type, nil] when set,
-        #   the substitution for `Bases::Self` in the method's
-        #   return type. Used by `MethodDispatcher#try_user_class_fallback`
-        #   to preserve the ORIGINAL receiver as the substitute
-        #   for `self` even though the dispatch is routed through
-        #   `Nominal[Object]` — so that `Bundler::URI::Generic.dup`
-        #   (which resolves through the `Object` fallback because
-        #   `Bundler::URI::Generic` lacks RBS) returns
-        #   `Bundler::URI::Generic` per `Kernel#dup: () -> self`
-        #   rather than `Object`. Defaults to nil (compute self
-        #   from the resolved class_name as before).
-        # @param public_only [Boolean] when true, a method whose RBS
-        #   accessibility is `:private` does not resolve (the call
-        #   yields `nil`, i.e. "no rule"). Set by the explicit-
-        #   non-`self`-receiver user-class fallback so a call like
-        #   `Favourite.select(...)` does not adopt the private
+        # @param block_type [Rigor::Type, nil] inferred block return type, propagated from
+        #   `MethodDispatcher.dispatch`. When non-nil, the selector prefers a block-bearing overload and
+        #   binds the method-level type parameter that the block's return type references to `block_type`
+        #   (Slice 6 phase C sub-phase 2).
+        # @param self_type_override [Rigor::Type, nil] when set, the substitution for `Bases::Self` in the
+        #   method's return type. Used by `MethodDispatcher#try_user_class_fallback` to preserve the
+        #   ORIGINAL receiver as the substitute for `self` even though the dispatch is routed through
+        #   `Nominal[Object]` — so that `Bundler::URI::Generic.dup` (which resolves through the `Object`
+        #   fallback because `Bundler::URI::Generic` lacks RBS) returns `Bundler::URI::Generic` per
+        #   `Kernel#dup: () -> self` rather than `Object`. Defaults to nil (compute self from the resolved
+        #   class_name as before).
+        # @param public_only [Boolean] when true, a method whose RBS accessibility is `:private` does not
+        #   resolve (the call yields `nil`, i.e. "no rule"). Set by the explicit-non-`self`-receiver
+        #   user-class fallback so a call like `Favourite.select(...)` does not adopt the private
         #   `Kernel#select` signature.
-        # @return [Rigor::Type, nil] inferred return type, or `nil`
-        #   when no rule resolves (no class name, no method, dispatch
-        #   on a Top/Dynamic[Top] receiver, etc.).
-        # @param scope [Rigor::Scope, nil] when supplied, enables ADR-43
-        #   RBS-complete-ancestor resolution against
-        #   `ALLOWED_RBS_COMPLETE_ANCESTORS`. `nil` keeps inherited calls
-        #   unresolved (`Dynamic[Top]`) — the FP-safe default for open
-        #   hierarchies (`< ActionController::Base`, …).
+        # @return [Rigor::Type, nil] inferred return type, or `nil` when no rule resolves (no class name,
+        #   no method, dispatch on a Top/Dynamic[Top] receiver, etc.).
+        # @param scope [Rigor::Scope, nil] when supplied, enables ADR-43 RBS-complete-ancestor resolution
+        #   against `ALLOWED_RBS_COMPLETE_ANCESTORS`. `nil` keeps inherited calls unresolved
+        #   (`Dynamic[Top]`) — the FP-safe default for open hierarchies (`< ActionController::Base`, …).
         def try_dispatch(context)
           environment = context.environment
           return nil if environment.nil?
@@ -130,27 +100,22 @@ module Rigor
           )
         end
 
-        # Slice 6 (Phase C sub-phase 1) probe: returns the positional
-        # block-parameter types declared by the receiving method's
-        # selected RBS overload, translated into `Rigor::Type`. Used
-        # by the StatementEvaluator to bind block parameter names
-        # before evaluating the block body.
+        # Slice 6 (Phase C sub-phase 1) probe: returns the positional block-parameter types declared by
+        # the receiving method's selected RBS overload, translated into `Rigor::Type`. Used by the
+        # StatementEvaluator to bind block parameter names before evaluating the block body.
         #
-        # The probe shares the receiver descriptor / overload selector
-        # plumbing with `try_dispatch`; only the projection at the end
-        # differs (the block's positional params instead of the return
-        # type). Returns an empty array when:
+        # The probe shares the receiver descriptor / overload selector plumbing with `try_dispatch`; only
+        # the projection at the end differs (the block's positional params instead of the return type).
+        # Returns an empty array when:
         #
         # - the environment / RBS loader is missing,
         # - the receiver does not project to a known class,
         # - the method has no signature in RBS,
         # - the selected overload has no `block:` clause, or
-        # - the block is `untyped` / `UntypedFunction` (no statically
-        #   declared parameter types).
+        # - the block is `untyped` / `UntypedFunction` (no statically declared parameter types).
         #
-        # This deliberately does NOT differentiate "no overload had a
-        # block" from "the block is untyped"; the binder treats both
-        # the same way (every parameter defaults to `Dynamic[Top]`).
+        # This deliberately does NOT differentiate "no overload had a block" from "the block is untyped";
+        # the binder treats both the same way (every parameter defaults to `Dynamic[Top]`).
         # @return [Array<Rigor::Type>] positional block parameter types.
         def block_param_types(context)
           environment = context.environment
@@ -215,23 +180,18 @@ module Rigor
               self_type_override: self_type_override
             )
           rescue StandardError
-            # Defensive: if RBS' definition builder raises on a broken
-            # hierarchy (e.g., partially loaded user signatures), the
-            # dispatcher MUST stay fail-soft.
+            # Defensive: if RBS' definition builder raises on a broken hierarchy (e.g., partially loaded
+            # user signatures), the dispatcher MUST stay fail-soft.
             nil
           end
 
-          # Maps a Rigor::Type receiver to a
-          # `[class_name, kind, type_args]` triple where `kind` is
-          # either `:instance` or `:singleton` and `type_args` carries
-          # the receiver's generic instantiation (empty for raw or
-          # singleton receivers, since `Singleton[Foo]` carries no
-          # generic args today). Returns nil when the receiver does
-          # not correspond to a single concrete class.
+          # Maps a Rigor::Type receiver to a `[class_name, kind, type_args]` triple where `kind` is either
+          # `:instance` or `:singleton` and `type_args` carries the receiver's generic instantiation (empty
+          # for raw or singleton receivers, since `Singleton[Foo]` carries no generic args today). Returns
+          # nil when the receiver does not correspond to a single concrete class.
           #
-          # Slice 5 phase 1 projects Tuple/HashShape receivers to
-          # their underlying Array/Hash nominal so dispatch reuses the
-          # generic-typed pipeline.
+          # Slice 5 phase 1 projects Tuple/HashShape receivers to their underlying Array/Hash nominal so
+          # dispatch reuses the generic-typed pipeline.
           def receiver_descriptor(receiver)
             case receiver
             when Type::Constant
@@ -247,27 +207,21 @@ module Rigor
             when Type::DataInstance, Type::DataClass, Type::StructInstance, Type::StructClass
               member_carrier_descriptor(receiver)
             when Type::BoundMethod
-              # `BoundMethod` is a precision-bearing alias for
-              # `Nominal[Method]`: it carries the
-              # `(receiver, method_name)` binding that
-              # `MethodFolding.try_backward` consumes at
-              # `.call` / `.()` / `[]`, but every other call
-              # site (`.owner` / `.name` / `.arity` / …) must
-              # still resolve through Method's RBS contract.
-              # Routing here keeps reflective Method methods
-              # working without forcing the carrier to
-              # collapse to a plain Nominal at construction.
+              # `BoundMethod` is a precision-bearing alias for `Nominal[Method]`: it carries the
+              # `(receiver, method_name)` binding that `MethodFolding.try_backward` consumes at
+              # `.call` / `.()` / `[]`, but every other call site (`.owner` / `.name` / `.arity` / …) must
+              # still resolve through Method's RBS contract. Routing here keeps reflective Method methods
+              # working without forcing the carrier to collapse to a plain Nominal at construction.
               ["Method", :instance, []]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end
           end
 
-          # ADR-48 — project a `Data`/`Struct` member carrier to its tagging
-          # class (or the `Data`/`Struct` supertype) so non-member calls
-          # (`inspect`, `==`, `frozen?`, ...) resolve through RBS rather than
-          # mis-firing undefined-method. Precise member reads were already
-          # folded by DataFolding / StructFolding above this tier.
+          # ADR-48 — project a `Data`/`Struct` member carrier to its tagging class (or the `Data`/`Struct`
+          # supertype) so non-member calls (`inspect`, `==`, `frozen?`, ...) resolve through RBS rather
+          # than mis-firing undefined-method. Precise member reads were already folded by DataFolding /
+          # StructFolding above this tier.
           def member_carrier_descriptor(receiver)
             case receiver
             when Type::DataInstance then [receiver.class_name || "Data", :instance, []]
@@ -294,11 +248,9 @@ module Rigor
             ]
           end
 
-          # True when the RBS method definition is `private`. A call
-          # with an explicit, non-`self` receiver cannot reach a
-          # private method (Ruby raises `NoMethodError`), so the
-          # explicit-receiver user-class fallback uses this to reject
-          # private signatures rather than return a wrong type.
+          # True when the RBS method definition is `private`. A call with an explicit, non-`self` receiver
+          # cannot reach a private method (Ruby raises `NoMethodError`), so the explicit-receiver
+          # user-class fallback uses this to reject private signatures rather than return a wrong type.
           def method_private?(method_definition)
             method_definition.respond_to?(:accessibility) &&
               method_definition.accessibility == :private
@@ -308,15 +260,12 @@ module Rigor
             direct = lookup_method_on(environment, class_name, kind, method_name)
             return direct if direct
 
-            # ADR-43 — scoped inherited-method resolution. The direct
-            # lookup misses when `class_name` is a Ruby-source subclass
-            # absent from RBS (so no ancestor walk runs). If its
-            # discovered superclass chain reaches an allow-listed
-            # RBS-complete ancestor, resolve the method there so
-            # inherited contract calls (`self.manifest` on a plugin)
-            # resolve and the normal call rules apply. Bounded to the
-            # allow-list, so open hierarchies stay on the Dynamic
-            # fallback (no false positive on `< ActionController::Base`).
+            # ADR-43 — scoped inherited-method resolution. The direct lookup misses when `class_name` is a
+            # Ruby-source subclass absent from RBS (so no ancestor walk runs). If its discovered
+            # superclass chain reaches an allow-listed RBS-complete ancestor, resolve the method there so
+            # inherited contract calls (`self.manifest` on a plugin) resolve and the normal call rules
+            # apply. Bounded to the allow-list, so open hierarchies stay on the Dynamic fallback (no false
+            # positive on `< ActionController::Base`).
             ancestor = allowed_rbs_complete_ancestor(environment, class_name, scope)
             return nil unless ancestor
 
@@ -332,13 +281,11 @@ module Rigor
             end
           end
 
-          # The first allow-listed, RBS-complete ancestor reachable from
-          # `class_name` through `scope.discovered_superclasses`, or nil.
-          # Returns nil when no scope is threaded, when `class_name` is
-          # itself RBS-known (the direct lookup already had authority),
-          # or when the discovered chain reaches no allow-listed class.
-          # The walk carries a visited set so a malformed cyclic
-          # `A < B < A` source cannot loop.
+          # The first allow-listed, RBS-complete ancestor reachable from `class_name` through
+          # `scope.discovered_superclasses`, or nil. Returns nil when no scope is threaded, when
+          # `class_name` is itself RBS-known (the direct lookup already had authority), or when the
+          # discovered chain reaches no allow-listed class. The walk carries a visited set so a malformed
+          # cyclic `A < B < A` source cannot loop.
           def allowed_rbs_complete_ancestor(environment, class_name, scope)
             return nil if scope.nil?
             return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
@@ -355,12 +302,10 @@ module Rigor
             nil
           end
 
-          # Slice 4 phase 2d substitution map. Zips the class's
-          # declared type-parameter names against the receiver's
-          # `type_args`. Returns an empty hash when either side is
-          # empty or when arities disagree -- in both cases free
-          # variables in the method's return type degrade to
-          # `Dynamic[Top]` per the translator's contract.
+          # Slice 4 phase 2d substitution map. Zips the class's declared type-parameter names against the
+          # receiver's `type_args`. Returns an empty hash when either side is empty or when arities
+          # disagree -- in both cases free variables in the method's return type degrade to `Dynamic[Top]`
+          # per the translator's contract.
           def build_type_vars(environment, class_name, receiver_args)
             return {} if receiver_args.empty?
 
@@ -375,12 +320,9 @@ module Rigor
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,
                                     environment: nil, self_type_override: nil)
             # rubocop:enable Metrics/ParameterLists
-            # Slice 4b-3 (ADR-7 § "Slice 4-A/4-B") — read the
-            # return-type override through the merger so future
-            # plugin / `:rbs_extended` bundles that also assert a
-            # `return_type` slot at this call site compose with
-            # the RBS::Extended directive instead of silently
-            # racing it.
+            # Slice 4b-3 (ADR-7 § "Slice 4-A/4-B") — read the return-type override through the merger so
+            # future plugin / `:rbs_extended` bundles that also assert a `return_type` slot at this call
+            # site compose with the RBS::Extended directive instead of silently racing it.
             override = merged_return_type(method_definition, environment: environment)
             return override if override
 
@@ -390,11 +332,9 @@ module Rigor
               when :singleton then Type::Combinator.singleton_of(class_name)
               else                 instance_type
               end
-            # `self_type_override` lets the user-class fallback
-            # path preserve the ORIGINAL receiver as the substitute
-            # for `Bases::Self` — so `Kernel#dup: () -> self`
-            # resolved through the Object fallback returns the
-            # caller's type, not Object.
+            # `self_type_override` lets the user-class fallback path preserve the ORIGINAL receiver as the
+            # substitute for `Bases::Self` — so `Kernel#dup: () -> self` resolved through the Object
+            # fallback returns the caller's type, not Object.
             self_type = self_type_override || resolved_self_type
 
             method_type = OverloadSelector.select(
@@ -418,12 +358,9 @@ module Rigor
             )
           end
 
-          # ADR-7 § "Slice 4-A/4-B" — folds the
-          # `RBS::Extended` `return:` directive (and any
-          # other `return_type`-bearing contribution future
-          # slices add at this call site) through the merger
-          # before consuming. Returns the merged return type
-          # or nil when no contribution overrides the
+          # ADR-7 § "Slice 4-A/4-B" — folds the `RBS::Extended` `return:` directive (and any other
+          # `return_type`-bearing contribution future slices add at this call site) through the merger
+          # before consuming. Returns the merged return type or nil when no contribution overrides the
           # RBS-declared return.
           def merged_return_type(method_definition, environment: nil)
             contribution = RbsExtended.read_flow_contribution(method_definition, environment: environment)
@@ -432,18 +369,13 @@ module Rigor
             Rigor::FlowContribution::Merger.merge([contribution]).return_type
           end
 
-          # When a block type is supplied, locate the method-level
-          # type parameter that the selected overload's block return
-          # type references and bind it to `block_type`. The
-          # contribution layers on top of the receiver-derived
-          # `type_vars` so a method like
-          # `def map[U] { (Elem) -> U } -> Array[U]` resolves
-          # `Elem` from the receiver and `U` from the block return
-          # type at the same call site. Anything outside this exact
-          # shape (no block clause, an `untyped` block, a non-
-          # variable block return type, a variable not declared in
-          # `type_params`) returns the original `type_vars` so
-          # fallbacks stay consistent.
+          # When a block type is supplied, locate the method-level type parameter that the selected
+          # overload's block return type references and bind it to `block_type`. The contribution layers
+          # on top of the receiver-derived `type_vars` so a method like
+          # `def map[U] { (Elem) -> U } -> Array[U]` resolves `Elem` from the receiver and `U` from the
+          # block return type at the same call site. Anything outside this exact shape (no block clause,
+          # an `untyped` block, a non-variable block return type, a variable not declared in
+          # `type_params`) returns the original `type_vars` so fallbacks stay consistent.
           def compose_block_type_vars(method_type, type_vars, block_type)
             return type_vars if block_type.nil?
 
@@ -485,12 +417,10 @@ module Rigor
             end
           end
 
-          # For a union receiver we keep the conservative answer: only
-          # return block param types when every member resolves the
-          # same arity and types (otherwise the call sites would have
-          # to thread per-member binders, which the slice does not
-          # support yet). Mismatches degrade to the empty array so the
-          # binder defaults all params to Dynamic[Top].
+          # For a union receiver we keep the conservative answer: only return block param types when every
+          # member resolves the same arity and types (otherwise the call sites would have to thread
+          # per-member binders, which the slice does not support yet). Mismatches degrade to the empty
+          # array so the binder defaults all params to Dynamic[Top].
           def probe_block_param_types_union(receiver, method_name, args, environment)
             results = receiver.members.map do |member|
               probe_block_param_types_one(member, method_name, args, environment)
@@ -553,11 +483,10 @@ module Rigor
             )
           end
 
-          # `RBS::Types::Block#type` is normally an `RBS::Types::Function`
-          # carrying the block's parameter list; some signatures use
-          # `RBS::Types::UntypedFunction` (a `(?)` block) which exposes
-          # no parameter types -- we treat it as "no information" and
-          # return an empty array so the binder defaults every slot.
+          # `RBS::Types::Block#type` is normally an `RBS::Types::Function` carrying the block's parameter
+          # list; some signatures use `RBS::Types::UntypedFunction` (a `(?)` block) which exposes no
+          # parameter types -- we treat it as "no information" and return an empty array so the binder
+          # defaults every slot.
           def translate_block_positional_params(block, self_type:, instance_type:, type_vars:)
             fun = block.type
             return [] unless fun.respond_to?(:required_positionals)

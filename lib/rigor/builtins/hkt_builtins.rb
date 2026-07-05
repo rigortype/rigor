@@ -6,28 +6,21 @@ require_relative "../inference/hkt_body_parser"
 
 module Rigor
   module Builtins
-    # ADR-20 slices 2c + 3 — Rigor-bundled Lightweight HKT
-    # registrations that ship with every analyzer instance.
-    # The set is intentionally small at v0.1.x: only the URIs
-    # whose payoff justifies hardcoded definitions. Plugin
-    # authors register more URIs through their manifests; user
-    # `.rbs` overlays register through the
-    # `%a{rigor:v1:hkt_register}` /
-    # `%a{rigor:v1:hkt_define}` annotations Slice 1 ships.
+    # ADR-20 slices 2c + 3 — Rigor-bundled Lightweight HKT registrations that ship with every analyzer instance.
+    # The set is intentionally small at v0.1.x: only the URIs whose payoff justifies hardcoded definitions. Plugin
+    # authors register more URIs through their manifests; user `.rbs` overlays register through the
+    # `%a{rigor:v1:hkt_register}` / `%a{rigor:v1:hkt_define}` annotations Slice 1 ships.
     #
     # Today's contents:
     #
-    # - `json::value[K]` — the recursive sum stdlib's
-    #   `JSON.parse` returns. Body:
+    # - `json::value[K]` — the recursive sum stdlib's `JSON.parse` returns. Body:
     #
     #     nil | true | false | Integer | Float | String
     #     | Array[App[json::value, K]]
     #     | Hash[K, App[json::value, K]]
     #
-    #   The reducer handles the self-recursive `App` nodes via
-    #   lazy "tying-the-knot" (see {HktReducer}). `K = String`
-    #   matches stdlib's default key handling; `K = Symbol`
-    #   matches `symbolize_names: true`.
+    #   The reducer handles the self-recursive `App` nodes via lazy "tying-the-knot" (see {HktReducer}). `K = String`
+    #   matches stdlib's default key handling; `K = Symbol` matches `symbolize_names: true`.
     module HktBuiltins
       module_function
 

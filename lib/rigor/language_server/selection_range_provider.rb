@@ -7,12 +7,10 @@ require_relative "buffer_resolution"
 
 module Rigor
   module LanguageServer
-    # Answers `textDocument/selectionRange` requests. For each
-    # position, returns a linked list of SelectionRange entries —
-    # innermost first, each pointing at its `parent` (the next-
-    # wider expression). Editors use this for "expand selection":
-    # one keystroke moves up the chain, another moves further out,
-    # all the way to the root.
+    # Answers `textDocument/selectionRange` requests. For each position, returns a linked list of
+    # SelectionRange entries — innermost first, each pointing at its `parent` (the next-wider expression).
+    # Editors use this for "expand selection": one keystroke moves up the chain, another moves further out, all
+    # the way to the root.
     class SelectionRangeProvider
       include BufferResolution
 
@@ -43,8 +41,8 @@ module Rigor
 
       private
 
-      # Walks the AST top-down; each node whose location encloses
-      # `offset` gets appended to the chain. Returns root→innermost.
+      # Walks the AST top-down; each node whose location encloses `offset` gets appended to the chain. Returns
+      # root→innermost.
       def ancestor_chain(node, offset, chain = [])
         return chain unless node.is_a?(Prism::Node)
         return chain unless node.location && offset_in?(node.location, offset)
@@ -58,10 +56,9 @@ module Rigor
         offset.between?(location.start_offset, location.end_offset)
       end
 
-      # Folds the root→innermost chain into the LSP `SelectionRange`
-      # linked-list shape — innermost on the outside (the request's
-      # return value) with `parent` chained outward. Editor "expand
-      # selection" follows `.parent` one step per invocation.
+      # Folds the root→innermost chain into the LSP `SelectionRange` linked-list shape — innermost on the
+      # outside (the request's return value) with `parent` chained outward. Editor "expand selection" follows
+      # `.parent` one step per invocation.
       def build_chain(root, offset)
         chain = ancestor_chain(root, offset)
         return nil if chain.empty?

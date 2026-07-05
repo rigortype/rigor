@@ -11,7 +11,6 @@ module Rigor
       :per_file,
       :total
     )
-      # Sum of all per-file totals.
       def grand_total
         total.total
       end
@@ -44,7 +43,6 @@ module Rigor
       def initialize
         @per_file = []
         @parse_errors = []
-        # Accumulated totals across all files.
         @total_total = 0
         @total_tier_counts = Inference::PrecisionScanner::TIERS.to_h { |t| [t, 0] }
       end

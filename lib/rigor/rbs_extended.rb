@@ -7,12 +7,10 @@ require_relative "rbs_extended/reporter"
 require_relative "rbs_extended/hkt_directives"
 
 module Rigor
-  # Reader for the `RBS::Extended` annotation surface described in
-  # `docs/type-specification/rbs-extended.md`.
+  # Reader for the `RBS::Extended` annotation surface described in `docs/type-specification/rbs-extended.md`.
   #
-  # Reads `%a{rigor:v1:<directive> <payload>}` annotations off RBS
-  # method definitions and returns well-typed effect objects the
-  # inference engine can consume. Implemented directives:
+  # Reads `%a{rigor:v1:<directive> <payload>}` annotations off RBS method definitions and returns well-typed
+  # effect objects the inference engine can consume. Implemented directives:
   #
   # - `rigor:v1:predicate-if-true <target> is <ClassName|refinement>`
   # - `rigor:v1:predicate-if-false <target> is <ClassName|refinement>`
@@ -23,45 +21,33 @@ module Rigor
   # - `rigor:v1:return <type-expr>` — per-call return override
   # - `rigor:v1:conforms-to <InterfaceName>` — structural conformance
   #
-  # `predicate-if-*` fires when the call is used as an `if` / `unless`
-  # condition; `assert` fires unconditionally at the call's post-scope;
-  # `assert-if-true` / `assert-if-false` fire at the post-scope only
-  # when the call's return value can be observed as truthy / falsey.
-  # Negation (`~T`) is supported for both class-name and refinement
-  # right-hand sides. Parameterised refinements (`non-empty-array[T]`)
-  # are also recognised. Annotations whose directive is unrecognised
-  # are silently ignored per the spec's "unsupported metadata" guidance.
+  # `predicate-if-*` fires when the call is used as an `if` / `unless` condition; `assert` fires unconditionally
+  # at the call's post-scope; `assert-if-true` / `assert-if-false` fire at the post-scope only when the call's
+  # return value can be observed as truthy / falsey. Negation (`~T`) is supported for both class-name and
+  # refinement right-hand sides. Parameterised refinements (`non-empty-array[T]`) are also recognised. Annotations
+  # whose directive is unrecognised are silently ignored per the spec's "unsupported metadata" guidance.
   module RbsExtended # rubocop:disable Metrics/ModuleLength
     DIRECTIVE_PREFIX = "rigor:v1:"
 
-    # Returned for `predicate-if-true` / `predicate-if-false`.
-    # `target_kind` is `:parameter` (with `target_name` the
-    # Ruby parameter symbol) or `:self`. `negative` is true
-    # when the directive uses the `~ClassName` form, in
-    # which case the engine narrows AWAY from `class_name`
-    # (`Narrowing.narrow_not_class`) instead of toward it.
+    # Returned for `predicate-if-true` / `predicate-if-false`. `target_kind` is `:parameter` (with `target_name`
+    # the Ruby parameter symbol) or `:self`. `negative` is true when the directive uses the `~ClassName` form, in
+    # which case the engine narrows AWAY from `class_name` (`Narrowing.narrow_not_class`) instead of toward it.
     #
-    # `refinement_type` is non-nil when the right-hand side is
-    # a kebab-case refinement name (`non-empty-string`,
-    # `lowercase-string`, …) instead of a Capitalised class
-    # name. The narrowing tier substitutes the carrier for the
-    # current local type; `class_name` is then nil. `negative`
-    # may be true for refinement-form directives — `~T` negation
-    # is supported; the narrowing tier computes the complement
-    # decomposition (see `AssertEffect` docs below).
+    # `refinement_type` is non-nil when the right-hand side is a kebab-case refinement name (`non-empty-string`,
+    # `lowercase-string`, …) instead of a Capitalised class name. The narrowing tier substitutes the carrier for
+    # the current local type; `class_name` is then nil. `negative` may be true for refinement-form directives —
+    # `~T` negation is supported; the narrowing tier computes the complement decomposition (see `AssertEffect`
+    # docs below).
     class PredicateEffect < Data.define(:edge, :target_kind, :target_name, :class_name, :negative, :refinement_type)
       def truthy_only? = edge == :truthy_only
       def falsey_only? = edge == :falsey_only
       def negative? = negative == true
       def refinement? = !refinement_type.nil?
 
-      # ADR-7 § "Slice 4-A" canonical translation. Lifts the
-      # parser-side carrier into a `Rigor::FlowContribution::Fact`
-      # that the merger and plugin contribution stream consume
-      # uniformly. `class_name` lifts to `Nominal[<class>]`;
-      # `refinement_type` is already a `Rigor::Type` and passes
-      # through. The `edge` field doesn't survive the conversion —
-      # the slot it lands in (truthy_facts / falsey_facts / ...)
+      # ADR-7 § "Slice 4-A" canonical translation. Lifts the parser-side carrier into a
+      # `Rigor::FlowContribution::Fact` that the merger and plugin contribution stream consume uniformly.
+      # `class_name` lifts to `Nominal[<class>]`; `refinement_type` is already a `Rigor::Type` and passes through.
+      # The `edge` field doesn't survive the conversion — the slot it lands in (truthy_facts / falsey_facts / ...)
       # encodes that.
       def to_fact
         FlowContribution::Fact.new(
@@ -73,21 +59,14 @@ module Rigor
       end
     end
 
-    # Returned for `assert` / `assert-if-true` /
-    # `assert-if-false`. `condition` is one of:
+    # Returned for `assert` / `assert-if-true` / `assert-if-false`. `condition` is one of:
     #
-    # - `:always`           — refines `target` at the call's
-    #                        post-scope unconditionally
-    #                        (`assert`).
-    # - `:if_truthy_return` — refines `target` only when the
-    #                        call's return value is observed
-    #                        as truthy (currently: as the
-    #                        predicate of a subsequent
-    #                        `if` / `unless`).
+    # - `:always`           — refines `target` at the call's post-scope unconditionally (`assert`).
+    # - `:if_truthy_return` — refines `target` only when the call's return value is observed as truthy
+    #                         (currently: as the predicate of a subsequent `if` / `unless`).
     # - `:if_falsey_return` — symmetric for falsey.
     #
-    # `negative` mirrors `PredicateEffect`: true when the
-    # directive uses `~ClassName` syntax.
+    # `negative` mirrors `PredicateEffect`: true when the directive uses `~ClassName` syntax.
     class AssertEffect < Data.define(:condition, :target_kind, :target_name, :class_name, :negative, :refinement_type)
       def always? = condition == :always
       def if_truthy_return? = condition == :if_truthy_return
@@ -95,12 +74,9 @@ module Rigor
       def negative? = negative == true
       def refinement? = !refinement_type.nil?
 
-      # ADR-7 § "Slice 4-A" canonical translation. Same shape as
-      # `PredicateEffect#to_fact`; the `condition` field
-      # (`:always` / `:if_truthy_return` / `:if_falsey_return`)
-      # routes which slot the resulting fact lands in at the
-      # `read_flow_contribution` boundary, but does not surface
-      # on the Fact itself.
+      # ADR-7 § "Slice 4-A" canonical translation. Same shape as `PredicateEffect#to_fact`; the `condition` field
+      # (`:always` / `:if_truthy_return` / `:if_falsey_return`) routes which slot the resulting fact lands in at
+      # the `read_flow_contribution` boundary, but does not surface on the Fact itself.
       def to_fact
         FlowContribution::Fact.new(
           target_kind: target_kind,
@@ -113,12 +89,9 @@ module Rigor
 
     module_function
 
-    # Reads RBS::Extended predicate effects off
-    # `RBS::Definition::Method#annotations`. Returns the
-    # effects in source order; duplicates and unrecognised
-    # `rigor:v1:` directives are dropped. Returns an empty
-    # array (NEVER `nil`) for a method with no recognised
-    # annotations so callers can iterate unconditionally.
+    # Reads RBS::Extended predicate effects off `RBS::Definition::Method#annotations`. Returns the effects in
+    # source order; duplicates and unrecognised `rigor:v1:` directives are dropped. Returns an empty array (NEVER
+    # `nil`) for a method with no recognised annotations so callers can iterate unconditionally.
     #
     # @param environment [Rigor::Environment, nil] ADR-13 slice
     #   3b. When provided, threads the plugin-supplied
@@ -148,14 +121,11 @@ module Rigor
       effects.uniq
     end
 
-    # The right-hand side accepts either a Capitalised class
-    # name (with optional `~` negation, optional `::` prefix,
-    # qualified names) OR a kebab-case refinement payload
-    # routed through `Builtins::ImportedRefinements::Parser`
-    # (bare names, `name[T]`, `name<min, max>`). The two arms
-    # share the same overall directive shape; the parser
-    # detects which form matched by looking at the `class_name`
-    # vs `refinement` capture groups.
+    # The right-hand side accepts either a Capitalised class name (with optional `~` negation, optional `::`
+    # prefix, qualified names) OR a kebab-case refinement payload routed through
+    # `Builtins::ImportedRefinements::Parser` (bare names, `name[T]`, `name<min, max>`). The two arms share the
+    # same overall directive shape; the parser detects which form matched by looking at the `class_name` vs
+    # `refinement` capture groups.
     PREDICATE_DIRECTIVE_PATTERN = /
       \A
       rigor:v1:(?<directive>predicate-if-(?:true|false))
@@ -202,14 +172,11 @@ module Rigor
       )
     end
 
-    # Reads RBS::Extended assertion effects (`assert`,
-    # `assert-if-true`, `assert-if-false`) off
-    # `RBS::Definition::Method#annotations`. Returns an empty
-    # array when no recognised assertion directives are
+    # Reads RBS::Extended assertion effects (`assert`, `assert-if-true`, `assert-if-false`) off
+    # `RBS::Definition::Method#annotations`. Returns an empty array when no recognised assertion directives are
     # attached to the method.
     #
-    # See {.read_predicate_effects} for the `environment:`
-    # keyword contract.
+    # See {.read_predicate_effects} for the `environment:` keyword contract.
     def read_assert_effects(method_def, environment: nil)
       return [] if method_def.nil?
 
@@ -332,16 +299,11 @@ module Rigor
       end
     end
 
-    # Reads the `rigor:v1:return: <kebab-name>` directive off
-    # `RBS::Definition::Method#annotations`. The directive
-    # overrides a method's RBS-declared return type with one of
-    # the imported-built-in refinements registered in
-    # `Rigor::Builtins::ImportedRefinements`. The override is the
-    # primary integration path for refinement carriers
-    # (`non-empty-string`, `positive-int`, `non-empty-array`, …)
-    # in v0.0 — annotation-driven, opt-in per method, and never
-    # silently rewrites a hand-authored RBS signature outside the
-    # annotation.
+    # Reads the `rigor:v1:return: <kebab-name>` directive off `RBS::Definition::Method#annotations`. The
+    # directive overrides a method's RBS-declared return type with one of the imported-built-in refinements
+    # registered in `Rigor::Builtins::ImportedRefinements`. The override is the primary integration path for
+    # refinement carriers (`non-empty-string`, `positive-int`, `non-empty-array`, …) in v0.0 — annotation-driven,
+    # opt-in per method, and never silently rewrites a hand-authored RBS signature outside the annotation.
     #
     # Example annotation in an RBS file:
     #
@@ -350,22 +312,16 @@ module Rigor
     #     def name: () -> String
     #   end
     #
-    # The RBS-declared return is `String`. The override
-    # tightens it to `non-empty-string` (i.e.
-    # `Difference[String, ""]`) for callers; RBS erasure of the
-    # tightened return goes back to `String` so the round-trip
-    # to ordinary RBS is unaffected.
+    # The RBS-declared return is `String`. The override tightens it to `non-empty-string` (i.e.
+    # `Difference[String, ""]`) for callers; RBS erasure of the tightened return goes back to `String` so the
+    # round-trip to ordinary RBS is unaffected.
     #
     # Returns the resolved `Rigor::Type` value, or `nil` when:
     # - the method has no annotations,
-    # - none of the annotations match the `rigor:v1:return:`
-    #   directive,
-    # - the directive's payload names a refinement not
-    #   registered in `Rigor::Builtins::ImportedRefinements`
-    #   (the analyzer prefers a silent miss over crashing on a
-    #   typo; ADR-13 slice 3b surfaces the miss as a
-    #   `dynamic.rbs-extended.unresolved` `:info` diagnostic when
-    #   an `environment:` is supplied).
+    # - none of the annotations match the `rigor:v1:return:` directive,
+    # - the directive's payload names a refinement not registered in `Rigor::Builtins::ImportedRefinements` (the
+    #   analyzer prefers a silent miss over crashing on a typo; ADR-13 slice 3b surfaces the miss as a
+    #   `dynamic.rbs-extended.unresolved` `:info` diagnostic when an `environment:` is supplied).
     def read_return_type_override(method_def, environment: nil)
       return nil if method_def.nil?
 
@@ -389,14 +345,10 @@ module Rigor
       nil
     end
 
-    # The trailing payload supports the full refinement
-    # grammar in `Builtins::ImportedRefinements::Parser` —
-    # bare kebab-case names plus parameterised forms like
-    # `non-empty-array[Integer]`, `non-empty-hash[Symbol,
-    # Integer]`, and `int<5, 10>`. The directive head is
-    # consumed by the regex; the rest is forwarded to the
-    # refinement parser. Anything the parser cannot resolve
-    # falls back to nil so the call site keeps the
+    # The trailing payload supports the full refinement grammar in `Builtins::ImportedRefinements::Parser` — bare
+    # kebab-case names plus parameterised forms like `non-empty-array[Integer]`, `non-empty-hash[Symbol,
+    # Integer]`, and `int<5, 10>`. The directive head is consumed by the regex; the rest is forwarded to the
+    # refinement parser. Anything the parser cannot resolve falls back to nil so the call site keeps the
     # RBS-declared return type.
     RETURN_DIRECTIVE_PATTERN = /
       \A
@@ -408,15 +360,11 @@ module Rigor
     /x
     private_constant :RETURN_DIRECTIVE_PATTERN
 
-    # ADR-20 slice 2d — recognises `App[<uri>, <ClassName>, ...]`
-    # syntax in a `rigor:v1:return:` payload before falling
-    # through to the refinement-name parser. The match captures
-    # the namespaced URI (`json::value`) plus a comma-separated
-    # list of bare class names (`String`, `Symbol`, `Integer`).
-    # Slice 2d keeps the arg vocabulary intentionally narrow;
-    # parameterised forms (`Array[T]`, `Hash[K, V]`), unions,
-    # and refinements inside `App[...]` wait for a follow-up
-    # slice's expression parser.
+    # ADR-20 slice 2d — recognises `App[<uri>, <ClassName>, ...]` syntax in a `rigor:v1:return:` payload before
+    # falling through to the refinement-name parser. The match captures the namespaced URI (`json::value`) plus a
+    # comma-separated list of bare class names (`String`, `Symbol`, `Integer`). Slice 2d keeps the arg vocabulary
+    # intentionally narrow; parameterised forms (`Array[T]`, `Hash[K, V]`), unions, and refinements inside
+    # `App[...]` wait for a follow-up slice's expression parser.
     APP_PAYLOAD_PATTERN = /
       \A
       App\[
@@ -452,17 +400,12 @@ module Rigor
       type
     end
 
-    # ADR-20 slice 2d. Parses `App[<uri>, <ClassName>, ...]`
-    # syntax into a `Rigor::Type::App`. When `hkt_registry` is
-    # supplied and the URI is registered with a body_tree, the
-    # `App` is reduced eagerly via {Inference::HktRegistry#reduce}
-    # so call sites observe the unfolded form (e.g.
-    # `Union[nil, true, false, ..., Array[App[json::value,
-    # String]], Hash[String, App[json::value, String]]]`)
-    # rather than the opaque carrier. When the registry is
-    # absent or the URI is unregistered, the carrier with its
-    # registry-supplied bound (or `untyped` as a last-resort
-    # fallback) is returned as-is.
+    # ADR-20 slice 2d. Parses `App[<uri>, <ClassName>, ...]` syntax into a `Rigor::Type::App`. When
+    # `hkt_registry` is supplied and the URI is registered with a body_tree, the `App` is reduced eagerly via
+    # {Inference::HktRegistry#reduce} so call sites observe the unfolded form (e.g.
+    # `Union[nil, true, false, ..., Array[App[json::value, String]], Hash[String, App[json::value, String]]]`)
+    # rather than the opaque carrier. When the registry is absent or the URI is unregistered, the carrier with
+    # its registry-supplied bound (or `untyped` as a last-resort fallback) is returned as-is.
     def parse_app_payload(payload, name_scope: nil, reporter: nil, source_location: nil, hkt_registry: nil)
       match = APP_PAYLOAD_PATTERN.match(payload)
       return nil if match.nil?
@@ -499,22 +442,15 @@ module Rigor
       Type::Nominal.new(normalized)
     end
 
-    # Returned for `rigor:v1:param: <name> <refinement>`. The
-    # parameter name is a Ruby identifier (Symbol); the type
-    # is any `Rigor::Type` the refinement parser resolves
-    # (bare kebab-case name, parameterised form, or `int<...>`
-    # range — the same grammar the `return:` directive
-    # accepts).
+    # Returned for `rigor:v1:param: <name> <refinement>`. The parameter name is a Ruby identifier (Symbol); the
+    # type is any `Rigor::Type` the refinement parser resolves (bare kebab-case name, parameterised form, or
+    # `int<...>` range — the same grammar the `return:` directive accepts).
     ParamOverride = Data.define(:param_name, :type)
 
-    # Reads every `rigor:v1:param: <name> <refinement>`
-    # directive off `RBS::Definition::Method#annotations` and
-    # returns the resolved `ParamOverride` list. Annotations
-    # the parser cannot resolve (typo, unknown refinement, no
-    # `param:` directive at all) are silently dropped — the
-    # call site keeps the RBS-declared parameter type for
-    # those parameters. The reader accepts a nil method
-    # definition so call sites can pass through optional
+    # Reads every `rigor:v1:param: <name> <refinement>` directive off `RBS::Definition::Method#annotations` and
+    # returns the resolved `ParamOverride` list. Annotations the parser cannot resolve (typo, unknown refinement,
+    # no `param:` directive at all) are silently dropped — the call site keeps the RBS-declared parameter type
+    # for those parameters. The reader accepts a nil method definition so call sites can pass through optional
     # method lookups without a guard.
     #
     # Example annotation in an RBS file:
@@ -524,11 +460,9 @@ module Rigor
     #     def normalise: (::String id) -> String
     #   end
     #
-    # The RBS-declared type of `id` is `String`. The override
-    # tightens it to `non-empty-string` for argument-check
-    # purposes; passing a too-wide `Nominal[String]` argument
-    # is flagged as an argument-type mismatch at the call
-    # site.
+    # The RBS-declared type of `id` is `String`. The override tightens it to `non-empty-string` for
+    # argument-check purposes; passing a too-wide `Nominal[String]` argument is flagged as an argument-type
+    # mismatch at the call site.
     def read_param_type_overrides(method_def, environment: nil)
       return [] if method_def.nil?
 
@@ -548,23 +482,18 @@ module Rigor
       end
     end
 
-    # Convenience reader for call sites that want to look up
-    # a single override by parameter name. Returns a frozen
-    # Hash<Symbol, Rigor::Type>; missing keys mean "use the
-    # RBS-declared type". Callers MUST treat the hash as
-    # read-only.
+    # Convenience reader for call sites that want to look up a single override by parameter name. Returns a
+    # frozen Hash<Symbol, Rigor::Type>; missing keys mean "use the RBS-declared type". Callers MUST treat the
+    # hash as read-only.
     def param_type_override_map(method_def, environment: nil)
       read_param_type_overrides(method_def, environment: environment)
         .to_h { |o| [o.param_name, o.type] }
         .freeze
     end
 
-    # The `is` glue word is optional so authors can write
-    # either `param: id is non-empty-string` (consistent with
-    # the existing `assert` / `predicate-if-*` directives) or
-    # the terser `param: id non-empty-string`. The trailing
-    # payload accepts the full refinement grammar in
-    # `Builtins::ImportedRefinements::Parser`.
+    # The `is` glue word is optional so authors can write either `param: id is non-empty-string` (consistent with
+    # the existing `assert` / `predicate-if-*` directives) or the terser `param: id non-empty-string`. The
+    # trailing payload accepts the full refinement grammar in `Builtins::ImportedRefinements::Parser`.
     PARAM_DIRECTIVE_PATTERN = /
       \A
       rigor:v1:param:
@@ -596,20 +525,14 @@ module Rigor
       ParamOverride.new(param_name: match[:param].to_sym, type: type)
     end
 
-    # A class- / module-level directive declaring that the
-    # annotated class satisfies a named structural interface as
-    # part of its public contract (spec:
-    # `docs/type-specification/rbs-extended.md` § "Explicit
-    # conformance directive"). Unlike the per-method directives
-    # above, this attaches to a `class` / `module` declaration and
-    # names a single RBS interface (`_RewindableStream`); the
-    # right-hand side is therefore an interface name (its last
-    # segment begins with `_`), never a refinement payload.
+    # A class- / module-level directive declaring that the annotated class satisfies a named structural interface
+    # as part of its public contract (spec: `docs/type-specification/rbs-extended.md` § "Explicit conformance
+    # directive"). Unlike the per-method directives above, this attaches to a `class` / `module` declaration and
+    # names a single RBS interface (`_RewindableStream`); the right-hand side is therefore an interface name (its
+    # last segment begins with `_`), never a refinement payload.
     #
-    # This parser only extracts the interface name; the
-    # conformance check itself lives in
-    # {Rigor::RbsExtended::ConformanceChecker}, which the
-    # {Rigor::Analysis::Runner} runs once per project run.
+    # This parser only extracts the interface name; the conformance check itself lives in
+    # {Rigor::RbsExtended::ConformanceChecker}, which the {Rigor::Analysis::Runner} runs once per project run.
     CONFORMS_TO_DIRECTIVE_PATTERN = /
       \A
       rigor:v1:conforms-to
@@ -620,12 +543,10 @@ module Rigor
     /x
     private_constant :CONFORMS_TO_DIRECTIVE_PATTERN
 
-    # Returns the interface name (leading `::` stripped) for a
-    # `rigor:v1:conforms-to <Interface>` annotation, or `nil` when
-    # the string is not a conforms-to directive (so callers can
-    # walk an annotation list without pre-filtering). The name is
-    # returned verbatim otherwise — namespace resolution happens at
-    # the loader boundary when the interface is built.
+    # Returns the interface name (leading `::` stripped) for a `rigor:v1:conforms-to <Interface>` annotation, or
+    # `nil` when the string is not a conforms-to directive (so callers can walk an annotation list without
+    # pre-filtering). The name is returned verbatim otherwise — namespace resolution happens at the loader
+    # boundary when the interface is built.
     def parse_conforms_to_annotation(string)
       return nil if string.nil?
 
@@ -635,11 +556,9 @@ module Rigor
       match[:interface].to_s.sub(/\A::/, "")
     end
 
-    # The shared {Rigor::FlowContribution::Provenance} for every
-    # bundle this module produces. `source_family: :rbs_extended`
-    # so consumers (today the documentation surface; v0.1.0 the
-    # plugin contribution merger) can attribute facts back to the
-    # RBS::Extended layer.
+    # The shared {Rigor::FlowContribution::Provenance} for every bundle this module produces.
+    # `source_family: :rbs_extended` so consumers (today the documentation surface; v0.1.0 the plugin contribution
+    # merger) can attribute facts back to the RBS::Extended layer.
     RBS_EXTENDED_PROVENANCE = FlowContribution::Provenance.new(
       source_family: :rbs_extended,
       plugin_id: nil,
@@ -647,10 +566,8 @@ module Rigor
       descriptor: nil
     ).freeze
 
-    # Rolls up every recognised RBS::Extended directive on
-    # `method_def` into a single {Rigor::FlowContribution} with
-    # the canonical {Rigor::FlowContribution::Fact} payload (see
-    # ADR-7 § "Slice 4-A"):
+    # Rolls up every recognised RBS::Extended directive on `method_def` into a single {Rigor::FlowContribution}
+    # with the canonical {Rigor::FlowContribution::Fact} payload (see ADR-7 § "Slice 4-A"):
     #
     # - `predicate-if-true`        → `truthy_facts`
     # - `predicate-if-false`       → `falsey_facts`
@@ -659,18 +576,14 @@ module Rigor
     # - `assert-if-false`          → `falsey_facts`
     # - `return:` override         → `return_type` (`Rigor::Type`)
     #
-    # Param overrides are intentionally NOT included — they refine
-    # the call's signature contract rather than its flow facts and
-    # do not fit ADR-2 § "Flow Contribution Bundle" slot semantics.
-    # Callers that care about parameter contracts keep using
-    # {.read_param_type_overrides} / {.param_type_override_map}.
+    # Param overrides are intentionally NOT included — they refine the call's signature contract rather than its
+    # flow facts and do not fit ADR-2 § "Flow Contribution Bundle" slot semantics. Callers that care about
+    # parameter contracts keep using {.read_param_type_overrides} / {.param_type_override_map}.
     #
-    # Returns `nil` when the method carries no recognised
-    # contribution directives (callers can skip the merge step
-    # without iterating an empty bundle).
+    # Returns `nil` when the method carries no recognised contribution directives (callers can skip the merge
+    # step without iterating an empty bundle).
     #
-    # See {.read_predicate_effects} for the `environment:`
-    # keyword contract.
+    # See {.read_predicate_effects} for the `environment:` keyword contract.
     def read_flow_contribution(method_def, environment: nil)
       return nil if method_def.nil?
 
@@ -708,12 +621,9 @@ module Rigor
       facts.empty? ? nil : facts
     end
 
-    # ADR-13 slice 3b — guards every reporter call so the
-    # in-RbsExtended-module call sites can record events
-    # uniformly without nil-checking each time. When the
-    # reporter is nil (the v0.1.0 → v0.1.3 default for call
-    # sites that do not yet thread `environment:`), the call is
-    # a no-op and the parser stays fail-soft.
+    # ADR-13 slice 3b — guards every reporter call so the in-RbsExtended-module call sites can record events
+    # uniformly without nil-checking each time. When the reporter is nil (the v0.1.0 → v0.1.3 default for call
+    # sites that do not yet thread `environment:`), the call is a no-op and the parser stays fail-soft.
     def record_unresolved(reporter, payload, source_location)
       return if reporter.nil?
 

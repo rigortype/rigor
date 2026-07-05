@@ -8,35 +8,26 @@ require_relative "acceptance_router"
 
 module Rigor
   module Type
-    # `Refined[base, predicate_id]` — predicate-subset half of
-    # the OQ3 refinement-carrier strategy
-    # ([ADR-3](docs/adr/3-type-representation.md), Working
-    # Decision Option C). Sibling of `Type::Difference`, which
-    # carries the point-removal half.
+    # `Refined[base, predicate_id]` — predicate-subset half of the OQ3 refinement-carrier strategy
+    # ([ADR-3](docs/adr/3-type-representation.md), Working Decision Option C). Sibling of
+    # `Type::Difference`, which carries the point-removal half.
     #
     #   lowercase-string = Refined[Nominal[String], :lowercase]
     #   uppercase-string = Refined[Nominal[String], :uppercase]
     #   numeric-string   = Refined[Nominal[String], :numeric]
     #
-    # The carrier wraps a base type and a `predicate_id` Symbol
-    # drawn from {PREDICATES}. The recogniser is invoked at
-    # constant-fold and acceptance time over a `Constant<base>`
-    # value; for non-Constant receivers the carrier is a marker
-    # the catalog tier consults to project `String#downcase` /
+    # The carrier wraps a base type and a `predicate_id` Symbol drawn from {PREDICATES}. The recogniser
+    # is invoked at constant-fold and acceptance time over a `Constant<base>` value; for non-Constant
+    # receivers the carrier is a marker the catalog tier consults to project `String#downcase` /
     # `String#upcase` (etc.) into the matching refinement.
     #
-    # Display routes through {CANONICAL_NAMES}: registered
-    # `(base_class_name, predicate_id)` pairs print in their
-    # kebab-case spelling (`lowercase-string`); unregistered
-    # combinations fall back to the `base & predicate?` operator
-    # form per
-    # [`type-operators.md`](docs/type-specification/type-operators.md).
+    # Display routes through {CANONICAL_NAMES}: registered `(base_class_name, predicate_id)` pairs print
+    # in their kebab-case spelling (`lowercase-string`); unregistered combinations fall back to the
+    # `base & predicate?` operator form per [`type-operators.md`](docs/type-specification/type-operators.md).
     #
-    # Construction MUST go through `Type::Combinator.refined` /
-    # the per-name factories (`Combinator.lowercase_string`,
-    # `Combinator.uppercase_string`, `Combinator.numeric_string`).
-    # Direct `.new` is an internal escape hatch for tests and
-    # combinator's own implementation.
+    # Construction MUST go through `Type::Combinator.refined` / the per-name factories
+    # (`Combinator.lowercase_string`, `Combinator.uppercase_string`, `Combinator.numeric_string`). Direct
+    # `.new` is an internal escape hatch for tests and combinator's own implementation.
     class Refined
       attr_reader :base, :predicate_id
 
@@ -55,8 +46,8 @@ module Rigor
         "#{base.describe(verbosity)} & #{predicate_id}?"
       end
 
-      # Erases to the base nominal: every refinement MUST erase
-      # to its base per [`rbs-erasure.md`](docs/type-specification/rbs-erasure.md).
+      # Erases to the base nominal: every refinement MUST erase to its base per
+      # [`rbs-erasure.md`](docs/type-specification/rbs-erasure.md).
       def erase_to_rbs
         base.erase_to_rbs
       end
@@ -83,12 +74,9 @@ module Rigor
         "#<Rigor::Type::Refined #{describe(:short)}>"
       end
 
-      # Recognises a Ruby value against this carrier's
-      # predicate. The trinary return is intentional: `true` /
-      # `false` when the predicate registry decides, `nil`
-      # when the predicate is unknown to the registry, so
-      # callers (today {Inference::Acceptance}) can fall
-      # through to gradual-mode `:maybe`.
+      # Recognises a Ruby value against this carrier's predicate. The trinary return is intentional:
+      # `true` / `false` when the predicate registry decides, `nil` when the predicate is unknown to the
+      # registry, so callers (today {Inference::Acceptance}) can fall through to gradual-mode `:maybe`.
       # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
       def matches?(value)
         recogniser = PREDICATES[predicate_id]
@@ -98,60 +86,42 @@ module Rigor
       end
       # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
 
-      # `predicate_id => recogniser` table. The recogniser is
-      # called with a Ruby value (typically the inner `value`
-      # of a `Constant`) and returns truthy when the value
-      # satisfies the predicate. The recogniser MUST be total
-      # (return false rather than raise) over arbitrary input,
-      # so callers can pass any `Constant#value` without a
-      # type-prefilter.
+      # `predicate_id => recogniser` table. The recogniser is called with a Ruby value (typically the
+      # inner `value` of a `Constant`) and returns truthy when the value satisfies the predicate. The
+      # recogniser MUST be total (return false rather than raise) over arbitrary input, so callers can
+      # pass any `Constant#value` without a type-prefilter.
       #
-      # Plugin-contributed predicates are not yet wired; today
-      # the table covers the built-in catalogue.
+      # Plugin-contributed predicates are not yet wired; today the table covers the built-in catalogue.
       #
       # Recogniser policy:
       #
-      # - `:numeric` recognises a string that is a *single Ruby
-      #   numeric literal* — exactly the syntax that, written in
-      #   Ruby source, evaluates to an `Integer` / `Float` /
-      #   `Rational` / `Complex`. The recogniser delegates to the
-      #   real Ruby parser ({Refined.ruby_numeric_literal?} via
-      #   Prism), so it tracks Ruby's grammar precisely: decimal /
-      #   `0x` hex / `0o` (or leading-zero) octal / `0b` binary /
-      #   `0d` decimal integers, underscore digit separators
-      #   (`1_000`), decimal fractions and scientific floats
-      #   (`1.5`, `1E-5`), and the `r` rational / `i` imaginary
-      #   suffixes (`1r`, `2i`, `0xffr`). A single leading sign is
-      #   folded into the literal (`-1`, `+1.5`), but a doubled
-      #   sign (`--1`, `++1`) parses as a unary-operator chain — a
-      #   `CallNode`, not a literal — and is rejected, as are
-      #   multi-dot junk (`1.2.3`), partial literals (`0x`, `1_`),
-      #   whitespace-padded strings, and — crucially — non-ASCII
-      #   "digits" (full-width `１`, superscript `²`, other Unicode
-      #   number characters): Ruby's lexer only accepts `[0-9]` in
-      #   a numeric literal, so those are `CallNode`s too. The
-      #   stricter base-N predicates below remain proper subsets.
-      # - `:decimal_int` is "what `Integer(s, 10)` would parse
-      #   without remainder" — one or more decimal digits,
-      #   optional leading sign, no whitespace, no fractional
-      #   tail.
-      # - `:octal_int` and `:hex_int` REQUIRE their conventional
-      #   prefix (`0o` / `0O` / leading `0` for octal; `0x` /
-      #   `0X` for hex) so the predicate is disjoint from
-      #   `:decimal_int`. A bare `"755"` is decimal-int-string,
-      #   not octal-int-string. This matches the typical user
-      #   intent — a refinement marks a string that "looks like
-      #   octal", not "happens to be base-8 valid".
+      # - `:numeric` recognises a string that is a *single Ruby numeric literal* — exactly the syntax
+      #   that, written in Ruby source, evaluates to an `Integer` / `Float` / `Rational` / `Complex`. The
+      #   recogniser delegates to the real Ruby parser ({Refined.ruby_numeric_literal?} via Prism), so it
+      #   tracks Ruby's grammar precisely: decimal / `0x` hex / `0o` (or leading-zero) octal / `0b`
+      #   binary / `0d` decimal integers, underscore digit separators (`1_000`), decimal fractions and
+      #   scientific floats (`1.5`, `1E-5`), and the `r` rational / `i` imaginary suffixes (`1r`, `2i`,
+      #   `0xffr`). A single leading sign is folded into the literal (`-1`, `+1.5`), but a doubled sign
+      #   (`--1`, `++1`) parses as a unary-operator chain — a `CallNode`, not a literal — and is
+      #   rejected, as are multi-dot junk (`1.2.3`), partial literals (`0x`, `1_`), whitespace-padded
+      #   strings, and — crucially — non-ASCII "digits" (full-width `１`, superscript `²`, other Unicode
+      #   number characters): Ruby's lexer only accepts `[0-9]` in a numeric literal, so those are
+      #   `CallNode`s too. The stricter base-N predicates below remain proper subsets.
+      # - `:decimal_int` is "what `Integer(s, 10)` would parse without remainder" — one or more decimal
+      #   digits, optional leading sign, no whitespace, no fractional tail.
+      # - `:octal_int` and `:hex_int` REQUIRE their conventional prefix (`0o` / `0O` / leading `0` for
+      #   octal; `0x` / `0X` for hex) so the predicate is disjoint from `:decimal_int`. A bare `"755"` is
+      #   decimal-int-string, not octal-int-string. This matches the typical user intent — a refinement
+      #   marks a string that "looks like octal", not "happens to be base-8 valid".
       DECIMAL_INT_STRING_PATTERN = /\A-?\d+\z/
       OCTAL_INT_STRING_PATTERN = /\A-?(?:0[oO][0-7]+|0[0-7]+)\z/
       HEX_INT_STRING_PATTERN = /\A-?0[xX][0-9a-fA-F]+\z/
       private_constant :DECIMAL_INT_STRING_PATTERN,
                        :OCTAL_INT_STRING_PATTERN, :HEX_INT_STRING_PATTERN
 
-      # Prism node classes that represent a numeric literal. A
-      # string is a numeric-string exactly when the parser reduces
-      # the whole input to a single one of these (the leading sign
-      # is already folded into the literal by the parser).
+      # Prism node classes that represent a numeric literal. A string is a numeric-string exactly when
+      # the parser reduces the whole input to a single one of these (the leading sign is already folded
+      # into the literal by the parser).
       NUMERIC_LITERAL_NODES = [
         Prism::IntegerNode,
         Prism::FloatNode,
@@ -160,11 +130,9 @@ module Rigor
       ].freeze
       private_constant :NUMERIC_LITERAL_NODES
 
-      # Cheap pre-filter applied before invoking the parser: every
-      # Ruby numeric literal starts with an ASCII digit, optionally
-      # preceded by exactly one sign. Strings that fail this never
-      # reach Prism (the common non-numeric case stays allocation-
-      # and parse-free).
+      # Cheap pre-filter applied before invoking the parser: every Ruby numeric literal starts with an
+      # ASCII digit, optionally preceded by exactly one sign. Strings that fail this never reach Prism
+      # (the common non-numeric case stays allocation- and parse-free).
       NUMERIC_LITERAL_PREFIX = /\A[+-]?\d/
       private_constant :NUMERIC_LITERAL_PREFIX
 
@@ -176,10 +144,8 @@ module Rigor
       def self.ruby_numeric_literal?(value)
         return false unless value.is_a?(String)
         return false if value.empty?
-        # A numeric literal carries no whitespace; reject any
-        # leading / trailing / interior space so the *whole* string
-        # must be the literal (Prism would otherwise accept a
-        # trailing-space `"1 "`).
+        # A numeric literal carries no whitespace; reject any leading / trailing / interior space so the
+        # *whole* string must be the literal (Prism would otherwise accept a trailing-space `"1 "`).
         return false if value.match?(/\s/)
         return false unless value.match?(NUMERIC_LITERAL_PREFIX)
 
@@ -203,28 +169,21 @@ module Rigor
         decimal_int: ->(v) { v.is_a?(String) && DECIMAL_INT_STRING_PATTERN.match?(v) },
         octal_int: ->(v) { v.is_a?(String) && OCTAL_INT_STRING_PATTERN.match?(v) },
         hex_int: ->(v) { v.is_a?(String) && HEX_INT_STRING_PATTERN.match?(v) },
-        # `literal-string` is a flow-tracked predicate, not a value-
-        # level predicate: a String is literal-string when it is
-        # known to come from a source-code literal (or composition
-        # of literals). Every concrete `Constant<String>` is
-        # already literal by construction, so the inspection
-        # recogniser returns true for any String — the property is
-        # really tracked in the flow analysis (interpolation,
-        # concatenation, RBS::Extended `return: literal-string`)
-        # rather than recovered by inspecting an arbitrary string.
+        # `literal-string` is a flow-tracked predicate, not a value-level predicate: a String is
+        # literal-string when it is known to come from a source-code literal (or composition of
+        # literals). Every concrete `Constant<String>` is already literal by construction, so the
+        # inspection recogniser returns true for any String — the property is really tracked in the flow
+        # analysis (interpolation, concatenation, RBS::Extended `return: literal-string`) rather than
+        # recovered by inspecting an arbitrary string.
         literal_string: ->(v) { v.is_a?(String) }
       }.freeze
 
-      # Maps `[base_class_name, predicate_id]` pairs to their
-      # kebab-case canonical name. Registered shapes print
-      # through `describe`; unregistered combinations fall back
-      # to the operator form.
+      # Maps `[base_class_name, predicate_id]` pairs to their kebab-case canonical name. Registered
+      # shapes print through `describe`; unregistered combinations fall back to the operator form.
       #
-      # ADR-15 Phase 4b.x — `Ractor.make_shareable` (not `.freeze`)
-      # because the keys are nested two-element Arrays. Plain
-      # `.freeze` would leave the inner arrays mutable, so a
-      # worker Ractor reading `CANONICAL_NAMES[[base, predicate]]`
-      # would trip `Ractor::IsolationError`.
+      # ADR-15 Phase 4b.x — `Ractor.make_shareable` (not `.freeze`) because the keys are nested
+      # two-element Arrays. Plain `.freeze` would leave the inner arrays mutable, so a worker Ractor
+      # reading `CANONICAL_NAMES[[base, predicate]]` would trip `Ractor::IsolationError`.
       CANONICAL_NAMES = Ractor.make_shareable({
                                                 ["String", :lowercase] => "lowercase-string",
                                                 ["String", :not_lowercase] => "non-lowercase-string",
@@ -239,21 +198,15 @@ module Rigor
                                               })
       private_constant :CANONICAL_NAMES
 
-      # Bidirectional `predicate_id ↔ complement_predicate_id`
-      # registry. `~Refined[base, p]` narrows to
-      # `Refined[base, COMPLEMENT_PAIRS[p]]` when the part is the
-      # refinement's base — the precise carrier the spec promises
-      # under the `~T` operator. Predicates without a registered
-      # complement fall back to the imprecise but sound
-      # `Difference[part, refined]` carrier from the existing
-      # narrowing rule.
+      # Bidirectional `predicate_id ↔ complement_predicate_id` registry. `~Refined[base, p]` narrows to
+      # `Refined[base, COMPLEMENT_PAIRS[p]]` when the part is the refinement's base — the precise carrier
+      # the spec promises under the `~T` operator. Predicates without a registered complement fall back
+      # to the imprecise but sound `Difference[part, refined]` carrier from the existing narrowing rule.
       #
-      # Adding a new pair here is an additive change: register the
-      # complement predicate in {PREDICATES}, give it a kebab-case
-      # canonical name in {CANONICAL_NAMES}, and add the bidirectional
-      # entry below. No call site needs to know about the new pair —
-      # `complement_refined` consults this map and routes through
-      # the registered complement automatically.
+      # Adding a new pair here is an additive change: register the complement predicate in {PREDICATES},
+      # give it a kebab-case canonical name in {CANONICAL_NAMES}, and add the bidirectional entry below.
+      # No call site needs to know about the new pair — `complement_refined` consults this map and
+      # routes through the registered complement automatically.
       COMPLEMENT_PAIRS = {
         lowercase: :not_lowercase,
         not_lowercase: :lowercase,

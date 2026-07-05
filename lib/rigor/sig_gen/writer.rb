@@ -8,64 +8,47 @@ require_relative "write_result"
 
 module Rigor
   module SigGen
-    # Applies a per-source-file group of {MethodCandidate}s to
-    # the target `.rbs` file under the project signature tree.
+    # Applies a per-source-file group of {MethodCandidate}s to the target `.rbs` file under the project
+    # signature tree.
     #
-    # ADR-14 slice 2: the writer parses the target with
-    # `RBS::Parser` to find the matching class declaration and
-    # inserts new method declarations just before the class's
-    # closing `end` keyword. Existing declarations are NEVER
-    # touched unless `--overwrite` is set AND the candidate's
-    # classification is `tighter-return`.
+    # ADR-14 slice 2: the writer parses the target with `RBS::Parser` to find the matching class declaration and
+    # inserts new method declarations just before the class's closing `end` keyword. Existing declarations are
+    # NEVER touched unless `--overwrite` is set AND the candidate's classification is `tighter-return`.
     #
-    # The slice does NOT re-render the whole file through
-    # `RBS::Writer`. That would lose comments / blank-line
-    # formatting per upstream design; the byte-range insertion
-    # approach taken here preserves untouched declarations
-    # verbatim. Mixed hand-written + generated output inside
-    # the *same* class declaration may still lose trailing
-    # blank lines on the touched ranges; the `--diff` review
-    # surface from slice 1 is the user's escape hatch.
+    # The slice does NOT re-render the whole file through `RBS::Writer`. That would lose comments / blank-line
+    # formatting per upstream design; the byte-range insertion approach taken here preserves untouched
+    # declarations verbatim. Mixed hand-written + generated output inside the *same* class declaration may still
+    # lose trailing blank lines on the touched ranges; the `--diff` review surface from slice 1 is the user's
+    # escape hatch.
     #
-    # Safety boundary: the writer ASSERTS the target lives
-    # inside the configured signature tree before touching the
-    # disk. Files outside that tree route through
-    # `WriteResult(action: :skipped_outside_sig_root)`; the
+    # Safety boundary: the writer ASSERTS the target lives inside the configured signature tree before touching
+    # the disk. Files outside that tree route through `WriteResult(action: :skipped_outside_sig_root)`; the
     # caller decides whether to warn or fail.
     class Writer # rubocop:disable Metrics/ClassLength
       INDENT = "  "
       private_constant :INDENT
 
-      # Per-`update_existing` accumulator. The merge_class
-      # helper mutates `source` / `decls` / `applied` /
-      # `skipped` in place as each class is processed so the
-      # next class sees the latest byte positions.
+      # Per-`update_existing` accumulator. The merge_class helper mutates `source` / `decls` / `applied` /
+      # `skipped` in place as each class is processed so the next class sees the latest byte positions.
       MergeState = Struct.new(:source, :decls, :applied, :skipped, keyword_init: true)
       private_constant :MergeState
 
       def initialize(path_mapper:, overwrite: false)
         @path_mapper = path_mapper
         @overwrite = overwrite
-        # Run-level (cross-file) namespace-kind view, populated
-        # per `#write_all` from every candidate's per-file map.
-        # Empty until then so the single-target `#write` path
-        # falls back to per-candidate kinds only.
+        # Run-level (cross-file) namespace-kind view, populated per `#write_all` from every candidate's per-file
+        # map. Empty until then so the single-target `#write` path falls back to per-candidate kinds only.
         @global_namespace_kinds = {}
-        # Run-level qualified-class-name => superclass-token view,
-        # same lifecycle as `@global_namespace_kinds`.
+        # Run-level qualified-class-name => superclass-token view, same lifecycle as `@global_namespace_kinds`.
         @global_superclasses = {}
       end
 
-      # Process the full candidate list by resolving each
-      # candidate's target sig file via the path mapper (which
-      # may route consolidated-layout classes to existing
-      # files) and grouping candidates that share a target
+      # Process the full candidate list by resolving each candidate's target sig file via the path mapper (which
+      # may route consolidated-layout classes to existing files) and grouping candidates that share a target
       # before writing.
       #
-      # ADR-14 follow-up: this is the consolidated-layout
-      # entry point. The legacy `write(source_path, candidates)`
-      # below assumes all candidates share a target and
-      # remains for spec convenience.
+      # ADR-14 follow-up: this is the consolidated-layout entry point. The legacy `write(source_path,
+      # candidates)` below assumes all candidates share a target and remains for spec convenience.
       #
       # @param candidates [Array<MethodCandidate>]
       # @return [Array<WriteResult>] one per target sig file.
@@ -95,10 +78,8 @@ module Rigor
 
       private
 
-      # Shared per-target write path used by both `#write` and
-      # `#write_all`. Picks a representative `source_path` for
-      # the {WriteResult} when multiple candidates merge into
-      # one target.
+      # Shared per-target write path used by both `#write` and `#write_all`. Picks a representative
+      # `source_path` for the {WriteResult} when multiple candidates merge into one target.
       def write_target(target, candidates, source_path: nil)
         source_path ||= candidates.first&.path
         unless inside_sig_root?(target)
@@ -116,8 +97,7 @@ module Rigor
         root = @path_mapper.sig_root_dir.realpath
         target.expand_path.ascend.any? { |ancestor| realpath_or_nil(ancestor) == root }
       rescue Errno::ENOENT
-        # The sig root doesn't exist yet; we'll create it
-        # alongside the target file. Allow this case.
+        # The sig root doesn't exist yet; we'll create it alongside the target file. Allow this case.
         target.expand_path.to_s.start_with?(@path_mapper.sig_root_dir.expand_path.to_s)
       end
 
@@ -134,26 +114,17 @@ module Rigor
                         action: :created, applied: candidates)
       end
 
-      # ADR-14 gap-#3 follow-up (c): when one candidate's
-      # `class_name` is a strict prefix of another's, emit a
-      # single nested tree instead of two flat sibling
-      # blocks. The third-round self-dogfood surfaced
-      # `Analysis::DependencySourceInference::GemResolver`
-      # containing `class Resolved < Data.define(...)` — the
-      # earlier `group_by(&:class_name)` flattened that into
-      # two top-level wraps (one for GemResolver's own
-      # methods, one for GemResolver::Resolved's), which
-      # Steep accepted but is not the canonical layout in
-      # this project's `sig/`.
+      # ADR-14 gap-#3 follow-up (c): when one candidate's `class_name` is a strict prefix of another's, emit a
+      # single nested tree instead of two flat sibling blocks. The third-round self-dogfood surfaced
+      # `Analysis::DependencySourceInference::GemResolver` containing `class Resolved < Data.define(...)` — the
+      # earlier `group_by(&:class_name)` flattened that into two top-level wraps (one for GemResolver's own
+      # methods, one for GemResolver::Resolved's), which Steep accepted but is not the canonical layout in this
+      # project's `sig/`.
       #
-      # The writer now builds a tree keyed by qualified-name
-      # segments. Each tree node carries (qualified_name,
-      # methods, shells, children); rendering walks the tree
-      # so every nested class appears inside its parent's
-      # block. Empty class shells (gap-#3 follow-up (e), e.g.
-      # `Unresolvable = Data.define(...)`) participate as
-      # zero-method tree nodes — they emit `class Foo\nend`
-      # at their position.
+      # The writer now builds a tree keyed by qualified-name segments. Each tree node carries (qualified_name,
+      # methods, shells, children); rendering walks the tree so every nested class appears inside its parent's
+      # block. Empty class shells (gap-#3 follow-up (e), e.g. `Unresolvable = Data.define(...)`) participate as
+      # zero-method tree nodes — they emit `class Foo\nend` at their position.
       def render_new_file(candidates)
         shells = collect_class_shells(candidates)
         tree = build_namespace_tree(candidates, shells)
@@ -162,8 +133,7 @@ module Rigor
         render_tree_nodes(tree, kinds, supers, 0)
       end
 
-      # Drains `class_shells` from every candidate; the
-      # generator's walker populates the same set on every
+      # Drains `class_shells` from every candidate; the generator's walker populates the same set on every
       # candidate produced from a given file (gap-#3 (e)).
       def collect_class_shells(candidates)
         shells = Set.new
@@ -179,29 +149,22 @@ module Rigor
         merged
       end
 
-      # Folds every candidate's per-file namespace-kind map
-      # into one run-level view so a `class Foo` recorded
-      # while scanning `foo.rb` governs the wrapper keyword
-      # emitted for `Foo` in a *sibling* file's target — e.g.
-      # `foo/bar.rb` declaring `class Foo::Bar`, whose compact
-      # constant path never names `Foo`, so the walker records
-      # no kind for it. Without this view that sibling target
-      # wraps the nested class in `module Foo` while `foo.rbs`
-      # declares `class Foo`; loading both raises
-      # `RBS::DuplicatedDeclarationError`, aborting the whole
-      # RBS env build.
+      # Folds every candidate's per-file namespace-kind map into one run-level view so a `class Foo` recorded
+      # while scanning `foo.rb` governs the wrapper keyword emitted for `Foo` in a *sibling* file's target — e.g.
+      # `foo/bar.rb` declaring `class Foo::Bar`, whose compact constant path never names `Foo`, so the walker
+      # records no kind for it. Without this view that sibling target wraps the nested class in `module Foo`
+      # while `foo.rbs` declares `class Foo`; loading both raises `RBS::DuplicatedDeclarationError`, aborting the
+      # whole RBS env build.
       def build_namespace_kinds(candidates)
         candidates.each_with_object({}) do |candidate, acc|
           (candidate.namespace_kinds || {}).each { |name, kind| apply_namespace_kind(acc, name, kind) }
         end
       end
 
-      # Superclass twins of {#merged_namespace_kinds} /
-      # {#build_namespace_kinds}: fold every candidate's
-      # per-file `class_superclasses` map into one view keyed by
-      # qualified class name. Only plain-constant superclasses are
-      # ever recorded (the generator skips computed ones), so a
-      # missing key means "emit no superclass", never "unknown".
+      # Superclass twins of {#merged_namespace_kinds} / {#build_namespace_kinds}: fold every candidate's
+      # per-file `class_superclasses` map into one view keyed by qualified class name. Only plain-constant
+      # superclasses are ever recorded (the generator skips computed ones), so a missing key means "emit no
+      # superclass", never "unknown".
       def merged_superclasses(candidates)
         merged = @global_superclasses.dup
         candidates.each do |c|
@@ -220,13 +183,10 @@ module Rigor
         end
       end
 
-      # A `class` declaration is authoritative and MUST win
-      # over the `:module` wrapper default: a compact
-      # `class Foo::Bar` never names `Foo`, so the only signal
-      # for `Foo`'s kind is an actual `class Foo` (or
-      # `Const = Data.define(...)` shell) seen elsewhere. This
-      # guarantees the generated tree never mixes `class` /
-      # `module` for the same constant.
+      # A `class` declaration is authoritative and MUST win over the `:module` wrapper default: a compact
+      # `class Foo::Bar` never names `Foo`, so the only signal for `Foo`'s kind is an actual `class Foo` (or
+      # `Const = Data.define(...)` shell) seen elsewhere. This guarantees the generated tree never mixes
+      # `class` / `module` for the same constant.
       def apply_namespace_kind(map, key, kind)
         if kind == :class
           map[key] = :class
@@ -235,12 +195,9 @@ module Rigor
         end
       end
 
-      # Tree node: { name:, children: Hash{String => node},
-      # methods: Array<MethodCandidate>, shell: Boolean }.
-      # `shell` flags nodes that came in via `class_shells`
-      # only (no methods of their own); rendering uses it to
-      # default the keyword to `:class` for the `class Const`
-      # = `Data.define(...)` case.
+      # Tree node: { name:, children: Hash{String => node}, methods: Array<MethodCandidate>, shell: Boolean }.
+      # `shell` flags nodes that came in via `class_shells` only (no methods of their own); rendering uses it to
+      # default the keyword to `:class` for the `class Const` = `Data.define(...)` case.
       def build_namespace_tree(candidates, shells)
         root = { name: nil, children: {}, methods: [], shell: false }
         candidates.group_by(&:class_name).each do |class_name, methods|
@@ -287,12 +244,9 @@ module Rigor
         method_lines + child_blocks
       end
 
-      # ` < Super` for a `class` node whose qualified name has a
-      # recorded superclass, else the empty string. A `module`
-      # never takes a superclass (RBS forbids it), so the keyword
-      # gates emission — a name coincidentally recorded as both
-      # (impossible from one source class, but cheap to guard)
-      # stays a bare module.
+      # ` < Super` for a `class` node whose qualified name has a recorded superclass, else the empty string. A
+      # `module` never takes a superclass (RBS forbids it), so the keyword gates emission — a name coincidentally
+      # recorded as both (impossible from one source class, but cheap to guard) stays a bare module.
       def superclass_suffix(keyword, supers, qualified)
         return "" unless keyword == :class
 
@@ -300,14 +254,10 @@ module Rigor
         superclass ? " < #{superclass}" : ""
       end
 
-      # Per ADR-14 gap-#3 (a) the keyword for a segment comes
-      # from `namespace_kinds` when known. The default for an
-      # explicit class shell (gap-#3 (e), `Const =
-      # Data.define(...)`) is `:class`; otherwise default to
-      # `:class` for a method-bearing leaf node and `:module`
-      # for an intermediate (children-only) segment. Defaulting
-      # intermediates to `:module` matches RBS's "multiple
-      # `module Foo` declarations merge" rule.
+      # Per ADR-14 gap-#3 (a) the keyword for a segment comes from `namespace_kinds` when known. The default for
+      # an explicit class shell (gap-#3 (e), `Const = Data.define(...)`) is `:class`; otherwise default to
+      # `:class` for a method-bearing leaf node and `:module` for an intermediate (children-only) segment.
+      # Defaulting intermediates to `:module` matches RBS's "multiple `module Foo` declarations merge" rule.
       def node_keyword(node, kinds, qualified)
         return kinds.fetch(qualified) if kinds.key?(qualified)
         return :class if node[:shell]
@@ -332,15 +282,11 @@ module Rigor
                         action: action, applied: state.applied, skipped: state.skipped)
       end
 
-      # ADR-14 gap-#3 (e): for every requested class shell
-      # that isn't already declared in the target file,
-      # insert an empty `class Const\nend` block inside the
-      # nearest existing ancestor. Shells already covered by
-      # an existing declaration are silently a no-op. The
-      # `applied` accumulator does NOT grow — shells are
-      # structural declarations, not methods, so the
-      # action-count surface (`updated +N`) keeps
-      # reflecting method changes only.
+      # ADR-14 gap-#3 (e): for every requested class shell that isn't already declared in the target file,
+      # insert an empty `class Const\nend` block inside the nearest existing ancestor. Shells already covered by
+      # an existing declaration are silently a no-op. The `applied` accumulator does NOT grow — shells are
+      # structural declarations, not methods, so the action-count surface (`updated +N`) keeps reflecting method
+      # changes only.
       def merge_class_shells(state, shells, kinds)
         shells.each do |qualified|
           next if find_class_decl(state.decls, qualified)
@@ -371,11 +317,9 @@ module Rigor
         [[], segments]
       end
 
-      # Pulls the indent depth (in `INDENT` units) one level
-      # deeper than the anchor decl's own column. Pre-
-      # existing members might be missing (an empty
-      # `class Foo; end`) so the keyword column is the
-      # robust signal.
+      # Pulls the indent depth (in `INDENT` units) one level deeper than the anchor decl's own column.
+      # Pre-existing members might be missing (an empty `class Foo; end`) so the keyword column is the robust
+      # signal.
       def anchor_decl_indent_depth(decl)
         decl_column = decl.location[:keyword].start_column
         (decl_column / INDENT.size) + 1
@@ -423,12 +367,9 @@ module Rigor
         state.decls = parse_signature(state.source) || state.decls
       end
 
-      # Walks the parsed decl tree recursively, tracking the
-      # enclosing module/class prefix, and returns the
-      # declaration whose fully-qualified name matches
-      # `qualified_name`. Recursing into modules lets us
-      # match `Rigor::Type::Nominal` against the
-      # `class Nominal` declaration nested inside
+      # Walks the parsed decl tree recursively, tracking the enclosing module/class prefix, and returns the
+      # declaration whose fully-qualified name matches `qualified_name`. Recursing into modules lets us match
+      # `Rigor::Type::Nominal` against the `class Nominal` declaration nested inside
       # `module Rigor; module Type; … end; end`.
       def find_class_decl(decls, qualified_name)
         find_class_decl_in(decls, [], qualified_name)
@@ -448,8 +389,7 @@ module Rigor
         nil
       end
 
-      # Appends an entirely new `class Foo … end` block at the
-      # end of the file (with a leading blank line as
+      # Appends an entirely new `class Foo … end` block at the end of the file (with a leading blank line as
       # separator).
       def append_new_class(source, class_name, methods, applied, superclass = nil)
         body = methods.map { |c| "#{INDENT}#{c.rbs}" }.join("\n")
@@ -481,13 +421,10 @@ module Rigor
         source
       end
 
-      # Returns a list of `[method_name (Symbol), kind (Symbol)]`
-      # pairs for every method-like member in the declaration.
-      # ADR-14 slice 4 recognises `MethodDefinition`'s
-      # `:instance` / `:singleton` kind plus the three
-      # `attr_*` declaration kinds so a source-side
-      # `attr_reader :name` and an RBS-side `attr_reader name: T`
-      # are treated as the same member (i.e. user-authored).
+      # Returns a list of `[method_name (Symbol), kind (Symbol)]` pairs for every method-like member in the
+      # declaration. ADR-14 slice 4 recognises `MethodDefinition`'s `:instance` / `:singleton` kind plus the
+      # three `attr_*` declaration kinds so a source-side `attr_reader :name` and an RBS-side
+      # `attr_reader name: T` are treated as the same member (i.e. user-authored).
       def collect_member_pairs(decl)
         pairs = []
         decl.members.each { |m| collect_pairs_for_member(m, pairs) }
@@ -512,10 +449,9 @@ module Rigor
         methods.partition { |c| !existing_pairs.include?([c.method_name, c.kind]) }
       end
 
-      # Inserts each new method line one column before the
-      # class declaration's `end` keyword. The insertion text
-      # carries its own leading indent + trailing newline so
-      # the surrounding source's whitespace stays intact.
+      # Inserts each new method line one column before the class declaration's `end` keyword. The insertion
+      # text carries its own leading indent + trailing newline so the surrounding source's whitespace stays
+      # intact.
       def insert_into_class(source, decl, new_methods)
         return source if new_methods.empty?
 
@@ -524,34 +460,25 @@ module Rigor
         source[0...end_pos] + addition + source[end_pos..]
       end
 
-      # Walks the class's existing method declarations; for
-      # each replaceable candidate that matches a member
-      # name, slices out the old declaration's source range
-      # and substitutes the new RBS one-liner. Members that
+      # Walks the class's existing method declarations; for each replaceable candidate that matches a member
+      # name, slices out the old declaration's source range and substitutes the new RBS one-liner. Members that
       # are not `MethodDefinition`s are left alone.
       #
-      # Two candidate classifications are eligible for
-      # replacement under `--overwrite`:
+      # Two candidate classifications are eligible for replacement under `--overwrite`:
       #
-      # 1. `TIGHTER_RETURN` — the classifier already proved the
-      #    new return type is a strict subtype of the declared
-      #    one (with lenience guards passed).
-      # 2. `NEW_METHOD` whose new RBS strictly tightens an
-      #    `untyped` position in the existing declaration. The
-      #    canonical case is `initialize_stub_candidate`, which
-      #    bypasses the existing-RBS comparison and always
-      #    classifies as `NEW_METHOD` — when sig-gen's
-      #    `--params=observed` upgrades a `(path: untyped) -> void`
-      #    declaration to `(path: String) -> void` we want
-      #    `--overwrite` to apply it.
+      # 1. `TIGHTER_RETURN` — the classifier already proved the new return type is a strict subtype of the
+      #    declared one (with lenience guards passed).
+      # 2. `NEW_METHOD` whose new RBS strictly tightens an `untyped` position in the existing declaration. The
+      #    canonical case is `initialize_stub_candidate`, which bypasses the existing-RBS comparison and always
+      #    classifies as `NEW_METHOD` — when sig-gen's `--params=observed` upgrades a `(path: untyped) -> void`
+      #    declaration to `(path: String) -> void` we want `--overwrite` to apply it.
       def replace_eligible_conflicts(source, decl, candidates)
         eligible = candidates.select { |c| eligible_for_replacement?(c, decl, source) }
         return [source, []] if eligible.empty?
 
         replaced = []
-        # Apply replacements from highest byte position downward
-        # so earlier byte offsets remain valid as the source
-        # grows or shrinks.
+        # Apply replacements from highest byte position downward so earlier byte offsets remain valid as the
+        # source grows or shrinks.
         sorted = eligible.sort_by { |c| -member_position(decl, c.method_name, c.kind) }
         sorted.each do |candidate|
           source = apply_replacement(source, decl, candidate) and replaced << candidate
@@ -567,14 +494,10 @@ module Rigor
         end
       end
 
-      # Compares the existing member's source-side RBS text
-      # against the candidate's proposed RBS text. Returns
-      # true when the new spelling has STRICTLY FEWER bare
-      # `untyped` tokens than the existing one — i.e. at
-      # least one `untyped` slot becomes a concrete type AND
-      # no concrete slot becomes `untyped`. Word-boundary
-      # matching ensures we count `untyped` only as a type
-      # token, not as a substring inside identifiers.
+      # Compares the existing member's source-side RBS text against the candidate's proposed RBS text. Returns
+      # true when the new spelling has STRICTLY FEWER bare `untyped` tokens than the existing one — i.e. at
+      # least one `untyped` slot becomes a concrete type AND no concrete slot becomes `untyped`. Word-boundary
+      # matching ensures we count `untyped` only as a type token, not as a substring inside identifiers.
       def tightens_untyped?(candidate, decl, source)
         member = find_method_member(decl, candidate.method_name, candidate.kind)
         return false if member.nil?
@@ -598,10 +521,8 @@ module Rigor
         end
       end
 
-      # Splices the new RBS one-liner over the existing
-      # declaration's byte range. `RBS::Parser`'s location
-      # starts at the `def` keyword, NOT at the column zero of
-      # the line, so the leading whitespace stays inside
+      # Splices the new RBS one-liner over the existing declaration's byte range. `RBS::Parser`'s location
+      # starts at the `def` keyword, NOT at the column zero of the line, so the leading whitespace stays inside
       # `source[0...start_pos]` and we do not re-emit it.
       def apply_replacement(source, decl, candidate)
         member = find_method_member(decl, candidate.method_name, candidate.kind)

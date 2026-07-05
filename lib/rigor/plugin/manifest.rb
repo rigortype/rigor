@@ -6,35 +6,27 @@ require_relative "additional_initializer"
 
 module Rigor
   module Plugin
-    # Value object describing one plugin's identity and metadata.
-    # Constructed once per plugin class through {Rigor::Plugin::Base.manifest};
-    # consumed by {Rigor::Plugin::Loader} when matching project
-    # configuration entries to registered plugins and by
-    # {Rigor::Cache::Descriptor::PluginEntry} when deriving cache keys.
+    # Value object describing one plugin's identity and metadata. Constructed once per plugin class through
+    # {Rigor::Plugin::Base.manifest}; consumed by {Rigor::Plugin::Loader} when matching project configuration
+    # entries to registered plugins and by {Rigor::Cache::Descriptor::PluginEntry} when deriving cache keys.
     #
-    # The fields are pinned by ADR-2 § "Registration, Configuration,
-    # and Caching"; the v0.1.0 plugin contract surface treats this
-    # struct as the public manifest shape.
+    # The fields are pinned by ADR-2 § "Registration, Configuration, and Caching"; the v0.1.0 plugin contract
+    # surface treats this struct as the public manifest shape.
     class Manifest # rubocop:disable Metrics/ClassLength
-      # Same regex {Rigor::Cache::Store::VALID_PRODUCER_ID} uses,
-      # so plugin ids round-trip through cache producer ids and
-      # `plugin.<id>.<rule>` diagnostic identifiers without escape.
+      # Same regex {Rigor::Cache::Store::VALID_PRODUCER_ID} uses, so plugin ids round-trip through cache
+      # producer ids and `plugin.<id>.<rule>` diagnostic identifiers without escape.
       VALID_ID = /\A[a-z][a-z0-9._-]*\z/
 
-      # The first-implementation `config_schema` accepts these value
-      # kinds. Slice 1 only checks key presence and shallow value
-      # kind; richer schemas (nested maps, enums) land later when
-      # the v0.1.0 protocol slices need them.
+      # The first-implementation `config_schema` accepts these value kinds. Slice 1 only checks key presence
+      # and shallow value kind; richer schemas (nested maps, enums) land later when the v0.1.0 protocol slices
+      # need them.
       VALID_VALUE_KINDS = %i[string boolean integer array hash any].freeze
 
-      # ADR-9 slice 4 — declared cross-plugin fact dependencies.
-      # `produces:` lists the names this plugin publishes through
-      # its `#prepare(services)` hook. `consumes:` lists the
-      # `(plugin_id, name)` pairs this plugin reads from
-      # `services.fact_store`. The loader uses both for
-      # topological sort + missing-producer detection; slice 4
-      # added the declarations; slice 5 (`Loader#topo_sort_plugins`)
-      # enforces ordering and missing-producer validation.
+      # ADR-9 slice 4 — declared cross-plugin fact dependencies. `produces:` lists the names this plugin
+      # publishes through its `#prepare(services)` hook. `consumes:` lists the `(plugin_id, name)` pairs this
+      # plugin reads from `services.fact_store`. The loader uses both for topological sort + missing-producer
+      # detection; slice 4 added the declarations; slice 5 (`Loader#topo_sort_plugins`) enforces ordering and
+      # missing-producer validation.
       class Consumption < Data.define(:plugin_id, :name, :optional)
         def initialize(plugin_id:, name:, optional: false)
           super(plugin_id: plugin_id.to_s, name: name.to_sym, optional: optional ? true : false)
@@ -110,17 +102,15 @@ module Rigor
         @source_rbs_synthesizer = source_rbs_synthesizer
       end
 
-      # Assigned outside assign_fields (which already carries the
-      # maximum positional arity) — set in `initialize` before the
-      # final freeze. ADR-36 nested-class emission tier.
+      # Assigned outside assign_fields (which already carries the maximum positional arity) — set in
+      # `initialize` before the final freeze. ADR-36 nested-class emission tier.
       def assign_nested_class_templates(nested_class_templates)
         @nested_class_templates = nested_class_templates.dup.freeze
       end
       private :assign_nested_class_templates
 
-      # ADR-38 — assigned outside assign_fields (which already carries
-      # the maximum positional arity), set in `initialize` before the
-      # final freeze.
+      # ADR-38 — assigned outside assign_fields (which already carries the maximum positional arity), set in
+      # `initialize` before the final freeze.
       def assign_additional_initializers(additional_initializers)
         @additional_initializers = additional_initializers.dup.freeze
       end
@@ -129,11 +119,9 @@ module Rigor
 
       public
 
-      # Validates the user-supplied plugin config block against this
-      # manifest's `config_schema`. Returns an array of human-readable
-      # error strings (empty when the config is valid). Slice 1 checks
-      # only unknown keys and shallow value kind; nested schemas come
-      # with later slices.
+      # Validates the user-supplied plugin config block against this manifest's `config_schema`. Returns an
+      # array of human-readable error strings (empty when the config is valid). Slice 1 checks only unknown
+      # keys and shallow value kind; nested schemas come with later slices.
       def validate_config(config)
         return ["plugin config must be a Hash, got #{config.class}"] unless config.is_a?(Hash)
 
@@ -226,9 +214,8 @@ module Rigor
         end
       end
 
-      # ADR-40 — a `config_schema` value is either a bare kind
-      # (`Symbol`/`String`, the original form) or a `{kind:, default:}`
-      # Hash. These three helpers read whichever shape was given.
+      # ADR-40 — a `config_schema` value is either a bare kind (`Symbol`/`String`, the original form) or a
+      # `{kind:, default:}` Hash. These three helpers read whichever shape was given.
       def schema_kind(value)
         if value.is_a?(Hash)
           kind = value[:kind] || value["kind"]
@@ -277,10 +264,9 @@ module Rigor
         end
       end
 
-      # Shared shape check for the Array-of-X manifest fields. Every entry
-      # must satisfy the block; otherwise raise the uniform "must be an
-      # Array of <label>" message. Centralises the message format the
-      # field validators below share so it cannot drift between them.
+      # Shared shape check for the Array-of-X manifest fields. Every entry must satisfy the block; otherwise
+      # raise the uniform "must be an Array of <label>" message. Centralises the message format the field
+      # validators below share so it cannot drift between them.
       def validate_array_of!(field, value, label, &)
         return if value.is_a?(Array) && value.all?(&)
 
@@ -291,73 +277,56 @@ module Rigor
         validate_array_of!("produces", produces, "Symbol/String") { |p| p.is_a?(Symbol) || p.is_a?(String) }
       end
 
-      # ADR-10 5a — `owns_receivers:` declares the class names
-      # this plugin claims sole ownership of. The dispatcher's
-      # dependency-source-inference tier consults this list
-      # before consulting its own catalog: receivers owned by a
-      # registered plugin (directly or via subclass) decline,
-      # so plugin contributions stay authoritative for those
-      # types.
+      # ADR-10 5a — `owns_receivers:` declares the class names this plugin claims sole ownership of. The
+      # dispatcher's dependency-source-inference tier consults this list before consulting its own catalog:
+      # receivers owned by a registered plugin (directly or via subclass) decline, so plugin contributions
+      # stay authoritative for those types.
       def validate_owns_receivers!(owns_receivers)
         validate_array_of!("owns_receivers", owns_receivers, "non-empty String") { |c| c.is_a?(String) && !c.empty? }
       end
 
-      # ADR-26 — `open_receivers:` declares the class names this
-      # plugin marks as "open": statically known to respond beyond
-      # their RBS-declared method surface (e.g. `ActiveRecord::Relation`,
-      # which delegates an unbounded set of user-defined scopes to
-      # its model). `Analysis::CheckRules` skips the
-      # `call.undefined-method` rule for a receiver whose class any
-      # loaded plugin lists here — flagging a method on a class
-      # with an open dynamic surface is unsound. Distinct from
-      # `owns_receivers:` (which routes dispatch); this one only
-      # suppresses the diagnostic.
+      # ADR-26 — `open_receivers:` declares the class names this plugin marks as "open": statically known to
+      # respond beyond their RBS-declared method surface (e.g. `ActiveRecord::Relation`, which delegates an
+      # unbounded set of user-defined scopes to its model). `Analysis::CheckRules` skips the
+      # `call.undefined-method` rule for a receiver whose class any loaded plugin lists here — flagging a
+      # method on a class with an open dynamic surface is unsound. Distinct from `owns_receivers:` (which
+      # routes dispatch); this one only suppresses the diagnostic.
       def validate_open_receivers!(open_receivers)
         validate_array_of!("open_receivers", open_receivers, "non-empty String") { |c| c.is_a?(String) && !c.empty? }
       end
 
-      # ADR-13 slice 2 — `type_node_resolvers:` declares the
-      # plugin-supplied `TypeNodeResolver` instances the parser
-      # consults (in slice 3) when an RBS::Extended payload's
-      # named- or generic-type head misses the built-in registry.
-      # Slice 2 carries the declarations on the manifest and the
-      # registry exposes them in registration order; the parser
-      # integration that actually drives the chain lands in
-      # slice 3.
+      # ADR-13 slice 2 — `type_node_resolvers:` declares the plugin-supplied `TypeNodeResolver` instances the
+      # parser consults (in slice 3) when an RBS::Extended payload's named- or generic-type head misses the
+      # built-in registry. Slice 2 carries the declarations on the manifest and the registry exposes them in
+      # registration order; the parser integration that actually drives the chain lands in slice 3.
       def validate_type_node_resolvers!(resolvers)
         validate_array_of!("type_node_resolvers", resolvers, "Rigor::Plugin::TypeNodeResolver instances") do |r|
           r.is_a?(TypeNodeResolver)
         end
       end
 
-      # ADR-16 slice 1a — `block_as_methods:` declares the Tier A
-      # substrate entries the plugin contributes. Slice 1a carries
-      # the declarations on the manifest; the engine hook that
-      # actually narrows `Scope#self_type` for matching blocks
-      # arrives in a subsequent slice.
+      # ADR-16 slice 1a — `block_as_methods:` declares the Tier A substrate entries the plugin contributes.
+      # Slice 1a carries the declarations on the manifest; the engine hook that actually narrows
+      # `Scope#self_type` for matching blocks arrives in a subsequent slice.
       def validate_block_as_methods!(entries)
         validate_array_of!("block_as_methods", entries, "Rigor::Plugin::Macro::BlockAsMethod instances") do |e|
           e.is_a?(Macro::BlockAsMethod)
         end
       end
 
-      # ADR-16 slice 2a — `heredoc_templates:` declares the Tier C
-      # substrate entries (heredoc-template synthesis on class-level
-      # DSL calls). Slice 2a carries the declarations on the
-      # manifest; the pre-pass + `SyntheticMethodIndex` that actually
-      # emit synthetic methods arrive in slice 2b.
+      # ADR-16 slice 2a — `heredoc_templates:` declares the Tier C substrate entries (heredoc-template
+      # synthesis on class-level DSL calls). Slice 2a carries the declarations on the manifest; the pre-pass +
+      # `SyntheticMethodIndex` that actually emit synthetic methods arrive in slice 2b.
       def validate_heredoc_templates!(entries)
         validate_array_of!("heredoc_templates", entries, "Rigor::Plugin::Macro::HeredocTemplate instances") do |e|
           e.is_a?(Macro::HeredocTemplate)
         end
       end
 
-      # ADR-36 — `nested_class_templates:` declares the
-      # nested-class emission tier (enum-shaped block DSLs that mint
-      # nested subclasses, e.g. Mangrove's `variants do variant
-      # Const, Type end`). The scanner synthesises the variant
-      # subclasses + their `#inner` reader through the existing
-      # `SyntheticMethodIndex` primitive.
+      # ADR-36 — `nested_class_templates:` declares the nested-class emission tier (enum-shaped block DSLs
+      # that mint nested subclasses, e.g. Mangrove's `variants do variant Const, Type end`). The scanner
+      # synthesises the variant subclasses + their `#inner` reader through the existing `SyntheticMethodIndex`
+      # primitive.
       def validate_nested_class_templates!(entries)
         validate_array_of!("nested_class_templates", entries,
                            "Rigor::Plugin::Macro::NestedClassTemplate instances") do |e|
@@ -365,105 +334,77 @@ module Rigor
         end
       end
 
-      # ADR-16 slice 3a — `trait_registries:` declares the Tier B
-      # substrate entries (trait-inlining via bundled module
-      # registry). Slice 3a carries the declarations on the
-      # manifest; the scanner + per-method explosion through
-      # `SyntheticMethodIndex` (slice 2b primitive) arrives in
-      # slice 3b.
+      # ADR-16 slice 3a — `trait_registries:` declares the Tier B substrate entries (trait-inlining via
+      # bundled module registry). Slice 3a carries the declarations on the manifest; the scanner + per-method
+      # explosion through `SyntheticMethodIndex` (slice 2b primitive) arrives in slice 3b.
       def validate_trait_registries!(entries)
         validate_array_of!("trait_registries", entries, "Rigor::Plugin::Macro::TraitRegistry instances") do |e|
           e.is_a?(Macro::TraitRegistry)
         end
       end
 
-      # ADR-20 slice 6 — `hkt_registrations:` declares the
-      # Lightweight HKT URI registrations this plugin ships
-      # (analogous to `%a{rigor:v1:hkt_register: ...}` directives
-      # but published via the manifest contract instead of a
-      # shipped `.rbs` file). Each entry MUST be an
-      # `Rigor::Inference::HktRegistry::Registration`. The
-      # registry aggregator on `Plugin::Registry` flattens
-      # entries from every loaded plugin and merges them into
-      # `env.hkt_registry` on top of `Builtins::HktBuiltins.registry`;
-      # user `.rbs` overlays merge on top of plugin entries
-      # last-write-wins.
+      # ADR-20 slice 6 — `hkt_registrations:` declares the Lightweight HKT URI registrations this plugin
+      # ships (analogous to `%a{rigor:v1:hkt_register: ...}` directives but published via the manifest
+      # contract instead of a shipped `.rbs` file). Each entry MUST be an
+      # `Rigor::Inference::HktRegistry::Registration`. The registry aggregator on `Plugin::Registry` flattens
+      # entries from every loaded plugin and merges them into `env.hkt_registry` on top of
+      # `Builtins::HktBuiltins.registry`; user `.rbs` overlays merge on top of plugin entries last-write-wins.
       def validate_hkt_registrations!(entries)
         validate_array_of!("hkt_registrations", entries, "Rigor::Inference::HktRegistry::Registration instances") do |e|
           e.is_a?(Inference::HktRegistry::Registration)
         end
       end
 
-      # ADR-20 slice 6 — `hkt_definitions:` declares the
-      # plugin's HKT type-function bodies (analogous to
-      # `%a{rigor:v1:hkt_define: ...}` directives). Each entry
-      # MUST be an `Rigor::Inference::HktRegistry::Definition`
-      # — typically built via
-      # `Rigor::Inference::HktRegistry.definition_with_body_tree(...)`
-      # so plugin authors can build the body programmatically
-      # via {Rigor::Inference::HktBody}'s node-constructor API
-      # without parsing a string.
+      # ADR-20 slice 6 — `hkt_definitions:` declares the plugin's HKT type-function bodies (analogous to
+      # `%a{rigor:v1:hkt_define: ...}` directives). Each entry MUST be an
+      # `Rigor::Inference::HktRegistry::Definition` — typically built via
+      # `Rigor::Inference::HktRegistry.definition_with_body_tree(...)` so plugin authors can build the body
+      # programmatically via {Rigor::Inference::HktBody}'s node-constructor API without parsing a string.
       def validate_hkt_definitions!(entries)
         validate_array_of!("hkt_definitions", entries, "Rigor::Inference::HktRegistry::Definition instances") do |e|
           e.is_a?(Inference::HktRegistry::Definition)
         end
       end
 
-      # ADR-25 — `signature_paths:` declares the RBS signature
-      # directories this plugin gem ships, as paths relative to the
-      # plugin's own gem root (e.g. `["sig"]`). `Plugin::Base#signature_paths`
-      # resolves them to absolute dirs against the gem root; the
-      # loader validates each exists and `Environment.for_project`
+      # ADR-25 — `signature_paths:` declares the RBS signature directories this plugin gem ships, as paths
+      # relative to the plugin's own gem root (e.g. `["sig"]`). `Plugin::Base#signature_paths` resolves them
+      # to absolute dirs against the gem root; the loader validates each exists and `Environment.for_project`
       # merges the resolved set into the RBS environment.
       def validate_signature_paths!(paths)
         validate_array_of!("signature_paths", paths, "non-empty String") { |p| p.is_a?(String) && !p.empty? }
       end
 
-      # ADR-28 — `protocol_contracts:` declares the path-scoped
-      # method-protocol contracts the plugin contributes. Each
-      # entry MUST be a `Rigor::Plugin::ProtocolContract`. The
-      # registry aggregator on `Plugin::Registry` flattens
-      # contracts across loaded plugins; the engine consults them
-      # in two places — `MethodParameterBinder` provides the
-      # declared parameter types into matching method bodies, and
-      # the contributing plugin's `#diagnostics_for_file` checks
-      # method presence + return-type conformance. The manifest
-      # field carries the plugin's *default* contracts; a plugin
-      # MAY override `Plugin::Base#protocol_contracts` to fold in
-      # per-project config (e.g. a custom convention path).
+      # ADR-28 — `protocol_contracts:` declares the path-scoped method-protocol contracts the plugin
+      # contributes. Each entry MUST be a `Rigor::Plugin::ProtocolContract`. The registry aggregator on
+      # `Plugin::Registry` flattens contracts across loaded plugins; the engine consults them in two places —
+      # `MethodParameterBinder` provides the declared parameter types into matching method bodies, and the
+      # contributing plugin's `#diagnostics_for_file` checks method presence + return-type conformance. The
+      # manifest field carries the plugin's *default* contracts; a plugin MAY override
+      # `Plugin::Base#protocol_contracts` to fold in per-project config (e.g. a custom convention path).
       def validate_protocol_contracts!(entries)
         validate_array_of!("protocol_contracts", entries, "Rigor::Plugin::ProtocolContract instances") do |e|
           e.is_a?(ProtocolContract)
         end
       end
 
-      # ADR-38 — `additional_initializers:` declares the
-      # (receiver_constraint, methods) pairs whose `def`-form methods
-      # the engine treats like `initialize` for the read-before-write
-      # nil soundness gate. Each entry MUST be a
-      # `Rigor::Plugin::AdditionalInitializer`. The registry
-      # aggregator on `Plugin::Registry` flattens entries across
-      # loaded plugins; `Inference::ScopeIndexer` consults the set at
-      # its single gate.
+      # ADR-38 — `additional_initializers:` declares the (receiver_constraint, methods) pairs whose `def`-form
+      # methods the engine treats like `initialize` for the read-before-write nil soundness gate. Each entry
+      # MUST be a `Rigor::Plugin::AdditionalInitializer`. The registry aggregator on `Plugin::Registry`
+      # flattens entries across loaded plugins; `Inference::ScopeIndexer` consults the set at its single gate.
       def validate_additional_initializers!(entries)
         validate_array_of!("additional_initializers", entries, "Rigor::Plugin::AdditionalInitializer instances") do |e|
           e.is_a?(AdditionalInitializer)
         end
       end
 
-      # ADR-32 WD4 — `source_rbs_synthesizer:` declares a callable
-      # the engine invokes once per analysed Ruby source file at
-      # env-build time. The callable receives a source file path
-      # (String) and returns either an RBS source String to merge
-      # into the analysis environment or `nil` (no contribution
-      # for this file). Distinct from `signature_paths:` (static,
-      # bundled RBS): the synthesizer derives RBS from project
+      # ADR-32 WD4 — `source_rbs_synthesizer:` declares a callable the engine invokes once per analysed Ruby
+      # source file at env-build time. The callable receives a source file path (String) and returns either
+      # an RBS source String to merge into the analysis environment or `nil` (no contribution for this file).
+      # Distinct from `signature_paths:` (static, bundled RBS): the synthesizer derives RBS from project
       # source on each run.
       #
-      # The value is held as-given (no dup / freeze) because a
-      # callable instance is opaque to the manifest; the plugin
-      # author is responsible for thread-/Ractor-safety of any
-      # captured state (per ADR-15).
+      # The value is held as-given (no dup / freeze) because a callable instance is opaque to the manifest;
+      # the plugin author is responsible for thread-/Ractor-safety of any captured state (per ADR-15).
       def validate_source_rbs_synthesizer!(synthesizer)
         return if synthesizer.nil?
         return if synthesizer.respond_to?(:call)

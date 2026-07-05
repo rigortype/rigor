@@ -8,16 +8,13 @@ require_relative "command"
 
 module Rigor
   class CLI
-    # Executes `rigor explain <rule>`. Prints the catalog entry for
-    # one canonical rule id, a legacy alias, or a family wildcard
-    # (`call`, `flow`, `assert`, `dump`, `def`).
+    # Executes `rigor explain <rule>`. Prints the catalog entry for one canonical rule id, a legacy alias, or a family
+    # wildcard (`call`, `flow`, `assert`, `dump`, `def`).
     #
     # Without arguments lists every rule's id and one-line summary.
     #
-    # The command is read-only: no parser, no analyzer, no I/O
-    # beyond the rendered catalog. Useful when a user sees a
-    # diagnostic in the editor and wants to know what the rule
-    # means without leaving the terminal.
+    # The command is read-only: no parser, no analyzer, no I/O beyond the rendered catalog. Useful when a user sees a
+    # diagnostic in the editor and wants to know what the rule means without leaving the terminal.
     class ExplainCommand < Command
       USAGE = "Usage: rigor explain [options] [<rule>]"
 

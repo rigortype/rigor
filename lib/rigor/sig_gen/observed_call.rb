@@ -2,27 +2,19 @@
 
 module Rigor
   module SigGen
-    # Per-call-site argument observation produced by
-    # {ObservationCollector}. ADR-14 follow-up: the earlier
-    # MVP shape (`Array[Type]` of positional types only)
-    # could not represent keyword arguments — keyword calls
-    # like `MethodCatalog.new(path: ..., mutating_selectors: ...)`
-    # were silently skipped in that shape.
-    # The new shape carries positional and keyword arg types
-    # in parallel so the per-position / per-keyword unions
-    # can each be reconstructed independently.
+    # Per-call-site argument observation produced by {ObservationCollector}. ADR-14 follow-up: the earlier MVP
+    # shape (`Array[Type]` of positional types only) could not represent keyword arguments — keyword calls like
+    # `MethodCatalog.new(path: ..., mutating_selectors: ...)` were silently skipped in that shape. The new shape
+    # carries positional and keyword arg types in parallel so the per-position / per-keyword unions can each be
+    # reconstructed independently.
     #
     # The carrier is intentionally minimal:
-    # - `positional` — frozen Array of `Rigor::Type` per
-    #   positional argument, in call-site order.
-    # - `keyword` — frozen Hash mapping each keyword
-    #   argument's Symbol name to its `Rigor::Type`.
+    # - `positional` — frozen Array of `Rigor::Type` per positional argument, in call-site order.
+    # - `keyword` — frozen Hash mapping each keyword argument's Symbol name to its `Rigor::Type`.
     #
-    # Generator-side callers also accept a legacy shape
-    # (plain Array of types) for backward compatibility with
-    # specs that constructed observations directly before
-    # this carrier existed; `ObservedCall.from(...)` does the
-    # lift.
+    # Generator-side callers also accept a legacy shape (plain Array of types) for backward compatibility with
+    # specs that constructed observations directly before this carrier existed; `ObservedCall.from(...)` does
+    # the lift.
     class ObservedCall
       attr_reader :positional, :keyword
 
@@ -45,11 +37,9 @@ module Rigor
         [ObservedCall, positional, keyword].hash
       end
 
-      # Lifts the legacy plain-Array shape into an
-      # `ObservedCall` carrier. Already-lifted values pass
-      # through unchanged. Used by `Generator#initialize`'s
-      # observations-normalisation pass so spec fixtures
-      # written against the slice-3 surface keep working.
+      # Lifts the legacy plain-Array shape into an `ObservedCall` carrier. Already-lifted values pass through
+      # unchanged. Used by `Generator#initialize`'s observations-normalisation pass so spec fixtures written
+      # against the slice-3 surface keep working.
       def self.from(value)
         case value
         when ObservedCall then value

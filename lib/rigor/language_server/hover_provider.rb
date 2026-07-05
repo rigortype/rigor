@@ -12,16 +12,14 @@ require_relative "../inference/scope_indexer"
 
 module Rigor
   module LanguageServer
-    # Answers `textDocument/hover` requests by running the same
-    # NodeLocator + ScopeIndexer + `Scope#type_of` chain that
-    # `rigor type-of` already drives. The LSP wraps the result in a
-    # `Hover` payload with markdown contents.
+    # Answers `textDocument/hover` requests by running the same NodeLocator + ScopeIndexer + `Scope#type_of`
+    # chain that `rigor type-of` already drives. The LSP wraps the result in a `Hover` payload with markdown
+    # contents.
     #
     # Per LSP spec § "Position":
     # - `line` and `character` are 0-based.
-    # - `character` counts UTF-16 code units; v1 emits byte counts
-    #   for ASCII source (UTF-16 conversion is queued, see design
-    #   doc § "Open questions").
+    # - `character` counts UTF-16 code units; v1 emits byte counts for ASCII source (UTF-16 conversion is
+    #   queued, see design doc § "Open questions").
     class HoverProvider
       include BufferResolution
 
@@ -42,8 +40,7 @@ module Rigor
         parse_result = Prism.parse(entry.bytes, filepath: path, version: @project_context.configuration.target_ruby)
         return nil unless parse_result.errors.empty?
 
-        # Rigor's NodeLocator uses 1-based line / column; LSP uses
-        # 0-based. Translate at the boundary.
+        # Rigor's NodeLocator uses 1-based line / column; LSP uses 0-based. Translate at the boundary.
         node = locate_node(source: entry.bytes, root: parse_result.value, line: line + 1, character: character + 1)
         return nil if node.nil?
 
@@ -64,8 +61,8 @@ module Rigor
       end
 
       def base_scope(_path)
-        # Pulls the Environment from the cached ProjectContext so
-        # each hover avoids repeating the RBS-load build.
+        # Pulls the Environment from the cached ProjectContext so each hover avoids repeating the RBS-load
+        # build.
         Scope.empty(environment: @project_context.environment)
       end
     end

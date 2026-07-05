@@ -9,16 +9,12 @@ module Rigor
     # Output formatter for `rigor sig-gen`.
     #
     # Supports three modes:
-    # - `:print` (default) — RBS skeletons grouped by source
-    #   file and class declaration, ready for the user to
+    # - `:print` (default) — RBS skeletons grouped by source file and class declaration, ready for the user to
     #   paste into `sig/<path>.rbs`.
-    # - `:diff` — a unified-style diff comparing the existing
-    #   RBS spelling (if any) against the inferred spelling.
-    #   The MVP renders a minimal "- declared / + inferred"
-    #   block; full per-file diffing arrives with slice 2's
-    #   `--write` merge.
-    # - `:json` — machine-readable payload with the same
-    #   classification table as `:print`.
+    # - `:diff` — a unified-style diff comparing the existing RBS spelling (if any) against the inferred
+    #   spelling. The MVP renders a minimal "- declared / + inferred" block; full per-file diffing arrives with
+    #   slice 2's `--write` merge.
+    # - `:json` — machine-readable payload with the same classification table as `:print`.
     class Renderer
       def initialize(out:)
         @out = out
@@ -107,10 +103,8 @@ module Rigor
 
       public
 
-      # Renders the per-source-file outcomes of a `--write`
-      # run. Distinct from {#render} because the write
-      # path's reporting surface is action-oriented (created
-      # / updated / skipped) rather than candidate-oriented.
+      # Renders the per-source-file outcomes of a `--write` run. Distinct from {#render} because the write
+      # path's reporting surface is action-oriented (created / updated / skipped) rather than candidate-oriented.
       def render_write(results:, format:)
         case format
         when "json" then render_write_json(results)

@@ -9,8 +9,8 @@ module Rigor
   class CLI
     # Executes the `rigor lsp` command.
     #
-    # Starts a long-running LSP server over stdio (JSON-RPC).
-    # See `docs/design/20260517-language-server.md` for the design.
+    # Starts a long-running LSP server over stdio (JSON-RPC). See `docs/design/20260517-language-server.md` for the
+    # design.
     class LspCommand < Command
       USAGE = "Usage: rigor lsp [options]"
 
@@ -29,13 +29,10 @@ module Rigor
         require_relative "../configuration"
         require "language_server-protocol"
 
-        # STDIN is read frame-by-frame via the gem's `Io::Reader`;
-        # STDOUT is wrapped in `SynchronizedWriter` so concurrent
-        # writes from the main dispatch thread + the Debouncer's
-        # async threads don't interleave frames. The Loop runs
-        # until either STDIN hits EOF or `server.exited?`; the
-        # process then exits with the server's recorded code
-        # (0 after a clean shutdown+exit, 1 otherwise).
+        # STDIN is read frame-by-frame via the gem's `Io::Reader`; STDOUT is wrapped in `SynchronizedWriter` so
+        # concurrent writes from the main dispatch thread + the Debouncer's async threads don't interleave frames. The
+        # Loop runs until either STDIN hits EOF or `server.exited?`; the process then exits with the server's recorded
+        # code (0 after a clean shutdown+exit, 1 otherwise).
         writer = LanguageServer::SynchronizedWriter.new(
           ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
         )
@@ -46,19 +43,14 @@ module Rigor
 
       private
 
-      # Builds the full collaborator graph from a fresh
-      # `Configuration` + `ProjectContext`. Returns `[server,
-      # loop]` so the caller drives the loop and reads
-      # `server.exit_code` for the process exit status.
+      # Builds the full collaborator graph from a fresh `Configuration` + `ProjectContext`. Returns `[server, loop]` so
+      # the caller drives the loop and reads `server.exit_code` for the process exit status.
       def build_server(writer:, config_path:) # rubocop:disable Metrics/MethodLength
         configuration = Configuration.load(config_path)
-        # ProjectContext caches Environment + Cache::Store across
-        # requests so hover / publish hit the warm path. Invalidated
-        # by `workspace/didChangeWatchedFiles` and
-        # `workspace/didChangeConfiguration`.
+        # ProjectContext caches Environment + Cache::Store across requests so hover / publish hit the warm path.
+        # Invalidated by `workspace/didChangeWatchedFiles` and `workspace/didChangeConfiguration`.
         project_context = LanguageServer::ProjectContext.new(configuration: configuration)
-        # Single source of truth for buffer state — threaded to
-        # Server + all three providers.
+        # Single source of truth for buffer state — threaded to Server + all three providers.
         buffer_table = LanguageServer::BufferTable.new
         debouncer = LanguageServer::Debouncer.new
         publisher = LanguageServer::DiagnosticPublisher.new(

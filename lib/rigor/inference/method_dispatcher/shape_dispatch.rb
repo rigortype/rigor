@@ -6,63 +6,46 @@ require_relative "call_context"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Slice 5 phase 2 shape-aware dispatch tier. Sits between
-      # {ConstantFolding} (which folds Constant-on-Constant arithmetic)
-      # and {RbsDispatch} (which projects shape carriers to their
+      # Slice 5 phase 2 shape-aware dispatch tier. Sits between {ConstantFolding} (which folds
+      # Constant-on-Constant arithmetic) and {RbsDispatch} (which projects shape carriers to their
       # underlying nominal and resolves return types through RBS).
       #
-      # The tier resolves a curated catalogue of element-access
-      # methods on `Rigor::Type::Tuple` and `Rigor::Type::HashShape`
-      # receivers, returning the *precise* member type rather than the
-      # projected `Array#[]` / `Hash#fetch` result. When the dispatch
-      # cannot prove which element will be returned (non-static key,
-      # out-of-range index, multi-arg `dig`, ...) the tier returns
-      # `nil` so the surrounding pipeline falls through to
-      # {RbsDispatch} and the projection-based answer.
+      # The tier resolves a curated catalogue of element-access methods on `Rigor::Type::Tuple` and
+      # `Rigor::Type::HashShape` receivers, returning the *precise* member type rather than the projected
+      # `Array#[]` / `Hash#fetch` result. When the dispatch cannot prove which element will be returned
+      # (non-static key, out-of-range index, multi-arg `dig`, ...) the tier returns `nil` so the
+      # surrounding pipeline falls through to {RbsDispatch} and the projection-based answer.
       #
       # Catalogue (Slice 5 phase 2):
       #
-      # - Tuple#`first`, Tuple#`last`, Tuple#`size`/`length`/`count`:
-      #   no-arg, no-block.
-      # - Tuple#`[]`, Tuple#`fetch` with a single `Constant[Integer]`
-      #   argument inside the tuple's bounds (negative indices are
-      #   normalised by length). Tuple#`[]` also handles static
-      #   Range and start-length slices, returning a sliced Tuple or
-      #   `Constant[nil]` for statically nil slices.
-      # - Tuple#`dig` with a chain of `Constant[Integer]` /
-      #   `Constant[Symbol|String]` arguments (Slice 5 phase 2 sub-
-      #   phase 2). Each step recurses through the resolved member; a
-      #   missing key/index along the chain collapses to `Constant[nil]`
-      #   so the carrier surfaces through downstream narrowing. A
-      #   non-shape intermediate falls through to the projection
-      #   answer.
+      # - Tuple#`first`, Tuple#`last`, Tuple#`size`/`length`/`count`: no-arg, no-block.
+      # - Tuple#`[]`, Tuple#`fetch` with a single `Constant[Integer]` argument inside the tuple's bounds
+      #   (negative indices are normalised by length). Tuple#`[]` also handles static Range and
+      #   start-length slices, returning a sliced Tuple or `Constant[nil]` for statically nil slices.
+      # - Tuple#`dig` with a chain of `Constant[Integer]` / `Constant[Symbol|String]` arguments (Slice 5
+      #   phase 2 sub-phase 2). Each step recurses through the resolved member; a missing key/index along
+      #   the chain collapses to `Constant[nil]` so the carrier surfaces through downstream narrowing. A
+      #   non-shape intermediate falls through to the projection answer.
       # - HashShape#`size`/`length`: no-arg.
-      # - HashShape#`[]`, HashShape#`fetch`, HashShape#`dig` with a
-      #   single `Constant[Symbol|String]` argument matching one of
-      #   the declared keys. `[]` and `dig` resolve missing keys to
-      #   `Constant[nil]`; `fetch` (no default, no block) falls through
-      #   on a miss because Ruby would raise `KeyError` and the
-      #   analyzer prefers the conservative projection answer.
-      # - HashShape#`dig` with multi-arg chains (Slice 5 phase 2 sub-
-      #   phase 2). Same chaining semantics as Tuple#`dig`.
-      # - HashShape#`values_at` with a list of `Constant[Symbol|String]`
-      #   arguments (Slice 5 phase 2 sub-phase 2). The result is a
-      #   `Tuple` whose elements are the per-key values
-      #   (`Constant[nil]` for missing keys, mirroring Ruby's runtime
-      #   behaviour).
+      # - HashShape#`[]`, HashShape#`fetch`, HashShape#`dig` with a single `Constant[Symbol|String]`
+      #   argument matching one of the declared keys. `[]` and `dig` resolve missing keys to
+      #   `Constant[nil]`; `fetch` (no default, no block) falls through on a miss because Ruby would raise
+      #   `KeyError` and the analyzer prefers the conservative projection answer.
+      # - HashShape#`dig` with multi-arg chains (Slice 5 phase 2 sub-phase 2). Same chaining semantics as
+      #   Tuple#`dig`.
+      # - HashShape#`values_at` with a list of `Constant[Symbol|String]` arguments (Slice 5 phase 2
+      #   sub-phase 2). The result is a `Tuple` whose elements are the per-key values (`Constant[nil]` for
+      #   missing keys, mirroring Ruby's runtime behaviour).
       #
       # Methods that this tier does NOT yet handle (they fall through):
       #
-      # - Iteration methods that bind block parameters (`each`, `map`,
-      #   `select`, ...). Those land alongside the BlockNode-aware
-      #   scope builder.
-      # - Tuple/HashShape mutation methods. These land with the future
-      #   effect model so read-only entries and mutation invalidation
-      #   have one place to report diagnostics.
+      # - Iteration methods that bind block parameters (`each`, `map`, `select`, ...). Those land alongside
+      #   the BlockNode-aware scope builder.
+      # - Tuple/HashShape mutation methods. These land with the future effect model so read-only entries
+      #   and mutation invalidation have one place to report diagnostics.
       #
-      # See docs/internal-spec/inference-engine.md (Slice 5 phase 2)
-      # and docs/adr/4-type-inference-engine.md for the slice
-      # rationale.
+      # See docs/internal-spec/inference-engine.md (Slice 5 phase 2) and docs/adr/4-type-inference-engine.md
+      # for the slice rationale.
       # rubocop:disable Metrics/ClassLength, Metrics/ModuleLength
       module ShapeDispatch
         module_function
@@ -109,8 +92,8 @@ module Rigor
           itself: :shape_self
         }.freeze
 
-        # Byte cap on a folded `tuple.join` result — a huge tuple times a
-        # long separator must not materialise an unbounded `Constant`.
+        # Byte cap on a folded `tuple.join` result — a huge tuple times a long separator must not
+        # materialise an unbounded `Constant`.
         TUPLE_JOIN_BYTE_LIMIT = 4096
         private_constant :TUPLE_JOIN_BYTE_LIMIT
 
@@ -156,29 +139,25 @@ module Rigor
           :<= => :hash_compare,
           :> => :hash_compare,
           :>= => :hash_compare,
-          # ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the
-          # `HashShape` carrier instead of degrading to the nominal `Hash`
-          # via the RBS `() -> self` signature, so
-          # `MESSAGES = {…}.freeze; MESSAGES[reason]` folds the value union
-          # rather than reading `Dynamic`. `dup` / `clone` produce a fresh
-          # object, but Rigor's shape carriers are immutable values, so
-          # preserving the carrier is sound for reads; a later in-place
-          # mutation routes through `MutationWidening`. (The `Tuple` table
-          # carries the same four entries; both became safe once the
-          # block-form over-fold guard landed in `try_dispatch` — ADR-78
-          # WD1 — so `CONST = [...].freeze; CONST.any? { … }` no longer
-          # folds the no-block result and fires a reflexive always-truthy.)
+          # ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the `HashShape` carrier instead of
+          # degrading to the nominal `Hash` via the RBS `() -> self` signature, so
+          # `MESSAGES = {…}.freeze; MESSAGES[reason]` folds the value union rather than reading `Dynamic`.
+          # `dup` / `clone` produce a fresh object, but Rigor's shape carriers are immutable values, so
+          # preserving the carrier is sound for reads; a later in-place mutation routes through
+          # `MutationWidening`. (The `Tuple` table carries the same four entries; both became safe once the
+          # block-form over-fold guard landed in `try_dispatch` — ADR-78 WD1 — so
+          # `CONST = [...].freeze; CONST.any? { … }` no longer folds the no-block result and fires a
+          # reflexive always-truthy.)
           freeze: :shape_self,
           dup: :shape_self,
           clone: :shape_self,
           itself: :shape_self
         }.freeze
 
-        # @return [Rigor::Type, nil] the precise element/value type, or
-        #   `nil` to defer to the next dispatcher tier.
-        # Per-carrier dispatch table. Adding a new carrier here
-        # is a one-row change; the helper methods stay private.
-        # Anonymous Type subclasses are not expected.
+        # @return [Rigor::Type, nil] the precise element/value type, or `nil` to defer to the next
+        #   dispatcher tier.
+        # Per-carrier dispatch table. Adding a new carrier here is a one-row change; the helper methods
+        # stay private. Anonymous Type subclasses are not expected.
         RECEIVER_HANDLERS = {
           Type::Tuple => :dispatch_tuple,
           Type::HashShape => :dispatch_hash_shape,
@@ -190,13 +169,10 @@ module Rigor
         }.freeze
         private_constant :RECEIVER_HANDLERS
 
-        # v0.1.1 Track 1 slice 5b — `Integer#to_s(base)` on a
-        # non-negative `IntegerRange` receiver. The output of
-        # `n.to_s(b)` for `n >= 0` is digit-string-only (no
-        # leading sign), so when the base is in this table the
-        # result lifts to the matching imported refinement.
-        # Bases not listed (2, 36, ...) keep the v0.1.0 baseline
-        # since Rigor has no carrier for the resulting alphabet.
+        # v0.1.1 Track 1 slice 5b — `Integer#to_s(base)` on a non-negative `IntegerRange` receiver. The
+        # output of `n.to_s(b)` for `n >= 0` is digit-string-only (no leading sign), so when the base is in
+        # this table the result lifts to the matching imported refinement. Bases not listed (2, 36, ...)
+        # keep the v0.1.0 baseline since Rigor has no carrier for the resulting alphabet.
         TO_S_BASE_REFINEMENTS = {
           10 => :decimal_int_string,
           8 => :octal_int_string,
@@ -209,15 +185,13 @@ module Rigor
           method_name = context.method_name
           args = context.args
           args ||= []
-          # ADR-78 WD1 — every shape handler folds *no-block* semantics; none
-          # evaluates a passed block. So a block-form call (`tuple.any? { … }`,
-          # `tuple.sum { … }`, `tuple.count { … }`) must NOT fold the no-block
-          # result — doing so ignores the block (an over-fold: `any? { false }`
-          # would still fold `Constant[true]`). Declining defers to BlockFolding
-          # / RBS. This is the over-fold class the Tuple shape-carrier
-          # preservation (ADR-76 WD2) surfaced as reflexive `always-truthy` on
-          # `CONST = [...].freeze; CONST.any? { … }`; fixing it at the fold (not
-          # the rule) unblocks that preservation.
+          # ADR-78 WD1 — every shape handler folds *no-block* semantics; none evaluates a passed block. So
+          # a block-form call (`tuple.any? { … }`, `tuple.sum { … }`, `tuple.count { … }`) must NOT fold
+          # the no-block result — doing so ignores the block (an over-fold: `any? { false }` would still
+          # fold `Constant[true]`). Declining defers to BlockFolding / RBS. This is the over-fold class the
+          # Tuple shape-carrier preservation (ADR-76 WD2) surfaced as reflexive `always-truthy` on
+          # `CONST = [...].freeze; CONST.any? { … }`; fixing it at the fold (not the rule) unblocks that
+          # preservation.
           return nil unless context.block_type.nil?
 
           handler = RECEIVER_HANDLERS[receiver.class]
@@ -226,11 +200,9 @@ module Rigor
           send(handler, receiver, method_name, args)
         end
 
-        # Tightens `Array#size` / `Array#length` / `String#length` /
-        # `String#bytesize` / `Hash#size` etc. on a `Nominal` receiver
-        # from the RBS-declared `Integer` to `non_negative_int`. The
-        # tier ahead of RBS sees the more precise carrier so
-        # downstream narrowing (`if size > 0; …`) actually has a
+        # Tightens `Array#size` / `Array#length` / `String#length` / `String#bytesize` / `Hash#size` etc.
+        # on a `Nominal` receiver from the RBS-declared `Integer` to `non_negative_int`. The tier ahead of
+        # RBS sees the more precise carrier so downstream narrowing (`if size > 0; …`) actually has a
         # range to intersect with.
         SIZE_RETURNING_NOMINALS = Ractor.make_shareable({
                                                           "Array" => %i[size length count],
@@ -241,12 +213,10 @@ module Rigor
                                                         })
         private_constant :SIZE_RETURNING_NOMINALS
 
-        # When the difference removes the empty value of the
-        # base type (`Constant[""]`, `Constant[0]`, an empty
-        # Tuple, an empty HashShape), `size` / `length` /
-        # `count` MUST be `positive-int` (the base's
-        # non-negative range minus the removed point's `0`),
-        # and `empty?` / `zero?` MUST be `Constant[false]`.
+        # When the difference removes the empty value of the base type (`Constant[""]`, `Constant[0]`, an
+        # empty Tuple, an empty HashShape), `size` / `length` / `count` MUST be `positive-int` (the base's
+        # non-negative range minus the removed point's `0`), and `empty?` / `zero?` MUST be
+        # `Constant[false]`.
         EMPTY_REMOVAL_BASES = %w[String Array Hash Set].freeze
         private_constant :EMPTY_REMOVAL_BASES
 
@@ -267,10 +237,9 @@ module Rigor
             send(handler, shape, method_name, args)
           end
 
-          # ADR-76 WD2 / ADR-78 WD3 — a pure self-returner
-          # (`freeze` / `dup` / `clone` / `itself`) returns the receiver
-          # carrier unchanged, preserving the shape that the nominal
-          # `() -> self` RBS signature would otherwise drop.
+          # ADR-76 WD2 / ADR-78 WD3 — a pure self-returner (`freeze` / `dup` / `clone` / `itself`) returns
+          # the receiver carrier unchanged, preserving the shape that the nominal `() -> self` RBS
+          # signature would otherwise drop.
           def shape_self(carrier, _method_name, _args)
             carrier
           end
@@ -287,10 +256,9 @@ module Rigor
             Type::Combinator.non_negative_int
           end
 
-          # Arg-/method-driven precision projections for a `Nominal`
-          # receiver, consulted ahead of the no-arg size tier. Each
-          # branch gates on the class name first so unrelated nominals
-          # skip the work. Returns nil when no projection applies.
+          # Arg-/method-driven precision projections for a `Nominal` receiver, consulted ahead of the
+          # no-arg size tier. Each branch gates on the class name first so unrelated nominals skip the
+          # work. Returns nil when no projection applies.
           def nominal_projection(nominal, method_name, args)
             case nominal.class_name
             when "String"
@@ -305,14 +273,12 @@ module Rigor
             end
           end
 
-          # `Array[T]#compact` — `compact` removes every `nil` element,
-          # so the result element type is `T` with its `nil` constituent
-          # stripped (`Array[Node?]#compact` → `Array[Node]`). Mirrors
-          # the `Tuple#compact` constant fold for the generic element
-          # case. Declines when the receiver carries no type argument
-          # (the RBS `Array[untyped]` answer is already maximal) or when
-          # `T` has no `nil` constituent to remove (the result equals the
-          # receiver, so the RBS tier's answer is already precise).
+          # `Array[T]#compact` — `compact` removes every `nil` element, so the result element type is `T`
+          # with its `nil` constituent stripped (`Array[Node?]#compact` → `Array[Node]`). Mirrors the
+          # `Tuple#compact` constant fold for the generic element case. Declines when the receiver carries
+          # no type argument (the RBS `Array[untyped]` answer is already maximal) or when `T` has no `nil`
+          # constituent to remove (the result equals the receiver, so the RBS tier's answer is already
+          # precise).
           def array_nominal_compact(nominal, args)
             return nil unless args.empty?
 
@@ -325,10 +291,9 @@ module Rigor
             Type::Combinator.nominal_of("Array", type_args: [stripped])
           end
 
-          # Removes the `nil` constituent from a (possibly union) type,
-          # returning the same object when there is nothing to remove so
-          # callers can detect the no-op cheaply. Kept local to the
-          # dispatch tier to avoid a dependency on the narrowing module.
+          # Removes the `nil` constituent from a (possibly union) type, returning the same object when
+          # there is nothing to remove so callers can detect the no-op cheaply. Kept local to the dispatch
+          # tier to avoid a dependency on the narrowing module.
           def strip_nil_constituent(type)
             case type
             when Type::Constant
@@ -345,17 +310,13 @@ module Rigor
             end
           end
 
-          # `Array[T]#flatten` (and `flatten(depth)`). When `T` is a
-          # nested `Array[U]` nominal, one flatten level yields the
-          # joined inner element type — `Array[Array[U]]#flatten` →
-          # `Array[U]`. When `T` is non-nested the result is `Array[T]`
-          # unchanged (Ruby returns a copy with the same element type).
-          # Multi-level nesting is handled conservatively: each level
-          # joins its element types, and a `depth` argument that does
-          # not fully resolve the nesting still produces a sound
-          # superset. Declines on an `Array` with no type argument
-          # (the RBS `Array[untyped]` answer is already as precise as
-          # we can be) and on a non-static depth argument.
+          # `Array[T]#flatten` (and `flatten(depth)`). When `T` is a nested `Array[U]` nominal, one flatten
+          # level yields the joined inner element type — `Array[Array[U]]#flatten` → `Array[U]`. When `T`
+          # is non-nested the result is `Array[T]` unchanged (Ruby returns a copy with the same element
+          # type). Multi-level nesting is handled conservatively: each level joins its element types, and a
+          # `depth` argument that does not fully resolve the nesting still produces a sound superset.
+          # Declines on an `Array` with no type argument (the RBS `Array[untyped]` answer is already as
+          # precise as we can be) and on a non-static depth argument.
           def array_nominal_flatten(nominal, args)
             element = nominal.type_args&.first
             return nil if element.nil?
@@ -367,11 +328,9 @@ module Rigor
             Type::Combinator.nominal_of("Array", type_args: [flattened])
           end
 
-          # Resolves the element type of a flattened `Array[element]`.
-          # Each `Array[U]` nesting level contributes `U`; the per-level
-          # element types are unioned. `depth < 0` recurses without
-          # bound; `depth == 0` stops (Ruby's `flatten(0)` is a no-op
-          # copy and returns the element unchanged).
+          # Resolves the element type of a flattened `Array[element]`. Each `Array[U]` nesting level
+          # contributes `U`; the per-level element types are unioned. `depth < 0` recurses without bound;
+          # `depth == 0` stops (Ruby's `flatten(0)` is a no-op copy and returns the element unchanged).
           def flatten_nominal_element(element, depth)
             return element if depth.zero?
             return element unless array_nominal?(element)
@@ -387,14 +346,13 @@ module Rigor
               !type.type_args.empty?
           end
 
-          # Arg-type-driven String binary projections for any String-typed
-          # receiver (including Nominal, Refined, and Difference fallbacks).
-          # Called before the no-arg size guard so binary operators are seen.
+          # Arg-type-driven String binary projections for any String-typed receiver (including Nominal,
+          # Refined, and Difference fallbacks). Called before the no-arg size guard so binary operators are
+          # seen.
           #
-          # - `String + non-empty-string` → `non-empty-string`
-          #   (arg guarantees the concatenation is non-empty)
-          # - `String * Constant[0]` → `Constant[""]`
-          #   (every string repeated 0 times is the empty string)
+          # - `String + non-empty-string` → `non-empty-string` (arg guarantees the concatenation is
+          #   non-empty)
+          # - `String * Constant[0]` → `Constant[""]` (every string repeated 0 times is the empty string)
           def dispatch_string_binary_from_arg(method_name, arg)
             case method_name
             when :+
@@ -407,11 +365,10 @@ module Rigor
             nil
           end
 
-          # Arg-type-driven Integer binary projections for any Integer-typed
-          # receiver (including Nominal, Refined, and Difference fallbacks).
+          # Arg-type-driven Integer binary projections for any Integer-typed receiver (including Nominal,
+          # Refined, and Difference fallbacks).
           #
-          # - `Integer * Constant[0]` → `Constant[0]`
-          #   (any integer multiplied by 0 is 0)
+          # - `Integer * Constant[0]` → `Constant[0]` (any integer multiplied by 0 is 0)
           def dispatch_integer_binary_from_arg(method_name, arg)
             return nil unless method_name == :*
             return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer) && arg.value.zero?
@@ -419,15 +376,12 @@ module Rigor
             Type::Combinator.constant_of(0)
           end
 
-          # `IntegerRange#to_s` precision (v0.1.1 Track 1 slice 5b).
-          # When the range's lower bound is `>= 0`, every member is
-          # a non-negative integer and `to_s(base)` returns a
-          # digit-string with no leading sign. The result lifts to
-          # the matching imported refinement (`decimal-int-string`
-          # for base 10, `octal-int-string` for 8, `hex-int-string`
-          # for 16). Signed ranges fall through (the result could
-          # carry a `-` sign that no Rigor refinement currently
-          # captures), as do bases without a digit-only refinement.
+          # `IntegerRange#to_s` precision (v0.1.1 Track 1 slice 5b). When the range's lower bound is
+          # `>= 0`, every member is a non-negative integer and `to_s(base)` returns a digit-string with no
+          # leading sign. The result lifts to the matching imported refinement (`decimal-int-string` for
+          # base 10, `octal-int-string` for 8, `hex-int-string` for 16). Signed ranges fall through (the
+          # result could carry a `-` sign that no Rigor refinement currently captures), as do bases
+          # without a digit-only refinement.
           def dispatch_integer_range(range, method_name, args)
             return nil unless method_name == :to_s
             return nil unless range.lower >= 0
@@ -441,10 +395,9 @@ module Rigor
             Type::Combinator.public_send(refinement)
           end
 
-          # `to_s` with no argument defaults to base 10. With one
-          # argument, the value MUST be a `Constant<Integer>` to
-          # be statically known. Anything else (Nominal[Integer]
-          # arg, multi-arg, etc.) declines.
+          # `to_s` with no argument defaults to base 10. With one argument, the value MUST be a
+          # `Constant<Integer>` to be statically known. Anything else (Nominal[Integer] arg, multi-arg,
+          # etc.) declines.
           def base_argument(args)
             return 10 if args.empty?
             return nil unless args.size == 1
@@ -455,21 +408,18 @@ module Rigor
             arg.value
           end
 
-          # Refinement-aware projections over a `Difference[base,
-          # removed]` receiver. When the removed value is the
-          # empty witness of the base (`Constant[""]` for
-          # String, `Tuple[]` for Array, `HashShape{}` for Hash,
-          # `Constant[0]` for Integer), the catalog tier knows:
+          # Refinement-aware projections over a `Difference[base, removed]` receiver. When the removed
+          # value is the empty witness of the base (`Constant[""]` for String, `Tuple[]` for Array,
+          # `HashShape{}` for Hash, `Constant[0]` for Integer), the catalog tier knows:
           #
           #   ns.size                      # positive-int
           #   ns.size == 0                 # Constant[false]   (via narrowing tier)
           #   ns.empty?                    # Constant[false]
           #   nzi.zero?                    # Constant[false]
           #
-          # For any other base method, the difference is opaque
-          # to ShapeDispatch — we delegate to the base nominal
-          # so the size/length tier still answers the broader
-          # `non_negative_int` envelope where applicable.
+          # For any other base method, the difference is opaque to ShapeDispatch — we delegate to the base
+          # nominal so the size/length tier still answers the broader `non_negative_int` envelope where
+          # applicable.
           def dispatch_difference(difference, method_name, args)
             base = difference.base
             return nil unless base.is_a?(Type::Nominal)
@@ -499,12 +449,11 @@ module Rigor
             !!(predicate && predicate.call(difference.removed))
           end
 
-          # Methods on a non-empty String that preserve non-emptiness
-          # (they transform characters but never reduce the string to "").
+          # Methods on a non-empty String that preserve non-emptiness (they transform characters but never
+          # reduce the string to "").
           NON_EMPTY_STRING_PRESERVING_UNARY = Set[:upcase, :downcase, :capitalize, :swapcase, :reverse].freeze
-          # Methods on non-zero-int that return a non-zero-int (identity ops).
-          # Negation of a non-zero integer is non-zero; `to_i`/`to_int` are
-          # identity operations on Integer.
+          # Methods on non-zero-int that return a non-zero-int (identity ops). Negation of a non-zero
+          # integer is non-zero; `to_i`/`to_int` are identity operations on Integer.
           NON_ZERO_INT_PRESERVING_UNARY = Set[:-@, :+@, :to_i, :to_int].freeze
           private_constant :NON_EMPTY_STRING_PRESERVING_UNARY, :NON_ZERO_INT_PRESERVING_UNARY
 
@@ -593,67 +542,64 @@ module Rigor
             Type::Combinator.positive_int
           end
 
-          # Predicate-subset projections over a `Refined[base,
-          # predicate]` receiver. Today the catalogue is the
-          # String case-normalisation pair: `s.downcase` over a
-          # `lowercase-string` receiver folds to the same
-          # carrier (already lowercase), and `s.upcase` lifts a
-          # `lowercase-string` to `uppercase-string`. Symmetric
-          # rules apply with the predicates swapped. Numeric-
-          # string idempotence over `#downcase` / `#upcase` is
-          # also recognised because a numeric string equals its
+          # Predicate-subset projections over a `Refined[base, predicate]` receiver. Today the catalogue is
+          # the String case-normalisation pair: `s.downcase` over a `lowercase-string` receiver folds to
+          # the same carrier (already lowercase), and `s.upcase` lifts a `lowercase-string` to
+          # `uppercase-string`. Symmetric rules apply with the predicates swapped. Numeric-string
+          # idempotence over `#downcase` / `#upcase` is also recognised because a numeric string equals its
           # own case-normalisation.
           #
-          # For methods this tier does not have a refinement-
-          # specific rule for, projection delegates to
-          # `dispatch_nominal_size` so size-returning calls on
-          # a `Refined[String, *]` still tighten to
+          # For methods this tier does not have a refinement-specific rule for, projection delegates to
+          # `dispatch_nominal_size` so size-returning calls on a `Refined[String, *]` still tighten to
           # `non_negative_int`.
-          # ADR-15 Phase 4b.x — `Ractor.make_shareable` (not `.freeze`)
-          # because the keys are two-element Symbol arrays whose
-          # inner arrays are unfrozen under shallow `.freeze`.
-          # Surfaced on Discourse via `Ractor::IsolationError` when
-          # the dispatch loop's `REFINED_STRING_PROJECTIONS[[id, sym]]`
-          # lookup ran from a worker Ractor.
+          # ADR-15 Phase 4b.x — `Ractor.make_shareable` (not `.freeze`) because the keys are two-element
+          # Symbol arrays whose inner arrays are unfrozen under shallow `.freeze`. Surfaced on Discourse via
+          # `Ractor::IsolationError` when the dispatch loop's `REFINED_STRING_PROJECTIONS[[id, sym]]` lookup
+          # ran from a worker Ractor.
           REFINED_STRING_PROJECTIONS = Ractor.make_shareable({
                                                                %i[lowercase downcase] => :refined_self,
                                                                %i[lowercase upcase] => :uppercase_string,
                                                                %i[uppercase upcase] => :refined_self,
                                                                %i[uppercase downcase] => :lowercase_string,
-                                                               # `numeric-string` is the full Ruby numeric-literal
-                                                               # grammar (since the predicate delegates to the
-                                                               # parser). `#downcase` preserves it — lowercasing a
-                                                               # literal (hex digits, `0X` / `E` prefixes) yields a
-                                                               # valid lowercase literal — but `#upcase` does NOT:
-                                                               # the rational / imaginary suffixes are lowercase-only
-                                                               # (`"1r".upcase == "1R"` is not a literal), so `upcase`
-                                                               # drops to the plain base `String` — still sound (the
-                                                               # result is a String), just no longer numeric.
+                                                               # `numeric-string` is the full Ruby
+                                                               # numeric-literal grammar (since the predicate
+                                                               # delegates to the parser). `#downcase`
+                                                               # preserves it — lowercasing a literal (hex
+                                                               # digits, `0X` / `E` prefixes) yields a valid
+                                                               # lowercase literal — but `#upcase` does NOT:
+                                                               # the rational / imaginary suffixes are
+                                                               # lowercase-only (`"1r".upcase == "1R"` is not
+                                                               # a literal), so `upcase` drops to the plain
+                                                               # base `String` — still sound (the result is a
+                                                               # String), just no longer numeric.
                                                                %i[numeric downcase] => :refined_self,
                                                                %i[numeric upcase] => :base_string,
-                                                               # Digit-only strings are case-invariant; the prefix
-                                                               # letters in `0o…` / `0x…` are accepted by the
-                                                               # predicate in either case so the predicate-subset
-                                                               # is preserved across `#downcase` / `#upcase` even
-                                                               # though the value-set element changes.
+                                                               # Digit-only strings are case-invariant; the
+                                                               # prefix letters in `0o…` / `0x…` are accepted
+                                                               # by the predicate in either case so the
+                                                               # predicate-subset is preserved across
+                                                               # `#downcase` / `#upcase` even though the
+                                                               # value-set element changes.
                                                                %i[decimal_int downcase] => :refined_self,
                                                                %i[decimal_int upcase] => :refined_self,
                                                                %i[octal_int downcase] => :refined_self,
                                                                %i[octal_int upcase] => :refined_self,
                                                                %i[hex_int downcase] => :refined_self,
                                                                %i[hex_int upcase] => :refined_self,
-                                                               # v0.1.1 Track 1 slice 2 — `to_i` / `to_int` on a
-                                                               # `decimal-int-string` parses to an `Integer`. The
-                                                               # carrier is `universal_int`, NOT `non-negative-int`:
-                                                               # the predicate `/\A-?\d+\z/` admits a leading sign, so
+                                                               # v0.1.1 Track 1 slice 2 — `to_i` / `to_int` on
+                                                               # a `decimal-int-string` parses to an
+                                                               # `Integer`. The carrier is `universal_int`,
+                                                               # NOT `non-negative-int`: the predicate
+                                                               # `/\A-?\d+\z/` admits a leading sign, so
                                                                # `"-7"` is a valid decimal-int-string and
-                                                               # `"-7".to_i == -7 < 0`. `String#to_i` is total (never
-                                                               # raises), so the projection is sound — just signed.
-                                                               # `numeric-string` is deliberately NOT projected to
-                                                               # `to_i` at all: it now spans the full numeric-literal
-                                                               # grammar, so a `"1.5"` / `"2i"` inhabitant has a
-                                                               # fractional or non-Integer parse — it falls through to
-                                                               # the RBS `Integer`.
+                                                               # `"-7".to_i == -7 < 0`. `String#to_i` is
+                                                               # total (never raises), so the projection is
+                                                               # sound — just signed. `numeric-string` is
+                                                               # deliberately NOT projected to `to_i` at all:
+                                                               # it now spans the full numeric-literal
+                                                               # grammar, so a `"1.5"` / `"2i"` inhabitant
+                                                               # has a fractional or non-Integer parse — it
+                                                               # falls through to the RBS `Integer`.
                                                                %i[decimal_int to_i] => :universal_int,
                                                                %i[decimal_int to_int] => :universal_int
                                                              })
@@ -685,27 +631,20 @@ module Rigor
             end
           end
 
-          # Projects a method call over an `Intersection[M1, …]`
-          # receiver by collecting each member's projection and
-          # combining the results. The set-theoretic identity is
-          # `M(A ∩ B) ⊆ M(A) ∩ M(B)`, so the meet of the per-member
-          # projections is sound. Combining is best-effort:
+          # Projects a method call over an `Intersection[M1, …]` receiver by collecting each member's
+          # projection and combining the results. The set-theoretic identity is
+          # `M(A ∩ B) ⊆ M(A) ∩ M(B)`, so the meet of the per-member projections is sound. Combining is
+          # best-effort:
           #
-          # - If every result is a `Type::IntegerRange`, return
-          #   their bounded-integer meet (max of lower bounds, min
-          #   of upper bounds). This catches the common
-          #   `(non_empty_string ∩ lowercase_string).size`
-          #   pattern where one member projects to `positive-int`
-          #   and the other to `non-negative-int`; the meet is
-          #   `positive-int`.
-          # - Otherwise return the first non-nil result. A richer
-          #   meet (e.g. of Difference + Refined results when both
-          #   project) is left for a future slice; the carrier
-          #   stays sound because every member's projection is
-          #   already a superset of the true intersection.
+          # - If every result is a `Type::IntegerRange`, return their bounded-integer meet (max of lower
+          #   bounds, min of upper bounds). This catches the common
+          #   `(non_empty_string ∩ lowercase_string).size` pattern where one member projects to
+          #   `positive-int` and the other to `non-negative-int`; the meet is `positive-int`.
+          # - Otherwise return the first non-nil result. A richer meet (e.g. of Difference + Refined
+          #   results when both project) is left for a future slice; the carrier stays sound because every
+          #   member's projection is already a superset of the true intersection.
           #
-          # Returns nil when no member projects, so the caller
-          # falls through to the next dispatcher tier.
+          # Returns nil when no member projects, so the caller falls through to the next dispatcher tier.
           def dispatch_intersection(intersection, method_name, args)
             results = intersection.members.filter_map do |member|
               ShapeDispatch.try_dispatch(
@@ -726,15 +665,11 @@ module Rigor
             results.first
           end
 
-          # Compute the bounded-integer meet of two or more
-          # `IntegerRange` carriers. We compare via the numeric
-          # `lower` / `upper` accessors (`-Float::INFINITY` /
-          # `Float::INFINITY` for the symbolic ends), then map
-          # back to the symbolic-bound representation
-          # `IntegerRange.new` expects. The disjoint-meet case
-          # cannot arise from sound member-wise projections in
-          # v0.0.4 but is guarded defensively to keep the
-          # carrier total.
+          # Compute the bounded-integer meet of two or more `IntegerRange` carriers. We compare via the
+          # numeric `lower` / `upper` accessors (`-Float::INFINITY` / `Float::INFINITY` for the symbolic
+          # ends), then map back to the symbolic-bound representation `IntegerRange.new` expects. The
+          # disjoint-meet case cannot arise from sound member-wise projections in v0.0.4 but is guarded
+          # defensively to keep the carrier total.
           def narrow_integer_ranges(ranges)
             numeric_low = ranges.map(&:lower).max
             numeric_high = ranges.map(&:upper).min
@@ -745,10 +680,9 @@ module Rigor
             Type::Combinator.integer_range(min, max)
           end
 
-          # `first` (no arg) → the first element (or `Constant[nil]` when
-          # empty). The `first(n)` arg-form is deliberately left to RBS
-          # overload selection (see the overload-selection specs) — folding
-          # it here would change that documented `Array[Elem]` contract.
+          # `first` (no arg) → the first element (or `Constant[nil]` when empty). The `first(n)` arg-form
+          # is deliberately left to RBS overload selection (see the overload-selection specs) — folding it
+          # here would change that documented `Array[Elem]` contract.
           def tuple_first(tuple, _method_name, args)
             return nil unless args.empty?
             return Type::Combinator.constant_of(nil) if tuple.elements.empty?
@@ -769,8 +703,7 @@ module Rigor
             Type::Combinator.constant_of(tuple.elements.size)
           end
 
-          # `tuple.empty?` — folds to a precise bool from the
-          # tuple's known arity.
+          # `tuple.empty?` — folds to a precise bool from the tuple's known arity.
           # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
           def tuple_empty?(tuple, _method_name, args)
             return nil unless args.empty?
@@ -778,20 +711,17 @@ module Rigor
             Type::Combinator.constant_of(tuple.elements.empty?)
           end
 
-          # `tuple.any?` (no-arg, no-block) — empty tuple → false,
-          # non-empty → true. The block / arg forms flow through
-          # `BlockFolding` and the RBS tier.
+          # `tuple.any?` (no-arg, no-block) — empty tuple → false, non-empty → true. The block / arg forms
+          # flow through `BlockFolding` and the RBS tier.
           def tuple_any?(tuple, _method_name, args)
             return nil unless args.empty?
 
             Type::Combinator.constant_of(!tuple.elements.empty?)
           end
 
-          # `tuple.all?` (no-arg, no-block) — true for empty
-          # tuple (vacuous truth) AND for non-empty tuples whose
-          # every element is provably truthy. Mixed / unknown
-          # element truthiness declines so the RBS / BlockFolding
-          # tiers can still answer.
+          # `tuple.all?` (no-arg, no-block) — true for empty tuple (vacuous truth) AND for non-empty tuples
+          # whose every element is provably truthy. Mixed / unknown element truthiness declines so the RBS
+          # / BlockFolding tiers can still answer.
           def tuple_all?(tuple, _method_name, args)
             return nil unless args.empty?
             return Type::Combinator.constant_of(true) if tuple.elements.empty?
@@ -802,9 +732,8 @@ module Rigor
             Type::Combinator.constant_of(decision)
           end
 
-          # `tuple.none?` (no-arg, no-block) — true when every
-          # element is provably falsey, false when any element is
-          # provably truthy. Empty tuple folds to true (vacuous).
+          # `tuple.none?` (no-arg, no-block) — true when every element is provably falsey, false when any
+          # element is provably truthy. Empty tuple folds to true (vacuous).
           def tuple_none?(tuple, _method_name, args)
             return nil unless args.empty?
             return Type::Combinator.constant_of(true) if tuple.elements.empty?
@@ -815,13 +744,10 @@ module Rigor
             Type::Combinator.constant_of(decision)
           end
 
-          # `tuple.include?(needle)` — folds to a precise bool when
-          # the needle is a `Constant` and the tuple's elements
-          # are all `Constant` (so disjointness is checkable).
-          # If any element matches the needle's value the answer
-          # is `Constant[true]`; if every element is a Constant
-          # whose value is structurally distinct from the needle
-          # the answer is `Constant[false]`.
+          # `tuple.include?(needle)` — folds to a precise bool when the needle is a `Constant` and the
+          # tuple's elements are all `Constant` (so disjointness is checkable). If any element matches the
+          # needle's value the answer is `Constant[true]`; if every element is a Constant whose value is
+          # structurally distinct from the needle the answer is `Constant[false]`.
           def tuple_include?(tuple, _method_name, args)
             return nil unless args.size == 1
 
@@ -836,9 +762,8 @@ module Rigor
           end
           # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
 
-          # `tuple.sum` — when every element is a numeric Constant,
-          # fold to `Constant[sum]`. Mixed / non-numeric elements
-          # decline so RBS widens.
+          # `tuple.sum` — when every element is a numeric Constant, fold to `Constant[sum]`. Mixed /
+          # non-numeric elements decline so RBS widens.
           def tuple_sum(tuple, _method_name, args)
             return nil unless args.empty?
             return Type::Combinator.constant_of(0) if tuple.elements.empty?
@@ -849,10 +774,9 @@ module Rigor
             Type::Combinator.constant_of(values.sum)
           end
 
-          # `tuple.join(sep = "")` — fold to the joined `Constant[String]`
-          # when every element is a `Constant` (its `to_s` is deterministic
-          # for the scalar value classes) and the separator is absent or a
-          # `Constant[String]`. Capped at `TUPLE_JOIN_BYTE_LIMIT`.
+          # `tuple.join(sep = "")` — fold to the joined `Constant[String]` when every element is a
+          # `Constant` (its `to_s` is deterministic for the scalar value classes) and the separator is
+          # absent or a `Constant[String]`. Capped at `TUPLE_JOIN_BYTE_LIMIT`.
           def tuple_join(tuple, _method_name, args)
             sep = tuple_join_separator(args)
             return nil if sep.nil?
@@ -868,8 +792,8 @@ module Rigor
             nil
           end
 
-          # The join separator: `""` for the no-arg form, the value of a
-          # single `Constant[String]` arg, or `nil` to decline.
+          # The join separator: `""` for the no-arg form, the value of a single `Constant[String]` arg, or
+          # `nil` to decline.
           def tuple_join_separator(args)
             return "" if args.empty?
             return nil unless args.size == 1
@@ -880,12 +804,10 @@ module Rigor
             arg.value
           end
 
-          # `tuple.min` / `tuple.max` — fold when every element is
-          # a `Constant` whose values share a Ruby-comparable
-          # domain. Empty tuples fold to `Constant[nil]`. The 1-arg
-          # `min(n)` / `max(n)` form folds to a `Tuple` of the n
-          # edge-most values in Ruby's order (`min(n)` ascending,
-          # `max(n)` descending) — the n-arg sibling of `first(n)`.
+          # `tuple.min` / `tuple.max` — fold when every element is a `Constant` whose values share a
+          # Ruby-comparable domain. Empty tuples fold to `Constant[nil]`. The 1-arg `min(n)` / `max(n)`
+          # form folds to a `Tuple` of the n edge-most values in Ruby's order (`min(n)` ascending, `max(n)`
+          # descending) — the n-arg sibling of `first(n)`.
           def tuple_min(tuple, _method_name, args)
             tuple_minmax(tuple, args, :min)
           end
@@ -907,12 +829,10 @@ module Rigor
             nil
           end
 
-          # `tuple.min(n)` / `tuple.max(n)` — a `Tuple` of the n
-          # edge-most element values, delegating to Ruby's
-          # `Array#min` / `#max` for the ordering. Declines on a
-          # non-static / negative count or non-Constant elements.
-          # The result is bounded by the tuple's known arity, so no
-          # extra size cap is needed.
+          # `tuple.min(n)` / `tuple.max(n)` — a `Tuple` of the n edge-most element values, delegating to
+          # Ruby's `Array#min` / `#max` for the ordering. Declines on a non-static / negative count or
+          # non-Constant elements. The result is bounded by the tuple's known arity, so no extra size cap
+          # is needed.
           def tuple_minmax_n(tuple, arg, edge)
             return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
             return nil if arg.value.negative?
@@ -926,11 +846,9 @@ module Rigor
             nil
           end
 
-          # `tuple.minmax` — the `[min, max]` pair as a 2-slot
-          # `Tuple[Constant[min], Constant[max]]`, mirroring the
-          # `Range#minmax` fold. Every element must be a `Constant`
-          # and the values must Ruby-compare; an empty tuple folds to
-          # `Tuple[nil, nil]` (Ruby's `[].minmax`), incomparable
+          # `tuple.minmax` — the `[min, max]` pair as a 2-slot `Tuple[Constant[min], Constant[max]]`,
+          # mirroring the `Range#minmax` fold. Every element must be a `Constant` and the values must
+          # Ruby-compare; an empty tuple folds to `Tuple[nil, nil]` (Ruby's `[].minmax`), incomparable
           # mixed-class values decline.
           def tuple_minmax_pair(tuple, _method_name, args)
             return nil unless args.empty?
@@ -952,10 +870,9 @@ module Rigor
             nil
           end
 
-          # `tuple.sort` — every element must be a `Constant` and
-          # the values must Ruby-compare. The result is a Tuple
-          # with the same elements in sorted order. Comparison
-          # failures (mixed-class incomparable values) decline.
+          # `tuple.sort` — every element must be a `Constant` and the values must Ruby-compare. The result
+          # is a Tuple with the same elements in sorted order. Comparison failures (mixed-class
+          # incomparable values) decline.
           def tuple_sort(tuple, _method_name, args)
             return nil unless args.empty?
             return tuple if tuple.elements.size <= 1
@@ -969,32 +886,27 @@ module Rigor
             nil
           end
 
-          # `tuple.reverse` — independent of element shape; a
-          # tuple-precise reversed Tuple.
+          # `tuple.reverse` — independent of element shape; a tuple-precise reversed Tuple.
           def tuple_reverse(tuple, _method_name, args)
             return nil unless args.empty?
 
             Type::Combinator.tuple_of(*tuple.elements.reverse)
           end
 
-          # `tuple.to_a` — Tuple is structurally identical to its
-          # to_a (Ruby returns the receiver itself for an Array).
+          # `tuple.to_a` — Tuple is structurally identical to its to_a (Ruby returns the receiver itself
+          # for an Array).
           def tuple_to_a(tuple, _method_name, args)
             return nil unless args.empty?
 
             tuple
           end
 
-          # `tuple.zip(other_1, other_2, …)` — pairs the receiver's
-          # per-position elements with the per-position elements of
-          # each other Tuple-shaped argument. The result is a Tuple
-          # of Tuples whose arity matches the receiver: position
-          # `i` is `Tuple[receiver[i], other_1[i], other_2[i], …]`.
-          # Out-of-range positions in any `other_k` contribute
-          # `Constant[nil]` (matching Ruby's runtime semantics).
-          # Declines when any `other_k` is not a Tuple, since the
-          # arity is then unknown and the result would be
-          # `Array[Array[…]]` — RBS already gives that answer.
+          # `tuple.zip(other_1, other_2, …)` — pairs the receiver's per-position elements with the
+          # per-position elements of each other Tuple-shaped argument. The result is a Tuple of Tuples
+          # whose arity matches the receiver: position `i` is `Tuple[receiver[i], other_1[i], other_2[i],
+          # …]`. Out-of-range positions in any `other_k` contribute `Constant[nil]` (matching Ruby's
+          # runtime semantics). Declines when any `other_k` is not a Tuple, since the arity is then unknown
+          # and the result would be `Array[Array[…]]` — RBS already gives that answer.
           def tuple_zip(tuple, _method_name, args)
             return nil if args.empty? || args.size > MAX_ZIP_ARITY
             return nil unless args.all?(Type::Tuple)
@@ -1009,11 +921,9 @@ module Rigor
           MAX_ZIP_ARITY = 8
           private_constant :MAX_ZIP_ARITY
 
-          # `tuple.to_h` — folds when every Tuple element is itself
-          # a 2-element Tuple whose first element is a `Constant`
-          # (so it can serve as a Hash key). Produces a closed
-          # `HashShape` whose entries mirror the per-position
-          # pairs. Empty Tuples fold to the empty HashShape.
+          # `tuple.to_h` — folds when every Tuple element is itself a 2-element Tuple whose first element
+          # is a `Constant` (so it can serve as a Hash key). Produces a closed `HashShape` whose entries
+          # mirror the per-position pairs. Empty Tuples fold to the empty HashShape.
           def tuple_to_h(tuple, _method_name, args)
             return nil unless args.empty?
             return Type::Combinator.hash_shape_of({}) if tuple.elements.empty?
@@ -1036,11 +946,9 @@ module Rigor
             [key.value, value]
           end
 
-          # `tuple.values_at(i1, i2, ...)` — returns a Tuple of
-          # per-index elements. Each argument must be a
-          # `Constant[Integer]`. Out-of-range indices fill with
-          # `Constant[nil]`, mirroring Ruby's runtime behaviour.
-          # Declines when any argument is non-static.
+          # `tuple.values_at(i1, i2, ...)` — returns a Tuple of per-index elements. Each argument must be a
+          # `Constant[Integer]`. Out-of-range indices fill with `Constant[nil]`, mirroring Ruby's runtime
+          # behaviour. Declines when any argument is non-static.
           def tuple_values_at(tuple, _method_name, args)
             return nil if args.empty?
 
@@ -1055,10 +963,8 @@ module Rigor
             Type::Combinator.tuple_of(*values)
           end
 
-          # `tuple + other` — concatenates two Tuples. Both sides
-          # must be `Type::Tuple`. Returns a new Tuple whose
-          # elements are those of the receiver followed by those
-          # of the argument.
+          # `tuple + other` — concatenates two Tuples. Both sides must be `Type::Tuple`. Returns a new
+          # Tuple whose elements are those of the receiver followed by those of the argument.
           def tuple_concat(tuple, _method_name, args)
             return nil unless args.size == 1
 
@@ -1068,10 +974,9 @@ module Rigor
             Type::Combinator.tuple_of(*tuple.elements, *other.elements)
           end
 
-          # `tuple.compact` — removes every element that is
-          # `Constant[nil]`. Folds only when every element is a
-          # `Constant` (so the nil set is decidable). Mixed-shape
-          # elements decline so the RBS tier widens.
+          # `tuple.compact` — removes every element that is `Constant[nil]`. Folds only when every element
+          # is a `Constant` (so the nil set is decidable). Mixed-shape elements decline so the RBS tier
+          # widens.
           def tuple_compact(tuple, _method_name, args)
             return nil unless args.empty?
             return nil unless tuple.elements.all?(Type::Constant)
@@ -1080,9 +985,8 @@ module Rigor
             Type::Combinator.tuple_of(*kept)
           end
 
-          # `uniq` (no block) → `Tuple` of the first occurrence of each
-          # distinct value. Folds only when every element is a `Constant`
-          # so value equality is decidable; the block form defers.
+          # `uniq` (no block) → `Tuple` of the first occurrence of each distinct value. Folds only when
+          # every element is a `Constant` so value equality is decidable; the block form defers.
           def tuple_uniq(tuple, _method_name, args)
             return nil unless args.empty?
             return nil unless tuple.elements.all?(Type::Constant)
@@ -1097,22 +1001,18 @@ module Rigor
             Type::Combinator.tuple_of(*kept)
           end
 
-          # `index(obj)` / `find_index(obj)` → `Constant[Integer]` of the
-          # first element equal to `obj`, `Constant[nil]` when none match.
-          # Folds only for the argument form (the block form defers) when
-          # every element AND the argument are `Constant` (decidable
-          # equality).
+          # `index(obj)` / `find_index(obj)` → `Constant[Integer]` of the first element equal to `obj`,
+          # `Constant[nil]` when none match. Folds only for the argument form (the block form defers) when
+          # every element AND the argument are `Constant` (decidable equality).
           def tuple_find_index(tuple, _method_name, args)
             constant_index(tuple, args) { |elements, value| elements.index { |e| e.value == value } }
           end
 
-          # `tuple.flatten` / `tuple.flatten(depth)` — recursively
-          # flattens nested Tuple elements into a single Tuple. With
-          # no argument the flatten is unbounded (matching Ruby's
-          # `Array#flatten`); a `Constant[Integer]` depth bounds it.
-          # Non-Tuple elements (scalars, `Array[T]` nominals, …) pass
-          # through unchanged at their level. A non-static depth
-          # argument (or a non-Integer one) declines so RBS answers.
+          # `tuple.flatten` / `tuple.flatten(depth)` — recursively flattens nested Tuple elements into a
+          # single Tuple. With no argument the flatten is unbounded (matching Ruby's `Array#flatten`); a
+          # `Constant[Integer]` depth bounds it. Non-Tuple elements (scalars, `Array[T]` nominals, …) pass
+          # through unchanged at their level. A non-static depth argument (or a non-Integer one) declines
+          # so RBS answers.
           def tuple_flatten(tuple, _method_name, args)
             depth = tuple_flatten_depth(args)
             return nil if depth == :decline
@@ -1120,10 +1020,8 @@ module Rigor
             Type::Combinator.tuple_of(*flatten_elements(tuple.elements, depth))
           end
 
-          # Returns the requested flatten depth: `-1` for the no-arg
-          # (unbounded) form, the Integer for a `Constant[Integer]`
-          # argument, or `:decline` for any non-static / wrong-arity
-          # argument shape.
+          # Returns the requested flatten depth: `-1` for the no-arg (unbounded) form, the Integer for a
+          # `Constant[Integer]` argument, or `:decline` for any non-static / wrong-arity argument shape.
           def tuple_flatten_depth(args)
             return -1 if args.empty?
             return :decline unless args.size == 1
@@ -1134,10 +1032,9 @@ module Rigor
             :decline
           end
 
-          # Flattens a list of element types to `depth` levels.
-          # `depth < 0` means unbounded. A Tuple element is spliced
-          # in (recursing with `depth - 1`); everything else passes
-          # through at this level.
+          # Flattens a list of element types to `depth` levels. `depth < 0` means unbounded. A Tuple
+          # element is spliced in (recursing with `depth - 1`); everything else passes through at this
+          # level.
           def flatten_elements(elements, depth)
             return elements if depth.zero?
 
@@ -1165,10 +1062,8 @@ module Rigor
             Type::Combinator.constant_of(yield(tuple.elements, needle.value))
           end
 
-          # `tuple.take(n)` — returns the first n elements as a
-          # new Tuple. The argument must be a `Constant[Integer]`.
-          # n <= 0 returns the empty Tuple; n >= size returns the
-          # full receiver.
+          # `tuple.take(n)` — returns the first n elements as a new Tuple. The argument must be a
+          # `Constant[Integer]`. n <= 0 returns the empty Tuple; n >= size returns the full receiver.
           def tuple_take(tuple, _method_name, args)
             n = non_negative_count_arg(args)
             return nil if n.nil?
@@ -1176,8 +1071,8 @@ module Rigor
             Type::Combinator.tuple_of(*tuple.elements.take(n))
           end
 
-          # `drop(n)` → `Tuple` of every element after the first `n`
-          # (mirror of `take`; `n >= size` → empty Tuple).
+          # `drop(n)` → `Tuple` of every element after the first `n` (mirror of `take`; `n >= size` → empty
+          # Tuple).
           def tuple_drop(tuple, _method_name, args)
             n = non_negative_count_arg(args)
             return nil if n.nil?
@@ -1185,9 +1080,8 @@ module Rigor
             Type::Combinator.tuple_of(*tuple.elements.drop(n))
           end
 
-          # `rotate` (no arg → 1) / `rotate(n)` → `Tuple` of the elements
-          # cyclically shifted left by `n` (`Array#rotate` handles negative
-          # and out-of-range `n` by modulo, so any Integer arg folds).
+          # `rotate` (no arg → 1) / `rotate(n)` → `Tuple` of the elements cyclically shifted left by `n`
+          # (`Array#rotate` handles negative and out-of-range `n` by modulo, so any Integer arg folds).
           def tuple_rotate(tuple, _method_name, args)
             count =
               if args.empty?
@@ -1201,10 +1095,9 @@ module Rigor
             Type::Combinator.tuple_of(*tuple.elements.rotate(count))
           end
 
-          # Unwraps a single non-negative `Constant[Integer]` count argument
-          # (the `take` / `drop` / `first(n)` / `last(n)` shape). Returns the
-          # Integer, or nil to defer (wrong arity, non-constant, non-Integer,
-          # or negative — `Array#take`/`#drop` raise on negative counts).
+          # Unwraps a single non-negative `Constant[Integer]` count argument (the `take` / `drop` /
+          # `first(n)` / `last(n)` shape). Returns the Integer, or nil to defer (wrong arity, non-constant,
+          # non-Integer, or negative — `Array#take`/`#drop` raise on negative counts).
           def non_negative_count_arg(args)
             return nil unless args.size == 1
 
@@ -1215,10 +1108,8 @@ module Rigor
             arg.value
           end
 
-          # Returns `true` / `false` if every element's truthiness
-          # agrees, nil for mixed-or-unknown shapes. `all: true`
-          # checks every element is truthy; `all: false` checks
-          # every element is falsey.
+          # Returns `true` / `false` if every element's truthiness agrees, nil for mixed-or-unknown shapes.
+          # `all: true` checks every element is truthy; `all: false` checks every element is falsey.
           def tuple_predicate_truthiness(tuple, all:)
             samples = tuple.elements.map { |e| element_truthiness(e) }
             return nil if samples.any?(:unknown)
@@ -1241,9 +1132,8 @@ module Rigor
             elements.any? { |e| e.is_a?(Type::Constant) && e.value == value }
           end
 
-          # Per-element Constant value extraction. Returns nil
-          # when any element is non-Constant, so the caller can
-          # decline.
+          # Per-element Constant value extraction. Returns nil when any element is non-Constant, so the
+          # caller can decline.
           def constant_values(elements)
             return nil unless elements.all?(Type::Constant)
 
@@ -1258,15 +1148,12 @@ module Rigor
             values
           end
 
-          # `tuple[i]`, `tuple[range]`, `tuple[start, length]`, and
-          # `tuple.fetch(i)` for static arguments. Out-of-range single
-          # indices still fall through because the same handler serves
-          # `fetch`, while statically nil slices can be represented
-          # precisely for `[]`.
-          # `[]` and its exact alias `slice` share the index / Range /
-          # start-length folding. `fetch` routes here too but stays
-          # integer-index-only: the Range and start-length branches gate
-          # on this selector set, which `fetch` is deliberately not in.
+          # `tuple[i]`, `tuple[range]`, `tuple[start, length]`, and `tuple.fetch(i)` for static arguments.
+          # Out-of-range single indices still fall through because the same handler serves `fetch`, while
+          # statically nil slices can be represented precisely for `[]`.
+          # `[]` and its exact alias `slice` share the index / Range / start-length folding. `fetch` routes
+          # here too but stays integer-index-only: the Range and start-length branches gate on this
+          # selector set, which `fetch` is deliberately not in.
           SLICE_SELECTORS = Set[:[], :slice].freeze
           private_constant :SLICE_SELECTORS
 
@@ -1316,14 +1203,11 @@ module Rigor
             [range.begin, range.end].all? { |endpoint| endpoint.nil? || endpoint.is_a?(Integer) }
           end
 
-          # `tuple.dig(i, ...)` with a chain of static keys/indices.
-          # Each step recurses through the resolved member: a Tuple
-          # member dispatches `dig` on the remaining args, a HashShape
-          # member does the same, and a `Constant[nil]` member ends
-          # the chain at `Constant[nil]` (matching Ruby's `Array#dig`
-          # short-circuit on nil). Anything else along the chain
-          # falls through to the projection answer so the analyzer
-          # never invents a value it cannot prove.
+          # `tuple.dig(i, ...)` with a chain of static keys/indices. Each step recurses through the
+          # resolved member: a Tuple member dispatches `dig` on the remaining args, a HashShape member
+          # does the same, and a `Constant[nil]` member ends the chain at `Constant[nil]` (matching Ruby's
+          # `Array#dig` short-circuit on nil). Anything else along the chain falls through to the
+          # projection answer so the analyzer never invents a value it cannot prove.
           def tuple_dig(tuple, _method_name, args)
             return nil if args.empty?
 
@@ -1343,8 +1227,8 @@ module Rigor
             tuple.elements[idx]
           end
 
-          # Returns the in-bounds non-negative index, or nil when the
-          # raw index falls outside `[-size, size)`.
+          # Returns the in-bounds non-negative index, or nil when the raw index falls outside
+          # `[-size, size)`.
           def normalise_index(raw, size)
             adjusted = raw.negative? ? raw + size : raw
             return nil if adjusted.negative? || adjusted >= size
@@ -1360,13 +1244,10 @@ module Rigor
             Type::Combinator.constant_of(shape.pairs.size)
           end
 
-          # `shape.empty?` — folds to a precise bool when the
-          # shape's emptiness is statically known. Closed shapes
-          # with no optional keys have a fixed size, so empty?
-          # is `Constant[shape.pairs.empty?]`. The handler returns
-          # `Type::t | nil` (nil signals "no rule, defer to next
-          # tier") so the standard predicate-return rubocop rule
-          # does not apply.
+          # `shape.empty?` — folds to a precise bool when the shape's emptiness is statically known. Closed
+          # shapes with no optional keys have a fixed size, so empty? is `Constant[shape.pairs.empty?]`.
+          # The handler returns `Type::t | nil` (nil signals "no rule, defer to next tier") so the standard
+          # predicate-return rubocop rule does not apply.
           # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
           def hash_empty?(shape, _method_name, args)
             return nil unless args.empty?
@@ -1376,9 +1257,8 @@ module Rigor
             Type::Combinator.constant_of(shape.pairs.empty?)
           end
 
-          # `shape.any?` (no block, no arg) — opposite of
-          # `empty?`. The block / arg forms are answered by the
-          # RBS / BlockFolding tier.
+          # `shape.any?` (no block, no arg) — opposite of `empty?`. The block / arg forms are answered by
+          # the RBS / BlockFolding tier.
           def hash_any?(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1387,9 +1267,8 @@ module Rigor
             Type::Combinator.constant_of(!shape.pairs.empty?)
           end
 
-          # `shape.none?` (no block, no arg) — mirror of `any?`.
-          # Folds to `Constant[shape.pairs.empty?]` for closed
-          # shapes with no optional keys.
+          # `shape.none?` (no block, no arg) — mirror of `any?`. Folds to `Constant[shape.pairs.empty?]`
+          # for closed shapes with no optional keys.
           def hash_none?(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1398,8 +1277,7 @@ module Rigor
             Type::Combinator.constant_of(shape.pairs.empty?)
           end
 
-          # `shape.one?` (no block, no arg) — folds to
-          # `Constant[shape.pairs.size == 1]` for a closed shape
+          # `shape.one?` (no block, no arg) — folds to `Constant[shape.pairs.size == 1]` for a closed shape
           # with no optional keys.
           def hash_one?(shape, _method_name, args)
             return nil unless args.empty?
@@ -1409,19 +1287,17 @@ module Rigor
             Type::Combinator.constant_of(shape.pairs.size == 1)
           end
 
-          # `shape.deconstruct_keys(keys)` — Ruby's `Hash#deconstruct_keys`
-          # returns the receiver itself regardless of the `keys`
-          # argument, so the precise answer is the shape unchanged.
+          # `shape.deconstruct_keys(keys)` — Ruby's `Hash#deconstruct_keys` returns the receiver itself
+          # regardless of the `keys` argument, so the precise answer is the shape unchanged.
           def hash_deconstruct_keys(shape, _method_name, args)
             return nil unless args.size == 1
 
             shape
           end
 
-          # `shape.fetch_values(:a, :b, ...)` — like `values_at` but
-          # raises `KeyError` on a missing key. Folds to `Tuple[V…]`
-          # only when every requested key is present; a missing key
-          # declines so the RBS tier reflects the raise.
+          # `shape.fetch_values(:a, :b, ...)` — like `values_at` but raises `KeyError` on a missing key.
+          # Folds to `Tuple[V…]` only when every requested key is present; a missing key declines so the
+          # RBS tier reflects the raise.
           def hash_fetch_values(shape, _method_name, args)
             return nil if args.empty?
             return nil unless shape.closed?
@@ -1440,8 +1316,8 @@ module Rigor
             Type::Combinator.tuple_of(*values)
           end
 
-          # `shape.assoc(key)` — returns `Tuple[Constant[k], V]` for a
-          # known key, `Constant[nil]` for a missing key.
+          # `shape.assoc(key)` — returns `Tuple[Constant[k], V]` for a known key, `Constant[nil]` for a
+          # missing key.
           def hash_assoc(shape, _method_name, args)
             return nil unless args.size == 1
             return nil unless shape.closed?
@@ -1457,11 +1333,9 @@ module Rigor
             Type::Combinator.tuple_of(Type::Combinator.constant_of(key), shape.pairs[key])
           end
 
-          # `shape.rassoc(value)` — reverse of `assoc`: returns
-          # `Tuple[Constant[k], V]` for the first key whose VALUE equals
-          # the argument, `Constant[nil]` when none match. Folds when every
-          # value is a `Constant` so equality is decidable (mirrors
-          # `hash_key`, which returns only the key).
+          # `shape.rassoc(value)` — reverse of `assoc`: returns `Tuple[Constant[k], V]` for the first key
+          # whose VALUE equals the argument, `Constant[nil]` when none match. Folds when every value is a
+          # `Constant` so equality is decidable (mirrors `hash_key`, which returns only the key).
           def hash_rassoc(shape, _method_name, args)
             return nil unless args.size == 1
             return nil unless shape.closed?
@@ -1477,10 +1351,9 @@ module Rigor
             Type::Combinator.tuple_of(Type::Combinator.constant_of(pair.first), pair.last)
           end
 
-          # `shape.key(value)` — reverse lookup. Folds when every
-          # value is a `Constant` so equality is decidable: returns
-          # `Constant[k]` for the first matching key, `Constant[nil]`
-          # when no value matches.
+          # `shape.key(value)` — reverse lookup. Folds when every value is a `Constant` so equality is
+          # decidable: returns `Constant[k]` for the first matching key, `Constant[nil]` when no value
+          # matches.
           def hash_key(shape, _method_name, args)
             return nil unless args.size == 1
             return nil unless shape.closed?
@@ -1494,10 +1367,8 @@ module Rigor
             Type::Combinator.constant_of(pair&.first)
           end
 
-          # `shape.has_value?(v)` / `value?(v)` — folds to
-          # `Constant[true/false]` when every value is a `Constant`
-          # (so equality is decidable) and the argument is a
-          # `Constant`.
+          # `shape.has_value?(v)` / `value?(v)` — folds to `Constant[true/false]` when every value is a
+          # `Constant` (so equality is decidable) and the argument is a `Constant`.
           def hash_has_value?(shape, _method_name, args)
             return nil unless args.size == 1
             return nil unless shape.closed?
@@ -1511,11 +1382,9 @@ module Rigor
             Type::Combinator.constant_of(found)
           end
 
-          # `shape.default` / `default_proc` — a literal `HashShape`
-          # carries no default value or proc, so both fold to
-          # `Constant[nil]`. `default` accepts an optional key
-          # argument (still returns the default), `default_proc`
-          # takes none — the `args.size <= 1` guard covers both.
+          # `shape.default` / `default_proc` — a literal `HashShape` carries no default value or proc, so
+          # both fold to `Constant[nil]`. `default` accepts an optional key argument (still returns the
+          # default), `default_proc` takes none — the `args.size <= 1` guard covers both.
           def hash_default(shape, _method_name, args)
             return nil unless args.size <= 1
             return nil unless shape.closed?
@@ -1523,10 +1392,9 @@ module Rigor
             Type::Combinator.constant_of(nil)
           end
 
-          # `shape < other` / `<=` / `>` / `>=` — Hash containment
-          # comparison. Both sides must be closed `HashShape`s whose
-          # values are all `Constant` (so pair equality is
-          # decidable). `<` / `>` are proper-subset / -superset.
+          # `shape < other` / `<=` / `>` / `>=` — Hash containment comparison. Both sides must be closed
+          # `HashShape`s whose values are all `Constant` (so pair equality is decidable). `<` / `>` are
+          # proper-subset / -superset.
           def hash_compare(shape, method_name, args)
             return nil unless args.size == 1
             return nil unless shape.closed? && shape.optional_keys.empty?
@@ -1542,9 +1410,8 @@ module Rigor
             Type::Combinator.constant_of(hash_containment(method_name, left, right))
           end
 
-          # Unwraps a closed shape's pairs to a plain Ruby Hash of
-          # `key => value` for value-equality comparison. Returns nil
-          # when any value is not a `Constant`.
+          # Unwraps a closed shape's pairs to a plain Ruby Hash of `key => value` for value-equality
+          # comparison. Returns nil when any value is not a `Constant`.
           def constant_pairs(shape)
             return nil unless shape.pairs.values.all?(Type::Constant)
 
@@ -1568,10 +1435,9 @@ module Rigor
             left.size < right.size && hash_subset?(left, right)
           end
 
-          # `shape.has_key?(k)` / `key?(k)` / `member?(k)` /
-          # `include?(k)` — folds to `Constant[true/false]` when
-          # the argument is a `Constant[Symbol|String]` and the
-          # shape is closed with no optional keys.
+          # `shape.has_key?(k)` / `key?(k)` / `member?(k)` / `include?(k)` — folds to `Constant[true/false]`
+          # when the argument is a `Constant[Symbol|String]` and the shape is closed with no optional
+          # keys.
           def hash_has_key?(shape, _method_name, args)
             return nil unless args.size == 1
             return nil unless shape.closed?
@@ -1587,10 +1453,9 @@ module Rigor
           end
           # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
 
-          # `shape.keys` — returns a `Tuple[Constant<k>…]` for a
-          # closed shape with no optional keys; the Tuple's
-          # arity matches the shape's per-key declaration order
-          # so downstream `tuple[i]` projections stay precise.
+          # `shape.keys` — returns a `Tuple[Constant<k>…]` for a closed shape with no optional keys; the
+          # Tuple's arity matches the shape's per-key declaration order so downstream `tuple[i]`
+          # projections stay precise.
           def hash_keys(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1599,9 +1464,8 @@ module Rigor
             Type::Combinator.tuple_of(*shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) })
           end
 
-          # `shape.values` — returns a `Tuple[V_1, …, V_n]` for a
-          # closed shape with no optional keys, the Tuple's arity
-          # matching the shape's per-key value order.
+          # `shape.values` — returns a `Tuple[V_1, …, V_n]` for a closed shape with no optional keys, the
+          # Tuple's arity matching the shape's per-key value order.
           def hash_values(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1610,8 +1474,8 @@ module Rigor
             Type::Combinator.tuple_of(*shape.pairs.values)
           end
 
-          # `shape.to_a` — returns a per-entry `Tuple[Tuple[K, V], …]`
-          # for a closed shape with no optional keys.
+          # `shape.to_a` — returns a per-entry `Tuple[Tuple[K, V], …]` for a closed shape with no optional
+          # keys.
           def hash_to_a(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1623,20 +1487,18 @@ module Rigor
             Type::Combinator.tuple_of(*entries)
           end
 
-          # `shape.to_h` — Hash is structurally identical to its
-          # to_h (Ruby returns the receiver itself for a Hash).
+          # `shape.to_h` — Hash is structurally identical to its to_h (Ruby returns the receiver itself for
+          # a Hash).
           def hash_to_h(shape, _method_name, args)
             return nil unless args.empty?
 
             shape
           end
 
-          # `shape.invert` — swaps keys and values. Folds when
-          # every value is a `Constant` whose value is a Symbol
-          # or String (the only hashable types that
-          # `HashShape` accepts as keys). Duplicate values would
-          # alias under inversion, so Rigor declines on
-          # collisions rather than silently dropping entries.
+          # `shape.invert` — swaps keys and values. Folds when every value is a `Constant` whose value is a
+          # Symbol or String (the only hashable types that `HashShape` accepts as keys). Duplicate values
+          # would alias under inversion, so Rigor declines on collisions rather than silently dropping
+          # entries.
           def hash_invert(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1652,10 +1514,9 @@ module Rigor
             Type::Combinator.hash_shape_of(inverted)
           end
 
-          # `shape.first` — returns the first `[k, v]` pair as a
-          # 2-Tuple, or `Constant[nil]` when the shape is empty.
-          # Folds only on closed shapes with no optional keys
-          # (open shapes might contribute extra keys at runtime).
+          # `shape.first` — returns the first `[k, v]` pair as a 2-Tuple, or `Constant[nil]` when the
+          # shape is empty. Folds only on closed shapes with no optional keys (open shapes might
+          # contribute extra keys at runtime).
           def hash_first(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1666,9 +1527,8 @@ module Rigor
             Type::Combinator.tuple_of(Type::Combinator.constant_of(key), value)
           end
 
-          # `shape.flatten` — flattens to `[k_1, v_1, k_2, v_2, …]`
-          # at depth 1. Closed shapes only; element order matches
-          # the per-key declaration order.
+          # `shape.flatten` — flattens to `[k_1, v_1, k_2, v_2, …]` at depth 1. Closed shapes only; element
+          # order matches the per-key declaration order.
           def hash_flatten(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1678,10 +1538,9 @@ module Rigor
             Type::Combinator.tuple_of(*elements)
           end
 
-          # `shape.compact` — drops every entry whose value is
-          # `Constant[nil]`. Folds only when every value is a
-          # `Constant` (so the drop set is decidable). Mixed-shape
-          # values decline so the RBS tier widens.
+          # `shape.compact` — drops every entry whose value is `Constant[nil]`. Folds only when every
+          # value is a `Constant` (so the drop set is decidable). Mixed-shape values decline so the RBS
+          # tier widens.
           def hash_compact(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -1692,11 +1551,9 @@ module Rigor
             Type::Combinator.hash_shape_of(kept)
           end
 
-          # `shape.merge(other)` — when both sides are closed
-          # HashShape with no optional keys, fold to the merged
-          # HashShape. Right-hand entries override left-hand
-          # entries on key collision (matching Ruby's runtime
-          # `Hash#merge`).
+          # `shape.merge(other)` — when both sides are closed HashShape with no optional keys, fold to the
+          # merged HashShape. Right-hand entries override left-hand entries on key collision (matching
+          # Ruby's runtime `Hash#merge`).
           def hash_merge(shape, _method_name, args)
             return nil unless args.size == 1
             return nil unless shape.closed? && shape.optional_keys.empty?
@@ -1708,14 +1565,13 @@ module Rigor
             Type::Combinator.hash_shape_of(shape.pairs.merge(other.pairs))
           end
 
-          # `shape[k]` and `shape.fetch(k)` for a static symbol/string
-          # key. Missing-key resolution depends on the method:
+          # `shape[k]` and `shape.fetch(k)` for a static symbol/string key. Missing-key resolution depends
+          # on the method:
           #
-          # - `[]` returns `nil` at runtime; we surface `Constant[nil]`
-          #   so the carrier is visible to downstream narrowing.
-          # - `fetch` (no default, no block) raises `KeyError`; we let
-          #   the projection answer apply because the runtime would
-          #   not produce a value.
+          # - `[]` returns `nil` at runtime; we surface `Constant[nil]` so the carrier is visible to
+          #   downstream narrowing.
+          # - `fetch` (no default, no block) raises `KeyError`; we let the projection answer apply because
+          #   the runtime would not produce a value.
           def hash_lookup(shape, method_name, args)
             return nil unless args.size == 1
 
@@ -1729,12 +1585,10 @@ module Rigor
             nil
           end
 
-          # `shape.dig(:a, :b, ...)` with a chain of static keys.
-          # Same recursion semantics as Tuple#`dig`: each step looks
-          # up the key, then `chain_dig` continues with the
-          # resolved value as the new receiver. Missing keys collapse
-          # to `Constant[nil]` (Ruby's `Hash#dig` short-circuits on
-          # nil too).
+          # `shape.dig(:a, :b, ...)` with a chain of static keys. Same recursion semantics as Tuple#`dig`:
+          # each step looks up the key, then `chain_dig` continues with the resolved value as the new
+          # receiver. Missing keys collapse to `Constant[nil]` (Ruby's `Hash#dig` short-circuits on nil
+          # too).
           def hash_dig(shape, _method_name, args)
             return nil if args.empty?
 
@@ -1744,10 +1598,9 @@ module Rigor
             chain_dig(step, args.drop(1))
           end
 
-          # Returns the per-step value type for a HashShape lookup
-          # (or `Constant[nil]` for a known-missing key). Returns
-          # `nil` when the argument is not a static symbol/string
-          # so the caller can fall through to the projection answer.
+          # Returns the per-step value type for a HashShape lookup (or `Constant[nil]` for a known-missing
+          # key). Returns `nil` when the argument is not a static symbol/string so the caller can fall
+          # through to the projection answer.
           def hash_dig_step(shape, arg)
             return nil unless arg.is_a?(Type::Constant)
 
@@ -1776,11 +1629,9 @@ module Rigor
             !shape.pairs.key?(arg.value)
           end
 
-          # `shape.values_at(:a, :b, ...)` with a list of static
-          # keys. Returns a `Tuple` whose per-position values are
-          # the per-key value types (`Constant[nil]` for missing
-          # keys, mirroring Ruby's runtime behaviour). Falls through
-          # when any argument is not a static symbol/string.
+          # `shape.values_at(:a, :b, ...)` with a list of static keys. Returns a `Tuple` whose per-position
+          # values are the per-key value types (`Constant[nil]` for missing keys, mirroring Ruby's runtime
+          # behaviour). Falls through when any argument is not a static symbol/string.
           def hash_values_at(shape, _method_name, args)
             return nil if args.empty?
 
@@ -1795,12 +1646,10 @@ module Rigor
             Type::Combinator.tuple_of(*values)
           end
 
-          # `shape.slice(:a, :b, ...)` — returns a sub-HashShape
-          # containing only the specified keys. All arguments must
-          # be `Constant[Symbol|String]`. Keys not present in the
-          # shape are silently omitted (matching Ruby's runtime
-          # semantics — no nil padding). Declines on open shapes
-          # or when any argument is not a static key.
+          # `shape.slice(:a, :b, ...)` — returns a sub-HashShape containing only the specified keys. All
+          # arguments must be `Constant[Symbol|String]`. Keys not present in the shape are silently
+          # omitted (matching Ruby's runtime semantics — no nil padding). Declines on open shapes or when
+          # any argument is not a static key.
           def hash_slice(shape, _method_name, args)
             return nil if args.empty?
             return nil unless shape.closed?
@@ -1819,11 +1668,9 @@ module Rigor
             Type::Combinator.hash_shape_of(shape.pairs.slice(*requested))
           end
 
-          # `shape.except(:a, :b, ...)` — returns a sub-HashShape
-          # with the specified keys removed. All arguments must be
-          # `Constant[Symbol|String]`. Keys not present in the shape
-          # are silently ignored. Declines on open shapes or when
-          # any argument is not a static key.
+          # `shape.except(:a, :b, ...)` — returns a sub-HashShape with the specified keys removed. All
+          # arguments must be `Constant[Symbol|String]`. Keys not present in the shape are silently
+          # ignored. Declines on open shapes or when any argument is not a static key.
           def hash_except(shape, _method_name, args)
             return nil if args.empty?
             return nil unless shape.closed?
@@ -1843,11 +1690,9 @@ module Rigor
             Type::Combinator.hash_shape_of(kept)
           end
 
-          # Continues a `dig` chain after the first step. Tuple and
-          # HashShape members re-dispatch into the catalogue;
-          # `Constant[nil]` short-circuits the chain (Hash#dig and
-          # Array#dig do the same at runtime); anything else falls
-          # through so the projection answer applies.
+          # Continues a `dig` chain after the first step. Tuple and HashShape members re-dispatch into the
+          # catalogue; `Constant[nil]` short-circuits the chain (Hash#dig and Array#dig do the same at
+          # runtime); anything else falls through so the projection answer applies.
           def chain_dig(receiver, args)
             return receiver if args.empty?
 

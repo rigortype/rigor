@@ -19,37 +19,26 @@ module Rigor
   class CLI
     # Executes `rigor annotate FILE`.
     #
-    # For every source line the command finds the expression the
-    # line evaluates to — the last statement that ends on the line
-    # (so `1; 2; 3` reports `3`), or, for a line that no statement
-    # closes, the widest expression ending there (so the `if nil`
-    # header reports its condition). It infers that expression's
-    # type and appends a `#=> <type>` comment (the xmpfilter /
-    # seeing_is_believing convention).
+    # For every source line the command finds the expression the line evaluates to — the last statement that ends on the
+    # line (so `1; 2; 3` reports `3`), or, for a line that no statement closes, the widest expression ending there (so
+    # the `if nil` header reports its condition). It infers that expression's type and appends a `#=> <type>` comment
+    # (the xmpfilter / seeing_is_believing convention).
     #
-    # The annotated source is re-parsed with Prism — a sanity gate,
-    # since the appended text is always a comment — and printed to
-    # stdout. When colour is enabled and `bat`
-    # (https://github.com/sharkdp/bat) is on PATH it is used for
-    # highlighting; otherwise IRB-style highlighting via
-    # {PrismColorizer}.
+    # The annotated source is re-parsed with Prism — a sanity gate, since the appended text is always a comment — and
+    # printed to stdout. When colour is enabled and `bat` (https://github.com/sharkdp/bat) is on PATH it is used for
+    # highlighting; otherwise IRB-style highlighting via {PrismColorizer}.
     class AnnotateCommand < Command
       USAGE = "Usage: rigor annotate [options] FILE"
 
-      # Trailing `#=> …` annotation comment. Matched and stripped
-      # before re-annotating so re-running is idempotent — this
-      # follows xmpfilter's convention of owning the `#=>` marker,
-      # and also absorbs the older `#=> dump_type: <type>` spelling
-      # (idempotency across re-runs). The leading `\s` requirement
-      # keeps a `#=>` inside a string literal (no preceding
-      # whitespace ambiguity aside) from matching mid-expression.
+      # Trailing `#=> …` annotation comment. Matched and stripped before re-annotating so re-running is idempotent —
+      # this follows xmpfilter's convention of owning the `#=>` marker, and also absorbs the older `#=> dump_type:
+      # <type>` spelling (idempotency across re-runs). The leading `\s` requirement keeps a `#=>` inside a string
+      # literal (no preceding whitespace ambiguity aside) from matching mid-expression.
       ANNOTATION_PATTERN = /\s+#=>(?:\s.*)?\z/
 
-      # Arguments for highlighting through `bat`: the annotated
-      # text arrives on stdin, so the language must be explicit;
-      # `--style=plain` drops the grid/header chrome so the output
-      # matches the PrismColorizer fallback line-for-line; paging
-      # stays off because the CLI may itself sit in a pipeline.
+      # Arguments for highlighting through `bat`: the annotated text arrives on stdin, so the language must be explicit;
+      # `--style=plain` drops the grid/header chrome so the output matches the PrismColorizer fallback line-for-line;
+      # paging stays off because the CLI may itself sit in a pipeline.
       BAT_ARGS = %w[--language=ruby --style=plain --paging=never --color=always].freeze
 
       # @return [Integer] CLI exit status.
@@ -71,8 +60,7 @@ module Rigor
       private
 
       def parse_options
-        # Default: colour a tty, unless `NO_COLOR` opts out. An
-        # explicit `--color` / `--no-color` overrides both.
+        # Default: colour a tty, unless `NO_COLOR` opts out. An explicit `--color` / `--no-color` overrides both.
         options = { config: nil, color: @out.tty? && !no_color_env?, bat: nil, format: :text }
 
         parser = OptionParser.new do |opts|
@@ -96,9 +84,8 @@ module Rigor
         options
       end
 
-      # https://no-color.org — colour output is suppressed by
-      # default when `NO_COLOR` is present and not an empty string,
-      # regardless of its value.
+      # https://no-color.org — colour output is suppressed by default when `NO_COLOR` is present and not an empty
+      # string, regardless of its value.
       def no_color_env?
         value = ENV.fetch("NO_COLOR", nil)
         !value.nil? && !value.empty?
@@ -106,22 +93,17 @@ module Rigor
 
       def execute(file, options)
         configuration = Configuration.load(options.fetch(:config))
-        # Force UTF-8 (with BOM tolerance) regardless of
-        # `Encoding.default_external`. Under a minimal locale
-        # the default is US-ASCII; reading multi-byte source
-        # under that tag makes the post-parse `String#sub` /
-        # `String#lines` calls in `#annotate` raise
-        # `invalid byte sequence in US-ASCII`. Ruby source is
-        # UTF-8 by convention (the parser's own assumption
-        # absent a magic comment).
+        # Force UTF-8 (with BOM tolerance) regardless of `Encoding.default_external`. Under a minimal locale the default
+        # is US-ASCII; reading multi-byte source under that tag makes the post-parse `String#sub` / `String#lines` calls
+        # in `#annotate` raise `invalid byte sequence in US-ASCII`. Ruby source is UTF-8 by convention (the parser's own
+        # assumption absent a magic comment).
         source = File.read(file, mode: "r:bom|utf-8")
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 
-        # `converged_loop_recording` re-records fixpoint-tracked loop
-        # bodies from their converged (post-writeback) bindings, so a
-        # loop-body line annotates the joined widened type (`Integer`)
-        # rather than a stale first-iterations constant (`1 | 2`).
+        # `converged_loop_recording` re-records fixpoint-tracked loop bodies from their converged (post-writeback)
+        # bindings, so a loop-body line annotates the joined widened type (`Integer`) rather than a stale
+        # first-iterations constant (`1 | 2`).
         scope_index = Inference::ScopeIndexer.index(
           parse_result.value, default_scope: base_scope(configuration),
                               converged_loop_recording: true
@@ -137,11 +119,10 @@ module Rigor
         0
       end
 
-      # `--format json` — emit the { line_number => type } map directly, the
-      # same data the text renderer consumes, so clients (the playground,
-      # editors) get structured annotations without reparsing the `#=> <type>`
-      # comment grammar. Values are the short type descriptions the text form
-      # also shows; keys are 1-based line numbers as strings (JSON object keys).
+      # `--format json` — emit the { line_number => type } map directly, the same data the text renderer consumes, so
+      # clients (the playground, editors) get structured annotations without reparsing the `#=> <type>` comment grammar.
+      # Values are the short type descriptions the text form also shows; keys are 1-based line numbers as strings (JSON
+      # object keys).
       def emit_json(line_types)
         annotations = line_types.keys.sort.to_h { |line| [line.to_s, line_types[line].describe(:short)] }
         @out.puts(JSON.generate({ "annotations" => annotations }))
@@ -165,8 +146,7 @@ module Rigor
         true
       end
 
-      # Appends ` #=> <type>` to every line a type was inferred
-      # for, aligning the comment column.
+      # Appends ` #=> <type>` to every line a type was inferred for, aligning the comment column.
       def annotate(source, line_types)
         lines = source.lines
         column = annotation_column(lines, line_types)
@@ -198,10 +178,8 @@ module Rigor
         rendered || PrismColorizer.colorize(annotated)
       end
 
-      # Pipes the annotated source through `bat` and returns its
-      # highlighted output, or nil when bat is unavailable or
-      # fails (broken install, killed mid-write) — the caller
-      # falls back to {PrismColorizer}. An explicit `--bat` with
+      # Pipes the annotated source through `bat` and returns its highlighted output, or nil when bat is unavailable or
+      # fails (broken install, killed mid-write) — the caller falls back to {PrismColorizer}. An explicit `--bat` with
       # no bat on PATH warns instead of failing silently.
       def render_with_bat(annotated, forced: nil)
         executable = bat_executable
@@ -233,9 +211,8 @@ module Rigor
       end
     end
 
-    # Walks a parsed program and resolves, per source line, the
-    # type of the expression the line evaluates to. Used only by
-    # {AnnotateCommand}.
+    # Walks a parsed program and resolves, per source line, the type of the expression the line evaluates to. Used only
+    # by {AnnotateCommand}.
     class LineTypeCollector
       def initialize(scope_index)
         @scope_index = scope_index
@@ -256,16 +233,11 @@ module Rigor
 
       private
 
-      # Yields each statement node (a child of any `StatementsNode`
-      # anywhere in the tree) in post-order: nested statements are
-      # yielded before the enclosing statement that contains them.
-      # `by_line[end_line] = type` overwrites earlier entries, so
-      # post-order means the *outermost* statement closing a line
-      # wins — for `b = if cond then :then else :else end` the
-      # line resolves to the assignment's type (the if-expression's
-      # union), not the else-branch's inner `:else`. Direct siblings
-      # (`1; 2; 3`) are still yielded in source order so the last
-      # sibling wins.
+      # Yields each statement node (a child of any `StatementsNode` anywhere in the tree) in post-order: nested
+      # statements are yielded before the enclosing statement that contains them. `by_line[end_line] = type` overwrites
+      # earlier entries, so post-order means the *outermost* statement closing a line wins — for `b = if cond then :then
+      # else :else end` the line resolves to the assignment's type (the if-expression's union), not the else-branch's
+      # inner `:else`. Direct siblings (`1; 2; 3`) are still yielded in source order so the last sibling wins.
       def each_statement(node, &block)
         return if node.nil?
 
@@ -279,8 +251,7 @@ module Rigor
         end
       end
 
-      # For a line no statement closes (the `if` / block header
-      # lines), fall back to the widest expression ending there.
+      # For a line no statement closes (the `if` / block header lines), fall back to the widest expression ending there.
       def fill_uncovered_lines(program, by_line)
         widest_per_line(program).each do |line, node|
           next if by_line.key?(line)
@@ -290,12 +261,10 @@ module Rigor
         end
       end
 
-      # A `do |i|` header line's widest node is its BlockParametersNode —
-      # not an expression, so evaluating it would only echo the
-      # `Dynamic[top]` fallback. Annotate the line with the parameters'
-      # inferred bindings instead (the single param's type, or a tuple
-      # for multi-param blocks); decline (nil) when any param has no
-      # plain name or no recorded binding, leaving the line bare.
+      # A `do |i|` header line's widest node is its BlockParametersNode — not an expression, so evaluating it would only
+      # echo the `Dynamic[top]` fallback. Annotate the line with the parameters' inferred bindings instead (the single
+      # param's type, or a tuple for multi-param blocks); decline (nil) when any param has no plain name or no recorded
+      # binding, leaving the line bare.
       def block_params_type(params_node)
         inner = params_node.parameters
         return nil if inner.nil? || inner.requireds.empty?
@@ -332,26 +301,20 @@ module Rigor
         node.compact_child_nodes.each { |child| walk(child, &block) }
       end
 
-      # Types the node through the flow evaluator (not the bare
-      # expression typer) under its recorded entry scope, so flow-only
-      # forms type as the engine sees them — `i += 1` dispatches `+` on
-      # `i`'s binding (`Integer`, post-fixpoint) instead of echoing the
-      # RHS literal's `1`.
+      # Types the node through the flow evaluator (not the bare expression typer) under its recorded entry scope, so
+      # flow-only forms type as the engine sees them — `i += 1` dispatches `+` on `i`'s binding (`Integer`,
+      # post-fixpoint) instead of echoing the RHS literal's `1`.
       def type_of(node)
         Inference::StatementEvaluator.new(scope: @scope_index[node]).evaluate(node).first
       rescue StandardError
         nil
       end
 
-      # For every `def`, replace the annotation on the header line
-      # (where the `def` keyword sits) with the method's inferred
-      # return type. The default annotation there comes from the
-      # parameter list (`name` typing as `Dynamic[top]`), which is
-      # noise; the return type is what readers actually want next
-      # to the method signature. When the return type cannot be
-      # inferred (empty body, scope-lookup miss, or any error
-      # under `DefReturnTyper.call`), the entry is deleted so no
-      # annotation is shown on that line.
+      # For every `def`, replace the annotation on the header line (where the `def` keyword sits) with the method's
+      # inferred return type. The default annotation there comes from the parameter list (`name` typing as
+      # `Dynamic[top]`), which is noise; the return type is what readers actually want next to the method signature.
+      # When the return type cannot be inferred (empty body, scope-lookup miss, or any error under
+      # `DefReturnTyper.call`), the entry is deleted so no annotation is shown on that line.
       def override_def_header_lines(program, by_line)
         each_def_node(program) do |def_node|
           line = def_node.location.start_line

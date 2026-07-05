@@ -2,11 +2,9 @@
 
 module Rigor
   class CLI
-    # Runtime CI-environment detection (ADR-51 WD7), modelled on
-    # `OndraM/ci-detector` (the library PHPStan uses). Reads the well-known
-    # environment variables a CI provider sets and returns the matching
-    # {Platform}, classifying it into a **tier** that decides how
-    # `rigor check` surfaces diagnostics there:
+    # Runtime CI-environment detection (ADR-51 WD7), modelled on `OndraM/ci-detector` (the library PHPStan uses). Reads
+    # the well-known environment variables a CI provider sets and returns the matching {Platform}, classifying it into a
+    # **tier** that decides how `rigor check` surfaces diagnostics there:
     #
     #   :native_stdout   — Rigor has a native format that renders purely from
     #                      stdout, so it is auto-emitted on top of the human
@@ -19,9 +17,8 @@ module Rigor
     #                      reviewdog (`checkstyle`/`sarif`) or `junit`. Hint
     #                      only.
     #
-    # Detection is a pure function of the environment hash, so it is fully
-    # testable; the CLI passes `ENV`. `RIGOR_CI_DETECT=0` (or `false`/`no`)
-    # disables it globally — the seam the spec suite uses for determinism.
+    # Detection is a pure function of the environment hash, so it is fully testable; the CLI passes `ENV`.
+    # `RIGOR_CI_DETECT=0` (or `false`/`no`) disables it globally — the seam the spec suite uses for determinism.
     module CiDetector
       Platform = Struct.new(:id, :name, :format, :tier, keyword_init: true) do
         def native_stdout? = tier == :native_stdout
@@ -29,10 +26,9 @@ module Rigor
         def reviewdog? = tier == :reviewdog
       end
 
-      # The detection table, ordered most-specific first so the generic
-      # `CI=true` catch-all is last (a provider that also sets `CI` is still
-      # recognised by its own variable). `match` is `:truthy` (value in
-      # 1/true/yes/on), `:present` (variable set non-empty), or `:equals`.
+      # The detection table, ordered most-specific first so the generic `CI=true` catch-all is last (a provider that
+      # also sets `CI` is still recognised by its own variable). `match` is `:truthy` (value in 1/true/yes/on),
+      # `:present` (variable set non-empty), or `:equals`.
       PROVIDERS = [
         { id: "github-actions", name: "GitHub Actions", format: "github", tier: :native_stdout,
           var: "GITHUB_ACTIONS", match: :truthy },
@@ -66,8 +62,7 @@ module Rigor
 
       module_function
 
-      # Returns the detected {Platform}, or nil when no CI is recognised or
-      # detection is disabled via `RIGOR_CI_DETECT`.
+      # Returns the detected {Platform}, or nil when no CI is recognised or detection is disabled via `RIGOR_CI_DETECT`.
       def detect(env = ENV)
         return nil if disabled?(env)
 

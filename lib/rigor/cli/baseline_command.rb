@@ -11,8 +11,8 @@ require_relative "command"
 
 module Rigor
   class CLI
-    # ADR-22 — `rigor baseline {generate,regenerate,dump,drift,
-    # prune}` subcommands, backed by `Rigor::Analysis::Baseline`.
+    # ADR-22 — `rigor baseline {generate,regenerate,dump,drift, prune}` subcommands, backed by
+    # `Rigor::Analysis::Baseline`.
     #
     #   rigor baseline generate              # default: rule-ID rows
     #   rigor baseline generate --match-mode message
@@ -64,12 +64,9 @@ module Rigor
         write_baseline(options, verb: "wrote baseline to")
       end
 
-      # ADR-22 slice 5 — `regenerate` is `generate --force`: the
-      # end-of-quality-improvement-session refresh after landing
-      # baseline-reducing fixes. It rewrites the file
-      # unconditionally (no existence guard, no `--force` flag),
-      # so `rigor baseline regenerate` reads cleanly as "make the
-      # baseline match reality again".
+      # ADR-22 slice 5 — `regenerate` is `generate --force`: the end-of-quality-improvement-session refresh after
+      # landing baseline-reducing fixes. It rewrites the file unconditionally (no existence guard, no `--force` flag),
+      # so `rigor baseline regenerate` reads cleanly as "make the baseline match reality again".
       def run_regenerate
         options = parse_generate_options(subcommand: "regenerate")
         write_baseline(options, verb: "regenerated baseline")
@@ -126,10 +123,8 @@ module Rigor
 
       def collect_diagnostics(configuration, _options)
         cache_store = Cache::Store.new(root: configuration.cache_path)
-        # IMPORTANT: do NOT activate the existing baseline when
-        # generating a fresh one — otherwise the new file
-        # records the post-filter (silenced) diagnostic set,
-        # which is empty after a successful first run.
+        # IMPORTANT: do NOT activate the existing baseline when generating a fresh one — otherwise the new file records
+        # the post-filter (silenced) diagnostic set, which is empty after a successful first run.
         configuration_for_generation = override_configuration_baseline_off(configuration)
         runner = Analysis::Runner.new(
           configuration: configuration_for_generation,
@@ -140,9 +135,8 @@ module Rigor
       end
 
       def override_configuration_baseline_off(configuration)
-        # Synthesise a new Configuration with `baseline` explicitly
-        # disabled. The original Configuration is frozen-ish so we
-        # round-trip through the constructor with an override hash.
+        # Synthesise a new Configuration with `baseline` explicitly disabled. The original Configuration is frozen-ish
+        # so we round-trip through the constructor with an override hash.
         defaults = Configuration::DEFAULTS.merge(
           "paths" => configuration.paths,
           "exclude" => configuration.exclude_patterns,
@@ -206,8 +200,7 @@ module Rigor
           return
         end
 
-        # Group by rule for readability; rules with the most
-        # entries first.
+        # Group by rule for readability; rules with the most entries first.
         by_rule = rows.group_by(&:rule).sort_by { |_rule, group| -group.size }
         by_rule.each do |rule, group|
           total = group.sum(&:count)

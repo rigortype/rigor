@@ -5,41 +5,31 @@ require_relative "../diagnostic"
 module Rigor
   module Analysis
     class Runner
-      # Builds and orders every project-level diagnostic stream the
-      # {Runner} surfaces — the pre-file streams (plugin load / prepare,
-      # ADR-10 dependency-source, pre-eval, RBS coverage, path errors),
-      # the post-analysis streams (synthesized namespaces, conforms-to,
-      # the three reporter drains), and the final severity stamp.
+      # Builds and orders every project-level diagnostic stream the {Runner} surfaces — the pre-file
+      # streams (plugin load / prepare, ADR-10 dependency-source, pre-eval, RBS coverage, path errors), the
+      # post-analysis streams (synthesized namespaces, conforms-to, the three reporter drains), and the
+      # final severity stamp.
       #
-      # Constraint: the relative order of every stream below is the
-      # diagnostic output contract — callers MUST NOT reorder the
-      # concatenation in `pre_file_diagnostics` or the post-analysis
-      # streams the {Runner} drains after `analyze_files`.
+      # Constraint: the relative order of every stream below is the diagnostic output contract — callers
+      # MUST NOT reorder the concatenation in `pre_file_diagnostics` or the post-analysis streams the
+      # {Runner} drains after `analyze_files`.
       #
-      # The collaborator holds the immutable per-run inputs (the
-      # configuration and the three mutable reporter accumulators, which
-      # are shared instances the dispatcher records into). The per-run
-      # varying state produced by other passes (the plugin registry, the
-      # dependency-source index, and the four end-of-pass snapshots) is
-      # read through injected reader procs so this collaborator never
-      # calls back into the {Runner} and the read happens at the exact
-      # point in the run the original inline read did.
+      # The collaborator holds the immutable per-run inputs (the configuration and the three mutable
+      # reporter accumulators, which are shared instances the dispatcher records into). The per-run varying
+      # state produced by other passes (the plugin registry, the dependency-source index, and the four
+      # end-of-pass snapshots) is read through injected reader procs so this collaborator never calls back
+      # into the {Runner} and the read happens at the exact point in the run the original inline read did.
       class DiagnosticAggregator # rubocop:disable Metrics/ClassLength
         # @param configuration [Rigor::Configuration]
         # @param rbs_extended_reporter [RbsExtended::Reporter]
-        # @param boundary_cross_reporter
-        #   [DependencySourceInference::BoundaryCrossReporter]
-        # @param source_rbs_synthesis_reporter
-        #   [Plugin::SourceRbsSynthesisReporter]
-        # @param plugin_registry [#call] reader returning the current
-        #   {Plugin::Registry} (varies per run).
-        # @param dependency_source_index [#call] reader returning the
-        #   current {DependencySourceInference::Index}.
+        # @param boundary_cross_reporter [DependencySourceInference::BoundaryCrossReporter]
+        # @param source_rbs_synthesis_reporter [Plugin::SourceRbsSynthesisReporter]
+        # @param plugin_registry [#call] reader returning the current {Plugin::Registry} (varies per run).
+        # @param dependency_source_index [#call] reader returning the current
+        #   {DependencySourceInference::Index}.
         # @param pool_mode [#call] reader returning the pool-mode flag.
-        # @param cached_plugin_prepare_diagnostics [#call] reader
-        #   returning the prepare-diagnostic snapshot.
-        # @param pre_eval_diagnostics_from_scanner [#call] reader
-        #   returning the pre-eval scanner diagnostics.
+        # @param cached_plugin_prepare_diagnostics [#call] reader returning the prepare-diagnostic snapshot.
+        # @param pre_eval_diagnostics_from_scanner [#call] reader returning the pre-eval scanner diagnostics.
         # @param synthesized_namespaces_snapshot [#call] reader.
         # @param conformance_results_snapshot [#call] reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
@@ -60,29 +50,21 @@ module Rigor
           @conformance_results_snapshot_reader = conformance_results_snapshot
         end
 
-        # Pre-file diagnostic streams that fire once per run rather
-        # than per analyzed file: plugin load / prepare envelopes,
-        # the ADR-10 dependency-source resolution surface, and the
-        # `expand_paths` errors for `paths:` entries that don't
-        # exist or aren't `.rb`. Aggregated here so `#run` stays
-        # under the ABC budget.
+        # Pre-file diagnostic streams that fire once per run rather than per analyzed file: plugin load /
+        # prepare envelopes, the ADR-10 dependency-source resolution surface, and the `expand_paths` errors
+        # for `paths:` entries that don't exist or aren't `.rb`. Aggregated here so `#run` stays under the
+        # ABC budget.
         #
-        # ADR-15 Phase 4b — `plugin_prepare_diagnostics` runs on
-        # the coordinator's plugin registry under sequential mode;
-        # under pool mode each worker re-runs `prepare` against
-        # its own plugin instances, so the pool path drains the
-        # first worker's prepare-diagnostic snapshot into the
-        # aggregated diagnostic stream instead (see
-        # {#analyze_files_in_pool}). Skipping the coordinator
-        # prepare in pool mode avoids double-running `#prepare`
-        # against the coordinator-side plugin instances (which
-        # the pool path never consults for per-file analysis).
+        # ADR-15 Phase 4b — `plugin_prepare_diagnostics` runs on the coordinator's plugin registry under
+        # sequential mode; under pool mode each worker re-runs `prepare` against its own plugin instances,
+        # so the pool path drains the first worker's prepare-diagnostic snapshot into the aggregated
+        # diagnostic stream instead (see {#analyze_files_in_pool}). Skipping the coordinator prepare in pool
+        # mode avoids double-running `#prepare` against the coordinator-side plugin instances (which the
+        # pool path never consults for per-file analysis).
         def pre_file_diagnostics(expansion)
-          # ADR-18 slice 3 — prepare diagnostics are captured
-          # earlier in #run (before the synthetic-method scanner)
-          # so cross-plugin facts are available to the scanner.
-          # We re-surface the captured diagnostics here so the
-          # existing pre_file_diagnostics ordering is preserved.
+          # ADR-18 slice 3 — prepare diagnostics are captured earlier in #run (before the synthetic-method
+          # scanner) so cross-plugin facts are available to the scanner. We re-surface the captured
+          # diagnostics here so the existing pre_file_diagnostics ordering is preserved.
           prepare = pool_mode? ? [] : cached_plugin_prepare_diagnostics
           plugin_load_diagnostics +
             prepare +
@@ -94,17 +76,13 @@ module Rigor
             expansion.fetch(:errors)
         end
 
-        # ADR-17 slice 1 — surface a `:error` diagnostic for each
-        # `pre_eval:` entry whose resolved path doesn't exist on
-        # disk. Loud failure mode (`:error`, not `:warning`):
-        # a missing pre_eval path is a configuration mistake the
-        # user must fix before analysis is meaningful.
+        # ADR-17 slice 1 — surface a `:error` diagnostic for each `pre_eval:` entry whose resolved path
+        # doesn't exist on disk. Loud failure mode (`:error`, not `:warning`): a missing pre_eval path is a
+        # configuration mistake the user must fix before analysis is meaningful.
         #
-        # Slice 2 adds the `:warning` `pre-eval.parse-error`
-        # stream from the pre-pass scanner — accumulated as
-        # `@pre_eval_diagnostics_from_scanner` during {#run} and
-        # merged here so both diagnostics flow through the same
-        # severity / ordering pipeline.
+        # Slice 2 adds the `:warning` `pre-eval.parse-error` stream from the pre-pass scanner — accumulated
+        # as `@pre_eval_diagnostics_from_scanner` during {#run} and merged here so both diagnostics flow
+        # through the same severity / ordering pipeline.
         def pre_eval_diagnostics
           not_found = @configuration.pre_eval.filter_map do |path|
             next if File.file?(path)
@@ -144,14 +122,11 @@ module Rigor
           end
         end
 
-        # ADR-10 § "Diagnostic prefix family" — surfaces gems
-        # listed in `dependencies.source_inference` that RubyGems
-        # could not resolve. The run continues; the gem simply
-        # contributes nothing this session, mirroring the
-        # plugin-load error envelope. Authored `:warning` because
-        # an unresolvable gem usually means a typo or a missing
-        # `bundle install` rather than a project-blocking problem;
-        # the severity profile still re-stamps it.
+        # ADR-10 § "Diagnostic prefix family" — surfaces gems listed in `dependencies.source_inference`
+        # that RubyGems could not resolve. The run continues; the gem simply contributes nothing this
+        # session, mirroring the plugin-load error envelope. Authored `:warning` because an unresolvable
+        # gem usually means a typo or a missing `bundle install` rather than a project-blocking problem; the
+        # severity profile still re-stamps it.
         def dependency_source_diagnostics
           dependency_source_index.unresolvable.map do |entry|
             Diagnostic.new(
@@ -167,23 +142,16 @@ module Rigor
           end
         end
 
-        # ADR-10 § "Budget interaction" / slice 4 — emits one
-        # `:warning` per gem whose Walker run hit the
-        # `dependencies.budget_per_gem` cap. The cap is a Walker-
-        # side guard rail (slice 4 picks the (α) semantics from
-        # ADR-10 WD4: harvesting stops, the dispatcher behaves
-        # exactly as before for unrecorded methods). The
-        # diagnostic names the gem and points the user at the
-        # three remediations: ship RBS, reduce `mode:` from
-        # `full` to `when_missing`, or de-list the gem.
-        # ADR-10 § "config-conflict diagnostic" / 5d — surfaces
-        # `Configuration::Dependencies` warnings accumulated
-        # during `from_h` deduplication of the `includes:`-chain
-        # source_inference array. Each warning describes a
-        # per-gem mode conflict that the merge resolved
-        # right-wins; the user sees one diagnostic per conflict.
-        # `:warning` matches the user's "warn but don't block"
-        # preference per the design discussion.
+        # ADR-10 § "Budget interaction" / slice 4 — emits one `:warning` per gem whose Walker run hit the
+        # `dependencies.budget_per_gem` cap. The cap is a Walker- side guard rail (slice 4 picks the (α)
+        # semantics from ADR-10 WD4: harvesting stops, the dispatcher behaves exactly as before for
+        # unrecorded methods). The diagnostic names the gem and points the user at the three remediations:
+        # ship RBS, reduce `mode:` from `full` to `when_missing`, or de-list the gem.
+        # ADR-10 § "config-conflict diagnostic" / 5d — surfaces `Configuration::Dependencies` warnings
+        # accumulated during `from_h` deduplication of the `includes:`-chain source_inference array. Each
+        # warning describes a per-gem mode conflict that the merge resolved right-wins; the user sees one
+        # diagnostic per conflict. `:warning` matches the user's "warn but don't block" preference per the
+        # design discussion.
         def dependency_source_config_conflict_diagnostics
           @configuration.dependencies.warnings.map do |message|
             Diagnostic.new(
@@ -216,20 +184,15 @@ module Rigor
           end
         end
 
-        # O4 Layer 3 slice 3 — graceful-degradation coverage
-        # report. When the project has a `Gemfile.lock` (slice 1)
-        # and one or more locked gems are not covered by ANY of
-        # the four RBS resolution paths (`DEFAULT_LIBRARIES`,
-        # `data/vendored_gem_sigs/`, slice-1 bundle-shipped
-        # `sig/`, slice-2 `rbs_collection.lock.yaml`), emit a
-        # single `:info` diagnostic summarising the uncovered set
-        # so the user can act on it (run `rbs collection install`,
-        # opt the gem into `dependencies.source_inference:`, or
-        # accept the `Dynamic[T]` fallback).
+        # O4 Layer 3 slice 3 — graceful-degradation coverage report. When the project has a `Gemfile.lock`
+        # (slice 1) and one or more locked gems are not covered by ANY of the four RBS resolution paths
+        # (`DEFAULT_LIBRARIES`, `data/vendored_gem_sigs/`, slice-1 bundle-shipped `sig/`, slice-2
+        # `rbs_collection.lock.yaml`), emit a single `:info` diagnostic summarising the uncovered set so the
+        # user can act on it (run `rbs collection install`, opt the gem into `dependencies.source_inference:`,
+        # or accept the `Dynamic[T]` fallback).
         #
-        # Suppressed when the lockfile is empty, when every gem
-        # is covered, or when slice 1's `bundler.lockfile`
-        # discovery returned nothing (no lockfile to read).
+        # Suppressed when the lockfile is empty, when every gem is covered, or when slice 1's
+        # `bundler.lockfile` discovery returned nothing (no lockfile to read).
         def rbs_coverage_diagnostics
           locked = Environment::LockfileResolver.locked_gems(
             lockfile_path: @configuration.bundler_lockfile,
@@ -261,14 +224,12 @@ module Rigor
           [build_rbs_coverage_missing_diagnostic(missing)]
         end
 
-        # Robustness uplift companion (ADR-5) — when the project's
-        # `signature_paths:` RBS declared qualified names without their
-        # enclosing namespace, `RbsLoader` synthesizes the missing
-        # `module`s so the otherwise-inert signatures resolve. Surface a
-        # single `:info` diagnostic naming them so the user knows their
-        # sig set is malformed (`rbs validate` rejects it) and can fix it
-        # at the source. Authored `:info`: the analysis already succeeded;
-        # this is advisory, never a gate. Empty for a well-formed sig set.
+        # Robustness uplift companion (ADR-5) — when the project's `signature_paths:` RBS declared
+        # qualified names without their enclosing namespace, `RbsLoader` synthesizes the missing `module`s
+        # so the otherwise-inert signatures resolve. Surface a single `:info` diagnostic naming them so the
+        # user knows their sig set is malformed (`rbs validate` rejects it) and can fix it at the source.
+        # Authored `:info`: the analysis already succeeded; this is advisory, never a gate. Empty for a
+        # well-formed sig set.
         def rbs_synthesized_namespace_diagnostics
           synthesized = synthesized_namespaces_snapshot
           return [] if synthesized.nil? || synthesized.empty?
@@ -276,16 +237,12 @@ module Rigor
           [build_rbs_synthesized_namespace_diagnostic(synthesized)]
         end
 
-        # Maps the per-run `rigor:v1:conforms-to` scan results into
-        # diagnostics (spec: `rbs-extended.md` § "Explicit conformance
-        # directive"). A class that declares `conforms-to _Interface`
-        # but is missing a required interface method surfaces as
-        # `rbs_extended.unsatisfied-conformance`; an unresolvable
-        # interface name surfaces as `dynamic.rbs-extended.unresolved`
-        # `:info` (the same fail-soft channel the other directive
-        # parsers use). Empty for a project with no directive, a
-        # well-formed conformance, or a non-sequential pool run (the
-        # snapshot mirrors `synthesized_namespaces`).
+        # Maps the per-run `rigor:v1:conforms-to` scan results into diagnostics (spec: `rbs-extended.md` §
+        # "Explicit conformance directive"). A class that declares `conforms-to _Interface` but is missing
+        # a required interface method surfaces as `rbs_extended.unsatisfied-conformance`; an unresolvable
+        # interface name surfaces as `dynamic.rbs-extended.unresolved` `:info` (the same fail-soft channel
+        # the other directive parsers use). Empty for a project with no directive, a well-formed
+        # conformance, or a non-sequential pool run (the snapshot mirrors `synthesized_namespaces`).
         def conforms_to_diagnostics
           results = conformance_results_snapshot
           return [] if results.nil? || results.empty?
@@ -381,22 +338,18 @@ module Rigor
           )
         end
 
-        # ADR-13 slice 3b — drains the per-run
-        # {RbsExtended::Reporter} into one diagnostic per accumulated
+        # ADR-13 slice 3b — drains the per-run {RbsExtended::Reporter} into one diagnostic per accumulated
         # event:
         #
-        # - `dynamic.rbs-extended.unresolved` for every annotation
-        #   payload the parser could not turn into a {Rigor::Type}.
-        #   Surfaces typos and references to plugin-supplied names
-        #   the project did not enable.
-        # - `dynamic.shape.lossy-projection` for every shape-projection
-        #   type function (`pick_of`, …) applied to a carrier that
-        #   loses precision (anything other than `HashShape` / `Tuple`).
+        # - `dynamic.rbs-extended.unresolved` for every annotation payload the parser could not turn into a
+        #   {Rigor::Type}. Surfaces typos and references to plugin-supplied names the project did not
+        #   enable.
+        # - `dynamic.shape.lossy-projection` for every shape-projection type function (`pick_of`, …) applied
+        #   to a carrier that loses precision (anything other than `HashShape` / `Tuple`).
         #
-        # Both are authored `:info`; the severity profile re-stamps
-        # them per project taste. Path / line / column come from the
-        # annotation's `RBS::Location` when available, falling back
-        # to `.rigor.yml`-style file-level attribution otherwise.
+        # Both are authored `:info`; the severity profile re-stamps them per project taste. Path / line /
+        # column come from the annotation's `RBS::Location` when available, falling back to
+        # `.rigor.yml`-style file-level attribution otherwise.
         def rbs_extended_reporter_diagnostics
           return [] if @rbs_extended_reporter.empty?
 
@@ -423,16 +376,12 @@ module Rigor
           unresolved + lossy
         end
 
-        # ADR-32 WD6 — drains the per-run
-        # {Plugin::SourceRbsSynthesisReporter} into
-        # `source-rbs-synthesis-failed` `:info` diagnostics. Each
-        # entry names the plugin that owns the synthesizer, the
-        # source file the rbs-inline parser couldn't process, and
-        # the upstream error message. The synthesizer-emitting
-        # plugin (currently only `rigor-rbs-inline`) treats a
-        # parse failure as a no-contribution event so analysis
-        # continues; this stream surfaces the failure so the user
-        # can see which files contributed nothing and why.
+        # ADR-32 WD6 — drains the per-run {Plugin::SourceRbsSynthesisReporter} into
+        # `source-rbs-synthesis-failed` `:info` diagnostics. Each entry names the plugin that owns the
+        # synthesizer, the source file the rbs-inline parser couldn't process, and the upstream error
+        # message. The synthesizer-emitting plugin (currently only `rigor-rbs-inline`) treats a parse
+        # failure as a no-contribution event so analysis continues; this stream surfaces the failure so the
+        # user can see which files contributed nothing and why.
         #
         # Severity profile re-stamps the rule per project taste.
         def source_rbs_synthesis_diagnostics
@@ -452,23 +401,17 @@ module Rigor
           end
         end
 
-        # ADR-10 slice 5c — drains the per-run
-        # {DependencySourceInference::BoundaryCrossReporter} into
-        # `dynamic.dependency-source.boundary-cross` `:info`
-        # diagnostics. Each event flags a call site where RBS
-        # dispatch produced a concrete answer AND a `mode: :full`
-        # opt-in gem's source catalog ALSO contains an entry for
-        # the same `(class_name, method_name)` — i.e., both
-        # contracts have an opinion. RBS still wins on the
-        # dispatch result; the diagnostic is purely advisory so
-        # the user can verify the two contracts haven't drifted.
+        # ADR-10 slice 5c — drains the per-run {DependencySourceInference::BoundaryCrossReporter} into
+        # `dynamic.dependency-source.boundary-cross` `:info` diagnostics. Each event flags a call site
+        # where RBS dispatch produced a concrete answer AND a `mode: :full` opt-in gem's source catalog
+        # ALSO contains an entry for the same `(class_name, method_name)` — i.e., both contracts have an
+        # opinion. RBS still wins on the dispatch result; the diagnostic is purely advisory so the user can
+        # verify the two contracts haven't drifted.
         #
-        # Severity profile re-stamps the rule per project taste.
-        # The diagnostic carries no `path` / `line` / `column`
-        # because the crossing is per-method-per-gem, not
-        # per-call-site — the diagnostic anchors at `.rigor.yml`
-        # like the other `dependency-source.*` diagnostics that
-        # report on opt-in configuration.
+        # Severity profile re-stamps the rule per project taste. The diagnostic carries no `path` / `line`
+        # / `column` because the crossing is per-method-per-gem, not per-call-site — the diagnostic anchors
+        # at `.rigor.yml` like the other `dependency-source.*` diagnostics that report on opt-in
+        # configuration.
         def boundary_cross_diagnostics
           return [] if @boundary_cross_reporter.empty?
 
@@ -513,11 +456,9 @@ module Rigor
           name.empty? ? ".rigor.yml" : name
         end
 
-        # ADR-8 § "Severity profile" — re-stamps each diagnostic's
-        # severity from the configured profile + per-rule
-        # overrides. Rules emit with their authored severity; the
-        # profile is the final filter. Diagnostics whose resolved
-        # severity is `:off` are dropped from the run result.
+        # ADR-8 § "Severity profile" — re-stamps each diagnostic's severity from the configured profile +
+        # per-rule overrides. Rules emit with their authored severity; the profile is the final filter.
+        # Diagnostics whose resolved severity is `:off` are dropped from the run result.
         def apply_severity_profile(diagnostics)
           diagnostics.filter_map { |diagnostic| stamp_severity(diagnostic) }
         end

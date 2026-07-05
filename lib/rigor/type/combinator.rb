@@ -21,14 +21,11 @@ require_relative "../inference/flow_tracer"
 
 module Rigor
   module Type
-    # Factory entry point that routes every public construction through the
-    # deterministic normalization rules. Production code paths MUST go
-    # through Rigor::Type::Combinator. Direct constructor calls are an
-    # internal escape hatch for tests and for combinator's own
-    # implementation.
+    # Factory entry point that routes every public construction through the deterministic normalization
+    # rules. Production code paths MUST go through Rigor::Type::Combinator. Direct constructor calls are
+    # an internal escape hatch for tests and for combinator's own implementation.
     #
-    # See docs/internal-spec/internal-type-api.md and
-    # docs/type-specification/normalization.md.
+    # See docs/internal-spec/internal-type-api.md and docs/type-specification/normalization.md.
     module Combinator # rubocop:disable Metrics/ModuleLength
       module_function
 
@@ -40,19 +37,16 @@ module Rigor
         Bot.instance
       end
 
-      # ADR-15 Phase 4b.x — read the eagerly-allocated
-      # `@untyped` ivar instead of `||=`. The singleton-class
-      # `@untyped = Dynamic.new(top)` initializer runs at module
-      # body (below) on the main Ractor at load time. Workers
-      # READ the populated ivar without performing the lazy
-      # write that non-main Ractors are forbidden from doing.
+      # ADR-15 Phase 4b.x — read the eagerly-allocated `@untyped` ivar instead of `||=`. The
+      # singleton-class `@untyped = Dynamic.new(top)` initializer runs at module body (below) on the main
+      # Ractor at load time. Workers READ the populated ivar without performing the lazy write that
+      # non-main Ractors are forbidden from doing.
       def untyped
         @untyped
       end
 
-      # Wraps the static facet in a Dynamic[T] carrier. Idempotent on the
-      # static facet so Dynamic[Dynamic[T]] collapses to Dynamic[T] per the
-      # value-lattice algebra.
+      # Wraps the static facet in a Dynamic[T] carrier. Idempotent on the static facet so
+      # Dynamic[Dynamic[T]] collapses to Dynamic[T] per the value-lattice algebra.
       def dynamic(static_facet)
         return untyped if static_facet.equal?(top)
 
@@ -62,12 +56,10 @@ module Rigor
         Dynamic.new(facet)
       end
 
-      # Constructs a Nominal type. Slice 4 phase 2d accepts an optional
-      # `type_args:` array, an ordered list of Rigor::Type values that
-      # carry the receiver's generic instantiation (`Array[Integer]` is
-      # `Nominal["Array", [Nominal["Integer"]]]`). Omitting the keyword
-      # produces the raw form `Nominal["Array"]`, which is structurally
-      # distinct from any applied form.
+      # Constructs a Nominal type. Slice 4 phase 2d accepts an optional `type_args:` array, an ordered
+      # list of Rigor::Type values that carry the receiver's generic instantiation (`Array[Integer]` is
+      # `Nominal["Array", [Nominal["Integer"]]]`). Omitting the keyword produces the raw form
+      # `Nominal["Array"]`, which is structurally distinct from any applied form.
       def nominal_of(class_name_or_object, type_args: [])
         Nominal.new(resolve_class_name(class_name_or_object), type_args)
       end
@@ -80,27 +72,23 @@ module Rigor
         Constant.new(value)
       end
 
-      # Widens every value-pinned (`Constant`) constituent of `type` to its
-      # nominal base (`Constant[1]` -> `Nominal["Integer"]`), recursing
-      # through unions and leaving non-pinned constituents untouched.
-      # `Constant[nil]` is preserved (no nominal base of interest). Shared
-      # by the ADR-55 recursive-return fixpoint and the ADR-56 block /
-      # loop-body fixpoint (`BodyFixpoint`) to force convergence on the
+      # Widens every value-pinned (`Constant`) constituent of `type` to its nominal base (`Constant[1]` ->
+      # `Nominal["Integer"]`), recursing through unions and leaving non-pinned constituents untouched.
+      # `Constant[nil]` is preserved (no nominal base of interest). Shared by the ADR-55 recursive-return
+      # fixpoint and the ADR-56 block / loop-body fixpoint (`BodyFixpoint`) to force convergence on the
       # final permitted iteration.
       def widen_value_pinned(type)
         case type
         when Constant
           type.value.nil? ? type : nominal_of(type.value.class.name)
         when Refined
-          # A refinement (`non-empty-string`) is a value-narrowed nominal;
-          # widen it to its base so an accumulator whose per-pass result is
-          # a bounded refinement converges on the final iteration rather
-          # than flooring to `Dynamic[top]` (ADR-56).
+          # A refinement (`non-empty-string`) is a value-narrowed nominal; widen it to its base so an
+          # accumulator whose per-pass result is a bounded refinement converges on the final iteration
+          # rather than flooring to `Dynamic[top]` (ADR-56).
           widen_value_pinned(type.base)
         when IntegerRange
-          # `int<1, 6>` is likewise a value-narrowed `Integer` (it erases to
-          # `Integer` in RBS); widen it so a bounded-int accumulator
-          # converges (ADR-56).
+          # `int<1, 6>` is likewise a value-narrowed `Integer` (it erases to `Integer` in RBS); widen it
+          # so a bounded-int accumulator converges (ADR-56).
           nominal_of("Integer")
         when Union
           union(*type.members.map { |member| widen_value_pinned(member) })
@@ -109,24 +97,20 @@ module Rigor
         end
       end
 
-      # `Object#method(:name)` carrier. Stores the bound
-      # `(receiver, method_name)` pair so the dispatcher can
-      # substitute the original dispatch at `.call` / `.()` /
-      # `[]` time. See {Type::BoundMethod}.
+      # `Object#method(:name)` carrier. Stores the bound `(receiver, method_name)` pair so the dispatcher
+      # can substitute the original dispatch at `.call` / `.()` / `[]` time. See {Type::BoundMethod}.
       def bound_method_of(receiver_type, method_name)
         BoundMethod.new(receiver_type: receiver_type, method_name: method_name)
       end
 
-      # Bounded-integer carrier. Each bound is either an `Integer` or
-      # one of `:neg_infinity` / `:pos_infinity` (sentinels exposed as
-      # `IntegerRange::NEG_INFINITY` / `POS_INFINITY`).
+      # Bounded-integer carrier. Each bound is either an `Integer` or one of `:neg_infinity` /
+      # `:pos_infinity` (sentinels exposed as `IntegerRange::NEG_INFINITY` / `POS_INFINITY`).
       def integer_range(min, max)
         IntegerRange.new(min, max)
       end
 
-      # Convenience aliases for the most common bounded shapes. The
-      # named alias survives roundtrip through `describe` for nicer
-      # human-facing output.
+      # Convenience aliases for the most common bounded shapes. The named alias survives roundtrip
+      # through `describe` for nicer human-facing output.
       def positive_int
         IntegerRange.new(1, IntegerRange::POS_INFINITY)
       end
@@ -147,11 +131,9 @@ module Rigor
         IntegerRange.new(IntegerRange::NEG_INFINITY, IntegerRange::POS_INFINITY)
       end
 
-      # Point-removal refinement carrier (ADR-3 OQ3 Option C). Use
-      # `non_empty_string` / `non_zero_int` / `non_empty_array` /
-      # `non_empty_hash` for the imported built-in shapes; raw
-      # `difference(base, removed)` for ad-hoc refinements an
-      # `RBS::Extended` annotation introduces.
+      # Point-removal refinement carrier (ADR-3 OQ3 Option C). Use `non_empty_string` / `non_zero_int` /
+      # `non_empty_array` / `non_empty_hash` for the imported built-in shapes; raw `difference(base,
+      # removed)` for ad-hoc refinements an `RBS::Extended` annotation introduces.
       def difference(base, removed)
         Difference.new(base, removed)
       end
@@ -164,11 +146,9 @@ module Rigor
         Difference.new(nominal_of("Integer"), constant_of(0))
       end
 
-      # `non-empty-array[T]` requires the element type so the
-      # `Nominal[Array, [T]]` projection through Array#first /
-      # #last keeps element precision intact. The default
-      # `Top` admits any array element when the caller does
-      # not have a more specific element type.
+      # `non-empty-array[T]` requires the element type so the `Nominal[Array, [T]]` projection through
+      # Array#first / #last keeps element precision intact. The default `Top` admits any array element
+      # when the caller does not have a more specific element type.
       def non_empty_array(element = top)
         Difference.new(
           nominal_of("Array", type_args: [element]),
@@ -183,12 +163,10 @@ module Rigor
         )
       end
 
-      # Predicate-subset refinement carrier (ADR-3 OQ3 Option C,
-      # second half). Use `lowercase_string` /
-      # `uppercase_string` / `numeric_string` for the imported
-      # built-in shapes; raw `refined(base, predicate_id)` for
-      # ad-hoc refinements introduced by an `RBS::Extended`
-      # annotation or a plugin-contributed predicate.
+      # Predicate-subset refinement carrier (ADR-3 OQ3 Option C, second half). Use `lowercase_string` /
+      # `uppercase_string` / `numeric_string` for the imported built-in shapes; raw `refined(base,
+      # predicate_id)` for ad-hoc refinements introduced by an `RBS::Extended` annotation or a
+      # plugin-contributed predicate.
       def refined(base, predicate_id)
         Refined.new(base, predicate_id)
       end
@@ -197,12 +175,10 @@ module Rigor
         Refined.new(nominal_of("String"), :lowercase)
       end
 
-      # Complement of `lowercase-string`: a `String` with at least
-      # one non-lowercase character (i.e. `v != v.downcase`).
-      # Registered as the paired complement of
-      # `:lowercase` in {Refined::COMPLEMENT_PAIRS} so
-      # `~lowercase-string` narrows to this carrier instead of
-      # falling back to `Difference[String, lowercase-string]`.
+      # Complement of `lowercase-string`: a `String` with at least one non-lowercase character (i.e. `v !=
+      # v.downcase`). Registered as the paired complement of `:lowercase` in {Refined::COMPLEMENT_PAIRS}
+      # so `~lowercase-string` narrows to this carrier instead of falling back to `Difference[String,
+      # lowercase-string]`.
       def non_lowercase_string
         Refined.new(nominal_of("String"), :not_lowercase)
       end
@@ -211,9 +187,8 @@ module Rigor
         Refined.new(nominal_of("String"), :uppercase)
       end
 
-      # Complement of `uppercase-string`: a `String` with at least
-      # one non-uppercase character. Paired with `:uppercase` in
-      # {Refined::COMPLEMENT_PAIRS}.
+      # Complement of `uppercase-string`: a `String` with at least one non-uppercase character. Paired
+      # with `:uppercase` in {Refined::COMPLEMENT_PAIRS}.
       def non_uppercase_string
         Refined.new(nominal_of("String"), :not_uppercase)
       end
@@ -222,11 +197,9 @@ module Rigor
         Refined.new(nominal_of("String"), :numeric)
       end
 
-      # Complement of `numeric-string`: a `String` that is not
-      # accepted by Rigor's Ruby numeric-string predicate
-      # (contains at least one non-digit, has a malformed numeric
-      # form, etc.). Paired with `:numeric` in
-      # {Refined::COMPLEMENT_PAIRS}.
+      # Complement of `numeric-string`: a `String` that is not accepted by Rigor's Ruby numeric-string
+      # predicate (contains at least one non-digit, has a malformed numeric form, etc.). Paired with
+      # `:numeric` in {Refined::COMPLEMENT_PAIRS}.
       def non_numeric_string
         Refined.new(nominal_of("String"), :not_numeric)
       end
@@ -243,36 +216,27 @@ module Rigor
         Refined.new(nominal_of("String"), :hex_int)
       end
 
-      # `literal-string` — a `String` that is statically known to
-      # come from a source-code literal (or a composition of
-      # literals). v0.0.9 tracks this flow through interpolation
-      # `"#{...}"`, leaving propagation through `+` / `<<` to a
-      # later slice. Every `Constant<String>` is implicitly
-      # literal-string-compatible; the carrier exists for cases
-      # where the concrete value is unknown but literal-ness has
-      # been established (an RBS::Extended `return: literal-string`
-      # annotation, or interpolation over literal-bearing parts).
+      # `literal-string` — a `String` that is statically known to come from a source-code literal (or a
+      # composition of literals). v0.0.9 tracks this flow through interpolation `"#{...}"`, leaving
+      # propagation through `+` / `<<` to a later slice. Every `Constant<String>` is implicitly
+      # literal-string-compatible; the carrier exists for cases where the concrete value is unknown but
+      # literal-ness has been established (an RBS::Extended `return: literal-string` annotation, or
+      # interpolation over literal-bearing parts).
       def literal_string
         Refined.new(nominal_of("String"), :literal_string)
       end
 
-      # `non-empty-literal-string` = `non-empty-string ∩ literal-string`.
-      # Composes the point-removal half (`Difference[String, ""]`)
-      # with the predicate-subset half. Both members erase to
-      # `String`.
+      # `non-empty-literal-string` = `non-empty-string ∩ literal-string`. Composes the point-removal half
+      # (`Difference[String, ""]`) with the predicate-subset half. Both members erase to `String`.
       def non_empty_literal_string
         intersection(non_empty_string, literal_string)
       end
 
-      # Recognises the carriers that participate in literal-string
-      # flow tracking: any `Constant<String>` (constants are literal
-      # by construction), the `literal-string` Refined carrier, an
-      # `Intersection` containing `literal-string`, or a `Union`
-      # whose every member qualifies. Used by
-      # `ExpressionTyper#type_of_interpolated_string` and the
-      # `LiteralStringFolding` dispatcher tier so propagation
-      # through interpolation and `+`/`*` composition stays
-      # consistent.
+      # Recognises the carriers that participate in literal-string flow tracking: any `Constant<String>`
+      # (constants are literal by construction), the `literal-string` Refined carrier, an `Intersection`
+      # containing `literal-string`, or a `Union` whose every member qualifies. Used by
+      # `ExpressionTyper#type_of_interpolated_string` and the `LiteralStringFolding` dispatcher tier so
+      # propagation through interpolation and `+`/`*` composition stays consistent.
       def literal_string_compatible?(type)
         case type
         when Constant then type.value.is_a?(String)
@@ -289,14 +253,12 @@ module Rigor
           refined.base.class_name == "String"
       end
 
-      # Returns true when `type` is statically known to be a
-      # non-empty String — i.e. its value can never be `""`.
-      # Used at String binary-operator dispatch sites to propagate
-      # the non-empty guarantee through `+` and `*`.
+      # Returns true when `type` is statically known to be a non-empty String — i.e. its value can never
+      # be `""`. Used at String binary-operator dispatch sites to propagate the non-empty guarantee
+      # through `+` and `*`.
       #
       # - `Constant[s]` where `s != ""` — a concrete non-empty literal.
-      # - `Difference[Nominal[String], Constant[""]]` — the canonical
-      #   `non-empty-string` carrier.
+      # - `Difference[Nominal[String], Constant[""]]` — the canonical `non-empty-string` carrier.
       # - `Intersection[…]` — any member suffices (set-theoretic subset).
       # - `Union[…]` — all members must qualify (the join may include "").
       def non_empty_string_compatible?(type)
@@ -316,16 +278,14 @@ module Rigor
         diff.removed.value == ""
       end
 
-      # Returns true when `type` is statically known to be a
-      # non-zero Integer — i.e. its value can never be `0`.
-      # Used at Integer arithmetic dispatch sites to propagate
-      # the non-zero guarantee through `*` and identity methods.
+      # Returns true when `type` is statically known to be a non-zero Integer — i.e. its value can never
+      # be `0`. Used at Integer arithmetic dispatch sites to propagate the non-zero guarantee through `*`
+      # and identity methods.
       #
       # - `Constant[n]` where `n != 0` — a concrete non-zero literal.
-      # - `Difference[Nominal[Integer], Constant[0]]` — the canonical
-      #   `non-zero-int` carrier.
-      # - `IntegerRange` that does not cover 0 — both `positive-int`
-      #   ([1,+∞)) and `negative-int` ([-∞,-1]) qualify.
+      # - `Difference[Nominal[Integer], Constant[0]]` — the canonical `non-zero-int` carrier.
+      # - `IntegerRange` that does not cover 0 — both `positive-int` ([1,+∞)) and `negative-int` ([-∞,-1])
+      #   qualify.
       # - `Intersection[…]` — any member suffices.
       # - `Union[…]` — all members must qualify.
       def non_zero_int_compatible?(type)
@@ -346,23 +306,18 @@ module Rigor
         diff.removed.value.zero?
       end
 
-      # Normalised intersection. Flattens nested Intersections,
-      # drops `Top` members, collapses to `Bot` if any member is
-      # `Bot`, deduplicates structurally-equal members, sorts the
-      # survivors by `describe(:short)`, and collapses 0-/1-member
-      # results so a degenerate intersection never reaches the
-      # carrier. See ADR-3 OQ3 for the rationale; the lattice
-      # algebra is in
+      # Normalised intersection. Flattens nested Intersections, drops `Top` members, collapses to `Bot` if
+      # any member is `Bot`, deduplicates structurally-equal members, sorts the survivors by
+      # `describe(:short)`, and collapses 0-/1-member results so a degenerate intersection never reaches
+      # the carrier. See ADR-3 OQ3 for the rationale; the lattice algebra is in
       # [`value-lattice.md`](docs/type-specification/value-lattice.md).
       def intersection(*members)
         collapse_intersection(normalised_intersection_members(members))
       end
 
-      # `non-empty-lowercase-string` = non-empty-string ∩
-      # lowercase-string. Composes the point-removal half
-      # (`Difference[String, ""]`) with the predicate-subset half
-      # (`Refined[String, :lowercase]`). Both members erase to
-      # `String` so the carrier's RBS erasure is unambiguous.
+      # `non-empty-lowercase-string` = non-empty-string ∩ lowercase-string. Composes the point-removal
+      # half (`Difference[String, ""]`) with the predicate-subset half (`Refined[String, :lowercase]`).
+      # Both members erase to `String` so the carrier's RBS erasure is unambiguous.
       def non_empty_lowercase_string
         intersection(non_empty_string, lowercase_string)
       end
@@ -371,16 +326,14 @@ module Rigor
         intersection(non_empty_string, uppercase_string)
       end
 
-      # Constructs a heterogeneous, fixed-arity Tuple from positional
-      # element types. `tuple_of()` produces the empty tuple `Tuple[]`,
-      # which is structurally distinct from the raw `Nominal[Array]`.
+      # Constructs a heterogeneous, fixed-arity Tuple from positional element types. `tuple_of()`
+      # produces the empty tuple `Tuple[]`, which is structurally distinct from the raw `Nominal[Array]`.
       def tuple_of(*elements)
         Tuple.new(elements)
       end
 
-      # Constructs a HashShape from an ordered (Symbol|String) -> type
-      # map. The argument is duped and frozen by the carrier; callers
-      # MUST NOT rely on later mutation.
+      # Constructs a HashShape from an ordered (Symbol|String) -> type map. The argument is duped and
+      # frozen by the carrier; callers MUST NOT rely on later mutation.
       def hash_shape_of(pairs = nil, **options)
         if pairs.nil?
           pairs = options
@@ -390,64 +343,57 @@ module Rigor
         HashShape.new(pairs, **options)
       end
 
-      # ADR-48 — the class object produced by `Data.define(:x, :y)`.
-      # `members` is the ordered Symbol member-name list; `class_name`
-      # tags the class when known (the named-subclass form) and is nil
-      # for the anonymous `Data.define(...)` result.
+      # ADR-48 — the class object produced by `Data.define(:x, :y)`. `members` is the ordered Symbol
+      # member-name list; `class_name` tags the class when known (the named-subclass form) and is nil for
+      # the anonymous `Data.define(...)` result.
       def data_class_of(members:, class_name: nil)
         DataClass.new(members, class_name)
       end
 
-      # ADR-48 — a `Data.define` value instance. `members` is the ordered
-      # member-name -> value-type map; `class_name` tags the instance's
-      # class when known.
+      # ADR-48 — a `Data.define` value instance. `members` is the ordered member-name -> value-type map;
+      # `class_name` tags the instance's class when known.
       def data_instance_of(members:, class_name: nil)
         DataInstance.new(members, class_name)
       end
 
-      # ADR-48 Struct follow-up — the class object produced by
-      # `Struct.new(:x, :y)`. `members` is the ordered Symbol member-name
-      # list; `keyword_init` records the `keyword_init:` flag; `class_name`
+      # ADR-48 Struct follow-up — the class object produced by `Struct.new(:x, :y)`. `members` is the
+      # ordered Symbol member-name list; `keyword_init` records the `keyword_init:` flag; `class_name`
       # tags the class when known (the named-subclass form).
       def struct_class_of(members:, class_name: nil, keyword_init: false)
         StructClass.new(members, class_name, keyword_init: keyword_init)
       end
 
-      # ADR-48 Struct follow-up — a `Struct.new` value instance. `members`
-      # is the ordered member-name -> value-type map; `class_name` tags the
-      # instance's class when known.
+      # ADR-48 Struct follow-up — a `Struct.new` value instance. `members` is the ordered member-name ->
+      # value-type map; `class_name` tags the instance's class when known.
       def struct_instance_of(members:, class_name: nil)
         StructInstance.new(members, class_name)
       end
 
-      # Normalized union. Flattens nested Unions, deduplicates structurally
-      # equal members, drops Bot, and collapses 0/1-member results.
+      # Normalized union. Flattens nested Unions, deduplicates structurally equal members, drops Bot, and
+      # collapses 0/1-member results.
       def union(*types)
         result = collapse_union(normalized_union_members(types))
         if Inference::BudgetTrace.enabled? && result.is_a?(Union)
           Inference::BudgetTrace.observe(Inference::BudgetTrace::UNION_ARITY, result.members.size)
         end
-        # `rigor trace` — degenerate merges (`1 | 1 → 1`, Dynamic
-        # absorption) are recorded too; the collapse itself is the
-        # teachable moment.
+        # `rigor trace` — degenerate merges (`1 | 1 → 1`, Dynamic absorption) are recorded too; the
+        # collapse itself is the teachable moment.
         Inference::FlowTracer.union(types, result) if Inference::FlowTracer.active? && types.size >= 2
         result
       end
 
-      # `key_of[T]` type function — projects the type-level
-      # union of `T`'s known keys. Recognised shapes:
+      # `key_of[T]` type function — projects the type-level union of `T`'s known keys. Recognised shapes:
       #
       # - `Type::HashShape{a: A, b: B}` → `Constant<:a> | Constant<:b>`.
       # - `Type::Tuple[A, B, C]` → `Constant<0> | Constant<1> | Constant<2>`.
       # - `Type::Nominal["Hash", [K, V]]` → `K` (untyped if absent).
       # - `Type::Nominal["Array", [E]]` → `non-negative-int`.
-      # - `Type::Constant` whose value is a Hash / Array / Range —
-      #   project through the literal's per-element keys.
+      # - `Type::Constant` whose value is a Hash / Array / Range — project through the literal's
+      #   per-element keys.
       #
-      # Other inputs (`Top`, `Dynamic`, untyped Nominals, `Union`,
-      # `Refined`, `Difference`, `Intersection`) project to `top`
-      # so the type function always returns a value — callers may
-      # narrow further when they know more.
+      # Other inputs (`Top`, `Dynamic`, untyped Nominals, `Union`, `Refined`, `Difference`,
+      # `Intersection`) project to `top` so the type function always returns a value — callers may narrow
+      # further when they know more.
       def key_of(type)
         case type
         when HashShape then hash_shape_keys(type)
@@ -458,15 +404,15 @@ module Rigor
         end
       end
 
-      # `value_of[T]` type function — projects the type-level
-      # union of `T`'s known values. Mirror of `key_of`:
+      # `value_of[T]` type function — projects the type-level union of `T`'s known values. Mirror of
+      # `key_of`:
       #
       # - `Type::HashShape{a: A, b: B}` → `A | B`.
       # - `Type::Tuple[A, B, C]` → `A | B | C`.
       # - `Type::Nominal["Hash", [K, V]]` → `V` (untyped if absent).
       # - `Type::Nominal["Array", [E]]` → `E` (untyped if absent).
-      # - `Type::Constant` whose value is a Hash / Array / Range —
-      #   union of `Constant<…>` for each element.
+      # - `Type::Constant` whose value is a Hash / Array / Range — union of `Constant<…>` for each
+      #   element.
       def value_of(type)
         case type
         when HashShape then hash_shape_values(type)
@@ -477,15 +423,11 @@ module Rigor
         end
       end
 
-      # `int_mask[1, 2, 4]` type function — every Integer
-      # representable by a bitwise OR over the listed flags,
-      # including 0. The closure of `[1, 2, 4]` is
-      # `{0, 1, 2, 3, 4, 5, 6, 7}`. Returns a `Union[Constant…]`
-      # for small closures and a covering `IntegerRange` once
-      # the cardinality exceeds `INT_MASK_UNION_LIMIT`. Returns
-      # `nil` when the input is malformed (non-integer flag,
-      # negative flag, or too many flags to compute the closure
-      # cheaply).
+      # `int_mask[1, 2, 4]` type function — every Integer representable by a bitwise OR over the listed
+      # flags, including 0. The closure of `[1, 2, 4]` is `{0, 1, 2, 3, 4, 5, 6, 7}`. Returns a
+      # `Union[Constant…]` for small closures and a covering `IntegerRange` once the cardinality exceeds
+      # `INT_MASK_UNION_LIMIT`. Returns `nil` when the input is malformed (non-integer flag, negative
+      # flag, or too many flags to compute the closure cheaply).
       INT_MASK_FLAG_LIMIT = 6
       INT_MASK_UNION_LIMIT = 16
       private_constant :INT_MASK_FLAG_LIMIT, :INT_MASK_UNION_LIMIT
@@ -505,12 +447,9 @@ module Rigor
         end
       end
 
-      # `int_mask_of[T]` — derives the int_mask closure from
-      # a finite integer-literal type:
-      # `Constant<n>` (single flag), `Union[Constant…]` (every
-      # member must be a `Constant<Integer>`). Returns nil for
-      # incompatible inputs (Top, Dynamic, IntegerRange, mixed
-      # member shapes).
+      # `int_mask_of[T]` — derives the int_mask closure from a finite integer-literal type: `Constant<n>`
+      # (single flag), `Union[Constant…]` (every member must be a `Constant<Integer>`). Returns nil for
+      # incompatible inputs (Top, Dynamic, IntegerRange, mixed member shapes).
       def int_mask_of(type)
         flags = extract_constant_int_set(type)
         return nil if flags.nil?
@@ -518,20 +457,16 @@ module Rigor
         int_mask(flags)
       end
 
-      # `T[K]` indexed-access type operator — extracts the type
-      # at index / key `K` from a structured `T`:
+      # `T[K]` indexed-access type operator — extracts the type at index / key `K` from a structured `T`:
       #
-      # - `Tuple[A, B, C][Constant<i>]` → `A` / `B` / `C` (out-of-
-      #   range indices return `Top` for safety).
+      # - `Tuple[A, B, C][Constant<i>]` → `A` / `B` / `C` (out-of-range indices return `Top` for safety).
       # - `HashShape{a: A, b: B}[Constant<:a>]` → `A`.
       # - `Nominal[Hash, [K, V]][_]` → `V` (untyped if absent).
       # - `Nominal[Array, [E]][_]` → `E` (untyped if absent).
       #
-      # Other shapes (`Top`, `Dynamic`, untyped Nominals,
-      # `Union`, `Refined`, `Difference`, `Intersection`)
-      # project to `Top`. The key argument is itself a
-      # `Type::t`; only `Type::Constant` keys produce a precise
-      # answer.
+      # Other shapes (`Top`, `Dynamic`, untyped Nominals, `Union`, `Refined`, `Difference`,
+      # `Intersection`) project to `Top`. The key argument is itself a `Type::t`; only `Type::Constant`
+      # keys produce a precise answer.
       def indexed_access(type, key)
         case type
         when Tuple then tuple_indexed_access(type, key)
@@ -542,18 +477,14 @@ module Rigor
         end
       end
 
-      # `pick_of[T, K]` shape-projection — keeps only the entries
-      # of `T` whose key is in the literal-key set extracted from
-      # `K`. ADR-13 § "Shape projection / Restriction and removal".
+      # `pick_of[T, K]` shape-projection — keeps only the entries of `T` whose key is in the literal-key
+      # set extracted from `K`. ADR-13 § "Shape projection / Restriction and removal".
       #
-      # Phase A handles `Type::HashShape` (literal-key K).
-      # Phase B (slice 5) extends to `Type::Tuple` (integer-index
-      # K) — `pick_of[Tuple[A, B, C], 0 | 2]` evaluates to
-      # `Tuple[A, C]`. Non-shape inputs (`Type::Nominal`, etc.)
-      # return `type` unchanged ("lossy degradation"; the
-      # `dynamic.shape.lossy-projection` diagnostic that flags
-      # the boundary lands when caller-side diagnostic threading
-      # arrives).
+      # Phase A handles `Type::HashShape` (literal-key K). Phase B (slice 5) extends to `Type::Tuple`
+      # (integer-index K) — `pick_of[Tuple[A, B, C], 0 | 2]` evaluates to `Tuple[A, C]`. Non-shape inputs
+      # (`Type::Nominal`, etc.) return `type` unchanged ("lossy degradation"; the
+      # `dynamic.shape.lossy-projection` diagnostic that flags the boundary lands when caller-side
+      # diagnostic threading arrives).
       def pick_of(type, keys)
         case type
         when HashShape then hash_shape_pick(type, keys)
@@ -562,9 +493,8 @@ module Rigor
         end
       end
 
-      # `omit_of[T, K]` shape-projection — dual of {pick_of}.
-      # Drops the entries / positions whose key (or index, for a
-      # `Tuple`) is in the literal-key set extracted from `K`.
+      # `omit_of[T, K]` shape-projection — dual of {pick_of}. Drops the entries / positions whose key (or
+      # index, for a `Tuple`) is in the literal-key set extracted from `K`.
       def omit_of(type, keys)
         case type
         when HashShape then hash_shape_omit(type, keys)
@@ -573,11 +503,9 @@ module Rigor
         end
       end
 
-      # `partial_of[T]` shape-projection — flips every required
-      # entry of `T` to optional. ADR-13 § "Required-ness flips".
-      # Does NOT add `nil` to value types — Rigor's HashShape
-      # distinguishes "key absent" from "key present with nil
-      # value", so flipping required-ness is sufficient.
+      # `partial_of[T]` shape-projection — flips every required entry of `T` to optional. ADR-13 §
+      # "Required-ness flips". Does NOT add `nil` to value types — Rigor's HashShape distinguishes "key
+      # absent" from "key present with nil value", so flipping required-ness is sufficient.
       def partial_of(type)
         return type unless type.is_a?(HashShape)
 
@@ -590,8 +518,8 @@ module Rigor
         )
       end
 
-      # `required_of[T]` shape-projection — inverse of
-      # {partial_of}; flips every optional entry to required.
+      # `required_of[T]` shape-projection — inverse of {partial_of}; flips every optional entry to
+      # required.
       def required_of(type)
         return type unless type.is_a?(HashShape)
 
@@ -604,9 +532,8 @@ module Rigor
         )
       end
 
-      # `readonly_of[T]` shape-projection — marks every entry of
-      # `T` as read-only in the current view. View-level only —
-      # does NOT prove the underlying Ruby Hash is frozen.
+      # `readonly_of[T]` shape-projection — marks every entry of `T` as read-only in the current view.
+      # View-level only — does NOT prove the underlying Ruby Hash is frozen.
       def readonly_of(type)
         return type unless type.is_a?(HashShape)
 
@@ -619,18 +546,14 @@ module Rigor
         )
       end
 
-      # Predicate that a shape-projection (`pick_of`, `omit_of`,
-      # `partial_of`, `required_of`, `readonly_of`) would degrade
-      # to "input unchanged" on this carrier. Callers consult
-      # this BEFORE invoking the projection so they can emit a
-      # `dynamic.shape.lossy-projection` diagnostic at the site
-      # where the projection was authored.
+      # Predicate that a shape-projection (`pick_of`, `omit_of`, `partial_of`, `required_of`,
+      # `readonly_of`) would degrade to "input unchanged" on this carrier. Callers consult this BEFORE
+      # invoking the projection so they can emit a `dynamic.shape.lossy-projection` diagnostic at the
+      # site where the projection was authored.
       #
-      # `HashShape` and `Tuple` carry shape-level information
-      # the projections honour; every other carrier is lossy.
-      # Slice 5b wires diagnostic emission through `RbsExtended`
-      # / parser callers; this predicate stands alone in slice 5
-      # for unit-test coverage and future composition.
+      # `HashShape` and `Tuple` carry shape-level information the projections honour; every other carrier
+      # is lossy. Slice 5b wires diagnostic emission through `RbsExtended` / parser callers; this
+      # predicate stands alone in slice 5 for unit-test coverage and future composition.
       def shape_projection_lossy?(type)
         !type.is_a?(HashShape) && !type.is_a?(Tuple)
       end
@@ -684,20 +607,12 @@ module Rigor
           end
         end
 
-        # `Type::Constant` only carries scalar literals (Integer
-        # / Float / String / Symbol / Range / Rational / Complex
-        # / true / false / nil); Array and Hash literals become
-        # Tuple / HashShape carriers earlier in the typer. Range
-        # is the only scalar with meaningful key/value
-        # projections.
         def compute_int_mask_closure(flags)
           unique = flags.uniq
           return [0] if unique.empty?
 
-          # Closure under bitwise OR over a set of non-negative
-          # integers is `0..(max_or_value)` only when the flags
-          # are bit-disjoint; otherwise it's a strict subset.
-          # Enumerate every subset's OR.
+          # Closure under bitwise OR over a set of non-negative integers is `0..(max_or_value)` only when
+          # the flags are bit-disjoint; otherwise it's a strict subset. Enumerate every subset's OR.
           closure = Set.new([0])
           unique.each do |flag|
             closure |= closure.map { |c| c | flag }
@@ -714,13 +629,10 @@ module Rigor
           end
         end
 
-        # Literal-key set extraction for {pick_of} / {omit_of}.
-        # Accepts `Constant<Symbol|String>` or `Union[Constant…]`
-        # where every member is such a Constant. Returns `nil`
-        # when the shape can't be reduced to a finite key set
-        # (untyped, Top, Difference, Refined, mixed-kind union,
-        # etc.) — callers degrade to "input unchanged" per
-        # ADR-13's lossy-projection rule.
+        # Literal-key set extraction for {pick_of} / {omit_of}. Accepts `Constant<Symbol|String>` or
+        # `Union[Constant…]` where every member is such a Constant. Returns `nil` when the shape can't be
+        # reduced to a finite key set (untyped, Top, Difference, Refined, mixed-kind union, etc.) —
+        # callers degrade to "input unchanged" per ADR-13's lossy-projection rule.
         def extract_constant_key_set(type)
           case type
           when Constant then constant_key_set(type)
@@ -743,12 +655,10 @@ module Rigor
           value.is_a?(Symbol) || value.is_a?(String)
         end
 
-        # Rebuild a {HashShape} from the subset of `keys` the
-        # caller decided to keep. Preserves required / optional /
-        # read-only classification AND the extra-keys policy of
-        # the source shape; entries dropped from `pairs` also
-        # drop from each policy list. Used by both {pick_of}
-        # (intersection with K) and {omit_of} (set difference).
+        # Rebuild a {HashShape} from the subset of `keys` the caller decided to keep. Preserves required /
+        # optional / read-only classification AND the extra-keys policy of the source shape; entries
+        # dropped from `pairs` also drop from each policy list. Used by both {pick_of} (intersection with
+        # K) and {omit_of} (set difference).
         def rebuild_hash_shape_with_keys(shape, kept_keys)
           HashShape.new(
             shape.pairs.slice(*kept_keys),
@@ -773,12 +683,10 @@ module Rigor
           rebuild_hash_shape_with_keys(type, type.pairs.keys - key_set)
         end
 
-        # ADR-13 slice 5 — Tuple support. `K` MUST be a
-        # `Constant<Integer>` or `Union[Constant<Integer>, …]`;
-        # other K shapes (or non-integer Constants in a Union)
-        # return the input unchanged. Negative or out-of-range
-        # indices are dropped silently per slice 5's permissive
-        # take — surface diagnostics are slice 5b material.
+        # ADR-13 slice 5 — Tuple support. `K` MUST be a `Constant<Integer>` or `Union[Constant<Integer>,
+        # …]`; other K shapes (or non-integer Constants in a Union) return the input unchanged. Negative
+        # or out-of-range indices are dropped silently per slice 5's permissive take — surface
+        # diagnostics are slice 5b material.
         def tuple_pick(type, keys)
           index_set = extract_tuple_index_set(keys, type.elements.size)
           return type if index_set.nil?
@@ -794,12 +702,10 @@ module Rigor
           Tuple.new(type.elements.each_with_index.reject { |_, i| dropped.include?(i) }.map(&:first))
         end
 
-        # Extracts a sorted, deduplicated set of in-range integer
-        # indices from a `Constant<Integer>` / `Union[Constant<Integer>, …]`
-        # carrier. Out-of-range indices are dropped silently; the
-        # caller decides whether an empty result still means
-        # "lossy projection" (current pick / omit just produce an
-        # empty Tuple).
+        # Extracts a sorted, deduplicated set of in-range integer indices from a `Constant<Integer>` /
+        # `Union[Constant<Integer>, …]` carrier. Out-of-range indices are dropped silently; the caller
+        # decides whether an empty result still means "lossy projection" (current pick / omit just
+        # produce an empty Tuple).
         def extract_tuple_index_set(type, size)
           flags = extract_constant_int_set(type)
           return nil if flags.nil?
@@ -841,6 +747,9 @@ module Rigor
           top
         end
 
+        # `Type::Constant` only carries scalar literals (Integer / Float / String / Symbol / Range /
+        # Rational / Complex / true / false / nil); Array and Hash literals become Tuple / HashShape
+        # carriers earlier in the typer. Range is the only scalar with meaningful key/value projections.
         def constant_keys(value)
           return non_negative_int if value.is_a?(Range) && value.begin.is_a?(Integer)
 
@@ -888,10 +797,9 @@ module Rigor
           end
         end
 
-        # Symmetric counterparts to the Union normalisers. The
-        # absorbing element is `Bot` (anything intersected with
-        # nothing is nothing) and the identity element is `Top`
-        # (intersecting with the universal type is a no-op).
+        # Symmetric counterparts to the Union normalisers. The absorbing element is `Bot` (anything
+        # intersected with nothing is nothing) and the identity element is `Top` (intersecting with the
+        # universal type is a no-op).
         def normalised_intersection_members(types)
           flattened = []
           types.each { |t| flatten_intersection_into(flattened, t) }

@@ -4,24 +4,20 @@ module Rigor
   module SigGen
     # Per-method record produced by the generator.
     #
-    # `classification` is one of the {Classification} constants;
-    # the remaining fields are populated only when applicable
-    # to that classification.
+    # `classification` is one of the {Classification} constants; the remaining fields are populated only when
+    # applicable to that classification.
     #
     # - `path` — the source `.rb` file the def came from.
-    # - `class_name` — qualified receiver class name (e.g.
-    #   `"Foo::Bar"`). `nil` for top-level / DSL-block defs
+    # - `class_name` — qualified receiver class name (e.g. `"Foo::Bar"`). `nil` for top-level / DSL-block defs
     #   the MVP skips.
     # - `method_name` — the def's `Symbol` name.
     # - `kind` — `:instance` or `:singleton`.
-    # - `inferred_return` — `Rigor::Type` instance (or `nil`
-    #   when the inference pass disqualified the def).
-    # - `declared_return_rbs` — the existing RBS-declared return
-    #   spelling, or `nil` when no RBS declares the method.
-    # - `rbs` — the rendered RBS one-liner the generator would
-    #   emit (`nil` for skipped / equivalent rows).
-    # - `skip_reason` — one of {Classification::SKIP_DIAGNOSTIC_IDS}
-    #   keys when classification is `:skipped`, else `nil`.
+    # - `inferred_return` — `Rigor::Type` instance (or `nil` when the inference pass disqualified the def).
+    # - `declared_return_rbs` — the existing RBS-declared return spelling, or `nil` when no RBS declares the
+    #   method.
+    # - `rbs` — the rendered RBS one-liner the generator would emit (`nil` for skipped / equivalent rows).
+    # - `skip_reason` — one of {Classification::SKIP_DIAGNOSTIC_IDS} keys when classification is `:skipped`,
+    #   else `nil`.
     class MethodCandidate
       attr_reader :path, :class_name, :method_name, :kind, :classification,
                   :inferred_return, :declared_return_rbs, :rbs, :skip_reason,
@@ -41,10 +37,9 @@ module Rigor
         @skip_reason = skip_reason
         @namespace_kinds = namespace_kinds.freeze
         @class_shells = class_shells.freeze
-        # Qualified-class-name => superclass source token (e.g.
-        # `{ "Foo::Bar" => "Base" }`). Only plain-constant
-        # superclasses appear; computed ones are absent. The Writer
-        # emits `class Bar < Base` for the leaf when present.
+        # Qualified-class-name => superclass source token (e.g. `{ "Foo::Bar" => "Base" }`). Only plain-constant
+        # superclasses appear; computed ones are absent. The Writer emits `class Bar < Base` for the leaf when
+        # present.
         @class_superclasses = class_superclasses.freeze
         freeze
       end

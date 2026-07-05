@@ -19,17 +19,14 @@ module Rigor
   class CLI
     # Executes `rigor check` — the analyzer's primary command.
     #
-    # The other subcommands delegate to a `CLI::Command` subclass once they
-    # grow beyond a few lines; `check` is the largest of them, owning option
-    # parsing, the baseline filter (ADR-22), the incremental modes (ADR-46),
-    # cache-stats reporting, editor mode, the CI-native output formats
-    # (ADR-51), and the diagnostic-only / heap / budget appendices. Keeping
-    # it in its own class follows the same dispatch-vs-implementation split
-    # the rest of the CLI uses and keeps `Rigor::CLI` focused on dispatch.
+    # The other subcommands delegate to a `CLI::Command` subclass once they grow beyond a few lines; `check` is the
+    # largest of them, owning option parsing, the baseline filter (ADR-22), the incremental modes (ADR-46), cache-stats
+    # reporting, editor mode, the CI-native output formats (ADR-51), and the diagnostic-only / heap / budget appendices.
+    # Keeping it in its own class follows the same dispatch-vs-implementation split the rest of the CLI uses and keeps
+    # `Rigor::CLI` focused on dispatch.
     #
-    # The class-length budget is relaxed (as on `Rigor::CLI` itself) because
-    # `check` aggregates several independent concerns that are clearer read
-    # together than split across micro-classes.
+    # The class-length budget is relaxed (as on `Rigor::CLI` itself) because `check` aggregates several independent
+    # concerns that are clearer read together than split across micro-classes.
     class CheckCommand < Command # rubocop:disable Metrics/ClassLength
       # @return [Integer] CLI exit status.
       def run # rubocop:disable Metrics/AbcSize
@@ -69,9 +66,8 @@ module Rigor
 
       private
 
-      # ADR-46 — the two incremental-analysis check modes both fully handle
-      # the run and return an exit code (so `run` short-circuits);
-      # returns nil for an ordinary check.
+      # ADR-46 — the two incremental-analysis check modes both fully handle the run and return an exit code (so `run`
+      # short-circuits); returns nil for an ordinary check.
       def dispatch_special_check_mode(configuration, options, cache_root)
         return run_verify_incremental(configuration) if options.fetch(:verify_incremental)
         return run_incremental_check(configuration, options, cache_root) if options.fetch(:incremental)
@@ -79,22 +75,19 @@ module Rigor
         nil
       end
 
-      # ADR-46 — the incremental-analysis acceptance gate. Runs a baseline
-      # analysis (recording cross-file dependencies), then re-analyzes a
-      # representative subset of files and serves the rest from the per-file
-      # cache (the body tier), and asserts the merged diagnostics are
-      # byte-identical to a full `--no-cache` analysis. A mismatch means the
-      # incremental machinery would serve a stale — manufactured —
-      # diagnostic, the soundness failure this gate exists to catch. Prints a
-      # one-line PASS (exit 0) or the differing diagnostics (exit 1).
+      # ADR-46 — the incremental-analysis acceptance gate. Runs a baseline analysis (recording cross-file dependencies),
+      # then re-analyzes a representative subset of files and serves the rest from the per-file cache (the body tier),
+      # and asserts the merged diagnostics are byte-identical to a full `--no-cache` analysis. A mismatch means the
+      # incremental machinery would serve a stale — manufactured — diagnostic, the soundness failure this gate exists to
+      # catch. Prints a one-line PASS (exit 0) or the differing diagnostics (exit 1).
       def run_verify_incremental(configuration)
         paths = @argv.empty? ? nil : @argv
         session = Analysis::IncrementalSession.new(configuration: configuration, paths: paths)
         session.baseline
         analyzed = session.analyzed_files
 
-        # Every other file forms the re-analyzed subset, so the run exercises
-        # BOTH the subset-analysis path and the cache-serving path.
+        # Every other file forms the re-analyzed subset, so the run exercises BOTH the subset-analysis path and the
+        # cache-serving path.
         subset = analyzed.each_with_index.select { |_, index| index.even? }.map(&:first)
         incremental = normalize_diagnostics(session.reanalyze_subset(subset))
         full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
@@ -102,14 +95,11 @@ module Rigor
         report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size)
       end
 
-      # ADR-46 — cross-process incremental analysis (`--incremental`). Derives
-      # the global fingerprint cheaply (no RBS env build), loads the disk
-      # snapshot, and on a fingerprint hit re-analyzes only the files changed
-      # since the last run (plus their dependents), serving the rest from the
-      # snapshot; on a miss runs a full baseline. Persists the updated
-      # snapshot for the next invocation. Diagnostics are identical to a full
-      # run (the `--verify-incremental` gate enforces this); the win is
-      # skipping per-file inference for unchanged files.
+      # ADR-46 — cross-process incremental analysis (`--incremental`). Derives the global fingerprint cheaply (no RBS
+      # env build), loads the disk snapshot, and on a fingerprint hit re-analyzes only the files changed since the last
+      # run (plus their dependents), serving the rest from the snapshot; on a miss runs a full baseline. Persists the
+      # updated snapshot for the next invocation. Diagnostics are identical to a full run (the `--verify-incremental`
+      # gate enforces this); the win is skipping per-file inference for unchanged files.
       def run_incremental_check(configuration, options, cache_root)
         paths = @argv.empty? ? nil : @argv
         probe = Analysis::Runner.new(configuration: configuration, cache_store: nil)
@@ -159,14 +149,11 @@ module Rigor
         1
       end
 
-      # ADR-22 slice 5 — the `--baseline-strict` CI gate. When the
-      # flag is set, ANY baseline drift fails the run — not only
-      # excess drift (a bucket over threshold, which already fails
-      # via the surfaced diagnostics) but also DEFICIT drift
-      # (`actual < count`: the baseline has grown looser than the
-      # code and should be regenerated). A no-op, with a stderr
-      # note, when no baseline is active — the flag never
-      # implicitly loads a baseline the config did not name (WD2).
+      # ADR-22 slice 5 — the `--baseline-strict` CI gate. When the flag is set, ANY baseline drift fails the run — not
+      # only excess drift (a bucket over threshold, which already fails via the surfaced diagnostics) but also DEFICIT
+      # drift (`actual < count`: the baseline has grown looser than the code and should be regenerated). A no-op, with a
+      # stderr note, when no baseline is active — the flag never implicitly loads a baseline the config did not name
+      # (WD2).
       def baseline_strict_violation?(raw_diagnostics, configuration, options)
         return false unless options.fetch(:baseline_strict)
 
@@ -199,22 +186,17 @@ module Rigor
         @err.puts("rigor: run `rigor baseline regenerate` to refresh the baseline.")
       end
 
-      # ADR-22 — apply the baseline filter as the LAST step of
-      # the diagnostic pipeline (after `# rigor:disable`,
-      # `severity_profile`, etc. — WD6). Resolution order
-      # follows WD2 (b):
+      # ADR-22 — apply the baseline filter as the LAST step of the diagnostic pipeline (after `# rigor:disable`,
+      # `severity_profile`, etc. — WD6). Resolution order follows WD2 (b):
       #
       #   1. --no-baseline on the CLI → no baseline.
       #   2. --baseline=PATH on the CLI → load that path.
       #   3. .rigor.yml's `baseline: <path>` → load that path.
       #   4. otherwise → no baseline.
       #
-      # When the path resolves and loads successfully, the filter
-      # replaces `result.diagnostics` with the surfaced set and
-      # writes a one-line summary to stderr (WD7) when any
-      # diagnostics were silenced. Load failures emit a warning
-      # to stderr and fall through to "no baseline" (graceful
-      # degradation).
+      # When the path resolves and loads successfully, the filter replaces `result.diagnostics` with the surfaced set
+      # and writes a one-line summary to stderr (WD7) when any diagnostics were silenced. Load failures emit a warning
+      # to stderr and fall through to "no baseline" (graceful degradation).
       def apply_baseline_filter(result, configuration, options)
         path = resolve_baseline_path(configuration, options)
         return result if path.nil?
@@ -260,60 +242,42 @@ module Rigor
           clear_cache: false,
           no_cache: false,
           stats: true,
-          # ADR-15 Phase 4c — when nil, falls back to
-          # `RIGOR_RACTOR_WORKERS` then `.rigor.yml`
-          # `parallel.workers:` then 0 (sequential). See
-          # `resolve_workers` for the precedence chain.
+          # ADR-15 Phase 4c — when nil, falls back to `RIGOR_RACTOR_WORKERS` then `.rigor.yml` `parallel.workers:` then
+          # 0 (sequential). See `resolve_workers` for the precedence chain.
           workers: nil,
           tmp_file: nil,
           instead_of: nil,
-          # ADR-22 — baseline filter. `:unset` means "fall through
-          # to `.rigor.yml`'s `baseline:` key"; a String overrides
-          # the config; `false` (from `--no-baseline`) suppresses
-          # any baseline that the config might name.
+          # ADR-22 — baseline filter. `:unset` means "fall through to `.rigor.yml`'s `baseline:` key"; a String
+          # overrides the config; `false` (from `--no-baseline`) suppresses any baseline that the config might name.
           baseline: :unset,
-          # ADR-22 slice 5 — `--baseline-strict` CI gate: fail the
-          # run on any baseline drift, in either direction.
+          # ADR-22 slice 5 — `--baseline-strict` CI gate: fail the run on any baseline drift, in either direction.
           baseline_strict: false,
-          # ADR-32 WD10 carry-over — `--treat-all-as-inline-rbs`
-          # forces the `rigor-rbs-inline` plugin into the loaded
-          # plugin set with `require_magic_comment: false` so a
-          # single ad-hoc `rigor check` invocation treats every
-          # analysed file as inline-RBS without the user editing
-          # `.rigor.yml`. Intended for single-file / ad-hoc CI use;
-          # ordinary projects should configure the plugin in
-          # `.rigor.yml`.
+          # ADR-32 WD10 carry-over — `--treat-all-as-inline-rbs` forces the `rigor-rbs-inline` plugin into the loaded
+          # plugin set with `require_magic_comment: false` so a single ad-hoc `rigor check` invocation treats every
+          # analysed file as inline-RBS without the user editing `.rigor.yml`. Intended for single-file / ad-hoc CI use;
+          # ordinary projects should configure the plugin in `.rigor.yml`.
           treat_all_as_inline_rbs: false,
-          # ADR-46 — the incremental-analysis acceptance gate. Runs a
-          # baseline analysis, re-analyzes a subset and serves the rest from
-          # the per-file cache, and asserts the merged diagnostics are
-          # byte-identical to a full `--no-cache` run. Exits non-zero on any
-          # mismatch. Off by default.
+          # ADR-46 — the incremental-analysis acceptance gate. Runs a baseline analysis, re-analyzes a subset and serves
+          # the rest from the per-file cache, and asserts the merged diagnostics are byte-identical to a full
+          # `--no-cache` run. Exits non-zero on any mismatch. Off by default.
           verify_incremental: false,
-          # ADR-46 — cross-process incremental analysis. With a disk snapshot
-          # of the prior run's per-file diagnostics + dependency graph,
-          # re-analyzes only the changed closure and serves the rest from the
-          # snapshot. Off by default.
+          # ADR-46 — cross-process incremental analysis. With a disk snapshot of the prior run's per-file diagnostics +
+          # dependency graph, re-analyzes only the changed closure and serves the rest from the snapshot. Off by
+          # default.
           incremental: false,
-          # ADR-51 WD7 — CI auto-detection. When the default `text` format is
-          # in effect and a first-class CI is detected (GitHub Actions /
-          # TeamCity), also emit that platform's native annotations on top of
-          # the human output; for GitLab / reviewdog-routed CIs, print a
-          # one-line hint. On by default; `--no-ci-detect` (or
+          # ADR-51 WD7 — CI auto-detection. When the default `text` format is in effect and a first-class CI is detected
+          # (GitHub Actions / TeamCity), also emit that platform's native annotations on top of the human output; for
+          # GitLab / reviewdog-routed CIs, print a one-line hint. On by default; `--no-ci-detect` (or
           # `RIGOR_CI_DETECT=0`) disables it.
           ci_detect: true,
-          # ADR-50 § WD2 — the `--bleeding-edge[=ids]` / `--no-bleeding-edge`
-          # CLI mirror of the `bleeding_edge:` config key. `:unset` means "no
-          # flag — use the configured selection"; `true` adopts the whole
-          # overlay, `false` adopts none, and an Array of ids adopts only
-          # those (see `apply_bleeding_edge_override`).
+          # ADR-50 § WD2 — the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI mirror of the `bleeding_edge:` config
+          # key. `:unset` means "no flag — use the configured selection"; `true` adopts the whole overlay, `false`
+          # adopts none, and an Array of ids adopts only those (see `apply_bleeding_edge_override`).
           bleeding_edge: :unset,
-          # Type-precision coverage block. Off by default — it is a
-          # second precision pass over the analyzed files (the same scan
-          # `rigor coverage` runs), so it is opt-in to keep the default
-          # check path's cost unchanged. When set, `--format json` gains
-          # a `coverage` object (scan_files + precision tiers) and the
-          # text output prints a one-line coverage summary.
+          # Type-precision coverage block. Off by default — it is a second precision pass over the analyzed files (the
+          # same scan `rigor coverage` runs), so it is opt-in to keep the default check path's cost unchanged. When set,
+          # `--format json` gains a `coverage` object (scan_files + precision tiers) and the text output prints a
+          # one-line coverage summary.
           coverage: false
         }
         parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
@@ -368,9 +332,8 @@ module Rigor
                   "ADR-51: do not auto-emit CI-native output when a CI environment is detected") do
             options[:ci_detect] = false
           end
-          # ADR-50 § WD2 — `=[LIST]` (not ` [LIST]`) so a bare `--bleeding-edge`
-          # never swallows a following positional path: `rigor check
-          # --bleeding-edge lib` adopts the whole overlay and checks `lib`.
+          # ADR-50 § WD2 — `=[LIST]` (not ` [LIST]`) so a bare `--bleeding-edge` never swallows a following positional
+          # path: `rigor check --bleeding-edge lib` adopts the whole overlay and checks `lib`.
           opts.on("--bleeding-edge=[LIST]",
                   "ADR-50: adopt the bleeding-edge overlay for this run " \
                   "(all features, or a comma-separated feature-id list)") do |value|
@@ -385,36 +348,26 @@ module Rigor
         options
       end
 
-      # Surfaces the class of mistake where a configured value resolves
-      # to nothing — a typo'd or moved `signature_paths:` / bundler /
-      # collection path, an unknown `libraries:` name, an inert
-      # `disable:` / `severity_overrides:` rule id ({ConfigAudit}). The
-      # loader filters each one silently, and the downstream symptom is
-      # confusing: missing signatures turn calls into high-confidence
-      # `call.undefined-method` firings, and an unrecognised suppression
-      # token leaves the rule firing as if the line were never written —
-      # so a one-character mistake can read as hundreds of real errors.
-      # Each finding is emitted to STDERR (a warning, not a hard error —
-      # partial / optional bundles are a valid setup) and the returned
-      # list rides into the `--format=json` payload under `config_warnings`
-      # so CI and framework consumers can assert on it. The audits only
-      # fire on explicit, working-setup-safe signals (see {ConfigAudit}).
+      # Surfaces the class of mistake where a configured value resolves to nothing — a typo'd or moved
+      # `signature_paths:` / bundler / collection path, an unknown `libraries:` name, an inert `disable:` /
+      # `severity_overrides:` rule id ({ConfigAudit}). The loader filters each one silently, and the downstream symptom
+      # is confusing: missing signatures turn calls into high-confidence `call.undefined-method` firings, and an
+      # unrecognised suppression token leaves the rule firing as if the line were never written — so a one-character
+      # mistake can read as hundreds of real errors. Each finding is emitted to STDERR (a warning, not a hard error —
+      # partial / optional bundles are a valid setup) and the returned list rides into the `--format=json` payload under
+      # `config_warnings` so CI and framework consumers can assert on it. The audits only fire on explicit,
+      # working-setup-safe signals (see {ConfigAudit}).
       def warn_unresolved_config(configuration)
         warnings = ConfigAudit.warnings(configuration)
         warnings.each { |warning| @err.puts("rigor: #{warning.message}") }
         warnings
       end
 
-      # ADR-32 WD10 carry-over — wraps `Configuration.load` so the
-      # CLI's `--treat-all-as-inline-rbs` flag can inject a
-      # `rigor-rbs-inline` plugin entry with
-      # `require_magic_comment: false` into the loaded plugin
-      # set. Re-runs the include-aware YAML load and applies the
-      # injection before `Configuration.new` so the new entry
-      # follows the normal coercion path. A pre-existing
-      # `rigor-rbs-inline` entry (by gem name or `id: rbs-inline`)
-      # is removed first so the synthesised entry's
-      # `require_magic_comment: false` wins unconditionally.
+      # ADR-32 WD10 carry-over — wraps `Configuration.load` so the CLI's `--treat-all-as-inline-rbs` flag can inject a
+      # `rigor-rbs-inline` plugin entry with `require_magic_comment: false` into the loaded plugin set. Re-runs the
+      # include-aware YAML load and applies the injection before `Configuration.new` so the new entry follows the normal
+      # coercion path. A pre-existing `rigor-rbs-inline` entry (by gem name or `id: rbs-inline`) is removed first so the
+      # synthesised entry's `require_magic_comment: false` wins unconditionally.
       def load_check_configuration(options)
         return Configuration.load(options.fetch(:config)) unless options.fetch(:treat_all_as_inline_rbs)
 
@@ -425,13 +378,11 @@ module Rigor
         Configuration.new(Configuration::DEFAULTS.merge(data))
       end
 
-      # ADR-50 § WD2 — applies the `--bleeding-edge[=ids]` / `--no-bleeding-edge`
-      # CLI selection over the configured `bleeding_edge:` value, mirroring the
-      # CLI-over-config precedence `--workers` and `--no-cache` follow. `:unset`
-      # (no flag) leaves the loaded configuration untouched; any other value is
-      # normalised by {Configuration#with_bleeding_edge}, so the two
-      # `SeverityProfile.resolve` sites (and the worker path, which receives the
-      # whole frozen Configuration) see the run's selection.
+      # ADR-50 § WD2 — applies the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI selection over the configured
+      # `bleeding_edge:` value, mirroring the CLI-over-config precedence `--workers` and `--no-cache` follow. `:unset`
+      # (no flag) leaves the loaded configuration untouched; any other value is normalised by
+      # {Configuration#with_bleeding_edge}, so the two `SeverityProfile.resolve` sites (and the worker path, which
+      # receives the whole frozen Configuration) see the run's selection.
       def apply_bleeding_edge_override(configuration, options)
         selection = options.fetch(:bleeding_edge)
         return configuration if selection == :unset
@@ -469,30 +420,24 @@ module Rigor
         end
       end
 
-      # Emits the {Analysis::RunStats} summary to STDERR so it
-      # doesn't interleave with the diagnostic stream (text or
-      # JSON) on STDOUT. JSON consumers can pipe stdout cleanly;
-      # interactive users still see the summary on their tty.
+      # Emits the {Analysis::RunStats} summary to STDERR so it doesn't interleave with the diagnostic stream (text or
+      # JSON) on STDOUT. JSON consumers can pipe stdout cleanly; interactive users still see the summary on their tty.
       def write_run_stats(stats)
         @err.puts("")
         stats.format(@err)
       end
 
-      # Opt-in developer diagnostics printed after the run: the
-      # inference-cutoff trace (RIGOR_BUDGET_TRACE) and the heap-attribution
-      # profile (RIGOR_HEAP_PROFILE). Each gates itself, so this is a no-op
-      # on a normal run.
+      # Opt-in developer diagnostics printed after the run: the inference-cutoff trace (RIGOR_BUDGET_TRACE) and the
+      # heap-attribution profile (RIGOR_HEAP_PROFILE). Each gates itself, so this is a no-op on a normal run.
       def write_trace_appendices
         write_budget_trace
         write_heap_profile
       end
 
-      # Dumps the opt-in inference-cutoff counters (RIGOR_BUDGET_TRACE).
-      # These are the hard-coded "budget" guards that silently degrade
-      # to `Dynamic[top]` / a fallback bound — counting them shows where
-      # inference actually stopped. Process-global counters: meaningful
-      # only on a single-process run (`--workers 0`), since they do not
-      # cross fork boundaries.
+      # Dumps the opt-in inference-cutoff counters (RIGOR_BUDGET_TRACE). These are the hard-coded "budget" guards that
+      # silently degrade to `Dynamic[top]` / a fallback bound — counting them shows where inference actually stopped.
+      # Process-global counters: meaningful only on a single-process run (`--workers 0`), since they do not cross fork
+      # boundaries.
       def write_budget_trace
         return unless Inference::BudgetTrace.enabled?
 
@@ -508,11 +453,9 @@ module Rigor
         write_budget_distributions
       end
 
-      # Dumps the read-only size distributions (ADR-41 Slice 2a). These
-      # observe how large unions actually get, with no cap enforced — the
-      # data the `union_size` budget default should be chosen from. The
-      # `over` thresholds bracket the TypeProf prior (10) and Rigor's spec
-      # default (24).
+      # Dumps the read-only size distributions (ADR-41 Slice 2a). These observe how large unions actually get, with no
+      # cap enforced — the data the `union_size` budget default should be chosen from. The `over` thresholds bracket the
+      # TypeProf prior (10) and Rigor's spec default (24).
       def write_budget_distributions
         summary = Inference::BudgetTrace.summarize(Inference::BudgetTrace::UNION_ARITY, over: [10, 24, 40])
         pct = summary[:percentiles]
@@ -522,14 +465,11 @@ module Rigor
         @err.puts("    unions ≥10: #{over[10]}  ≥24: #{over[24]}  ≥40: #{over[40]}")
       end
 
-      # Dumps a live-heap class breakdown (RIGOR_HEAP_PROFILE) — retained
-      # objects by class after a forced GC, ranked by total memsize. The
-      # tool for attributing where the analyzer's resident memory goes
-      # (ADR-41 Slice 2b): it answers whether the heap is type carriers,
-      # RBS objects, Prism nodes, or fact-store Hashes/Strings. Walking the
-      # whole heap is slow — a dev probe, not a normal diagnostic. Run
-      # single-process (`--workers 0`) so the parent heap is the analysis
-      # heap; the gem is required lazily so a normal run never loads it.
+      # Dumps a live-heap class breakdown (RIGOR_HEAP_PROFILE) — retained objects by class after a forced GC, ranked by
+      # total memsize. The tool for attributing where the analyzer's resident memory goes (ADR-41 Slice 2b): it answers
+      # whether the heap is type carriers, RBS objects, Prism nodes, or fact-store Hashes/Strings. Walking the whole
+      # heap is slow — a dev probe, not a normal diagnostic. Run single-process (`--workers 0`) so the parent heap is
+      # the analysis heap; the gem is required lazily so a normal run never loads it.
       def write_heap_profile
         return if ENV["RIGOR_HEAP_PROFILE"].to_s.empty?
 
@@ -543,9 +483,8 @@ module Rigor
         write_string_allocation_sites
       end
 
-      # Loads the analysis-path dependencies lazily (so non-check commands
-      # stay light) and starts heap-allocation tracing if requested, before
-      # any analysis object is allocated.
+      # Loads the analysis-path dependencies lazily (so non-check commands stay light) and starts heap-allocation
+      # tracing if requested, before any analysis object is allocated.
       def load_check_dependencies
         require_relative "../analysis/runner"
         require_relative "../analysis/buffer_binding"
@@ -554,9 +493,8 @@ module Rigor
         start_heap_trace_if_requested
       end
 
-      # Starts allocation tracing (RIGOR_HEAP_TRACE) as early as possible so
-      # the heap profile can attribute retained Strings to their allocation
-      # `file:line`. Very high overhead — run on a small file subset only.
+      # Starts allocation tracing (RIGOR_HEAP_TRACE) as early as possible so the heap profile can attribute retained
+      # Strings to their allocation `file:line`. Very high overhead — run on a small file subset only.
       def start_heap_trace_if_requested
         return if ENV["RIGOR_HEAP_TRACE"].to_s.empty?
 
@@ -564,11 +502,9 @@ module Rigor
         ObjectSpace.trace_object_allocations_start
       end
 
-      # When RIGOR_HEAP_TRACE is on, groups the live String objects by their
-      # allocation site (`sourcefile:sourceline`) and prints the top sites by
-      # count — pinpointing which engine code retains the millions of strings
-      # that dominate the large-app heap (ADR-41 Slice 2b). Strings allocated
-      # before tracing started report `(pre-trace)`.
+      # When RIGOR_HEAP_TRACE is on, groups the live String objects by their allocation site (`sourcefile:sourceline`)
+      # and prints the top sites by count — pinpointing which engine code retains the millions of strings that dominate
+      # the large-app heap (ADR-41 Slice 2b). Strings allocated before tracing started report `(pre-trace)`.
       def write_string_allocation_sites
         return if ENV["RIGOR_HEAP_TRACE"].to_s.empty?
 
@@ -585,9 +521,8 @@ module Rigor
         end
       end
 
-      # Walks the whole live heap (after a forced GC) and tallies
-      # `{class_name => [count, memsize]}` plus the grand total. Returns
-      # `[by_class, total]`. Slow — a dev probe only.
+      # Walks the whole live heap (after a forced GC) and tallies `{class_name => [count, memsize]}` plus the grand
+      # total. Returns `[by_class, total]`. Slow — a dev probe only.
       def tally_live_heap
         require "objspace"
         GC.start
@@ -675,9 +610,8 @@ module Rigor
           write_text_result(result)
           write_coverage_summary(coverage) if coverage
         when ->(fmt) { CLI::DiagnosticFormats.supports?(fmt) }
-          # ADR-51 — CI-native renderings (SARIF / GitHub Actions commands /
-          # GitLab Code Quality). The `github` form is empty when there are no
-          # diagnostics; the JSON forms always carry a document.
+          # ADR-51 — CI-native renderings (SARIF / GitHub Actions commands / GitLab Code Quality). The `github` form is
+          # empty when there are no diagnostics; the JSON forms always carry a document.
           output = CLI::DiagnosticFormats.render(result, format)
           @out.puts(output) unless output.empty?
         else
@@ -685,11 +619,9 @@ module Rigor
         end
       end
 
-      # Runs the type-precision scan (`--coverage`) over the same file set
-      # the check analyzed and returns a `CoverageReport`, or nil when the
-      # flag is off. It is a second pass — the same scan `rigor coverage`
-      # runs, reused via {CoverageScan} — so it is opt-in to keep the
-      # default check path's cost unchanged.
+      # Runs the type-precision scan (`--coverage`) over the same file set the check analyzed and returns a
+      # `CoverageReport`, or nil when the flag is off. It is a second pass — the same scan `rigor coverage` runs, reused
+      # via {CoverageScan} — so it is opt-in to keep the default check path's cost unchanged.
       def compute_coverage(runner, configuration, options)
         return nil unless options.fetch(:coverage)
 
@@ -697,11 +629,9 @@ module Rigor
         CoverageScan.precision_report(files: files, configuration: configuration)
       end
 
-      # The `coverage` block embedded in `--format json`. Mirrors the
-      # `summary` of `rigor coverage --format json` (the same vocabulary —
-      # `precise_ratio`, not a separate `typed_ratio`) plus `scan_files`,
-      # so a consumer reads one stream to learn both what fired and how
-      # much of the analyzed surface Rigor could type.
+      # The `coverage` block embedded in `--format json`. Mirrors the `summary` of `rigor coverage --format json` (the
+      # same vocabulary — `precise_ratio`, not a separate `typed_ratio`) plus `scan_files`, so a consumer reads one
+      # stream to learn both what fired and how much of the analyzed surface Rigor could type.
       def coverage_payload(report)
         {
           "scan_files" => report.files.size - report.parse_errors.size,
@@ -722,13 +652,10 @@ module Rigor
                   "Run `rigor coverage` for the full per-file / per-tier breakdown.")
       end
 
-      # Adds the per-rule `evidence_tier` and `documentation_url` fields
-      # to each diagnostic in the `--format json` payload. Both are pure
-      # functions of the rule id (the rule catalogue, ADR-61 / the
-      # 2026-06-15 feedback §4 + §5.1), so they enrich the presentation
-      # layer here rather than threading through every diagnostic
-      # construction site. Only built-in rules carry catalogue metadata;
-      # plugin / `rbs_extended` / parse-error diagnostics are left
+      # Adds the per-rule `evidence_tier` and `documentation_url` fields to each diagnostic in the `--format json`
+      # payload. Both are pure functions of the rule id (the rule catalogue, ADR-61 / the 2026-06-15 feedback §4 +
+      # §5.1), so they enrich the presentation layer here rather than threading through every diagnostic construction
+      # site. Only built-in rules carry catalogue metadata; plugin / `rbs_extended` / parse-error diagnostics are left
       # untouched (they host their own documentation and confidence).
       def enrich_json(payload)
         Array(payload["diagnostics"]).each do |diag|
@@ -745,14 +672,11 @@ module Rigor
         payload
       end
 
-      # ADR-51 WD7 — CI auto-detection. Only augments the default human
-      # (`text`) output: an explicit `--format` means the caller is in control
-      # and is left untouched. For a first-class stdout-native CI (GitHub
-      # Actions / TeamCity) the platform's annotations are emitted on top of
-      # the text output (so the human log AND the inline surface both appear,
-      # like PHPStan's CI-detecting table formatter). For GitLab (native but
-      # artifact-based) and the reviewdog-routed CIs, a one-line hint goes to
-      # stderr — but only when there are diagnostics, so a clean run stays
+      # ADR-51 WD7 — CI auto-detection. Only augments the default human (`text`) output: an explicit `--format` means
+      # the caller is in control and is left untouched. For a first-class stdout-native CI (GitHub Actions / TeamCity)
+      # the platform's annotations are emitted on top of the text output (so the human log AND the inline surface both
+      # appear, like PHPStan's CI-detecting table formatter). For GitLab (native but artifact-based) and the
+      # reviewdog-routed CIs, a one-line hint goes to stderr — but only when there are diagnostics, so a clean run stays
       # quiet.
       def emit_ci_detected_output(result, options)
         return unless options.fetch(:ci_detect)
@@ -780,10 +704,8 @@ module Rigor
         end
       end
 
-      # Text output adds a one-line summary so users see the
-      # diagnostic-count immediately. The summary distinguishes
-      # the success and failure cases and reports the affected
-      # file count for failures.
+      # Text output adds a one-line summary so users see the diagnostic-count immediately. The summary distinguishes the
+      # success and failure cases and reports the affected file count for failures.
       def write_text_result(result)
         result.diagnostics.each { |diagnostic| @out.puts(diagnostic) }
 

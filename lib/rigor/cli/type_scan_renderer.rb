@@ -7,11 +7,9 @@ require_relative "renderable"
 
 module Rigor
   class CLI
-    # Renders a `TypeScanCommand::Report` as either a terminal-friendly text
-    # summary or a JSON document suitable for CI ingestion. Text and JSON
-    # branches share a single source of truth (the `Report` value object) so
-    # the two formats stay in lockstep; that pairing is why this class is a
-    # bit longer than the default class-length budget.
+    # Renders a `TypeScanCommand::Report` as either a terminal-friendly text summary or a JSON document suitable for CI
+    # ingestion. Text and JSON branches share a single source of truth (the `Report` value object) so the two formats
+    # stay in lockstep; that pairing is why this class is a bit longer than the default class-length budget.
     class TypeScanRenderer
       include Renderable
 

@@ -6,20 +6,17 @@ require_relative "singleton_folding"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Folds `Set` constructor calls into `Constant[Set]` when all
-      # arguments are statically known.
+      # Folds `Set` constructor calls into `Constant[Set]` when all arguments are statically known.
       #
-      # Ruby 3.2+ implements Set in C (`set.c`). The constructor is
-      # deterministic — it reads only its arguments and writes nothing
-      # to global state.
+      # Ruby 3.2+ implements Set in C (`set.c`). The constructor is deterministic — it reads only its
+      # arguments and writes nothing to global state.
       #
       # === Supported methods
       #
-      # * `Set[]` — variadic constructor; each argument must be a
-      #   `Constant[T]`. Returns `Constant[Set]`.
+      # * `Set[]` — variadic constructor; each argument must be a `Constant[T]`. Returns `Constant[Set]`.
       # * `Set.new` — zero-argument form; returns `Constant[Set.new]`.
-      # * `Set.new(tuple)` — the argument must be a `Tuple` whose
-      #   every element is a `Constant[T]`. Returns `Constant[Set]`.
+      # * `Set.new(tuple)` — the argument must be a `Tuple` whose every element is a `Constant[T]`. Returns
+      #   `Constant[Set]`.
       #
       # === Non-constant / unsupported cases
       #

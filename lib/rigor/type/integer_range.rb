@@ -7,23 +7,19 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # A bounded integer range carrier. Each bound is either an `Integer`
-    # or one of the symbolic infinities `:neg_infinity` / `:pos_infinity`.
-    # Inspired by PHPStan's `int<min, max>` family — the named aliases
-    # `positive-int` (1..), `non-negative-int` (0..), `negative-int`
-    # (..-1), `non-positive-int` (..0) all surface through this single
-    # carrier and are recovered in `describe` for human-friendly output.
+    # A bounded integer range carrier. Each bound is either an `Integer` or one of the symbolic
+    # infinities `:neg_infinity` / `:pos_infinity`. Inspired by PHPStan's `int<min, max>` family — the
+    # named aliases `positive-int` (1..), `non-negative-int` (0..), `negative-int` (..-1),
+    # `non-positive-int` (..0) all surface through this single carrier and are recovered in `describe`
+    # for human-friendly output.
     #
     # Constraints on construction:
-    # - both bounds must be either `Integer` or one of the two infinity
-    #   sentinels;
+    # - both bounds must be either `Integer` or one of the two infinity sentinels;
     # - if both bounds are concrete, `min <= max` must hold;
-    # - the universal case `(-∞, +∞)` is structurally distinct from
-    #   `Nominal[Integer]` — it carries no extra information today but
-    #   keeps the carrier closed under range narrowing.
+    # - the universal case `(-∞, +∞)` is structurally distinct from `Nominal[Integer]` — it carries no
+    #   extra information today but keeps the carrier closed under range narrowing.
     #
-    # Erasure to RBS is always "Integer": RBS itself does not natively
-    # express bounded integer ranges.
+    # Erasure to RBS is always "Integer": RBS itself does not natively express bounded integer ranges.
     class IntegerRange
       NEG_INFINITY = :neg_infinity
       POS_INFINITY = :pos_infinity
@@ -64,9 +60,8 @@ module Rigor
         int.between?(lower, upper)
       end
 
-      # Returns the lower bound as a numeric (with `-Float::INFINITY` for
-      # `:neg_infinity`). Use this in arithmetic comparisons; never compare
-      # `:neg_infinity` directly with an `Integer`.
+      # Returns the lower bound as a numeric (with `-Float::INFINITY` for `:neg_infinity`). Use this in
+      # arithmetic comparisons; never compare `:neg_infinity` directly with an `Integer`.
       def lower
         m = min
         return m if m.is_a?(Integer)

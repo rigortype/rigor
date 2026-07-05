@@ -7,25 +7,19 @@ require_relative "member_shape_projection"
 module Rigor
   module Inference
     module MethodDispatcher
-      # ADR-48 — `Data.define` value folding. Three responsibilities, all
-      # gated on a fully-decidable shape and degrading to today's behaviour
-      # (no carrier / the `Data` nominal) the moment a premise is uncertain,
-      # so the tier is precision-additive and adds no false-positive
-      # surface:
+      # ADR-48 — `Data.define` value folding. Three responsibilities, all gated on a fully-decidable shape
+      # and degrading to today's behaviour (no carrier / the `Data` nominal) the moment a premise is
+      # uncertain, so the tier is precision-additive and adds no false-positive surface:
       #
-      # 1. `Data.define(:x, :y)` on a `Singleton[Data]` receiver with
-      #    literal-Symbol args and NO block -> `DataClass{members: [...]}`.
-      #    A block (`Data.define(:x) do ... end`) defers (slice 4 hardens
-      #    the block-body case); non-literal members (`Data.define(*names)`)
-      #    defer.
-      # 2. `.new` / `.[]` on a `DataClass` receiver -> a `DataInstance`
-      #    whose member map is built from the call's positional or keyword
-      #    arguments. An arity / key mismatch degrades to the `Data` (or the
+      # 1. `Data.define(:x, :y)` on a `Singleton[Data]` receiver with literal-Symbol args and NO block ->
+      #    `DataClass{members: [...]}`. A block (`Data.define(:x) do ... end`) defers (slice 4 hardens the
+      #    block-body case); non-literal members (`Data.define(*names)`) defer.
+      # 2. `.new` / `.[]` on a `DataClass` receiver -> a `DataInstance` whose member map is built from the
+      #    call's positional or keyword arguments. An arity / key mismatch degrades to the `Data` (or the
       #    tagged class) nominal rather than a wrong member map.
-      # 3. member reads + `[]` / `to_h` / `deconstruct` / `deconstruct_keys`
-      #    / `members` / `with` on a `DataInstance` receiver -> the precise
-      #    projected type. Unhandled methods return nil so the pipeline
-      #    projects the instance to its nominal through RbsDispatch.
+      # 3. member reads + `[]` / `to_h` / `deconstruct` / `deconstruct_keys` / `members` / `with` on a
+      #    `DataInstance` receiver -> the precise projected type. Unhandled methods return nil so the
+      #    pipeline projects the instance to its nominal through RbsDispatch.
       #
       # See docs/adr/48-data-struct-value-folding.md.
       module DataFolding
@@ -51,11 +45,10 @@ module Rigor
           end
         end
 
-        # A `Data.define` value object assigned to a constant (or a
-        # `class Point < Data.define(...)` subclass) is canonicalised by the
-        # engine to `Singleton[Point]`, not a `DataClass` — so its member
-        # layout is read from the project side-table the scope indexer built
-        # (`Scope#data_member_layout`) rather than from the receiver carrier.
+        # A `Data.define` value object assigned to a constant (or a `class Point < Data.define(...)`
+        # subclass) is canonicalised by the engine to `Singleton[Point]`, not a `DataClass` — so its member
+        # layout is read from the project side-table the scope indexer built (`Scope#data_member_layout`)
+        # rather than from the receiver carrier.
         def fold_named_new(singleton, context)
           scope = context.scope
           return nil if scope.nil?
@@ -79,8 +72,8 @@ module Rigor
           Type::Combinator.data_class_of(members: members)
         end
 
-        # The ordered Symbol member names, or nil when any argument is not
-        # a literal `Constant[Symbol]` (a splat or dynamic name).
+        # The ordered Symbol member names, or nil when any argument is not a literal `Constant[Symbol]` (a
+        # splat or dynamic name).
         def member_names_from_args(args)
           names = args.map do |arg|
             return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Symbol)
@@ -104,9 +97,8 @@ module Rigor
           Type::Combinator.data_instance_of(members: map, class_name: class_name)
         end
 
-        # Builds the member -> type map from the call's arguments, honouring
-        # the keyword vs positional distinction read off the call node. nil
-        # when the arguments cannot soundly populate every member.
+        # Builds the member -> type map from the call's arguments, honouring the keyword vs positional
+        # distinction read off the call node. nil when the arguments cannot soundly populate every member.
         def member_map_for_new(members, context)
           if keyword_new?(context)
             keyword_member_map(members, context.args)
@@ -115,10 +107,9 @@ module Rigor
           end
         end
 
-        # `Point.new(x: 1, y: 2)` arrives as a single trailing `HashShape`
-        # arg whose call node is a `KeywordHashNode`. Distinguishing it from
-        # a positional hash (`Point.new({x: 1})`, a `HashNode`) needs the
-        # call node, since both type to a `HashShape`.
+        # `Point.new(x: 1, y: 2)` arrives as a single trailing `HashShape` arg whose call node is a
+        # `KeywordHashNode`. Distinguishing it from a positional hash (`Point.new({x: 1})`, a `HashNode`)
+        # needs the call node, since both type to a `HashShape`.
         def keyword_new?(context)
           node = context.call_node
           return false if node.nil?
@@ -146,9 +137,8 @@ module Rigor
           members.zip(args).to_h
         end
 
-        # A `.new` whose arguments do not fold to a precise map still has a
-        # sound, more-precise-than-Dynamic answer: an instance of the
-        # tagged class (or the `Data` supertype).
+        # A `.new` whose arguments do not fold to a precise map still has a sound, more-precise-than-Dynamic
+        # answer: an instance of the tagged class (or the `Data` supertype).
         def degraded_instance(class_name)
           Type::Combinator.nominal_of(class_name || "Data")
         end

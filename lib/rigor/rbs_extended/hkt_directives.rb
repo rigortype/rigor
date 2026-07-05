@@ -5,35 +5,25 @@ require_relative "../inference/hkt_body_parser"
 
 module Rigor
   module RbsExtended
-    # ADR-20 § "Decision D6" parser for the two new HKT
-    # directives that live in `.rbs` files at module / class
+    # ADR-20 § "Decision D6" parser for the two new HKT directives that live in `.rbs` files at module / class
     # scope:
     #
-    # - `%a{rigor:v1:hkt_register: uri=<uri> arity=<int>
-    #   variance=<v1>,<v2>,... bound=<class_name_or_untyped>}` —
-    #   registers a defunctionalised type-constructor URI
-    #   together with its arity, per-position variance, and
+    # - `%a{rigor:v1:hkt_register: uri=<uri> arity=<int> variance=<v1>,<v2>,... bound=<class_name_or_untyped>}` —
+    #   registers a defunctionalised type-constructor URI together with its arity, per-position variance, and
     #   erasure bound.
-    # - `%a{rigor:v1:hkt_define: uri=<uri> params=<P1>,<P2>,...
-    #   body=<body_text>}` — binds the URI to a type-function
-    #   body that {HktBodyParser} parses into an
-    #   {HktBody::Union} tree.
+    # - `%a{rigor:v1:hkt_define: uri=<uri> params=<P1>,<P2>,... body=<body_text>}` — binds the URI to a
+    #   type-function body that {HktBodyParser} parses into an {HktBody::Union} tree.
     #
     # ## Payload format
     #
-    # **Space-separated `key=value` pairs.** The format is
-    # constrained by RBS's `%a{...}` annotation grammar, which
-    # does NOT accept arbitrary nested punctuation (a JSON
-    # payload with quotes / nested braces will fail RBS
-    # parsing). Each value is a bare token: no quoting, no
-    # escaping. Values that contain spaces or `=` signs MUST
-    # be encoded via the `body=` key, which is special-cased
-    # to gobble everything from `body=` to the end of the
+    # **Space-separated `key=value` pairs.** The format is constrained by RBS's `%a{...}` annotation grammar,
+    # which does NOT accept arbitrary nested punctuation (a JSON payload with quotes / nested braces will fail RBS
+    # parsing). Each value is a bare token: no quoting, no escaping. Values that contain spaces or `=` signs MUST
+    # be encoded via the `body=` key, which is special-cased to gobble everything from `body=` to the end of the
     # payload — see `parse_define`.
     #
-    # Example annotations (write inside a class / module
-    # declaration so the annotation attaches to the decl
-    # RBS parses):
+    # Example annotations (write inside a class / module declaration so the annotation attaches to the decl RBS
+    # parses):
     #
     #   %a{rigor:v1:hkt_register: uri=json::value arity=1
     #     variance=out bound=untyped}
@@ -46,18 +36,13 @@ module Rigor
     #
     # ## Bound vocabulary
     #
-    # - `untyped` resolves to `Rigor::Type::Combinator.untyped`
-    #   (i.e. `Dynamic[Top]`, the ADR-20 WD2 default).
-    # - A bare class name (`String`, `Integer`, …) resolves
-    #   through `name_scope.nominal_for_name(...)` when
-    #   supplied, falling back to a raw `Rigor::Type::Nominal`
-    #   otherwise.
-    # - Anything else falls back to `untyped` and emits an
-    #   `:info` diagnostic via the supplied reporter (fail-soft
+    # - `untyped` resolves to `Rigor::Type::Combinator.untyped` (i.e. `Dynamic[Top]`, the ADR-20 WD2 default).
+    # - A bare class name (`String`, `Integer`, …) resolves through `name_scope.nominal_for_name(...)` when
+    #   supplied, falling back to a raw `Rigor::Type::Nominal` otherwise.
+    # - Anything else falls back to `untyped` and emits an `:info` diagnostic via the supplied reporter (fail-soft
     #   so an unrecognised bound never crashes the loader).
     #
-    # Richer bound forms (parameterised generics, unions,
-    # refinements) wait for a follow-up slice's expression
+    # Richer bound forms (parameterised generics, unions, refinements) wait for a follow-up slice's expression
     # parser.
     module HktDirectives
       module_function
@@ -68,10 +53,8 @@ module Rigor
       DEFAULT_VARIANCE = :inv
       DEFAULT_BOUND_LITERAL = "untyped"
 
-      # Parses one `%a{rigor:v1:hkt_register: ...}` payload
-      # string and returns a `Registration`, or `nil` when the
-      # string is not an hkt_register directive (so callers can
-      # walk a list of annotations without each having to
+      # Parses one `%a{rigor:v1:hkt_register: ...}` payload string and returns a `Registration`, or `nil` when the
+      # string is not an hkt_register directive (so callers can walk a list of annotations without each having to
       # pre-filter).
       def parse_register(string, name_scope: nil, reporter: nil, source_location: nil)
         payload = extract_payload(string, REGISTER_DIRECTIVE)
@@ -106,8 +89,7 @@ module Rigor
         nil
       end
 
-      # Parses one `%a{rigor:v1:hkt_define: ...}` payload
-      # string and returns a `Definition`, or `nil` when the
+      # Parses one `%a{rigor:v1:hkt_define: ...}` payload string and returns a `Definition`, or `nil` when the
       # string is not an hkt_define directive.
       def parse_define(string, reporter: nil, source_location: nil)
         payload = extract_payload(string, DEFINE_DIRECTIVE)
@@ -149,8 +131,7 @@ module Rigor
         return nil if idx.nil?
 
         payload = string[(idx + directive.size)..].to_s.strip
-        # Strip trailing `}` of the wrapping `%a{...}` form if
-        # the caller passed the raw annotation string. The
+        # Strip trailing `}` of the wrapping `%a{...}` form if the caller passed the raw annotation string. The
         # parser also accepts a pre-extracted payload.
         payload = payload.sub(/\}\z/, "") if payload.end_with?("}") && !balanced_braces?(payload)
         payload.empty? ? nil : payload
@@ -169,19 +150,15 @@ module Rigor
         depth.zero?
       end
 
-      # Parses a space-separated `key=value [key=value ...]`
-      # payload into a Hash. When `body_key` is supplied AND
-      # that key appears, everything from `<body_key>=` to
-      # the end of the payload becomes the value (body
-      # contents typically include spaces, `|`, `[]` etc.
-      # that the simple tokenizer cannot otherwise carry).
+      # Parses a space-separated `key=value [key=value ...]` payload into a Hash. When `body_key` is supplied AND
+      # that key appears, everything from `<body_key>=` to the end of the payload becomes the value (body
+      # contents typically include spaces, `|`, `[]` etc. that the simple tokenizer cannot otherwise carry).
       KV_KEY_PATTERN = /(?<![\w.])([a-z_]\w*)=/
       private_constant :KV_KEY_PATTERN
 
       def parse_kv_payload(payload, body_key:)
         result = {}
-        # Find every `<key>=` boundary; each value runs to
-        # the next boundary or end of string.
+        # Find every `<key>=` boundary; each value runs to the next boundary or end of string.
         markers = []
         payload.scan(KV_KEY_PATTERN) { markers << [::Regexp.last_match[1], ::Regexp.last_match.end(0)] }
         markers.each_with_index do |(key, value_start), i|
@@ -196,13 +173,10 @@ module Rigor
         result
       end
 
-      # ADR-20 slice 2b — parse the body String into an
-      # `HktBody::*` tree via {Inference::HktBodyParser.parse}.
-      # On parse failure: emit a fail-soft `:info` reporter
-      # entry and return `nil` so the resulting Definition
-      # keeps its `body` String slot but `body_tree` stays
-      # absent (the reducer falls back to `app.bound` at call
-      # time per ADR-20 D5).
+      # ADR-20 slice 2b — parse the body String into an `HktBody::*` tree via {Inference::HktBodyParser.parse}. On
+      # parse failure: emit a fail-soft `:info` reporter entry and return `nil` so the resulting Definition keeps
+      # its `body` String slot but `body_tree` stays absent (the reducer falls back to `app.bound` at call time
+      # per ADR-20 D5).
       def parse_body_tree(body, params, reporter:, source_location:)
         return nil if body.nil? || body.empty?
 

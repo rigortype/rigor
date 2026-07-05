@@ -7,25 +7,20 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # The class object produced by `Struct.new(:x, :y)` (ADR-48 Struct
-    # follow-up). The mutable sibling of {DataClass}: it models the *class*
-    # (the value bound to `Point` in `Point = Struct.new(:x, :y)`, or the
-    # anonymous superclass in `class Point < Struct.new(:x, :y)`), carrying
-    # the ordered member-name list so `Point.new(...)` can materialise a
-    # {StructInstance}.
+    # The class object produced by `Struct.new(:x, :y)` (ADR-48 Struct follow-up). The mutable sibling of
+    # {DataClass}: it models the *class* (the value bound to `Point` in `Point = Struct.new(:x, :y)`, or
+    # the anonymous superclass in `class Point < Struct.new(:x, :y)`), carrying the ordered member-name
+    # list so `Point.new(...)` can materialise a {StructInstance}.
     #
-    # `keyword_init` records the `Struct.new(..., keyword_init: true)` flag
-    # so `.new` only materialises a precise instance for the matching call
-    # form — a positional `.new(1, 2)` on a `keyword_init: true` struct, or
-    # a keyword `.new(x: 1)` on a positional struct, is a different runtime
-    # shape and must degrade rather than fold a wrong member map.
+    # `keyword_init` records the `Struct.new(..., keyword_init: true)` flag so `.new` only materialises a
+    # precise instance for the matching call form — a positional `.new(1, 2)` on a `keyword_init: true`
+    # struct, or a keyword `.new(x: 1)` on a positional struct, is a different runtime shape and must
+    # degrade rather than fold a wrong member map.
     #
-    # `class_name` carries the binding name when known (the named-subclass
-    # form) and is `nil` for the anonymous result of a bare `Struct.new(...)`
-    # before it is assigned to a constant.
+    # `class_name` carries the binding name when known (the named-subclass form) and is `nil` for the
+    # anonymous result of a bare `Struct.new(...)` before it is assigned to a constant.
     #
-    # Equality and hashing are structural over the member list, the class
-    # name, and the keyword-init flag.
+    # Equality and hashing are structural over the member list, the class name, and the keyword-init flag.
     #
     # See docs/adr/48-data-struct-value-folding.md § "Struct follow-up".
     class StructClass

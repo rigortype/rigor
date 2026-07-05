@@ -7,13 +7,11 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # The singleton type for a Ruby class or module. Inhabitants are the
-    # class object itself (e.g. the constant `Foo`), not its instances.
-    # In RBS this corresponds to `singleton(Foo)`.
+    # The singleton type for a Ruby class or module. Inhabitants are the class object itself (e.g. the
+    # constant `Foo`), not its instances. In RBS this corresponds to `singleton(Foo)`.
     #
-    # `Singleton[Foo]` and `Nominal[Foo]` share the same `class_name` but
-    # are NEVER equal; they describe disjoint values (the class object vs.
-    # instances of the class).
+    # `Singleton[Foo]` and `Nominal[Foo]` share the same `class_name` but are NEVER equal; they describe
+    # disjoint values (the class object vs. instances of the class).
     #
     # See docs/type-specification/rbs-compatible-types.md (singleton(T)).
     class Singleton

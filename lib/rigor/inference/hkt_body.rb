@@ -2,45 +2,35 @@
 
 module Rigor
   module Inference
-    # ADR-20 Slice 2a — node types for the parsed body of a
-    # type-function `Definition`. Each node represents one
-    # piece of a Rigor-side type expression that the reducer
-    # ({HktReducer}) walks against a concrete argument list.
+    # ADR-20 Slice 2a — node types for the parsed body of a type-function `Definition`. Each node
+    # represents one piece of a Rigor-side type expression that the reducer ({HktReducer}) walks
+    # against a concrete argument list.
     #
-    # Slice 2a ships a programmatic constructor surface; plugin
-    # and Rigor-bundled overlay authors may build a body tree
-    # by hand using these node types. The string-grammar parser
-    # (`HktBodyParser`, Slice 2b, shipped) reads `Definition#body`
-    # (populated by Slice 1's `HktDirectives.parse_define`) into
-    # this node tree; `body_tree` is the evaluable form.
+    # Slice 2a ships a programmatic constructor surface; plugin and Rigor-bundled overlay authors
+    # may build a body tree by hand using these node types. The string-grammar parser
+    # (`HktBodyParser`, Slice 2b, shipped) reads `Definition#body` (populated by Slice 1's
+    # `HktDirectives.parse_define`) into this node tree; `body_tree` is the evaluable form.
     #
-    # The nine node types cover JSON.parse, dry-monads, and the
-    # ADR-20 § D3 conditional / membership forms (shipped):
+    # The nine node types cover JSON.parse, dry-monads, and the ADR-20 § D3 conditional /
+    # membership forms (shipped):
     #
-    # - {TypeLeaf}    — wraps a fully-built `Rigor::Type`
-    #   (use for atoms like `nil`, `Constant<true>`,
-    #   `Nominal[Integer]`).
-    # - {Param}       — reference to a formal parameter
-    #   declared in the enclosing `Definition#params` list
-    #   (e.g. `K` in `json::value[K]`). The reducer
-    #   substitutes from the application's `args`.
-    # - {AppRef}      — abstract HKT application; the reducer
-    #   resolves it via the registry, or returns the `App`
-    #   carrier as-is when the reference is self-recursive
-    #   (lazy "tying-the-knot" handling that lets recursive
-    #   sums like `json::value` reduce without infinite
-    #   expansion).
+    # - {TypeLeaf}    — wraps a fully-built `Rigor::Type` (use for atoms like `nil`,
+    #   `Constant<true>`, `Nominal[Integer]`).
+    # - {Param}       — reference to a formal parameter declared in the enclosing
+    #   `Definition#params` list (e.g. `K` in `json::value[K]`). The reducer substitutes from the
+    #   application's `args`.
+    # - {AppRef}      — abstract HKT application; the reducer resolves it via the registry, or
+    #   returns the `App` carrier as-is when the reference is self-recursive (lazy
+    #   "tying-the-knot" handling that lets recursive sums like `json::value` reduce without
+    #   infinite expansion).
     # - {Union}       — N-ary union of arms.
-    # - {NominalApp}  — parameterised nominal class
-    #   (`Array[X]`, `Hash[K, V]`) whose type args are
+    # - {NominalApp}  — parameterised nominal class (`Array[X]`, `Hash[K, V]`) whose type args are
     #   themselves body nodes.
     #
-    # Every node is a frozen `Data.define` value; structural
-    # equality is by-field.
+    # Every node is a frozen `Data.define` value; structural equality is by-field.
     module HktBody
-      # Wraps a pre-built `Rigor::Type` value. Use for atoms
-      # that need no substitution (e.g. `Nominal[Integer]`,
-      # `Constant<nil>`).
+      # Wraps a pre-built `Rigor::Type` value. Use for atoms that need no substitution
+      # (e.g. `Nominal[Integer]`, `Constant<nil>`).
       TypeLeaf = Data.define(:type) do
         def initialize(type:)
           raise ArgumentError, "type must not be nil" if type.nil?
@@ -49,12 +39,10 @@ module Rigor
         end
       end
 
-      # Reference to a formal parameter the enclosing
-      # `Definition#params` declared. The reducer substitutes
-      # this node with the matching positional arg from the
-      # `App` being reduced; an unknown name raises during
-      # reduction (the parser, when it ships, MUST reject
-      # unknown names earlier).
+      # Reference to a formal parameter the enclosing `Definition#params` declared. The reducer
+      # substitutes this node with the matching positional arg from the `App` being reduced; an
+      # unknown name raises during reduction (the parser, when it ships, MUST reject unknown names
+      # earlier).
       Param = Data.define(:name) do
         def initialize(name:)
           raise ArgumentError, "name must be a Symbol, got #{name.class}" unless name.is_a?(Symbol)
@@ -63,11 +51,9 @@ module Rigor
         end
       end
 
-      # Abstract HKT application — the reducer's primary
-      # recursion point. `uri` is a namespaced Symbol
-      # matching some `Registration` in the registry; `args`
-      # is an Array of body nodes (each gets substituted /
-      # resolved before being used).
+      # Abstract HKT application — the reducer's primary recursion point. `uri` is a namespaced
+      # Symbol matching some `Registration` in the registry; `args` is an Array of body nodes
+      # (each gets substituted / resolved before being used).
       AppRef = Data.define(:uri, :args) do
         def initialize(uri:, args:)
           raise ArgumentError, "uri must be a Symbol, got #{uri.class}" unless uri.is_a?(Symbol)
@@ -79,9 +65,8 @@ module Rigor
         end
       end
 
-      # N-ary union. The reducer builds the result through
-      # `Type::Combinator.union(*reduced_arms)` so
-      # normalization (flattening, dedup, Bot drop) applies.
+      # N-ary union. The reducer builds the result through `Type::Combinator.union(*reduced_arms)`
+      # so normalization (flattening, dedup, Bot drop) applies.
       Union = Data.define(:arms) do
         def initialize(arms:)
           raise ArgumentError, "arms must be an Array, got #{arms.class}" unless arms.is_a?(Array)
@@ -91,12 +76,9 @@ module Rigor
         end
       end
 
-      # Parameterised nominal class. `class_name` is the
-      # Ruby class name (`"Array"`, `"Hash"`); `args` is an
-      # Array of body nodes for the type arguments. The
-      # reducer builds the result through
-      # `Type::Combinator.nominal_of(class_name, type_args:
-      # reduced_args)`.
+      # Parameterised nominal class. `class_name` is the Ruby class name (`"Array"`, `"Hash"`);
+      # `args` is an Array of body nodes for the type arguments. The reducer builds the result
+      # through `Type::Combinator.nominal_of(class_name, type_args: reduced_args)`.
       NominalApp = Data.define(:class_name, :args) do
         def initialize(class_name:, args:)
           unless class_name.is_a?(String) && !class_name.empty?
@@ -109,17 +91,14 @@ module Rigor
         end
       end
 
-      # ADR-20 § D3 — conditional type form. `test` is a
-      # {TestSubtype} / {TestEquality} / {TestMembership}
-      # value object the reducer evaluates against the
-      # current bindings; `then_branch` / `else_branch` are
-      # body nodes. The reducer's trinary handling:
+      # ADR-20 § D3 — conditional type form. `test` is a {TestSubtype} / {TestEquality} /
+      # {TestMembership} value object the reducer evaluates against the current bindings;
+      # `then_branch` / `else_branch` are body nodes. The reducer's trinary handling:
       #
       # - test = `yes` → return the reduced `then_branch`.
       # - test = `no` → return the reduced `else_branch`.
-      # - test = `maybe` → widen to the union of both
-      #   reduced branches (per ADR-20 WD7 / robustness
-      #   principle).
+      # - test = `maybe` → widen to the union of both reduced branches (per ADR-20 WD7 /
+      #   robustness principle).
       Conditional = Data.define(:test, :then_branch, :else_branch) do
         def initialize(test:, then_branch:, else_branch:)
           raise ArgumentError, "test must not be nil" if test.nil?
@@ -130,8 +109,8 @@ module Rigor
         end
       end
 
-      # `left <: right` — subtype check. `left` is typically
-      # a {Param} reference; `right` is any body expression.
+      # `left <: right` — subtype check. `left` is typically a {Param} reference; `right` is any
+      # body expression.
       TestSubtype = Data.define(:left, :right) do
         def initialize(left:, right:)
           raise ArgumentError, "left/right must not be nil" if left.nil? || right.nil?
@@ -140,9 +119,8 @@ module Rigor
         end
       end
 
-      # `left == right` — structural equality. Useful for
-      # discriminating against literal constants
-      # (`E == :symbol`).
+      # `left == right` — structural equality. Useful for discriminating against literal
+      # constants (`E == :symbol`).
       TestEquality = Data.define(:left, :right) do
         def initialize(left:, right:)
           raise ArgumentError, "left/right must not be nil" if left.nil? || right.nil?
@@ -151,9 +129,8 @@ module Rigor
         end
       end
 
-      # `left in [opt1, opt2, ...]` — set membership. Each
-      # `option` is a body node; the test passes iff `left`
-      # is structurally equal to any of the options.
+      # `left in [opt1, opt2, ...]` — set membership. Each `option` is a body node; the test
+      # passes iff `left` is structurally equal to any of the options.
       TestMembership = Data.define(:left, :options) do
         def initialize(left:, options:)
           raise ArgumentError, "left must not be nil" if left.nil?

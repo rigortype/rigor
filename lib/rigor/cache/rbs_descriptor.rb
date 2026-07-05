@@ -6,12 +6,10 @@ require_relative "descriptor"
 
 module Rigor
   module Cache
-    # Shared descriptor builder for cache producers that depend on the
-    # RBS environment (constant table, known-class set, future
-    # Marshal-clean reflection artefacts). Every consumer attaches the
-    # same three slots, so factoring the construction here keeps the
-    # producers small and ensures invalidation behaves identically
-    # across them.
+    # Shared descriptor builder for cache producers that depend on the RBS environment (constant table,
+    # known-class set, future Marshal-clean reflection artefacts). Every consumer attaches the same three
+    # slots, so factoring the construction here keeps the producers small and ensures invalidation behaves
+    # identically across them.
     module RbsDescriptor
       # @param loader [Rigor::Environment::RbsLoader]
       # @return [Rigor::Cache::Descriptor]
@@ -52,13 +50,10 @@ module Rigor
         )
       end
 
-      # ADR-32 WD5 — encode the loader's virtual_rbs set into a
-      # `ConfigEntry` so the env cache invalidates when a
-      # plugin-contributed synthesised RBS string changes (or
-      # appears for the first time). Returns nil when the
-      # loader has no virtual_rbs entries, so callers without
-      # any synthesizer-emitting plugin pay zero descriptor
-      # cost.
+      # ADR-32 WD5 — encode the loader's virtual_rbs set into a `ConfigEntry` so the env cache invalidates when
+      # a plugin-contributed synthesised RBS string changes (or appears for the first time). Returns nil when
+      # the loader has no virtual_rbs entries, so callers without any synthesizer-emitting plugin pay zero
+      # descriptor cost.
       def self.virtual_rbs_entry(loader)
         return nil unless loader.respond_to?(:virtual_rbs)
         return nil if loader.virtual_rbs.nil? || loader.virtual_rbs.empty?

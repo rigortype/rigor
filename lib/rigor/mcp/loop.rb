@@ -4,9 +4,8 @@ require "json"
 
 module Rigor
   module MCP
-    # Reads newline-delimited JSON-RPC 2.0 messages from `input`,
-    # dispatches each to `server`, and writes responses to `output`.
-    # Runs until input reaches EOF (the client closes the connection).
+    # Reads newline-delimited JSON-RPC 2.0 messages from `input`, dispatches each to `server`, and writes responses to
+    # `output`. Runs until input reaches EOF (the client closes the connection).
     class Loop
       def initialize(input:, output:, server:)
         @input = input

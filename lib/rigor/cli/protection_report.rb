@@ -4,12 +4,10 @@ require_relative "../inference/dynamic_origin"
 
 module Rigor
   class CLI
-    # ADR-63 Tier 1 — aggregates per-file {Inference::ProtectionScanner}
-    # results into a project-level protection report: the protected ratio, the
-    # per-file breakdown, and a ranked "add a type here" list keyed by the
-    # method called on an unprotected (`Dynamic`) receiver — the highest-traffic
-    # untyped dispatches, where a receiver annotation buys the most catching
-    # power.
+    # ADR-63 Tier 1 — aggregates per-file {Inference::ProtectionScanner} results into a project-level protection report:
+    # the protected ratio, the per-file breakdown, and a ranked "add a type here" list keyed by the method called on an
+    # unprotected (`Dynamic`) receiver — the highest-traffic untyped dispatches, where a receiver annotation buys the
+    # most catching power.
     FileProtection = Data.define(:path, :protected_count, :unprotected_count, :ratio)
     UntypedCall = Data.define(:method_name, :count, :examples, :dynamic_origin)
 
@@ -19,12 +17,10 @@ module Rigor
       def grand_total = total_protected + total_unprotected
       def ratio = grand_total.zero? ? 1.0 : total_protected.to_f / grand_total
 
-      # ADR-73 P6 — total dispatch-site count per tractability axis across
-      # the classified holes (those with a recorded `dynamic_origin`), so a
-      # user sees at a glance how much of the untyped surface a type can
-      # actually close (`add_rbs`) vs. needs a plugin (`enable_plugin`) vs.
-      # is an engine gap. Keys are omitted when zero; an all-unclassified
-      # run yields `{}`.
+      # ADR-73 P6 — total dispatch-site count per tractability axis across the classified holes (those with a recorded
+      # `dynamic_origin`), so a user sees at a glance how much of the untyped surface a type can actually close
+      # (`add_rbs`) vs. needs a plugin (`enable_plugin`) vs. is an engine gap. Keys are omitted when zero; an
+      # all-unclassified run yields `{}`.
       def tractability_summary
         untyped_calls.each_with_object(Hash.new(0)) do |c, acc|
           axis = c.dynamic_origin && Inference::DynamicOrigin.tractability(c.dynamic_origin)

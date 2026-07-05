@@ -10,32 +10,25 @@ module Rigor
   class Configuration # rubocop:disable Metrics/ClassLength
     # File-discovery order for `Configuration.load(nil)`.
     #
-    # The first file present is loaded; the others are NOT
-    # implicitly merged. To extend a base config explicitly the
-    # winning file MUST list the base via `includes:`.
+    # The first file present is loaded; the others are NOT implicitly merged. To extend a base config
+    # explicitly the winning file MUST list the base via `includes:`.
     #
-    # `.rigor.yml` is a developer-local override (typically
-    # gitignored); `.rigor.dist.yml` is the project default
-    # (committed to the repo). When both are present the
-    # developer's local override wins outright — there is no
-    # implicit auto-merge.
+    # `.rigor.yml` is a developer-local override (typically gitignored); `.rigor.dist.yml` is the project
+    # default (committed to the repo). When both are present the developer's local override wins outright —
+    # there is no implicit auto-merge.
     DISCOVERY_ORDER = %w[.rigor.yml .rigor.dist.yml].freeze
-    # Back-compat alias. Keep here so external callers that read
-    # `Configuration::DEFAULT_PATH` for help text / fixture paths
-    # still work; the discovery list is the canonical source.
+    # Back-compat alias. Keep here so external callers that read `Configuration::DEFAULT_PATH` for help text /
+    # fixture paths still work; the discovery list is the canonical source.
     DEFAULT_PATH = DISCOVERY_ORDER.first
 
-    # Built-in exclusion patterns appended to `exclude:` so vendored
-    # dependencies, Bundler artefacts, and JavaScript node_modules are
-    # never analysed by accident when a directory glob expands. Users
-    # cannot disable these defaults; the trade-off is that analysing
-    # any of these paths is essentially never what the user wants
-    # (they're build outputs / external dependencies, not source).
+    # Built-in exclusion patterns appended to `exclude:` so vendored dependencies, Bundler artefacts, and
+    # JavaScript node_modules are never analysed by accident when a directory glob expands. Users cannot
+    # disable these defaults; the trade-off is that analysing any of these paths is essentially never what
+    # the user wants (they're build outputs / external dependencies, not source).
     #
-    # We deliberately keep this list narrow. `tmp/` and similar
-    # directories vary across project layouts (Rails has `tmp/`,
-    # libraries usually don't); user-supplied `exclude:` entries
-    # in `.rigor.yml` cover the project-specific cases.
+    # We deliberately keep this list narrow. `tmp/` and similar directories vary across project layouts
+    # (Rails has `tmp/`, libraries usually don't); user-supplied `exclude:` entries in `.rigor.yml` cover the
+    # project-specific cases.
     BUILTIN_EXCLUDES = %w[
       **/vendor/bundle/**
       **/.bundle/**
@@ -50,35 +43,26 @@ module Rigor
       "disable" => [],
       "libraries" => [],
       "signature_paths" => nil,
-      # ADR-17 — project-side monkey-patch pre-evaluation.
-      # Empty by default; users opt in by listing explicit files
-      # that the analyzer walks before per-file inference so
-      # patched-method declarations are visible across the
-      # project (e.g. `lib/core_ext/string_extensions.rb`). Slice 1
-      # plumbing only — listed files are validated at config-load
-      # time (`pre-eval.file-not-found` on a missing path), but
-      # the dispatcher tier consuming the registry lands in
-      # slice 2.
+      # ADR-17 — project-side monkey-patch pre-evaluation. Empty by default; users opt in by listing explicit
+      # files that the analyzer walks before per-file inference so patched-method declarations are visible
+      # across the project (e.g. `lib/core_ext/string_extensions.rb`). Slice 1 plumbing only — listed files
+      # are validated at config-load time (`pre-eval.file-not-found` on a missing path), but the dispatcher
+      # tier consuming the registry lands in slice 2.
       "pre_eval" => [],
-      # ADR-22 — baseline file path. nil (default) means no
-      # baseline is loaded; the `false` literal is treated as
-      # the explicit-disable form for `.rigor.yml`-side override
-      # of an upstream `.rigor.dist.yml` `baseline:` declaration.
-      # The presence of `.rigor-baseline.yml` on disk alone does
-      # NOT activate filtering — the path must be named here
-      # (WD2 (b) of ADR-22).
+      # ADR-22 — baseline file path. nil (default) means no baseline is loaded; the `false` literal is
+      # treated as the explicit-disable form for `.rigor.yml`-side override of an upstream `.rigor.dist.yml`
+      # `baseline:` declaration. The presence of `.rigor-baseline.yml` on disk alone does NOT activate
+      # filtering — the path must be named here (WD2 (b) of ADR-22).
       "baseline" => nil,
       "fold_platform_specific_paths" => false,
       "cache" => {
         "path" => ".rigor/cache",
-        # LRU eviction cap in bytes (ADR-54 WD3). The least-recently-used
-        # entries are removed at the end of a run when the total exceeds
-        # this limit. The 256 MB default exists to reap orphans — entries
-        # whose content key nothing references any more (an rbs gem bump,
-        # a signature change) and that no run would otherwise ever delete;
-        # a full active per-project set is ~2 MB, so the cap never touches
-        # live entries. Set explicitly to `null` to disable eviction
-        # (pre-WD3 behaviour: the cache grows until `--clear-cache`).
+        # LRU eviction cap in bytes (ADR-54 WD3). The least-recently-used entries are removed at the end of a
+        # run when the total exceeds this limit. The 256 MB default exists to reap orphans — entries whose
+        # content key nothing references any more (an rbs gem bump, a signature change) and that no run
+        # would otherwise ever delete; a full active per-project set is ~2 MB, so the cap never touches live
+        # entries. Set explicitly to `null` to disable eviction (pre-WD3 behaviour: the cache grows until
+        # `--clear-cache`).
         "max_bytes" => 268_435_456
       },
       "plugins_io" => {
@@ -88,100 +72,74 @@ module Rigor
       },
       "severity_profile" => "balanced",
       "severity_overrides" => {},
-      # ADR-50 § WD2 — bleeding-edge overlay opt-in. Selects which of
-      # the *next major's* queued changes ({Rigor::BleedingEdge}) this
-      # project adopts early. Orthogonal to `severity_profile:`. Accepts
-      # `false` (default — adopt none), `true` (adopt the whole
-      # overlay), a list of feature ids (adopt only those), or
-      # `{ all: true, except: [ids] }` (adopt all but the named). The
-      # overlay is empty today, so every form is currently a no-op; it
-      # becomes live when the first discipline is queued for a major.
+      # ADR-50 § WD2 — bleeding-edge overlay opt-in. Selects which of the *next major's* queued changes
+      # ({Rigor::BleedingEdge}) this project adopts early. Orthogonal to `severity_profile:`. Accepts `false`
+      # (default — adopt none), `true` (adopt the whole overlay), a list of feature ids (adopt only those),
+      # or `{ all: true, except: [ids] }` (adopt all but the named). The overlay is empty today, so every
+      # form is currently a no-op; it becomes live when the first discipline is queued for a major.
       "bleeding_edge" => false,
       "dependencies" => {
         "source_inference" => [],
         "budget_per_gem" => Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM
       },
       "parallel" => {
-        # ADR-15 Phase 4c — when greater than zero, `rigor check`
-        # dispatches per-file analysis across N Ractor workers
-        # built around {Rigor::Analysis::WorkerSession}.
-        # `0` (default) keeps the sequential coordinator path
-        # bit-for-bit unchanged. The CLI's `--workers=N` flag
-        # and the `RIGOR_RACTOR_WORKERS` env var both override
-        # this setting; precedence is CLI > env > config > 0.
+        # ADR-15 Phase 4c — when greater than zero, `rigor check` dispatches per-file analysis across N
+        # Ractor workers built around {Rigor::Analysis::WorkerSession}. `0` (default) keeps the sequential
+        # coordinator path bit-for-bit unchanged. The CLI's `--workers=N` flag and the `RIGOR_RACTOR_WORKERS`
+        # env var both override this setting; precedence is CLI > env > config > 0.
         "workers" => 0
       },
       "bundler" => {
-        # Open item O4 — target-project Bundler awareness.
-        # When `bundle_path:` is set (or auto-detected), Rigor
-        # walks `<bundle_path>/ruby/*/gems/*/sig/` and adds each
-        # gem-shipped sig directory to `signature_paths:`. With
-        # O7's failure-memo in place, conflicts (a vendored sig
-        # already declares the same constant) degrade gracefully
-        # to "no RBS env" with a single-line warning naming the
-        # offending file, rather than hanging.
+        # Open item O4 — target-project Bundler awareness. When `bundle_path:` is set (or auto-detected),
+        # Rigor walks `<bundle_path>/ruby/*/gems/*/sig/` and adds each gem-shipped sig directory to
+        # `signature_paths:`. With O7's failure-memo in place, conflicts (a vendored sig already declares the
+        # same constant) degrade gracefully to "no RBS env" with a single-line warning naming the offending
+        # file, rather than hanging.
         #
-        # `bundle_path:` (String, optional): explicit path to the
-        # bundler install root (e.g., "vendor/bundle" or an
-        # absolute path). Resolved relative to the project root
-        # (`paths:`'s base) when relative.
+        # `bundle_path:` (String, optional): explicit path to the bundler install root (e.g.,
+        # "vendor/bundle" or an absolute path). Resolved relative to the project root (`paths:`'s base) when
+        # relative.
         #
-        # `auto_detect:` (Boolean, default true): when no
-        # explicit `bundle_path:` is set, try `.bundle/config`'s
-        # `BUNDLE_PATH:` first; fall back to `vendor/bundle/`
-        # under the project root if it exists. When neither is
-        # found, no extra sigs are added — the analyzer sees
-        # only rigor's vendored RBS and the user's
-        # `signature_paths:`.
+        # `auto_detect:` (Boolean, default true): when no explicit `bundle_path:` is set, try
+        # `.bundle/config`'s `BUNDLE_PATH:` first; fall back to `vendor/bundle/` under the project root if it
+        # exists. When neither is found, no extra sigs are added — the analyzer sees only rigor's vendored
+        # RBS and the user's `signature_paths:`.
         #
         # O4 Layer 3 keys:
         #
-        # `lockfile:` (String, optional): explicit path to a
-        # `Gemfile.lock`. Resolved relative to the project root
-        # when relative. When set (or auto-detected via the
-        # `auto_detect:` flag below) Rigor parses the lockfile
-        # and uses it to FILTER the bundle-discovered `sig/`
-        # directories: only gems whose `(name, version,
-        # platform)` matches a lockfile entry are admitted to
-        # `signature_paths:`. Stale or out-of-band gems sitting
-        # in the bundle install tree are silently dropped.
+        # `lockfile:` (String, optional): explicit path to a `Gemfile.lock`. Resolved relative to the
+        # project root when relative. When set (or auto-detected via the `auto_detect:` flag below) Rigor
+        # parses the lockfile and uses it to FILTER the bundle-discovered `sig/` directories: only gems whose
+        # `(name, version, platform)` matches a lockfile entry are admitted to `signature_paths:`. Stale or
+        # out-of-band gems sitting in the bundle install tree are silently dropped.
         #
-        # `auto_detect:` (Boolean, also gates the lockfile
-        # search): when true and `lockfile:` is nil, look for
-        # `<project_root>/Gemfile.lock`.
+        # `auto_detect:` (Boolean, also gates the lockfile search): when true and `lockfile:` is nil, look
+        # for `<project_root>/Gemfile.lock`.
         "bundle_path" => nil,
         "auto_detect" => true,
         "lockfile" => nil
       },
       "rbs_collection" => {
-        # Open item O4 Layer 3 slice 2 — `rbs collection
-        # install` awareness. When the target project has been
-        # set up with `rbs collection install`, the resulting
-        # `rbs_collection.lock.yaml` carries the resolved (gem,
-        # version, source) triples and `.gem_rbs_collection/`
-        # holds the downloaded `.rbs` files. Rigor parses the
-        # lockfile and auto-feeds each gem's
-        # `<collection_root>/<name>/<version>/` directory into
-        # `RbsLoader`'s `signature_paths:`. Sources of type
-        # `stdlib` are skipped because rigor's bundled
+        # Open item O4 Layer 3 slice 2 — `rbs collection install` awareness. When the target project has been
+        # set up with `rbs collection install`, the resulting `rbs_collection.lock.yaml` carries the resolved
+        # (gem, version, source) triples and `.gem_rbs_collection/` holds the downloaded `.rbs` files. Rigor
+        # parses the lockfile and auto-feeds each gem's `<collection_root>/<name>/<version>/` directory into
+        # `RbsLoader`'s `signature_paths:`. Sources of type `stdlib` are skipped because rigor's bundled
         # `DEFAULT_LIBRARIES` already covers that surface.
         #
-        # `lockfile:` (String, optional): explicit path to
-        # `rbs_collection.lock.yaml`. Resolved relative to the
-        # project root when relative.
+        # `lockfile:` (String, optional): explicit path to `rbs_collection.lock.yaml`. Resolved relative to
+        # the project root when relative.
         #
-        # `auto_detect:` (Boolean, default true): when no
-        # explicit `lockfile:` is set, look for
+        # `auto_detect:` (Boolean, default true): when no explicit `lockfile:` is set, look for
         # `<project_root>/rbs_collection.lock.yaml`.
         "lockfile" => nil,
         "auto_detect" => true
       }
     }.freeze
 
-    # Top-level keys whose values are file/directory paths that
-    # MUST be resolved relative to the config file's directory.
-    # `exclude:` is intentionally NOT in this list — its entries
-    # are glob patterns (`**/vendor/**`), not paths.
+    # Top-level keys whose values are file/directory paths that MUST be resolved relative to the config
+    # file's directory. `exclude:` is intentionally NOT in this list — its entries are glob patterns
+    # (`**/vendor/**`), not paths.
     PATH_KEYS = %w[paths signature_paths pre_eval].freeze
     private_constant :PATH_KEYS
 
@@ -199,18 +157,14 @@ module Rigor
 
     # Loads a configuration file.
     #
-    # `path == nil` triggers auto-discovery against
-    # {DISCOVERY_ORDER}. The first present file in that list is
+    # `path == nil` triggers auto-discovery against {DISCOVERY_ORDER}. The first present file in that list is
     # loaded; if none exist the built-in {DEFAULTS} are used.
     #
-    # When a path is supplied (whether by auto-discovery or by
-    # the caller) the YAML body is processed for `includes:`
-    # recursively, and every relative path inside path-bearing
-    # keys (`paths:`, `signature_paths:`, `plugins_io.allowed_paths:`,
-    # `includes:`) is resolved against THAT file's directory.
-    # The resolution is per-file: an included file's relative
-    # paths resolve against the included file's directory, not
-    # the top-level file. Path resolution mirrors
+    # When a path is supplied (whether by auto-discovery or by the caller) the YAML body is processed for
+    # `includes:` recursively, and every relative path inside path-bearing keys (`paths:`,
+    # `signature_paths:`, `plugins_io.allowed_paths:`, `includes:`) is resolved against THAT file's
+    # directory. The resolution is per-file: an included file's relative paths resolve against the included
+    # file's directory, not the top-level file. Path resolution mirrors
     # [PHPStan](https://phpstan.org/config-reference#paths).
     def self.load(path = nil)
       resolved = path || discover
@@ -220,22 +174,17 @@ module Rigor
       new(DEFAULTS.merge(data))
     end
 
-    # Returns the path to the config file Rigor would load
-    # under auto-discovery, or `nil` when neither candidate
-    # exists. Public so the CLI / spec drift checks can
-    # introspect the resolved file.
+    # Returns the path to the config file Rigor would load under auto-discovery, or `nil` when neither
+    # candidate exists. Public so the CLI / spec drift checks can introspect the resolved file.
     def self.discover
       DISCOVERY_ORDER.find { |candidate| File.exist?(candidate) }
     end
 
-    # Reads `path` (which MUST exist) plus every file listed in
-    # its `includes:` chain, merging them under the order:
-    # included files first (in declaration order), then the
-    # current file's own keys override. Relative paths inside
-    # each file are resolved against that file's directory.
-    # Public so the CLI can run the include-aware load before
-    # applying `--treat-all-as-inline-rbs`'s plugin injection
-    # (see {CLI::CheckCommand#load_check_configuration}).
+    # Reads `path` (which MUST exist) plus every file listed in its `includes:` chain, merging them under the
+    # order: included files first (in declaration order), then the current file's own keys override.
+    # Relative paths inside each file are resolved against that file's directory. Public so the CLI can run
+    # the include-aware load before applying `--treat-all-as-inline-rbs`'s plugin injection (see
+    # {CLI::CheckCommand#load_check_configuration}).
     def self.load_with_includes(path, visited: Set.new)
       absolute = File.expand_path(path)
       raise ArgumentError, "circular include: #{absolute}" if visited.include?(absolute)
@@ -265,12 +214,10 @@ module Rigor
       deep_merge(accumulated, data)
     end
 
-    # Per-file path resolution. Each path-bearing key listed in
-    # {PATH_KEYS} plus the nested `plugins_io.allowed_paths:`
-    # entries get their relative paths expanded against the
-    # config file's directory. `cache.path:` is intentionally
-    # left as-is so end-user messages (e.g. `--cache-stats`
-    # output) keep the project-relative form the user wrote.
+    # Per-file path resolution. Each path-bearing key listed in {PATH_KEYS} plus the nested
+    # `plugins_io.allowed_paths:` entries get their relative paths expanded against the config file's
+    # directory. `cache.path:` is intentionally left as-is so end-user messages (e.g. `--cache-stats` output)
+    # keep the project-relative form the user wrote.
     def self.resolve_paths_in(data, base_dir)
       return data unless data.is_a?(Hash)
 
@@ -305,14 +252,11 @@ module Rigor
       merged
     end
 
-    # Most keys are right-wins (override) or recursively
-    # merged hashes. ADR-10 § "config-conflict diagnostic"
-    # carves out `dependencies.source_inference[]`: the
-    # per-gem merge across `includes:` chains needs union
-    # behaviour with mode-conflict detection. The Hash itself
-    # still merges deeply; only the inner array gets
-    # concatenated so {Dependencies.from_h} sees every
-    # contributor's entries and can dedupe them.
+    # Most keys are right-wins (override) or recursively merged hashes. ADR-10 § "config-conflict
+    # diagnostic" carves out `dependencies.source_inference[]`: the per-gem merge across `includes:` chains
+    # needs union behaviour with mode-conflict detection. The Hash itself still merges deeply; only the
+    # inner array gets concatenated so {Dependencies.from_h} sees every contributor's entries and can dedupe
+    # them.
     def self.merge_value(key, merged, value)
       if key == "dependencies" && merged[key].is_a?(Hash) && value.is_a?(Hash)
         merge_dependencies_hash(merged[key], value)
@@ -388,15 +332,10 @@ module Rigor
       rclf = rbs_collection.fetch("lockfile")
       @rbs_collection_lockfile = rclf.nil? ? nil : rclf.to_s.dup.freeze
       @rbs_collection_auto_detect = rbs_collection.fetch("auto_detect") == true
-      # Ractor migration Phase 2a: deep-freeze the
-      # Configuration so it is `Ractor.shareable?`. Every
-      # ivar above is now either a frozen value (Symbol /
-      # nil / Boolean) or an explicitly frozen
-      # collection / value object; freezing `self` makes the
-      # whole carrier safe to send across Ractor boundaries
-      # (and catches accidental post-init mutation in any
-      # caller). See
-      # `docs/design/20260514-ractor-migration.md`.
+      # Ractor migration Phase 2a: deep-freeze the Configuration so it is `Ractor.shareable?`. Every ivar
+      # above is now either a frozen value (Symbol / nil / Boolean) or an explicitly frozen collection /
+      # value object; freezing `self` makes the whole carrier safe to send across Ractor boundaries (and
+      # catches accidental post-init mutation in any caller). See `docs/design/20260514-ractor-migration.md`.
       freeze
     end
     # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
@@ -440,23 +379,19 @@ module Rigor
       }
     end
 
-    # ADR-50 § WD2 — returns a sibling Configuration whose bleeding-edge
-    # selection (and the derived `bleeding_edge_severity_overrides` the two
-    # {SeverityProfile.resolve} sites consult) is replaced by `value`,
-    # leaving every other field shared with the receiver. `value` takes the
-    # same forms as the `bleeding_edge:` config key — `false` / `true` / a
-    # feature-id Array / `{ "all" => true, "except" => [...] }` — and is
-    # normalised through the same {#coerce_bleeding_edge} path, so an unknown
-    # id stays inert.
+    # ADR-50 § WD2 — returns a sibling Configuration whose bleeding-edge selection (and the derived
+    # `bleeding_edge_severity_overrides` the two {SeverityProfile.resolve} sites consult) is replaced by
+    # `value`, leaving every other field shared with the receiver. `value` takes the same forms as the
+    # `bleeding_edge:` config key — `false` / `true` / a feature-id Array / `{ "all" => true, "except" =>
+    # [...] }` — and is normalised through the same {#coerce_bleeding_edge} path, so an unknown id stays
+    # inert.
     #
-    # The CLI's `--bleeding-edge[=ids]` / `--no-bleeding-edge` flag uses this
-    # to override the configured selection for a single run (the same
-    # CLI-over-config precedence `--workers` and `--no-cache` follow). It is a
-    # frozen `dup` with the two bleeding-edge ivars re-set: `dup` returns an
-    # unfrozen shallow copy (every other ivar is the receiver's deeply-frozen
-    # value, safe to share read-only), the two replacements are themselves
-    # deeply frozen, and the re-`freeze` keeps the result `Ractor.shareable?`
-    # for the worker path.
+    # The CLI's `--bleeding-edge[=ids]` / `--no-bleeding-edge` flag uses this to override the configured
+    # selection for a single run (the same CLI-over-config precedence `--workers` and `--no-cache` follow).
+    # It is a frozen `dup` with the two bleeding-edge ivars re-set: `dup` returns an unfrozen shallow copy
+    # (every other ivar is the receiver's deeply-frozen value, safe to share read-only), the two replacements
+    # are themselves deeply frozen, and the re-`freeze` keeps the result `Ractor.shareable?` for the worker
+    # path.
     def with_bleeding_edge(value)
       selector = coerce_bleeding_edge(value)
       copy = dup
@@ -468,17 +403,13 @@ module Rigor
 
     private
 
-    # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is
-    # accepted as either a literal path (slice 1 contract) OR a
-    # `File.fnmatch?`-shaped glob pattern (`lib/core_ext/**/*.rb`).
-    # Glob meta characters (`*`, `?`, `[`) trigger `Dir.glob`
-    # expansion; the resulting file list is folded into the
-    # `pre_eval:` set with `uniq`. Literal entries that don't
-    # exist on disk continue to surface as `pre-eval.file-not-found`
-    # `:error` (slice 1 behaviour); glob entries that match
-    # nothing degrade silently to "no contribution from this
-    # entry" so a templated `**` pattern in a fresh project
-    # doesn't generate an error per match-less pattern.
+    # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is accepted as either a literal path (slice 1
+    # contract) OR a `File.fnmatch?`-shaped glob pattern (`lib/core_ext/**/*.rb`). Glob meta characters (`*`,
+    # `?`, `[`) trigger `Dir.glob` expansion; the resulting file list is folded into the `pre_eval:` set with
+    # `uniq`. Literal entries that don't exist on disk continue to surface as `pre-eval.file-not-found`
+    # `:error` (slice 1 behaviour); glob entries that match nothing degrade silently to "no contribution from
+    # this entry" so a templated `**` pattern in a fresh project doesn't generate an error per match-less
+    # pattern.
     def expand_pre_eval_entries(entries)
       entries.flat_map do |entry|
         glob_pattern?(entry) ? Dir.glob(entry, sort: true) : [entry]
@@ -489,10 +420,8 @@ module Rigor
       path.include?("*") || path.include?("?") || path.include?("[")
     end
 
-    # Accepts either `"rigor-foo"` (gem-name shorthand) or
-    # `{ "gem" => "rigor-foo", "id" => "foo", "config" => {...} }`
-    # (full form). Returns the canonical hash form so the loader
-    # works against a single shape.
+    # Accepts either `"rigor-foo"` (gem-name shorthand) or `{ "gem" => "rigor-foo", "id" => "foo", "config" =>
+    # {...} }` (full form). Returns the canonical hash form so the loader works against a single shape.
     def coerce_plugin_entry(entry)
       case entry
       when String
@@ -505,16 +434,12 @@ module Rigor
       end
     end
 
-    # `target_ruby` is passed to `Prism.parse_file(path, version:)` at
-    # the analyser's three parse sites (`Analysis::Runner`,
-    # `CLI::TypeOfCommand`, `CLI::TypeScanCommand`) so projects that
-    # target an older Ruby get parse errors for syntax their target
-    # doesn't support. Format validation here is loose — accepts
-    # any `<major>.<minor>` or `<major>.<minor>.<patch>` form, plus
-    # the literal `"latest"`. Prism itself enforces the supported
-    # set and raises `ArgumentError` for versions it does not
-    # recognise (e.g. `"1.0"`); the parse-time error message names
-    # the version, so the user can correct the setting.
+    # `target_ruby` is passed to `Prism.parse_file(path, version:)` at the analyser's three parse sites
+    # (`Analysis::Runner`, `CLI::TypeOfCommand`, `CLI::TypeScanCommand`) so projects that target an older
+    # Ruby get parse errors for syntax their target doesn't support. Format validation here is loose —
+    # accepts any `<major>.<minor>` or `<major>.<minor>.<patch>` form, plus the literal `"latest"`. Prism
+    # itself enforces the supported set and raises `ArgumentError` for versions it does not recognise (e.g.
+    # `"1.0"`); the parse-time error message names the version, so the user can correct the setting.
     TARGET_RUBY_FORMAT = /\A(?:\d+\.\d+(?:\.\d+)?|latest)\z/
     private_constant :TARGET_RUBY_FORMAT
 
@@ -528,22 +453,17 @@ module Rigor
       s.dup.freeze
     end
 
-    # YAML scalar may arrive as a String or already as a Symbol;
-    # coerce to the canonical Symbol shape so the downstream
-    # `TrustPolicy` constructor stays strict.
+    # YAML scalar may arrive as a String or already as a Symbol; coerce to the canonical Symbol shape so the
+    # downstream `TrustPolicy` constructor stays strict.
     #
-    # The accepted set is duplicated from
-    # {Rigor::Plugin::TrustPolicy::VALID_NETWORK_POLICIES} so
-    # `Configuration` does not require the plugin namespace at
-    # load time (Configuration is loaded before Plugin in
-    # `lib/rigor.rb`); the two stay in lockstep via spec.
+    # The accepted set is duplicated from {Rigor::Plugin::TrustPolicy::VALID_NETWORK_POLICIES} so
+    # `Configuration` does not require the plugin namespace at load time (Configuration is loaded before
+    # Plugin in `lib/rigor.rb`); the two stay in lockstep via spec.
     VALID_NETWORK_POLICIES = %i[disabled allowlist].freeze
     private_constant :VALID_NETWORK_POLICIES
 
-    # ADR-15 Phase 4c — accepts a non-negative Integer (or a
-    # string-shaped one from YAML files that miss type
-    # annotations). Negative / non-integer values raise so
-    # typos / bad YAML fail loudly rather than silently
+    # ADR-15 Phase 4c — accepts a non-negative Integer (or a string-shaped one from YAML files that miss type
+    # annotations). Negative / non-integer values raise so typos / bad YAML fail loudly rather than silently
     # disabling parallelism.
     def coerce_parallel_workers(value)
       integer = Integer(value)
@@ -554,11 +474,9 @@ module Rigor
       raise ArgumentError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
     end
 
-    # ADR-22 WD2 (b) — `baseline: <path>` activates the file;
-    # `baseline: false` is the explicit-disable form (useful in
-    # `.rigor.yml` to override an upstream `.rigor.dist.yml`
-    # that names a baseline). `nil` (default / absent key) is
-    # also "no baseline".
+    # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
+    # (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml` that names a baseline). `nil`
+    # (default / absent key) is also "no baseline".
     def coerce_baseline_path(value)
       return nil if value.nil? || value == false
 
@@ -575,9 +493,8 @@ module Rigor
       sym
     end
 
-    # ADR-8 § "Severity profile" — accepts the canonical Symbol
-    # form or its String spelling; rejects unknown profile names
-    # so typos fail loudly.
+    # ADR-8 § "Severity profile" — accepts the canonical Symbol form or its String spelling; rejects unknown
+    # profile names so typos fail loudly.
     def coerce_severity_profile(value)
       sym = value.to_sym
       unless SeverityProfile::VALID_PROFILES.include?(sym)
@@ -589,21 +506,17 @@ module Rigor
       sym
     end
 
-    # ADR-8 § "Severity profile" — `severity_overrides:` is a
-    # `{ rule => severity }` map. Keys are canonical rule ids
-    # (`call.undefined-method`) or family wildcards (`call`).
-    # Values are {SeverityProfile::VALID_SEVERITIES} symbols
-    # (`:error` / `:warning` / `:info` / `:off`). Unknown
-    # severities raise; unknown rule ids are silently kept (the
-    # override is inert until the rule lands).
+    # ADR-8 § "Severity profile" — `severity_overrides:` is a `{ rule => severity }` map. Keys are canonical
+    # rule ids (`call.undefined-method`) or family wildcards (`call`). Values are
+    # {SeverityProfile::VALID_SEVERITIES} symbols (`:error` / `:warning` / `:info` / `:off`). Unknown
+    # severities raise; unknown rule ids are silently kept (the override is inert until the rule lands).
     def coerce_severity_overrides(value)
       raise ArgumentError, "severity_overrides must be a Hash, got #{value.inspect}" unless value.is_a?(Hash)
 
       value.to_h do |k, v|
-        # YAML 1.1 parses bare `off`/`on`/`no`/`yes`/`true`/`false`
-        # as booleans, so a user who wrote `off` (a valid severity)
-        # without quotes hands us `false`. Catch the non-Symbol /
-        # non-String case before `to_sym` blows up with a backtrace.
+        # YAML 1.1 parses bare `off`/`on`/`no`/`yes`/`true`/`false` as booleans, so a user who wrote `off` (a
+        # valid severity) without quotes hands us `false`. Catch the non-Symbol / non-String case before
+        # `to_sym` blows up with a backtrace.
         unless v.is_a?(String) || v.is_a?(Symbol)
           hint = v == false ? %( — did you mean the string "off"?) : ""
           raise ArgumentError,
@@ -623,12 +536,10 @@ module Rigor
       end.freeze
     end
 
-    # ADR-50 § WD2 — normalizes the `bleeding_edge:` selector to a
-    # canonical `{ "mode" => … }` hash (interpreted by
-    # {Rigor::BleedingEdge}). Validates *shape* only; membership against
-    # the overlay is intentionally NOT checked here (an unknown id stays
-    # inert, like an unknown `severity_overrides:` rule). Deep-frozen so
-    # the Configuration stays `Ractor.shareable?`.
+    # ADR-50 § WD2 — normalizes the `bleeding_edge:` selector to a canonical `{ "mode" => … }` hash
+    # (interpreted by {Rigor::BleedingEdge}). Validates *shape* only; membership against the overlay is
+    # intentionally NOT checked here (an unknown id stays inert, like an unknown `severity_overrides:` rule).
+    # Deep-frozen so the Configuration stays `Ractor.shareable?`.
     def coerce_bleeding_edge(value)
       case value
       when nil, false then { "mode" => "none" }
@@ -651,18 +562,16 @@ module Rigor
       end
     end
 
-    # Feature ids reach `coerce_bleeding_edge` from YAML, a `to_h` round-trip,
-    # or the CLI's `--bleeding-edge=a,b` (all runtime-created, non-frozen
-    # Strings). Each id String is frozen so the normalized selector — and thus
-    # the whole Configuration — stays deeply frozen and `Ractor.shareable?`
-    # for the worker path (the same invariant `#initialize`'s final `freeze`
-    # upholds for every other field).
+    # Feature ids reach `coerce_bleeding_edge` from YAML, a `to_h` round-trip, or the CLI's
+    # `--bleeding-edge=a,b` (all runtime-created, non-frozen Strings). Each id String is frozen so the
+    # normalized selector — and thus the whole Configuration — stays deeply frozen and `Ractor.shareable?`
+    # for the worker path (the same invariant `#initialize`'s final `freeze` upholds for every other field).
     def freeze_ids(ids)
       ids.map { |id| id.to_s.dup.freeze }.freeze
     end
 
-    # Renders the normalized selector back into the user-facing
-    # `bleeding_edge:` form for `#to_h` round-trips.
+    # Renders the normalized selector back into the user-facing `bleeding_edge:` form for `#to_h`
+    # round-trips.
     def bleeding_edge_to_h
       case bleeding_edge["mode"]
       when "all"

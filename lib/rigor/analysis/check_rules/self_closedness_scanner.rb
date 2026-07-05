@@ -7,24 +7,19 @@ require_relative "../../source/constant_path"
 module Rigor
   module Analysis
     module CheckRules
-      # ADR-24 slice 4 — read-side companion to `call.self-undefined-method`.
-      # Walks a file's parse tree once and collects the qualified names of
-      # declarations that are NOT confidently closed for self-call
+      # ADR-24 slice 4 — read-side companion to `call.self-undefined-method`. Walks a file's parse tree once
+      # and collects the qualified names of declarations that are NOT confidently closed for self-call
       # undefined-method analysis, so the rule can exclude them:
       #
-      # - **Modules** — a `module M` is a mixin contract; its methods may be
-      #   provided by includers (template-method pattern), so an unresolved
-      #   self-call inside it is not provably a typo.
-      # - **Classes with a dynamic `attr_*` accessor** — `attr_reader(*NAMES)`
-      #   / `attr_accessor(:a, SOME_CONST)` synthesizes readers whose names
-      #   are not statically decidable, so the class's method surface cannot
-      #   be enumerated from source.
+      # - **Modules** — a `module M` is a mixin contract; its methods may be provided by includers
+      #   (template-method pattern), so an unresolved self-call inside it is not provably a typo.
+      # - **Classes with a dynamic `attr_*` accessor** — `attr_reader(*NAMES)` / `attr_accessor(:a, SOME_CONST)`
+      #   synthesizes readers whose names are not statically decidable, so the class's method surface cannot be
+      #   enumerated from source.
       #
-      # The enclosing declaration of a self-call is always in the same file
-      # as the call (even a reopened class restates `class Foo`), so a
-      # per-file AST scan suffices — no cross-file plumbing. Names are built
-      # to match the engine's qualified `self` type (`Module.nesting`-style
-      # `A::B::C`).
+      # The enclosing declaration of a self-call is always in the same file as the call (even a reopened class
+      # restates `class Foo`), so a per-file AST scan suffices — no cross-file plumbing. Names are built to
+      # match the engine's qualified `self` type (`Module.nesting`-style `A::B::C`).
       class SelfClosednessScanner
         ATTR_MACROS = %i[attr_reader attr_accessor attr_writer].freeze
         private_constant :ATTR_MACROS
@@ -61,16 +56,14 @@ module Rigor
           end
         end
 
-        # A class whose source-declared surface cannot be fully enumerated:
-        # a dynamic `attr_*` accessor, or a non-constant (dynamically produced)
-        # superclass.
+        # A class whose source-declared surface cannot be fully enumerated: a dynamic `attr_*` accessor, or a
+        # non-constant (dynamically produced) superclass.
         def class_surface_open?(class_node)
           dynamic_attr_class?(class_node) || dynamic_superclass?(class_node)
         end
 
-        # True when the class body directly invokes an `attr_*` macro with a
-        # non-literal argument (a splat, a constant, a method call) — the
-        # synthesized accessor names are then not statically knowable.
+        # True when the class body directly invokes an `attr_*` macro with a non-literal argument (a splat, a
+        # constant, a method call) — the synthesized accessor names are then not statically knowable.
         def dynamic_attr_class?(class_node)
           body = class_node.body
           return false unless body.is_a?(Prism::StatementsNode)
@@ -90,13 +83,11 @@ module Rigor
           args.any? { |arg| !arg.is_a?(Prism::SymbolNode) && !arg.is_a?(Prism::StringNode) }
         end
 
-        # True when the class declares a superclass that is not a static
-        # constant — `class X < DelegateClass(Array)` / `< Struct.new(...)` /
-        # `< Data.define(...)`. The inherited surface is then a dynamically
-        # produced class the engine cannot enumerate from a constant name (the
-        # superclass is a method call, so `discovered_superclasses` never
-        # records it and the closed-class gate would wrongly treat the class as
-        # standalone), so a missed self-call is not provably a typo.
+        # True when the class declares a superclass that is not a static constant — `class X < DelegateClass(Array)`
+        # / `< Struct.new(...)` / `< Data.define(...)`. The inherited surface is then a dynamically produced
+        # class the engine cannot enumerate from a constant name (the superclass is a method call, so
+        # `discovered_superclasses` never records it and the closed-class gate would wrongly treat the class
+        # as standalone), so a missed self-call is not provably a typo.
         def dynamic_superclass?(class_node)
           superclass = class_node.superclass
           return false if superclass.nil?

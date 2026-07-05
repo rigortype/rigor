@@ -6,17 +6,13 @@ module Rigor
   module Triage
     # ADR-23 § "Heuristic catalogue" — the six v1 recognisers.
     #
-    # {.recognise} runs them in order over the diagnostic stream.
-    # Each recogniser sees only the diagnostics not yet claimed by
-    # an earlier one, so a `5.minutes` diagnostic counted by H1
-    # (ActiveSupport) is not re-counted by H2 (monkey-patch).
+    # {.recognise} runs them in order over the diagnostic stream. Each recogniser sees only the diagnostics not yet
+    # claimed by an earlier one, so a `5.minutes` diagnostic counted by H1 (ActiveSupport) is not re-counted by H2
+    # (monkey-patch).
     #
-    # WD3 / slice 4: recognisers key on the structured
-    # `qualified_rule` first; where they additionally need the
-    # receiver type or method name they read the structured
-    # `Diagnostic#receiver_type` / `#method_name` fields, falling
-    # back to parsing the diagnostic message only when those are
-    # absent. A parse failure degrades to "skip this diagnostic" —
+    # WD3 / slice 4: recognisers key on the structured `qualified_rule` first; where they additionally need the receiver
+    # type or method name they read the structured `Diagnostic#receiver_type` / `#method_name` fields, falling back to
+    # parsing the diagnostic message only when those are absent. A parse failure degrades to "skip this diagnostic" —
     # never a crash.
     module Catalogue # rubocop:disable Metrics/ModuleLength
       module_function
@@ -27,9 +23,8 @@ module Rigor
       # `undefined method `foo' for <receiver>`
       UNDEF_METHOD = /\Aundefined method [`'"]([^`'"]+)['"`] for (.+)\z/
 
-      # ActiveSupport `core_ext` selectors, grouped by the core
-      # class they extend. Survey-grounded (the dominant clusters
-      # from the five-project survey + the Mastodon measurement).
+      # ActiveSupport `core_ext` selectors, grouped by the core class they extend. Survey-grounded (the dominant
+      # clusters from the five-project survey + the Mastodon measurement).
       AS_NUMERIC = %w[
         day days hour hours minute minutes second seconds week weeks
         fortnight fortnights month months year years
@@ -72,8 +67,8 @@ module Rigor
       }.freeze
       private_constant :AS_NUMERIC, :AS_STRING, :AS_HASH, :AS_ARRAY, :AS_TIMEDATE
 
-      # ActiveRecord query-builder methods. When flagged on an
-      # `Array[...]` receiver they signal a relation misinference.
+      # ActiveRecord query-builder methods. When flagged on an `Array[...]` receiver they signal a relation
+      # misinference.
       AR_QUERY_METHODS = %w[
         where joins includes preload eager_load references select
         order reorder distinct group having limit offset pluck
@@ -87,16 +82,12 @@ module Rigor
       GENUINE_BUG_MAX_COUNT = 5    # rule total ≤ N → "likely genuine bug"
       private_constant :SYSTEMIC_THRESHOLD, :MONKEY_PATCH_MIN_FILES, :GENUINE_BUG_MAX_COUNT
 
-      # WD6 (ADR-23): H5 (systemic cluster) and H6 (genuine bugs) are
-      # the only count-based, severity-agnostic recognisers, so they
-      # alone risk reading plugin recognition trace (`:info`
-      # `*.model-call` / `*.helper`, …) as a "systemic cluster" or a
-      # "genuine bug" — frightening working code. They are guarded
-      # against `:info` unless `include_info` restores the pre-v0.2.3
-      # behaviour. Every other recogniser keys on an error/warning rule
-      # (H1/H2/H2K/H4/H7) or intentionally reads an info notice
-      # (H3 — the `gem-without-rbs` `rbs.coverage.missing-gem`), so the
-      # full pool is correct for them.
+      # WD6 (ADR-23): H5 (systemic cluster) and H6 (genuine bugs) are the only count-based, severity-agnostic
+      # recognisers, so they alone risk reading plugin recognition trace (`:info` `*.model-call` / `*.helper`, …) as a
+      # "systemic cluster" or a "genuine bug" — frightening working code. They are guarded against `:info` unless
+      # `include_info` restores the pre-v0.2.3 behaviour. Every other recogniser keys on an error/warning rule
+      # (H1/H2/H2K/H4/H7) or intentionally reads an info notice (H3 — the `gem-without-rbs` `rbs.coverage.missing-gem`),
+      # so the full pool is correct for them.
       INFO_GUARDED = %i[h5_systemic_cluster h6_genuine_bugs].freeze
       private_constant :INFO_GUARDED
 
@@ -116,19 +107,14 @@ module Rigor
         end
       end
 
-      # H4 (ActiveRecord query methods) runs before H2 (generic
-      # monkey-patch): a known AR method on `Array[...]` deserves
-      # the precise relation-misinference hint, not the generic
-      # "project core-ext" guess H2 would otherwise claim it for.
+      # H4 (ActiveRecord query methods) runs before H2 (generic monkey-patch): a known AR method on `Array[...]`
+      # deserves the precise relation-misinference hint, not the generic "project core-ext" guess H2 would otherwise
+      # claim it for.
       #
-      # H2K (known project patch) runs before the generic H2: the
-      # engine has already proved the defining site via the
-      # `project_definition_site` field (ADR-17), so those
-      # diagnostics get the high-confidence file-naming hint rather
-      # than the spread-based guess. H7 (unresolved toplevel) runs
-      # before the systemic / genuine-bug catch-alls so toplevel
-      # resolution misses route to `pre_eval:` (ADR-34) instead of
-      # reading as scattered bugs.
+      # H2K (known project patch) runs before the generic H2: the engine has already proved the defining site via the
+      # `project_definition_site` field (ADR-17), so those diagnostics get the high-confidence file-naming hint rather
+      # than the spread-based guess. H7 (unresolved toplevel) runs before the systemic / genuine-bug catch-alls so
+      # toplevel resolution misses route to `pre_eval:` (ADR-34) instead of reading as scattered bugs.
       def recognisers
         %i[h1_activesupport h4_ar_relation h3_gem_without_rbs
            h2k_known_project_patch h2_monkey_patch h7_unresolved_toplevel
@@ -154,13 +140,10 @@ module Rigor
       end
 
       # --- H2K — known project monkey-patch (engine-proven) ------
-      # ADR-17 / WD3 slice 4: the `call.undefined-method` rule sets
-      # `project_definition_site` when the project itself defines the
-      # called method on the receiver class somewhere in the file set
-      # (a reopened core/stdlib/gem class the dispatcher does not
-      # apply cross-file). That is direct evidence — not a spread
-      # heuristic — so this recogniser is `:likely` and names the
-      # defining files outright. It runs before the generic H2.
+      # ADR-17 / WD3 slice 4: the `call.undefined-method` rule sets `project_definition_site` when the project itself
+      # defines the called method on the receiver class somewhere in the file set (a reopened core/stdlib/gem class the
+      # dispatcher does not apply cross-file). That is direct evidence — not a spread heuristic — so this recogniser is
+      # `:likely` and names the defining files outright. It runs before the generic H2.
       def h2k_known_project_patch(pool)
         matched = pool.select(&:project_definition_site)
         return nil if matched.empty?
@@ -231,13 +214,10 @@ module Rigor
       end
 
       # --- H7 — unresolved toplevel implicit-self calls ----------
-      # ADR-34: `call.unresolved-toplevel` fires on a toplevel
-      # implicit-self call (no receiver, outside any def / class /
-      # module) that resolves against no visible contributor. The
-      # canonical opt-out is `pre_eval:` — the file is usually a
-      # script relying on methods defined by a monkey-patch or a
-      # required helper Rigor did not walk. Grouped, not per-site,
-      # so the report names the cluster once.
+      # ADR-34: `call.unresolved-toplevel` fires on a toplevel implicit-self call (no receiver, outside any def / class
+      # / module) that resolves against no visible contributor. The canonical opt-out is `pre_eval:` — the file is
+      # usually a script relying on methods defined by a monkey-patch or a required helper Rigor did not walk. Grouped,
+      # not per-site, so the report names the cluster once.
       def h7_unresolved_toplevel(pool)
         matched = pool.select { |d| rule_of(d) == UNRESOLVED_TOPLEVEL_RULE }
         return nil if matched.empty?
@@ -290,11 +270,9 @@ module Rigor
 
       # --- shared helpers ----------------------------------------
 
-      # WD3 / slice 4: prefer the structured `receiver_type` /
-      # `method_name` fields the `call.undefined-method` rule now
-      # populates; fall back to parsing the message only when they
-      # are absent (older diagnostics, plugin-emitted rules). Either
-      # way the receiver token is normalised through `receiver_class`.
+      # WD3 / slice 4: prefer the structured `receiver_type` / `method_name` fields the `call.undefined-method` rule now
+      # populates; fall back to parsing the message only when they are absent (older diagnostics, plugin-emitted rules).
+      # Either way the receiver token is normalised through `receiver_class`.
       def parse_undefined_method(diag)
         return nil unless rule_of(diag) == UNDEFINED_METHOD_RULE
 
@@ -319,8 +297,7 @@ module Rigor
         m && [m[1], m[2]]
       end
 
-      # Normalises a message receiver token to a class name. The fold
-      # logic is shared with the selector axis — see
+      # Normalises a message receiver token to a class name. The fold logic is shared with the selector axis — see
       # {Triage.normalize_receiver}.
       def receiver_class(token)
         Triage.normalize_receiver(token)
@@ -342,10 +319,9 @@ module Rigor
         groups.keys.first(3).map { |method, recv| "`#{method}` on #{recv}" }.join(", ")
       end
 
-      # `parser: :undefined_method` (default) reads the method from
-      # the parsed `undefined-method` shape; `parser: :toplevel`
-      # reads the structured `method_name` field directly (the
-      # `unresolved-toplevel` rule carries no receiver to parse).
+      # `parser: :undefined_method` (default) reads the method from the parsed `undefined-method` shape; `parser:
+      # :toplevel` reads the structured `method_name` field directly (the `unresolved-toplevel` rule carries no receiver
+      # to parse).
       def top_methods(diagnostics, limit: 5, parser: :undefined_method)
         names = diagnostics.filter_map do |d|
           parser == :toplevel ? d.method_name : parse_undefined_method(d)&.fetch(:method)

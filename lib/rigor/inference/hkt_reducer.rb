@@ -5,40 +5,29 @@ require_relative "budget_trace"
 
 module Rigor
   module Inference
-    # ADR-20 Slice 2a — reducer that walks a `Definition`'s
-    # `body_tree` against a concrete `Type::App` and returns a
-    # fully-typed `Rigor::Type`.
+    # ADR-20 Slice 2a — reducer that walks a `Definition`'s `body_tree` against a concrete
+    # `Type::App` and returns a fully-typed `Rigor::Type`.
     #
-    # Reduction is the operational interpretation of ADR-20
-    # § D4 ("Evaluation rules"):
+    # Reduction is the operational interpretation of ADR-20 § D4 ("Evaluation rules"):
     #
-    # 1. **Resolve `F`.** Look up the registered body via
-    #    `registry.definition(uri)`.
-    # 2. **Substitute arguments.** Walk the body tree, replacing
-    #    `{HktBody::Param}` nodes with the matching positional
-    #    arg from the application.
-    # 3. **Build types.** `{HktBody::TypeLeaf}` returns its
-    #    wrapped type as-is; `{HktBody::Union}` and
-    #    `{HktBody::NominalApp}` route their reduced children
-    #    through `Type::Combinator.union` / `.nominal_of` so
-    #    normalization applies.
-    # 4. **Recurse on `{HktBody::AppRef}` nodes.** Reduce the
-    #    args first; if the resulting `(uri, args)` matches an
-    #    App already on the current reduction stack, return the
-    #    in-progress `Type::App` carrier as-is (lazy
-    #    self-reference handling — the standard "tying the
-    #    knot" trick for recursive type aliases like
-    #    `json::value`). Otherwise build a fresh
-    #    `Type::App` and recursively reduce it against the
-    #    same registry, sharing the fuel budget.
-    # 5. **Fuel budget.** Each visited node consumes one unit.
-    #    On exhaustion, reduction unwinds to `app.bound`.
+    # 1. **Resolve `F`.** Look up the registered body via `registry.definition(uri)`.
+    # 2. **Substitute arguments.** Walk the body tree, replacing `{HktBody::Param}` nodes with
+    #    the matching positional arg from the application.
+    # 3. **Build types.** `{HktBody::TypeLeaf}` returns its wrapped type as-is; `{HktBody::Union}`
+    #    and `{HktBody::NominalApp}` route their reduced children through
+    #    `Type::Combinator.union` / `.nominal_of` so normalization applies.
+    # 4. **Recurse on `{HktBody::AppRef}` nodes.** Reduce the args first; if the resulting
+    #    `(uri, args)` matches an App already on the current reduction stack, return the
+    #    in-progress `Type::App` carrier as-is (lazy self-reference handling — the standard
+    #    "tying the knot" trick for recursive type aliases like `json::value`). Otherwise build a
+    #    fresh `Type::App` and recursively reduce it against the same registry, sharing the fuel
+    #    budget.
+    # 5. **Fuel budget.** Each visited node consumes one unit. On exhaustion, reduction unwinds to
+    #    `app.bound`.
     #
-    # The reducer is **pure** with respect to its inputs (the
-    # registry + the App) but uses a per-call mutable state
-    # bag for fuel + cycle tracking. Concurrent reductions
-    # MUST allocate fresh reducers (or fresh `_reduce` calls)
-    # — the per-call state is not shared.
+    # The reducer is **pure** with respect to its inputs (the registry + the App) but uses a
+    # per-call mutable state bag for fuel + cycle tracking. Concurrent reductions MUST allocate
+    # fresh reducers (or fresh `_reduce` calls) — the per-call state is not shared.
     class HktReducer
       DEFAULT_FUEL = 64
 
@@ -53,12 +42,10 @@ module Rigor
       # Reduce `app` against the registry.
       #
       # @param app [Rigor::Type::App]
-      # @param fuel [Integer] reduction-step budget (default 64
-      #   per ADR-20 WD3). Each visited body node costs one
-      #   unit. On exhaustion the reduction returns `app.bound`.
-      # @return [Rigor::Type] the reduced type, or `app.bound`
-      #   when reduction is impossible (URI not defined, arity
-      #   mismatch, body_tree absent, fuel exhausted).
+      # @param fuel [Integer] reduction-step budget (default 64 per ADR-20 WD3). Each visited
+      #   body node costs one unit. On exhaustion the reduction returns `app.bound`.
+      # @return [Rigor::Type] the reduced type, or `app.bound` when reduction is impossible (URI
+      #   not defined, arity mismatch, body_tree absent, fuel exhausted).
       def reduce(app, fuel: DEFAULT_FUEL)
         raise ArgumentError, "expected a Rigor::Type::App, got #{app.class}" unless app.is_a?(Type::App)
 
@@ -109,13 +96,12 @@ module Rigor
         end
       end
 
-      # ADR-20 § D3 conditional reduction. Resolves the test
-      # against the current bindings and picks a branch:
+      # ADR-20 § D3 conditional reduction. Resolves the test against the current bindings and
+      # picks a branch:
       #
       # - test = `yes` → return the reduced `then_branch`.
       # - test = `no`  → return the reduced `else_branch`.
-      # - test = `maybe` → widen to the union of both
-      #   reduced branches (per ADR-20 WD7).
+      # - test = `maybe` → widen to the union of both reduced branches (per ADR-20 WD7).
       def walk_conditional(node, bindings:, state:)
         verdict = evaluate_test(node.test, bindings: bindings, state: state)
         case verdict
@@ -150,25 +136,21 @@ module Rigor
         end
       end
 
-      # `left <: right`. Slice 7a verdict policy: structural
-      # equality is `:yes`; clearly-disjoint nominal /
-      # constant pairs are `:no`; everything else is `:maybe`
-      # (widens to the union per ADR-20 WD7 — robustness
-      # principle keeps us conservative on undecided tests).
+      # `left <: right`. Slice 7a verdict policy: structural equality is `:yes`; clearly-disjoint
+      # nominal / constant pairs are `:no`; everything else is `:maybe` (widens to the union per
+      # ADR-20 WD7 — robustness principle keeps us conservative on undecided tests).
       def subtype_verdict(left, right)
         return :yes if left == right
 
-        # Both Nominals with different class names AND
-        # neither carries Dynamic — `:no` (statically
-        # disjoint). For any other shape pair, `:maybe`.
+        # Both Nominals with different class names AND neither carries Dynamic — `:no`
+        # (statically disjoint). For any other shape pair, `:maybe`.
         return :no if disjoint_nominals?(left, right)
         return :no if disjoint_constants?(left, right)
 
         :maybe
       end
 
-      # Structural equality verdict — same shape as
-      # subtype_verdict but symmetric.
+      # Structural equality verdict — same shape as subtype_verdict but symmetric.
       def equality_verdict(left, right)
         return :yes if left == right
         return :no if disjoint_nominals?(left, right)
@@ -198,11 +180,9 @@ module Rigor
       end
 
       def reduce_app_ref(uri, reduced_args, state:)
-        # Cycle detection — when the same `(uri, args)` is
-        # already on the reduction stack, return the
-        # in-progress App carrier as-is so recursive type
-        # aliases (`Array[App[json::value, K]]` inside the
-        # `json::value` body) terminate.
+        # Cycle detection — when the same `(uri, args)` is already on the reduction stack, return
+        # the in-progress App carrier as-is so recursive type aliases (`Array[App[json::value,
+        # K]]` inside the `json::value` body) terminate.
         existing = state.in_progress_for(uri, reduced_args)
         return existing if existing
 
@@ -219,9 +199,8 @@ module Rigor
         end
       end
 
-      # Per-call mutable bag carrying the remaining fuel
-      # budget and the active reduction stack (for cycle
-      # detection). Not shared across `reduce` calls.
+      # Per-call mutable bag carrying the remaining fuel budget and the active reduction stack
+      # (for cycle detection). Not shared across `reduce` calls.
       class State
         def initialize(fuel:)
           @fuel = fuel

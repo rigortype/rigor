@@ -4,14 +4,12 @@ require "prism"
 
 module Rigor
   class CLI
-    # Re-lexes Ruby source with Prism and wraps each token in an
-    # ANSI colour escape, producing IRB-style syntax highlighting.
+    # Re-lexes Ruby source with Prism and wraps each token in an ANSI colour escape, producing IRB-style syntax
+    # highlighting.
     #
-    # Rigor ships no runtime dependencies (ADR-0), so the `irb`
-    # gem's `IRB::Color` is not available; this module reproduces
-    # the same effect from Prism's own token stream. `rigor
-    # annotate` re-parses its annotated output through here before
-    # printing.
+    # Rigor ships no runtime dependencies (ADR-0), so the `irb` gem's `IRB::Color` is not available; this module
+    # reproduces the same effect from Prism's own token stream. `rigor annotate` re-parses its annotated output through
+    # here before printing.
     module PrismColorizer
       module_function
 
@@ -41,9 +39,8 @@ module Rigor
       # @return [String] the source with ANSI colour escapes, or
       #   the input unchanged when lexing surfaces an error.
       def colorize(source)
-        # Sources read under a POSIX locale arrive tagged US-ASCII even
-        # when they carry UTF-8 bytes; retag so the token regexes below
-        # do not raise on multibyte comments.
+        # Sources read under a POSIX locale arrive tagged US-ASCII even when they carry UTF-8 bytes; retag so the token
+        # regexes below do not raise on multibyte comments.
         source = source.dup.force_encoding(Encoding::UTF_8) unless source.encoding == Encoding::UTF_8
         result = Prism.lex(source)
         return source unless result.errors.empty?
@@ -51,9 +48,8 @@ module Rigor
         render(source, result.value)
       end
 
-      # Prism token offsets are BYTE offsets — slice with byteslice, or
-      # any multibyte character earlier in the source shifts every
-      # subsequent token boundary.
+      # Prism token offsets are BYTE offsets — slice with byteslice, or any multibyte character earlier in the source
+      # shifts every subsequent token boundary.
       def render(source, lexed)
         out = +""
         offset = 0
@@ -73,10 +69,8 @@ module Rigor
         out
       end
 
-      # The token after a `SYMBOL_BEGIN` (`:`) carries the symbol
-      # name — and Prism lexes `:then` / `:class` etc. as a
-      # keyword token — so it is painted with the symbol colour
-      # regardless of its own token type.
+      # The token after a `SYMBOL_BEGIN` (`:`) carries the symbol name — and Prism lexes `:then` / `:class` etc. as a
+      # keyword token — so it is painted with the symbol colour regardless of its own token type.
       def effective_category(token_type, previous_type)
         return :symbol if previous_type == :SYMBOL_BEGIN
 
@@ -87,8 +81,8 @@ module Rigor
         sgr = CATEGORY_SGR.fetch(category)
         return text if sgr.nil? || text.empty?
 
-        # Keep a trailing newline outside the colour span so the
-        # reset sits on the token's own line (comments include it).
+        # Keep a trailing newline outside the colour span so the reset sits on the token's own line (comments include
+        # it).
         trailing = text[/\s*\z/] || ""
         body = trailing.empty? ? text : text[0...-trailing.length]
         return text if body.empty?

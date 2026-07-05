@@ -14,12 +14,10 @@ module Rigor
   class CLI
     # ADR-23 — executes `rigor triage`.
     #
-    # Runs the same analysis as `rigor check`, then summarises the
-    # diagnostic stream (rule distribution, per-file hotspots,
-    # heuristic hints) instead of printing the raw per-line list.
-    # Read-only and advisory (WD4): never edits config, never
-    # writes a baseline. Always exits 0 — it is an inspection
-    # command, not a gate (`rigor check` remains the gate).
+    # Runs the same analysis as `rigor check`, then summarises the diagnostic stream (rule distribution, per-file
+    # hotspots, heuristic hints) instead of printing the raw per-line list. Read-only and advisory (WD4): never edits
+    # config, never writes a baseline. Always exits 0 — it is an inspection command, not a gate (`rigor check` remains
+    # the gate).
     class TriageCommand < Command
       USAGE = "Usage: rigor triage [options] [paths]"
       DEFAULT_SECTIONS = %i[distribution selectors hotspots hints].freeze
@@ -70,10 +68,8 @@ module Rigor
         raise OptionParser::InvalidArgument, "unsupported format: #{options.fetch(:format)}"
       end
 
-      # Sequential, cache-backed, no run-stats: triage only needs
-      # the diagnostic stream, and sequential keeps the rule
-      # distribution deterministic (the fork pool's cross-file
-      # divergence would skew the histogram).
+      # Sequential, cache-backed, no run-stats: triage only needs the diagnostic stream, and sequential keeps the rule
+      # distribution deterministic (the fork pool's cross-file divergence would skew the histogram).
       def analyze(configuration)
         runner = Analysis::Runner.new(
           configuration: configuration,

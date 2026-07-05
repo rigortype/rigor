@@ -19,22 +19,19 @@ require_relative "../type/hash_shape"
 
 module Rigor
   module LanguageServer
-    # Answers `textDocument/signatureHelp` requests. When the user
-    # types `(` inside a method call (`obj.foo(|`) editors fire
-    # `signatureHelp` to show the method's parameter signature
-    # inline. The provider parses the buffer, locates the enclosing
-    # `CallNode`, infers the receiver's type, and returns the
+    # Answers `textDocument/signatureHelp` requests. When the user types `(` inside a method call
+    # (`obj.foo(|`) editors fire `signatureHelp` to show the method's parameter signature inline. The provider
+    # parses the buffer, locates the enclosing `CallNode`, infers the receiver's type, and returns the
     # method's first overload as a `SignatureInformation`.
     #
     # Slice C1 (this commit) ships:
-    # - Sentinel patching for `obj.foo(|` so Prism's parse
-    #   succeeds (mirrors `CompletionProvider`'s slice B4 pattern).
+    # - Sentinel patching for `obj.foo(|` so Prism's parse succeeds (mirrors `CompletionProvider`'s slice B4
+    #   pattern).
     # - First-overload signature only.
     # - Active parameter = comma count before cursor.
     #
-    # Multi-overload presentation + `documentation` field +
-    # active-parameter override per overload land in follow-up
-    # slices (queued in the design doc § "Out of scope for v2").
+    # Multi-overload presentation + `documentation` field + active-parameter override per overload land in
+    # follow-up slices (queued in the design doc § "Out of scope for v2").
     class SignatureHelpProvider
       include BufferResolution
 
@@ -75,12 +72,10 @@ module Rigor
         patch_with_arg_sentinel(original_bytes, line, character)
       end
 
-      # Mid-edit buffer at `obj.foo(|` or `obj.foo(1,|`: truncate
-      # everything from the cursor onwards and append `SENTINEL)`
-      # so the call is syntactically complete. The truncation is
-      # aggressive — signatureHelp only cares about the enclosing
-      # call's signature; downstream content (closing parens,
-      # subsequent statements) is irrelevant.
+      # Mid-edit buffer at `obj.foo(|` or `obj.foo(1,|`: truncate everything from the cursor onwards and append
+      # `SENTINEL)` so the call is syntactically complete. The truncation is aggressive — signatureHelp only
+      # cares about the enclosing call's signature; downstream content (closing parens, subsequent statements)
+      # is irrelevant.
       def patch_with_arg_sentinel(original_bytes, line, character)
         prefix_offset = byte_offset_for(original_bytes, line, character)
         return [original_bytes, [line, character]] if prefix_offset.nil?
@@ -93,11 +88,9 @@ module Rigor
         [patched, [line, character]]
       end
 
-      # Walks the AST for the smallest CallNode whose `arguments`
-      # location encloses the cursor offset. Prism doesn't expose
-      # parent pointers, so NodeLocator's leaf-returning shape
-      # isn't enough; we re-walk. For LSP usage this is cheap —
-      # the buffer is parsed once per request.
+      # Walks the AST for the smallest CallNode whose `arguments` location encloses the cursor offset. Prism
+      # doesn't expose parent pointers, so NodeLocator's leaf-returning shape isn't enough; we re-walk. For
+      # LSP usage this is cheap — the buffer is parsed once per request.
       def enclosing_call_for_offset(root, cursor_offset)
         result = nil
         walk = lambda do |n|
@@ -137,23 +130,18 @@ module Rigor
         end
         {
           signatures: signatures,
-          # `activeSignature` is the index editors highlight by
-          # default. Slice C2 picks the first overload uniformly;
-          # a future slice could choose the overload that best
-          # matches the current argument shape.
+          # `activeSignature` is the index editors highlight by default. Slice C2 picks the first overload
+          # uniformly; a future slice could choose the overload that best matches the current argument shape.
           activeSignature: 0,
           activeParameter: active_param
         }
       end
 
-      # Builds the LSP `ParameterInformation[]` for a method type's
-      # parameter list. Each entry's `label` is a STRING form
-      # (e.g. `"::int width"`, `"?::string pad_string"`); LSP's
-      # offset-tuple form (`[start, end]`) for in-signature
-      # highlighting is queued. Order matches `activeParameter`'s
-      # index expectation: required positionals, then optionals,
-      # then rest, then trailing, then required keywords, then
-      # optional keywords, then rest keywords.
+      # Builds the LSP `ParameterInformation[]` for a method type's parameter list. Each entry's `label` is a
+      # STRING form (e.g. `"::int width"`, `"?::string pad_string"`); LSP's offset-tuple form
+      # (`[start, end]`) for in-signature highlighting is queued. Order matches `activeParameter`'s index
+      # expectation: required positionals, then optionals, then rest, then trailing, then required keywords,
+      # then optional keywords, then rest keywords.
       def parameter_information(method_type) # rubocop:disable Metrics/AbcSize
         func = method_type.type
         return [] unless func.respond_to?(:required_positionals)
@@ -172,12 +160,9 @@ module Rigor
         param.name ? "#{param.type} #{param.name}" : param.type.to_s
       end
 
-      # Identical contract to HoverRenderer#rbs_documentation —
-      # surfaces the method's RBS comment text or nil. Kept inline
-      # rather than extracted to a shared mixin because the two
-      # call sites are small and the shape may diverge (signatureHelp
-      # might want per-parameter docs split out; hover wants the
-      # full paragraph).
+      # Identical contract to HoverRenderer#rbs_documentation — surfaces the method's RBS comment text or nil.
+      # Kept inline rather than extracted to a shared mixin because the two call sites are small and the shape
+      # may diverge (signatureHelp might want per-parameter docs split out; hover wants the full paragraph).
       def rbs_documentation(definition)
         comments = definition.respond_to?(:comments) ? definition.comments : nil
         return nil if comments.nil? || comments.empty?
@@ -200,9 +185,8 @@ module Rigor
         end
       end
 
-      # Mirrors CompletionProvider's receiver-type mapping. Tuple →
-      # Array, HashShape → Hash, Refined / Difference unwrap to
-      # their base (handled in `lookup_method` above for clarity).
+      # Mirrors CompletionProvider's receiver-type mapping. Tuple → Array, HashShape → Hash, Refined /
+      # Difference unwrap to their base (handled in `lookup_method` above for clarity).
       def nominal_class_name(type)
         case type
         when Type::Nominal then type.class_name
@@ -217,10 +201,9 @@ module Rigor
         Inference::ScopeIndexer.index(root, default_scope: scope)
       end
 
-      # Counts commas in the buffer between the call's opening `(`
-      # and the cursor position. Cursor on the first argument → 0;
-      # after one comma → 1; etc. Bounded by the call's arguments
-      # location so commas in nested expressions don't bleed in.
+      # Counts commas in the buffer between the call's opening `(` and the cursor position. Cursor on the
+      # first argument → 0; after one comma → 1; etc. Bounded by the call's arguments location so commas in
+      # nested expressions don't bleed in.
       def active_parameter_index(call_node, bytes, line, character)
         return 0 if call_node.arguments.nil?
 

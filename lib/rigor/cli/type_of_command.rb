@@ -18,14 +18,11 @@ module Rigor
   class CLI
     # Executes the `rigor type-of` command.
     #
-    # The command is a thin probe over `Rigor::Scope#type_of`: it locates the
-    # deepest expression at a `(file, line, column)` triple and prints the
-    # inferred type, RBS erasure, and (optionally) the recorded fail-soft
-    # fallbacks.
+    # The command is a thin probe over `Rigor::Scope#type_of`: it locates the deepest expression at a `(file, line,
+    # column)` triple and prints the inferred type, RBS erasure, and (optionally) the recorded fail-soft fallbacks.
     #
-    # Encapsulating the command in its own class keeps `Rigor::CLI` focused on
-    # dispatching and lets us evolve the type-of UX (extra flags, watch mode,
-    # streaming output) without bloating the CLI shell. Output formatting is
+    # Encapsulating the command in its own class keeps `Rigor::CLI` focused on dispatching and lets us evolve the
+    # type-of UX (extra flags, watch mode, streaming output) without bloating the CLI shell. Output formatting is
     # delegated to {TypeOfRenderer}.
     class TypeOfCommand < Command
       USAGE = "Usage: rigor type-of [options] FILE:LINE:COL"
@@ -63,11 +60,9 @@ module Rigor
 
       def execute(target:, options:, buffer: nil)
         file, line, column = target
-        # Under editor mode the logical `file` may not exist on disk
-        # (user editing a new file); the runtime check is only that
-        # the BUFFER is readable, which `resolve_buffer_binding`
-        # has already enforced. For non-editor mode `file` must
-        # exist.
+        # Under editor mode the logical `file` may not exist on disk (user editing a new file); the runtime check is
+        # only that the BUFFER is readable, which `resolve_buffer_binding` has already enforced. For non-editor mode
+        # `file` must exist.
         physical = buffer ? buffer.resolve(file) : file
         return 1 unless file_exists?(buffer ? physical : file)
 
@@ -83,12 +78,10 @@ module Rigor
         tracer = options[:trace] ? Inference::FallbackTracer.new : nil
         base_scope = Scope.empty(environment: project_environment(file, configuration))
 
-        # Build a per-node scope index so locals bound earlier in the
-        # file flow into the scope used to type the queried node. We
-        # build the index with no tracer attached (it would otherwise
-        # double-record fallback events with the second-pass type_of
-        # call below), then look up the scope visible at the queried
-        # node and run the actual probe under it.
+        # Build a per-node scope index so locals bound earlier in the file flow into the scope used to type the queried
+        # node. We build the index with no tracer attached (it would otherwise double-record fallback events with the
+        # second-pass type_of call below), then look up the scope visible at the queried node and run the actual probe
+        # under it.
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
         node_scope = scope_index[node]
 
@@ -99,11 +92,9 @@ module Rigor
         0
       end
 
-      # Builds a project-aware environment relative to the probed file.
-      # Project-RBS auto-detection roots at CWD today; future work will
-      # walk parent directories to find the enclosing `Gemfile`/`*.gemspec`
-      # so probes against files outside the current process's CWD still
-      # see the right `sig/` tree.
+      # Builds a project-aware environment relative to the probed file. Project-RBS auto-detection roots at CWD today;
+      # future work will walk parent directories to find the enclosing `Gemfile`/`*.gemspec` so probes against files
+      # outside the current process's CWD still see the right `sig/` tree.
       def project_environment(_file, configuration)
         Environment.for_project(
           libraries: configuration.libraries,

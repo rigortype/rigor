@@ -7,12 +7,10 @@ module Rigor
     module Builtins
       # `Array` catalog. Singleton — load once, consult during dispatch.
       #
-      # Array has more mutation surface than String: every method that
-      # logically reshapes the array tends to call `rb_ary_modify` or
-      # an internal helper (`ary_replace`, `ary_resize`, `ary_pop`,
-      # `ary_push_internal`, …) that the classifier does not yet
-      # recognise. The blocklist captures the methods we have
-      # specifically observed flowing as `:leaf` despite mutating.
+      # Array has more mutation surface than String: every method that logically reshapes the array tends
+      # to call `rb_ary_modify` or an internal helper (`ary_replace`, `ary_resize`, `ary_pop`,
+      # `ary_push_internal`, …) that the classifier does not yet recognise. The blocklist captures the
+      # methods we have specifically observed flowing as `:leaf` despite mutating.
       ARRAY_CATALOG = MethodCatalog.for_topic(
         "array",
         mutating_selectors: {

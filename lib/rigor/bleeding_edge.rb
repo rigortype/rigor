@@ -3,26 +3,21 @@
 module Rigor
   # ADR-50 § WD2 — the bleeding-edge overlay.
   #
-  # A Rigor-maintained set of the *next major's* queued changes —
-  # severity-map promotions and new-discipline rule enablements — that a
-  # user can adopt early, before they become default-on at a major
-  # (ADR-50 § WD7). It is orthogonal to `severity_profile:` (how loud
-  # *today's* rules are) and is versioned with the gem, NOT a
-  # user-supplied file: the inspectable counterpart to PHPStan's
-  # `bleedingEdge` include.
+  # A Rigor-maintained set of the *next major's* queued changes — severity-map promotions and
+  # new-discipline rule enablements — that a user can adopt early, before they become
+  # default-on at a major (ADR-50 § WD7). It is orthogonal to `severity_profile:` (how loud
+  # *today's* rules are) and is versioned with the gem, NOT a user-supplied file: the
+  # inspectable counterpart to PHPStan's `bleedingEdge` include.
   #
-  # The overlay is **empty today** — no discipline has yet been queued
-  # for the next major. This module is the WD2 *foundation* (the v0.1.19
-  # slice): the surface (`bleeding_edge:` config, the
-  # `rigor show-bleedingedge` command, the severity-composition hook in
-  # {Configuration::SeverityProfile.resolve}) exists and is wired
-  # end-to-end, so the first real feature lands as a single {FEATURES}
-  # entry with no engine plumbing.
+  # The overlay is **empty today** — no discipline has yet been queued for the next major.
+  # This module is the WD2 *foundation* (the v0.1.19 slice): the surface (`bleeding_edge:`
+  # config, the `rigor show-bleedingedge` command, the severity-composition hook in
+  # {Configuration::SeverityProfile.resolve}) exists and is wired end-to-end, so the first
+  # real feature lands as a single {FEATURES} entry with no engine plumbing.
   #
-  # Each feature carries a **stable feature id** — part of the ADR-50
-  # WD1 contract vocabulary: the config, the `show` command, and the
-  # eventual CHANGELOG migration note all name the same id, and a
-  # feature graduates to default-on at a major by being removed from
+  # Each feature carries a **stable feature id** — part of the ADR-50 WD1 contract
+  # vocabulary: the config, the `show` command, and the eventual CHANGELOG migration note all
+  # name the same id, and a feature graduates to default-on at a major by being removed from
   # {FEATURES}.
   module BleedingEdge
     # One queued change.
@@ -32,10 +27,9 @@ module Rigor
     # @!attribute summary
     #   @return [String] a one-line description of what it changes.
     # @!attribute severity_overrides
-    #   @return [Hash{String => Symbol}] canonical rule id → the
-    #     severity this feature imposes. Composed *below* the user's own
-    #     `severity_overrides:` and *above* the active `severity_profile`
-    #     (see {Configuration::SeverityProfile.resolve}).
+    #   @return [Hash{String => Symbol}] canonical rule id → the severity this feature
+    #     imposes. Composed *below* the user's own `severity_overrides:` and *above* the
+    #     active `severity_profile` (see {Configuration::SeverityProfile.resolve}).
     Feature = Data.define(:id, :summary, :severity_overrides) do
       def to_h
         {
@@ -46,8 +40,8 @@ module Rigor
       end
     end
 
-    # The overlay. Empty until the first next-major discipline is
-    # queued; add a {Feature} here (with a stable id) when one is.
+    # The overlay. Empty until the first next-major discipline is queued; add a {Feature}
+    # here (with a stable id) when one is.
     FEATURES = [].freeze
 
     module_function
@@ -68,12 +62,11 @@ module Rigor
       FEATURES.find { |f| f.id == id }
     end
 
-    # Resolves a normalized `bleeding_edge:` selector (see
-    # {Configuration#bleeding_edge}) to the active {Feature} list.
-    # Unknown ids in a `list` / `except` selector are simply absent from
-    # the overlay and contribute nothing — symmetric with how
-    # `severity_overrides:` keeps an unknown rule id inert until it
-    # lands (robust across gem versions).
+    # Resolves a normalized `bleeding_edge:` selector (see {Configuration#bleeding_edge}) to
+    # the active {Feature} list. Unknown ids in a `list` / `except` selector are simply
+    # absent from the overlay and contribute nothing — symmetric with how
+    # `severity_overrides:` keeps an unknown rule id inert until it lands (robust across gem
+    # versions).
     #
     # @param selector [Hash] `{ "mode" => "none" }`,
     #   `{ "mode" => "all" }`, `{ "mode" => "all", "except" => [ids] }`,
@@ -92,8 +85,8 @@ module Rigor
       end
     end
 
-    # The merged severity-override map the active features impose for a
-    # selector. Frozen so the result is `Ractor.shareable?`.
+    # The merged severity-override map the active features impose for a selector. Frozen so
+    # the result is `Ractor.shareable?`.
     #
     # @param selector [Hash] see {#active_features}.
     # @return [Hash{String => Symbol}]
@@ -103,9 +96,8 @@ module Rigor
       end.freeze
     end
 
-    # Feature ids named by a selector that are NOT in the overlay
-    # (typo / graduated / from a newer gem). Surfaced by
-    # `rigor show-bleedingedge` as a hint; never an error.
+    # Feature ids named by a selector that are NOT in the overlay (typo / graduated / from a
+    # newer gem). Surfaced by `rigor show-bleedingedge` as a hint; never an error.
     #
     # @param selector [Hash] see {#active_features}.
     # @return [Array<String>]

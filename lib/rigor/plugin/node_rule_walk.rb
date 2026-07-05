@@ -8,48 +8,36 @@ module Rigor
   module Plugin
     # ADR-52 WD4 — one engine-owned AST walk per file for node rules.
     #
-    # Before this, every plugin that declared a {Base.node_rule} walked
-    # the file's AST itself (`Base#node_rule_diagnostics` →
-    # `Source::NodeWalker.each_with_ancestors`), so a project with N
-    # node-rule plugins paid N walks per file. This folds them into a
-    # single walk that dispatches each visited node to every matching
-    # `(plugin, rule)` pair.
+    # Before this, every plugin that declared a {Base.node_rule} walked the file's AST itself
+    # (`Base#node_rule_diagnostics` → `Source::NodeWalker.each_with_ancestors`), so a project with N node-rule
+    # plugins paid N walks per file. This folds them into a single walk that dispatches each visited node to
+    # every matching `(plugin, rule)` pair.
     #
-    # Behaviour is preserved exactly so the diagnostics stay
-    # byte-identical (the WD6 gate):
+    # Behaviour is preserved exactly so the diagnostics stay byte-identical (the WD6 gate):
     #
-    # * Each plugin's `node_file_context` block runs once per file,
-    #   before any of its rules fire, `instance_exec`'d on that plugin —
-    #   same as the per-plugin walk.
-    # * One frozen {NodeContext} is built per node, lazily, only when at
-    #   least one rule matches it. Because it wraps only the ancestors it
-    #   is safe to share across plugins for the same node.
-    # * Each rule block is `instance_exec`'d on its own plugin instance
-    #   with the same five arguments `(node, scope, path, file_context,
-    #   context)`.
-    # * A plugin whose context block or any rule block raises has its
-    #   whole node-rule contribution isolated — the walk records the
-    #   error against that plugin and continues, matching the runner's
-    #   per-plugin rescue around the old `#node_rule_diagnostics` call.
-    # * Diagnostics are bucketed per plugin and returned in the
-    #   registry order the runner already iterates, so emission order is
-    #   unchanged (plugin-major, not node-major) — order preservation is
-    #   what keeps the gate byte-identical in this slice.
+    # * Each plugin's `node_file_context` block runs once per file, before any of its rules fire,
+    #   `instance_exec`'d on that plugin — same as the per-plugin walk.
+    # * One frozen {NodeContext} is built per node, lazily, only when at least one rule matches it. Because it
+    #   wraps only the ancestors it is safe to share across plugins for the same node.
+    # * Each rule block is `instance_exec`'d on its own plugin instance with the same five arguments `(node,
+    #   scope, path, file_context, context)`.
+    # * A plugin whose context block or any rule block raises has its whole node-rule contribution isolated —
+    #   the walk records the error against that plugin and continues, matching the runner's per-plugin rescue
+    #   around the old `#node_rule_diagnostics` call.
+    # * Diagnostics are bucketed per plugin and returned in the registry order the runner already iterates,
+    #   so emission order is unchanged (plugin-major, not node-major) — order preservation is what keeps the
+    #   gate byte-identical in this slice.
     #
-    # The result is an ordered Array of {Result}, one per node-rule
-    # plugin (registry order). `Result#error` is non-nil iff that
-    # plugin's context or a rule block raised, in which case
-    # `#diagnostics` is empty; the runner turns the error into the same
-    # per-plugin `runtime-error` envelope it produced before.
+    # The result is an ordered Array of {Result}, one per node-rule plugin (registry order). `Result#error` is
+    # non-nil iff that plugin's context or a rule block raised, in which case `#diagnostics` is empty; the
+    # runner turns the error into the same per-plugin `runtime-error` envelope it produced before.
     class NodeRuleWalk
-      # One plugin's node-rule outcome for a single file. `error` is the
-      # exception raised by the plugin's context block or a rule block
-      # (nil on success); when set, `diagnostics` is empty.
+      # One plugin's node-rule outcome for a single file. `error` is the exception raised by the plugin's
+      # context block or a rule block (nil on success); when set, `diagnostics` is empty.
       Result = Struct.new(:plugin, :diagnostics, :error)
 
-      # Plugins that declare at least one `node_rule`, paired with their
-      # frozen rule list, in registry order. Built once per run and
-      # reused for every file.
+      # Plugins that declare at least one `node_rule`, paired with their frozen rule list, in registry order.
+      # Built once per run and reused for every file.
       def initialize(plugins)
         @entries = plugins.filter_map do |plugin|
           rules = plugin.class.node_rules
@@ -62,28 +50,20 @@ module Rigor
         @entries.empty?
       end
 
-      # Walk `root` once, dispatching every node to each matching
-      # `(plugin, rule)`. Returns an Array of {Result} in plugin
-      # (registry) order. `root` nil yields one empty Result per plugin.
+      # Walk `root` once, dispatching every node to each matching `(plugin, rule)`. Returns an Array of
+      # {Result} in plugin (registry) order. `root` nil yields one empty Result per plugin.
       #
-      # ADR-53 B4 — when `collector_driver` is given (an
-      # {Analysis::CheckRules::RuleWalk::CollectorDriver}), the SAME
-      # single traversal also drives the built-in {CheckRules} node
-      # collectors: each visited node is dispatched both to the plugin
-      # rules (this walk's original job) and to the built-in collectors
-      # (the `CollectorDriver`), so a file is walked once for both
-      # instead of once each. The two dispatch models coexist: plugin
-      # rules keep `is_a?` matching via the per-class memo and receive a
-      # lazily-built {NodeContext} (ancestors); built-in collectors keep
-      # exact-node-class dispatch and receive the immutable
-      # {RuleWalk::Context} threaded through the descent. Order is
-      # preserved because each side accumulates into its own bucket
-      # (per-plugin {Result}s / per-collector `results`) and the two are
-      # assembled separately by their respective diagnostic builders.
-      # A raising plugin rule isolates only that plugin (per-{State}
-      # rescue) and never aborts built-in collection, nor vice versa
-      # (the collectors' `visit` is the verbatim legacy gather logic,
-      # which does not raise on the corpora).
+      # ADR-53 B4 — when `collector_driver` is given (an {Analysis::CheckRules::RuleWalk::CollectorDriver}),
+      # the SAME single traversal also drives the built-in {CheckRules} node collectors: each visited node is
+      # dispatched both to the plugin rules (this walk's original job) and to the built-in collectors (the
+      # `CollectorDriver`), so a file is walked once for both instead of once each. The two dispatch models
+      # coexist: plugin rules keep `is_a?` matching via the per-class memo and receive a lazily-built
+      # {NodeContext} (ancestors); built-in collectors keep exact-node-class dispatch and receive the
+      # immutable {RuleWalk::Context} threaded through the descent. Order is preserved because each side
+      # accumulates into its own bucket (per-plugin {Result}s / per-collector `results`) and the two are
+      # assembled separately by their respective diagnostic builders. A raising plugin rule isolates only that
+      # plugin (per-{State} rescue) and never aborts built-in collection, nor vice versa (the collectors'
+      # `visit` is the verbatim legacy gather logic, which does not raise on the corpora).
       def diagnostics_for_file(path:, scope:, root:, collector_driver: nil)
         return @entries.map { |plugin, _| Result.new(plugin, [], nil) } if root.nil?
 
@@ -99,14 +79,11 @@ module Rigor
         walk_node(root, [], context, path, scope, states, collector_driver)
       end
 
-      # The single converged DFS pre-order traversal. Threads both the
-      # live `ancestors` stack (for plugin {NodeContext}) and the
-      # immutable built-in {RuleWalk::Context} (for the collectors),
-      # derived together as the walk descends — the cheap-ancestors
-      # option from the ADR-53 B4 design note. Identical pre-order over
-      # `compact_child_nodes` to both the legacy
-      # `Source::NodeWalker.each_with_ancestors` and `RuleWalk.walk`, so
-      # every node is visited in the same order each side saw before.
+      # The single converged DFS pre-order traversal. Threads both the live `ancestors` stack (for plugin
+      # {NodeContext}) and the immutable built-in {RuleWalk::Context} (for the collectors), derived together
+      # as the walk descends — the cheap-ancestors option from the ADR-53 B4 design note. Identical pre-order
+      # over `compact_child_nodes` to both the legacy `Source::NodeWalker.each_with_ancestors` and
+      # `RuleWalk.walk`, so every node is visited in the same order each side saw before.
       def walk_node(node, ancestors, context, path, scope, states, collector_driver)
         return unless node.is_a?(Prism::Node)
 
@@ -129,16 +106,15 @@ module Rigor
           matched = state.rules_for(node)
           next if matched.empty?
 
-          # One frozen NodeContext per node, built lazily and shared
-          # across every plugin that matches this node.
+          # One frozen NodeContext per node, built lazily and shared across every plugin that matches this
+          # node.
           node_context ||= NodeContext.new(ancestors)
           state.run_rules(matched, node, scope, path, node_context)
         end
       end
 
-      # Mutable per-(plugin, file) walk state. Kept private to the walk —
-      # holds the diagnostics bucket, the file context, the per-concrete-
-      # class match memo, and the isolation flag.
+      # Mutable per-(plugin, file) walk state. Kept private to the walk — holds the diagnostics bucket, the
+      # file context, the per-concrete-class match memo, and the isolation flag.
       class State
         def initialize(plugin, rules, scope, root)
           @plugin = plugin
@@ -153,10 +129,9 @@ module Rigor
           !@error.nil?
         end
 
-        # Rules whose `node_type` this concrete node satisfies, memoised
-        # by the node's class so the `is_a?` scan runs once per class.
-        # Preserves `is_a?` semantics when a rule's `node_type` is a
-        # superclass of the concrete node.
+        # Rules whose `node_type` this concrete node satisfies, memoised by the node's class so the `is_a?`
+        # scan runs once per class. Preserves `is_a?` semantics when a rule's `node_type` is a superclass of
+        # the concrete node.
         def rules_for(node)
           @match_cache[node.class] ||=
             @rules.select { |rule| node.is_a?(rule[:node_type]) }

@@ -13,13 +13,10 @@ require_relative "sig_gen/write_result"
 require_relative "sig_gen/writer"
 
 module Rigor
-  # Namespace for the RBS signature generator that powers
-  # `rigor sig-gen` (ADR-14).
+  # Namespace for the RBS signature generator that powers `rigor sig-gen` (ADR-14).
   #
-  # The generator emits RBS from Rigor's inference results so
-  # users close RBS coverage gaps without freehand authorship.
-  # See `docs/adr/14-rbs-sig-generation.md` for the design
-  # rationale and the slicing plan.
+  # The generator emits RBS from Rigor's inference results so users close RBS coverage gaps without freehand
+  # authorship. See `docs/adr/14-rbs-sig-generation.md` for the design rationale and the slicing plan.
   module SigGen
   end
 end

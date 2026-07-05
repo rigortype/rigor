@@ -15,22 +15,17 @@ require_relative "trace_renderer"
 
 module Rigor
   class CLI
-    # Executes the `rigor trace` command: re-runs the inference engine
-    # over one file under {Rigor::Inference::FlowTracer} and replays the
-    # recorded event stream — scope binds, union formation, method
-    # dispatch, and (with `--verbose`) every expression enter/result —
-    # as a step-through terminal animation. A teaching probe: it shows
-    # HOW Rigor arrives at a type, where `rigor type-of` shows only the
-    # answer.
+    # Executes the `rigor trace` command: re-runs the inference engine over one file under
+    # {Rigor::Inference::FlowTracer} and replays the recorded event stream — scope binds, union formation, method
+    # dispatch, and (with `--verbose`) every expression enter/result — as a step-through terminal animation. A teaching
+    # probe: it shows HOW Rigor arrives at a type, where `rigor type-of` shows only the answer.
     #
-    # The tracer is observational; this command never changes what
-    # `rigor check` would infer for the same file.
+    # The tracer is observational; this command never changes what `rigor check` would infer for the same file.
     class TraceCommand < Command
       USAGE = "Usage: rigor trace [options] FILE"
 
-      # Default frame kinds: the three teachable moments. :enter/:result
-      # add one frame per literal and drown the signal; `--verbose`
-      # opts into them.
+      # Default frame kinds: the three teachable moments. :enter/:result add one frame per literal and drown the signal;
+      # `--verbose` opts into them.
       DEFAULT_KINDS = %i[bind union dispatch].freeze
       VERBOSE_KINDS = (%i[enter result] + DEFAULT_KINDS).freeze
 
@@ -95,10 +90,8 @@ module Rigor
         0
       end
 
-      # Mirrors the single-file path `rigor type-of` takes: a
-      # project-aware environment, an empty seed scope, one
-      # statement-level evaluation of the whole program — but recorded
-      # under the FlowTracer.
+      # Mirrors the single-file path `rigor type-of` takes: a project-aware environment, an empty seed scope, one
+      # statement-level evaluation of the whole program — but recorded under the FlowTracer.
       def record_events(root, file, configuration)
         environment = Environment.for_project(
           libraries: configuration.libraries,

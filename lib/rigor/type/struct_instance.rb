@@ -7,28 +7,23 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # A `Struct.new` value instance (ADR-48 Struct follow-up) —
-    # `Point.new(1, 2)`. The mutable sibling of {DataInstance}: a closed,
-    # total, class-tagged member map (member name -> value type),
+    # A `Struct.new` value instance (ADR-48 Struct follow-up) — `Point.new(1, 2)`. The mutable sibling of
+    # {DataInstance}: a closed, total, class-tagged member map (member name -> value type),
     # HashShape-shaped but nominal.
     #
-    # Unlike {DataInstance}, a `Struct` instance is **mutable** — `s.x = v`,
-    # `s[:x] = v`, and escape can invalidate the member map. The folding
-    # tier therefore only projects member reads off a **fresh** instance
-    # (the transient receiver of a `.new(...).x` / `.with(...).x` chain,
-    # which provably cannot have been mutated between materialisation and
-    # the read); a read off a *stored* binding degrades to `Dynamic[top]`
-    # rather than fold a possibly-stale member value. Promoting the
-    # fold to mutation-free bound locals is the deferred slice 3 (see ADR).
+    # Unlike {DataInstance}, a `Struct` instance is **mutable** — `s.x = v`, `s[:x] = v`, and escape can
+    # invalidate the member map. The folding tier therefore only projects member reads off a **fresh**
+    # instance (the transient receiver of a `.new(...).x` / `.with(...).x` chain, which provably cannot
+    # have been mutated between materialisation and the read); a read off a *stored* binding degrades to
+    # `Dynamic[top]` rather than fold a possibly-stale member value. Promoting the fold to mutation-free
+    # bound locals is the deferred slice 3 (see ADR).
     #
-    # That mutability-gating lives in the dispatch tier (`StructFolding`),
-    # not the carrier: the carrier itself just records the member map. Like
-    # {DataInstance}, non-folded methods project to the `Struct` nominal (or
-    # the tagged class) through {RbsDispatch}'s `receiver_descriptor`, so
-    # non-member calls resolve without mis-firing undefined-method.
+    # That mutability-gating lives in the dispatch tier (`StructFolding`), not the carrier: the carrier
+    # itself just records the member map. Like {DataInstance}, non-folded methods project to the
+    # `Struct` nominal (or the tagged class) through {RbsDispatch}'s `receiver_descriptor`, so non-member
+    # calls resolve without mis-firing undefined-method.
     #
-    # Equality and hashing are structural over the (member -> type) map and
-    # the class name.
+    # Equality and hashing are structural over the (member -> type) map and the class name.
     #
     # See docs/adr/48-data-struct-value-folding.md § "Struct follow-up".
     class StructInstance
@@ -67,9 +62,8 @@ module Rigor
         "#{class_name || 'Struct'}(#{rendered.join(', ')})"
       end
 
-      # Erases to the tagging class nominal (conservative: the structural
-      # members are not RBS-expressible as a class instance). The
-      # anonymous case erases to the `Struct` supertype.
+      # Erases to the tagging class nominal (conservative: the structural members are not RBS-expressible
+      # as a class instance). The anonymous case erases to the `Struct` supertype.
       def erase_to_rbs
         name = class_name
         return "Struct" if name.nil?

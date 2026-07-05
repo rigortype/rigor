@@ -4,16 +4,10 @@ require_relative "fallback"
 
 module Rigor
   module Inference
-    # Mutable observer that accumulates Rigor::Inference::Fallback events
-    # emitted by the type-inference engine. Pass an instance to
-    # Rigor::Scope#type_of(node, tracer: ...) to record every fail-soft
-    # fallback. The tracer MUST NOT change the return value of type_of;
-    # see docs/internal-spec/inference-engine.md (Fail-Soft Policy).
-    #
-    # Future slices may add additional record_* methods (e.g.
-    # record_dispatch_miss for Slice 3, record_budget_cutoff for Slice 5);
-    # the namespaced method names exist so a single tracer can collect
-    # multiple event families without confusing them.
+    # Mutable observer that accumulates Rigor::Inference::Fallback events emitted by the type-inference
+    # engine. Pass an instance to Rigor::Scope#type_of(node, tracer: ...) to record every fail-soft fallback.
+    # The tracer MUST NOT change the return value of type_of; see docs/internal-spec/inference-engine.md
+    # (Fail-Soft Policy).
     class FallbackTracer
       def initialize
         @events = []

@@ -1,12 +1,10 @@
 # frozen_string_literal: true
 
 module Rigor
-  # The Language Server subsystem. See
-  # `docs/design/20260517-language-server.md` for the design.
-  # The full v1 capability surface (document sync, publishDiagnostics,
-  # hover, completion, sig-help, folding, selection, and watched-file
-  # invalidation) is implemented. This module is the namespace and
-  # require entry point for the subsystem.
+  # The Language Server subsystem. See `docs/design/20260517-language-server.md` for the design. The full v1
+  # capability surface (document sync, publishDiagnostics, hover, completion, sig-help, folding, selection, and
+  # watched-file invalidation) is implemented. This module is the namespace and require entry point for the
+  # subsystem.
   module LanguageServer
   end
 end

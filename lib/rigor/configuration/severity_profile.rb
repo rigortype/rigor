@@ -2,40 +2,33 @@
 
 module Rigor
   class Configuration
-    # ADR-8 § "Severity profile" — three named profiles tune the
-    # severity of every built-in `Analysis::CheckRules` rule for
-    # the run. Profiles are applied as a **final filter** on
-    # `Diagnostic#severity`: rules emit with their authored
-    # severity, then `Analysis::Runner` re-stamps the severity
-    # from the active profile before adding the diagnostic to
-    # the result.
+    # ADR-8 § "Severity profile" — three named profiles tune the severity of every built-in
+    # `Analysis::CheckRules` rule for the run. Profiles are applied as a **final filter** on
+    # `Diagnostic#severity`: rules emit with their authored severity, then `Analysis::Runner` re-stamps the
+    # severity from the active profile before adding the diagnostic to the result.
     #
     # Three profiles:
     #
-    # - `lenient`: Only proven (`:no`) diagnostics are errors;
-    #   uncertain (`:maybe`) drop to `:warning`. Useful for
-    #   incremental adoption on legacy code.
-    # - `balanced` (**default**): Current Rigor stance — most
-    #   rules `:error`; `dump.type` `:info`; uncertain rules
-    #   `:warning`.
+    # - `lenient`: Only proven (`:no`) diagnostics are errors; uncertain (`:maybe`) drop to `:warning`.
+    #   Useful for incremental adoption on legacy code.
+    # - `balanced` (**default**): Current Rigor stance — most rules `:error`; `dump.type` `:info`; uncertain
+    #   rules `:warning`.
     # - `strict`: Every rule is `:error`. CI-friendly.
     #
     # The profile resolution order:
     #
     # 1. Profile-specific entry for the canonical rule id.
-    # 2. The diagnostic's own authored severity (the rule's
-    #    default).
-    # 3. `:error` (catch-all so an unrecognised rule still emits
-    #    visibly — the public-API drift spec catches the
-    #    bookkeeping gap separately).
+    # 2. The diagnostic's own authored severity (the rule's default).
+    # 3. `:error` (catch-all so an unrecognised rule still emits visibly — the public-API drift spec catches
+    #    the bookkeeping gap separately).
     module SeverityProfile
       VALID_PROFILES = %i[lenient balanced strict].freeze
       VALID_SEVERITIES = %i[error warning info off].freeze
 
       DEFAULT_PROFILE = :balanced
 
-      # Per-profile severity tables. Missing keys fall back to
-      # the diagnostic's authored severity (typically `:error`).
+      # Per-profile severity tables. Missing keys fall back to the diagnostic's authored severity (typically
+      # `:error`).
       PROFILES = {
         lenient: {
           "call.undefined-method" => :error,
@@ -117,30 +110,23 @@ module Rigor
 
       module_function
 
-      # Resolves the configured severity for a diagnostic given
-      # the active profile and any per-rule overrides.
+      # Resolves the configured severity for a diagnostic given the active profile and any per-rule
+      # overrides.
       #
       # @param rule [String, nil] canonical rule id (`call.undefined-method`).
-      # @param authored_severity [Symbol] severity the rule emitted
-      #   the diagnostic with (`:error`, `:warning`, `:info`).
-      # @param profile [Symbol] one of {VALID_PROFILES}; falls back
-      #   to {DEFAULT_PROFILE} for unknown values.
-      # @param overrides [Hash{String => Symbol}] per-rule severity
-      #   overrides from `.rigor.yml`'s `severity_overrides:` map.
-      #   Keys are canonical rule ids; values are
-      #   {VALID_SEVERITIES} symbols. Family-wildcard keys
-      #   (`call`) match every rule under that prefix.
-      # @param bleeding_edge_overrides [Hash{String => Symbol}] the
-      #   severity map imposed by the active ADR-50 § WD2 bleeding-edge
-      #   features ({Rigor::BleedingEdge.severity_overrides_for}).
-      #   Consulted *below* the user's own `overrides` (so an explicit
-      #   `severity_overrides:` entry, exact or family wildcard, always
-      #   wins) and *above* the profile table. Exact rule ids only — the
-      #   overlay never carries family wildcards. Empty while the
-      #   overlay is unpopulated, so the default leaves resolution
-      #   bit-for-bit unchanged.
-      # @return [Symbol] the resolved severity. Returns `:off` to
-      #   mean "drop the diagnostic entirely".
+      # @param authored_severity [Symbol] severity the rule emitted the diagnostic with (`:error`, `:warning`,
+      #   `:info`).
+      # @param profile [Symbol] one of {VALID_PROFILES}; falls back to {DEFAULT_PROFILE} for unknown values.
+      # @param overrides [Hash{String => Symbol}] per-rule severity overrides from `.rigor.yml`'s
+      #   `severity_overrides:` map. Keys are canonical rule ids; values are {VALID_SEVERITIES} symbols.
+      #   Family-wildcard keys (`call`) match every rule under that prefix.
+      # @param bleeding_edge_overrides [Hash{String => Symbol}] the severity map imposed by the active ADR-50
+      #   § WD2 bleeding-edge features ({Rigor::BleedingEdge.severity_overrides_for}). Consulted *below* the
+      #   user's own `overrides` (so an explicit `severity_overrides:` entry, exact or family wildcard,
+      #   always wins) and *above* the profile table. Exact rule ids only — the overlay never carries family
+      #   wildcards. Empty while the overlay is unpopulated, so the default leaves resolution bit-for-bit
+      #   unchanged.
+      # @return [Symbol] the resolved severity. Returns `:off` to mean "drop the diagnostic entirely".
       def resolve(rule:, authored_severity:, profile: DEFAULT_PROFILE, overrides: {}, bleeding_edge_overrides: {})
         return authored_severity if rule.nil?
 

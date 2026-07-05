@@ -4,41 +4,32 @@ require_relative "hkt_body"
 
 module Rigor
   module Inference
-    # ADR-20 § "Decision D1 / D2" — registry of Lightweight HKT
-    # tag registrations + type-function bodies parsed off the
-    # `%a{rigor:v1:hkt_register: ...}` /
-    # `%a{rigor:v1:hkt_define: ...}` annotations in shipped
-    # `.rbs` files.
+    # ADR-20 § "Decision D1 / D2" — registry of Lightweight HKT tag registrations + type-function
+    # bodies parsed off the `%a{rigor:v1:hkt_register: ...}` / `%a{rigor:v1:hkt_define: ...}`
+    # annotations in shipped `.rbs` files.
     #
-    # The registry stores registration metadata (arity, variance,
-    # bound) and the definition body as both a raw String and an
-    # evaluable `HktBody` node tree. `HktReducer` (Slice 2a) and
-    # `HktBodyParser` (Slice 2b) are both shipped and reduce
-    # `Type::App` instances against the definition. The carrier
-    # never needs to read from the registry
-    # because Slice 1's `Type::App` carries its `bound` directly;
-    # the registry exists at this slice solely so the parser
+    # The registry stores registration metadata (arity, variance, bound) and the definition body
+    # as both a raw String and an evaluable `HktBody` node tree. `HktReducer` (Slice 2a) and
+    # `HktBodyParser` (Slice 2b) are both shipped and reduce `Type::App` instances against the
+    # definition. The carrier never needs to read from the registry because Slice 1's `Type::App`
+    # carries its `bound` directly; the registry exists at this slice solely so the parser
     # round-trip and downstream slices have a stable target API.
     #
-    # The registry is immutable after construction. Callers that
-    # need to extend it (e.g. plugin registrations layered on top
-    # of stdlib registrations) MUST build a new registry via
-    # `merge` rather than mutating an existing one. This keeps the
-    # registry shareable across Ractor boundaries per ADR-15.
+    # The registry is immutable after construction. Callers that need to extend it (e.g. plugin
+    # registrations layered on top of stdlib registrations) MUST build a new registry via `merge`
+    # rather than mutating an existing one. This keeps the registry shareable across Ractor
+    # boundaries per ADR-15.
     class HktRegistry
       # Frozen value object recording one tag registration.
       #
-      # - `uri`: namespaced Symbol per ADR-20 WD1 (must include
-      #   `"::"`).
-      # - `arity`: positive Integer — the number of formal
-      #   parameters the registered constructor takes.
-      # - `variance`: ordered Array of Symbols, one per
-      #   parameter, each `:out` (covariant), `:in`
+      # - `uri`: namespaced Symbol per ADR-20 WD1 (must include `"::"`).
+      # - `arity`: positive Integer — the number of formal parameters the registered constructor
+      #   takes.
+      # - `variance`: ordered Array of Symbols, one per parameter, each `:out` (covariant), `:in`
       #   (contravariant), or `:inv` (invariant; default).
-      # - `bound`: a `Rigor::Type` to erase to when an `App`
-      #   referring to this URI cannot be reduced. Defaults to
-      #   `Dynamic[Top]` (the parser fills in the default when
-      #   the annotation omits `bound:`).
+      # - `bound`: a `Rigor::Type` to erase to when an `App` referring to this URI cannot be
+      #   reduced. Defaults to `Dynamic[Top]` (the parser fills in the default when the
+      #   annotation omits `bound:`).
       Registration = Data.define(:uri, :arity, :variance, :bound) do
         def initialize(uri:, arity:, variance:, bound:)
           raise ArgumentError, "uri must be a Symbol, got #{uri.class}" unless uri.is_a?(Symbol)
@@ -61,21 +52,16 @@ module Rigor
         end
       end
 
-      # Frozen value object recording one type-function
-      # definition.
+      # Frozen value object recording one type-function definition.
       #
-      # `body` is the raw String payload from the `%a{...}`
-      # annotation (Slice 1's parser populates it); parsed into
-      # `body_tree` by `HktBodyParser` (Slice 2b, shipped).
+      # `body` is the raw String payload from the `%a{...}` annotation (Slice 1's parser
+      # populates it); parsed into `body_tree` by `HktBodyParser` (Slice 2b, shipped).
       #
-      # `body_tree` is the evaluable form: a
-      # `Rigor::Inference::HktBody::*` node tree the Slice 2a
-      # reducer walks against the application's concrete
-      # arguments. Plugin and Rigor-bundled overlay authors
-      # construct it programmatically through
-      # {.definition_with_body_tree}. The reducer treats a
-      # `nil` `body_tree` as "definition not yet evaluable"
-      # and returns the registered bound.
+      # `body_tree` is the evaluable form: a `Rigor::Inference::HktBody::*` node tree the Slice 2a
+      # reducer walks against the application's concrete arguments. Plugin and Rigor-bundled
+      # overlay authors construct it programmatically through {.definition_with_body_tree}. The
+      # reducer treats a `nil` `body_tree` as "definition not yet evaluable" and returns the
+      # registered bound.
       Definition = Data.define(:uri, :params, :body, :body_tree, :source_path, :source_line) do
         def initialize(uri:, params:, body:, body_tree: nil, source_path: nil, source_line: nil)
           raise ArgumentError, "uri must be a Symbol, got #{uri.class}" unless uri.is_a?(Symbol)
@@ -97,11 +83,9 @@ module Rigor
         end
       end
 
-      # Convenience constructor for callers that have a body
-      # tree but no raw String — typically Rigor-bundled HKT
-      # overlays that build the body programmatically. The
-      # raw `body` slot is filled with an empty placeholder
-      # so existing consumers keep their type contract.
+      # Convenience constructor for callers that have a body tree but no raw String — typically
+      # Rigor-bundled HKT overlays that build the body programmatically. The raw `body` slot is
+      # filled with an empty placeholder so existing consumers keep their type contract.
       def self.definition_with_body_tree(uri:, params:, body_tree:, source_path: nil, source_line: nil)
         Definition.new(
           uri: uri,
@@ -139,10 +123,8 @@ module Rigor
         @definitions[uri]
       end
 
-      # @return [HktRegistry] a new registry whose entries are
-      #   the union of this registry's and `other`'s. On URI
-      #   collisions `other`'s entries win (last-write-wins; OQ3
-      #   tentative).
+      # @return [HktRegistry] a new registry whose entries are the union of this registry's and
+      #   `other`'s. On URI collisions `other`'s entries win (last-write-wins; OQ3 tentative).
       def merge(other)
         raise ArgumentError, "merge target must be an HktRegistry, got #{other.class}" unless other.is_a?(HktRegistry)
 
@@ -156,41 +138,33 @@ module Rigor
         @registrations.empty? && @definitions.empty?
       end
 
-      # ADR-20 Slice 2a — reduce an `App` against this
-      # registry. Convenience wrapper around `HktReducer.new(self).reduce`.
-      # Each call allocates a fresh reducer; concurrent
-      # reductions are safe.
+      # ADR-20 Slice 2a — reduce an `App` against this registry. Convenience wrapper around
+      # `HktReducer.new(self).reduce`. Each call allocates a fresh reducer; concurrent reductions
+      # are safe.
       def reduce(app, fuel: HktReducer::DEFAULT_FUEL)
         HktReducer.new(self).reduce(app, fuel: fuel)
       end
 
-      # ADR-20 slice 2e — scan a Rigor RbsLoader for
-      # `rigor:v1:hkt_register` / `rigor:v1:hkt_define`
-      # annotations attached to class- or module-level
-      # declarations in the loaded RBS env, parse them via
-      # {Rigor::RbsExtended::HktDirectives}, and return a new
-      # registry that is the union of `base` and every parsed
-      # entry. Last-write-wins on URI collisions per
-      # {#merge}'s contract. Fail-soft on per-annotation parse
-      # errors (the reporter records an `:info` entry; the
-      # other annotations still apply).
+      # ADR-20 slice 2e — scan a Rigor RbsLoader for `rigor:v1:hkt_register` /
+      # `rigor:v1:hkt_define` annotations attached to class- or module-level declarations in the
+      # loaded RBS env, parse them via {Rigor::RbsExtended::HktDirectives}, and return a new
+      # registry that is the union of `base` and every parsed entry. Last-write-wins on URI
+      # collisions per {#merge}'s contract. Fail-soft on per-annotation parse errors (the reporter
+      # records an `:info` entry; the other annotations still apply).
       #
       # @param rbs_loader [Rigor::Environment::RbsLoader]
-      # @param base [HktRegistry] starting registry (typically
-      #   the bundled `Rigor::Builtins::HktBuiltins.registry`).
-      # @param name_scope [Rigor::Environment::NameScope, nil]
-      #   threaded through to the bound resolver for class-name
-      #   lookups; safe to omit during scanning since hkt
-      #   bounds are typically `untyped` or stdlib classes.
-      # @param reporter [#record, nil] same fail-soft reporter
-      #   contract the other RBS-extended parsers use.
+      # @param base [HktRegistry] starting registry (typically the bundled
+      #   `Rigor::Builtins::HktBuiltins.registry`).
+      # @param name_scope [Rigor::Environment::NameScope, nil] threaded through to the bound
+      #   resolver for class-name lookups; safe to omit during scanning since hkt bounds are
+      #   typically `untyped` or stdlib classes.
+      # @param reporter [#record, nil] same fail-soft reporter contract the other RBS-extended
+      #   parsers use.
       def self.scan_rbs_loader(rbs_loader, base: EMPTY, name_scope: nil, reporter: nil)
         return base if rbs_loader.nil?
 
-        # Required lazily here to avoid a hard circular
-        # require between hkt_registry / hkt_directives;
-        # HktDirectives requires HktRegistry to construct its
-        # value objects.
+        # Required lazily here to avoid a hard circular require between hkt_registry /
+        # hkt_directives; HktDirectives requires HktRegistry to construct its value objects.
         require_relative "../rbs_extended/hkt_directives"
 
         registrations = []

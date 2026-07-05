@@ -6,19 +6,15 @@ require_relative "../scope"
 require_relative "../inference/scope_indexer"
 
 module Rigor
-  # ADR-63 Tier 2 — the productized subset of the dev-only mutation-testing
-  # harness (`tool/mutation/`, ADR-62). Only the *per-file effectiveness
-  # measurement* lives here — the type-visible {Mutator} and the warm-loop
-  # {MutationScanner} kill-rate measurement. The dev sweep / fuzz / survivor
-  # clustering stay off the frozen surface in `tool/mutation/mutate.rb`
-  # (which now reuses this {Mutator} so there is one source of truth).
+  # ADR-63 Tier 2 — the productized subset of the dev-only mutation-testing harness (`tool/mutation/`, ADR-62).
+  # Only the *per-file effectiveness measurement* lives here — the type-visible {Mutator} and the warm-loop
+  # {MutationScanner} kill-rate measurement. The dev sweep / fuzz / survivor clustering stay off the frozen
+  # surface in `tool/mutation/mutate.rb` (which now reuses this {Mutator} so there is one source of truth).
   module Protection
-    # One concrete edit: replace source bytes [start, stop) with `replacement`.
-    # `anchor` is the Prism node whose inferred type decides type-relevance —
-    # the call receiver whose contract the mutation could violate, or nil when
-    # there is no concrete receiver (implicit-self call, literal outside a call).
-    # `anchor_type` (the rendered receiver type) and `method_name` are filled in
-    # for reporting a surviving site; both may stay nil.
+    # One concrete edit: replace source bytes [start, stop) with `replacement`. `anchor` is the Prism node whose
+    # inferred type decides type-relevance — the call receiver whose contract the mutation could violate, or nil
+    # when there is no concrete receiver (implicit-self call, literal outside a call). `anchor_type` (the
+    # rendered receiver type) and `method_name` are filled in for reporting a surviving site; both may stay nil.
     Mutation = Struct.new(
       :operator, :expected_rule, :start, :stop, :replacement, :line, :label, :anchor,
       :anchor_type, :method_name,
@@ -31,35 +27,29 @@ module Rigor
       end
     end
 
-    # Generates type-visible mutations of a Ruby source string by walking the
-    # Prism AST and recording byte-range splices (no unparser needed — Prism
-    # hands us exact offsets, and the analyzer re-parses the spliced source).
+    # Generates type-visible mutations of a Ruby source string by walking the Prism AST and recording byte-range
+    # splices (no unparser needed — Prism hands us exact offsets, and the analyzer re-parses the spliced source).
     #
-    # A mutation is "type-visible" when it should trip a diagnostic rule *if*
-    # Rigor holds a type at the site: a call-argument literal dropped to `nil`
-    # or type-swapped (→ `call.argument-type-mismatch`), or a call site renamed
-    # to a missing method (→ `call.undefined-method`). Only call sites and
-    # bodies are mutated, never `def` signatures, so a reused project scan stays
-    # valid.
+    # A mutation is "type-visible" when it should trip a diagnostic rule *if* Rigor holds a type at the site: a
+    # call-argument literal dropped to `nil` or type-swapped (→ `call.argument-type-mismatch`), or a call site
+    # renamed to a missing method (→ `call.undefined-method`). Only call sites and bodies are mutated, never
+    # `def` signatures, so a reused project scan stays valid.
     class Mutator
       IDENT = /\A[a-z_][A-Za-z0-9_]*\z/
       QUOTES = ['"', "'"].freeze
-      # Mutating an argument to a universal-equality method is always an
-      # equivalent mutant: Ruby's `==` / `<=>` family returns false / nil on a
-      # type mismatch rather than raising, so the engine exempts them
+      # Mutating an argument to a universal-equality method is always an equivalent mutant: Ruby's `==` / `<=>`
+      # family returns false / nil on a type mismatch rather than raising, so the engine exempts them
       # (`UNIVERSAL_EQUALITY_METHODS`). Skip them to keep survivors meaningful.
       UNIVERSAL_EQUALITY = %w[== != eql? equal? <=>].freeze
 
-      # Every operator the mutator knows. Each maps to the diagnostic rule
-      # family it is *engineered* to trip when the mutated value/call sits in a
-      # context where Rigor has type knowledge.
+      # Every operator the mutator knows. Each maps to the diagnostic rule family it is *engineered* to trip when
+      # the mutated value/call sits in a context where Rigor has type knowledge.
       ALL_OPERATORS = %i[nil_inject type_swap undefined_method arity_extra].freeze
 
-      # The default set. `arity_extra` is excluded: most Ruby methods accept an
-      # extra argument (splat / optional), so appending one is usually an
-      # equivalent mutant — it contributes almost only noise. Re-enable it
-      # explicitly via `operators:` to measure arity teeth. (A signature-arity
-      # guard would make it default-worthy — a follow-up.)
+      # The default set. `arity_extra` is excluded: most Ruby methods accept an extra argument (splat / optional),
+      # so appending one is usually an equivalent mutant — it contributes almost only noise. Re-enable it
+      # explicitly via `operators:` to measure arity teeth. (A signature-arity guard would make it
+      # default-worthy — a follow-up.)
       OPERATORS = %i[nil_inject type_swap undefined_method].freeze
 
       def initialize(source, operators: OPERATORS)
@@ -78,14 +68,12 @@ module Rigor
         out
       end
 
-      # Phase 1.5 — keep only mutations whose anchor types to a concrete,
-      # non-Dynamic type, i.e. a site where Rigor actually holds a contract the
-      # mutation could violate. Drops implicit-self calls and literals outside a
-      # typed call (no contract → guaranteed survival → noise). FP-safe
-      # direction: an unresolved/probe-failed type KEEPS the mutation, so the
-      # filter never hides a kill it is unsure about — it only removes
-      # provably-Dynamic sites. Returns [kept, dropped_count]. Builds the scope
-      # index from THIS mutator's parse so anchor node identity matches the keys.
+      # Phase 1.5 — keep only mutations whose anchor types to a concrete, non-Dynamic type, i.e. a site where
+      # Rigor actually holds a contract the mutation could violate. Drops implicit-self calls and literals
+      # outside a typed call (no contract → guaranteed survival → noise). FP-safe direction: an
+      # unresolved/probe-failed type KEEPS the mutation, so the filter never hides a kill it is unsure about — it
+      # only removes provably-Dynamic sites. Returns [kept, dropped_count]. Builds the scope index from THIS
+      # mutator's parse so anchor node identity matches the keys.
       def filter_by_type(mutations, environment:, path:)
         base = Rigor::Scope.empty(environment: environment, source_path: path)
         index = Rigor::Inference::ScopeIndexer.index(@parse.value, default_scope: base)
@@ -98,13 +86,11 @@ module Rigor
         [kept, mutations.size - kept.size]
       end
 
-      # ADR-69 Seam 2 (AllSites) — keep every *dispatch-site* mutation (a method
-      # call or a call-argument literal), Dynamic receiver included, annotating
-      # the anchor type where Rigor holds one. Drops only non-dispatch literals
-      # (a literal outside any call — no receiver contract to violate). The
-      # biteable {#filter_by_type} hides exactly the Dynamic sites a test-suite
-      # consumer most wants to probe: where Rigor cannot bite, a test is the only
-      # protection. Use only with a {TestSuiteOracle} — at a Dynamic site the
+      # ADR-69 Seam 2 (AllSites) — keep every *dispatch-site* mutation (a method call or a call-argument
+      # literal), Dynamic receiver included, annotating the anchor type where Rigor holds one. Drops only
+      # non-dispatch literals (a literal outside any call — no receiver contract to violate). The biteable
+      # {#filter_by_type} hides exactly the Dynamic sites a test-suite consumer most wants to probe: where Rigor
+      # cannot bite, a test is the only protection. Use only with a {TestSuiteOracle} — at a Dynamic site the
       # type pass can never kill, so without the test axis these are all noise.
       def dispatch_site_mutations(mutations, environment:, path:)
         base = Rigor::Scope.empty(environment: environment, source_path: path)
@@ -139,10 +125,9 @@ module Rigor
         end
       end
 
-      # Record, for each literal that is a direct call argument, the receiver of
-      # the enclosing call — the anchor whose param contract a literal mutation
-      # could violate. Literals elsewhere get a nil anchor (filtered out under
-      # the type filter).
+      # Record, for each literal that is a direct call argument, the receiver of the enclosing call — the anchor
+      # whose param contract a literal mutation could violate. Literals elsewhere get a nil anchor (filtered out
+      # under the type filter).
       def index_literal_anchors(node)
         return if node.nil?
 
@@ -158,9 +143,8 @@ module Rigor
         node.is_a?(Prism::IntegerNode) || node.is_a?(Prism::FloatNode) || node.is_a?(Prism::StringNode)
       end
 
-      # Returns [keep?, rendered_type]. Keep when `anchor` is a site where Rigor
-      # holds a concrete (non-Dynamic/Top) type. FP-safe: an unresolved or
-      # probe-failed type keeps the mutation (with a nil rendered type).
+      # Returns [keep?, rendered_type]. Keep when `anchor` is a site where Rigor holds a concrete (non-Dynamic/Top)
+      # type. FP-safe: an unresolved or probe-failed type keeps the mutation (with a nil rendered type).
       def anchor_decision(anchor, index, cache)
         return [false, nil] if anchor.nil?
         return cache[anchor] if cache.key?(anchor)
@@ -181,11 +165,10 @@ module Rigor
         [true, nil] # never let a probe failure hide a candidate
       end
 
-      # A receiver type Rigor cannot bite on, so a mutation anchored to it would
-      # survive as noise: `Dynamic` / `Top` / `bot`, or a union with any such arm
-      # (gradually valid — `Array | Dynamic[top]`.whatever never fires). A union
-      # of fully-concrete arms (`String | Symbol`) stays concrete — it now has
-      # undefined-method teeth.
+      # A receiver type Rigor cannot bite on, so a mutation anchored to it would survive as noise: `Dynamic` /
+      # `Top` / `bot`, or a union with any such arm (gradually valid — `Array | Dynamic[top]`.whatever never
+      # fires). A union of fully-concrete arms (`String | Symbol`) stays concrete — it now has undefined-method
+      # teeth.
       def non_concrete_type?(type)
         return true if type.is_a?(Rigor::Type::Dynamic) || type.is_a?(Rigor::Type::Top) ||
                        type.is_a?(Rigor::Type::Bot)
@@ -200,9 +183,8 @@ module Rigor
         type.class.name
       end
 
-      # Mutate a literal: drop it to nil (possible-nil channel) and swap its
-      # type (type-mismatch channel). String literals are only touched when the
-      # node is a real quoted string, so we never corrupt `%w[...]` words.
+      # Mutate a literal: drop it to nil (possible-nil channel) and swap its type (type-mismatch channel). String
+      # literals are only touched when the node is a real quoted string, so we never corrupt `%w[...]` words.
       def literal_mutations(node, out, numeric:)
         return if !numeric && !QUOTES.include?(node.opening_loc&.slice)
 
@@ -222,12 +204,10 @@ module Rigor
         extend_arity(node, out)
       end
 
-      # Rename the *call site* (not the def) to a method that cannot exist, so a
-      # typed receiver trips call.undefined-method. We leave `def` signatures
-      # untouched on purpose: the prebuilt ProjectScan still carries the file's
-      # original declarations, so mutating only bodies/call-sites keeps it valid.
-      # Anchor is the explicit receiver (nil ⇒ implicit self ⇒ filtered out, as
-      # call.self-undefined-method ships `:off`).
+      # Rename the *call site* (not the def) to a method that cannot exist, so a typed receiver trips
+      # call.undefined-method. We leave `def` signatures untouched on purpose: the prebuilt ProjectScan still
+      # carries the file's original declarations, so mutating only bodies/call-sites keeps it valid. Anchor is
+      # the explicit receiver (nil ⇒ implicit self ⇒ filtered out, as call.self-undefined-method ships `:off`).
       def rename_call(node, out)
         name = node.name.to_s
         mloc = node.message_loc
@@ -237,8 +217,8 @@ module Rigor
             "#{name}__rigor_absent", mloc.start_line, "call ##{name} → missing method", node.receiver, name)
       end
 
-      # Append a trailing argument inside explicit `(...)` parens to trip an
-      # arity diagnostic against a known fixed-arity signature.
+      # Append a trailing argument inside explicit `(...)` parens to trip an arity diagnostic against a known
+      # fixed-arity signature.
       def extend_arity(node, out)
         open = node.opening_loc
         close = node.closing_loc

@@ -7,31 +7,23 @@ require_relative "singleton_folding"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Folds `CGI` module-function calls on statically known
-      # string constants.
+      # Folds `CGI` module-function calls on statically known string constants.
       #
-      # `CGI.escapeHTML` / `CGI.unescapeHTML` and related methods
-      # are pure, deterministic functions over their string inputs.
-      # When the argument is a `Constant[String]`, the analyzer can
-      # evaluate the call at inference time and return the concrete
-      # `Constant[String]` result.
+      # `CGI.escapeHTML` / `CGI.unescapeHTML` and related methods are pure, deterministic functions over
+      # their string inputs. When the argument is a `Constant[String]`, the analyzer can evaluate the call
+      # at inference time and return the concrete `Constant[String]` result.
       #
       # === Supported methods
       #
-      # * `escapeHTML(str)` / `escape_html(str)` / `h(str)` —
-      #   HTML-escape. Returns `Constant[String]`.
-      # * `unescapeHTML(str)` / `unescape_html(str)` —
-      #   HTML-unescape. Returns `Constant[String]`.
-      # * `escape(str)` / `unescape(str)` —
-      #   URL-encode / decode (`application/x-www-form-urlencoded`).
+      # * `escapeHTML(str)` / `escape_html(str)` / `h(str)` — HTML-escape. Returns `Constant[String]`.
+      # * `unescapeHTML(str)` / `unescape_html(str)` — HTML-unescape. Returns `Constant[String]`.
+      # * `escape(str)` / `unescape(str)` — URL-encode / decode (`application/x-www-form-urlencoded`).
       #   Returns `Constant[String]`.
-      # * `escapeURIComponent(str)` / `escape_uri_component(str)`,
-      #   `unescapeURIComponent(str)` / `unescape_uri_component(str)` —
-      #   URI-component percent-encode / decode. Returns `Constant[String]`.
+      # * `escapeURIComponent(str)` / `escape_uri_component(str)`, `unescapeURIComponent(str)` /
+      #   `unescape_uri_component(str)` — URI-component percent-encode / decode. Returns `Constant[String]`.
       # * `escapeElement(str, *elements)` / `escape_element(str, *elements)`,
-      #   `unescapeElement(str, *elements)` / `unescape_element(str, *elements)` —
-      #   element-level escape / unescape (first arg is the string,
-      #   remaining args are element names). Returns `Constant[String]`.
+      #   `unescapeElement(str, *elements)` / `unescape_element(str, *elements)` — element-level escape /
+      #   unescape (first arg is the string, remaining args are element names). Returns `Constant[String]`.
       #
       # === Non-constant / unsupported cases
       #
@@ -89,9 +81,8 @@ module Rigor
           nil
         end
 
-        # `CGI.escapeElement(str, "elem1", "elem2", ...)` — element-
-        # level escape / unescape. The remaining args after the first
-        # must be `Constant[String]` element names.
+        # `CGI.escapeElement(str, "elem1", "elem2", ...)` — element-level escape / unescape. The remaining
+        # args after the first must be `Constant[String]` element names.
         def fold_cgi_element(method_name, str, element_args)
           elements = element_args.map do |arg|
             value = SingletonFolding.constant_string(arg)

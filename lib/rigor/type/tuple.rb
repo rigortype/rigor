@@ -7,30 +7,25 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # A heterogeneous, fixed-arity array shape. Inhabitants are exactly
-    # the Ruby `Array` instances whose length matches `elements.size`
-    # and whose element at position `i` inhabits `elements[i]`.
+    # A heterogeneous, fixed-arity array shape. Inhabitants are exactly the Ruby `Array` instances whose
+    # length matches `elements.size` and whose element at position `i` inhabits `elements[i]`.
     #
-    # In RBS this corresponds to the tuple form `[A, B, C]`. A tuple
-    # is always a subtype of `Array[union(elements)]`; method dispatch
-    # therefore degrades to the underlying `Nominal[Array, [union]]`
-    # while acceptance keeps the per-position precision.
+    # In RBS this corresponds to the tuple form `[A, B, C]`. A tuple is always a subtype of
+    # `Array[union(elements)]`; method dispatch therefore degrades to the underlying `Nominal[Array,
+    # [union]]` while acceptance keeps the per-position precision.
     #
-    # Slice 5 phase 1 introduces the carrier and surfaces it from the
-    # `ArrayNode` literal handler when every element is a non-splat
-    # value. Tuple-aware refinements (`tuple[0]`, `tuple.first`,
-    # destructuring) are implemented in `ShapeDispatch`, which runs
-    # above {Rigor::Inference::MethodDispatcher::RbsDispatch}.
+    # Slice 5 phase 1 introduces the carrier and surfaces it from the `ArrayNode` literal handler when
+    # every element is a non-splat value. Tuple-aware refinements (`tuple[0]`, `tuple.first`,
+    # destructuring) are implemented in `ShapeDispatch`, which runs above
+    # {Rigor::Inference::MethodDispatcher::RbsDispatch}.
     #
-    # Equality and hashing are structural across an ordered, frozen
-    # element list. The empty Tuple `Tuple[]` is permitted; the array
-    # literal handler keeps `[]` as raw `Nominal[Array]` (no element
-    # evidence to lock the arity), but external constructors MAY build
-    # `Tuple[]` directly when the zero-arity discipline is intended.
+    # Equality and hashing are structural across an ordered, frozen element list. The empty Tuple
+    # `Tuple[]` is permitted; the array literal handler keeps `[]` as raw `Nominal[Array]` (no element
+    # evidence to lock the arity), but external constructors MAY build `Tuple[]` directly when the
+    # zero-arity discipline is intended.
     #
     # See docs/type-specification/rbs-compatible-types.md (tuple) and
-    # docs/type-specification/rigor-extensions.md (hash-shape and
-    # tuple kin).
+    # docs/type-specification/rigor-extensions.md (hash-shape and tuple kin).
     class Tuple
       attr_reader :elements
 

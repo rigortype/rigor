@@ -4,11 +4,10 @@ require "json"
 
 module Rigor
   class CLI
-    # Renders a {FusedProtectionReport} (ADR-70) as text or JSON. The text form
-    # leads with the fused protected ratio (caught by *either* a type or a test),
-    # splits it into the two axes, then lists the unprotected breakages ("add a
-    # type or a test here") and the least-protected files. The framing is always
-    # *where to add protection*, never "your code is broken".
+    # Renders a {FusedProtectionReport} (ADR-70) as text or JSON. The text form leads with the fused protected ratio
+    # (caught by *either* a type or a test), splits it into the two axes, then lists the unprotected breakages ("add a
+    # type or a test here") and the least-protected files. The framing is always *where to add protection*, never "your
+    # code is broken".
     class FusedProtectionRenderer
       TOP_CALLS = 15
       TOP_FILES = 10

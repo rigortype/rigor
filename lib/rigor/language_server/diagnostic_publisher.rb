@@ -8,17 +8,14 @@ require_relative "../analysis/buffer_binding"
 
 module Rigor
   module LanguageServer
-    # Converts buffer state into `textDocument/publishDiagnostics`
-    # notifications. Owns the Rigor `Analysis::Runner` orchestration
-    # for the per-buffer single-file scope path that editor mode v1
-    # already supports — every `publish_for(uri)` call materialises
-    # a `BufferBinding` from the BufferTable entry, runs the Runner,
-    # and pushes the resulting LSP `Diagnostic[]` through the writer.
+    # Converts buffer state into `textDocument/publishDiagnostics` notifications. Owns the Rigor
+    # `Analysis::Runner` orchestration for the per-buffer single-file scope path that editor mode v1 already
+    # supports — every `publish_for(uri)` call materialises a `BufferBinding` from the BufferTable entry, runs
+    # the Runner, and pushes the resulting LSP `Diagnostic[]` through the writer.
     #
-    # Debouncing is wired via an optional `Debouncer` injected at
-    # construction (delay defaults to 200ms quiet-time); without a
-    # debouncer each call blocks synchronously (primarily for specs).
-    # Ractor-pool dispatch is queued.
+    # Debouncing is wired via an optional `Debouncer` injected at construction (delay defaults to 200ms
+    # quiet-time); without a debouncer each call blocks synchronously (primarily for specs). Ractor-pool
+    # dispatch is queued.
     class DiagnosticPublisher
       # Maps Rigor severity symbols to LSP DiagnosticSeverity
       # integers per spec § "Diagnostic":
@@ -49,12 +46,10 @@ module Rigor
         @debounce_seconds = debounce_seconds
       end
 
-      # Run analysis for the buffer at `uri` (looked up in the
-      # BufferTable) and push a `textDocument/publishDiagnostics`
-      # notification. No-op when the URI isn't a `file://` form or
-      # the buffer isn't currently open. When a Debouncer is wired,
-      # the analysis is scheduled async per the configured
-      # `debounce_seconds`; otherwise it runs inline.
+      # Run analysis for the buffer at `uri` (looked up in the BufferTable) and push a
+      # `textDocument/publishDiagnostics` notification. No-op when the URI isn't a `file://` form or the
+      # buffer isn't currently open. When a Debouncer is wired, the analysis is scheduled async per the
+      # configured `debounce_seconds`; otherwise it runs inline.
       def publish_for(uri)
         path = Uri.to_path(uri)
         return if path.nil?
@@ -66,17 +61,14 @@ module Rigor
         end
       end
 
-      # Publishes an EMPTY diagnostic array for `uri`. The LSP-spec
-      # idiom for "clear inline markers" — called from `didClose`
-      # so clients drop stale highlights when the user closes a
-      # buffer.
+      # Publishes an EMPTY diagnostic array for `uri`. The LSP-spec idiom for "clear inline markers" — called
+      # from `didClose` so clients drop stale highlights when the user closes a buffer.
       def publish_empty(uri)
         notify(uri, [])
       end
 
-      # Cancels every in-flight debounced task. Called from
-      # `Server#handle_shutdown` so pending publishes don't fire
-      # against a closed STDOUT.
+      # Cancels every in-flight debounced task. Called from `Server#handle_shutdown` so pending publishes
+      # don't fire against a closed STDOUT.
       def cancel_pending
         @debouncer&.cancel_all
       end
@@ -85,25 +77,20 @@ module Rigor
 
       def run_and_notify(uri, path)
         entry = @buffer_table[uri]
-        # The buffer may have been closed during the debounce
-        # window — drop the publish; the empty notification from
-        # didClose already cleared the markers.
+        # The buffer may have been closed during the debounce window — drop the publish; the empty
+        # notification from didClose already cleared the markers.
         return if entry.nil?
 
         diagnostics = run_analysis(path: path, bytes: entry.bytes)
         notify(uri, diagnostics)
       end
 
-      # Runs `Analysis::Runner` with a `BufferBinding` so the buffer
-      # bytes (instead of the on-disk file) drive the parse. The
-      # `Rigor::Analysis::ProjectScan` cached on the ProjectContext
-      # is passed through `prebuilt:` so plugin `#prepare`, the
-      # dependency-source walker, and the synthetic-method /
-      # project-patched scanners do not re-run per publish. The
-      # snapshot rebuilds only when `ProjectContext#invalidate!`
-      # fires (watched-file or configuration change). Returns
-      # the LSP-shaped Diagnostic Array, ready to serialize into
-      # the notification's `params.diagnostics` field.
+      # Runs `Analysis::Runner` with a `BufferBinding` so the buffer bytes (instead of the on-disk file) drive
+      # the parse. The `Rigor::Analysis::ProjectScan` cached on the ProjectContext is passed through
+      # `prebuilt:` so plugin `#prepare`, the dependency-source walker, and the synthetic-method /
+      # project-patched scanners do not re-run per publish. The snapshot rebuilds only when
+      # `ProjectContext#invalidate!` fires (watched-file or configuration change). Returns the LSP-shaped
+      # Diagnostic Array, ready to serialize into the notification's `params.diagnostics` field.
       def run_analysis(path:, bytes:)
         with_tempfile(bytes) do |tmp|
           binding = Analysis::BufferBinding.new(logical_path: path, physical_path: tmp.path)
@@ -137,10 +124,9 @@ module Rigor
       def to_lsp_diagnostic(diagnostic, buffer_path)
         return nil if diagnostic.path != buffer_path
 
-        # Rigor uses 1-based line + 1-based byte column; LSP uses
-        # 0-based line + 0-based UTF-16 code unit. UTF-16 conversion
-        # is queued (design doc § "Open questions"); v1 emits byte
-        # columns which are correct for ASCII source.
+        # Rigor uses 1-based line + 1-based byte column; LSP uses 0-based line + 0-based UTF-16 code unit.
+        # UTF-16 conversion is queued (design doc § "Open questions"); v1 emits byte columns which are
+        # correct for ASCII source.
         line = (diagnostic.line - 1).clamp(0, Float::INFINITY).to_i
         character = (diagnostic.column - 1).clamp(0, Float::INFINITY).to_i
 

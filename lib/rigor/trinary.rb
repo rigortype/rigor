@@ -1,23 +1,19 @@
 # frozen_string_literal: true
 
 module Rigor
-  # Three-valued logic value object shared by capability queries, relational
-  # queries, and any analyzer surface that distinguishes "proven yes",
-  # "proven no", and "cannot prove either".
+  # Three-valued logic value object shared by capability queries, relational queries, and any
+  # analyzer surface that distinguishes "proven yes", "proven no", and "cannot prove either".
   #
   # See docs/type-specification/relations-and-certainty.md for semantics and
   # docs/internal-spec/internal-type-api.md for the contract.
   class Trinary
     VALUES = %i[yes no maybe].freeze
 
-    # ADR-15 Phase 4b.x — eager singleton instances so the
-    # class-level `@yes` / `@no` / `@maybe` ivars are populated
-    # on the main Ractor at load time. Workers READ the ivars
-    # via `Trinary.yes` etc. without performing the `||=`
-    # write that non-main Ractors are forbidden from doing.
-    # The actual `@yes = new(:yes).freeze` allocation happens
-    # at the bottom of the file, AFTER `def initialize` is
-    # defined.
+    # ADR-15 Phase 4b.x — eager singleton instances so the class-level `@yes` / `@no` /
+    # `@maybe` ivars are populated on the main Ractor at load time. Workers READ the ivars
+    # via `Trinary.yes` etc. without performing the `||=` write that non-main Ractors are
+    # forbidden from doing. The actual `@yes = new(:yes).freeze` allocation happens at the
+    # bottom of the file, AFTER `def initialize` is defined.
     class << self
       attr_reader :yes, :no, :maybe
 
@@ -103,8 +99,8 @@ module Rigor
       raise TypeError, "expected Rigor::Trinary, got #{other.class}"
     end
 
-    # ADR-15 Phase 4b.x eager singletons (see `class << self`
-    # above). Allocated after `initialize` is defined.
+    # ADR-15 Phase 4b.x eager singletons (see `class << self` above). Allocated after
+    # `initialize` is defined.
     @yes = new(:yes).freeze
     @no = new(:no).freeze
     @maybe = new(:maybe).freeze

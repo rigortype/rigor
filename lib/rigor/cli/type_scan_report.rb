@@ -2,9 +2,8 @@
 
 module Rigor
   class CLI
-    # Aggregated report assembled by `TypeScanCommand` and consumed by
-    # `TypeScanRenderer`. The struct holds per-file paths, accumulated
-    # per-class counts, located fallback events, and any parse errors.
+    # Aggregated report assembled by `TypeScanCommand` and consumed by `TypeScanRenderer`. The struct holds per-file
+    # paths, accumulated per-class counts, located fallback events, and any parse errors.
     class Report < Data.define(
       :files,
       :parse_errors,

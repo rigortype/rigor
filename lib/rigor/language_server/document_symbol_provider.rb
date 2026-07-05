@@ -7,11 +7,9 @@ require_relative "buffer_resolution"
 
 module Rigor
   module LanguageServer
-    # Answers `textDocument/documentSymbol` requests by walking the
-    # Prism AST and emitting one LSP `DocumentSymbol` per
-    # `ClassNode` / `ModuleNode` / `DefNode`. Nested classes /
-    # modules / methods nest in the `children` array so the editor's
-    # outline tree mirrors the source structure.
+    # Answers `textDocument/documentSymbol` requests by walking the Prism AST and emitting one LSP
+    # `DocumentSymbol` per `ClassNode` / `ModuleNode` / `DefNode`. Nested classes / modules / methods nest in
+    # the `children` array so the editor's outline tree mirrors the source structure.
     #
     # SymbolKind mapping (LSP § "SymbolKind"):
     # - Class       (5)  — `class Foo`
@@ -41,8 +39,8 @@ module Rigor
 
         parse_result = Prism.parse(entry.bytes, filepath: path,
                                                 version: @project_context.configuration.target_ruby)
-        # Tolerate partial parse errors: walk what Prism gave us
-        # anyway. Editors prefer a stale outline over no outline.
+        # Tolerate partial parse errors: walk what Prism gave us anyway. Editors prefer a stale outline over
+        # no outline.
         walk_top_level(parse_result.value)
       end
 
@@ -97,10 +95,9 @@ module Rigor
 
       def def_symbol(node, in_namespace:)
         name = node.name.to_s
-        # `def self.foo` (singleton-class) → singleton-method shape.
-        # We surface the same as instance methods in v1 (LSP kind
-        # has no distinct "ClassMethod" code); the textual `self.`
-        # prefix preserves the distinction visually.
+        # `def self.foo` (singleton-class) → singleton-method shape. We surface the same as instance methods
+        # in v1 (LSP kind has no distinct "ClassMethod" code); the textual `self.` prefix preserves the
+        # distinction visually.
         display_name = node.receiver.is_a?(Prism::SelfNode) ? "self.#{name}" : name
         {
           name: display_name,
@@ -111,10 +108,9 @@ module Rigor
         }
       end
 
-      # Renders a `ConstantReadNode` / `ConstantPathNode` as its
-      # fully-qualified name string (e.g. `Foo::Bar::Baz`). Returns
-      # the slot-name source when the node shape is unrecognised so
-      # the outline still has something to display.
+      # Renders a `ConstantReadNode` / `ConstantPathNode` as its fully-qualified name string (e.g.
+      # `Foo::Bar::Baz`). Returns the slot-name source when the node shape is unrecognised so the outline
+      # still has something to display.
       def qualified_name_of(node)
         case node
         when Prism::ConstantReadNode
@@ -127,10 +123,9 @@ module Rigor
         end
       end
 
-      # LSP `Range` is 0-based start + end with `character` in
-      # UTF-16 code units. This implementation emits byte columns
-      # (correct for ASCII source); UTF-16 conversion stays queued
-      # per design doc § "Open questions".
+      # LSP `Range` is 0-based start + end with `character` in UTF-16 code units. This implementation emits
+      # byte columns (correct for ASCII source); UTF-16 conversion stays queued per design doc § "Open
+      # questions".
       def range_from(location)
         {
           start: { line: location.start_line - 1, character: location.start_column },

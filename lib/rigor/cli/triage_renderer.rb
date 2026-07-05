@@ -6,8 +6,7 @@ require_relative "../triage"
 
 module Rigor
   class CLI
-    # ADR-23 — renders a {Rigor::Triage::Report} as the `rigor
-    # triage` text report or as `--format json`.
+    # ADR-23 — renders a {Rigor::Triage::Report} as the `rigor triage` text report or as `--format json`.
     class TriageRenderer
       BAR_WIDTH = 24
       SELECTOR_ROWS = 15 # text-output cap; `--format json` carries the full list

@@ -7,12 +7,10 @@ module Rigor
     module Builtins
       # `Enumerable` module catalog. Singleton — load once.
       #
-      # `Enumerable` is a Ruby module, not a class, so the
-      # catalog is NOT routed through
-      # `MethodDispatcher::ConstantFolding::CATALOG_BY_CLASS`
-      # (which dispatches on the receiver's concrete class).
-      # The data is wired into `MODULE_CATALOGS` in
-      # `MethodDispatcher::ConstantFolding` (ancestor-chain lookup).
+      # `Enumerable` is a Ruby module, not a class, so the catalog is NOT routed through
+      # `MethodDispatcher::ConstantFolding::CATALOG_BY_CLASS` (which dispatches on the receiver's concrete
+      # class). The data is wired into `MODULE_CATALOGS` in `MethodDispatcher::ConstantFolding`
+      # (ancestor-chain lookup).
       ENUMERABLE_CATALOG = MethodCatalog.for_topic(
         "enumerable",
         mutating_selectors: {

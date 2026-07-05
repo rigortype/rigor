@@ -2,20 +2,16 @@
 
 module Rigor
   module Plugin
-    # ADR-38 declaration: "on `receiver_constraint` (and its
-    # subclasses), every method named in `methods` (def-form) or
-    # `block_methods` (block-form) also establishes instance-variable
-    # state — treat it like `initialize` for the read-before-write nil
-    # soundness gate."
+    # ADR-38 declaration: "on `receiver_constraint` (and its subclasses), every method named in `methods`
+    # (def-form) or `block_methods` (block-form) also establishes instance-variable state — treat it like
+    # `initialize` for the read-before-write nil soundness gate."
     #
-    # **Def-form** (`methods:`) — applies when the ivar write lives in a
-    # named `def` body. Example: Minitest `def setup; @conn = …; end`.
+    # **Def-form** (`methods:`) — applies when the ivar write lives in a named `def` body. Example: Minitest
+    # `def setup; @conn = …; end`.
     #
-    # **Block-form** (`block_methods:`) — applies when the ivar write
-    # lives in a block passed to a method call. Example: RSpec
-    # `before { @user = create(:user) }` / `let(:x) { @y = … }`.
-    # `ScopeIndexer` descends the block body of any `CallNode` whose
-    # method name is in `block_methods`, collecting ivar writes exactly
+    # **Block-form** (`block_methods:`) — applies when the ivar write lives in a block passed to a method
+    # call. Example: RSpec `before { @user = create(:user) }` / `let(:x) { @y = … }`. `ScopeIndexer` descends
+    # the block body of any `CallNode` whose method name is in `block_methods`, collecting ivar writes exactly
     # as it would for a def-form initializer.
     #
     # At least one of `methods:` or `block_methods:` must be non-empty.
@@ -34,28 +30,24 @@ module Rigor
     #     block_methods: [:before, :let, :subject]
     #   )
     #
-    # The Ruby analogue of PHPStan's `AdditionalConstructorsExtension`.
-    # `Rigor::Inference::ScopeIndexer` consults the aggregated set at
-    # its read-before-write gate.
+    # The Ruby analogue of PHPStan's `AdditionalConstructorsExtension`. `Rigor::Inference::ScopeIndexer`
+    # consults the aggregated set at its read-before-write gate.
     #
-    # The contribution can only ever *suppress* a nil widening — it
-    # never makes the analyzer stricter — so a missed or over-broad
-    # match is false-positive-safe by construction (ADR-38 § "Why this
-    # is FP-safe").
+    # The contribution can only ever *suppress* a nil widening — it never makes the analyzer stricter — so a
+    # missed or over-broad match is false-positive-safe by construction (ADR-38 § "Why this is FP-safe").
     #
     # ## Fields
     #
-    # - `receiver_constraint` — fully-qualified class name (String).
-    #   The entry applies to that class and its subclasses.
-    # - `methods` — Array of Symbol `def`-form method names (may be
-    #   empty when only block_methods is used).
-    # - `block_methods` — Array of Symbol call-with-block method names
-    #   (may be empty when only methods is used).
+    # - `receiver_constraint` — fully-qualified class name (String). The entry applies to that class and its
+    #   subclasses.
+    # - `methods` — Array of Symbol `def`-form method names (may be empty when only block_methods is used).
+    # - `block_methods` — Array of Symbol call-with-block method names (may be empty when only methods is
+    #   used).
     #
     # ## Ractor-shareability
     #
-    # All fields are frozen at construction (ADR-15 Phase 1);
-    # `Ractor.shareable?` returns true after `#initialize`.
+    # All fields are frozen at construction (ADR-15 Phase 1); `Ractor.shareable?` returns true after
+    # `#initialize`.
     class AdditionalInitializer
       attr_reader :receiver_constraint, :methods, :block_methods
 
@@ -71,14 +63,12 @@ module Rigor
         freeze
       end
 
-      # True when `method_name` (a Symbol) is declared a def-form
-      # initializer by this entry.
+      # True when `method_name` (a Symbol) is declared a def-form initializer by this entry.
       def covers_method?(method_name)
         methods.include?(method_name)
       end
 
-      # True when `method_name` (a Symbol) is declared a block-form
-      # initializer by this entry.
+      # True when `method_name` (a Symbol) is declared a block-form initializer by this entry.
       def covers_block_method?(method_name)
         block_methods.include?(method_name)
       end

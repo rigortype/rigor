@@ -4,10 +4,9 @@ require "json"
 
 module Rigor
   class CLI
-    # Renders a {MutationProtectionReport} (ADR-63 Tier 2) as text or JSON. The
-    # text form leads with the effectiveness ratio (caught breakages), then the
-    # breakages Rigor missed ("add a type here"), then the least-effective files.
-    # The framing is always *where to add a type*, never "your code is broken".
+    # Renders a {MutationProtectionReport} (ADR-63 Tier 2) as text or JSON. The text form leads with the effectiveness
+    # ratio (caught breakages), then the breakages Rigor missed ("add a type here"), then the least-effective files. The
+    # framing is always *where to add a type*, never "your code is broken".
     class MutationProtectionRenderer
       TOP_CALLS = 15
       TOP_FILES = 10

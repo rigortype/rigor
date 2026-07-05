@@ -7,38 +7,32 @@ require_relative "member_shape_projection"
 module Rigor
   module Inference
     module MethodDispatcher
-      # ADR-48 Struct follow-up — `Struct.new` value folding, the mutable
-      # sibling of {DataFolding}. Same fully-decidable-shape, degrade-on-any-
-      # uncertainty discipline, with one extra premise the immutable `Data`
-      # path does not need: **mutation soundness.**
+      # ADR-48 Struct follow-up — `Struct.new` value folding, the mutable sibling of {DataFolding}. Same
+      # fully-decidable-shape, degrade-on-any-uncertainty discipline, with one extra premise the immutable
+      # `Data` path does not need: **mutation soundness.**
       #
-      # A `Struct` instance is mutable (`s.x = v`, `s[:x] = v`, escape), so a
-      # member map bound to a variable can be invalidated by a later write.
-      # This slice (ADR-48 slices 1+2 in the sound *transient* form) folds a
-      # member read ONLY off a **fresh** instance — the transient receiver of
-      # a `.new(...).x` / `.with(...).x` chain, which provably cannot have
-      # been mutated between materialisation and the read. A member read off
-      # a *stored* binding degrades to `Dynamic[top]` rather than fold a
-      # possibly-stale value. Promoting the fold to mutation-free bound
-      # locals is the deferred slice 3 (relax the fresh-receiver gate to a
-      # fold-safe-local scan); precise mutated-member re-typing is slice 4.
+      # A `Struct` instance is mutable (`s.x = v`, `s[:x] = v`, escape), so a member map bound to a
+      # variable can be invalidated by a later write. This slice (ADR-48 slices 1+2 in the sound
+      # *transient* form) folds a member read ONLY off a **fresh** instance — the transient receiver of a
+      # `.new(...).x` / `.with(...).x` chain, which provably cannot have been mutated between
+      # materialisation and the read. A member read off a *stored* binding degrades to `Dynamic[top]`
+      # rather than fold a possibly-stale value. Promoting the fold to mutation-free bound locals is the
+      # deferred slice 3 (relax the fresh-receiver gate to a fold-safe-local scan); precise mutated-member
+      # re-typing is slice 4.
       #
       # Responsibilities:
       #
-      # 1. `Struct.new(:x, :y [, keyword_init: <bool>])` on a
-      #    `Singleton[Struct]` receiver, literal-Symbol members, NO block ->
-      #    `StructClass{members:, keyword_init:}`. A block / non-literal
-      #    members defer.
-      # 2. `.new` / `.[]` on a `StructClass` (or a `Singleton[Point]` with a
-      #    recorded struct layout) -> a `StructInstance`, the member map built
-      #    from the call's arguments (positional or keyword per the class's
-      #    `keyword_init`). A form / arity mismatch degrades to `Dynamic[top]`
-      #    rather than a wrong member map. `.members` on the class folds.
-      # 3. member reads + `[]` / `to_h` / `deconstruct` / `deconstruct_keys`
-      #    / `members` / `with` on a *fresh* `StructInstance` -> the precise
-      #    projected type; member *setters* (`s.x = v`) return the assigned
-      #    value type. Unhandled / stored-receiver calls return nil so the
-      #    pipeline projects the instance to its nominal through RbsDispatch.
+      # 1. `Struct.new(:x, :y [, keyword_init: <bool>])` on a `Singleton[Struct]` receiver, literal-Symbol
+      #    members, NO block -> `StructClass{members:, keyword_init:}`. A block / non-literal members
+      #    defer.
+      # 2. `.new` / `.[]` on a `StructClass` (or a `Singleton[Point]` with a recorded struct layout) -> a
+      #    `StructInstance`, the member map built from the call's arguments (positional or keyword per the
+      #    class's `keyword_init`). A form / arity mismatch degrades to `Dynamic[top]` rather than a wrong
+      #    member map. `.members` on the class folds.
+      # 3. member reads + `[]` / `to_h` / `deconstruct` / `deconstruct_keys` / `members` / `with` on a
+      #    *fresh* `StructInstance` -> the precise projected type; member *setters* (`s.x = v`) return the
+      #    assigned value type. Unhandled / stored-receiver calls return nil so the pipeline projects the
+      #    instance to its nominal through RbsDispatch.
       #
       # See docs/adr/48-data-struct-value-folding.md § "Struct follow-up".
       module StructFolding
@@ -64,12 +58,10 @@ module Rigor
           end
         end
 
-        # A `Struct.new`-defined class assigned to a constant (or a
-        # `class Point < Struct.new(...)` subclass) is canonicalised by the
-        # engine to `Singleton[Point]`, not a `StructClass` — so its member
-        # layout is read from the project side-table the scope indexer built
-        # (`Scope#struct_member_layout`) rather than from the receiver
-        # carrier.
+        # A `Struct.new`-defined class assigned to a constant (or a `class Point < Struct.new(...)`
+        # subclass) is canonicalised by the engine to `Singleton[Point]`, not a `StructClass` — so its
+        # member layout is read from the project side-table the scope indexer built
+        # (`Scope#struct_member_layout`) rather than from the receiver carrier.
         def fold_named_new(singleton, context)
           scope = context.scope
           return nil if scope.nil?
@@ -84,8 +76,8 @@ module Rigor
 
         def fold_struct_new(context)
           return nil unless context.method_name == :new
-          # Block-form (`Struct.new(:x) do ... end`) defers — the named
-          # constant/subclass forms still fold via the layout side-table.
+          # Block-form (`Struct.new(:x) do ... end`) defers — the named constant/subclass forms still fold
+          # via the layout side-table.
           return nil unless context.block_type.nil?
 
           parsed = parse_struct_new_args(context.args)
@@ -94,10 +86,9 @@ module Rigor
           Type::Combinator.struct_class_of(members: parsed[:members], keyword_init: parsed[:keyword_init])
         end
 
-        # Parses `Struct.new`'s arguments into `{ members:, keyword_init: }`,
-        # or nil when any argument is non-conforming (a dynamic member name,
-        # an unexpected trailing keyword). Handles the optional leading String
-        # class name and the trailing `keyword_init:` option hash.
+        # Parses `Struct.new`'s arguments into `{ members:, keyword_init: }`, or nil when any argument is
+        # non-conforming (a dynamic member name, an unexpected trailing keyword). Handles the optional
+        # leading String class name and the trailing `keyword_init:` option hash.
         def parse_struct_new_args(args)
           rest = args.dup
           keyword_init = false
@@ -125,9 +116,9 @@ module Rigor
           { members: members, keyword_init: keyword_init }
         end
 
-        # A trailing hash is the `Struct.new` options hash only when it is a
-        # closed shape whose sole key is `:keyword_init`. Any other key means
-        # the call is not a recognisable member-list definition -> defer.
+        # A trailing hash is the `Struct.new` options hash only when it is a closed shape whose sole key is
+        # `:keyword_init`. Any other key means the call is not a recognisable member-list definition ->
+        # defer.
         def struct_options_hash?(shape)
           shape.closed? && shape.optional_keys.empty? &&
             shape.pairs.keys.all? { |key| key == :keyword_init }
@@ -154,10 +145,9 @@ module Rigor
           Type::Combinator.struct_instance_of(members: map, class_name: class_name)
         end
 
-        # Builds the member -> type map honouring the class's `keyword_init`
-        # flag: a `keyword_init: true` struct accepts only the keyword form,
-        # a positional struct only the positional form. The mismatched form
-        # is a different runtime shape, so it degrades rather than fold.
+        # Builds the member -> type map honouring the class's `keyword_init` flag: a `keyword_init: true`
+        # struct accepts only the keyword form, a positional struct only the positional form. The
+        # mismatched form is a different runtime shape, so it degrades rather than fold.
         def member_map_for_new(members, keyword_init, context)
           if keyword_new?(context)
             keyword_init ? keyword_member_map(members, context.args) : nil
@@ -166,9 +156,9 @@ module Rigor
           end
         end
 
-        # `Point.new(x: 1)` arrives as a single trailing `HashShape` whose
-        # call node is a `KeywordHashNode`; distinguishing it from a
-        # positional hash needs the call node (both type to a `HashShape`).
+        # `Point.new(x: 1)` arrives as a single trailing `HashShape` whose call node is a
+        # `KeywordHashNode`; distinguishing it from a positional hash needs the call node (both type to a
+        # `HashShape`).
         def keyword_new?(context)
           node = context.call_node
           return false if node.nil?
@@ -179,9 +169,9 @@ module Rigor
           arguments.last.is_a?(Prism::KeywordHashNode)
         end
 
-        # `Struct.new(:a, :b).new(v)` is legal — trailing members default to
-        # `nil` — so fewer positionals than members pad with `Constant[nil]`;
-        # more positionals than members is an ArgumentError -> degrade.
+        # `Struct.new(:a, :b).new(v)` is legal — trailing members default to `nil` — so fewer positionals
+        # than members pad with `Constant[nil]`; more positionals than members is an ArgumentError ->
+        # degrade.
         def positional_member_map(members, args)
           return nil if args.size > members.size
 
@@ -190,9 +180,8 @@ module Rigor
           end
         end
 
-        # `Struct.new(:a, :b).new(a: 1)` is legal — omitted members default
-        # to `nil` — so a keyword subset pads the rest; an unknown key is an
-        # ArgumentError -> degrade.
+        # `Struct.new(:a, :b).new(a: 1)` is legal — omitted members default to `nil` — so a keyword subset
+        # pads the rest; an unknown key is an ArgumentError -> degrade.
         def keyword_member_map(members, args)
           return nil unless args.size == 1
 
@@ -204,9 +193,8 @@ module Rigor
           members.to_h { |name| [name, shape.pairs[name] || Type::Combinator.constant_of(nil)] }
         end
 
-        # A `.new` whose arguments cannot soundly populate the member map
-        # degrades to `Dynamic[top]` (today's behaviour for `Struct.new(...)`
-        # instances), never a wrong map.
+        # A `.new` whose arguments cannot soundly populate the member map degrades to `Dynamic[top]`
+        # (today's behaviour for `Struct.new(...)` instances), never a wrong map.
         def degraded_instance
           Type::Combinator.untyped
         end
@@ -218,27 +206,24 @@ module Rigor
           args = context.args
           members = instance.members
 
-          # Member setter `s.x = v`: returns the assigned value type. Sound
-          # regardless of mutation state (it models the setter's own return),
-          # and avoids a fall-through undefined-method on a writer the
-          # existence table does not register.
+          # Member setter `s.x = v`: returns the assigned value type. Sound regardless of mutation state
+          # (it models the setter's own return), and avoids a fall-through undefined-method on a writer
+          # the existence table does not register.
           setter = member_setter_target(method_name, members)
           return args.first if setter && args.size == 1
 
           foldable = foldable_receiver?(context)
 
           if members.key?(method_name) && args.empty? && !reader_overridden?(instance, method_name, context.scope)
-            # A stored receiver folds only when the bound local is proven
-            # fold-safe (ADR-48 slice 3 — never mutated / aliased / escaped);
-            # otherwise the member value may be stale, so it degrades to
+            # A stored receiver folds only when the bound local is proven fold-safe (ADR-48 slice 3 — never
+            # mutated / aliased / escaped); otherwise the member value may be stale, so it degrades to
             # `Dynamic[top]` (not nil -> no undefined-method fall-through).
             return foldable ? members.fetch(method_name) : Type::Combinator.untyped
           end
 
-          # Projections fold only off a foldable (fresh, or proven fold-safe)
-          # instance; off any other stored binding they defer to Struct's RBS
-          # (`to_h` / `[]` / `members` / `deconstruct*` all exist on `Struct`),
-          # which is sound and non-regressive.
+          # Projections fold only off a foldable (fresh, or proven fold-safe) instance; off any other
+          # stored binding they defer to Struct's RBS (`to_h` / `[]` / `members` / `deconstruct*` all exist
+          # on `Struct`), which is sound and non-regressive.
           return nil unless foldable
 
           fold_fresh_projection(instance, method_name, args)
@@ -258,9 +243,9 @@ module Rigor
           end
         end
 
-        # The member name a `:<member>=` setter targets, or nil. Comparison
-        # operators (`==`, `>=`, ...) end with `=` too but never strip to a
-        # member symbol, so they fall through to the normal dispatch path.
+        # The member name a `:<member>=` setter targets, or nil. Comparison operators (`==`, `>=`, ...) end
+        # with `=` too but never strip to a member symbol, so they fall through to the normal dispatch
+        # path.
         def member_setter_target(method_name, members)
           name = method_name.to_s
           return nil unless name.end_with?("=")
@@ -269,17 +254,16 @@ module Rigor
           members.key?(base) ? base : nil
         end
 
-        # A member read is foldable when the receiver is either FRESH (the
-        # transient result of a `.new(...)`/`.with(...)` chain, which cannot
-        # have been mutated between materialisation and this read) or a
-        # FOLD-SAFE stored local (ADR-48 slice 3 — `StructFoldSafety` proved
-        # the binding is never mutated / aliased / escaped in its scope).
+        # A member read is foldable when the receiver is either FRESH (the transient result of a
+        # `.new(...)`/`.with(...)` chain, which cannot have been mutated between materialisation and this
+        # read) or a FOLD-SAFE stored local (ADR-48 slice 3 — `StructFoldSafety` proved the binding is
+        # never mutated / aliased / escaped in its scope).
         def foldable_receiver?(context)
           fresh_receiver?(context) || fold_safe_local_receiver?(context)
         end
 
-        # A fresh receiver is the transient result of a chained call
-        # (`Point.new(1, 2).x`, `inst.with(x: 9).y`).
+        # A fresh receiver is the transient result of a chained call (`Point.new(1, 2).x`,
+        # `inst.with(x: 9).y`).
         def fresh_receiver?(context)
           node = context.call_node
           return false if node.nil?
@@ -287,8 +271,8 @@ module Rigor
           node.receiver.is_a?(Prism::CallNode)
         end
 
-        # A fold-safe stored receiver is a local-variable read whose name the
-        # body's fold-safe set (on the scope) marks as never mutated.
+        # A fold-safe stored receiver is a local-variable read whose name the body's fold-safe set (on the
+        # scope) marks as never mutated.
         def fold_safe_local_receiver?(context)
           node = context.call_node
           receiver = node&.receiver

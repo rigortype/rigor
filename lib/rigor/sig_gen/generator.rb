@@ -16,30 +16,21 @@ module Rigor
   module SigGen
     # Core generator for `rigor sig-gen` (ADR-14 slice 1 — MVP).
     #
-    # Walks every `.rb` file under the input paths, builds a
-    # per-node scope index via {Rigor::Inference::ScopeIndexer},
-    # finds every `Prism::DefNode` whose enclosing class is
-    # nameable, types the body's last expression to derive an
-    # inferred return, looks up the project's existing RBS
-    # declaration (if any), and emits one {MethodCandidate} per
-    # def.
+    # Walks every `.rb` file under the input paths, builds a per-node scope index via
+    # {Rigor::Inference::ScopeIndexer}, finds every `Prism::DefNode` whose enclosing class is nameable, types the
+    # body's last expression to derive an inferred return, looks up the project's existing RBS declaration (if
+    # any), and emits one {MethodCandidate} per def.
     #
     # The MVP keeps the scope deliberately narrow:
-    # - Only instance methods inside a `class` / `module` body
-    #   are considered. Top-level / DSL-block / singleton defs
-    #   are skipped (`sig.skipped.complex-shape`).
-    # - Parameter signatures are hard-coded to `untyped` per
-    #   ADR-14 § "Robustness principle compliance" clause 2;
+    # - Only instance methods inside a `class` / `module` body are considered. Top-level / DSL-block / singleton
+    #   defs are skipped (`sig.skipped.complex-shape`).
+    # - Parameter signatures are hard-coded to `untyped` per ADR-14 § "Robustness principle compliance" clause 2;
     #   `--params=observed` arrives in slice 3.
-    # - Optional / rest / keyword / block params disqualify the
-    #   def (`sig.skipped.complex-shape`).
-    # - A `Dynamic[top]` inferred return becomes
-    #   `sig.skipped.untyped-return` — emitting `untyped` would
-    #   obscure rather than help.
-    # - Tighter-return detection compares the RBS-erased
-    #   spellings only when the existing declared return
-    #   strictly accepts the inferred one (acceptance check
-    #   under the engine's current `:gradual` mode; ADR-14
+    # - Optional / rest / keyword / block params disqualify the def (`sig.skipped.complex-shape`).
+    # - A `Dynamic[top]` inferred return becomes `sig.skipped.untyped-return` — emitting `untyped` would obscure
+    #   rather than help.
+    # - Tighter-return detection compares the RBS-erased spellings only when the existing declared return
+    #   strictly accepts the inferred one (acceptance check under the engine's current `:gradual` mode; ADR-14
     #   reserves the eventual `:strict` mode).
     class Generator # rubocop:disable Metrics/ClassLength
       # @param configuration [Rigor::Configuration]
@@ -54,24 +45,18 @@ module Rigor
         @paths = paths
         @observations = normalize_observations(observations)
         @include_private = include_private
-        # Per-file scratch state. `analyse_file` resets each
-        # one to a fresh container for every file walked so
-        # candidates from one file don't leak into another;
-        # initialising empty here gives downstream consumers
-        # (`build_candidate`, `method_def_prefix`) a never-nil
-        # invariant without per-call-site defensive guards.
+        # Per-file scratch state. `analyse_file` resets each one to a fresh container for every file walked so
+        # candidates from one file don't leak into another; initialising empty here gives downstream consumers
+        # (`build_candidate`, `method_def_prefix`) a never-nil invariant without per-call-site defensive guards.
         @namespace_kinds = {}
         @module_function_methods = Set.new
         @class_shells = Set.new
         @class_superclasses = {}
       end
 
-      # Lifts legacy plain-`Array[Type]` observation entries
-      # into {ObservedCall} carriers. Specs from the slice-3
-      # generation predate the carrier and pass observations
-      # as `{ [class, method] => [[type1, type2], ...] }`;
-      # the wrapper keeps those passing while internal code
-      # always sees the new shape.
+      # Lifts legacy plain-`Array[Type]` observation entries into {ObservedCall} carriers. Specs from the
+      # slice-3 generation predate the carrier and pass observations as `{ [class, method] => [[type1, type2],
+      # ...] }`; the wrapper keeps those passing while internal code always sees the new shape.
       def normalize_observations(map)
         return map if map.empty?
 
@@ -120,11 +105,9 @@ module Rigor
         @class_superclasses = {}
         defs = collect_method_definitions(parse_result.value)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
-          # An analyzer bug typing one def's body must cost only that
-          # def's candidate, never the whole `rigor sig-gen` run. The
-          # `check` path recovers each *file* this way
-          # (worker_session.rb); sig-gen recovers per-def so the rest of
-          # the file's candidates still emit.
+          # An analyzer bug typing one def's body must cost only that def's candidate, never the whole
+          # `rigor sig-gen` run. The `check` path recovers each *file* this way (worker_session.rb); sig-gen
+          # recovers per-def so the rest of the file's candidates still emit.
 
           classify_def(path, def_node, class_name, kind, scope_index)
         rescue StandardError
@@ -134,29 +117,20 @@ module Rigor
         candidates_from_defs + collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
       end
 
-      # Walks the AST collecting `(def_node, class_name, kind)`
-      # tuples for every `def` Rigor can re-type. Slice 1
-      # covered instance `def foo` methods inside a nameable
-      # `class` / `module` body. Slice 4 extends this to
-      # singleton-side methods via `def self.foo` and
-      # `class << self; def foo; end`; top-level / DSL-block
-      # defs still degrade silently (no nameable receiver).
+      # Walks the AST collecting `(def_node, class_name, kind)` tuples for every `def` Rigor can re-type. Slice 1
+      # covered instance `def foo` methods inside a nameable `class` / `module` body. Slice 4 extends this to
+      # singleton-side methods via `def self.foo` and `class << self; def foo; end`; top-level / DSL-block defs
+      # still degrade silently (no nameable receiver).
       #
-      # ADR-14 gap-#3 follow-up tracks two extra pieces during
-      # the same walk so the Writer can emit kind-correct RBS
-      # without guessing:
+      # ADR-14 gap-#3 follow-up tracks two extra pieces during the same walk so the Writer can emit kind-correct
+      # RBS without guessing:
       #
-      # - `@namespace_kinds[qualified_name]` records whether
-      #   each segment came from `class Foo` (`:class`) or
-      #   `module Foo` (`:module`). Used by the writer's
-      #   `wrap_in_modules` step to emit the right keyword for
+      # - `@namespace_kinds[qualified_name]` records whether each segment came from `class Foo` (`:class`) or
+      #   `module Foo` (`:module`). Used by the writer's `wrap_in_modules` step to emit the right keyword for
       #   each intermediate segment AND the leaf.
-      # - `@module_function_methods` records `(class_name,
-      #   method_name)` pairs where a `module_function` (no
-      #   args) call preceded the `def` inside a module body.
-      #   The renderer emits `def self?.name` for these, the
-      #   RBS spelling that matches the dual instance +
-      #   singleton dispatch the runtime produces.
+      # - `@module_function_methods` records `(class_name, method_name)` pairs where a `module_function` (no
+      #   args) call preceded the `def` inside a module body. The renderer emits `def self?.name` for these, the
+      #   RBS spelling that matches the dual instance + singleton dispatch the runtime produces.
       def collect_method_definitions(root)
         out = []
         walk_defs(root, [], false, false, out)
@@ -179,8 +153,7 @@ module Rigor
           return
         when Prism::ConstantWriteNode
           register_data_struct_shell(node, prefix)
-          # fall through to recurse into the RHS so a trailing
-          # `do ... end` block carrying defs is still walked.
+          # fall through to recurse into the RHS so a trailing `do ... end` block carrying defs is still walked.
         when Prism::StatementsNode
           walk_statements(node, prefix, in_singleton_class, module_function_active, out)
           return
@@ -202,20 +175,15 @@ module Rigor
         true
       end
 
-      # ADR-14: a generated subclass declaration MUST carry its
-      # superclass, or the sidecar `sig/` misrepresents the class
-      # (inherited members vanish → receiver dispatch degrades to
-      # `Dynamic`) and, worse, a nested reference to an inherited
-      # type re-declares the class as a bare namespace on the RBS
-      # side and can collapse the whole env (the 2026-07-04 redmine
-      # `GitAdapter < AbstractAdapter` crash). Only a plain constant
-      # superclass is emittable: `class X < Foo` / `class X <
-      # Foo::Bar` yields the source token verbatim (RBS resolves it
-      # relative to the emitted namespace, matching Ruby's lexical
-      # scope). A computed superclass (`Struct.new`, `Data.define`,
-      # `Class.new`, any `CallNode`) is left unrecorded — those flow
-      # through the {#register_data_struct_shell} shell path or are
-      # simply un-representable, and guessing would misfold.
+      # ADR-14: a generated subclass declaration MUST carry its superclass, or the sidecar `sig/` misrepresents
+      # the class (inherited members vanish → receiver dispatch degrades to `Dynamic`) and, worse, a nested
+      # reference to an inherited type re-declares the class as a bare namespace on the RBS side and can
+      # collapse the whole env (the 2026-07-04 redmine `GitAdapter < AbstractAdapter` crash). Only a plain
+      # constant superclass is emittable: `class X < Foo` / `class X < Foo::Bar` yields the source token verbatim
+      # (RBS resolves it relative to the emitted namespace, matching Ruby's lexical scope). A computed
+      # superclass (`Struct.new`, `Data.define`, `Class.new`, any `CallNode`) is left unrecorded — those flow
+      # through the {#register_data_struct_shell} shell path or are simply un-representable, and guessing would
+      # misfold.
       def record_superclass(node, full)
         return unless node.is_a?(Prism::ClassNode)
 
@@ -223,24 +191,16 @@ module Rigor
         @class_superclasses[full] = superclass if superclass
       end
 
-      # ADR-14 gap-#3 (e): recognises
-      # `Const = Data.define(...)` and
-      # `Const = Struct.new(...)` as class declarations.
-      # The runtime side stamps a brand-new anonymous class
-      # at the RHS and binds it to `Const`, so the generated
-      # RBS needs an explicit `class Const` declaration even
-      # though no `class Const ... end` block appears in
-      # source. Without it, references to `Const` in return
-      # types fail to resolve under Steep (the canonical case
-      # is `GemResolver::Resolved | GemResolver::Unresolvable`
-      # where `Unresolvable = Data.define(:gem_name, :reason)`).
+      # ADR-14 gap-#3 (e): recognises `Const = Data.define(...)` and `Const = Struct.new(...)` as class
+      # declarations. The runtime side stamps a brand-new anonymous class at the RHS and binds it to `Const`, so
+      # the generated RBS needs an explicit `class Const` declaration even though no `class Const ... end` block
+      # appears in source. Without it, references to `Const` in return types fail to resolve under Steep (the
+      # canonical case is `GemResolver::Resolved | GemResolver::Unresolvable` where
+      # `Unresolvable = Data.define(:gem_name, :reason)`).
       #
-      # The walker records the fully-qualified constant name
-      # in `@class_shells` (carried through to every
-      # candidate so the writer's tree-builder picks it up)
-      # AND in `@namespace_kinds` so the leaf's `class`
-      # keyword wins over the intermediate-segment `module`
-      # default.
+      # The walker records the fully-qualified constant name in `@class_shells` (carried through to every
+      # candidate so the writer's tree-builder picks it up) AND in `@namespace_kinds` so the leaf's `class`
+      # keyword wins over the intermediate-segment `module` default.
       def register_data_struct_shell(node, prefix)
         return unless data_or_struct_call?(node.value)
 
@@ -264,16 +224,11 @@ module Rigor
         DATA_STRUCT_SHELL_HEADS[receiver.name.to_s] == value.name
       end
 
-      # Module / class bodies are walked through the
-      # `walk_statements` path so `module_function` (no-args)
-      # encountered as one statement applies to every
-      # subsequent sibling def in the same body. The
-      # directive is module-scoped semantically — classes
-      # inherit `module_function` via `Module`'s ancestor
-      # chain but don't honour it the same way at runtime, so
-      # tracking is only meaningful inside `ModuleNode`
-      # bodies. Generator emits `def self?.name` for the
-      # marked defs.
+      # Module / class bodies are walked through the `walk_statements` path so `module_function` (no-args)
+      # encountered as one statement applies to every subsequent sibling def in the same body. The directive is
+      # module-scoped semantically — classes inherit `module_function` via `Module`'s ancestor chain but don't
+      # honour it the same way at runtime, so tracking is only meaningful inside `ModuleNode` bodies. Generator
+      # emits `def self?.name` for the marked defs.
       def walk_namespace_body(namespace_node, prefix, out)
         return if namespace_node.body.nil?
 
@@ -306,12 +261,9 @@ module Rigor
         out << [node, class_name, kind]
       end
 
-      # Wraps `MethodCandidate.new` so every candidate carries
-      # the per-file `@namespace_kinds` map AND the
-      # `@class_shells` set — the Writer's nested-syntax
-      # emission consults both to pick `module` vs `class`
-      # for each segment and to emit empty
-      # `Const = Data.define(...)` declarations.
+      # Wraps `MethodCandidate.new` so every candidate carries the per-file `@namespace_kinds` map AND the
+      # `@class_shells` set — the Writer's nested-syntax emission consults both to pick `module` vs `class` for
+      # each segment and to emit empty `Const = Data.define(...)` declarations.
       def build_candidate(**)
         MethodCandidate.new(
           namespace_kinds: @namespace_kinds,
@@ -321,10 +273,8 @@ module Rigor
         )
       end
 
-      # Returns "def self." (kind: :singleton),
-      # "def self?." (instance method declared inside a
-      # `module_function` region — both instance + singleton
-      # dispatch at runtime), or "def " (plain instance).
+      # Returns "def self." (kind: :singleton), "def self?." (instance method declared inside a
+      # `module_function` region — both instance + singleton dispatch at runtime), or "def " (plain instance).
       def method_def_prefix(class_name, method_name, kind)
         return "def self." if kind == :singleton
         return "def self?." if @module_function_methods.include?([class_name, method_name])
@@ -332,16 +282,11 @@ module Rigor
         "def "
       end
 
-      # Slice-4 follow-up surfaced by the Rigor self-dogfood:
-      # most `lib/rigor/cli/*` files have a small public
-      # surface (`run`) and many private helpers. Emitting the
-      # private helpers into a `sig/` file is noise — private
-      # methods are implementation details, not part of the
-      # type contract downstream consumers (Steep, IDE, gem
-      # users) read. The default now skips private and
-      # protected methods; the `:include_private` flag
-      # restores the slice-4 behaviour for callers that want
-      # every method.
+      # Slice-4 follow-up surfaced by the Rigor self-dogfood: most `lib/rigor/cli/*` files have a small public
+      # surface (`run`) and many private helpers. Emitting the private helpers into a `sig/` file is noise —
+      # private methods are implementation details, not part of the type contract downstream consumers (Steep,
+      # IDE, gem users) read. The default now skips private and protected methods; the `:include_private` flag
+      # restores the slice-4 behaviour for callers that want every method.
       def visibility_excludes?(def_node, class_name, kind, scope_index)
         return false if kind == :singleton
         return false if @include_private
@@ -353,34 +298,25 @@ module Rigor
         %i[private protected].include?(visibility)
       end
 
-      # Ruby's `initialize` return value is never meaningful;
-      # the conventional RBS spelling is `() -> void`. The
-      # body-typing path types the last expression (often an
-      # ivar assignment whose rvalue happens to be `[]` /
+      # Ruby's `initialize` return value is never meaningful; the conventional RBS spelling is `() -> void`. The
+      # body-typing path types the last expression (often an ivar assignment whose rvalue happens to be `[]` /
       # `{}`), which produces nonsense return types.
       #
-      # Skipping `initialize` entirely is correct ONLY for
-      # default constructors — the `Object#initialize: () -> void`
-      # RBS fallback then covers the lookup. When the class
-      # has a non-trivial `initialize(argv:, ...)` (i.e. any
-      # parameter), partial-class sigs trip Steep's
-      # method-parameter-mismatch check: Steep sees the
-      # runtime `def initialize(...)` and compares against
-      # the inherited `Object#initialize: () -> void`. The
-      # mismatch surfaces a `Ruby::MethodParameterMismatch`
-      # warning even when `rigor check` itself is clean.
+      # Skipping `initialize` entirely is correct ONLY for default constructors — the
+      # `Object#initialize: () -> void` RBS fallback then covers the lookup. When the class has a non-trivial
+      # `initialize(argv:, ...)` (i.e. any parameter), partial-class sigs trip Steep's method-parameter-mismatch
+      # check: Steep sees the runtime `def initialize(...)` and compares against the inherited
+      # `Object#initialize: () -> void`. The mismatch surfaces a `Ruby::MethodParameterMismatch` warning even
+      # when `rigor check` itself is clean.
       #
-      # Returning `nil` here causes `classify_def` to skip
-      # emission; returning `:emit_stub` causes
-      # `initialize_stub_candidate` to emit a permissive
-      # `(<param shape>) -> void` stub matching the
-      # runtime parameter list.
+      # Returning `nil` here causes `classify_def` to skip emission; returning `:emit_stub` causes
+      # `initialize_stub_candidate` to emit a permissive `(<param shape>) -> void` stub matching the runtime
+      # parameter list.
       def initialize_excludes?(def_node, kind)
         return false unless kind == :instance
         return false unless def_node.name == :initialize
 
-        # Default constructor with no params — skip; the
-        # Object#initialize RBS fallback covers it.
+        # Default constructor with no params — skip; the Object#initialize RBS fallback covers it.
         params = def_node.parameters
         params.nil? || trivial_initialize_params?(params)
       end
@@ -397,19 +333,14 @@ module Rigor
         kind == :instance && def_node.name == :initialize && !trivial_initialize_params?(def_node.parameters)
       end
 
-      # Emits `def initialize: (<shape>) -> void`. The return
-      # is always `void` because Ruby's `initialize` return
-      # value is never meaningful. The parameter list mirrors
-      # the runtime shape (required / optional / rest /
-      # keyword / keyword-rest / block).
+      # Emits `def initialize: (<shape>) -> void`. The return is always `void` because Ruby's `initialize`
+      # return value is never meaningful. The parameter list mirrors the runtime shape (required / optional /
+      # rest / keyword / keyword-rest / block).
       #
-      # When `--params=observed` populates `@observations` for
-      # `[class_name, :initialize]` (via the
-      # `ObservationCollector`'s `.new` → `:initialize`
-      # routing), positional and keyword arg types come from
-      # the per-position / per-keyword union of observed
-      # types; otherwise every position keeps `untyped` per
-      # ADR-5 clause 2.
+      # When `--params=observed` populates `@observations` for `[class_name, :initialize]` (via the
+      # `ObservationCollector`'s `.new` → `:initialize` routing), positional and keyword arg types come from the
+      # per-position / per-keyword union of observed types; otherwise every position keeps `untyped` per ADR-5
+      # clause 2.
       def initialize_stub_candidate(path, def_node, class_name)
         rbs = "def initialize: (#{render_initialize_param_list(def_node.parameters, class_name)}) -> void"
         build_candidate(
@@ -442,10 +373,8 @@ module Rigor
         parts.join(", ")
       end
 
-      # Picks observations under `[class_name, :initialize]`
-      # whose positional arity matches the def's accepted
-      # range (required..required+optional). Looser arities
-      # don't get used because they describe a different
+      # Picks observations under `[class_name, :initialize]` whose positional arity matches the def's accepted
+      # range (required..required+optional). Looser arities don't get used because they describe a different
       # overload the stub cannot express.
       def initialize_observations(class_name, params)
         return [] if @observations.empty?
@@ -503,11 +432,9 @@ module Rigor
         end
       end
 
-      # Required positionals only; the MVP's body-typing path
-      # gives well-defined returns for that shape. Optional /
-      # rest / keyword / block parameters route through the
-      # `sig.skipped.complex-shape` reason until slices 3+
-      # widen the param policy.
+      # Required positionals only; the MVP's body-typing path gives well-defined returns for that shape.
+      # Optional / rest / keyword / block parameters route through the `sig.skipped.complex-shape` reason until
+      # slices 3+ widen the param policy.
       def simple_parameter_shape?(params)
         return true if params.nil?
         return false unless params.is_a?(Prism::ParametersNode)
@@ -519,27 +446,18 @@ module Rigor
           params.block.nil?
       end
 
-      # Mirrors the `def.return-type-mismatch` rule's body-type
-      # extraction: type the implicit-return expression under
-      # the scope the indexer associated with the body. The
-      # parameter bindings (typed `untyped` per the indexer's
-      # default) come from `with_local` inside
-      # `StatementEvaluator`; the result is the carrier the
+      # Mirrors the `def.return-type-mismatch` rule's body-type extraction: type the implicit-return expression
+      # under the scope the indexer associated with the body. The parameter bindings (typed `untyped` per the
+      # indexer's default) come from `with_local` inside `StatementEvaluator`; the result is the carrier the
       # body proves *given an untyped argument tuple*.
       #
-      # Post-dogfood enhancement: walk the body's AST for
-      # explicit `return X` statements and union their value
-      # types with the implicit-return expression's type. The
-      # earlier MVP only typed the implicit-return path, which
-      # routinely produced single-branch artefacts like
-      # `parse_options: () -> nil` (the actual runtime return
-      # is `options | nil`) or `find: () -> V` (actually
-      # `V | nil` via `return nil unless ...`). The walk
-      # excludes nested `DefNode` / lambda / block scopes
-      # whose returns belong to different methods.
-      # Delegates to {Rigor::Inference::DefReturnTyper} — the same
-      # body-typing + explicit-return-union the `rigor annotate`
-      # def-line annotator uses.
+      # Post-dogfood enhancement: walk the body's AST for explicit `return X` statements and union their value
+      # types with the implicit-return expression's type. The earlier MVP only typed the implicit-return path,
+      # which routinely produced single-branch artefacts like `parse_options: () -> nil` (the actual runtime
+      # return is `options | nil`) or `find: () -> V` (actually `V | nil` via `return nil unless ...`). The walk
+      # excludes nested `DefNode` / lambda / block scopes whose returns belong to different methods. Delegates
+      # to {Rigor::Inference::DefReturnTyper} — the same body-typing + explicit-return-union the `rigor
+      # annotate` def-line annotator uses.
       def infer_return_type(def_node, scope_index)
         Inference::DefReturnTyper.call(def_node, scope_index)
       end
@@ -548,13 +466,10 @@ module Rigor
         return true if type.is_a?(Type::Dynamic)
         return true if type.respond_to?(:top?) && type.top?.yes?
 
-        # Post-dogfood: when explicit-return union absorbs
-        # Dynamic and the carrier ends up as a Union containing
-        # `Dynamic[top]`, the Bug-1 erasure rule renders it as
-        # `untyped`. Emitting `def m: () -> untyped` is the
-        # `sig.skipped.untyped-return` case — obscures rather
-        # than helps — so the skip check considers the erased
-        # form too.
+        # Post-dogfood: when explicit-return union absorbs Dynamic and the carrier ends up as a Union
+        # containing `Dynamic[top]`, the Bug-1 erasure rule renders it as `untyped`. Emitting
+        # `def m: () -> untyped` is the `sig.skipped.untyped-return` case — obscures rather than helps — so the
+        # skip check considers the erased form too.
         type.respond_to?(:erase_to_rbs) && type.erase_to_rbs == "untyped"
       end
 
@@ -621,26 +536,17 @@ module Rigor
         nil
       end
 
-      # ADR-14 § "What 'more precise' means". The MVP uses the
-      # engine's gradual-mode acceptance — `:strict` is
-      # reserved by `Inference::Acceptance` and lands in a
-      # follow-up. The "different spelling" guard ensures we
+      # ADR-14 § "What 'more precise' means". The MVP uses the engine's gradual-mode acceptance — `:strict` is
+      # reserved by `Inference::Acceptance` and lands in a follow-up. The "different spelling" guard ensures we
       # never classify a same-string round-trip as tighter.
       #
-      # The `loses_declared_union_member?` guard added after
-      # the Rigor self-dogfood pass refuses to classify as
-      # tighter-return when the declared form is a top-level
-      # Union and the inferred form collapses one or more of
-      # its declared members. The body-typing path in slice 1
-      # only inspects the implicit-return expression, so
-      # methods with `return nil unless ...` / boolean
-      # `false | true` shapes / `Float | Integer` numeric
-      # alternates routinely look "tighter" while actually
-      # dropping reachable branches. Treating those as
-      # equivalent matches the project rule that an
-      # inferred tightening contradicting an existing RBS
-      # member set is suspected incomplete inference until
-      # proven otherwise.
+      # The `loses_declared_union_member?` guard added after the Rigor self-dogfood pass refuses to classify as
+      # tighter-return when the declared form is a top-level Union and the inferred form collapses one or more
+      # of its declared members. The body-typing path in slice 1 only inspects the implicit-return expression,
+      # so methods with `return nil unless ...` / boolean `false | true` shapes / `Float | Integer` numeric
+      # alternates routinely look "tighter" while actually dropping reachable branches. Treating those as
+      # equivalent matches the project rule that an inferred tightening contradicting an existing RBS member set
+      # is suspected incomplete inference until proven otherwise.
       def tighter?(declared, inferred)
         return false if inferred.is_a?(Type::Dynamic)
         return false if loses_declared_lenience?(declared, inferred)
@@ -652,24 +558,16 @@ module Rigor
         !backward.yes?
       end
 
-      # Composite guard: refuse to classify as tighter-return
-      # when the declared RBS expresses lenience that the
-      # inferred form removes. Three cases all signal
-      # incomplete inference rather than precision gain:
+      # Composite guard: refuse to classify as tighter-return when the declared RBS expresses lenience that the
+      # inferred form removes. Three cases all signal incomplete inference rather than precision gain:
       #
-      # 1. Top-level union losing one or more declared
-      #    members. `return nil unless ...` paths, two-valued
+      # 1. Top-level union losing one or more declared members. `return nil unless ...` paths, two-valued
       #    booleans, `Float | Integer` numeric alternates.
-      # 2. Generic collection narrowed to a fixed shape.
-      #    `Array[T]` → `Tuple[T, ...]`, `Hash[K, V]` →
-      #    HashShape — the body's last expression was a
-      #    literal whose specific shape is not the method's
+      # 2. Generic collection narrowed to a fixed shape. `Array[T]` → `Tuple[T, ...]`, `Hash[K, V]` →
+      #    HashShape — the body's last expression was a literal whose specific shape is not the method's
       #    contract.
-      # 3. `untyped` type-arg replaced by a concrete form.
-      #    Declared `Hash[String, untyped]` carries the
-      #    author's intentional value-type lenience; the
-      #    inference's narrower Union should not override
-      #    it.
+      # 3. `untyped` type-arg replaced by a concrete form. Declared `Hash[String, untyped]` carries the author's
+      #    intentional value-type lenience; the inference's narrower Union should not override it.
       def loses_declared_lenience?(declared, inferred)
         loses_declared_union_member?(declared, inferred) ||
           narrows_collection_to_shape?(declared, inferred) ||
@@ -704,19 +602,13 @@ module Rigor
         inferred.is_a?(Type::Tuple) || inferred.is_a?(Type::HashShape)
       end
 
-      # Heuristic added after the third-round self-dogfood:
-      # `FallbackTracer#size` body is `@events.size`, where
-      # `@events` is initialised to `[]` and never assigned
-      # again at the class-ivar pre-pass level. The
-      # `Type::Tuple[]` (size 0) folds `.size` to
-      # `Constant<0>` — the carrier knows the empty-tuple
-      # cardinality exactly. But the runtime contract is
-      # `Integer` because callers add events through other
-      # methods. The signal is "the body's last expression
-      # is NOT a directly-authored literal but the inferred
-      # type IS a Constant"; in that case the precision
-      # came from inference over an internal computation,
-      # not the author's contract, so refuse to tighten.
+      # Heuristic added after the third-round self-dogfood: `FallbackTracer#size` body is `@events.size`, where
+      # `@events` is initialised to `[]` and never assigned again at the class-ivar pre-pass level. The
+      # `Type::Tuple[]` (size 0) folds `.size` to `Constant<0>` — the carrier knows the empty-tuple cardinality
+      # exactly. But the runtime contract is `Integer` because callers add events through other methods. The
+      # signal is "the body's last expression is NOT a directly-authored literal but the inferred type IS a
+      # Constant"; in that case the precision came from inference over an internal computation, not the
+      # author's contract, so refuse to tighten.
       def computed_literal_tightening?(inferred, def_node)
         return false unless inferred.is_a?(Type::Constant)
 
@@ -774,22 +666,17 @@ module Rigor
         "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred))}"
       end
 
-      # Routes the inferred carrier through {TypeElaborator}
-      # so bare generic nominals (`Array` / `Hash` / `Set`
-      # / `Range` / `Enumerable`) get their `untyped` type
-      # parameters filled in before erasing to RBS. The
-      # elaborator consults the class's RBS-declared
-      # type-parameter list via `Reflection.class_type_param_names`.
+      # Routes the inferred carrier through {TypeElaborator} so bare generic nominals (`Array` / `Hash` / `Set`
+      # / `Range` / `Enumerable`) get their `untyped` type parameters filled in before erasing to RBS. The
+      # elaborator consults the class's RBS-declared type-parameter list via
+      # `Reflection.class_type_param_names`.
       def elaborated_rbs(type)
         TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs
       end
 
-      # RBS / Steep require return-position unions to be
-      # parenthesised when they appear bare at the top
-      # level of a method type — `def m: () -> 0 | 1` fails
-      # the parser because the trailing `| 1` isn't a valid
-      # method-type start. Wrap when the erased form is a
-      # top-level union; single types and already-bracketed
+      # RBS / Steep require return-position unions to be parenthesised when they appear bare at the top level of
+      # a method type — `def m: () -> 0 | 1` fails the parser because the trailing `| 1` isn't a valid
+      # method-type start. Wrap when the erased form is a top-level union; single types and already-bracketed
       # forms (e.g. `Array[A | B]`) parse without wrapping.
       def paren_wrap_union(rendered)
         top_level_union?(rendered) ? "(#{rendered})" : rendered
@@ -815,14 +702,11 @@ module Rigor
         params.is_a?(Prism::ParametersNode) ? params.requireds.size : 0
       end
 
-      # Per ADR-5 clause 2 the default is `untyped` for every
-      # position. Observed-policy callers (`--params=observed`)
-      # pass an `observations:` map at construction time; the
-      # generator unions per-position arg types whose tuple
-      # arity matches the def's required-positional count.
-      # Observations from arities other than the def's count
-      # are discarded — they describe a different overload
-      # the MVP does not emit.
+      # Per ADR-5 clause 2 the default is `untyped` for every position. Observed-policy callers
+      # (`--params=observed`) pass an `observations:` map at construction time; the generator unions
+      # per-position arg types whose tuple arity matches the def's required-positional count. Observations from
+      # arities other than the def's count are discarded — they describe a different overload the MVP does not
+      # emit.
       def render_param_list(class_name, method_name, arity)
         tuples = matching_observations(class_name, method_name, arity)
         return Array.new(arity, "untyped").join(", ") if tuples.empty?
@@ -841,25 +725,18 @@ module Rigor
         return "untyped" if types.empty?
         return elaborated_rbs(types.first) if types.size == 1
 
-        # `Type::Combinator.union` dedupes by structural type
-        # equality. The carrier-level `erase_to_rbs` now
-        # absorbs `untyped` members and dedupes the post-erase
-        # strings (`String | String` → `String` for distinct
-        # `Constant<"Alice">` / `Constant<"Bob">` envelopes),
-        # so the sig-gen layer only needs to elaborate bare
-        # generics before erasing.
+        # `Type::Combinator.union` dedupes by structural type equality. The carrier-level `erase_to_rbs` now
+        # absorbs `untyped` members and dedupes the post-erase strings (`String | String` → `String` for
+        # distinct `Constant<"Alice">` / `Constant<"Bob">` envelopes), so the sig-gen layer only needs to
+        # elaborate bare generics before erasing.
         elaborated_rbs(Type::Combinator.union(*types))
       end
 
-      # ADR-14 slice 4 — `attr_reader` / `attr_writer` /
-      # `attr_accessor` recognition. Each Symbol-named entry in
-      # the call's argument list yields one or two
-      # {MethodCandidate}s whose inferred return type is the
-      # corresponding instance-variable's accumulated type from
-      # `Scope#class_ivars_for(class_name)`. `attr_reader` adds
-      # one reader candidate; `attr_writer` adds one
-      # `name=`-method writer candidate; `attr_accessor` adds
-      # both.
+      # ADR-14 slice 4 — `attr_reader` / `attr_writer` / `attr_accessor` recognition. Each Symbol-named entry in
+      # the call's argument list yields one or two {MethodCandidate}s whose inferred return type is the
+      # corresponding instance-variable's accumulated type from `Scope#class_ivars_for(class_name)`.
+      # `attr_reader` adds one reader candidate; `attr_writer` adds one `name=`-method writer candidate;
+      # `attr_accessor` adds both.
       ATTR_METHOD_NAMES = %i[attr_reader attr_writer attr_accessor].freeze
       private_constant :ATTR_METHOD_NAMES
 
@@ -870,11 +747,9 @@ module Rigor
       }.freeze
       private_constant :ATTR_KINDS
 
-      # Per-file context the attr_* walker threads through its
-      # recursive descent. Keeps parameter lists in check.
-      # `obs_ivar_map` carries the observation-derived fallback types
-      # built by {#build_observed_ivar_map}; it is empty when sig-gen
-      # is invoked without `--params=observed`.
+      # Per-file context the attr_* walker threads through its recursive descent. Keeps parameter lists in
+      # check. `obs_ivar_map` carries the observation-derived fallback types built by
+      # {#build_observed_ivar_map}; it is empty when sig-gen is invoked without `--params=observed`.
       AttrWalkContext = Struct.new(:path, :scope_index, :obs_ivar_map, :out, keyword_init: true)
       private_constant :AttrWalkContext
 
@@ -899,8 +774,7 @@ module Rigor
           walk_attr_calls(node.body, prefix, true, ctx) if node.body
           return
         when Prism::DefNode
-          # Skip method bodies — attr_* there would refer to
-          # whatever the method is doing dynamically, not a
+          # Skip method bodies — attr_* there would refer to whatever the method is doing dynamically, not a
           # class-level declaration.
           return
         when Prism::CallNode
@@ -930,21 +804,15 @@ module Rigor
         Source::Literals.symbol_arguments(call_node)
       end
 
-      # Returns a closure that looks up `:@<attr_name>` in the
-      # class-ivar accumulator carried by the first scope the
-      # indexer associated with this file. The accumulator is
-      # populated by `ScopeIndexer#build_class_ivar_index`
-      # before any statement evaluation runs, so the lookup
-      # works even when attr_* declarations come before the
-      # corresponding ivar writes lexically.
+      # Returns a closure that looks up `:@<attr_name>` in the class-ivar accumulator carried by the first scope
+      # the indexer associated with this file. The accumulator is populated by
+      # `ScopeIndexer#build_class_ivar_index` before any statement evaluation runs, so the lookup works even
+      # when attr_* declarations come before the corresponding ivar writes lexically.
       #
-      # When `obs_ivar_map` is non-empty (i.e. `--params=observed`
-      # was used), it acts as a fallback: if the ivar pre-pass
-      # resolved the type to `nil` or `Dynamic[top]` — typically
-      # because `@ivar = param` inside `initialize` typed the param
-      # as `untyped` — the observation-derived type is substituted.
-      # This lets `attr_reader :name` emit a concrete type when
-      # `ClassName.new("alice")` call sites are visible to the
+      # When `obs_ivar_map` is non-empty (i.e. `--params=observed` was used), it acts as a fallback: if the ivar
+      # pre-pass resolved the type to `nil` or `Dynamic[top]` — typically because `@ivar = param` inside
+      # `initialize` typed the param as `untyped` — the observation-derived type is substituted. This lets
+      # `attr_reader :name` emit a concrete type when `ClassName.new("alice")` call sites are visible to the
       # observation scan.
       def ivar_type_lookup(scope_index, class_name, obs_ivar_map = {})
         any_scope = scope_index.each_value.first
@@ -958,13 +826,10 @@ module Rigor
         end
       end
 
-      # Build a { class_name => { attr_name_sym => Type } } map that
-      # records observation-derived types for ivars assigned directly
-      # from `def initialize` parameters. Only populated when
-      # `@observations` is non-empty (i.e. `--params=observed` was
-      # supplied). Matches the pattern `@ivar_name = param_name` where
-      # `param_name` is a required / optional positional or keyword
-      # parameter of `initialize`.
+      # Build a { class_name => { attr_name_sym => Type } } map that records observation-derived types for
+      # ivars assigned directly from `def initialize` parameters. Only populated when `@observations` is
+      # non-empty (i.e. `--params=observed` was supplied). Matches the pattern `@ivar_name = param_name` where
+      # `param_name` is a required / optional positional or keyword parameter of `initialize`.
       def build_observed_ivar_map(root)
         return {} if @observations.empty?
 
@@ -995,9 +860,8 @@ module Rigor
         node.compact_child_nodes.each { |c| collect_init_ivar_obs(c, prefix, result) }
       end
 
-      # Derive { attr_name_sym => Type } for a single `def initialize`
-      # by matching `@ivar = param_name` assignments against the
-      # available `[class_name, :initialize]` observations.
+      # Derive { attr_name_sym => Type } for a single `def initialize` by matching `@ivar = param_name`
+      # assignments against the available `[class_name, :initialize]` observations.
       def ivar_obs_from_initialize(class_name, def_node)
         obs_list = @observations[[class_name, :initialize]]
         return {} if obs_list.nil? || obs_list.empty?
@@ -1011,8 +875,8 @@ module Rigor
         build_ivar_obs_type_map(ivar_to_param, param_index, obs_list)
       end
 
-      # Map `{ ivar_name => param_name }` → `{ attr_name_sym => Type }`
-      # by looking up each param's observation types and unioning them.
+      # Map `{ ivar_name => param_name }` → `{ attr_name_sym => Type }` by looking up each param's observation
+      # types and unioning them.
       def build_ivar_obs_type_map(ivar_to_param, param_index, obs_list)
         ivar_to_param.filter_map do |ivar_name, param_name|
           types = collect_param_obs_types(obs_list, param_name, param_index[param_name])
@@ -1023,8 +887,8 @@ module Rigor
         end.to_h
       end
 
-      # Collect observed argument types for a single parameter across all
-      # call-site observations. Returns an array of Type objects (may be empty).
+      # Collect observed argument types for a single parameter across all call-site observations. Returns an
+      # array of Type objects (may be empty).
       def collect_param_obs_types(obs_list, param_name, param_info)
         case param_info[:kind]
         when :positional then obs_list.filter_map { |obs| obs.positional[param_info[:index]] }
@@ -1033,9 +897,8 @@ module Rigor
         end
       end
 
-      # Map param_name_sym → { kind: :positional, index: N } or
-      # { kind: :keyword } for required / optional positionals and
-      # required / optional keywords of a ParametersNode.
+      # Map param_name_sym → { kind: :positional, index: N } or { kind: :keyword } for required / optional
+      # positionals and required / optional keywords of a ParametersNode.
       def build_init_param_index(parameters)
         index  = {}
         offset = 0
@@ -1056,10 +919,9 @@ module Rigor
         index
       end
 
-      # Walk a def body for direct `@ivar = local_var` assignments
-      # where `local_var` is one of the listed parameter names.
-      # Records ivar_name (Symbol with `@` prefix) → param_name.
-      # Does not recurse into nested defs / classes / modules.
+      # Walk a def body for direct `@ivar = local_var` assignments where `local_var` is one of the listed
+      # parameter names. Records ivar_name (Symbol with `@` prefix) → param_name. Does not recurse into nested
+      # defs / classes / modules.
       def scan_ivar_param_assignments(node, param_names, result)
         return unless node.is_a?(Prism::Node)
 
@@ -1143,14 +1005,11 @@ module Rigor
         )
       end
 
-      # Slice 4 emits attr_* in the long-form `def` spelling so
-      # the existing writer's `MethodDefinition`-based merge
-      # path applies without extra wiring. Users who prefer the
-      # idiomatic `attr_reader name: Type` short form can
-      # normalise post-emit; the writer-side member detection
-      # (slice 2) treats existing `attr_*` declarations as
-      # user-authored so a paired source-side `attr_reader`
-      # never produces a duplicate `def` insertion.
+      # Slice 4 emits attr_* in the long-form `def` spelling so the existing writer's `MethodDefinition`-based
+      # merge path applies without extra wiring. Users who prefer the idiomatic `attr_reader name: Type` short
+      # form can normalise post-emit; the writer-side member detection (slice 2) treats existing `attr_*`
+      # declarations as user-authored so a paired source-side `attr_reader` never produces a duplicate `def`
+      # insertion.
       def render_attr_rbs_line(method_name, variant, ivar_type)
         erased = elaborated_rbs(ivar_type)
         wrapped = paren_wrap_union(erased)

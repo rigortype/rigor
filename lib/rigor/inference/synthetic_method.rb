@@ -2,24 +2,17 @@
 
 module Rigor
   module Inference
-    # ADR-16 Tier C output — one synthetic method declared by a
-    # plugin's `Plugin::Macro::HeredocTemplate` entry, after the
-    # pre-pass has interpolated the call-site literal symbol into
-    # the template name. Stored in {SyntheticMethodIndex} and
-    # consulted by {MethodDispatcher} below the RBS dispatch tier.
+    # ADR-16 Tier C output — one synthetic method declared by a plugin's `Plugin::Macro::HeredocTemplate` entry, after
+    # the pre-pass has interpolated the call-site literal symbol into the template name. Stored in
+    # {SyntheticMethodIndex} and consulted by {MethodDispatcher} below the RBS dispatch tier.
     #
-    # Per ADR-16 § WD13 (cost-bounded best-effort): method names
-    # emit with return types promoted by the dispatcher's Slice 6
-    # tiers — Slice 6a promotes via `origin_module` (TierB) and
-    # Slice 6b via `return_type` nominal lookup (TierC). The
-    # `return_type` string is preserved so promotion can resolve
-    # it without re-walking; `"untyped"` / `"void"` placeholders
-    # fall back to `Dynamic[Top]`.
+    # Per ADR-16 § WD13 (cost-bounded best-effort): method names emit with return types promoted by the dispatcher's
+    # Slice 6 tiers — Slice 6a promotes via `origin_module` (TierB) and Slice 6b via `return_type` nominal lookup
+    # (TierC). The `return_type` string is preserved so promotion can resolve it without re-walking; `"untyped"` /
+    # `"void"` placeholders fall back to `Dynamic[Top]`.
     #
-    # The `provenance` Hash carries debug / `--explain` metadata:
-    # plugin id, the template's call shape, and the source
-    # location of the originating DSL call. Surfaced through the
-    # dispatcher's `macro.tier_c.*` provenance markers.
+    # The `provenance` Hash carries debug / `--explain` metadata: plugin id, the template's call shape, and the source
+    # location of the originating DSL call. Surfaced through the dispatcher's `macro.tier_c.*` provenance markers.
     class SyntheticMethod
       INSTANCE = :instance
       SINGLETON = :singleton

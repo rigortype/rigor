@@ -2,33 +2,24 @@
 
 module Rigor
   module SigGen
-    # Maps a source `.rb` file to its target `.rbs` sig file
-    # under the project's signature tree.
+    # Maps a source `.rb` file to its target `.rbs` sig file under the project's signature tree.
     #
     # ADR-14 § "Output layout":
-    # - `--write` MUST NOT touch files outside
-    #   `configuration.signature_paths` (default `sig/`).
-    # - The first slice supports one source file → one RBS
-    #   file; multi-class files emit one RBS containing both
+    # - `--write` MUST NOT touch files outside `configuration.signature_paths` (default `sig/`).
+    # - The first slice supports one source file → one RBS file; multi-class files emit one RBS containing both
     #   classes (handled by the {Writer}, not here).
     #
-    # The mapping convention mirrors the Ruby community
-    # default: strip the source root prefix (the first entry
-    # of `configuration.paths`, typically `"lib"`), swap the
-    # extension, and place the result under the first entry of
-    # `configuration.signature_paths` (typically `"sig"`).
+    # The mapping convention mirrors the Ruby community default: strip the source root prefix (the first entry
+    # of `configuration.paths`, typically `"lib"`), swap the extension, and place the result under the first
+    # entry of `configuration.signature_paths` (typically `"sig"`).
     #
-    # ADR-14 follow-up: when a class is already declared in
-    # an existing consolidated sig file (e.g. `sig/rigor/type.rbs`
-    # holds all `Rigor::Type::*` classes), the optional
-    # `LayoutIndex` re-routes the target to that file so the
-    # writer updates the consolidated declaration instead of
-    # creating a duplicate at the 1:1 mirror path.
+    # ADR-14 follow-up: when a class is already declared in an existing consolidated sig file (e.g.
+    # `sig/rigor/type.rbs` holds all `Rigor::Type::*` classes), the optional `LayoutIndex` re-routes the target
+    # to that file so the writer updates the consolidated declaration instead of creating a duplicate at the 1:1
+    # mirror path.
     #
-    # When the source path is not under any configured source
-    # root (e.g. files supplied directly on the CLI from
-    # outside `lib/`), the full relative path is preserved
-    # under the sig root.
+    # When the source path is not under any configured source root (e.g. files supplied directly on the CLI
+    # from outside `lib/`), the full relative path is preserved under the sig root.
     class PathMapper
       # @param configuration [Rigor::Configuration]
       # @param project_root [String, Pathname] (defaults to `Dir.pwd`)
@@ -63,9 +54,8 @@ module Rigor
         @layout_index.file_for(class_name)
       end
 
-      # The directory `--write` is allowed to create / modify.
-      # Used by callers to assert the target stays inside the
-      # configured signature tree before touching the disk.
+      # The directory `--write` is allowed to create / modify. Used by callers to assert the target stays inside
+      # the configured signature tree before touching the disk.
       def sig_root_dir
         @sig_root_dir ||= @project_root / sig_root_name
       end
@@ -76,8 +66,7 @@ module Rigor
         path = Pathname(source_path)
         return path unless path.absolute?
 
-        # Both sides go through realpath so macOS `/tmp` vs
-        # `/private/tmp` (and any other symlinked project
+        # Both sides go through realpath so macOS `/tmp` vs `/private/tmp` (and any other symlinked project
         # root) compare cleanly.
         path.realpath.relative_path_from(@project_root.realpath)
       rescue ArgumentError, Errno::ENOENT
@@ -95,9 +84,8 @@ module Rigor
         components.empty? ? Pathname("") : Pathname(components.join(File::SEPARATOR))
       end
 
-      # `Configuration` resolves `paths:` and `signature_paths:`
-      # to absolute Strings. We only need the trailing basename
-      # for the mapping (`/abs/lib` → `lib`, `/abs/app` → `app`).
+      # `Configuration` resolves `paths:` and `signature_paths:` to absolute Strings. We only need the trailing
+      # basename for the mapping (`/abs/lib` → `lib`, `/abs/app` → `app`).
       def source_root_name
         @source_root_name ||= begin
           path = @configuration.paths.first

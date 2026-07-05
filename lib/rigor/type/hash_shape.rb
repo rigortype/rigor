@@ -7,20 +7,16 @@ require_relative "plain_lattice"
 
 module Rigor
   module Type
-    # A hash shape with statically known keys. Inhabitants are Ruby
-    # `Hash` instances whose known entries inhabit the corresponding
-    # value types. RBS records correspond to the exact closed subset;
-    # Rigor extends that carrier with optional keys, read-only entry
-    # views, and an open/closed extra-key policy.
+    # A hash shape with statically known keys. Inhabitants are Ruby `Hash` instances whose known entries
+    # inhabit the corresponding value types. RBS records correspond to the exact closed subset; Rigor
+    # extends that carrier with optional keys, read-only entry views, and an open/closed extra-key policy.
     #
-    # Keys are restricted to Symbol and String values. Exact closed
-    # symbol-keyed shapes erase to the RBS record syntax
-    # `{ a: Integer, ?b: String }`; all other shapes degrade to
-    # `Hash[K, V]` or raw `Hash` when no useful bounds are available.
+    # Keys are restricted to Symbol and String values. Exact closed symbol-keyed shapes erase to the RBS
+    # record syntax `{ a: Integer, ?b: String }`; all other shapes degrade to `Hash[K, V]` or raw `Hash`
+    # when no useful bounds are available.
     #
-    # Equality and hashing are structural over the (key -> Rigor::Type)
-    # pair set and policy fields. Hash insertion order is preserved by
-    # the underlying storage but does NOT affect equality (matching
+    # Equality and hashing are structural over the (key -> Rigor::Type) pair set and policy fields. Hash
+    # insertion order is preserved by the underlying storage but does NOT affect equality (matching
     # Ruby's `Hash#==`).
     #
     # See docs/type-specification/rbs-compatible-types.md (records) and
@@ -65,9 +61,8 @@ module Rigor
         "{ #{rendered.join(', ')} }"
       end
 
-      # Erases to the RBS record form `{ a: Integer, ?b: String }`
-      # for exact closed symbol-keyed shapes. Open shapes and
-      # string-keyed closed shapes degrade to a generic Hash bound.
+      # Erases to the RBS record form `{ a: Integer, ?b: String }` for exact closed symbol-keyed shapes.
+      # Open shapes and string-keyed closed shapes degrade to a generic Hash bound.
       def erase_to_rbs
         return "{}" if pairs.empty? && closed?
         return hash_erasure unless closed?

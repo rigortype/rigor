@@ -5,17 +5,13 @@ require_relative "../type"
 
 module Rigor
   module Inference
-    # ADR-20 slice 2b — parses the body of an
-    # `HktRegistry::Definition` (a `String`, as populated by
-    # Slice 1's `HktDirectives.parse_define` from
-    # `%a{rigor:v1:hkt_define}` payloads) into the `HktBody`
-    # node tree the Slice 2a reducer evaluates against.
+    # ADR-20 slice 2b — parses the body of an `HktRegistry::Definition` (a `String`, as populated
+    # by Slice 1's `HktDirectives.parse_define` from `%a{rigor:v1:hkt_define}` payloads) into the
+    # `HktBody` node tree the Slice 2a reducer evaluates against.
     #
-    # The grammar implements the full ADR-20 § D3 subset:
-    # union-of-atoms/parameterised-forms for `JSON.parse`'s
-    # `json::value` recursive sum, plus the conditional and
-    # membership forms shipped in subsequent slices. Indexed-access
-    # forms remain deferred (no concrete demand yet).
+    # The grammar implements the full ADR-20 § D3 subset: union-of-atoms/parameterised-forms for
+    # `JSON.parse`'s `json::value` recursive sum, plus the conditional and membership forms
+    # shipped in subsequent slices. Indexed-access forms remain deferred (no concrete demand yet).
     #
     # ## Grammar
     #
@@ -37,22 +33,17 @@ module Rigor
     #
     # ## Disambiguation
     #
-    # The same syntactic UCNAME spells both a parameter
-    # reference (`K` when `params = [:K]`) and a nominal class
-    # name (`Integer`). The parser resolves by checking the
-    # `params` set passed to {.parse}; an unknown UCNAME is
-    # treated as a nominal class name. `App` is reserved at
-    # the head position of an `App[...]` form; using `App` as
-    # a class name is therefore not supported.
+    # The same syntactic UCNAME spells both a parameter reference (`K` when `params = [:K]`) and
+    # a nominal class name (`Integer`). The parser resolves by checking the `params` set passed
+    # to {.parse}; an unknown UCNAME is treated as a nominal class name. `App` is reserved at the
+    # head position of an `App[...]` form; using `App` as a class name is therefore not
+    # supported.
     #
-    # Atoms are kept verbatim as `HktBody::TypeLeaf` nodes
-    # wrapping the appropriate `Rigor::Type::*` carrier:
-    # `nil` / `true` / `false` produce `Constant` carriers;
-    # `bool` produces the `Constant<true> | Constant<false>`
-    # union; `untyped` produces `Combinator.untyped`
-    # (i.e. `Dynamic[Top]`). Nominal class names produce raw
-    # `Type::Nominal` carriers (no `name_scope` resolution at
-    # this slice — the reducer trusts the name verbatim).
+    # Atoms are kept verbatim as `HktBody::TypeLeaf` nodes wrapping the appropriate
+    # `Rigor::Type::*` carrier: `nil` / `true` / `false` produce `Constant` carriers; `bool`
+    # produces the `Constant<true> | Constant<false>` union; `untyped` produces
+    # `Combinator.untyped` (i.e. `Dynamic[Top]`). Nominal class names produce raw `Type::Nominal`
+    # carriers (no `name_scope` resolution at this slice — the reducer trusts the name verbatim).
     module HktBodyParser
       class ParseError < StandardError; end
 
@@ -159,14 +150,11 @@ module Rigor
         #     conditional := "(" test "?" union ":" union ")"
         #     test        := type_expr ("<:" | "==") type_expr
         #
-        # Parens delimit a conditional unambiguously — bare
-        # `(type_expr)` grouping is not supported at this slice
-        # (no use case yet). Branches can be unions; test sides
-        # are single arms (wrap in `App[my_union, ...]` if you
-        # need a union there). `in [opt1, opt2]` membership
-        # tests are programmatically supported via
-        # `HktBody::TestMembership` but the parser does not yet
-        # recognise the `in` keyword (no concrete demand yet).
+        # Parens delimit a conditional unambiguously — bare `(type_expr)` grouping is not
+        # supported at this slice (no use case yet). Branches can be unions; test sides are
+        # single arms (wrap in `App[my_union, ...]` if you need a union there). `in [opt1, opt2]`
+        # membership tests are programmatically supported via `HktBody::TestMembership` but the
+        # parser does not yet recognise the `in` keyword (no concrete demand yet).
         def parse_conditional
           expect!(:lparen)
           test = parse_test
@@ -196,11 +184,9 @@ module Rigor
           end
         end
 
-        # `left in [opt1, opt2, ...]` membership test.
-        # Distinguished from a lowercase atom by the
-        # subsequent `[` — the only place an identifier
-        # `in` is permitted at this position is membership
-        # syntax.
+        # `left in [opt1, opt2, ...]` membership test. Distinguished from a lowercase atom by the
+        # subsequent `[` — the only place an identifier `in` is permitted at this position is
+        # membership syntax.
         def parse_in_membership(left, op_token:)
           unless op_token.value == "in"
             raise ParseError,
@@ -243,11 +229,9 @@ module Rigor
           parse_nominal_or_param_with_args
         end
 
-        # Returns true when the current UCName is followed by
-        # `::` (qualified class name continuation) or `[`
-        # (parameterised application). In either case the
-        # token is a nominal, not a param ref — Slice 2b's
-        # `Param` nodes are always single bare identifiers.
+        # Returns true when the current UCName is followed by `::` (qualified class name
+        # continuation) or `[` (parameterised application). In either case the token is a
+        # nominal, not a param ref — Slice 2b's `Param` nodes are always single bare identifiers.
         def class_continuation?
           next_tok = @tokens[@pos + 1]
           next_tok && %i[sep lb].include?(next_tok.kind)
@@ -266,8 +250,8 @@ module Rigor
         end
 
         def parse_classname_with_leading_sep
-          # The leading "::" form (`::Foo::Bar`). Consume the
-          # separator so the rest threads through parse_class_name.
+          # The leading "::" form (`::Foo::Bar`). Consume the separator so the rest threads
+          # through parse_class_name.
           consume
           tok = peek
           raise ParseError, "expected class name after `::`" if tok.nil? || tok.kind != :ucname
@@ -307,13 +291,10 @@ module Rigor
           parts.join("::").to_sym
         end
 
-        # Arg list for `Foo[A, B, C]` and `App[uri, A, B]`
-        # forms. Each arg is parsed as a union so per-arg
-        # `A | B` forms work (`Array[K | nil]`); the COMMA
-        # at the top level still separates args, so
-        # `Hash[K, V]` reads as two args (each a single-arm
-        # union that collapses to the arm) rather than one
-        # union of two.
+        # Arg list for `Foo[A, B, C]` and `App[uri, A, B]` forms. Each arg is parsed as a union so
+        # per-arg `A | B` forms work (`Array[K | nil]`); the COMMA at the top level still
+        # separates args, so `Hash[K, V]` reads as two args (each a single-arm union that
+        # collapses to the arm) rather than one union of two.
         def parse_arg_list
           args = [parse_union]
           while peek_kind == :comma

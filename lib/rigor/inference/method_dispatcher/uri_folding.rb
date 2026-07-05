@@ -7,23 +7,19 @@ require_relative "singleton_folding"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Folds `URI` module-function calls on statically known
-      # string constants.
+      # Folds `URI` module-function calls on statically known string constants.
       #
-      # `URI.encode_www_form_component` / `decode_www_form_component`
-      # and the newer `encode_uri_component` / `decode_uri_component`
-      # are pure, deterministic functions over their string inputs.
-      # When the argument is a `Constant[String]`, the analyzer can
-      # evaluate the call at inference time and return the concrete
-      # `Constant[String]` result.
+      # `URI.encode_www_form_component` / `decode_www_form_component` and the newer `encode_uri_component`
+      # / `decode_uri_component` are pure, deterministic functions over their string inputs. When the
+      # argument is a `Constant[String]`, the analyzer can evaluate the call at inference time and return
+      # the concrete `Constant[String]` result.
       #
       # === Supported methods
       #
-      # * `encode_www_form_component(str)` / `decode_www_form_component(str)` —
-      #   RFC 3986 percent-encode / decode. Returns `Constant[String]`.
-      # * `encode_uri_component(str)` / `decode_uri_component(str)` —
-      #   Same encoding but may preserve additional reserved chars
-      #   (Ruby 3.2+). Returns `Constant[String]`.
+      # * `encode_www_form_component(str)` / `decode_www_form_component(str)` — RFC 3986 percent-encode /
+      #   decode. Returns `Constant[String]`.
+      # * `encode_uri_component(str)` / `decode_uri_component(str)` — Same encoding but may preserve
+      #   additional reserved chars (Ruby 3.2+). Returns `Constant[String]`.
       #
       # === Non-constant / unsupported cases
       #

@@ -5,16 +5,12 @@ require_relative "method_catalog"
 module Rigor
   module Inference
     module Builtins
-      # `String` and `Symbol` catalog. Singleton — load once,
-      # consult during dispatch.
+      # `String` and `Symbol` catalog. Singleton — load once, consult during dispatch.
       #
-      # The blocklist below is the curated set of catalog `:leaf`
-      # entries the C-body classifier mis-attributes (the body of
-      # `rb_str_replace` calls `str_modifiable` / `str_discard`
-      # which the regex-based classifier does not recognise as
-      # mutation primitives). Adding to the blocklist is the
-      # corrective surface for false positives until the
-      # classifier learns the helper functions.
+      # The blocklist below is the curated set of catalog `:leaf` entries the C-body classifier
+      # mis-attributes (the body of `rb_str_replace` calls `str_modifiable` / `str_discard` which the
+      # regex-based classifier does not recognise as mutation primitives). Adding to the blocklist is the
+      # corrective surface for false positives until the classifier learns the helper functions.
       STRING_CATALOG = MethodCatalog.for_topic(
         "string",
         mutating_selectors: {
@@ -23,19 +19,16 @@ module Rigor
             :prepend, :force_encoding, :encode, :scrub, :unicode_normalize, :"[]=",
             :upto, :each_byte, :each_char, :each_codepoint,
             :each_grapheme_cluster, :each_line, :bytesplice,
-            # `crypt` is not a mutator but is blocked from folding for the
-            # same "do not bake a non-pure result into a Constant" reason:
-            # `rb_str_crypt` delegates to the platform `crypt(3)`, whose
-            # output (algorithm and digest) varies by libc / OS, so
-            # `"x".crypt("ab")` is not deterministic across the platforms
-            # an analyzed project may target. The catalog classifies it
-            # `:leaf` from its C body; this entry overrides that.
+            # `crypt` is not a mutator but is blocked from folding for the same "do not bake a non-pure
+            # result into a Constant" reason: `rb_str_crypt` delegates to the platform `crypt(3)`, whose
+            # output (algorithm and digest) varies by libc / OS, so `"x".crypt("ab")` is not deterministic
+            # across the platforms an analyzed project may target. The catalog classifies it `:leaf` from
+            # its C body; this entry overrides that.
             :crypt
           ],
           "Symbol" => Set[
-            # Symbol is immutable in Ruby; the classifier mis-flags
-            # `inspect` because `rb_sym_inspect` builds a temporary
-            # mutable buffer. Allow it.
+            # Symbol is immutable in Ruby; the classifier mis-flags `inspect` because `rb_sym_inspect`
+            # builds a temporary mutable buffer. Allow it.
           ]
         }
       )

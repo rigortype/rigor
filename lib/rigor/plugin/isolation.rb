@@ -4,28 +4,24 @@ require_relative "box"
 
 module Rigor
   module Plugin
-    # ADR-39 slice 5 — the selectable isolation strategy for target-library
-    # invocation. A plugin invokes a pure method on a trusted target
-    # library (e.g. `ActiveSupport::Inflector.pluralize("post")`) through
-    # {.call}; how much the invocation is isolated from Rigor's own process
-    # is a **configurable strategy** (`RIGOR_PLUGIN_ISOLATION` env; the
-    # `exe/rigor` launcher maps `.rigor.yml`'s `plugins_isolation:` onto it
+    # ADR-39 slice 5 — the selectable isolation strategy for target-library invocation. A plugin invokes a
+    # pure method on a trusted target library (e.g. `ActiveSupport::Inflector.pluralize("post")`) through
+    # {.call}; how much the invocation is isolated from Rigor's own process is a **configurable strategy**
+    # (`RIGOR_PLUGIN_ISOLATION` env; the `exe/rigor` launcher maps `.rigor.yml`'s `plugins_isolation:` onto it
     # before re-exec). Three backends behind one interface:
     #
-    # - `none` — load into the main space and call directly.
-    #   Lowest cost; no isolation. Used as the fallback where fork is
-    #   unavailable; fine because the invoked library is trusted + pure.
-    # - `ruby_box` — call inside a {Box} (`Ruby::Box`, `RUBY_BOX=1`). Isolates
-    #   core-class monkey-patches + lets gem versions coexist, but a native
-    #   crash in the boxed work still takes the process down (in-process).
-    # - `process` (**default**) — call in a forked worker ({Process}); returns data over a
-    #   pipe. The strongest: a child crash (even `SIGSEGV`) is contained —
-    #   the parent survives and declines. Higher cost (fork + IPC).
+    # - `none` — load into the main space and call directly. Lowest cost; no isolation. Used as the fallback
+    #   where fork is unavailable; fine because the invoked library is trusted + pure.
+    # - `ruby_box` — call inside a {Box} (`Ruby::Box`, `RUBY_BOX=1`). Isolates core-class monkey-patches +
+    #   lets gem versions coexist, but a native crash in the boxed work still takes the process down
+    #   (in-process).
+    # - `process` (**default**) — call in a forked worker ({Process}); returns data over a pipe. The
+    #   strongest: a child crash (even `SIGSEGV`) is contained — the parent survives and declines. Higher cost
+    #   (fork + IPC).
     #
-    # All three answer with the method's return value, or raise
-    # {Unavailable} (never approximate) when the target library cannot be
-    # reached in the chosen strategy — the caller's per-plugin rescue turns
-    # that into silence, never a wrong fact.
+    # All three answer with the method's return value, or raise {Unavailable} (never approximate) when the
+    # target library cannot be reached in the chosen strategy — the caller's per-plugin rescue turns that into
+    # silence, never a wrong fact.
     module Isolation
       class Unavailable < StandardError
       end
@@ -34,36 +30,31 @@ module Rigor
 
       module_function
 
-      # The default strategy. `process` (a crash-contained forked worker)
-      # is the default: it isolates the target library's monkey-patches +
-      # crashes from Rigor with no in-process contamination, and forks a
-      # single persistent worker (not one per call). It falls back to
-      # `none` where fork is unavailable (see {#backend}).
+      # The default strategy. `process` (a crash-contained forked worker) is the default: it isolates the
+      # target library's monkey-patches + crashes from Rigor with no in-process contamination, and forks a
+      # single persistent worker (not one per call). It falls back to `none` where fork is unavailable (see
+      # {#backend}).
       DEFAULT = "process"
 
-      # The configured strategy name (`RIGOR_PLUGIN_ISOLATION`), defaulting
-      # to {DEFAULT} for any unset / unrecognised value.
+      # The configured strategy name (`RIGOR_PLUGIN_ISOLATION`), defaulting to {DEFAULT} for any unset /
+      # unrecognised value.
       def strategy_name
         name = ENV["RIGOR_PLUGIN_ISOLATION"].to_s
         STRATEGIES.include?(name) ? name : DEFAULT
       end
 
-      # Invokes `receiver.method(*args)` on a target library, requiring
-      # `feature` first, under the configured isolation strategy. `receiver`
-      # is a constant name (String), `method` a Symbol from the caller's
-      # allow-list, and `args` simple, Marshal-able / inspectable values
-      # (Strings) — never free input. Returns the result, or raises
-      # {Unavailable}.
+      # Invokes `receiver.method(*args)` on a target library, requiring `feature` first, under the configured
+      # isolation strategy. `receiver` is a constant name (String), `method` a Symbol from the caller's
+      # allow-list, and `args` simple, Marshal-able / inspectable values (Strings) — never free input. Returns
+      # the result, or raises {Unavailable}.
       def call(feature:, receiver:, method:, args:)
         backend.call(feature: feature, receiver: receiver, method: method, args: args)
       end
 
-      # The backend module for the configured strategy. `process`
-      # (including the default) falls back to `Direct` where `fork` is
-      # unavailable (Windows / JRuby) so inflection still works rather than
-      # silently degrading — the libraries are trusted + pure, so the
-      # main-space fallback is acceptable when no fork-based isolation can
-      # be had.
+      # The backend module for the configured strategy. `process` (including the default) falls back to
+      # `Direct` where `fork` is unavailable (Windows / JRuby) so inflection still works rather than silently
+      # degrading — the libraries are trusted + pure, so the main-space fallback is acceptable when no
+      # fork-based isolation can be had.
       def backend
         case strategy_name
         when "ruby_box" then RubyBox
@@ -72,8 +63,8 @@ module Rigor
         end
       end
 
-      # `none` — load the trusted library into the main space and call it
-      # directly. No isolation; lowest cost; the fork-unavailable fallback.
+      # `none` — load the trusted library into the main space and call it directly. No isolation; lowest
+      # cost; the fork-unavailable fallback.
       module Direct
         module_function
 
@@ -85,9 +76,8 @@ module Rigor
         end
       end
 
-      # `ruby_box` — call inside the shared {Box}. The expression is built
-      # from the fixed `receiver` / allow-listed `method` and `inspect`-ed
-      # args (safe Ruby literals), so the box's `eval` carries no free
+      # `ruby_box` — call inside the shared {Box}. The expression is built from the fixed `receiver` /
+      # allow-listed `method` and `inspect`-ed args (safe Ruby literals), so the box's `eval` carries no free
       # input.
       module RubyBox
         module_function
@@ -96,9 +86,8 @@ module Rigor
           raise Unavailable, "ruby_box isolation requested but Ruby::Box is not active (RUBY_BOX=1)" unless Box.enabled?
           raise Unavailable, "#{feature} could not be loaded into the Ruby::Box" unless Box.require_feature(feature)
 
-          # `receiver` is a fixed constant name and `method` an allow-listed
-          # symbol; args are rendered via `inspect` (safe Ruby literals), so
-          # the expression is e.g. `ActiveSupport::Inflector.pluralize("x")`
+          # `receiver` is a fixed constant name and `method` an allow-listed symbol; args are rendered via
+          # `inspect` (safe Ruby literals), so the expression is e.g. `ActiveSupport::Inflector.pluralize("x")`
           # — no free input reaches the box's eval.
           rendered = args.map(&:inspect).join(", ")
           expression = "#{receiver}.#{method}(#{rendered})"
@@ -106,9 +95,8 @@ module Rigor
         end
       end
 
-      # `process` — run the call in a forked worker so a crash (even a C
-      # extension `SIGSEGV`) is contained: the parent detects the dead
-      # worker (broken pipe / EOF) and declines instead of dying. A single
+      # `process` — run the call in a forked worker so a crash (even a C extension `SIGSEGV`) is contained:
+      # the parent detects the dead worker (broken pipe / EOF) and declines instead of dying. A single
       # persistent worker handles all calls over a Marshal pipe pair.
       module Process
         module_function
@@ -128,9 +116,9 @@ module Rigor
         rescue Unavailable
           raise
         rescue StandardError => e
-          # A dead worker surfaces as EOFError (Marshal.load) or Errno::EPIPE
-          # (Marshal.dump) — both StandardError. The crash is contained: the
-          # parent resets the worker (respawn next call) and declines.
+          # A dead worker surfaces as EOFError (Marshal.load) or Errno::EPIPE (Marshal.dump) — both
+          # StandardError. The crash is contained: the parent resets the worker (respawn next call) and
+          # declines.
           @worker = nil
           raise Unavailable, "process isolation worker failed (#{e.class})"
         end
@@ -164,9 +152,8 @@ module Rigor
           end
         end
 
-        # The child loop: read a `[feature, receiver, method, args]`
-        # request, require + call, and write `[:ok, result]` or
-        # `[:error, message]`. EOF (parent gone) ends the loop.
+        # The child loop: read a `[feature, receiver, method, args]` request, require + call, and write
+        # `[:ok, result]` or `[:error, message]`. EOF (parent gone) ends the loop.
         def run_worker_loop(req_r, res_w)
           loop do
             feature, receiver, method, args = Marshal.load(req_r) # rubocop:disable Security/MarshalLoad -- parent input

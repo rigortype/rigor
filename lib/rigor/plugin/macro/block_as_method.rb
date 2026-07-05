@@ -3,10 +3,8 @@
 module Rigor
   module Plugin
     module Macro
-      # ADR-16 Tier A declaration: "the block passed to a
-      # class-level DSL call of one of `method_names` runs as an
-      # instance method on `receiver_constraint`'s subclass tree,
-      # with `self` typed accordingly."
+      # ADR-16 Tier A declaration: "the block passed to a class-level DSL call of one of `method_names` runs as
+      # an instance method on `receiver_constraint`'s subclass tree, with `self` typed accordingly."
       #
       # Authored on a plugin manifest:
       #
@@ -21,41 +19,31 @@ module Rigor
       #     ]
       #   )
       #
-      # Sinatra is the canonical worked target (`Sinatra::Base#generate_method`
-      # at `lib/sinatra/base.rb:1788-1793` literally does
-      # `define_method(name, &block); remove_method` — the block IS
-      # the method body, byte-for-byte). The substrate adopts the
-      # same contract: declare the receiver constraint + the
-      # class-level methods whose block argument runs as if it were
-      # an instance method of the receiver.
+      # Sinatra is the canonical worked target (`Sinatra::Base#generate_method` at
+      # `lib/sinatra/base.rb:1788-1793` literally does `define_method(name, &block); remove_method` — the
+      # block IS the method body, byte-for-byte). The substrate adopts the same contract: declare the receiver
+      # constraint + the class-level methods whose block argument runs as if it were an instance method of the
+      # receiver.
       #
-      # Engine wiring: `Inference::MacroBlockSelfType.narrow_self_type_for`
-      # (called from expression_typer.rb) consults registered entries
-      # and narrows `Scope#self_type` for matching block call sites.
+      # Engine wiring: `Inference::MacroBlockSelfType.narrow_self_type_for` (called from expression_typer.rb)
+      # consults registered entries and narrows `Scope#self_type` for matching block call sites.
       #
       # ## Fields
       #
-      # - `receiver_constraint` — fully-qualified class name (String)
-      #   that the call's lexical receiver MUST be (or inherit from)
-      #   for the entry to fire. For Sinatra modular-style this is
-      #   `"Sinatra::Base"`; the substrate's class-context match
-      #   accepts every subclass.
-      # - `method_names` — Array of Symbol method names. A call shape
-      #   `<receiver_subclass>.get('/path') { ... }` matches when
-      #   `:get` is in this list. (Named `verbs:` before ADR-60 WD2
-      #   normalised the macro value-object vocabulary.)
-      # - `self_type` — Symbol selecting the kind of `self`-binding
-      #   the substrate applies inside the block. Slice 1a accepts
-      #   only `:receiver_instance` (the block runs as an instance
-      #   method of the receiver class). Other kinds (`:receiver_singleton`,
-      #   `:dsl_recorder`) are reserved for later slices.
+      # - `receiver_constraint` — fully-qualified class name (String) that the call's lexical receiver MUST be
+      #   (or inherit from) for the entry to fire. For Sinatra modular-style this is `"Sinatra::Base"`; the
+      #   substrate's class-context match accepts every subclass.
+      # - `method_names` — Array of Symbol method names. A call shape `<receiver_subclass>.get('/path') { ... }`
+      #   matches when `:get` is in this list. (Named `verbs:` before ADR-60 WD2 normalised the macro
+      #   value-object vocabulary.)
+      # - `self_type` — Symbol selecting the kind of `self`-binding the substrate applies inside the block.
+      #   Slice 1a accepts only `:receiver_instance` (the block runs as an instance method of the receiver
+      #   class). Other kinds (`:receiver_singleton`, `:dsl_recorder`) are reserved for later slices.
       #
       # ## Ractor-shareability
       #
-      # All fields are frozen at construction (ADR-15 Phase 1).
-      # `method_names` is dup-frozen so the caller's mutable array
-      # does not leak into the value. `Ractor.shareable?` returns
-      # true after `#initialize`.
+      # All fields are frozen at construction (ADR-15 Phase 1). `method_names` is dup-frozen so the caller's
+      # mutable array does not leak into the value. `Ractor.shareable?` returns true after `#initialize`.
       class BlockAsMethod
         SELF_TYPE_RECEIVER_INSTANCE = :receiver_instance
         VALID_SELF_TYPES = [SELF_TYPE_RECEIVER_INSTANCE].freeze

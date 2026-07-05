@@ -3,10 +3,9 @@
 module Rigor
   module Plugin
     module Macro
-      # ADR-36 — the nested-class emission tier of the ADR-16
-      # macro substrate. Where Tier C ({HeredocTemplate}) synthesises
-      # *methods* on the calling class, this tier synthesises *nested
-      # subclasses* declared by an enum-shaped block DSL.
+      # ADR-36 — the nested-class emission tier of the ADR-16 macro substrate. Where Tier C ({HeredocTemplate})
+      # synthesises *methods* on the calling class, this tier synthesises *nested subclasses* declared by an
+      # enum-shaped block DSL.
       #
       # Motivating shape — Mangrove's `Enum`:
       #
@@ -18,13 +17,10 @@ module Rigor
       #       end
       #     end
       #
-      # Each `variant <Const>, <Type>` row is meant to mint a nested
-      # subclass `Shape::Circle < Shape` carrying `#inner : <Type>`.
-      # Mangrove builds this at runtime via `const_missing` +
-      # `class_eval`; the substrate replays the same contract
-      # statically so `Shape::Circle.new(1.0).inner` resolves the
-      # payload to `Float` instead of `call.undefined-constant` /
-      # `Dynamic[Top]`.
+      # Each `variant <Const>, <Type>` row is meant to mint a nested subclass `Shape::Circle < Shape` carrying
+      # `#inner : <Type>`. Mangrove builds this at runtime via `const_missing` + `class_eval`; the substrate
+      # replays the same contract statically so `Shape::Circle.new(1.0).inner` resolves the payload to `Float`
+      # instead of `call.undefined-constant` / `Dynamic[Top]`.
       #
       # ## Authoring shape
       #
@@ -41,34 +37,24 @@ module Rigor
       #
       # ## Fields
       #
-      # - `receiver_constraint` — fully-qualified module name (String)
-      #   the enclosing class must `extend` for the block to be
-      #   recognised (e.g. `"Mangrove::Enum"`).
-      # - `block_method` — Symbol naming the enclosing DSL block
-      #   (`:variants`).
-      # - `variant_method` — Symbol naming each declaration call
-      #   inside the block (`:variant`).
-      # - `symbol_arg_position` — Integer (default 0): the argument
-      #   index whose literal **constant** names the nested subclass.
-      #   (Named `name_arg_position:` before ADR-60 WD2 normalised
-      #   the macro value-object vocabulary.)
-      # - `inner_arg_position` — Integer (default 1): the argument
-      #   index whose type expression becomes the `#inner` reader's
-      #   return type. Slice A resolves a constant type argument
-      #   (`Float`, `String`); non-constant inner shapes (shape
-      #   hashes) degrade to `Dynamic[Top]`.
-      # - `inner_reader` — Symbol (default `:inner`): the payload
-      #   reader synthesised on each variant subclass.
+      # - `receiver_constraint` — fully-qualified module name (String) the enclosing class must `extend` for
+      #   the block to be recognised (e.g. `"Mangrove::Enum"`).
+      # - `block_method` — Symbol naming the enclosing DSL block (`:variants`).
+      # - `variant_method` — Symbol naming each declaration call inside the block (`:variant`).
+      # - `symbol_arg_position` — Integer (default 0): the argument index whose literal **constant** names the
+      #   nested subclass. (Named `name_arg_position:` before ADR-60 WD2 normalised the macro value-object
+      #   vocabulary.)
+      # - `inner_arg_position` — Integer (default 1): the argument index whose type expression becomes the
+      #   `#inner` reader's return type. Slice A resolves a constant type argument (`Float`, `String`);
+      #   non-constant inner shapes (shape hashes) degrade to `Dynamic[Top]`.
+      # - `inner_reader` — Symbol (default `:inner`): the payload reader synthesised on each variant subclass.
       #
       # ## Floor / ceiling per ADR-16 WD13 + ADR-36 WD4
       #
-      # Slice A ships the floor: each variant constant resolves as a
-      # class (so `<Variant>.new(...)` and the constant reference
-      # type), and the `#inner` reader resolves to the declared inner
-      # type. The `sealed`-parent fact + `is_a?` cross-variant
-      # exhaustive narrowing (ADR-36 WD3) is the ceiling, deferred —
-      # it needs the synthetic-class hierarchy threaded into
-      # `Environment#class_ordering`.
+      # Slice A ships the floor: each variant constant resolves as a class (so `<Variant>.new(...)` and the
+      # constant reference type), and the `#inner` reader resolves to the declared inner type. The
+      # `sealed`-parent fact + `is_a?` cross-variant exhaustive narrowing (ADR-36 WD3) is the ceiling,
+      # deferred — it needs the synthetic-class hierarchy threaded into `Environment#class_ordering`.
       class NestedClassTemplate
         attr_reader :receiver_constraint, :block_method, :variant_method,
                     :symbol_arg_position, :inner_arg_position, :inner_reader

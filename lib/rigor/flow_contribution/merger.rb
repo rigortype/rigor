@@ -6,55 +6,44 @@ require_relative "merge_result"
 
 module Rigor
   class FlowContribution
-    # Composes any number of {FlowContribution} bundles into a
-    # single {MergeResult} per ADR-2 § "Plugin Contribution
-    # Merging". The merger is the **single point of integration**
-    # the analyzer uses to combine contributions from built-in
-    # narrowing rules, `RBS::Extended` annotations, and plugins;
-    # slice 4 routes the existing internal narrowing through it
-    # and slice 6 wires plugin-side cache producers around it.
+    # Composes any number of {FlowContribution} bundles into a single {MergeResult} per ADR-2 § "Plugin
+    # Contribution Merging". The merger is the **single point of integration** the analyzer uses to combine
+    # contributions from built-in narrowing rules, `RBS::Extended` annotations, and plugins; slice 4 routes
+    # the existing internal narrowing through it and slice 6 wires plugin-side cache producers around it.
     #
     # ## Authority tiers
     #
-    # - Tier 0: `:builtin` — Core Ruby semantics and accepted RBS
-    #   contracts. Authoritative; lower tiers may not contradict.
-    # - Tier 1: `:rbs_extended` (`RBS::Extended` directive bundles,
-    #   v0.0.9 group D reference impl) and `:generated` (generated
-    #   signatures / metadata).
+    # - Tier 0: `:builtin` — Core Ruby semantics and accepted RBS contracts. Authoritative; lower tiers may
+    #   not contradict.
+    # - Tier 1: `:rbs_extended` (`RBS::Extended` directive bundles, v0.0.9 group D reference impl) and
+    #   `:generated` (generated signatures / metadata).
     # - Tier 2: `:plugin` and `plugin.<id>` source families.
     # - Tier 3: anything else — treated as the lowest tier.
     #
-    # Within a tier, contributions are merged in deterministic
-    # order: provenance-supplied `plugin_id` alphabetical (nil
-    # plugin ids sort first to keep `:rbs_extended` / `:generated`
-    # pre-plugin contributions stable), then by their original
-    # input position as the final tie-break.
+    # Within a tier, contributions are merged in deterministic order: provenance-supplied `plugin_id`
+    # alphabetical (nil plugin ids sort first to keep `:rbs_extended` / `:generated` pre-plugin contributions
+    # stable), then by their original input position as the final tie-break.
     #
     # ## Composition rules (ADR-2)
     #
-    # - `:return_type` — Intersect via `Type::Combinator.intersection`;
-    #   collapse to bot raises `:return_type_collapse`.
-    # - `:truthy_fact` / `:falsey_fact` / `:post_return_fact` —
-    #   Edge-local; accumulate while deduping by payload equality.
-    # - `:mutation` / `:invalidation` / `:role` — Union; dedupe by
-    #   equality.
-    # - `:exception` — Single-valued. Two non-`nil` non-equal
-    #   exceptional effects raise `:exceptional_disagreement`.
+    # - `:return_type` — Intersect via `Type::Combinator.intersection`; collapse to bot raises
+    #   `:return_type_collapse`.
+    # - `:truthy_fact` / `:falsey_fact` / `:post_return_fact` — Edge-local; accumulate while deduping by
+    #   payload equality.
+    # - `:mutation` / `:invalidation` / `:role` — Union; dedupe by equality.
+    # - `:exception` — Single-valued. Two non-`nil` non-equal exceptional effects raise
+    #   `:exceptional_disagreement`.
     #
     # ## Cross-tier contradictions
     #
-    # Lower tiers may refine higher tiers but must not weaken them.
-    # Slice 3 surfaces contradictions through `:lower_tier_contradiction`
-    # when:
+    # Lower tiers may refine higher tiers but must not weaken them. Slice 3 surfaces contradictions through
+    # `:lower_tier_contradiction` when:
     #
-    # - the higher tier already pinned a `return_type` and a lower
-    #   tier's intersection collapses to `bot`;
-    # - the higher tier set `exceptional` to a non-`nil` value and a
-    #   lower tier disagrees.
+    # - the higher tier already pinned a `return_type` and a lower tier's intersection collapses to `bot`;
+    # - the higher tier set `exceptional` to a non-`nil` value and a lower tier disagrees.
     #
-    # In every conflict case the result keeps the higher-tier value
-    # for that slot, records a {Conflict} with both provenances, and
-    # continues processing the remaining slots / contributions.
+    # In every conflict case the result keeps the higher-tier value for that slot, records a {Conflict} with
+    # both provenances, and continues processing the remaining slots / contributions.
     module Merger
       AUTHORITY_TIERS = {
         builtin: 0,
@@ -91,8 +80,8 @@ module Rigor
         private
 
         def order_contributions(contributions)
-          # Stable sort: tier ascending, then provenance plugin_id
-          # alphabetical (nil first), then original input position.
+          # Stable sort: tier ascending, then provenance plugin_id alphabetical (nil first), then original
+          # input position.
           contributions.each_with_index
                        .sort_by { |c, i| [tier_for(c.provenance), plugin_id_key(c.provenance), i] }
                        .map { |c, _| c }
@@ -140,13 +129,10 @@ module Rigor
           state.return_type_tier = [state.return_type_tier, tier].min
         end
 
-        # Two types' intersection collapses to bot when neither
-        # accepts the other under gradual mode — i.e. the value
-        # domains are disjoint. `Rigor::Type::Combinator.intersection`
-        # itself does not collapse incompatible nominals (`String ∩
-        # Integer` builds a structurally-empty `Intersection`
-        # carrier), so the merger checks the disjointness condition
-        # directly via the `accepts` trinary.
+        # Two types' intersection collapses to bot when neither accepts the other under gradual mode — i.e.
+        # the value domains are disjoint. `Rigor::Type::Combinator.intersection` itself does not collapse
+        # incompatible nominals (`String ∩ Integer` builds a structurally-empty `Intersection` carrier), so
+        # the merger checks the disjointness condition directly via the `accepts` trinary.
         def intersection_empty?(lhs, rhs)
           return false if lhs.equal?(rhs)
 
@@ -227,9 +213,8 @@ module Rigor
         end
       end
 
-      # Internal accumulator carried through a single merge call.
-      # Not part of the public API; folds into a {MergeResult} at
-      # the end via {#to_result}.
+      # Internal accumulator carried through a single merge call. Not part of the public API; folds into a
+      # {MergeResult} at the end via {#to_result}.
       class MergeState
         attr_accessor :return_type, :return_type_tier, :return_type_provenance,
                       :exceptional, :exceptional_tier, :exceptional_provenance

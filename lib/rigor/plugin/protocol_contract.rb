@@ -2,10 +2,8 @@
 
 module Rigor
   module Plugin
-    # ADR-28 declaration: "every instance/singleton method named
-    # `method_name`, defined in a source file matching `path_glob`,
-    # is implicitly required to satisfy the declared parameter +
-    # return-type protocol."
+    # ADR-28 declaration: "every instance/singleton method named `method_name`, defined in a source file
+    # matching `path_glob`, is implicitly required to satisfy the declared parameter + return-type protocol."
     #
     # Authored on a plugin manifest:
     #
@@ -22,49 +20,38 @@ module Rigor
     #     ]
     #   )
     #
-    # The contract drives two distinct engine behaviours (ADR-28
-    # § "provide-and-check"):
+    # The contract drives two distinct engine behaviours (ADR-28 § "provide-and-check"):
     #
-    # - **provide** — when the inference engine binds the parameter
-    #   list of a matching `def`, {Rigor::Inference::MethodParameterBinder}
-    #   substitutes the declared `param_types` for the usual
-    #   `Dynamic[Top]` fallback, so the method body is analysed as
-    #   if the parameter carried its protocol type.
-    # - **check** — the contributing plugin's `#diagnostics_for_file`
-    #   hook confirms the method exists and its inferred return type
-    #   conforms to `return_type_name`.
+    # - **provide** — when the inference engine binds the parameter list of a matching `def`,
+    #   {Rigor::Inference::MethodParameterBinder} substitutes the declared `param_types` for the usual
+    #   `Dynamic[Top]` fallback, so the method body is analysed as if the parameter carried its protocol type.
+    # - **check** — the contributing plugin's `#diagnostics_for_file` hook confirms the method exists and its
+    #   inferred return type conforms to `return_type_name`.
     #
     # ## Fields
     #
-    # - `path_glob` — `File.fnmatch` glob (String) selecting the
-    #   source files the contract applies to, relative to the
-    #   analysed project root (e.g. `"lib/controller/**/*.rb"`).
-    # - `method_name` — Symbol; the instance (or singleton) method
-    #   the contract constrains.
-    # - `singleton` — Boolean; `true` constrains `def self.<name>`,
-    #   `false` (default) constrains instance methods.
-    # - `param_types` — Array of `ParamType` (positional index →
-    #   fully-qualified type name). The type names resolve against
-    #   the analysed project's environment lazily, at consumption
-    #   time, so the contract value object stays independent of
-    #   environment construction order.
-    # - `return_type_name` — fully-qualified type name (String) the
-    #   method's inferred return type must conform to.
-    # - `severity` — Symbol diagnostic severity for contract
-    #   violations (`:error` default).
+    # - `path_glob` — `File.fnmatch` glob (String) selecting the source files the contract applies to,
+    #   relative to the analysed project root (e.g. `"lib/controller/**/*.rb"`).
+    # - `method_name` — Symbol; the instance (or singleton) method the contract constrains.
+    # - `singleton` — Boolean; `true` constrains `def self.<name>`, `false` (default) constrains instance
+    #   methods.
+    # - `param_types` — Array of `ParamType` (positional index → fully-qualified type name). The type names
+    #   resolve against the analysed project's environment lazily, at consumption time, so the contract value
+    #   object stays independent of environment construction order.
+    # - `return_type_name` — fully-qualified type name (String) the method's inferred return type must
+    #   conform to.
+    # - `severity` — Symbol diagnostic severity for contract violations (`:error` default).
     #
     # ## Ractor-shareability
     #
-    # Every field is frozen at construction (ADR-15 Phase 1); the
-    # nested `ParamType` is a frozen `Data`. `Ractor.shareable?`
-    # returns true after `#initialize`, so the contract survives
+    # Every field is frozen at construction (ADR-15 Phase 1); the nested `ParamType` is a frozen `Data`.
+    # `Ractor.shareable?` returns true after `#initialize`, so the contract survives
     # `Plugin::Registry.materialize` into a worker Ractor.
     class ProtocolContract
       VALID_SEVERITIES = %i[error warning info].freeze
 
-      # One positional-parameter provision: the zero-based index of
-      # the parameter and the fully-qualified name of the type it
-      # carries under the protocol.
+      # One positional-parameter provision: the zero-based index of the parameter and the fully-qualified
+      # name of the type it carries under the protocol.
       ParamType = Data.define(:index, :type_name)
 
       attr_reader :path_glob, :method_name, :singleton, :param_types, :return_type_name, :severity
@@ -85,9 +72,8 @@ module Rigor
         freeze
       end
 
-      # Returns a copy with `path_glob` replaced. Plugins use this to
-      # honour a per-project config override of the convention path
-      # without rebuilding the whole contract by hand.
+      # Returns a copy with `path_glob` replaced. Plugins use this to honour a per-project config override of
+      # the convention path without rebuilding the whole contract by hand.
       def with_path_glob(glob)
         ProtocolContract.new(
           path_glob: glob,

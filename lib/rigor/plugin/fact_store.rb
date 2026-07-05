@@ -4,23 +4,17 @@ module Rigor
   module Plugin
     # Per-run cross-plugin fact store. ADR-9 § "Plugin::FactStore".
     #
-    # A plugin publishes typed `(plugin_id, name) -> value` tuples
-    # in its `Plugin::Base#prepare(services)` hook (slice 3); other
-    # plugins read them in `#diagnostics_for_file` via
-    # `services.fact_store.read(plugin_id:, name:)`. The store is
-    # constructed fresh at the start of every `Analysis::Runner.run`
-    # and discarded at the end — caching the underlying expensive
-    # computation is the producer's job (`Plugin::Base.producer`);
-    # the FactStore just publishes a *reference* to that
+    # A plugin publishes typed `(plugin_id, name) -> value` tuples in its `Plugin::Base#prepare(services)` hook
+    # (slice 3); other plugins read them in `#diagnostics_for_file` via
+    # `services.fact_store.read(plugin_id:, name:)`. The store is constructed fresh at the start of every
+    # `Analysis::Runner.run` and discarded at the end — caching the underlying expensive computation is the
+    # producer's job (`Plugin::Base.producer`); the FactStore just publishes a *reference* to that
     # already-cached result.
     #
-    # `(plugin_id, name)` is a unique key. A second `publish` with
-    # the same value is a no-op (`==` comparison); a second
-    # `publish` with a different value raises {Conflict}. Since
-    # `plugin_id` namespaces the key, a real conflict only happens
-    # when a single plugin publishes twice with differing values —
-    # the conflict signals a plugin-author bug, never a load-time
-    # interaction between unrelated plugins.
+    # `(plugin_id, name)` is a unique key. A second `publish` with the same value is a no-op (`==` comparison);
+    # a second `publish` with a different value raises {Conflict}. Since `plugin_id` namespaces the key, a real
+    # conflict only happens when a single plugin publishes twice with differing values — the conflict signals a
+    # plugin-author bug, never a load-time interaction between unrelated plugins.
     class FactStore
       Fact = Data.define(:plugin_id, :name, :value)
 
@@ -45,15 +39,13 @@ module Rigor
         @mutex = Mutex.new
       end
 
-      # Writes a `(plugin_id, name) -> value` triple. Idempotent if
-      # the same value is published twice (`==`); raises
-      # {Conflict} if the values differ.
+      # Writes a `(plugin_id, name) -> value` triple. Idempotent if the same value is published twice (`==`);
+      # raises {Conflict} if the values differ.
       #
       # @param plugin_id [String] producing plugin's manifest id.
-      # @param name [Symbol, String] fact name (canonicalised to
-      #   Symbol for lookup).
-      # @param value [Object] frozen-shape value object the
-      #   producer chose to publish. The value is stored as-is.
+      # @param name [Symbol, String] fact name (canonicalised to Symbol for lookup).
+      # @param value [Object] frozen-shape value object the producer chose to publish. The value is stored
+      #   as-is.
       def publish(plugin_id:, name:, value:)
         plugin_id = plugin_id.to_s
         name = name.to_sym
@@ -68,10 +60,8 @@ module Rigor
         nil
       end
 
-      # @return [Object, nil] the published value, or `nil` when no
-      #   fact is registered. Reads do NOT establish a dependency —
-      #   `manifest(consumes:)` (slice 4) is the dependency
-      #   declaration mechanism.
+      # @return [Object, nil] the published value, or `nil` when no fact is registered. Reads do NOT establish
+      #   a dependency — `manifest(consumes:)` (slice 4) is the dependency declaration mechanism.
       def read(plugin_id:, name:)
         fact = @mutex.synchronize { @facts[[plugin_id.to_s, name.to_sym]] }
         fact&.value

@@ -2,16 +2,13 @@
 
 module Rigor
   class FlowContribution
-    # Result of folding any number of {FlowContribution} bundles
-    # through {Merger.merge}. Surfaces the merged content slot-by-
-    # slot, the ordered list of contributing provenances, and the
-    # {Conflict} list collected along the way.
+    # Result of folding any number of {FlowContribution} bundles through {Merger.merge}. Surfaces the merged
+    # content slot-by-slot, the ordered list of contributing provenances, and the {Conflict} list collected
+    # along the way.
     #
-    # The merge result is a sibling shape of {FlowContribution} —
-    # the analyzer reads from it to drive narrowing / dispatch /
-    # diagnostics, and the formatter reads from it to surface
-    # plugin / RBS::Extended provenance. The shape is derived per
-    # ADR-2 § "Plugin Contribution Merging"; see
+    # The merge result is a sibling shape of {FlowContribution} — the analyzer reads from it to drive narrowing
+    # / dispatch / diagnostics, and the formatter reads from it to surface plugin / RBS::Extended provenance.
+    # The shape is derived per ADR-2 § "Plugin Contribution Merging"; see
     # [`docs/internal-spec/flow-contribution-merger.md`](../../../docs/internal-spec/flow-contribution-merger.md)
     # for the slice-3 normative description.
     class MergeResult

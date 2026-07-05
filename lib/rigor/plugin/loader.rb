@@ -6,34 +6,27 @@ require_relative "load_error"
 
 module Rigor
   module Plugin
-    # Resolves the project's `.rigor.yml` `plugins:` entries into
-    # instantiated plugin instances, paired with a service container.
-    # Internal slice-1 implementation; the public surface is
-    # {Loader.load} returning a {Registry}.
+    # Resolves the project's `.rigor.yml` `plugins:` entries into instantiated plugin instances, paired with a
+    # service container. Internal slice-1 implementation; the public surface is {Loader.load} returning a
+    # {Registry}.
     #
     # Steps per entry (in order):
     #
     # 1. Normalise the entry into `{ gem:, id:, config: }`.
     # 2. `require` the gem (failures surface as a {LoadError}).
-    # 3. Look up the registered plugin class by id (or by gem
-    #    name if the entry omitted an explicit id).
-    # 4. Validate the user's config against the manifest's
-    #    `config_schema`.
+    # 3. Look up the registered plugin class by id (or by gem name if the entry omitted an explicit id).
+    # 4. Validate the user's config against the manifest's `config_schema`.
     # 5. Instantiate the plugin and call `init(services)`.
     #
-    # Loading is deterministic: configuration order, with plugin
-    # id alphabetical as the tie-breaker for entries that resolve
-    # to the same gem. Failures do not abort the run; the loader
-    # collects them on the {Registry} so the runner can convert
-    # each one into a `:plugin_loader` diagnostic.
+    # Loading is deterministic: configuration order, with plugin id alphabetical as the tie-breaker for
+    # entries that resolve to the same gem. Failures do not abort the run; the loader collects them on the
+    # {Registry} so the runner can convert each one into a `:plugin_loader` diagnostic.
     class Loader # rubocop:disable Metrics/ClassLength
       attr_reader :services, :requirer
 
       # @param services [Rigor::Plugin::Services]
-      # @param requirer [#call] takes a gem name and returns truthy
-      #   on successful require. Defaulted to `Kernel.require` via
-      #   a lambda; the spec injects a fake to avoid touching the
-      #   real load path.
+      # @param requirer [#call] takes a gem name and returns truthy on successful require. Defaulted to
+      #   `Kernel.require` via a lambda; the spec injects a fake to avoid touching the real load path.
       def initialize(services:, requirer: ->(name) { require name })
         @services = services
         @requirer = requirer
@@ -43,8 +36,7 @@ module Rigor
         new(services: services, requirer: requirer).load(configuration.plugins)
       end
 
-      # @param entries [Array<String, Hash>] the raw `plugins:`
-      #   list from the configuration.
+      # @param entries [Array<String, Hash>] the raw `plugins:` list from the configuration.
       # @return [Registry]
       def load(entries)
         plugins = []
@@ -64,12 +56,10 @@ module Rigor
           end
         end
 
-        # ADR-9 slice 5 — topological sort by `manifest(consumes:)`
-        # so producers run before consumers, plus early
-        # `missing-producer` validation. Cycles surface as
-        # `dependency-cycle` LoadErrors. When validation fails, the
-        # offending plugin(s) drop from the returned plugins list
-        # and the LoadError surfaces alongside any earlier failure.
+        # ADR-9 slice 5 — topological sort by `manifest(consumes:)` so producers run before consumers, plus
+        # early `missing-producer` validation. Cycles surface as `dependency-cycle` LoadErrors. When
+        # validation fails, the offending plugin(s) drop from the returned plugins list and the LoadError
+        # surfaces alongside any earlier failure.
         plugins, sort_errors = topo_sort_plugins(plugins)
         load_errors.concat(sort_errors)
 
@@ -130,13 +120,11 @@ module Rigor
         plugin
       end
 
-      # ADR-25 — a plugin's manifest-declared `signature_paths:`
-      # are resolved (by `Plugin::Base#signature_paths`) against
-      # the plugin gem root. A declared directory that does not
-      # exist is a load-time failure for that plugin — loud, not
-      # silent, because a missing `sig/` means the bundle gem is
-      # broken. The raised LoadError is collected like any other
-      # load failure and the plugin drops from the registry.
+      # ADR-25 — a plugin's manifest-declared `signature_paths:` are resolved (by
+      # `Plugin::Base#signature_paths`) against the plugin gem root. A declared directory that does not exist
+      # is a load-time failure for that plugin — loud, not silent, because a missing `sig/` means the bundle
+      # gem is broken. The raised LoadError is collected like any other load failure and the plugin drops
+      # from the registry.
       def validate_signature_paths!(plugin)
         plugin.signature_paths.each do |dir|
           next if File.directory?(dir)
@@ -221,19 +209,15 @@ module Rigor
         plugin_class.to_s
       end
 
-      # ADR-9 slice 5 — topological sort of plugins by their
-      # `manifest(consumes:)` declarations. Returns `[sorted_plugins,
-      # load_errors]`. Determinism: when no dependency relation
-      # forces an order, plugins are visited alphabetically by
-      # manifest id. A non-optional consume of a `(plugin_id, name)`
-      # whose producer is missing emits a `:missing-producer`
-      # LoadError and drops the consumer; cycles emit a
+      # ADR-9 slice 5 — topological sort of plugins by their `manifest(consumes:)` declarations. Returns
+      # `[sorted_plugins, load_errors]`. Determinism: when no dependency relation forces an order, plugins
+      # are visited alphabetically by manifest id. A non-optional consume of a `(plugin_id, name)` whose
+      # producer is missing emits a `:missing-producer` LoadError and drops the consumer; cycles emit a
       # `:dependency-cycle` LoadError naming the offending chain.
       def topo_sort_plugins(plugins)
-        # If no plugin opts into the cross-plugin API the loader's
-        # legacy configuration-order contract is preserved
-        # unchanged. Topo sort and missing-producer validation only
-        # run when at least one plugin declares `consumes:`.
+        # If no plugin opts into the cross-plugin API the loader's legacy configuration-order contract is
+        # preserved unchanged. Topo sort and missing-producer validation only run when at least one plugin
+        # declares `consumes:`.
         return [plugins, []] unless plugins.any? { |p| p.manifest.consumes.any? }
 
         index = plugins.to_h { |plugin| [plugin.manifest.id, plugin] }
@@ -267,12 +251,9 @@ module Rigor
         producer.manifest.produces.include?(name)
       end
 
-      # Kahn's algorithm with `Configuration#plugins`-order
-      # tie-break. Edges go from producer -> consumer (producer
-      # must visit first). When two plugins are simultaneously
-      # ready, the configuration-order index decides the visit
-      # order — preserves the v0.1.0 legacy contract for plugins
-      # without dependencies.
+      # Kahn's algorithm with `Configuration#plugins`-order tie-break. Edges go from producer -> consumer
+      # (producer must visit first). When two plugins are simultaneously ready, the configuration-order index
+      # decides the visit order — preserves the v0.1.0 legacy contract for plugins without dependencies.
       def sort_in_topo_order(plugins, index, errors, config_order)
         in_degree, forward = build_consumes_graph(plugins, index, errors)
         ordered, cycle_errors = kahn_walk(plugins, in_degree, forward, config_order)

@@ -4,16 +4,14 @@ module Rigor
   module Plugin
     module Macro
       # ADR-16 Tier B declaration: "the class-level DSL call
-      # `<receiver_constraint>.<method_name>(:trait_a, :trait_b, ...)`
-      # effectively includes the modules named in
-      # `modules_by_symbol[:trait_a]` + `[:trait_b]` (plus any
-      # `always_included` modules) on the calling class."
+      # `<receiver_constraint>.<method_name>(:trait_a, :trait_b, ...)` effectively includes the modules named
+      # in `modules_by_symbol[:trait_a]` + `[:trait_b]` (plus any `always_included` modules) on the calling
+      # class."
       #
-      # Worked target: Devise's model-side `devise :database_authenticatable,
-      # :recoverable` DSL (per-library survey § Devise). The bundled
-      # registry mirrors `lib/devise/modules.rb`'s symbol → module table;
-      # `always_included` carries the modules Devise always mixes in
-      # regardless of selection (e.g. `Devise::Models::Authenticatable`).
+      # Worked target: Devise's model-side `devise :database_authenticatable, :recoverable` DSL (per-library
+      # survey § Devise). The bundled registry mirrors `lib/devise/modules.rb`'s symbol → module table;
+      # `always_included` carries the modules Devise always mixes in regardless of selection (e.g.
+      # `Devise::Models::Authenticatable`).
       #
       # ## Authoring shape
       #
@@ -37,50 +35,36 @@ module Rigor
       #
       # ## Fields
       #
-      # - `receiver_constraint` — fully-qualified class name (String).
-      #   Synthesis fires when the call's lexical receiver class
-      #   equals or inherits from this constraint.
-      # - `method_name` — Symbol naming the DSL method
-      #   (e.g. `:devise`).
-      # - `symbol_arg_position` — `:rest` (all positional Symbol args
-      #   are traits, slice 3a's only supported form) or a
-      #   non-negative Integer (the index of a single trait symbol —
-      #   reserved for future shapes; not yet honoured by the
-      #   scanner).
-      # - `modules_by_symbol` — Hash<Symbol, String>. Maps each
-      #   recognised trait symbol to a fully-qualified module name.
-      #   Symbols not in the table fall through (silent skip; the
-      #   scanner emits a `macro.tier_b.unknown-trait` `:info`
-      #   provenance marker per WD9 / WD13).
-      # - `always_included` — Array<String>. Fully-qualified module
-      #   names that are added to every call site (even when no
-      #   symbols match). Mirrors Devise's `always_include` modules.
+      # - `receiver_constraint` — fully-qualified class name (String). Synthesis fires when the call's
+      #   lexical receiver class equals or inherits from this constraint.
+      # - `method_name` — Symbol naming the DSL method (e.g. `:devise`).
+      # - `symbol_arg_position` — `:rest` (all positional Symbol args are traits, slice 3a's only supported
+      #   form) or a non-negative Integer (the index of a single trait symbol — reserved for future shapes;
+      #   not yet honoured by the scanner).
+      # - `modules_by_symbol` — Hash<Symbol, String>. Maps each recognised trait symbol to a fully-qualified
+      #   module name. Symbols not in the table fall through (silent skip; the scanner emits a
+      #   `macro.tier_b.unknown-trait` `:info` provenance marker per WD9 / WD13).
+      # - `always_included` — Array<String>. Fully-qualified module names that are added to every call site
+      #   (even when no symbols match). Mirrors Devise's `always_include` modules.
       #
       # ## Floor / ceiling per ADR-16 WD13
       #
-      # Slice 3 ships at the **floor**: the substrate per-method-
-      # explodes each included module's RBS instance methods into
-      # the existing `SyntheticMethodIndex` (slice 2b primitive).
-      # The synthesised methods adopt the module's authored RBS
-      # return types — Tier B is NOT subject to the Tier C
-      # `Dynamic[T]` floor because the source-of-truth (the
-      # module's authored RBS) is not a manifest-declared string.
-      # Per ADR-5 robustness, the substrate does not fabricate
-      # precision; it simply replays the modules's signatures.
+      # Slice 3 ships at the **floor**: the substrate per-method-explodes each included module's RBS instance
+      # methods into the existing `SyntheticMethodIndex` (slice 2b primitive). The synthesised methods adopt
+      # the module's authored RBS return types — Tier B is NOT subject to the Tier C `Dynamic[T]` floor
+      # because the source-of-truth (the module's authored RBS) is not a manifest-declared string. Per ADR-5
+      # robustness, the substrate does not fabricate precision; it simply replays the modules's signatures.
       #
       # **Out of scope for slice 3** (deferred follow-ups):
-      # - `class_methods_module:` per-trait (Devise's `ClassMethods`
-      #   extend-pattern); slice 3 covers instance methods only.
-      # - `sort_key:` for controlled include ordering across traits;
-      #   slice 3 uses plugin-registration order then registry
-      #   declaration order.
-      # - `included_do_digest:` — the per-module `included do` block
-      #   facts (attr_reader / after_save / etc.); slice 3 emits
-      #   only the module's plain instance methods.
+      # - `class_methods_module:` per-trait (Devise's `ClassMethods` extend-pattern); slice 3 covers instance
+      #   methods only.
+      # - `sort_key:` for controlled include ordering across traits; slice 3 uses plugin-registration order
+      #   then registry declaration order.
+      # - `included_do_digest:` — the per-module `included do` block facts (attr_reader / after_save / etc.);
+      #   slice 3 emits only the module's plain instance methods.
       #
-      # Engine wiring: `Inference::SyntheticMethodScanner#collect_trait_registries`
-      # (slice 3b) walks Tier B call sites and explodes per-method
-      # entries. Worked consumer: `plugins/rigor-devise/` (slice 3c).
+      # Engine wiring: `Inference::SyntheticMethodScanner#collect_trait_registries` (slice 3b) walks Tier B
+      # call sites and explodes per-method entries. Worked consumer: `plugins/rigor-devise/` (slice 3c).
       class TraitRegistry
         REST_POSITION = :rest
 
@@ -121,10 +105,9 @@ module Rigor
           to_h.hash
         end
 
-        # @return [String, nil] fully-qualified module name for the
-        #   given trait symbol, or nil when the registry doesn't
-        #   know the symbol (caller emits a tier_b.unknown-trait
-        #   provenance marker and falls through).
+        # @return [String, nil] fully-qualified module name for the given trait symbol, or nil when the
+        #   registry doesn't know the symbol (caller emits a tier_b.unknown-trait provenance marker and falls
+        #   through).
         def module_for(symbol)
           modules_by_symbol[symbol.to_sym]
         end

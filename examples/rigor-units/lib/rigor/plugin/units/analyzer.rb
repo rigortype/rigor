@@ -5,17 +5,12 @@ require "prism"
 module Rigor
   module Plugin
     class Units < Rigor::Plugin::Base
-      # Walks a single Ruby file, evaluates every expression
-      # against the {MethodTable} dispatch surface, and tracks
-      # local-variable bindings so dimensions flow through
-      # subsequent reads.
+      # Walks a single Ruby file, evaluates every expression against the {MethodTable} dispatch surface, and tracks
+      # local-variable bindings so dimensions flow through subsequent reads.
       #
-      # The walker is intentionally simple — no path-sensitive
-      # branching, no method-body scoping — because the demo's
-      # value is "what the plugin sees at the top level". An
-      # `if` / `else` body is recursed into for diagnostics, but
-      # any binding it writes is global to the analyser; there
-      # is no scope stack. That keeps the example small without
+      # The walker is intentionally simple — no path-sensitive branching, no method-body scoping — because the demo's
+      # value is "what the plugin sees at the top level". An `if` / `else` body is recursed into for diagnostics, but
+      # any binding it writes is global to the analyser; there is no scope stack. That keeps the example small without
       # surprising users with partial control-flow precision.
       class Analyzer
         DIMENSIONS = %i[distance time speed acceleration].freeze
@@ -35,10 +30,8 @@ module Rigor
 
         private
 
-        # Returns the dimension Symbol for a node, or `nil` when
-        # the analyzer cannot — or chooses not to — type it.
-        # Recursing down a tree always uses `evaluate`; the
-        # diagnostics each node owns fire as a side-effect of
+        # Returns the dimension Symbol for a node, or `nil` when the analyzer cannot — or chooses not to — type it.
+        # Recursing down a tree always uses `evaluate`; the diagnostics each node owns fire as a side-effect of
         # evaluating it, exactly once per node.
         def evaluate(node)
           return nil if node.nil?
@@ -148,11 +141,9 @@ module Rigor
         end
 
         def push_diagnostic(node, severity:, message:, rule:)
-          # `Analyzer` is a plain class, not a `Plugin::Base` subclass, so
-          # it cannot use the `#diagnostic` instance helper — but
-          # `Diagnostic.from_location` is the same public constructor that
-          # helper wraps, and it internalises the 1-based line / column + 1
-          # convention this method used to spell out by hand.
+          # `Analyzer` is a plain class, not a `Plugin::Base` subclass, so it cannot use the `#diagnostic` instance
+          # helper — but `Diagnostic.from_location` is the same public constructor that helper wraps, and it
+          # internalises the 1-based line / column + 1 convention this method used to spell out by hand.
           @diagnostics << Rigor::Analysis::Diagnostic.from_location(
             node.location,
             path: @path,

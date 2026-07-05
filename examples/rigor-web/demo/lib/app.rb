@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
-# Wiring for the demo app: build a RigWeb router and register the
-# two controllers. This is the snippet from the rigor-web README,
-# made into a real analysable file.
+# Wiring for the demo app: build a RigWeb router and register the two controllers. This is the snippet from the
+# rigor-web README, made into a real analysable file.
 #
-# Run the analysis from this `demo/` directory with the plugin on
-# the load path:
+# Run the analysis from this `demo/` directory with the plugin on the load path:
 #
 #   RUBYLIB=$PWD/../lib bundle exec rigor check
 

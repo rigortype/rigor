@@ -2,8 +2,7 @@
 
 require_relative "lib/lisp"
 
-# Each `Lisp.eval(...)` call below produces an `info`
-# diagnostic from the rigor-lisp-eval plugin naming the
+# Each `Lisp.eval(...)` call below produces an `info` diagnostic from the rigor-lisp-eval plugin naming the
 # statically-inferred return type. Run from this directory:
 #
 #   RUBYLIB=$PWD/../lib bundle exec rigor check demo.rb
@@ -28,14 +27,12 @@ puts maybe
 both = Lisp.eval([:and, true, [:not, false]])
 puts both
 
-# Non-literal argument — the plugin stays silent rather than
-# guessing. The analyzer treats the call as `untyped` per the
+# Non-literal argument — the plugin stays silent rather than guessing. The analyzer treats the call as `untyped` per the
 # RBS signature.
 program = [:+, 1, 2]
 unknown = Lisp.eval(program)
 puts unknown
 
-# Ill-typed expression — surfaces as an error diagnostic.
-# Comment the next line out to silence the type-error path.
+# Ill-typed expression — surfaces as an error diagnostic. Comment the next line out to silence the type-error path.
 broken = Lisp.eval([:+, 1, true])
 puts broken

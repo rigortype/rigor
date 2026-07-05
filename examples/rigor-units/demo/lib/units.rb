@@ -1,13 +1,10 @@
 # frozen_string_literal: true
 
-# Tiny units-of-measure runtime the rigor-units plugin types
-# statically. The classes are minimal — just enough to make
-# the demo executable under MRI. The plugin's value is what
-# `rigor check` says about the call sites, not what the
+# Tiny units-of-measure runtime the rigor-units plugin types statically. The classes are minimal — just enough to make
+# the demo executable under MRI. The plugin's value is what `rigor check` says about the call sites, not what the
 # runtime does internally.
 
-# Internal storage is the SI base unit: meters for distance,
-# seconds for time, m/s for speed, m/s² for acceleration.
+# Internal storage is the SI base unit: meters for distance, seconds for time, m/s for speed, m/s² for acceleration.
 
 class Distance
   include Comparable

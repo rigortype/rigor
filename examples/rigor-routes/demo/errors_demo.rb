@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
-# Intentionally ill-typed file — demonstrates the diagnostics
-# rigor-routes emits for unknown helpers and arity mismatches.
-# DO NOT run via `ruby errors_demo.rb` — the unknown helpers
-# would NoMethodError at runtime. Run `rigor check` instead.
+# Intentionally ill-typed file — demonstrates the diagnostics rigor-routes emits for unknown helpers and arity
+# mismatches. DO NOT run via `ruby errors_demo.rb` — the unknown helpers would NoMethodError at runtime. Run `rigor
+# check` instead.
 
 # Unknown route helpers (with did-you-mean suggestions).
 unknown_widget_path

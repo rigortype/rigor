@@ -6,11 +6,9 @@ require_relative "lib/route_helpers"
 #
 #   RUBYLIB=$PWD/../lib bundle exec rigor check
 #
-# rigor-routes reads `config/routes.yml` once (via
-# Plugin::IoBoundary), caches the parsed RouteTable
-# (--cache-stats shows the entry under `plugin.routes.route_table`),
-# and validates each *_path / *_url call below against the
-# table for existence + arity.
+# rigor-routes reads `config/routes.yml` once (via Plugin::IoBoundary), caches the parsed RouteTable (--cache-stats
+# shows the entry under `plugin.routes.route_table`), and validates each *_path / *_url call below against the table for
+# existence + arity.
 
 # ---- Recognised calls ----
 

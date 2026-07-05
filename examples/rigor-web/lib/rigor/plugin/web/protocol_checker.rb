@@ -14,12 +14,9 @@ module Rigor
       # 2. that method's inferred return type conforms to the
       #    contract's `return_type_name`.
       #
-      # The "provide" half — binding the contract's parameter types
-      # into the method body — happens engine-side in
-      # `Inference::MethodParameterBinder` before this checker runs.
-      # The checker re-binds the same parameter types onto its own
-      # query scope so `Scope#type_of` types the body identically to
-      # the engine's own per-file inference.
+      # The "provide" half — binding the contract's parameter types into the method body — happens engine-side in
+      # `Inference::MethodParameterBinder` before this checker runs. The checker re-binds the same parameter types onto
+      # its own query scope so `Scope#type_of` types the body identically to the engine's own per-file inference.
       class ProtocolChecker
         FNMATCH_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
@@ -28,11 +25,9 @@ module Rigor
         end
 
         # Per-`ClassNode` check over the engine-owned walk (ADR-37):
-        # called once per class node the `node_rule` in `web.rb`
-        # dispatches, checking it against every contract whose
-        # `path_glob` matches the file. No cross-class-node state is
-        # needed, so the checker ships no `class_nodes` traversal of its
-        # own.
+        # called once per class node the `node_rule` in `web.rb` dispatches, checking it against every contract whose
+        # `path_glob` matches the file. No cross-class-node state is needed, so the checker ships no `class_nodes`
+        # traversal of its own.
         def check_class(class_node, path:, scope:)
           @contracts.flat_map do |contract|
             next [] unless path_matches?(contract.path_glob, path)
@@ -43,9 +38,8 @@ module Rigor
 
         private
 
-        # Contract globs are authored project-root-relative; the
-        # analyzer may pass a relative or an absolute path, so the
-        # glob is matched directly and as a `**/`-prefixed suffix.
+        # Contract globs are authored project-root-relative; the analyzer may pass a relative or an absolute path, so
+        # the glob is matched directly and as a `**/`-prefixed suffix.
         def path_matches?(glob, path)
           return false if path.nil?
 
@@ -62,8 +56,7 @@ module Rigor
           end
         end
 
-        # The contracted method, defined directly in `class_node`'s
-        # body (not in a nested class / module).
+        # The contracted method, defined directly in `class_node`'s body (not in a nested class / module).
         def target_def(class_node, contract)
           direct_defs(class_node).find do |def_node|
             def_node.name == contract.method_name &&
@@ -104,12 +97,9 @@ module Rigor
           )
         end
 
-        # Compares the inferred return type of the contracted method
-        # against the contract's declared return type. Stays silent
-        # when the protocol's RBS is not loaded (return type
-        # unresolvable) or when inference cannot pin the body type
-        # down (`Dynamic[Top]`) — the plugin defers to runtime
-        # rather than frighten code that may be correct.
+        # Compares the inferred return type of the contracted method against the contract's declared return type. Stays
+        # silent when the protocol's RBS is not loaded (return type unresolvable) or when inference cannot pin the body
+        # type down (`Dynamic[Top]`) — the plugin defers to runtime rather than frighten code that may be correct.
         def return_type_diagnostic(contract, path, scope, def_node)
           return nil if contract.return_type_name.nil?
 
@@ -134,8 +124,7 @@ module Rigor
           )
         end
 
-        # Re-binds the contract's parameter types onto the query
-        # scope so `type_of` analyses the body with the same
+        # Re-binds the contract's parameter types onto the query scope so `type_of` analyses the body with the same
         # parameter knowledge the engine's binder used.
         def bind_contract_params(contract, scope, def_node)
           contract.param_types.reduce(scope) do |acc, param_type|

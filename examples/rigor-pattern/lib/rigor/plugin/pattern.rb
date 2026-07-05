@@ -6,22 +6,16 @@ require "rigor/source/literals"
 
 module Rigor
   module Plugin
-    # Example plugin: validates `validate(:name, value)` calls
-    # against a user-declared regex pattern table. Demonstrates
+    # Example plugin: validates `validate(:name, value)` calls against a user-declared regex pattern table. Demonstrates
     # **plugin → analyzer collaboration**: the plugin asks Rigor's
-    # type system whether each `value` argument is a provably
-    # literal string (via `Type::Combinator.literal_string_compatible?`),
-    # and if so, runs the configured regex against the literal value
-    # at lint time.
+    # type system whether each `value` argument is a provably literal string (via
+    # `Type::Combinator.literal_string_compatible?`), and if so, runs the configured regex against the literal value at
+    # lint time.
     #
-    # Compared with the AST-only approach used by the earlier
-    # examples, this one **does not reimplement** literal-string
-    # tracking. Rigor already folds `"user@" + "example.com"`
-    # to a literal-string carrier through its
-    # `LiteralStringFolding` tier; the plugin reads that fact
-    # back through `Scope#type_of` and uses it. Plugins that
-    # need to know "is this a literal string?" should reach for
-    # the engine surface rather than re-implementing string
+    # Compared with the AST-only approach used by the earlier examples, this one **does not reimplement** literal-string
+    # tracking. Rigor already folds `"user@" + "example.com"` to a literal-string carrier through its
+    # `LiteralStringFolding` tier; the plugin reads that fact back through `Scope#type_of` and uses it. Plugins that
+    # need to know "is this a literal string?" should reach for the engine surface rather than re-implementing string
     # propagation.
     #
     # ## Configuration
@@ -44,9 +38,8 @@ module Rigor
     # | provably literal-string but exact value unknown | `:info`  | `literal-unknown` |
     # | call site references an unknown pattern name    | `:error` | `unknown-pattern` |
     #
-    # Calls whose `value` argument is not provably a literal
-    # (e.g. `validate(:email, params[:email])`) stay silent —
-    # the plugin defers to runtime for those.
+    # Calls whose `value` argument is not provably a literal (e.g. `validate(:email, params[:email])`) stay silent — the
+    # plugin defers to runtime for those.
     class Pattern < Rigor::Plugin::Base
       manifest(
         id: "pattern",
@@ -65,9 +58,8 @@ module Rigor
         raise "rigor-pattern: invalid regex in config: #{e.message}"
       end
 
-      # ADR-37 — per-call validation over the engine-owned walk.
-      # `validate_call?` gates on the configured `method_name` with
-      # ≥2 args; the plugin ships no traversal of its own.
+      # ADR-37 — per-call validation over the engine-owned walk. `validate_call?` gates on the configured `method_name`
+      # with ≥2 args; the plugin ships no traversal of its own.
       node_rule Prism::CallNode do |node, scope, path|
         next [] if @patterns.empty?
         next [] unless validate_call?(node)
@@ -76,17 +68,12 @@ module Rigor
         found ? [found] : []
       end
 
-      # ADR-52 slice 4 — return-type contribution via the compiled
-      # dispatch DSL. The `methods:` callable resolves after `#init`
-      # so `@method_name` is available. Runtime `validate` returns
-      # its `value` argument when the regex matches and raises
-      # otherwise, so on a successful match we narrow the call
-      # site's return type to the value argument's type (typically
-      # `Constant<String>` after Rigor's literal-string folding).
-      # Mismatches keep the existing `literal-mismatch` diagnostic
-      # and stay at the RBS-level untyped return. The engine wraps
-      # the bare `Rigor::Type` return in a `FlowContribution`
-      # automatically.
+      # ADR-52 slice 4 — return-type contribution via the compiled dispatch DSL. The `methods:` callable resolves after
+      # `#init` so `@method_name` is available. Runtime `validate` returns its `value` argument when the regex matches
+      # and raises otherwise, so on a successful match we narrow the call site's return type to the value argument's
+      # type (typically `Constant<String>` after Rigor's literal-string folding). Mismatches keep the existing
+      # `literal-mismatch` diagnostic and stay at the RBS-level untyped return. The engine wraps the bare `Rigor::Type`
+      # return in a `FlowContribution` automatically.
       dynamic_return methods: -> { [@method_name] } do |call_node, scope|
         next nil unless validate_call?(call_node)
 
@@ -142,11 +129,9 @@ module Rigor
         value_node = call.arguments.arguments[1]
         return nil if value_node.nil?
 
-        # Use the per-file entry scope's `type_of` so the plugin
-        # rides Rigor's existing literal-string folding rather
-        # than reimplementing it. `Type::Combinator.literal_string_compatible?`
-        # is the engine-side predicate the literal-string carrier
-        # publishes.
+        # Use the per-file entry scope's `type_of` so the plugin rides Rigor's existing literal-string folding rather
+        # than reimplementing it. `Type::Combinator.literal_string_compatible?` is the engine-side predicate the
+        # literal-string carrier publishes.
         value_type = scope.type_of(value_node)
         evaluate_value(path, value_node, pattern, pattern_name, value_type)
       end
@@ -172,12 +157,9 @@ module Rigor
             )
           end
         else
-          # Provably literal-string-compatible but the exact
-          # value is not a `Type::Constant` — typically a
-          # refinement carrier produced through interpolation
-          # of a non-Constant literal-string. Surface as an
-          # info note so the user sees the engine collaboration
-          # without false-positive errors.
+          # Provably literal-string-compatible but the exact value is not a `Type::Constant` — typically a refinement
+          # carrier produced through interpolation of a non-Constant literal-string. Surface as an info note so the user
+          # sees the engine collaboration without false-positive errors.
           diagnostic(
             value_node, path: path,
                         severity: :info,

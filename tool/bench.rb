@@ -3,14 +3,12 @@
 
 # ADR-50 WD4 — perf-regression benchmark for `make bench-perf` / the release gate.
 #
-# Runs `rigor check` in-process over one or more targets, measures wall time,
-# total allocated objects, and peak RSS (Linux only), then gates against a
-# committed baseline within a tunable tolerance band (bench/thresholds.yml).
+# Runs `rigor check` in-process over one or more targets, measures wall time, total allocated objects, and peak RSS
+# (Linux only), then gates against a committed baseline within a tunable tolerance band (bench/thresholds.yml).
 #
-# First run (baseline uncalibrated): writes a SUGGESTED baseline to a
-# `.updated.json` sibling and passes — the same calibrate-on-first-run
-# pattern as tool/oss_sweep_compare.rb. The committed baseline is never
-# overwritten implicitly; commit a CI-measured baseline to activate the gate.
+# First run (baseline uncalibrated): writes a SUGGESTED baseline to a `.updated.json` sibling and passes — the same
+# calibrate-on-first-run pattern as tool/oss_sweep_compare.rb. The committed baseline is never overwritten implicitly;
+# commit a CI-measured baseline to activate the gate.
 #
 # Usage:
 #   ruby tool/bench.rb [--target PATH ...] \
@@ -38,10 +36,9 @@ OptionParser.new do |o|
 end.parse!
 options[:targets] = ["lib"] if options[:targets].empty?
 
-# Peak RSS is read from /proc on Linux (the CI runner, which is the
-# authoritative measurement host). On macOS / other hosts there is no
-# /proc/self/status, so RSS is reported nil and the gate skips it — local
-# `make bench-perf` still measures wall + allocations, which are portable.
+# Peak RSS is read from /proc on Linux (the CI runner, which is the authoritative measurement host). On macOS / other
+# hosts there is no /proc/self/status, so RSS is reported nil and the gate skips it — local `make bench-perf` still
+# measures wall + allocations, which are portable.
 def peak_rss_kb
   status = "/proc/self/status"
   return nil unless File.readable?(status)

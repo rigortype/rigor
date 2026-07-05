@@ -12,8 +12,7 @@
 # - the matching integration `describe` block in
 #   `spec/integration/type_construction_spec.rb`
 #
-# Manual follow-ups the script intentionally leaves to the
-# operator (the per-class judgement calls):
+# Manual follow-ups the script intentionally leaves to the operator (the per-class judgement calls):
 # - blocklist curation in the loader file (read the generated
 #   YAML and add false-positive `:leaf` entries with one-line
 #   comments naming the indirect mutator helper);
@@ -165,11 +164,9 @@ end
 # Templates
 # ---------------------------------------------------------------------
 
-# Matches the existing two-space indentation inside the TOPICS
-# hash literal. `<<~` strips the heredoc's common leading
-# whitespace, so we re-add a uniform two-space prefix afterwards
-# (the body's natural indent is already correct relative to the
-# entry's own brace).
+# Matches the existing two-space indentation inside the TOPICS hash literal. `<<~` strips the heredoc's common leading
+# whitespace, so we re-add a uniform two-space prefix afterwards (the body's natural indent is already correct relative
+# to the entry's own brace).
 topics_block = <<~ENTRY.chomp.gsub(/^/, "  ")
   "#{topic}" => {
     init_function: "#{init_fn}",
@@ -310,9 +307,8 @@ edit_file!(EXTRACTOR_PATH, dry_run: dry_run) do |body|
     end
   end
 
-  # Insert before the `}.freeze` that closes TOPICS. The TOPICS hash's
-  # last entry has no trailing comma, so we add one to its closing
-  # brace before appending the new block.
+  # Insert before the `}.freeze` that closes TOPICS. The TOPICS hash's last entry has no trailing comma, so we add one
+  # to its closing brace before appending the new block.
   new_body.sub(/(TOPICS = \{\n.*?  \})(\n\}\.freeze)/m) do
     "#{::Regexp.last_match(1)},\n#{topics_block}#{::Regexp.last_match(2)}"
   end
@@ -332,17 +328,13 @@ edit_file!(DISPATCHER_PATH, dry_run: dry_run) do |body|
     "\\1require_relative \"../builtins/#{topic}_catalog\"\n"
   )
 
-  # Module catalogs (`--module`) are not receiver classes, so the
-  # constant-fold dispatcher does not route through them today.
-  # The require_relative above keeps the singleton reachable for
-  # future include-aware lookup; the CATALOG_BY_CLASS row stays
-  # absent.
+  # Module catalogs (`--module`) are not receiver classes, so the constant-fold dispatcher does not route through them
+  # today. The require_relative above keeps the singleton reachable for future include-aware lookup; the
+  # CATALOG_BY_CLASS row stays absent.
   next body if options[:module_kind]
 
-  # Append the CATALOG_BY_CLASS row before the closing bracket.
-  # The exact column padding inside each row is hand-aligned;
-  # the script ships a sensibly-spaced default and the operator
-  # can re-align later if desired.
+  # Append the CATALOG_BY_CLASS row before the closing bracket. The exact column padding inside each row is
+  # hand-aligned; the script ships a sensibly-spaced default and the operator can re-align later if desired.
   catalog_row = %(          [#{class_name}, [Builtins::#{CATALOG_CONST}, "#{class_name}"]])
   body.sub(/(CATALOG_BY_CLASS = \[\n.*?)\n        \]\.freeze/m) do
     "#{::Regexp.last_match(1)},\n#{catalog_row}\n        ].freeze"

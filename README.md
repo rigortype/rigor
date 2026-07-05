@@ -231,9 +231,10 @@ rigor docs --list                 # list every bundled page
 
 ## Status
 
-Current release: **`v0.2.0`** (2026-06-17) — the first
-publicly-announced (general / evaluation) release. It publishes an
-enumerated [compatibility surface](docs/compatibility.md) as a
+Current release: **`v0.2.6`** (2026-06-27) — the latest cut on the
+`0.2.x` evaluation line opened by `v0.2.0`, the first
+publicly-announced (general / evaluation) release. The line publishes
+an enumerated [compatibility surface](docs/compatibility.md) as a
 minor-non-break trial, rehearsing the contract that hard-freezes at
 `v1.0.0`. Rigor analyses real Ruby today: it has been hardened against
 Mastodon, Redmine, and GitLab FOSS, and the deliberately conservative

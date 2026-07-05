@@ -25,6 +25,9 @@ module Rigor
       ALLOWED_KEY_CLASSES = [Symbol, String].freeze
       EXTRA_KEY_POLICIES = %i[open closed].freeze
       POLICY_KEYWORDS = %i[required_keys optional_keys read_only_keys extra_keys].freeze
+      # A Symbol whose text matches renders as a bare RBS record key (`lang:`) in {#erase_to_rbs};
+      # anything else must be quoted with a fat arrow (`"data-contrast" =>`). See {#erase_key_prefix}.
+      BARE_RECORD_KEY = /\A[A-Za-z_][A-Za-z0-9_]*[?!]?\z/
 
       attr_reader :pairs, :required_keys, :optional_keys, :read_only_keys, :extra_keys
 
@@ -68,7 +71,7 @@ module Rigor
         return hash_erasure unless closed?
         return hash_erasure if pairs.each_key.any? { |k| !k.is_a?(Symbol) }
 
-        rendered = pairs.map { |k, v| "#{record_key(k)}: #{v.erase_to_rbs}" }
+        rendered = pairs.map { |k, v| "#{erase_key_prefix(k)} #{v.erase_to_rbs}" }
         "{ #{rendered.join(', ')} }"
       end
 
@@ -191,6 +194,9 @@ module Rigor
         "#{prefix.join(' ')} #{value.describe(verbosity)}"
       end
 
+      # `describe` is a human-facing display contract (it feeds diagnostic messages, never a parser),
+      # so it keeps the compact `"a":` form for a quoted key. The RBS-erasure path uses
+      # {#erase_key_prefix} instead, which must emit a parseable key.
       def render_key(key)
         case key
         when Symbol then key.to_s
@@ -198,8 +204,21 @@ module Rigor
         end
       end
 
-      def record_key(key)
-        optional_key?(key) ? "?#{key}" : key.to_s
+      # An RBS record entry's key + separator, for the {#erase_to_rbs} path (which only ever sees
+      # Symbol keys — string-keyed shapes degrade to `Hash[...]` before reaching here). A Symbol whose
+      # text is a plain identifier is a bare key with a colon (`lang:`); a hyphenated / punctuated
+      # Symbol MUST use the quoted `"data-contrast" =>` form, because RBS rejects both a bare
+      # non-identifier (`data-contrast:`) and a quoted key with a colon (`"data-contrast":`). Getting
+      # this wrong made sig-gen emit an unparseable Mastodon `html_attributes` shape that crashed the
+      # whole RBS env build. Valid identifier keys (incl. Ruby keywords like `class`) keep the colon
+      # form, so only genuinely non-identifier keys change. Optional keys carry a leading `?`.
+      def erase_key_prefix(key)
+        optional = optional_key?(key) ? "?" : ""
+        if BARE_RECORD_KEY.match?(key.to_s)
+          "#{optional}#{key}:"
+        else
+          "#{optional}#{key.to_s.inspect} =>"
+        end
       end
 
       def hash_erasure

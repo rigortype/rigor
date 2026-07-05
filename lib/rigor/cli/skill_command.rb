@@ -25,6 +25,12 @@ module Rigor
     #                                inline body plus the header's absolute
     #                                paths let the agent act with or without
     #                                a file-reading tool.
+    # - `rigor skill --full <name>`— the body AND every `references/*.md`
+    #                                inline: the complete, version-current
+    #                                procedure in one call. The thinned SKILL
+    #                                bodies point a *frozen* (vendored) copy
+    #                                at this so the reader follows the gem's
+    #                                current steps, not a stale local copy.
     # - `rigor skill --path <name>`— one-line absolute path, for a Read tool.
     # - `rigor skill --list`       — table of name + absolute path.
     # - `rigor skill --describe`   — ADR-73's live entry point: a cheap
@@ -43,12 +49,14 @@ module Rigor
     # verb, so it stays first-class alongside `--describe`.
     class SkillCommand < Command
       USAGE = <<~USAGE
-        Usage: rigor skill [<name>] [--path <name>] [--list] [--describe]
+        Usage: rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]
 
         With no argument, lists the bundled skills.
 
           rigor skill                List bundled skills
           rigor skill <name>         Print the SKILL.md body for <name> (with a header)
+          rigor skill --full <name>  Print the SKILL.md body AND its references/ inline
+                                     (the complete, version-current procedure in one call)
           rigor skill --path <name>  Print the absolute path of the SKILL.md file for <name>
           rigor skill --list         List bundled skills (name + absolute path)
           rigor skill --describe     Report project state + recommend the next skill to run
@@ -56,6 +64,7 @@ module Rigor
         Examples:
           rigor skill
           rigor skill rigor-project-init
+          rigor skill --full rigor-baseline-reduce
           rigor skill --path rigor-baseline-reduce
           rigor skill --describe        (also: rigor describe)
 
@@ -95,6 +104,9 @@ module Rigor
         when "--list"
           @argv.shift
           run_list
+        when "--full"
+          @argv.shift
+          run_full(@argv.shift)
         when "--path"
           @argv.shift
           run_path(@argv.shift)
@@ -144,6 +156,34 @@ module Rigor
         @out.puts(render_print_header(skill))
         @out.puts
         @out.write(File.read(skill.fetch(:path)))
+        0
+      end
+
+      # `rigor skill --full <name>` — the whole current procedure in one
+      # call: the SKILL.md body followed by each `references/*.md` inline.
+      # This is what the thinned SKILL bodies point a *frozen* copy at — a
+      # vendored copy of a skill (installed via `npx skills`) may lag the
+      # gem, so re-fetching the complete body here guarantees the reader
+      # follows the version that shipped with the installed Rigor, without
+      # needing a file-reading tool or reading a possibly-stale co-located
+      # `references/`.
+      def run_full(name)
+        return usage_error("`--full` requires a skill name") if name.nil?
+
+        skill = find_skill(name)
+        return name_error(name) if skill.nil?
+
+        @out.puts(render_print_header(skill))
+        @out.puts
+        @out.write(File.read(skill.fetch(:path)))
+
+        reference_files(skill).each do |ref|
+          @out.puts
+          @out.puts
+          @out.puts("<!-- ===== references/#{File.basename(ref)} (bundled with rigortype #{Rigor::VERSION}) ===== -->")
+          @out.puts
+          @out.write(File.read(ref))
+        end
         0
       end
 
@@ -205,6 +245,17 @@ module Rigor
 
       def find_skill(name)
         discover_skills.find { |s| s.fetch(:name) == name }
+      end
+
+      # The `references/*.md` files bundled alongside a skill, sorted so the
+      # `NN-` prefixes drive read order.
+      def reference_files(skill)
+        dir = File.join(File.dirname(skill.fetch(:path)), "references")
+        return [] unless File.directory?(dir)
+
+        # `Dir.glob` returns lexicographically sorted paths (Ruby 3.0+),
+        # so the `NN-` prefixes already drive read order.
+        Dir.glob(File.join(dir, "*.md"))
       end
 
       def name_error(name)

@@ -37,10 +37,8 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       expect(snap[described_class::BLOCK_WRITEBACK_CAP]).to eq(0)
     end
 
-    # ADR-56 slice A — a compounding captured-local write
-    # (`a = [a]` grows structurally each pass) never converges, so the
-    # block-write-back fixpoint runs to its cap and collapses that local
-    # to `Dynamic[top]`, recording a hit.
+    # ADR-56 slice A — a compounding captured-local write (`a = [a]` grows structurally each pass) never converges, so
+    # the block-write-back fixpoint runs to its cap and collapses that local to `Dynamic[top]`, recording a hit.
     it "records a block-write-back-cap hit when a compounding captured local floors" do
       source = <<~RUBY
         a = 1
@@ -51,8 +49,7 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       expect(described_class.snapshot[described_class::BLOCK_WRITEBACK_CAP]).to be >= 1
     end
 
-    # An accumulator that converges (or widens cleanly on the final
-    # iteration) must NOT record a cap hit.
+    # An accumulator that converges (or widens cleanly on the final iteration) must NOT record a cap hit.
     it "records no hit when the captured local converges or widens cleanly" do
       source = <<~RUBY
         c = 0
@@ -157,10 +154,9 @@ RSpec.describe Rigor::Inference::BudgetTrace do
     end
 
     it "records a recursion-unroll fuel-exhaustion firing (ADR-55 slice 1)" do
-      # factorial(100) unrolls past the 32-frame fuel budget, so the
-      # extended value-key path falls back to the plain guard and the
-      # `RECURSION_UNROLL_FUEL` counter ticks. The run also must not
-      # raise (graceful degradation to today's widened result).
+      # factorial(100) unrolls past the 32-frame fuel budget, so the extended value-key path falls back to the plain
+      # guard and the `RECURSION_UNROLL_FUEL` counter ticks. The run also must not raise (graceful degradation to
+      # today's widened result).
       source = <<~RUBY
         class Factorial
           def of(n)
@@ -173,8 +169,8 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       tree = result.value
       scope = Rigor::Scope.empty(environment: Rigor::Environment.default)
       index = Rigor::Inference::ScopeIndexer.index(tree, default_scope: scope)
-      # `CheckRules.diagnose` drives a full per-node walk, exercising the
-      # recursive inference at the call site (and must not raise).
+      # `CheckRules.diagnose` drives a full per-node walk, exercising the recursive inference at the call site (and must
+      # not raise).
       expect do
         Rigor::Analysis::CheckRules.diagnose(
           path: "fuel", root: tree, scope_index: index, comments: result.comments || []

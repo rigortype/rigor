@@ -229,11 +229,9 @@ RSpec.describe Rigor::Cache::Descriptor do
     it "leaves other gems' slices stable when one gem bumps" do
       before = described_class.new(dependencies: [rack_old, faraday])
       after = described_class.new(dependencies: [rack_new, faraday])
-      # The invariant that matters: the descriptor for a producer
-      # keyed only on `faraday` does not change when `rack`
-      # bumps. Slice 3 lands the *primitive* — composing a
-      # producer's per-gem descriptor with the index's
-      # contribution is the consumer's job (slice 4+).
+      # The invariant that matters: the descriptor for a producer keyed only on `faraday` does not change when `rack`
+      # bumps. Slice 3 lands the *primitive* — composing a producer's per-gem descriptor with the index's contribution
+      # is the consumer's job (slice 4+).
       faraday_only_before = described_class.new(dependencies: [faraday])
       faraday_only_after = described_class.new(dependencies: [faraday])
       expect(faraday_only_before.cache_key_for(producer_id: "p", params: {}))

@@ -25,9 +25,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
   describe ".vendored_gem_names" do
     it "returns the gem subdirectory names under data/vendored_gem_sigs/" do
       names = described_class.vendored_gem_names
-      # The set is the source of truth for RbsCollectionDiscovery's
-      # skip list; assert the known native-ext / Rails-ubiquitous
-      # gems that drove the collision fix are present.
+      # The set is the source of truth for RbsCollectionDiscovery's skip list; assert the known native-ext /
+      # Rails-ubiquitous gems that drove the collision fix are present.
       expect(names).to include("redis", "nokogiri", "pg", "bcrypt", "cgi")
     end
 
@@ -88,11 +87,10 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   describe "class-alias resolution (`class Mutex = Thread::Mutex`)" do
-    # An RBS class alias lives only in `class_alias_decls`, so `class_known?`
-    # reports it but the definition builder (which only knows `class_decls`)
-    # could not enumerate its methods. The loader now normalises the alias to
-    # its canonical target before building, so dispatch and the
-    # `call.undefined-method` existence check both work on `Mutex`.
+    # An RBS class alias lives only in `class_alias_decls`, so `class_known?` reports it but the definition builder
+    # (which only knows `class_decls`) could not enumerate its methods. The loader now normalises the alias to its
+    # canonical target before building, so dispatch and the `call.undefined-method` existence check both work on
+    # `Mutex`.
     it "reports the alias as known" do
       expect(loader.class_known?("Mutex")).to be(true)
     end
@@ -198,10 +196,9 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   describe "core overlay (data/core_overlay/)" do
-    # `Numeric#to_f`/`to_i`/`to_r` are not declared on the abstract
-    # `Numeric` by upstream `ruby/rbs` (only on the concrete subclasses),
-    # but Rigor widens arithmetic chains to `Numeric`, so the overlay
-    # reopens the class to supply them. See data/core_overlay/numeric.rbs.
+    # `Numeric#to_f`/`to_i`/`to_r` are not declared on the abstract `Numeric` by upstream `ruby/rbs` (only on the
+    # concrete subclasses), but Rigor widens arithmetic chains to `Numeric`, so the overlay reopens the class to supply
+    # them. See data/core_overlay/numeric.rbs.
     it "exposes a non-empty overlay sig path set" do
       expect(described_class.core_overlay_sig_paths).not_to be_empty
       expect(described_class.core_overlay_sig_paths).to all(be_a(Pathname))
@@ -221,21 +218,19 @@ RSpec.describe Rigor::Environment::RbsLoader do
       end
     end
 
-    # `Pathname#expand_path` delegates to `File.expand_path` at runtime, which
-    # accepts any `to_path`-bearing object as its `dir` base.  The upstream RBS
-    # sig only allows `String`, causing false positives when a `Pathname` is
-    # passed as the base (the Bundler pattern).  See data/core_overlay/pathname.rbs.
+    # `Pathname#expand_path` delegates to `File.expand_path` at runtime, which accepts any `to_path`-bearing object as
+    # its `dir` base. The upstream RBS sig only allows `String`, causing false positives when a `Pathname` is passed as
+    # the base (the Bundler pattern). See data/core_overlay/pathname.rbs.
     context "with the pathname stdlib library loaded" do
-      # Pathname is a stdlib library (not core), so we need a loader that
-      # opts in to it.
+      # Pathname is a stdlib library (not core), so we need a loader that opts in to it.
       let(:pathname_loader) { described_class.new(libraries: ["pathname"]) }
 
       it "resolves Pathname#expand_path with the widened overlay signature" do
         method = pathname_loader.instance_method(class_name: "Pathname", method_name: :expand_path)
         expect(method).not_to be_nil, "expected overlay to declare Pathname#expand_path"
         expect(method.method_types).not_to be_empty
-        # The overlay widens the optional `dir` parameter to accept Pathname
-        # in addition to String; verify at least one overload carries a parameter.
+        # The overlay widens the optional `dir` parameter to accept Pathname in addition to String; verify at least one
+        # overload carries a parameter.
         param_types = method.method_types.flat_map { |mt| mt.type.required_positionals + mt.type.optional_positionals }
         expect(param_types).not_to be_empty
       end
@@ -278,8 +273,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
 
     it "is namespace-disjoint from #instance_method" do
-      # Module#instance_methods is a singleton-side method on every
-      # class type; it MUST NOT be exposed on the instance side.
+      # Module#instance_methods is a singleton-side method on every class type; it MUST NOT be exposed on the instance
+      # side.
       expect(loader.instance_method(class_name: "Integer", method_name: :instance_methods)).to be_nil
       expect(loader.singleton_method(class_name: "Integer", method_name: :instance_methods)).not_to be_nil
     end
@@ -343,13 +338,10 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   describe "#class_decl_paths" do
-    # Regression: `class_decl_paths` called `entry.primary_decl`
-    # unguarded, which only exists on RBS 4.x. Under RBS 3.x (allowed
-    # by the gemspec `rbs >= 3.0, < 5.0`, which exposes `entry.primary`
-    # instead) `rigor check` crashed with
-    # `undefined method 'primary_decl'`. The shared `primary_decl_for`
-    # helper normalises both shapes, so this maps every loaded class to
-    # the file its first declaration came from across the whole range.
+    # Regression: `class_decl_paths` called `entry.primary_decl` unguarded, which only exists on RBS 4.x. Under RBS 3.x
+    # (allowed by the gemspec `rbs >= 3.0, < 5.0`, which exposes `entry.primary` instead) `rigor check` crashed with
+    # `undefined method 'primary_decl'`. The shared `primary_decl_for` helper normalises both shapes, so this maps every
+    # loaded class to the file its first declaration came from across the whole range.
     it "maps core classes to the RBS source file of their first declaration" do
       paths = loader.class_decl_paths
       expect(paths).not_to be_empty
@@ -397,8 +389,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
       loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
       allow(loader).to receive(:warn) # silence the once-per-loader env-build-failure warning
       allow(described_class).to receive(:build_env_for).and_call_original
-      # Touch env many times; the broken state should be memoised
-      # so build_env_for runs at most once.
+      # Touch env many times; the broken state should be memoised so build_env_for runs at most once.
       10.times { loader.send(:env) }
       expect(described_class).to have_received(:build_env_for).at_most(:once)
       expect(loader.send(:env)).to be_nil
@@ -434,12 +425,10 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   describe "missing-namespace synthesis (ADR-5 robustness)" do
-    # A project sig set that declares qualified names without ever
-    # declaring the enclosing namespace is invalid upstream (`rbs
-    # validate` rejects it); pre-fix every method on every such class
-    # degraded to Dynamic[Top] because `build_instance` raised
-    # `NoTypeFoundError`. The loader now synthesizes the missing
-    # `module` so the otherwise-inert signatures resolve.
+    # A project sig set that declares qualified names without ever declaring the enclosing namespace is invalid upstream
+    # (`rbs validate` rejects it); pre-fix every method on every such class degraded to Dynamic[Top] because
+    # `build_instance` raised `NoTypeFoundError`. The loader now synthesizes the missing `module` so the otherwise-inert
+    # signatures resolve.
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-namespace-spec-") }
 
     after { FileUtils.rm_rf(tmpdir) }
@@ -487,10 +476,9 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   describe "referenced-type stub synthesis (ADR-5 robustness)" do
-    # A single reference to a type no loaded signature declares makes
-    # RBS's per-class build fail wholesale, so EVERY method on the
-    # referencing class degrades to Dynamic[Top]. Stubbing the missing
-    # type lets the rest of the class build.
+    # A single reference to a type no loaded signature declares makes RBS's per-class build fail wholesale, so EVERY
+    # method on the referencing class degrades to Dynamic[Top]. Stubbing the missing type lets the rest of the class
+    # build.
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-stub-spec-") }
 
     after { FileUtils.rm_rf(tmpdir) }
@@ -535,13 +523,10 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
 
     it "does not collapse the env when a class references its own nested type (2026-07-04 redmine)" do
-      # The stub sweep must stub only the missing leaf
-      # (`GitAdapter::Revision`), never re-declare the already-declared
-      # `GitAdapter` as a `module` — that class-vs-module kind mismatch
-      # made `resolve_type_names` raise DuplicatedDeclarationError and
-      # nulled the WHOLE env (every type-of query → Dynamic[Top]). The
-      # exact shape `rigor sig-gen` emitted for a subclass whose sig
-      # dropped the superclass.
+      # The stub sweep must stub only the missing leaf (`GitAdapter::Revision`), never re-declare the already-declared
+      # `GitAdapter` as a `module` — that class-vs-module kind mismatch made `resolve_type_names` raise
+      # DuplicatedDeclarationError and nulled the WHOLE env (every type-of query → Dynamic[Top]). The exact shape `rigor
+      # sig-gen` emitted for a subclass whose sig dropped the superclass.
       File.write(
         File.join(tmpdir, "adapter.rbs"),
         <<~RBS
@@ -562,9 +547,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
 
     it "does not re-stub a leaf whose namespace prefix is already a declared class" do
-      # `append_stub_declarations` mirrors `collect_missing_namespaces`'s
-      # `declared.include?` guard: an enclosing prefix already present in
-      # the env is never re-emitted.
+      # `append_stub_declarations` mirrors `collect_missing_namespaces`'s `declared.include?` guard: an enclosing prefix
+      # already present in the env is never re-emitted.
       File.write(
         File.join(tmpdir, "adapter.rbs"),
         <<~RBS

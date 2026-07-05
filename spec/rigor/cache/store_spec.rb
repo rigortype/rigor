@@ -104,11 +104,9 @@ RSpec.describe Rigor::Cache::Store do
       store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :first }
       File.write(File.join(cache_root, "schema_version.txt"), "999")
 
-      # The disk-level schema-mismatch recovery applies on
-      # the disk-read path. A fresh `Store` (process restart
-      # / new CLI invocation) is the scenario that triggers
-      # it; the same-instance in-memory memo would skip the
-      # disk read entirely.
+      # The disk-level schema-mismatch recovery applies on the disk-read path. A fresh `Store` (process restart / new
+      # CLI invocation) is the scenario that triggers it; the same-instance in-memory memo would skip the disk read
+      # entirely.
       fresh_store = described_class.new(root: cache_root)
       called = 0
       result = fresh_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
@@ -124,9 +122,8 @@ RSpec.describe Rigor::Cache::Store do
 
   describe "format-version marker (ADR-54)" do
     it "clears the root left by a pre-compression Rigor (old marker without the format suffix)" do
-      # A pre-WD2 cache: marker carries only the descriptor schema
-      # ("3"), and its entries are unreadable v1 bytes that no run
-      # would otherwise ever reclaim (they sit below the eviction cap).
+      # A pre-WD2 cache: marker carries only the descriptor schema ("3"), and its entries are unreadable v1 bytes that
+      # no run would otherwise ever reclaim (they sit below the eviction cap).
       FileUtils.mkdir_p(File.join(cache_root, "p", "ab"))
       stale_entry = File.join(cache_root, "p", "ab", "cdef.entry")
       File.binwrite(stale_entry, "RIGOR\x00\x01stale-v1-bytes#{"\x00" * 32}")
@@ -176,13 +173,12 @@ RSpec.describe Rigor::Cache::Store do
       key = descriptor.cache_key_for(producer_id: "demo", params: {})
       entry_path = File.join(cache_root, "demo", key[0, 2], "#{key[2..]}.entry")
       bytes = File.binread(entry_path)
-      # ADR-54 WD2 — the value payload is zlib-deflated on disk, so
-      # the serialiser output no longer appears verbatim in the file...
+      # ADR-54 WD2 — the value payload is zlib-deflated on disk, so the serialiser output no longer appears verbatim in
+      # the file...
       expect(bytes).not_to include('{"name":"Alice","age":30}')
 
-      # ...but the deserialiser receives EXACTLY the serialiser's
-      # bytes back (no Marshal wrapping; compression is transparent
-      # at the contract layer). A fresh Store forces the disk read.
+      # ...but the deserialiser receives EXACTLY the serialiser's bytes back (no Marshal wrapping; compression is
+      # transparent at the contract layer). A fresh Store forces the disk read.
       fresh = described_class.new(root: cache_root)
       result = fresh.fetch_or_compute(
         producer_id: "demo", params: {}, descriptor: descriptor,
@@ -226,9 +222,8 @@ RSpec.describe Rigor::Cache::Store do
         producer_id: "demo", params: {}, descriptor: descriptor,
         serialize: identity, deserialize: identity
       ) { "first" }
-      # `Store#fetch_or_compute` memoises the produced value
-      # in-process; the disk-read deserialise path is exercised
-      # by a fresh `Store` ("process restart" scenario).
+      # `Store#fetch_or_compute` memoises the produced value in-process; the disk-read deserialise path is exercised by
+      # a fresh `Store` ("process restart" scenario).
       fresh_store = described_class.new(root: cache_root)
       result = fresh_store.fetch_or_compute(
         producer_id: "demo", params: {}, descriptor: descriptor,
@@ -429,14 +424,10 @@ RSpec.describe Rigor::Cache::Store do
       store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :first }
     end
 
-    # The corruption-tolerance cases simulate the disk being
-    # mutated externally (e.g. by a buggy editor or a crash
-    # mid-write). The fault-tolerance guarantee is "a fresh
-    # process reading the corrupt entry treats it as a miss";
-    # an in-process `Store` that already produced the value
-    # legitimately keeps it in memory and never touches disk.
-    # Each test re-creates the `Store` post-corruption to
-    # exercise the fault-tolerance path.
+    # The corruption-tolerance cases simulate the disk being mutated externally (e.g. by a buggy editor or a crash
+    # mid-write). The fault-tolerance guarantee is "a fresh process reading the corrupt entry treats it as a miss"; an
+    # in-process `Store` that already produced the value legitimately keeps it in memory and never touches disk. Each
+    # test re-creates the `Store` post-corruption to exercise the fault-tolerance path.
     def fresh_store_after_corruption
       described_class.new(root: cache_root)
     end
@@ -520,10 +511,9 @@ RSpec.describe Rigor::Cache::Store do
       end
       threads.each(&:join)
 
-      # Every writer raced for the SAME entry; the last rename wins but the
-      # entry must be intact (one of the written values) and no temp file
-      # from any writer is left behind — collisions there would clobber a
-      # sibling writer's in-flight temp file.
+      # Every writer raced for the SAME entry; the last rename wins but the entry must be intact (one of the written
+      # values) and no temp file from any writer is left behind — collisions there would clobber a sibling writer's
+      # in-flight temp file.
       expect(Dir.glob("#{entry_path}.tmp.*")).to be_empty
       final = described_class.new(root: cache_root).fetch_or_compute(
         producer_id: "p", params: {}, descriptor: descriptor
@@ -597,8 +587,7 @@ RSpec.describe Rigor::Cache::Store do
       path = Dir.glob(File.join(cache_root, "**", "*.entry")).first
       old_mtime = File.mtime(path)
 
-      # Wait a small amount so mtime can differ, then read via a fresh store
-      # (no in-process memo).
+      # Wait a small amount so mtime can differ, then read via a fresh store (no in-process memo).
       sleep(0.05)
       fresh = described_class.new(root: cache_root, max_bytes: 10 * 1024 * 1024)
       fresh.fetch_or_compute(

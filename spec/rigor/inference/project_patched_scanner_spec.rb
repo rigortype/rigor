@@ -180,9 +180,8 @@ RSpec.describe Rigor::Inference::ProjectPatchedScanner do
         outcome = described_class.scan([path])
         diag = outcome.diagnostics.first
         expect(diag[:rule]).to eq("pre-eval.parse-error")
-        # The parse-error message is distinct from the read-failure one
-        # below — assert the specific text so a bypass to the rescue
-        # (which also names the path) does not satisfy this.
+        # The parse-error message is distinct from the read-failure one below — assert the specific text so a bypass to
+        # the rescue (which also names the path) does not satisfy this.
         expect(diag[:message]).to include("has a parse error").and include("broken.rb")
       end
     end

@@ -5,9 +5,8 @@ require "rigor/configuration"
 
 RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
   # In-memory writer collecting every payload pushed to it. Mirrors
-  # `LanguageServer::Protocol::Transport::Io::Writer#write` but
-  # captures the raw Hash so specs can inspect the wire shape
-  # without re-parsing.
+  # `LanguageServer::Protocol::Transport::Io::Writer#write` but captures the raw Hash so specs can inspect the wire
+  # shape without re-parsing.
   let(:writer) do
     Class.new do
       attr_reader :payloads
@@ -44,8 +43,7 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       Dir.mktmpdir("rigor-lsp-publish-") do |tmpdir|
         path = File.join(tmpdir, "foo.rb")
         uri = "file://#{path}"
-        # Buffer has a parse error — should surface as an LSP
-        # diagnostic mapped from Rigor's :error severity.
+        # Buffer has a parse error — should surface as an LSP diagnostic mapped from Rigor's :error severity.
         buffer_table.open(uri: uri, bytes: "def broken\n", version: 1)
 
         Dir.chdir(tmpdir) { publisher.publish_for(uri) }
@@ -65,8 +63,7 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       Dir.mktmpdir("rigor-lsp-publish-zerobased-") do |tmpdir|
         path = File.join(tmpdir, "foo.rb")
         uri = "file://#{path}"
-        # Parse error fires on line 1 of the buffer; LSP expects
-        # line: 0 (0-based).
+        # Parse error fires on line 1 of the buffer; LSP expects line: 0 (0-based).
         buffer_table.open(uri: uri, bytes: "def broken\n", version: 1)
 
         Dir.chdir(tmpdir) { publisher.publish_for(uri) }

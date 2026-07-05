@@ -61,18 +61,15 @@ RSpec.describe Rigor::Cache::RbsConstantTable do
     end
 
     it "files slot for a loader with no signature_paths still digests the bundled vendored gem stubs" do
-      # Vendored gem RBS stubs ship with rigor and are loaded by
-      # default (`Environment::RbsLoader.vendored_gem_sig_paths`),
-      # so the descriptor's files slot is never empty even without
-      # any user-supplied `signature_paths:`. The vendored set is
-      # part of the cache invalidation contract: bumping a stub
-      # bumps the cache.
+      # Vendored gem RBS stubs ship with rigor and are loaded by default
+      # (`Environment::RbsLoader.vendored_gem_sig_paths`), so the descriptor's files slot is never empty even without
+      # any user-supplied `signature_paths:`. The vendored set is part of the cache invalidation contract: bumping a
+      # stub bumps the cache.
       descriptor = Rigor::Cache::RbsDescriptor.build(loader)
       expect(descriptor.files).not_to be_empty
       expect(descriptor.files.map(&:comparator).uniq).to eq([:digest])
-      # Bundled signature roots: the vendored gem stubs plus the core
-      # overlay (data/core_overlay, e.g. numeric.rbs) — both ship with
-      # rigor and participate in the same digest-based invalidation.
+      # Bundled signature roots: the vendored gem stubs plus the core overlay (data/core_overlay, e.g. numeric.rbs) —
+      # both ship with rigor and participate in the same digest-based invalidation.
       vendored_root = Rigor::Environment::RbsLoader.vendored_gem_sig_paths.first.to_s
       data_root = vendored_root.split("/")[0..-3].join("/")
       expect(descriptor.files.map(&:path)).to all(start_with(data_root))
@@ -92,13 +89,11 @@ RSpec.describe Rigor::Cache::RbsConstantTable do
 
         custom_loader = Rigor::Environment::RbsLoader.new(signature_paths: [sig_dir])
         descriptor = Rigor::Cache::RbsDescriptor.build(custom_loader)
-        # The two user files MUST be present; vendored stubs add
-        # their own entries on top.
+        # The two user files MUST be present; vendored stubs add their own entries on top.
         custom_paths = descriptor.files.map(&:path).select { |p| p.start_with?(sig_dir) }
         expect(custom_paths.size).to eq(2)
         expect(descriptor.files.map(&:comparator).uniq).to eq([:digest])
-        # Sanity: the descriptor SHOULD also include the bundled
-        # vendored stubs so a stub edit invalidates the cache.
+        # Sanity: the descriptor SHOULD also include the bundled vendored stubs so a stub edit invalidates the cache.
         vendored_root = Rigor::Environment::RbsLoader.vendored_gem_sig_paths.first.to_s
         expect(descriptor.files.size).to be > custom_paths.size
         expect(descriptor.files.map(&:path).any? { |p| p.start_with?(File.dirname(vendored_root)) }).to be(true)

@@ -2,10 +2,8 @@
 
 require "spec_helper"
 
-# ADR-25 — named plugin classes for the signature_paths
-# load-time-validation tests. Defined in this file, so the gem
-# root resolves (no `/lib/` segment) to this file's directory;
-# `"."` therefore points at an existing directory and the
+# ADR-25 — named plugin classes for the signature_paths load-time-validation tests. Defined in this file, so the gem
+# root resolves (no `/lib/` segment) to this file's directory; `"."` therefore points at an existing directory and the
 # bogus entry at a missing one.
 class LoaderSpecSigOkPlugin < Rigor::Plugin::Base
   manifest(id: "sigok", version: "0.1.0", signature_paths: ["."])
@@ -161,8 +159,8 @@ RSpec.describe Rigor::Plugin::Loader do
       registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
 
       expect(registry.plugins).to be_empty
-      # The error must be actionable: name the meta-gem nature and how to
-      # list the individual plugins (the onboarding field-trial trap).
+      # The error must be actionable: name the meta-gem nature and how to list the individual plugins (the onboarding
+      # field-trial trap).
       message = registry.load_errors.first.message
       expect(message).to include("convenience meta-gem")
       expect(message).to match(/list the individual plugin gems/i)

@@ -52,8 +52,7 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
 
       expect(items).not_to be_nil
       labels = items.map { |i| i[:label] }
-      # `new` is a singleton method on String (well, on Class —
-      # inherited but still enumerated).
+      # `new` is a singleton method on String (well, on Class — inherited but still enumerated).
       expect(labels).to include("new")
     end
 
@@ -74,8 +73,7 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
 
     describe "composite-receiver handling (slice B3)" do
       it "enumerates Array's methods for a tuple-shape receiver" do
-        # `[1, 2, 3]` infers to a Tuple carrier; method completion
-        # should fall through to Array's instance methods.
+        # `[1, 2, 3]` infers to a Tuple carrier; method completion should fall through to Array's instance methods.
         buffer_table.open(uri: uri, bytes: "[1, 2, 3].length\n", version: 1)
         items = provider.provide(uri: uri, line: 0, character: 11)
 
@@ -96,8 +94,7 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
 
     describe "constant-path completion (slice B2)" do
       it "returns child constants for `Foo::Bar` when cursor is on `Bar`" do
-        # `Process::Status` — Status is a known child of Process
-        # in the bundled stdlib RBS. Cursor on `Status` should
+        # `Process::Status` — Status is a known child of Process in the bundled stdlib RBS. Cursor on `Status` should
         # surface every immediate child of `Process`.
         buffer_table.open(uri: uri, bytes: "Process::Status\n", version: 1)
         items = provider.provide(uri: uri, line: 0, character: 12)
@@ -134,9 +131,8 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
 
     describe "hash-key completion (slice D1)" do
       it "returns the HashShape's keys for `hash[:|` mid-edit" do
-        # Buffer: `h = {a: 1, b: 2, ccc: 3}; h[:` (incomplete).
-        # The provider should patch `__rigor_lsp_key__]` and surface
-        # the three keys from the HashShape carrier.
+        # Buffer: `h = {a: 1, b: 2, ccc: 3}; h[:` (incomplete). The provider should patch `__rigor_lsp_key__]` and
+        # surface the three keys from the HashShape carrier.
         source = "h = {a: 1, b: 2, ccc: 3}\nh[:\n"
         buffer_table.open(uri: uri, bytes: source, version: 1)
         items = provider.provide(uri: uri, line: 1, character: 3)
@@ -155,15 +151,14 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
       end
 
       it "falls back to method completion when the receiver isn't a HashShape" do
-        # `[1, 2].[:foo` — receiver is Tuple, not HashShape. The
-        # provider should NOT return hash-key items; falls through
-        # to method completion (Array methods).
+        # `[1, 2].[:foo` — receiver is Tuple, not HashShape. The provider should NOT return hash-key items; falls
+        # through to method completion (Array methods).
         source = "[1, 2][:\n"
         buffer_table.open(uri: uri, bytes: source, version: 1)
         items = provider.provide(uri: uri, line: 0, character: 8)
 
-        # Either nil or Array method completions — but NOT hash
-        # keys. Hash-key items would have labels starting with `:`.
+        # Either nil or Array method completions — but NOT hash keys. Hash-key items would have labels starting with
+        # `:`.
         if items
           labels = items.map { |i| i[:label] }
           expect(labels.none? { |l| l.start_with?(":") }).to be(true)
@@ -173,8 +168,7 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
 
     describe "parse-recovery sentinel (slice B4)" do
       it "completes after a trailing `.` even though the buffer doesn't parse" do
-        # `"hi".` is malformed Ruby; provider should patch with
-        # the method sentinel and return String's methods.
+        # `"hi".` is malformed Ruby; provider should patch with the method sentinel and return String's methods.
         buffer_table.open(uri: uri, bytes: "\"hi\".\n", version: 1)
         items = provider.provide(uri: uri, line: 0, character: 5)
 

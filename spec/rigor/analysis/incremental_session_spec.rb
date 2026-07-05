@@ -3,12 +3,10 @@
 require "spec_helper"
 require "tmpdir"
 
-# ADR-46 slice 2 — the in-memory incremental orchestrator. The acceptance
-# property (the `--verify-incremental` gate, here without disk persistence
-# or CLI wiring): after a real on-disk edit, `#recheck` re-analyzes only
-# the affected closure and serves the rest from cache, yet its merged
-# diagnostics are byte-identical — as a sorted set — to a full re-analysis
-# of the edited tree.
+# ADR-46 slice 2 — the in-memory incremental orchestrator. The acceptance property (the `--verify-incremental` gate,
+# here without disk persistence or CLI wiring): after a real on-disk edit, `#recheck` re-analyzes only the affected
+# closure and serves the rest from cache, yet its merged diagnostics are byte-identical — as a sorted set — to a full
+# re-analysis of the edited tree.
 RSpec.describe Rigor::Analysis::IncrementalSession do
   def configuration(dir)
     Rigor::Configuration.new("paths" => [dir])
@@ -37,8 +35,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, roots: [dir])
   end
 
-  # A self-contained `def.override-visibility-reduced` (balanced profile →
-  # :warning) plus a referenceable class. `reduced:` toggles the diagnostic.
+  # A self-contained `def.override-visibility-reduced` (balanced profile → :warning) plus a referenceable class.
+  # `reduced:` toggles the diagnostic.
   def write_unit(path, prefix:, reduced: true)
     File.write(path, <<~RUBY)
       class #{prefix}Base
@@ -111,8 +109,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       r1 = session.recheck
       expect(sorted(r1.diagnostics)).to eq(sorted(full_run(dir)))
 
-      # Round 2: erase b.rb's diagnostic too. The session's cache for a.rb
-      # must already reflect round 1, so the merge stays correct.
+      # Round 2: erase b.rb's diagnostic too. The session's cache for a.rb must already reflect round 1, so the merge
+      # stays correct.
       write_unit(b, prefix: "B", reduced: false)
       r2 = session.recheck
       expect(r2.changed).to eq(Set[b])
@@ -120,10 +118,9 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
   end
 
-  # ADR-46 slice 3 — negative-dependency tracking. A top-level call has no
-  # class ancestry to walk, so a miss records no positive edge; without the
-  # negative edge a caller's `call.unresolved-toplevel` would be served stale
-  # after the method is defined elsewhere.
+  # ADR-46 slice 3 — negative-dependency tracking. A top-level call has no class ancestry to walk, so a miss records no
+  # positive edge; without the negative edge a caller's `call.unresolved-toplevel` would be served stale after the
+  # method is defined elsewhere.
   describe "negative (appeared-symbol) dependencies" do
     it "re-checks a caller whose missed top-level method is defined by an edit" do
       Dir.mktmpdir do |dir|
@@ -141,8 +138,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.write(b, "def helper\n  1\nend\n")
         recheck = session.recheck
 
-        # a.rb is pulled into the affected closure by the appeared `helper`,
-        # so the merged result matches a full re-analysis (no stale FP).
+        # a.rb is pulled into the affected closure by the appeared `helper`, so the merged result matches a full
+        # re-analysis (no stale FP).
         expect(recheck.affected).to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
         expect(sorted(recheck.diagnostics).map { |h| h["rule"] }).not_to include("call.unresolved-toplevel")
@@ -153,8 +150,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")
         b = File.join(dir, "b.rb")
-        # ASub overrides tag with reduced visibility, but NewBase does not yet
-        # exist, so no def.override-* fires at baseline.
+        # ASub overrides tag with reduced visibility, but NewBase does not yet exist, so no def.override-* fires at
+        # baseline.
         File.write(a, "class ASub < NewBase\n  private\n\n  def tag\n    \"y\"\n  end\nend\n")
         File.write(b, "class Placeholder\nend\n")
 
@@ -162,8 +159,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         baseline = session.baseline
         expect(baseline.map(&:rule)).not_to include("def.override-visibility-reduced")
 
-        # Define NewBase (with a public tag) in b.rb — ASub now reduces its
-        # visibility, so the override diagnostic must appear.
+        # Define NewBase (with a public tag) in b.rb — ASub now reduces its visibility, so the override diagnostic must
+        # appear.
         File.write(b, "class NewBase\n  def tag\n    \"x\"\n  end\nend\n")
         recheck = session.recheck
 
@@ -182,8 +179,8 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
 
         session = session_for(configuration(dir))
         session.baseline
-        # Add an unrelated top-level method — a.rb missed `missing_helper`,
-        # not `other`, so it must stay served from cache.
+        # Add an unrelated top-level method — a.rb missed `missing_helper`, not `other`, so it must stay served from
+        # cache.
         File.write(b, "class Thing\n  def existing\n    1\n  end\nend\n\ndef other\n  2\nend\n")
         recheck = session.recheck
 
@@ -193,10 +190,9 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
   end
 
-  # ADR-46 slice 3 (structural tier) — files added / removed between runs are
-  # reconciled incrementally (the `paths:` set is no longer in the snapshot
-  # fingerprint), leaning on the appeared-symbol/class negative edges for
-  # additions and the positive dependents of removed files for removals.
+  # ADR-46 slice 3 (structural tier) — files added / removed between runs are reconciled incrementally (the `paths:` set
+  # is no longer in the snapshot fingerprint), leaning on the appeared-symbol/class negative edges for additions and the
+  # positive dependents of removed files for removals.
   describe "file addition / removal" do
     it "re-checks a caller when a new file defines its missing top-level method" do
       Dir.mktmpdir do |dir|
@@ -244,8 +240,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         File.delete(b)
         recheck = session.recheck
 
-        # a.rb re-checked (now fires unresolved-toplevel); b.rb gone from the
-        # analyzed set and the merged diagnostics.
+        # a.rb re-checked (now fires unresolved-toplevel); b.rb gone from the analyzed set and the merged diagnostics.
         expect(recheck.affected).to include(a)
         expect(session.analyzed_files).not_to include(b)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
@@ -284,8 +279,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
                      .run_incremental(snapshot: snapshot, fingerprint: fp)
         expect(warm1).to be(false)
 
-        # A new file appears between processes; the roots-keyed fingerprint is
-        # unchanged, so the snapshot still loads.
+        # A new file appears between processes; the roots-keyed fingerprint is unchanged, so the snapshot still loads.
         File.write(File.join(dir, "b.rb"), "def helper\n  1\nend\n")
         diags2, warm2 = session_for(config, paths: [dir])
                         .run_incremental(snapshot: snapshot, fingerprint: fp)
@@ -312,12 +306,11 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
                         .run_incremental(snapshot: snapshot, fingerprint: fp)
         expect(warm1).to be(false)
 
-        # An edit between "processes" — erase a.rb's diagnostic. Content is
-        # not part of the fingerprint, so the snapshot still loads.
+        # An edit between "processes" — erase a.rb's diagnostic. Content is not part of the fingerprint, so the snapshot
+        # still loads.
         write_unit(a, prefix: "A", reduced: false)
 
-        # Process 2 — warm: a fresh session restores the snapshot and
-        # re-analyzes only the changed closure.
+        # Process 2 — warm: a fresh session restores the snapshot and re-analyzes only the changed closure.
         diags2, warm2 = session_for(config, paths: [dir])
                         .run_incremental(snapshot: snapshot, fingerprint: fp)
         expect(warm2).to be(true)

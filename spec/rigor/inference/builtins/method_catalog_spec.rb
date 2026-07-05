@@ -35,16 +35,15 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
 
     it "STRING_CATALOG blocks `crypt` (platform `crypt(3)` — not reproducible across OS / libc)" do
       catalog = Rigor::Inference::Builtins::STRING_CATALOG
-      # `crypt` is classified `:leaf` in string.yml, but its output is
-      # platform-dependent, so it must not fold to a Constant.
+      # `crypt` is classified `:leaf` in string.yml, but its output is platform-dependent, so it must not fold to a
+      # Constant.
       expect(catalog.safe_for_folding?("String", :crypt)).to be(false)
     end
 
     it "universally blocks per-process-non-reproducible selectors (hash / object_id)" do
-      # `#hash` is SipHash-salted per process and `#object_id` is
-      # per-process identity — folding either bakes one process's value
-      # into the type + cache. The block is universal (catalog-wide), not
-      # per-class, because these are Object-level methods on every receiver.
+      # `#hash` is SipHash-salted per process and `#object_id` is per-process identity — folding either bakes one
+      # process's value into the type + cache. The block is universal (catalog-wide), not per-class, because these are
+      # Object-level methods on every receiver.
       %w[String Symbol].each do |klass|
         expect(Rigor::Inference::Builtins::STRING_CATALOG.safe_for_folding?(klass, :hash)).to be(false)
       end
@@ -70,10 +69,9 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
 
     it "HASH_CATALOG blocks block-yielding leaves classified as :leaf by the C-body heuristic" do
       catalog = Rigor::Inference::Builtins::HASH_CATALOG
-      # `each*` / `select` / `filter` / `reject` / `transform_values` /
-      # `merge` all dispatch through `rb_hash_foreach` (or yield via a
-      # static callback) — the regex-based classifier marks them as
-      # `:leaf` despite being block-dependent.
+      # `each*` / `select` / `filter` / `reject` / `transform_values` / `merge` all dispatch through `rb_hash_foreach`
+      # (or yield via a static callback) — the regex-based classifier marks them as `:leaf` despite being
+      # block-dependent.
       %i[each each_pair each_key each_value select filter reject transform_values merge].each do |sel|
         expect(catalog.safe_for_folding?("Hash", sel)).to be(false)
       end
@@ -109,10 +107,9 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
   end
 
   describe "alias resolution and reset!" do
-    # A real catalog ships an `aliases` section mapping an alias
-    # selector to its canonical target; `method_entry` resolves the
-    # alias to the target's entry. Exercise it from a temp YAML so the
-    # whole resolve_alias_entry path (and `reset!`) is covered.
+    # A real catalog ships an `aliases` section mapping an alias selector to its canonical target; `method_entry`
+    # resolves the alias to the target's entry. Exercise it from a temp YAML so the whole resolve_alias_entry path (and
+    # `reset!`) is covered.
     let(:catalog_yaml) do
       <<~YAML
         classes:
@@ -134,8 +131,8 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
       YAML
     end
 
-    # Writes `catalog_yaml` to a temp file and yields a catalog built
-    # from it; the file is removed when the block returns.
+    # Writes `catalog_yaml` to a temp file and yields a catalog built from it; the file is removed when the block
+    # returns.
     def with_catalog
       Tempfile.create(["method-catalog", ".yml"]) do |f|
         f.write(catalog_yaml)
@@ -159,8 +156,7 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
     end
 
     it "folds exactly the leaf / trivial / leaf_when_numeric purities" do
-      # Pins the FOLDABLE_PURITIES membership: each foldable purity folds,
-      # and a non-foldable one (`dispatch`) does not.
+      # Pins the FOLDABLE_PURITIES membership: each foldable purity folds, and a non-foldable one (`dispatch`) does not.
       with_catalog do |catalog|
         expect(catalog.safe_for_folding?("Foo", :real_method)).to be(true)     # leaf
         expect(catalog.safe_for_folding?("Foo", :trivial_method)).to be(true)  # trivial

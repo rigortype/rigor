@@ -5,9 +5,8 @@ require "tmpdir"
 require "rigor/inference/parameter_inference_collector"
 require "rigor/environment"
 
-# ADR-67 WD3 — single-level call-site parameter inference. A parameter's
-# inferred type is the union of resolved call-site argument types; an argument
-# that is itself untyped (the fixpoint case) poisons the parameter.
+# ADR-67 WD3 — single-level call-site parameter inference. A parameter's inferred type is the union of resolved
+# call-site argument types; an argument that is itself untyped (the fixpoint case) poisons the parameter.
 RSpec.describe Rigor::Inference::ParameterInferenceCollector do
   def collect(*sources, max_rounds: described_class::DEFAULT_ROUNDS)
     Dir.mktmpdir do |dir|
@@ -52,9 +51,8 @@ RSpec.describe Rigor::Inference::ParameterInferenceCollector do
         end
       end
     RUBY
-    # `widget.run(Widget.new)` — widget is untyped, so the receiver does not
-    # resolve and this call is skipped; the test asserts only that the
-    # collector does not crash and produces no false entry for `run`.
+    # `widget.run(Widget.new)` — widget is untyped, so the receiver does not resolve and this call is skipped; the test
+    # asserts only that the collector does not crash and produces no false entry for `run`.
     expect(table[["Widget", :run, :instance]]).to be_nil
   end
 
@@ -173,8 +171,8 @@ RSpec.describe Rigor::Inference::ParameterInferenceCollector do
       end
     RUBY
     table = collect(source)
-    # `middle.x` is concrete in round 1 (called with `A.new`); `inner.y` is only
-    # reachable in round 2, once `x` is seeded so `inner(x)` types `x` as `A`.
+    # `middle.x` is concrete in round 1 (called with `A.new`); `inner.y` is only reachable in round 2, once `x` is
+    # seeded so `inner(x)` types `x` as `A`.
     expect(table.fetch(["Hub", :middle, :instance])[:x].describe(:short)).to eq("A")
     expect(table.fetch(["Hub", :inner, :instance])[:y].describe(:short)).to eq("A")
   end

@@ -4,8 +4,7 @@ require "spec_helper"
 require "rigor/inference/struct_fold_safety"
 
 RSpec.describe Rigor::Inference::StructFoldSafety do
-  # Resolves `Point` / `Line` to a member list for the constant-receiver form;
-  # everything else is unknown (nil).
+  # Resolves `Point` / `Line` to a member list for the constant-receiver form; everything else is unknown (nil).
   let(:layout_lookup) do
     ->(name) { { "Point" => %i[x y], "Line" => %i[from to] }[name] }
   end
@@ -98,8 +97,8 @@ RSpec.describe Rigor::Inference::StructFoldSafety do
     end
 
     it "does not let a nested def's same-named local affect the outer scope" do
-      # The outer `p` is fold-safe; the inner `p` (a different binding) is not
-      # scanned, so its unsafe use must not disqualify the outer one.
+      # The outer `p` is fold-safe; the inner `p` (a different binding) is not scanned, so its unsafe use must not
+      # disqualify the outer one.
       expect(safe(<<~RUBY)).to eq(Set[:p])
         p = Point.new(1, 2)
         p.x

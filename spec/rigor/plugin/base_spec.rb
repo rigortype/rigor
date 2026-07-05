@@ -2,10 +2,9 @@
 
 require "spec_helper"
 
-# Top-level named plugin class for the ADR-25 `#signature_paths`
-# tests — resolution needs `Object.const_source_location`, which
-# only resolves a named constant. Defined here so the file is
-# self-contained under `parallel_test`.
+# Top-level named plugin class for the ADR-25 `#signature_paths` tests — resolution needs
+# `Object.const_source_location`, which only resolves a named constant. Defined here so the file is self-contained under
+# `parallel_test`.
 class RigorPluginBaseSpecSigPlugin < Rigor::Plugin::Base
   manifest(id: "base-spec-sig", version: "0.0.1", signature_paths: ["sig"])
 end
@@ -83,8 +82,7 @@ RSpec.describe Rigor::Plugin::Base do
 
     it "resolves declared paths against the plugin gem root" do
       plugin = RigorPluginBaseSpecSigPlugin.new(services: services)
-      # The class is defined in this spec file (no `/lib/` segment),
-      # so the gem root falls back to the file's directory.
+      # The class is defined in this spec file (no `/lib/` segment), so the gem root falls back to the file's directory.
       expect(plugin.signature_paths).to eq([File.expand_path("sig", __dir__)])
     end
 
@@ -122,9 +120,8 @@ RSpec.describe Rigor::Plugin::Base do
     end
   end
 
-  # Private since ADR-60 WD3 — `producer watch:` is the declared way to
-  # cover a producer's glob; this remains its building block, exercised
-  # here via `send`.
+  # Private since ADR-60 WD3 — `producer watch:` is the declared way to cover a producer's glob; this remains its
+  # building block, exercised here via `send`.
   describe "#glob_descriptor" do
     let(:plugin_class) do
       Class.new(described_class) do
@@ -199,8 +196,7 @@ RSpec.describe Rigor::Plugin::Base do
       Dir.mktmpdir("rigor-glob-desc-") do |dir|
         FileUtils.mkdir_p(File.join(dir, "sub"))
         File.write(File.join(dir, "a.rb"), "")
-        # `**/*` matches both `sub` and `a.rb`; only `a.rb` should
-        # appear in the descriptor.
+        # `**/*` matches both `sub` and `a.rb`; only `a.rb` should appear in the descriptor.
         descriptor = plugin.send(:glob_descriptor, [dir], "**/*")
         names = descriptor.files.map(&:path).map { |p| File.basename(p) }
         expect(names).to contain_exactly("a.rb")
@@ -271,8 +267,8 @@ RSpec.describe Rigor::Plugin::Base do
       plugin = klass.new(services: services)
       root = Prism.parse("foo\nbar").value
       diags = plugin.node_rule_diagnostics(path: "d.rb", scope: Rigor::Scope.empty, root: root)
-      # Both CallNodes (foo, bar) see the same file context (statement
-      # count = 2), proving it was built before the walk and threaded.
+      # Both CallNodes (foo, bar) see the same file context (statement count = 2), proving it was built before the walk
+      # and threaded.
       expect(diags.map(&:message)).to eq(["count=2", "count=2"])
     end
 
@@ -573,9 +569,8 @@ RSpec.describe Rigor::Plugin::Base do
       end
 
       it "fires on the method name regardless of the receiver carrier shape" do
-        # A receiver carrier with no nominal class (untyped/Dynamic) —
-        # a receiver-gated rule could not match it, but a methods-only
-        # rule reads the shape inside its own block.
+        # A receiver carrier with no nominal class (untyped/Dynamic) — a receiver-gated rule could not match it, but a
+        # methods-only rule reads the shape inside its own block.
         type = plugin_methods_only.dynamic_return_type(
           call_node: call("100.kilometers"), scope: Rigor::Scope.empty,
           receiver_type: Rigor::Type::Combinator.untyped
@@ -614,9 +609,8 @@ RSpec.describe Rigor::Plugin::Base do
       let(:plugin_runtime) do
         Class.new(described_class) do
           manifest(id: "dr-rt", version: "0.1.0")
-          # The set the callable returns is built at run time — here a
-          # mutable accumulator the test fills after the class is defined,
-          # standing in for a `#prepare`-built index.
+          # The set the callable returns is built at run time — here a mutable accumulator the test fills after the
+          # class is defined, standing in for a `#prepare`-built index.
           def model_names = @model_names ||= []
 
           dynamic_return receivers: -> { model_names } do |_call_node, _scope|
@@ -742,8 +736,8 @@ RSpec.describe Rigor::Plugin::Base do
       let(:plugin_file_methods) do
         Class.new(described_class) do
           manifest(id: "dr-pfm", version: "0.1.0")
-          # The per-file name set — here a hand-seeded path → names map;
-          # in a real plugin a per-file index (rspec's LetScopeIndex).
+          # The per-file name set — here a hand-seeded path → names map; in a real plugin a per-file index (rspec's
+          # LetScopeIndex).
           def names_by_path = @names_by_path ||= {}
 
           dynamic_return file_methods: ->(path) { names_by_path[path] } do |_call_node, _scope|

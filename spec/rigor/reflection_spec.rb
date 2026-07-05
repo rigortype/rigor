@@ -17,8 +17,7 @@ RSpec.describe Rigor::Reflection do
     end
 
     it "returns false for an unknown name" do
-      # Use a class registry without the RBS loader to avoid the
-      # stdlib RBS picking up well-known names that the test
+      # Use a class registry without the RBS loader to avoid the stdlib RBS picking up well-known names that the test
       # author did not intend.
       env = Rigor::Environment.new
       scope = Rigor::Scope.empty(environment: env)
@@ -44,10 +43,8 @@ RSpec.describe Rigor::Reflection do
 
   describe ".class_ordering" do
     it "delegates to Environment#class_ordering and returns the trinary ordering" do
-      # `Integer < Numeric` in Ruby's class hierarchy, so the
-      # ordering is :subclass. Asserting the concrete value
-      # rather than the membership keeps the rubocop
-      # `RSpec/ExpectActual` cop satisfied.
+      # `Integer < Numeric` in Ruby's class hierarchy, so the ordering is :subclass. Asserting the concrete value rather
+      # than the membership keeps the rubocop `RSpec/ExpectActual` cop satisfied.
       result = described_class.class_ordering("Integer", "Numeric")
       expect(result).to eq(:subclass)
     end
@@ -62,8 +59,7 @@ RSpec.describe Rigor::Reflection do
     end
 
     it "falls back to the Environment's RBS-side constant" do
-      # Pick a constant that ships with the bundled RBS so the
-      # default Environment can resolve it.
+      # Pick a constant that ships with the bundled RBS so the default Environment can resolve it.
       type = described_class.constant_type_for("ARGV")
       expect(type).not_to be_nil
     end

@@ -2,15 +2,12 @@
 
 require "rigor/analysis/runner"
 
-# Path-error / parse-error specs intentionally bypass `analyze`
-# because they exercise paths that do not exist or contain
-# non-Ruby content; the helper assumes a writable tmpdir of
-# `.rb` files. Everything else uses `analyze`.
+# Path-error / parse-error specs intentionally bypass `analyze` because they exercise paths that do not exist or contain
+# non-Ruby content; the helper assumes a writable tmpdir of `.rb` files. Everything else uses `analyze`.
 RSpec.describe Rigor::Analysis::Runner do
-  # T1 — a `rescue SyntaxError => e` in one file resolves to the
-  # project's `M::SyntaxError = Class.new(Error)` defined in a sibling
-  # file (not core `::SyntaxError`), so a call on the rescued exception
-  # that the project class supports does not fire undefined-method.
+  # T1 — a `rescue SyntaxError => e` in one file resolves to the project's `M::SyntaxError = Class.new(Error)` defined
+  # in a sibling file (not core `::SyntaxError`), so a call on the rescued exception that the project class supports
+  # does not fire undefined-method.
   it "resolves a cross-file rescue Const to the same-namespace Class.new class" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "a.rb"), <<~RUBY)
@@ -43,10 +40,8 @@ RSpec.describe Rigor::Analysis::Runner do
     Dir.mktmpdir do |dir|
       missing = File.join(dir, "ghost.rb")
       configuration = Rigor::Configuration.new("paths" => [missing])
-      # chdir into a clean tmpdir so the runner does not pick up
-      # rigor's own `Gemfile.lock` (which would fire the
-      # O4-slice-3 missing-RBS diagnostic ahead of the
-      # file-not-found one).
+      # chdir into a clean tmpdir so the runner does not pick up rigor's own `Gemfile.lock` (which would fire the
+      # O4-slice-3 missing-RBS diagnostic ahead of the file-not-found one).
       Dir.chdir(dir) do
         result = described_class.new(configuration: configuration).run
 
@@ -79,8 +74,7 @@ RSpec.describe Rigor::Analysis::Runner do
       txt = File.join(dir, "notes.txt")
       File.write(txt, "hello")
       configuration = Rigor::Configuration.new("paths" => [txt])
-      # See above: chdir away from rigor's repo root so the
-      # missing-RBS diagnostic doesn't surface ahead of the
+      # See above: chdir away from rigor's repo root so the missing-RBS diagnostic doesn't surface ahead of the
       # path-error diagnostic.
       Dir.chdir(dir) do
         result = described_class.new(configuration: configuration).run
@@ -98,14 +92,11 @@ RSpec.describe Rigor::Analysis::Runner do
     expect(result.diagnostics.first.message).not_to be_empty
   end
 
-  # Regression: Rails generator templates ship as `.rb` files but contain
-  # ERB interpolation (`<%= ... %>`), which Prism cannot parse and the
-  # analyzer used to surface as up to ~20 noisy parse-error diagnostics
-  # per file. Redmine's `lib/generators/redmine_plugin_model/templates/
-  # migration.rb` is the canonical example. The closing `%>` marker
-  # cannot appear in valid Ruby (`%` is a binary operator that requires
-  # an operand on its right), so its presence is sufficient evidence
-  # that the file is an ERB template; analysis silently skips it.
+  # Regression: Rails generator templates ship as `.rb` files but contain ERB interpolation (`<%= ... %>`), which Prism
+  # cannot parse and the analyzer used to surface as up to ~20 noisy parse-error diagnostics per file. Redmine's
+  # `lib/generators/redmine_plugin_model/templates/migration.rb` is the canonical example. The closing `%>` marker
+  # cannot appear in valid Ruby (`%` is a binary operator that requires an operand on its right), so its presence is
+  # sufficient evidence that the file is an ERB template; analysis silently skips it.
   context "with an ERB-templated `.rb` file (Rails generator shape)" do
     it "silently skips a file whose source uses `<%= ... %>` interpolation" do
       result = analyze(<<~ERB)
@@ -128,9 +119,8 @@ RSpec.describe Rigor::Analysis::Runner do
   end
 
   describe "exclude: patterns filter directory globs" do
-    # Each test plants a parse-error-shaped file (unclosed `def`)
-    # so analysis attempts surface as diagnostics; the test then
-    # checks whether those diagnostics include the planted path.
+    # Each test plants a parse-error-shaped file (unclosed `def`) so analysis attempts surface as diagnostics; the test
+    # then checks whether those diagnostics include the planted path.
     let(:bad_source) { "def broken\n" }
 
     it "skips the built-in vendor/bundle pattern when a directory expansion contains it" do
@@ -183,12 +173,10 @@ RSpec.describe Rigor::Analysis::Runner do
   end
 
   describe "configuration wiring at runtime (audit guard)" do
-    # Adjacent to the `target_ruby` block below, these specs guard
-    # against any of the documented `.rigor.yml` settings going
-    # phantom — i.e., loaded into `Configuration` but never read
-    # at runtime. The `cache.path` regression that prompted this
-    # block (the CLI hardcoded `".rigor/cache"` and ignored the
-    # config) is covered separately in `cli_spec.rb`.
+    # Adjacent to the `target_ruby` block below, these specs guard against any of the documented `.rigor.yml` settings
+    # going phantom — i.e., loaded into `Configuration` but never read at runtime. The `cache.path` regression that
+    # prompted this block (the CLI hardcoded `".rigor/cache"` and ignored the config) is covered separately in
+    # `cli_spec.rb`.
 
     it "loads `libraries:` stdlib RBS into Environment.for_project" do
       libraries_args = nil
@@ -244,8 +232,7 @@ RSpec.describe Rigor::Analysis::Runner do
               })
 
       expect(captured_kwargs).not_to be_nil
-      # The `analyze` helper chdirs into a tmpdir; on macOS the
-      # tmpdir resolves under `/private/tmp/...`, so match by
+      # The `analyze` helper chdirs into a tmpdir; on macOS the tmpdir resolves under `/private/tmp/...`, so match by
       # suffix rather than full prefix to stay portable.
       expect(captured_kwargs[:allowed_read_roots]).to include(end_with("/vendor/generated"))
       expect(captured_kwargs[:network_policy]).to eq(:disabled)
@@ -301,10 +288,8 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     it "respects the per-receiver plugin veto (ADR-10 5a)" do
-      # When a plugin declares manifest(owns_receivers: [...])
-      # and the dispatcher's receiver IS owned by the plugin,
-      # try_dependency_source must decline so the plugin
-      # contribution stays authoritative.
+      # When a plugin declares manifest(owns_receivers: [...]) and the dispatcher's receiver IS owned by the plugin,
+      # try_dependency_source must decline so the plugin contribution stays authoritative.
       Rigor::Plugin.unregister!
       owner = Class.new(Rigor::Plugin::Base) do
         manifest(id: "owns-fake-node", version: "0.1.0", owns_receivers: ["Prism::FakeOwnedNode"])
@@ -381,9 +366,8 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     it "surfaces `rbs.coverage.missing-gem` :info exactly once when locked gems have no RBS (O4 slice 3)" do # rubocop:disable RSpec/ExampleLength
-      # Build a tmpdir with Gemfile.lock listing two gems
-      # whose RBS is not covered by ANY of the four resolution
-      # paths (DEFAULT_LIBRARIES / vendored / bundle / collection).
+      # Build a tmpdir with Gemfile.lock listing two gems whose RBS is not covered by ANY of the four resolution paths
+      # (DEFAULT_LIBRARIES / vendored / bundle / collection).
       Dir.mktmpdir("rigor-rbs-coverage-spec-") do |tmpdir|
         File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
           GEM
@@ -552,15 +536,15 @@ RSpec.describe Rigor::Analysis::Runner do
     it "does not emit `call.undefined-method` on a value of a synthesized stub type" do
       Dir.mktmpdir("rigor-stub-no-fp-") do |tmpdir|
         FileUtils.mkdir_p(File.join(tmpdir, "sig"))
-        # `Acme::Widget#remote` references `Net::FakeService`, which no
-        # loaded signature declares — Rigor stubs it so Widget builds.
+        # `Acme::Widget#remote` references `Net::FakeService`, which no loaded signature declares — Rigor stubs it so
+        # Widget builds.
         File.write(File.join(tmpdir, "sig", "widget.rbs"), <<~RBS)
           class Acme::Widget
             def remote: () -> Net::FakeService
           end
         RBS
-        # The call against the stub-typed value must NOT mis-fire
-        # undefined-method (the real Net::FakeService might define it).
+        # The call against the stub-typed value must NOT mis-fire undefined-method (the real Net::FakeService might
+        # define it).
         File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
           w = Acme::Widget.new
           r = w.remote
@@ -581,11 +565,9 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     describe "attr_* accessors suppress cross-file undefined-method" do
-      # A class that defines `attr_reader :x` AND ships RBS that omits
-      # `x` (an incomplete `sig/`) must not fire a false
-      # `undefined-method` on `obj.x` from another file. attr-declared
-      # accessors are recorded as discovered methods and propagated
-      # project-wide.
+      # A class that defines `attr_reader :x` AND ships RBS that omits `x` (an incomplete `sig/`) must not fire a false
+      # `undefined-method` on `obj.x` from another file. attr-declared accessors are recorded as discovered methods and
+      # propagated project-wide.
       it "does not flag an attr_reader method called from another file" do
         Dir.mktmpdir("rigor-attr-xfile-") do |tmpdir|
           FileUtils.mkdir_p(File.join(tmpdir, "sig"))
@@ -596,8 +578,8 @@ RSpec.describe Rigor::Analysis::Runner do
               attr_reader :size
             end
           RUBY
-          # `Widget.new` types the receiver as Widget (RBS-known), so
-          # the undefined-method rule actually evaluates `size`.
+          # `Widget.new` types the receiver as Widget (RBS-known), so the undefined-method rule actually evaluates
+          # `size`.
           File.write(File.join(tmpdir, "user.rb"), <<~RUBY)
             w = Widget.new
             w.size
@@ -705,15 +687,11 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      # Regression: the dispatcher's `try_project_patched_method`
-      # tier resolved the call's TYPE through the registry, but
-      # `CheckRules#undefined_method_diagnostic` ran an independent
-      # "does this method exist?" probe that ignored the registry —
-      # so a patched method on a concretely-typed receiver
-      # (`Nominal[String]` / `Constant["hello"]`) would type
-      # correctly yet still fire `call.undefined-method`. The fix
-      # consults the registry in CheckRules at the same precedence
-      # the dispatcher does.
+      # Regression: the dispatcher's `try_project_patched_method` tier resolved the call's TYPE through the registry,
+      # but `CheckRules#undefined_method_diagnostic` ran an independent "does this method exist?" probe that ignored the
+      # registry — so a patched method on a concretely-typed receiver (`Nominal[String]` / `Constant["hello"]`) would
+      # type correctly yet still fire `call.undefined-method`. The fix consults the registry in CheckRules at the same
+      # precedence the dispatcher does.
       it "suppresses `call.undefined-method` on a patched method called on a concrete receiver" do # rubocop:disable RSpec/ExampleLength
         Dir.mktmpdir("rigor-pre-eval-concrete-") do |tmpdir|
           ext_path = File.join(tmpdir, "string_ext.rb")
@@ -764,10 +742,9 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
-    # ADR-17 — when a project patch is NOT registered via `pre_eval:`,
-    # the call still fires `call.undefined-method`, but the diagnostic
-    # names the proven definition site and carries it as the structured
-    # `project_definition_site` field for `rigor triage` to key on.
+    # ADR-17 — when a project patch is NOT registered via `pre_eval:`, the call still fires `call.undefined-method`, but
+    # the diagnostic names the proven definition site and carries it as the structured `project_definition_site` field
+    # for `rigor triage` to key on.
     describe "ADR-17 — enriched undefined-method for un-registered project patches" do
       it "names the cross-file def site and sets project_definition_site" do
         Dir.mktmpdir("rigor-mp-enrich-") do |tmpdir|
@@ -989,17 +966,16 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     it "surfaces a configuration-error diagnostic when target_ruby is not Prism-accepted" do
-      # `3.0` matches the format regex but Prism rejects it. The
-      # one-time smoke parse in `Runner#run` converts the
-      # `ArgumentError` into a single `:builtin configuration-error`
-      # diagnostic so the run fails fast rather than crashing.
+      # `3.0` matches the format regex but Prism rejects it. The one-time smoke parse in `Runner#run` converts the
+      # `ArgumentError` into a single `:builtin configuration-error` diagnostic so the run fails fast rather than
+      # crashing.
       result = analyze("x = 1\n", config: { "target_ruby" => "3.0" })
       diag = result.diagnostics.find { |d| d.rule == "configuration-error" }
       expect(diag).not_to be_nil
       expect(diag.path).to eq(".rigor.yml")
       expect(diag.message).to include('"3.0"')
-      # The message must name the supported floor and where to read the
-      # right value, so the fix is obvious without a guess-and-retry loop.
+      # The message must name the supported floor and where to read the right value, so the fix is obvious without a
+      # guess-and-retry loop.
       expect(diag.message).to include(described_class.prism_supported_floor)
       expect(diag.message).to match(/Gemfile\.lock|\.ruby-version/)
     end
@@ -1045,8 +1021,8 @@ RSpec.describe Rigor::Analysis::Runner do
     it "carries structured receiver_type / method_name on the undefined-method diagnostic (ADR-23 slice 4)" do
       result = analyze("\"hello\".no_such_method\n")
 
-      # `receiver_type` stores the rendered receiver type — the same
-      # token the message uses; the triage catalogue normalises it.
+      # `receiver_type` stores the rendered receiver type — the same token the message uses; the triage catalogue
+      # normalises it.
       diag = result.diagnostics.find { |d| d.rule == "call.undefined-method" }
       expect([diag&.receiver_type, diag&.method_name]).to eq(['"hello"', "no_such_method"])
     end
@@ -1191,8 +1167,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
 
         it "respects file-suppression placed at the bottom of the file" do
-          # The convention is to put the comment near the top,
-          # but Rigor scans every comment in the file so any
+          # The convention is to put the comment near the top, but Rigor scans every comment in the file so any
           # placement works.
           result = analyze(<<~RUBY)
             "x".no_method
@@ -1203,8 +1178,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
 
         it "does not confuse `disable-file` with the line-only `disable`" do
-          # Per-line suppression on line 1 only; line 2's
-          # diagnostic still fires.
+          # Per-line suppression on line 1 only; line 2's diagnostic still fires.
           result = analyze(<<~RUBY)
             "x".no_method # rigor:disable undefined-method
             "y".also_missing
@@ -1415,10 +1389,8 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       describe "argument-type-mismatch rule (v0.0.2 #4)" do
-        # `Demo#take_string: (String) -> String` fixture, paired
-        # with the matching `def`. `analyze` writes the sig under
-        # `sig/` and chdirs so `Environment.for_project` discovers
-        # it.
+        # `Demo#take_string: (String) -> String` fixture, paired with the matching `def`. `analyze` writes the sig under
+        # `sig/` and chdirs so `Environment.for_project` discovers it.
         let(:demo_sig) do
           { "demo.rbs" => <<~RBS }
             class Demo
@@ -1448,25 +1420,20 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(arg_errors).to be_empty
         end
 
-        # ADR-58 (N2 extension, 2026-06-13 app/network survey) — the
-        # declaration-sourced-nil-is-not-diagnostic-fuel criterion that
-        # governs `possible-nil-receiver` extends to `argument-type-mismatch`.
-        # A declaration-sourced ivar (the class-ivar index seed of a ctor
-        # `@x = 0` / `@x = nil`, read in a sibling method) types `T | nil`; the
-        # rejecting constituent is the seed nil, and the program's invariant is
-        # that the ivar is set by then. Stripping the nil yields an accepted
-        # type, so the rule withholds. Flow-live nil and genuinely-wrong types
-        # keep firing.
+        # ADR-58 (N2 extension, 2026-06-13 app/network survey) — the declaration-sourced-nil-is-not-diagnostic-fuel
+        # criterion that governs `possible-nil-receiver` extends to `argument-type-mismatch`. A declaration-sourced ivar
+        # (the class-ivar index seed of a ctor `@x = 0` / `@x = nil`, read in a sibling method) types `T | nil`; the
+        # rejecting constituent is the seed nil, and the program's invariant is that the ivar is set by then. Stripping
+        # the nil yields an accepted type, so the rule withholds. Flow-live nil and genuinely-wrong types keep firing.
         context "when the rejecting argument is a declaration-sourced ivar nil (ADR-58 N2)" do
           def arg_mismatch_diags(result)
             result.diagnostics.select { |d| d.message.start_with?("argument type mismatch") }
           end
 
           it "does not fire on `@length` (ctor-seeded Integer ivar) used in `k <= @length`" do
-            # `@length = 0` in the ctor seeds the class-ivar index, so a read in
-            # a sibling method types `0 | nil`. `Integer#<=` expects Numeric;
-            # `0` is gradual-consistent, the seed `nil` is what rejects.
-            # (concurrent-ruby ruby_non_concurrent_priority_queue shape.)
+            # `@length = 0` in the ctor seeds the class-ivar index, so a read in a sibling method types `0 | nil`.
+            # `Integer#<=` expects Numeric; `0` is gradual-consistent, the seed `nil` is what rejects. (concurrent-ruby
+            # ruby_non_concurrent_priority_queue shape.)
             result = analyze(<<~RUBY)
               class PQ
                 def initialize; @length = 0; end
@@ -1495,9 +1462,8 @@ RSpec.describe Rigor::Analysis::Runner do
           end
 
           it "STILL fires on a genuinely-wrong argument type regardless of provenance" do
-            # `@name` is a ctor-seeded String ivar — declaration-sourced — but
-            # passing a String where Numeric is required is a real mismatch with
-            # no nil constituent to strip, so it must still fire.
+            # `@name` is a ctor-seeded String ivar — declaration-sourced — but passing a String where Numeric is
+            # required is a real mismatch with no nil constituent to strip, so it must still fire.
             result = analyze(<<~RUBY)
               class PQ
                 def initialize; @name = "q"; end
@@ -1597,9 +1563,8 @@ RSpec.describe Rigor::Analysis::Runner do
         end
 
         it "is suppressed when an ivar nil-guard fires on an ivar seeded as Constant[nil]" do
-          # Regression: when @ivar is seeded Constant[nil] by the class-ivar
-          # accumulator, @ivar.nil? folds to Constant[true] (always-live branch
-          # optimisation). The fix ensures the early-return narrowing path still
+          # Regression: when @ivar is seeded Constant[nil] by the class-ivar accumulator, @ivar.nil? folds to
+          # Constant[true] (always-live branch optimisation). The fix ensures the early-return narrowing path still
           # applies so downstream code doesn't see the stale nil type.
           result = analyze(<<~RUBY)
             class GuardedService
@@ -1618,18 +1583,13 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      # Regression — liquid v5.x sweep, Event 3
-      # (docs/notes/20260616-liquid-v5.x-regression-sweep.md). A local
-      # conditionally assigned across an `if/elsif/else: raise` chain is
-      # bound on every reachable path (the else raises), so reading it
-      # afterwards must NOT fire `possible-nil-receiver`. The bug only
-      # surfaced when one assigning arm was `Dynamic`-typed and another
-      # concrete: the inner `elsif … else raise` dropped its body's
-      # assignment, leaving the local unbound for the outer if's join to
-      # nil-inject. The `Dynamic | concrete` union then leaked the
-      # injected nil past the FP-discipline gate that silences a *bare*
-      # `Dynamic` receiver. The fix carries the surviving then-body's
-      # scope forward; the whole bisection table must stay clean.
+      # Regression — liquid v5.x sweep, Event 3 (docs/notes/20260616-liquid-v5.x-regression-sweep.md). A local
+      # conditionally assigned across an `if/elsif/else: raise` chain is bound on every reachable path (the else
+      # raises), so reading it afterwards must NOT fire `possible-nil-receiver`. The bug only surfaced when one
+      # assigning arm was `Dynamic`-typed and another concrete: the inner `elsif … else raise` dropped its body's
+      # assignment, leaving the local unbound for the outer if's join to nil-inject. The `Dynamic | concrete` union then
+      # leaked the injected nil past the FP-discipline gate that silences a *bare* `Dynamic` receiver. The fix carries
+      # the surviving then-body's scope forward; the whole bisection table must stay clean.
       describe "if/elsif/else-raise conditional-local definite assignment" do
         def nil_receiver_diags(result)
           result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
@@ -1774,11 +1734,9 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       it "does not flag inferred-constant predicates (envelope is literal-only)" do
-        # `class_object.name.nil?` folds to `Constant<false>`
-        # because RBS declares `Module#name -> String`, but
-        # anonymous classes really do return nil at runtime.
-        # The literal-only envelope avoids flagging the
-        # defensive `raise ... if x.name.nil?` shape.
+        # `class_object.name.nil?` folds to `Constant<false>` because RBS declares `Module#name -> String`, but
+        # anonymous classes really do return nil at runtime. The literal-only envelope avoids flagging the defensive
+        # `raise ... if x.name.nil?` shape.
         result = analyze(<<~RUBY)
           def register(class_object)
             raise ArgumentError unless class_object.is_a?(Module)
@@ -1815,8 +1773,7 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       it "is suppressible via `# rigor:disable unreachable-branch` on the dead-branch line" do
-        # The diagnostic points at the dead branch's location,
-        # so the suppression comment lives on the dead-branch
+        # The diagnostic points at the dead branch's location, so the suppression comment lives on the dead-branch
         # statement (not the `if` line).
         result = analyze(<<~RUBY)
           if false
@@ -1901,10 +1858,8 @@ RSpec.describe Rigor::Analysis::Runner do
             break
           end
         RUBY
-        # `while x` itself isn't an IfNode so it's outside the
-        # rule's scope; if Rigor ever folds the body's `if`
-        # against a loop-mutated local, the loop ancestor
-        # check keeps the rule from firing.
+        # `while x` itself isn't an IfNode so it's outside the rule's scope; if Rigor ever folds the body's `if` against
+        # a loop-mutated local, the loop ancestor check keeps the rule from firing.
         expect(truthy_diags(result)).to be_empty
       end
 
@@ -1932,16 +1887,13 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(truthy_diags(result)).to be_empty
       end
 
-      # Regression: the class-ivar pre-pass seeds every InstanceVariableWriteNode
-      # rvalue into a per-class accumulator. Defensive-init idioms
-      # (`@x = v unless @x` / `@x = v if @x.nil?` / `unless defined?(@x); @x = v; end`)
-      # used to seed `@x` as `Constant[v]`, then the predicate `@x` folded
-      # to that same constant and fired this rule against working programs —
-      # most visibly in tdiary-core's `TDiary::Configuration#configure_attrs`
-      # (≈ 20 false positives across a single block of consecutive defaults).
-      # The pre-pass now unions `Constant[nil]` into the seeded type for
-      # writes that sit in the THEN body of a conditional whose predicate
-      # tests the same ivar's truthiness / nil-ness / definedness.
+      # Regression: the class-ivar pre-pass seeds every InstanceVariableWriteNode rvalue into a per-class accumulator.
+      # Defensive-init idioms (`@x = v unless @x` / `@x = v if @x.nil?` / `unless defined?(@x); @x = v; end`) used to
+      # seed `@x` as `Constant[v]`, then the predicate `@x` folded to that same constant and fired this rule against
+      # working programs — most visibly in tdiary-core's `TDiary::Configuration#configure_attrs` (≈ 20 false positives
+      # across a single block of consecutive defaults). The pre-pass now unions `Constant[nil]` into the seeded type for
+      # writes that sit in the THEN body of a conditional whose predicate tests the same ivar's truthiness / nil-ness /
+      # definedness.
       context "with defensive ivar-init idioms (tdiary-core configuration.rb cluster)" do
         it "does not fire on `@x = v unless @x`" do
           result = analyze(<<~RUBY)
@@ -1990,14 +1942,11 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(truthy_diags(result)).to be_empty
         end
 
-        # Polarity check: the ELSE branch of `if @x; ...; else; @x = init; end`
-        # is also a defensive-init shape, but treating its write as "guarded
-        # by nil" forces the read of `@x` elsewhere in the class to fold to
-        # `union(init_type, nil)` and surfaces a possible-nil-receiver FP on
-        # any later call against `@x` that relies on a method-call invariant
-        # (the tdiary `TDiary::TDiaryBase#do_eval_rhtml` shape). The fix
-        # leaves the ELSE branch unguarded so those reads continue to type
-        # as they did before.
+        # Polarity check: the ELSE branch of `if @x; ...; else; @x = init; end` is also a defensive-init shape, but
+        # treating its write as "guarded by nil" forces the read of `@x` elsewhere in the class to fold to
+        # `union(init_type, nil)` and surfaces a possible-nil-receiver FP on any later call against `@x` that relies on
+        # a method-call invariant (the tdiary `TDiary::TDiaryBase#do_eval_rhtml` shape). The fix leaves the ELSE branch
+        # unguarded so those reads continue to type as they did before.
         it "does not over-mark the else branch of `if @x; ...; else; @x = init; end`" do
           result = analyze(<<~RUBY)
             class Foo
@@ -2020,13 +1969,10 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      # ADR-58 WD1 — declaration-sourced ivar optionality (the ctor
-      # `@x = nil` seed unioned in via the class-ivar index) is not
-      # diagnostic fuel for `possible-nil-receiver`. The 109-FP class on
-      # idiomatic data-structure Ruby: a node field read whose nil arrives
-      # only from a sibling-method ctor seed, guarded by an unprovable
-      # cross-method invariant. Flow-live nil (a method-local write or a
-      # failed-guard narrowing) keeps firing exactly as before.
+      # ADR-58 WD1 — declaration-sourced ivar optionality (the ctor `@x = nil` seed unioned in via the class-ivar index)
+      # is not diagnostic fuel for `possible-nil-receiver`. The 109-FP class on idiomatic data-structure Ruby: a node
+      # field read whose nil arrives only from a sibling-method ctor seed, guarded by an unprovable cross-method
+      # invariant. Flow-live nil (a method-local write or a failed-guard narrowing) keeps firing exactly as before.
       context "when the ivar nil is declaration-sourced (ADR-58 WD1)" do
         def nil_receiver_diags(result)
           result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
@@ -2104,13 +2050,10 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      # Flow-folding gap G1 — closed via the
-      # `Rigor::Inference::MutationWidening` hook in `eval_call`.
-      # The pre-fix shape used to fold `arms.size == 1` to
-      # `Constant[true]` because the body's `arms << x` mutation
-      # was not reflected in the post-loop binding. Mirrors the
-      # parse_union FP at lib/rigor/inference/hkt_body_parser.rb:140
-      # documented in CURRENT_WORK.md § Flow-folding.
+      # Flow-folding gap G1 — closed via the `Rigor::Inference::MutationWidening` hook in `eval_call`. The pre-fix shape
+      # used to fold `arms.size == 1` to `Constant[true]` because the body's `arms << x` mutation was not reflected in
+      # the post-loop binding. Mirrors the parse_union FP at lib/rigor/inference/hkt_body_parser.rb:140 documented in
+      # CURRENT_WORK.md § Flow-folding.
       context "when a loop body mutates the seeded collection (G1, Mastodon cluster 4)" do
         it "does NOT fire on a tuple seeded then mutated inside a `while`" do
           result = analyze(<<~RUBY)
@@ -2164,12 +2107,9 @@ RSpec.describe Rigor::Analysis::Runner do
         end
 
         it "does NOT fire on an outer-scope tuple mutated INSIDE an `each {}` block" do
-          # This is the hkt_registry.rb:212 shape: a local seeded
-          # as a tuple literal, mutated only inside an iterator
-          # block, then probed with `.empty?` after the block. The
-          # block lives in a child scope; the propagation in
-          # `MutationWidening.widen_after_block` carries the
-          # widening back to the outer scope.
+          # This is the hkt_registry.rb:212 shape: a local seeded as a tuple literal, mutated only inside an iterator
+          # block, then probed with `.empty?` after the block. The block lives in a child scope; the propagation in
+          # `MutationWidening.widen_after_block` carries the widening back to the outer scope.
           result = analyze(<<~RUBY)
             def collect_things(items)
               registrations = []
@@ -2185,8 +2125,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
 
         it "still fires on a tuple that is genuinely never mutated" do
-          # The widening only triggers on an in-place mutator call;
-          # a tuple whose size is a fact at the predicate site
+          # The widening only triggers on an in-place mutator call; a tuple whose size is a fact at the predicate site
           # MUST still fold. This pins the precision floor.
           result = analyze(<<~RUBY)
             arr = [1]
@@ -2498,8 +2437,8 @@ RSpec.describe Rigor::Analysis::Runner do
         result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
       end
 
-      # `h[:foo]` on an optional key reads `Integer?`; inside a
-      # `h.key?(:foo)` guard the optionality nil is gone → `Integer`.
+      # `h[:foo]` on an optional key reads `Integer?`; inside a `h.key?(:foo)` guard the optionality nil is gone →
+      # `Integer`.
       it "narrows h[:foo] from Integer? to Integer after a `h.key?(:foo)` guard" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           class Config
@@ -2522,8 +2461,8 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(dumps.last).to eq("dump_type: Integer")      # guarded: nil removed
       end
 
-      # §4-3 false edge: `unless h.key?(:foo)` proves `:foo` absent, so
-      # `h[:foo]` reads `nil` (the key is dropped from the shape).
+      # §4-3 false edge: `unless h.key?(:foo)` proves `:foo` absent, so `h[:foo]` reads `nil` (the key is dropped from
+      # the shape).
       it "narrows h[:foo] to nil in the falsey edge (key proven absent)" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           class Config
@@ -2548,9 +2487,8 @@ RSpec.describe Rigor::Analysis::Runner do
         result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
       end
 
-      # Inside an `unless arr.empty?` / `if arr.any?` guard the array is
-      # `non-empty-array[T]`, so `size`/`length`/`count` refine from
-      # `non-negative-int` to `positive-int` (Elixir `tuple_size`-style).
+      # Inside an `unless arr.empty?` / `if arr.any?` guard the array is `non-empty-array[T]`, so
+      # `size`/`length`/`count` refine from `non-negative-int` to `positive-int` (Elixir `tuple_size`-style).
       it "refines arr.size to positive-int inside a non-empty guard" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           class Box
@@ -3082,9 +3020,8 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
-    # ADR-35 slice 3 — Liskov signature rule for parameters (contravariance).
-    # Uses real (loadable) classes Numeric/Integer so the nominal subtype
-    # check resolves to :no rather than the FP-safe :maybe it returns for
+    # ADR-35 slice 3 — Liskov signature rule for parameters (contravariance). Uses real (loadable) classes
+    # Numeric/Integer so the nominal subtype check resolves to :no rather than the FP-safe :maybe it returns for
     # unloadable user-only class hierarchies.
     describe "override-param-narrowed rule (ADR-35 slice 3)" do
       def override_param_diags(result)
@@ -3362,8 +3299,7 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       it "does not flag class-body ivars outside any def" do
-        # Class-level ivars (`Module#@var`) are a separate
-        # surface the engine doesn't yet model.
+        # Class-level ivars (`Module#@var`) are a separate surface the engine doesn't yet model.
         result = analyze(<<~RUBY)
           class Foo
             @config = "default"
@@ -3390,10 +3326,8 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       it "does not flag the bool flag idiom (false in initialize, true elsewhere)" do
-        # Common idiom: a memoization flag starts at `false` and
-        # transitions to `true` once the underlying value has been
-        # computed. Both writes are conceptually `bool` — the rule
-        # MUST NOT fire on this shape.
+        # Common idiom: a memoization flag starts at `false` and transitions to `true` once the underlying value has
+        # been computed. Both writes are conceptually `bool` — the rule MUST NOT fire on this shape.
         result = analyze(<<~RUBY)
           class Holder
             def initialize
@@ -3418,14 +3352,10 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       it "does not flag a nil-placeholder followed by concrete writes (nullable-slot idiom)" do
-        # The `@parse_method = nil` placeholder followed by
-        # per-state `@parse_method = :foo` / `:bar` assignments
-        # is the common nullable-slot idiom. Pre-fix the
-        # `NilClass` placeholder anchored as `first_class` and
-        # every concrete write tripped the rule; the canonical
-        # type is now the first non-nil write so neither
-        # `Symbol → Symbol` (same class) nor `nil → Symbol`
-        # widening fires.
+        # The `@parse_method = nil` placeholder followed by per-state `@parse_method = :foo` / `:bar` assignments is the
+        # common nullable-slot idiom. Pre-fix the `NilClass` placeholder anchored as `first_class` and every concrete
+        # write tripped the rule; the canonical type is now the first non-nil write so neither `Symbol → Symbol` (same
+        # class) nor `nil → Symbol` widening fires.
         result = analyze(<<~RUBY)
           class Foo
             def initialize
@@ -3447,8 +3377,7 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       it "still flags Symbol → String drift even with a leading nil placeholder" do
-        # The leading `nil` shouldn't mask a genuine drift between
-        # two distinct concrete classes.
+        # The leading `nil` shouldn't mask a genuine drift between two distinct concrete classes.
         result = analyze(<<~RUBY)
           class Foo
             def initialize
@@ -3521,12 +3450,9 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     it "returns Dynamic[Top] when the top-level def has a complex param shape" do
-      # `def helper(x, kind: :default)` has a kwarg — the
-      # first-iteration binder rejects it. The engine still
-      # prefers the local def over RBS dispatch and returns
-      # `Dynamic[Top]`, suppressing the spurious
-      # `Array#select`-style mis-routing that previously
-      # caused `select(...)` to type as `Array[Elem]`.
+      # `def helper(x, kind: :default)` has a kwarg — the first-iteration binder rejects it. The engine still prefers
+      # the local def over RBS dispatch and returns `Dynamic[Top]`, suppressing the spurious `Array#select`-style
+      # mis-routing that previously caused `select(...)` to type as `Array[Elem]`.
       result = analyze(<<~RUBY)
         def select(class_name, method_name, kind: :instance)
           class_name
@@ -3535,8 +3461,7 @@ RSpec.describe Rigor::Analysis::Runner do
         mt.no_such_method_on_array
       RUBY
 
-      # `mt` is `Dynamic[Top]`; the undefined-method rule
-      # skips Dynamic receivers so no diagnostic surfaces.
+      # `mt` is `Dynamic[Top]`; the undefined-method rule skips Dynamic receivers so no diagnostic surfaces.
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end
   end
@@ -3584,18 +3509,15 @@ RSpec.describe Rigor::Analysis::Runner do
         assert_type("42", x)
       RUBY
 
-      # `String | 42` narrowed to `Integer` keeps only the
-      # integer-side carrier (Constant[42] survives because
-      # it is a subtype of Integer); the String carrier is
-      # dropped.
+      # `String | 42` narrowed to `Integer` keeps only the integer-side carrier (Constant[42] survives because it is a
+      # subtype of Integer); the String carrier is dropped.
       mismatch = result.diagnostics.find { |d| d.rule == "assert.type-mismatch" }
       expect(mismatch).to be_nil
     end
 
     it "leaves the scope unchanged when the matcher shape is unrecognised" do
-      # `to be_truthy` is intentionally NOT modelled; the
-      # post-call type of `x` should remain `String | nil`
-      # and `x.upcase` should still flag.
+      # `to be_truthy` is intentionally NOT modelled; the post-call type of `x` should remain `String | nil` and
+      # `x.upcase` should still flag.
       result = analyze(<<~RUBY)
         x = if rand < 0.5
           "hello"
@@ -3619,8 +3541,7 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     it "emits :info fallback diagnostics when explain is on" do
-      # `BEGIN { ... }` is a Prism::PreExecutionNode the engine
-      # does not recognise — a stable explain-mode trigger.
+      # `BEGIN { ... }` is a Prism::PreExecutionNode the engine does not recognise — a stable explain-mode trigger.
       result = analyze("BEGIN { 1 }\n", explain: true)
 
       fallback = result.diagnostics.find { |d| d.rule == "fallback" }
@@ -3679,8 +3600,7 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     it "does not fire when the divisor cannot be proved zero" do
-      # `rand(100)` could be zero but the analyzer cannot
-      # prove it, so the rule stays silent.
+      # `rand(100)` could be zero but the analyzer cannot prove it, so the rule stays silent.
       expect(
         analyze("rand(100) / rand(100)\n").diagnostics.find { |d| d.rule == "flow.always-raises" }
       ).to be_nil
@@ -3838,9 +3758,8 @@ RSpec.describe Rigor::Analysis::Runner do
       runtime_errors = result.diagnostics.select do |d|
         d.source_family == :plugin_loader && d.rule == "runtime-error"
       end
-      # The contribution is silently dropped — no diagnostic. The
-      # rest of the run continues. (Plugins that need to surface
-      # their own errors should emit through diagnostics_for_file.)
+      # The contribution is silently dropped — no diagnostic. The rest of the run continues. (Plugins that need to
+      # surface their own errors should emit through diagnostics_for_file.)
       expect(runtime_errors).to be_empty
       expect(result).to be_a(Rigor::Analysis::Result)
     end
@@ -3850,9 +3769,8 @@ RSpec.describe Rigor::Analysis::Runner do
     before { Rigor::Plugin.unregister! }
     after { Rigor::Plugin.unregister! }
 
-    # Synthetic plugin: recognises any call named `narrow_self_to_string!`
-    # and contributes a post_return_fact narrowing self to
-    # `Nominal[String]` from that call onwards.
+    # Synthetic plugin: recognises any call named `narrow_self_to_string!` and contributes a post_return_fact narrowing
+    # self to `Nominal[String]` from that call onwards.
     let(:self_narrowing_plugin) do
       klass = Class.new(Rigor::Plugin::Base) do
         manifest(id: "self-narrower", version: "0.1.0")
@@ -3891,10 +3809,8 @@ RSpec.describe Rigor::Analysis::Runner do
     end
 
     it "applies a plugin-contributed post_return_fact(target_kind: :self) to the surrounding scope" do
-      # Without the narrowing, `self.upcase` would emit
-      # `call.undefined-method` because the implicit-self type
-      # at top level isn't `String`. The plugin narrows self to
-      # `Nominal[String]` after `narrow_self_to_string!`, so
+      # Without the narrowing, `self.upcase` would emit `call.undefined-method` because the implicit-self type at top
+      # level isn't `String`. The plugin narrows self to `Nominal[String]` after `narrow_self_to_string!`, so
       # `self.upcase` resolves cleanly.
       result = run_with_plugin(self_narrowing_plugin, source: <<~RUBY)
         def narrow_self_to_string!; nil; end
@@ -4255,9 +4171,8 @@ RSpec.describe Rigor::Analysis::Runner do
       RBS
       result = analyze("x = 1\n", sig: sig)
 
-      # `_Stream` is namespace-relative (only `Buffers::_Stream` exists), so
-      # resolution must find it under the class's namespace — and then flag
-      # the missing `read`, rather than reporting the interface unresolved.
+      # `_Stream` is namespace-relative (only `Buffers::_Stream` exists), so resolution must find it under the class's
+      # namespace — and then flag the missing `read`, rather than reporting the interface unresolved.
       conformance = result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }
       expect(conformance).not_to be_nil
       expect(conformance.message).to include("`#read`")
@@ -4283,8 +4198,7 @@ RSpec.describe Rigor::Analysis::Runner do
             cache_store: nil, workers: 4, buffer: binding
           )
 
-          # `pool_mode?` is private; assert via `send` since the
-          # contract change IS about that predicate.
+          # `pool_mode?` is private; assert via `send` since the contract change IS about that predicate.
           expect(runner.send(:pool_mode?)).to be(false)
         end
       end
@@ -4359,10 +4273,8 @@ RSpec.describe Rigor::Analysis::Runner do
   end
 
   describe "editor mode (BufferBinding)" do
-    # Slice 2: when the runner is wired with `buffer:`, the
-    # logical path in `paths:` is parsed from the physical
-    # buffer's bytes but every diagnostic reports the LOGICAL
-    # path. The on-disk version of the logical file is silently
+    # Slice 2: when the runner is wired with `buffer:`, the logical path in `paths:` is parsed from the physical
+    # buffer's bytes but every diagnostic reports the LOGICAL path. The on-disk version of the logical file is silently
     # replaced by the buffer for parse purposes.
     it "parses bytes from the buffer's physical path but emits diagnostics under the logical path" do
       Dir.mktmpdir("rigor-buffer-binding-") do |tmpdir|
@@ -4383,8 +4295,7 @@ RSpec.describe Rigor::Analysis::Runner do
             configuration: configuration, cache_store: nil, buffer: binding
           ).run
 
-          # The parse error from the buffer surfaces under the
-          # LOGICAL path — that's what the editor highlights.
+          # The parse error from the buffer surfaces under the LOGICAL path — that's what the editor highlights.
           paths = result.diagnostics.map(&:path)
           expect(paths).to include(logical)
           expect(paths).not_to include(physical)
@@ -4399,8 +4310,7 @@ RSpec.describe Rigor::Analysis::Runner do
           other = File.join("lib", "bar.rb")
           FileUtils.mkdir_p("lib")
           File.write(logical, "x = 1\n")
-          # `other` would normally surface a parse error — but under
-          # editor mode it MUST NOT be analyzed.
+          # `other` would normally surface a parse error — but under editor mode it MUST NOT be analyzed.
           File.write(other, "def also_broken\n")
           physical = File.join(tmpdir, "buffer.rb")
           File.write(physical, "x = 1\n")
@@ -4425,8 +4335,7 @@ RSpec.describe Rigor::Analysis::Runner do
     it "analyzes the buffer when its logical path doesn't exist on disk (LSP new-file case)" do
       Dir.mktmpdir("rigor-buffer-binding-phantom-") do |tmpdir|
         Dir.chdir(tmpdir) do
-          # Logical path doesn't exist on disk — user is editing a
-          # brand-new file via LSP.
+          # Logical path doesn't exist on disk — user is editing a brand-new file via LSP.
           logical = File.join(tmpdir, "lib", "fresh.rb")
           physical = File.join(tmpdir, "buffer.rb")
           File.write(physical, "def broken\n")
@@ -4440,8 +4349,7 @@ RSpec.describe Rigor::Analysis::Runner do
           ).run([logical])
 
           paths = result.diagnostics.map(&:path).uniq
-          # The buffer's parse error surfaces under the logical
-          # path — NOT as a "no such file" diagnostic.
+          # The buffer's parse error surfaces under the logical path — NOT as a "no such file" diagnostic.
           expect(paths).to include(logical)
           expect(result.diagnostics.map(&:message)).not_to include(/no such file/)
         end
@@ -4470,8 +4378,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
           paths = result.diagnostics.map(&:path).uniq
           expect(paths).to include(logical)
-          # `app/real.rb` is not analyzed under editor mode even though
-          # it's in `paths:` — single-file scope wins.
+          # `app/real.rb` is not analyzed under editor mode even though it's in `paths:` — single-file scope wins.
           expect(paths).not_to include(File.join("app", "real.rb"))
         end
       end
@@ -4530,10 +4437,8 @@ RSpec.describe Rigor::Analysis::Runner do
                          .prepare_project_scan
         end
 
-        # When prebuilt: is supplied, Plugin::Loader.load MUST NOT
-        # run — the cached registry is the one the runner uses. We
-        # verify by stubbing `Plugin::Loader.load` to raise and
-        # confirming the run still succeeds.
+        # When prebuilt: is supplied, Plugin::Loader.load MUST NOT run — the cached registry is the one the runner uses.
+        # We verify by stubbing `Plugin::Loader.load` to raise and confirming the run still succeeds.
         allow(Rigor::Plugin::Loader).to receive(:load).and_raise("loader.load called unexpectedly")
 
         runner = described_class.new(
@@ -4554,8 +4459,7 @@ RSpec.describe Rigor::Analysis::Runner do
         runner = described_class.new(configuration: configuration, cache_store: nil, collect_stats: false)
         Dir.chdir(tmpdir) { runner.run }
 
-        # Pre-passes ran inline — registry / dep_index built fresh
-        # this call, not adopted from a prior snapshot.
+        # Pre-passes ran inline — registry / dep_index built fresh this call, not adopted from a prior snapshot.
         expect(runner.plugin_registry).not_to be_nil
         expect(runner.dependency_source_index).not_to be_nil
       end
@@ -4572,19 +4476,14 @@ RSpec.describe Rigor::Analysis::Runner do
           signature_paths: configuration.signature_paths
         )
 
-        # Once the override is supplied, Environment.for_project
-        # must NOT be invoked from within analyze_files for the
-        # sequential path. Stubbing to raise lets a single
-        # unexpected call abort the run.
+        # Once the override is supplied, Environment.for_project must NOT be invoked from within analyze_files for the
+        # sequential path. Stubbing to raise lets a single unexpected call abort the run.
         runner = described_class.new(
           configuration: configuration, cache_store: nil, collect_stats: false, environment: env
         )
-        # The runner's pre-pass scaffold still calls
-        # `Environment.for_project` outside `analyze_files`
-        # (synthetic-method scanner uses `environment: nil`,
-        # but the `prewarm_rbs_cache_for_pool` would on pool
-        # mode — sequential path here doesn't). Allow it, but
-        # assert it isn't called by the override path itself.
+        # The runner's pre-pass scaffold still calls `Environment.for_project` outside `analyze_files` (synthetic-method
+        # scanner uses `environment: nil`, but the `prewarm_rbs_cache_for_pool` would on pool mode — sequential path
+        # here doesn't). Allow it, but assert it isn't called by the override path itself.
         expect do
           Dir.chdir(tmpdir) { runner.run }
         end.not_to raise_error
@@ -4609,8 +4508,8 @@ RSpec.describe Rigor::Analysis::Runner do
         )
         Dir.chdir(tmpdir) { runner.run }
 
-        # After the run, the env's reporter slot should reference
-        # the runner's per-run reporter, not the pre-attached one.
+        # After the run, the env's reporter slot should reference the runner's per-run reporter, not the pre-attached
+        # one.
         expect(env.rbs_extended_reporter).not_to equal(original_rbs_reporter)
         expect(env.rbs_extended_reporter).to equal(runner.rbs_extended_reporter)
       end

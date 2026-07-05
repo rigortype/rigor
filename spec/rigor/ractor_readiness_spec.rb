@@ -2,31 +2,20 @@
 
 require "spec_helper"
 
-# Ractor-readiness audit. Each constructor below SHOULD produce
-# a value that's `Ractor.shareable?` so it can cross a Ractor
-# boundary without `Ractor.make_shareable` retro-fitting at
-# every dispatch.
+# Ractor-readiness audit. Each constructor below SHOULD produce a value that's `Ractor.shareable?` so it can cross a
+# Ractor boundary without `Ractor.make_shareable` retro-fitting at every dispatch.
 #
-# The audit serves as a regression guard: when someone adds a
-# new value-object class to the inference / type-node /
-# flow-contribution surface, the matching `it` here documents
-# the shareability expectation. Adding a class to one of the
-# already-passing groups WITHOUT writing the spec leaves
-# Ractor-readiness silent until a later refactor crashes the
-# carrier at a Ractor boundary; the audit makes the gap
-# visible.
+# The audit serves as a regression guard: when someone adds a new value-object class to the inference / type-node
+# / flow-contribution surface, the matching `it` here documents the shareability expectation. Adding a class to one of
+# the already-passing groups WITHOUT writing the spec leaves Ractor-readiness silent until a later refactor crashes the
+# carrier at a Ractor boundary; the audit makes the gap visible.
 #
-# Phase 1 (this spec) covers the Type / TypeNode value-object
-# surface that downstream Ractor-isolated workers would carry
-# in the most common dispatch paths. Phase 2 (deferred) adds
-# `Rigor::Configuration`, `Rigor::Scope`, and
-# `Rigor::Environment` once the underlying `RbsLoader` cache
-# state is split into a frozen reflection surface plus a
-# per-Ractor mutable cache. Phase 3 (deferred) adds plugin
-# state.
+# Phase 1 (this spec) covers the Type / TypeNode value-object surface that downstream Ractor-isolated workers would
+# carry in the most common dispatch paths. Phase 2 (deferred) adds `Rigor::Configuration`, `Rigor::Scope`, and
+# `Rigor::Environment` once the underlying `RbsLoader` cache state is split into a frozen reflection surface plus a
+# per-Ractor mutable cache. Phase 3 (deferred) adds plugin state.
 #
-# See `docs/design/20260514-ractor-migration.md` for the
-# full staged plan.
+# See `docs/design/20260514-ractor-migration.md` for the full staged plan.
 RSpec.describe "Ractor readiness", :ractor_readiness do
   def shareable?(obj)
     Ractor.shareable?(obj)
@@ -149,24 +138,17 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
   end
 
   describe "Phase 2 — Configuration / Scope / Environment" do
-    # Phase 2a (LANDED): `Configuration` deep-freezes its
-    # `@paths` Array + calls `freeze` on `self` at the end
-    # of `initialize`. Backward-compatible — every reader
-    # path treats the Configuration as immutable already.
+    # Phase 2a (LANDED): `Configuration` deep-freezes its `@paths` Array + calls `freeze` on `self` at the end of
+    # `initialize`. Backward-compatible — every reader path treats the Configuration as immutable already.
     it "Rigor::Configuration (Phase 2a)" do
       expect(shareable?(Rigor::Configuration.new(Rigor::Configuration::DEFAULTS))).to be(true)
     end
 
-    # Phase 2b (LANDED): `Environment::Reflection` extracts
-    # the loader's read-only RBS query surface into a
-    # frozen carrier. NOT `Ractor.shareable?` because the
-    # cached `RBS::Definition` objects transitively
-    # reference `RBS::Location` (C-extension state that
-    # `Ractor.make_shareable` rejects). The Phase 4 worker
-    # pool sidesteps the constraint by building one
-    # Reflection per worker from the shared `Cache::Store`;
-    # the cross-Ractor sharing point is the Store, NOT the
-    # Reflection.
+    # Phase 2b (LANDED): `Environment::Reflection` extracts the loader's read-only RBS query surface into a frozen
+    # carrier. NOT `Ractor.shareable?` because the cached `RBS::Definition` objects transitively reference
+    # `RBS::Location` (C-extension state that `Ractor.make_shareable` rejects). The Phase 4 worker pool sidesteps the
+    # constraint by building one Reflection per worker from the shared `Cache::Store`; the cross-Ractor sharing point is
+    # the Store, NOT the Reflection.
     it "Rigor::Environment::Reflection is frozen (Phase 2b)" do
       reflection = Rigor::Environment.for_project.reflection
       expect(reflection).not_to be_nil
@@ -178,11 +160,8 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(shareable?(reflection)).to be(false)
     end
 
-    # Phase 2b residual targets — still pending. The
-    # blockers are documented in
-    # `docs/design/20260514-ractor-migration.md` and
-    # ADR-15; `skip` keeps the gap visible in
-    # `make verify` output.
+    # Phase 2b residual targets — still pending. The blockers are documented in
+    # `docs/design/20260514-ractor-migration.md` and ADR-15; `skip` keeps the gap visible in `make verify` output.
     it "Rigor::Scope.empty" do
       skip "Phase 2b residual: Scope.environment carries the non-shareable RbsLoader"
       expect(shareable?(Rigor::Scope.empty)).to be(true)
@@ -194,23 +173,16 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
     end
   end
 
-  # Phase 3 (LANDED in part): the plugin contract carries a
-  # Ractor-shareable {Rigor::Plugin::Blueprint} replay carrier
-  # alongside live (mutable) plugin instances. A worker Ractor
-  # ships `blueprints` across the boundary, then calls
-  # {Rigor::Plugin::Registry.materialize} once at startup so the
-  # per-Ractor plugin instance (with its mutable accumulators)
-  # never escapes its owning Ractor.
+  # Phase 3 (LANDED in part): the plugin contract carries a Ractor-shareable {Rigor::Plugin::Blueprint} replay carrier
+  # alongside live (mutable) plugin instances. A worker Ractor ships `blueprints` across the boundary, then calls
+  # {Rigor::Plugin::Registry.materialize} once at startup so the per-Ractor plugin instance (with its mutable
+  # accumulators) never escapes its owning Ractor.
   #
-  # Plugin instances themselves are intentionally NOT
-  # `Ractor.shareable?` — they accumulate per-run state in
-  # ivars (`rigor-sorbet`'s `@reachable_absurd_nodes`,
-  # `@reveal_type_calls`, `@assert_type_mismatches` are the
-  # canonical examples). The blueprint+materialize pattern
-  # sidesteps that constraint without forcing every plugin
-  # author to refactor.
-  # Self-contained reference class so this spec doesn't depend
-  # on blueprint_spec.rb being loaded in the same run.
+  # Plugin instances themselves are intentionally NOT `Ractor.shareable?` — they accumulate per-run state in ivars
+  # (`rigor-sorbet`'s `@reachable_absurd_nodes`, `@reveal_type_calls`, `@assert_type_mismatches` are the canonical
+  # examples). The blueprint+materialize pattern sidesteps that constraint without forcing every plugin author to
+  # refactor. Self-contained reference class so this spec doesn't depend on blueprint_spec.rb being loaded in the same
+  # run.
   unless defined?(RigorRactorReadinessSpecPlugin)
     class ::RigorRactorReadinessSpecPlugin < Rigor::Plugin::Base
       manifest(id: "ractor-audit", version: "0.1.0")
@@ -246,15 +218,10 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
     end
   end
 
-  # Phase 4a (LANDED): the per-worker analysis substrate
-  # {Rigor::Analysis::WorkerSession}. The session itself is
-  # NOT `Ractor.shareable?` — it intentionally owns mutable
-  # state (per-session reporters, materialised plugin
-  # instances with their accumulators). The contract is:
-  # the session's CONSTRUCTOR INPUTS are all
-  # `Ractor.shareable?` so a Phase 4b worker Ractor can
-  # receive them across the boundary, then build its own
-  # session inside the Ractor body.
+  # Phase 4a (LANDED): the per-worker analysis substrate {Rigor::Analysis::WorkerSession}. The session itself is NOT
+  # `Ractor.shareable?` — it intentionally owns mutable state (per-session reporters, materialised plugin instances with
+  # their accumulators). The contract is: the session's CONSTRUCTOR INPUTS are all `Ractor.shareable?` so a Phase 4b
+  # worker Ractor can receive them across the boundary, then build its own session inside the Ractor body.
   describe "Phase 4a — WorkerSession constructor inputs" do
     require "rigor/analysis/worker_session"
 
@@ -291,16 +258,11 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
     end
   end
 
-  # Phase 4b (LANDED): the Runner now ships per-file analysis
-  # to a Ractor pool around `WorkerSession` when constructed
-  # with `workers: N > 0`. The class-level lazy memos every
-  # worker reads on its first `Environment.for_project` call
-  # MUST be `Ractor.shareable?` — `Environment::ClassRegistry.default`
-  # in particular, since lazy-initialising a class @ivar from
-  # a non-main Ractor would trip `Ractor::IsolationError`.
-  # Pre-warming the registry on the main Ractor is the
-  # `Runner#analyze_files_in_pool` contract; this audit
-  # asserts the underlying invariant.
+  # Phase 4b (LANDED): the Runner now ships per-file analysis to a Ractor pool around `WorkerSession` when constructed
+  # with `workers: N > 0`. The class-level lazy memos every worker reads on its first `Environment.for_project` call
+  # MUST be `Ractor.shareable?` — `Environment::ClassRegistry.default` in particular, since lazy-initialising a class
+  # @ivar from a non-main Ractor would trip `Ractor::IsolationError`. Pre-warming the registry on the main Ractor is the
+  # `Runner#analyze_files_in_pool` contract; this audit asserts the underlying invariant.
   describe "Phase 4b — Ractor pool readiness" do
     it "Environment::ClassRegistry.default is Ractor.shareable?" do
       expect(shareable?(Rigor::Environment::ClassRegistry.default)).to be(true)
@@ -313,10 +275,8 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       explain = false
 
       ractor = Ractor.new(configuration, cache_root, blueprints, explain) do |c, _r, b, e|
-        # Touch each input on the receiving side so the
-        # boundary crossing is exercised in full; return a
-        # Ractor.shareable? digest so the assertion compares
-        # apples to apples.
+        # Touch each input on the receiving side so the boundary crossing is exercised in full; return a
+        # Ractor.shareable? digest so the assertion compares apples to apples.
         [c.frozen?, b.frozen?, e == false].freeze
       end
 
@@ -324,21 +284,16 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
     end
   end
 
-  # Phase 4b.x: module-level catalogs and canonical-name tables
-  # that worker Ractors read during ordinary dispatch. Each
-  # MUST be deep-`Ractor.shareable?`; a shallow `.freeze` is
-  # insufficient when the value graph contains nested Hash /
-  # Array / parsed-YAML payloads (whose inner nodes start out
-  # unfrozen). A regression here surfaces on real-world target
-  # projects as `Ractor::IsolationError` while reading the
-  # singleton-class ivar or constant from a non-main Ractor.
+  # Phase 4b.x: module-level catalogs and canonical-name tables that worker Ractors read during ordinary dispatch. Each
+  # MUST be deep-`Ractor.shareable?`; a shallow `.freeze` is insufficient when the value graph contains nested Hash
+  # /Array / parsed-YAML payloads (whose inner nodes start out unfrozen). A regression here surfaces on real-world
+  # target projects as `Ractor::IsolationError` while reading the singleton-class ivar or constant from a non-main
+  # Ractor.
   describe "Phase 4b.x — module catalog shareability" do
     it "NUMERIC_CATALOG (MethodCatalog instance + its @catalog graph) is Ractor.shareable?" do
-      # NUMERIC_CATALOG is now an ordinary MethodCatalog instance (folded
-      # off its former bespoke module); like the other per-class catalogs
-      # it is deep-frozen via `Ractor.make_shareable(CATALOG_BY_CLASS)` in
-      # ConstantFolding, so the instance and its parsed-YAML @catalog must
-      # both be shareable.
+      # NUMERIC_CATALOG is now an ordinary MethodCatalog instance (folded off its former bespoke module); like the other
+      # per-class catalogs it is deep-frozen via `Ractor.make_shareable(CATALOG_BY_CLASS)` in ConstantFolding, so the
+      # instance and its parsed-YAML @catalog must both be shareable.
       expect(shareable?(Rigor::Inference::Builtins::NUMERIC_CATALOG)).to be(true)
     end
 
@@ -353,21 +308,16 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
     end
 
     it "MethodDispatcher::ShapeDispatch::REFINED_STRING_PROJECTIONS is Ractor.shareable?" do
-      # Defined inside `class << self`, so it lives on the
-      # singleton class of `ShapeDispatch`, not directly on the
+      # Defined inside `class << self`, so it lives on the singleton class of `ShapeDispatch`, not directly on the
       # module. `singleton_class.const_get` is the access path.
       table = Rigor::Inference::MethodDispatcher::ShapeDispatch.singleton_class.const_get(:REFINED_STRING_PROJECTIONS)
       expect(shareable?(table)).to be(true)
     end
 
-    # `CONSTANT_CONSTRUCTORS` carries `Proc` values; a shallow
-    # `.freeze` leaves the lambdas non-shareable and
-    # `constant_constructor_lift`'s `rescue StandardError` quietly
-    # swallows the resulting `Ractor::IsolationError`. The result
-    # is a precision divergence (`Constant<Pathname>` under
-    # sequential, `Nominal[Pathname]` under pool), which then
-    # surfaces downstream as a spurious `call.argument-type-mismatch`
-    # diagnostic. Surfaced on GitLab FOSS via
+    # `CONSTANT_CONSTRUCTORS` carries `Proc` values; a shallow `.freeze` leaves the lambdas non-shareable and
+    # `constant_constructor_lift`'s `rescue StandardError` quietly swallows the resulting `Ractor::IsolationError`. The
+    # result is a precision divergence (`Constant<Pathname>` under sequential, `Nominal[Pathname]` under pool), which
+    # then surfaces downstream as a spurious `call.argument-type-mismatch` diagnostic. Surfaced on GitLab FOSS via
     # `lib/gitlab/mail_room.rb:17`.
     it "MethodDispatcher::CONSTANT_CONSTRUCTORS is Ractor.shareable? (Proc values + outer Hash)" do
       table = Rigor::Inference::MethodDispatcher.const_get(:CONSTANT_CONSTRUCTORS)

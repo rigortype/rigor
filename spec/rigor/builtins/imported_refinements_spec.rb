@@ -191,9 +191,8 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         end
 
         it "parses key_of[Hash[Symbol, Integer]][Symbol] (chained)" do
-          # key_of[Hash[Symbol, Integer]] = Symbol; Symbol[…] is Top
-          # because Symbol is not an indexable shape. The chain still
-          # parses without error.
+          # key_of[Hash[Symbol, Integer]] = Symbol; Symbol[…] is Top because Symbol is not an indexable shape. The chain
+          # still parses without error.
           result = described_class.parse("key_of[Hash[Symbol, Integer]][Symbol]")
           expect(result).to be_a(Rigor::Type::Top)
         end
@@ -230,11 +229,8 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         end
 
         it "parses int_mask_of[Constant union]" do
-          # int_mask_of expects a single type arg; the parser
-          # accepts the resolved type. We use raw Combinator
-          # construction here because the parser grammar does
-          # not have a direct surface for ad-hoc Constant
-          # unions yet.
+          # int_mask_of expects a single type arg; the parser accepts the resolved type. We use raw Combinator
+          # construction here because the parser grammar does not have a direct surface for ad-hoc Constant unions yet.
           flags = Rigor::Type::Combinator.union(
             Rigor::Type::Combinator.constant_of(1),
             Rigor::Type::Combinator.constant_of(2)
@@ -247,8 +243,7 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
 
     describe "shape projection (ADR-13 slice 4)" do
       it "resolves pick_of[Foo, ...] when Foo names a Nominal carrier" do
-        # `Foo` resolves to Nominal[Foo]; pick_of on a non-HashShape
-        # returns the input unchanged (lossy degradation).
+        # `Foo` resolves to Nominal[Foo]; pick_of on a non-HashShape returns the input unchanged (lossy degradation).
         result = described_class.parse("pick_of[Foo, NameKey]")
         expect(result).to eq(Rigor::Type::Combinator.nominal_of("Foo"))
       end
@@ -278,11 +273,9 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
 
     describe "shape projection — Tuple (ADR-13 slice 5)" do
       it "evaluates pick_of of a built-up Tuple via Tuple-shaped K argument" do
-        # Construct Tuple[String, Integer] inline through an
-        # auxiliary plugin path is heavy; instead, walk through
-        # Combinator directly to confirm the parser-builder
-        # pipeline isn't a bottleneck. The tuple_of binding is
-        # tested at the Combinator layer.
+        # Construct Tuple[String, Integer] inline through an auxiliary plugin path is heavy; instead, walk through
+        # Combinator directly to confirm the parser-builder pipeline isn't a bottleneck. The tuple_of binding is tested
+        # at the Combinator layer.
         tuple = Rigor::Type::Combinator.tuple_of(
           Rigor::Type::Combinator.nominal_of("String"),
           Rigor::Type::Combinator.nominal_of("Integer")
@@ -333,8 +326,7 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         seen = nil
         resolver = make_resolver do |node, _scope|
           seen = node if node.is_a?(Rigor::TypeNode::Generic) && node.head == "Pick"
-          # Resolver still declines so the Nominal fallback runs and the
-          # parse remains valid.
+          # Resolver still declines so the Nominal fallback runs and the parse remains valid.
           nil
         end
         scope = make_scope(resolver)
@@ -383,15 +375,14 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         end
         scope = make_scope(resolver)
         described_class.parse("Pick[Address, non-empty-string]", name_scope: scope)
-        # Address — class-shaped → Nominal[Address] (RBS fallback)
-        # non-empty-string — built-in registry
+        # Address — class-shaped → Nominal[Address] (RBS fallback) non-empty-string — built-in registry
         expect(seen_t_type).to eq(Rigor::Type::Combinator.nominal_of("Address"))
         expect(seen_k_type).to eq(Rigor::Type::Combinator.non_empty_string)
       end
 
       it "preserves slice-1 / slice-2 behaviour when no NameScope is supplied" do
-        # Bare names that miss the built-in registry return nil (parser
-        # fail-soft); class-shaped names fall back to Nominal.
+        # Bare names that miss the built-in registry return nil (parser fail-soft); class-shaped names fall back to
+        # Nominal.
         expect(described_class.parse("my-custom-name")).to be_nil
         expected = Rigor::Type::Combinator.nominal_of(
           "Pick",
@@ -438,14 +429,10 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
       end
 
       it "resolves a `pick_of[Foo, :a | :b]` payload end-to-end (Nominal source degrades to input)" do
-        # The TypeScript-utility-types plugin is the canonical
-        # consumer; a direct synthetic payload exercises the
-        # parser → resolver path without a plugin chain. Before
-        # the literal-token addition this payload would not
-        # tokenise; with it, the resolver returns a non-nil
-        # carrier (Nominal sources degrade to the input itself
-        # — Phase B / `shape_projection_lossy?` covers the
-        # diagnostic emission separately).
+        # The TypeScript-utility-types plugin is the canonical consumer; a direct synthetic payload exercises the parser
+        # → resolver path without a plugin chain. Before the literal-token addition this payload would not tokenise;
+        # with it, the resolver returns a non-nil carrier (Nominal sources degrade to the input itself — Phase B /
+        # `shape_projection_lossy?` covers the diagnostic emission separately).
         result = described_class.parse("pick_of[Foo, :a | :b]")
         expect(result).not_to be_nil
       end

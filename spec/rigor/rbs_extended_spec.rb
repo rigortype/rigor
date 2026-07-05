@@ -230,8 +230,7 @@ RSpec.describe Rigor::RbsExtended do
     end
 
     it "tolerates the `is` glue word being absent" do
-      # The grammar is `param: <name> <payload>`; the existing
-      # surface in the codebase keeps `<name> <payload>` rather
+      # The grammar is `param: <name> <payload>`; the existing surface in the codebase keeps `<name> <payload>` rather
       # than requiring a dedicated `is` keyword. Accept either.
       expect(described_class.parse_param_annotation("rigor:v1:param: id non-empty-string"))
         .to be_a(Rigor::RbsExtended::ParamOverride)
@@ -445,8 +444,8 @@ RSpec.describe Rigor::RbsExtended do
         %a{rigor:v1:assert value is String}
       ANNOT
         bundle = described_class.read_flow_contribution(method_def)
-        # The bundle reflects only the assert directive; param: stays
-        # on read_param_type_overrides / param_type_override_map.
+        # The bundle reflects only the assert directive; param: stays on read_param_type_overrides /
+        # param_type_override_map.
         expect(bundle.post_return_facts.size).to eq(1)
         expect(bundle.return_type).to be_nil
         expect(bundle.truthy_facts).to be_nil

@@ -5,11 +5,9 @@ require "stringio"
 require "rigor/cli"
 require "rigor/cli/plugin_command"
 
-# `rigor plugin` (singular) exposes the plugin source Rigor bundles
-# under `plugins/` and `examples/` so authors (and the
-# `rigor-plugin-author` skill) can read a real, working plugin as a
-# worked example. The examples here exercise the real on-disk tree so
-# the contract the skill + AI agents depend on is verified end-to-end.
+# `rigor plugin` (singular) exposes the plugin source Rigor bundles under `plugins/` and `examples/` so authors (and the
+# `rigor-plugin-author` skill) can read a real, working plugin as a worked example. The examples here exercise the real
+# on-disk tree so the contract the skill + AI agents depend on is verified end-to-end.
 RSpec.describe Rigor::CLI::PluginCommand do
   def run(argv)
     out = StringIO.new

@@ -55,9 +55,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch" do
         environment: env
       )
 
-      # Comparable#between? is declared as `() -> bool` in core RBS;
-      # the precision-promoted dispatcher returns the module's
-      # actual return type, NOT the slice-2b/3b floor's untyped.
+      # Comparable#between? is declared as `() -> bool` in core RBS; the precision-promoted dispatcher returns the
+      # module's actual return type, NOT the slice-2b/3b floor's untyped.
       expect(result).not_to be_nil
       expect(result).not_to eq(Rigor::Type::Combinator.untyped)
     end
@@ -98,8 +97,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch" do
         ],
         environment: env
       )
-      # The first entry's origin_module doesn't resolve; the
-      # promotion walk falls through to the second entry which DOES
+      # The first entry's origin_module doesn't resolve; the promotion walk falls through to the second entry which DOES
       # resolve. End result is the resolved type — NOT untyped.
       expect(result).not_to be_nil
       expect(result).not_to eq(Rigor::Type::Combinator.untyped)
@@ -126,8 +124,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch" do
         method_name: :city,
         arg_types: [], environment: env
       )
-      # "String" is in core RBS — nominal_for_name resolves to
-      # Nominal[String], NOT the untyped floor.
+      # "String" is in core RBS — nominal_for_name resolves to Nominal[String], NOT the untyped floor.
       expect(result).to eq(Rigor::Type::Combinator.nominal_of("String"))
     end
 
@@ -164,8 +161,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch" do
         method_name: :city,
         arg_types: [], environment: env
       )
-      # "Array[String]" is not a bare class name — nominal_for_name
-      # returns nil; substrate falls back to the WD13 floor.
+      # "Array[String]" is not a bare class name — nominal_for_name returns nil; substrate falls back to the WD13 floor.
       expect(result).to eq(Rigor::Type::Combinator.untyped)
     end
   end

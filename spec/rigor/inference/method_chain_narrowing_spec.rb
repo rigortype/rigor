@@ -8,19 +8,13 @@ require "rigor/type"
 require "rigor/inference/narrowing"
 require "rigor/inference/scope_indexer"
 
-# Unit-level coverage for stable single-hop method-chain
-# narrowing. The recorder lives in `Narrowing` (extension to
-# `analyse_class_predicate`); the lookup lives in
-# `ExpressionTyper#call_type_for` via
-# `method_chain_narrowing_for`; the invalidator lives in
-# `IndexedNarrowing.invalidate_chain_after_call` and is wired
-# into `StatementEvaluator#eval_call`.
+# Unit-level coverage for stable single-hop method-chain narrowing. The recorder lives in `Narrowing` (extension to
+# `analyse_class_predicate`); the lookup lives in `ExpressionTyper#call_type_for` via `method_chain_narrowing_for`; the
+# invalidator lives in `IndexedNarrowing.invalidate_chain_after_call` and is wired into `StatementEvaluator#eval_call`.
 #
-# Integration coverage of the truthy/falsey edge + Array
-# dispatch lives in `spec/integration/fixtures/method_chain_narrowing.rb`.
-# This file pins the address-keying + invalidation contract in
-# isolation so the slice's soundness story has a stable
-# regression surface.
+# Integration coverage of the truthy/falsey edge + Array dispatch lives in
+# `spec/integration/fixtures/method_chain_narrowing.rb`. This file pins the address-keying + invalidation contract in
+# isolation so the slice's soundness story has a stable regression surface.
 RSpec.describe "Stable single-hop method-chain narrowing" do
   let(:default_scope) { Rigor::Scope.empty }
 
@@ -33,12 +27,9 @@ RSpec.describe "Stable single-hop method-chain narrowing" do
 
   describe "recorder" do
     it "records `(local, :xs, :last) → Array` on the truthy edge of `if xs.last.is_a?(::Array)`" do
-      # `xs` is a method parameter (Dynamic[top]) — the narrowing
-      # path widens Dynamic to the asked class, so the recorded
-      # carrier is `Nominal[Array]`. A locally-bound `xs` whose
-      # `.last` already carries a Tuple subtype would narrow to
-      # the more-precise Tuple, not Array, because narrowing
-      # never coarsens.
+      # `xs` is a method parameter (Dynamic[top]) — the narrowing path widens Dynamic to the asked class, so the
+      # recorded carrier is `Nominal[Array]`. A locally-bound `xs` whose `.last` already carries a Tuple subtype would
+      # narrow to the more-precise Tuple, not Array, because narrowing never coarsens.
       program, _scope, index = post_scope_for(<<~RUBY)
         def f(xs)
           if xs.last.is_a?(::Array)
@@ -66,8 +57,7 @@ RSpec.describe "Stable single-hop method-chain narrowing" do
           end
         end
       RUBY
-      # Walk to the assignment inside the method body. With no
-      # `@list` seed in the class-ivar accumulator, the ivar
+      # Walk to the assignment inside the method body. With no `@list` seed in the class-ivar accumulator, the ivar
       # reads as `Dynamic[top]` and narrowing produces `Nominal[Array]`.
       class_node = program.statements.body.first
       def_f = class_node.body.body.first
@@ -117,8 +107,7 @@ RSpec.describe "Stable single-hop method-chain narrowing" do
       if_node = program.statements.body[1]
       probe_assign = if_node.statements.body.first
       entry_scope = index[probe_assign]
-      # The inner `xs.first` is not the predicate's outermost
-      # receiver, so the recorder does not register it.
+      # The inner `xs.first` is not the predicate's outermost receiver, so the recorder does not register it.
       expect(entry_scope.method_chain_narrowing(:local, :xs, :first)).to be_nil
     end
   end

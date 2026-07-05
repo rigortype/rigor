@@ -54,10 +54,9 @@ RSpec.describe Rigor::Type::Difference do
     end
   end
 
-  # Subtracting a second value from an existing Difference layers rather
-  # than flattening into one multi-removal carrier: the outer Difference
-  # keeps the inner one as its base. Display composes — the inner renders
-  # by its canonical refinement name, the outer appends the new exclusion.
+  # Subtracting a second value from an existing Difference layers rather than flattening into one multi-removal carrier:
+  # the outer Difference keeps the inner one as its base. Display composes — the inner renders by its canonical
+  # refinement name, the outer appends the new exclusion.
   describe "repeated subtraction (layering)" do
     it "wraps `(String - \"\") - \"x\"` as a Difference whose base is the inner Difference" do
       inner = Rigor::Type::Combinator.difference(nominal_of("String"), constant_of(""))
@@ -103,8 +102,7 @@ RSpec.describe Rigor::Type::Difference do
     end
 
     it "rejects the universal nominal because it could be the removed value" do
-      # `Nominal[String]` includes `""` so the difference cannot
-      # accept the wider base.
+      # `Nominal[String]` includes `""` so the difference cannot accept the wider base.
       expect(nes.accepts(nominal_of("String")).no?).to be(true)
     end
   end

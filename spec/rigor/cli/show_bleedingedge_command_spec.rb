@@ -7,10 +7,9 @@ require "tmpdir"
 require "rigor/cli"
 require "rigor/cli/show_bleedingedge_command"
 
-# ADR-50 § WD2 — `rigor show-bleedingedge` prints the bleeding-edge
-# overlay and what the project's `bleeding_edge:` config adopts. The
-# overlay is empty in this release, so the default run reports an empty
-# set; a stubbed feature exercises the populated rendering.
+# ADR-50 § WD2 — `rigor show-bleedingedge` prints the bleeding-edge overlay and what the project's `bleeding_edge:`
+# config adopts. The overlay is empty in this release, so the default run reports an empty set; a stubbed feature
+# exercises the populated rendering.
 RSpec.describe Rigor::CLI::ShowBleedingedgeCommand do
   def run(argv)
     out = StringIO.new

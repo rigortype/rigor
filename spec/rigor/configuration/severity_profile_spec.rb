@@ -77,9 +77,8 @@ RSpec.describe Rigor::Configuration::SeverityProfile do
       ).to eq(:info)
     end
 
-    # ADR-50 § WD2 — the bleeding-edge overlay composes below the user's
-    # own overrides and above the profile table. Defaults to {} so the
-    # shipped (empty) overlay leaves resolution bit-for-bit unchanged.
+    # ADR-50 § WD2 — the bleeding-edge overlay composes below the user's own overrides and above the profile table.
+    # Defaults to {} so the shipped (empty) overlay leaves resolution bit-for-bit unchanged.
     describe "bleeding_edge_overrides:" do
       it "defaults to an empty map, leaving resolution unchanged" do
         expect(

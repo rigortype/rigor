@@ -204,9 +204,8 @@ RSpec.describe Rigor::Configuration do
     it "reads severity_profile + severity_overrides from the YAML file" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")
-        # NOTE: `off` is reserved in YAML 1.1 (parses to `false`),
-        # so users quote `"off"` when they want the severity. The
-        # config loader does NOT auto-coerce booleans.
+        # NOTE: `off` is reserved in YAML 1.1 (parses to `false`), so users quote `"off"` when they want the severity.
+        # The config loader does NOT auto-coerce booleans.
         File.write(path, <<~YAML)
           severity_profile: strict
           severity_overrides:
@@ -242,8 +241,7 @@ RSpec.describe Rigor::Configuration do
     end
 
     it "gives a friendly error when a severity is an unquoted YAML boolean" do
-      # `off` is YAML 1.1-reserved and parses to `false`; the user
-      # almost certainly meant the severity string "off".
+      # `off` is YAML 1.1-reserved and parses to `false`; the user almost certainly meant the severity string "off".
       expect do
         described_class.new(
           Rigor::Configuration::DEFAULTS.merge(
@@ -314,8 +312,8 @@ RSpec.describe Rigor::Configuration do
         expect(Ractor.shareable?(config_with("all" => true, "except" => ["x"]))).to be(true)
       end
 
-      # ADR-50 § WD2 — the CLI mirror (`--bleeding-edge[=ids]`) overrides the
-      # configured selection for a single run via this method.
+      # ADR-50 § WD2 — the CLI mirror (`--bleeding-edge[=ids]`) overrides the configured selection for a single run via
+      # this method.
       describe "#with_bleeding_edge" do
         let(:base) { config_with(false) }
 
@@ -326,9 +324,8 @@ RSpec.describe Rigor::Configuration do
         end
 
         it "recomputes bleeding_edge_severity_overrides from the new selector" do
-          # The overlay is empty in this release, so every selection still maps
-          # to an empty severity overlay — the wiring, not a populated result,
-          # is what this pins.
+          # The overlay is empty in this release, so every selection still maps to an empty severity overlay — the
+          # wiring, not a populated result, is what this pins.
           expect(base.with_bleeding_edge(true).bleeding_edge_severity_overrides).to eq({})
         end
 

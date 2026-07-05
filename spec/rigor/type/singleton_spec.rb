@@ -62,9 +62,8 @@ RSpec.describe Rigor::Type::Singleton do
       expect(described_class.new("String")).not_to eq(described_class.new("Integer"))
     end
 
-    # `Singleton[Foo]` and `Nominal[Foo]` share a class_name but describe
-    # disjoint values (the class object vs. instances) — they must never
-    # compare equal even though they'd share a value_fields key.
+    # `Singleton[Foo]` and `Nominal[Foo]` share a class_name but describe disjoint values (the class object vs.
+    # instances) — they must never compare equal even though they'd share a value_fields key.
     it "is never equal to a Nominal with the same class_name" do
       singleton = described_class.new("String")
       nominal = Rigor::Type::Nominal.new("String")

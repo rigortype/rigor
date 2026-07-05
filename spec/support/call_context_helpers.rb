@@ -2,10 +2,9 @@
 
 require "rigor/inference/method_dispatcher/call_context"
 
-# Shared helper for the dispatch-tier unit specs. Every tier entry point
-# takes a `CallContext` (Finding 3 interface unification); `cc` builds one
-# from the call quartet so specs need not spell out the wider context
-# fields they do not exercise.
+# Shared helper for the dispatch-tier unit specs. Every tier entry point takes a `CallContext` (Finding 3 interface
+# unification); `cc` builds one from the call quartet so specs need not spell out the wider context fields they do not
+# exercise.
 module CallContextHelpers
   def cc(receiver:, method_name:, args:, **rest)
     Rigor::Inference::MethodDispatcher::CallContext.build(

@@ -25,8 +25,8 @@ RSpec.describe "nil argument-type-mismatch" do
   end
 
   it "fires on a single-overload interface-alias param that rejects nil (Gap B)" do
-    # "a" + nil and "a".include?(nil) raise TypeError; String#+/#include? take
-    # `string` (String | _ToStr), and nil implements neither.
+    # "a" + nil and "a".include?(nil) raise TypeError; String#+/#include? take `string` (String | _ToStr), and nil
+    # implements neither.
     expect(arg_mismatches(%(s = "a"\ns + nil\n))).to include(a_string_matching(/`\+' on String.*got nil/))
     expect(arg_mismatches(%(s = "a"\ns.include?(nil)\n)))
       .to include(a_string_matching(/`include\?' on String.*got nil/))
@@ -37,9 +37,8 @@ RSpec.describe "nil argument-type-mismatch" do
     expect(arg_mismatches("x = 5\nx * nil\n")).to include(a_string_matching(/`\*' on Integer.*got nil/))
     # Array#fetch is multi-overload with an interface-alias `int` param.
     expect(arg_mismatches("a = [1, 2, 3]\na.fetch(nil)\n")).to include(a_string_matching(/`fetch' on Array.*got nil/))
-    # MatchData#[] has a `range[int?]` GENERIC-alias overload; resolving it
-    # (not bailing to "admits") lets every overload reject nil so `m[nil]`
-    # fires.
+    # MatchData#[] has a `range[int?]` GENERIC-alias overload; resolving it (not bailing to "admits") lets every
+    # overload reject nil so `m[nil]` fires.
     expect(arg_mismatches(%(m = "abc".match(/b/)\nunless m.nil?\n  m[nil]\nend\n)))
       .to include(a_string_matching(/`\[\]' on MatchData.*got nil/))
   end
@@ -55,8 +54,8 @@ RSpec.describe "nil argument-type-mismatch" do
   end
 
   it "does not fire on a non-nil mismatched argument (nil-only restriction — coerce-safety)" do
-    # 5 * "x" raises too, but a non-nil receiver may be valid via `coerce`,
-    # so the rule is deliberately restricted to nil.
+    # 5 * "x" raises too, but a non-nil receiver may be valid via `coerce`, so the rule is deliberately restricted to
+    # nil.
     expect(arg_mismatches(%(x = 5\nx * "y"\n))).to be_empty
   end
 

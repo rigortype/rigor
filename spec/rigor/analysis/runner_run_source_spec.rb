@@ -3,9 +3,8 @@
 require "spec_helper"
 require "tempfile"
 
-# `Runner#run_source` — in-memory single-source analysis (a clean public
-# entry point for embedders + a faster spec path). It must be diagnostic-
-# equivalent to running the same source from a real file on disk.
+# `Runner#run_source` — in-memory single-source analysis (a clean public entry point for embedders + a faster spec
+# path). It must be diagnostic- equivalent to running the same source from a real file on disk.
 RSpec.describe "Rigor::Analysis::Runner#run_source" do
   def configuration
     Rigor::Configuration.new("paths" => [])
@@ -30,8 +29,8 @@ RSpec.describe "Rigor::Analysis::Runner#run_source" do
     diagnostics.map { |d| [d.rule, d.line, d.column] }.sort
   end
 
-  # Each source exercises a different analysis path; the in-memory and
-  # on-disk runs must agree on every diagnostic's rule + location.
+  # Each source exercises a different analysis path; the in-memory and on-disk runs must agree on every diagnostic's
+  # rule + location.
   {
     "same-file self-call resolution" => "class C\n  def run\n    helper\n  end\n  def helper\n    1\n  end\nend\n",
     "explicit-receiver undefined-method" => "x = 1\nx.no_such_method\n",
@@ -49,8 +48,8 @@ RSpec.describe "Rigor::Analysis::Runner#run_source" do
                                          .run_source(source: "x = 1\nx.nope\n", path: "buffer.rb")
                                          .diagnostics
     expect(diagnostics).not_to be_empty
-    # Per-file diagnostics carry the logical path; the only other path is
-    # the run-level config-info stream (`.rigor.yml`). No tmp/disk path.
+    # Per-file diagnostics carry the logical path; the only other path is the run-level config-info stream
+    # (`.rigor.yml`). No tmp/disk path.
     file_paths = diagnostics.map(&:path).reject { |p| p == ".rigor.yml" }.uniq
     expect(file_paths).to eq(["buffer.rb"])
   end

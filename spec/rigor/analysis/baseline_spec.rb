@@ -194,10 +194,8 @@ RSpec.describe Rigor::Analysis::Baseline do
 
       merge_bucket = baseline.buckets.find { |b| b.message_regex.source.include?("merge") }
       expect(merge_bucket.count).to eq(2)
-      # Confirm the regex round-trips correctly through escape +
-      # match — the literal backtick / apostrophe / square-
-      # brackets in the original message must NOT be
-      # regex-interpreted.
+      # Confirm the regex round-trips correctly through escape + match — the literal backtick / apostrophe / square-
+      # brackets in the original message must NOT be regex-interpreted.
       expect(merge_bucket.message_regex.match?("undefined method `merge' for Array")).to be(true)
     end
 
@@ -384,9 +382,8 @@ RSpec.describe Rigor::Analysis::Baseline do
       rows = baseline.audit([
                               diagnostic(path: "a.rb", rule: "call.undefined-method", message: "undefined method `foo'")
                             ])
-      # Two distinct messages → two buckets, each keyed by its own regex source
-      # (bucket_key reads message_regex.source); the foo bucket matches once, bar
-      # matches nothing, so the two counts must not collide.
+      # Two distinct messages → two buckets, each keyed by its own regex source (bucket_key reads message_regex.source);
+      # the foo bucket matches once, bar matches nothing, so the two counts must not collide.
       expect(rows.size).to eq(2)
       foo_row = rows.find { |r| r.bucket.message_regex.source.include?("foo") }
       bar_row = rows.find { |r| r.bucket.message_regex.source.include?("bar") }

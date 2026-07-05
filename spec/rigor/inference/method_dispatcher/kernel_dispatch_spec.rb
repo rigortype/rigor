@@ -67,17 +67,15 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
     end
 
     it "narrows Integer(decimal-int-string) to universal-int (signed: `\"-7\"` parses to -7)" do
-      # The decimal-int-string predicate `/\A-?\d+\z/` admits a leading
-      # sign, so `Integer("-7") == -7 < 0` — the result is a plain
-      # Integer, NOT non-negative-int. `Integer()` is total over the
-      # carrier, so the (signed) IntegerRange is sound.
+      # The decimal-int-string predicate `/\A-?\d+\z/` admits a leading sign, so `Integer("-7") == -7 < 0` — the result
+      # is a plain Integer, NOT non-negative-int. `Integer()` is total over the carrier, so the (signed) IntegerRange is
+      # sound.
       expect(integer_dispatch(Rigor::Type::Combinator.decimal_int_string)).to eq(universal_int)
     end
 
     it "declines Integer(numeric-string) — the widened grammar is not Integer-total nor non-negative" do
-      # numeric-string now covers the full Ruby numeric-literal grammar
-      # (`1.5`, `2i`, `-3`, …), so Integer(numeric_string) may raise or
-      # be negative — narrowing it to non-negative-int would be unsound.
+      # numeric-string now covers the full Ruby numeric-literal grammar (`1.5`, `2i`, `-3`, …), so
+      # Integer(numeric_string) may raise or be negative — narrowing it to non-negative-int would be unsound.
       expect(integer_dispatch(Rigor::Type::Combinator.numeric_string)).to be_nil
     end
 

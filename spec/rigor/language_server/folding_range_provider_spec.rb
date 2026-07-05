@@ -45,8 +45,7 @@ RSpec.describe Rigor::LanguageServer::FoldingRangeProvider do
 
       ranges = provider.provide(uri)
       expect(ranges.size).to eq(3) # outer class + two defs.
-      # Outer class spans lines 0..9 (LSP 0-based). endLine = 8
-      # (one line before `end` on line 9 in 0-based).
+      # Outer class spans lines 0..9 (LSP 0-based). endLine = 8 (one line before `end` on line 9 in 0-based).
       outer = ranges.max_by { |r| r[:endLine] - r[:startLine] }
       expect(outer[:startLine]).to eq(0)
       expect(outer[:endLine]).to be >= 7

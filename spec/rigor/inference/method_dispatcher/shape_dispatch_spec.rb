@@ -70,8 +70,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: t, method_name: :fetch, args: [constant(99)])).to be_nil
     end
 
-    # `Array#slice` is an exact alias of `Array#[]`, so it folds identically
-    # across the integer / Range / start-length forms.
+    # `Array#slice` is an exact alias of `Array#[]`, so it folds identically across the integer / Range / start-length
+    # forms.
     it "folds `tuple.slice(i)` like `tuple[i]`, including negative indices" do
       expect(dispatch(receiver: t, method_name: :slice, args: [constant(0)])).to eq(constant(1))
       expect(dispatch(receiver: t, method_name: :slice, args: [constant(-1)])).to eq(constant(3))
@@ -116,19 +116,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
 
     it "falls through for methods outside the catalogue" do
-      # `:map` is not handled by ShapeDispatch — element-wise
-      # block re-evaluation lives in `ExpressionTyper` (v0.0.6
-      # phase 2). `:reverse` IS handled by ShapeDispatch as of
-      # v0.0.7, so the existing assertion shifts to a method that
+      # `:map` is not handled by ShapeDispatch — element-wise block re-evaluation lives in `ExpressionTyper` (v0.0.6
+      # phase 2). `:reverse` IS handled by ShapeDispatch as of v0.0.7, so the existing assertion shifts to a method that
       # has not been catalogued.
       expect(dispatch(receiver: t, method_name: :map)).to be_nil
       expect(dispatch(receiver: t, method_name: :weird_method)).to be_nil
     end
 
     it "ignores arity mismatches by returning nil" do
-      # `tuple.first(2)` is the Slice-4 RBS overload; we let RbsDispatch
-      # handle it through the projection so the precise tier doesn't
-      # accidentally claim ownership.
+      # `tuple.first(2)` is the Slice-4 RBS overload; we let RbsDispatch handle it through the projection so the precise
+      # tier doesn't accidentally claim ownership.
       expect(dispatch(receiver: t, method_name: :first, args: [constant(2)])).to be_nil
     end
 
@@ -499,8 +496,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
 
     it "falls through (nil) for `fetch(missing)` so RbsDispatch handles the projection" do
-      # `fetch` raises at runtime; the precise tier defers rather than
-      # manufacturing a Constant[nil] the runtime would never produce.
+      # `fetch` raises at runtime; the precise tier defers rather than manufacturing a Constant[nil] the runtime would
+      # never produce.
       expect(dispatch(receiver: shape, method_name: :fetch, args: [constant(:missing)])).to be_nil
     end
 
@@ -541,8 +538,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
 
     it "falls through for multi-arg dig when the intermediate is a non-shape Constant" do
-      # shape.dig(:a, :b) — :a resolves to Constant[1], which is
-      # neither nil nor a shape, so the chain cannot continue.
+      # shape.dig(:a, :b) — :a resolves to Constant[1], which is neither nil nor a shape, so the chain cannot continue.
       expect(dispatch(receiver: shape, method_name: :dig, args: [constant(:a), constant(:b)])).to be_nil
     end
 
@@ -809,8 +805,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
 
     it "returns keys in argument order, matching Ruby's Hash#slice semantics" do
-      # Ruby's Hash#slice follows argument order, not receiver insertion order:
-      # { a:, b:, c: }.slice(:c, :a) => { c:, a: }
+      # Ruby's Hash#slice follows argument order, not receiver insertion order: { a:, b:, c: }.slice(:c, :a) => { c:, a:
+      # }
       result = dispatch(receiver: shape, method_name: :slice, args: [constant(:c), constant(:a)])
       expect(result.pairs.keys).to eq(%i[c a])
     end
@@ -952,11 +948,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       let(:receiver) { Rigor::Type::Combinator.decimal_int_string }
 
       it "narrows `to_i` to universal-int (signed: `\"-7\".to_i == -7`)" do
-        # The decimal-int-string predicate `/\A-?\d+\z/` admits a
-        # leading sign, so a `"-7"` inhabitant parses to a negative
-        # Integer — the result is a plain (signed) Integer, NOT
-        # non-negative-int. `String#to_i` is total, so the projection
-        # stays sound.
+        # The decimal-int-string predicate `/\A-?\d+\z/` admits a leading sign, so a `"-7"` inhabitant parses to a
+        # negative Integer — the result is a plain (signed) Integer, NOT non-negative-int. `String#to_i` is total, so
+        # the projection stays sound.
         expect(dispatch(receiver: receiver, method_name: :to_i)).to eq(universal_int)
       end
 
@@ -974,18 +968,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       let(:receiver) { Rigor::Type::Combinator.numeric_string }
 
       it "declines `to_i` / `to_int` — the full numeric-literal grammar is not non-negative-int" do
-        # `"1.5".to_i` truncates, `"-3".to_i` is negative, `"2i"` is
-        # not an Integer at all, so projecting to non-negative-int
-        # would be unsound; the projection falls through to RBS Integer.
+        # `"1.5".to_i` truncates, `"-3".to_i` is negative, `"2i"` is not an Integer at all, so projecting to
+        # non-negative-int would be unsound; the projection falls through to RBS Integer.
         expect(dispatch(receiver: receiver, method_name: :to_i)).to be_nil
         expect(dispatch(receiver: receiver, method_name: :to_int)).to be_nil
       end
 
       it "preserves the refinement across `#downcase` but drops to base String on `#upcase`" do
-        # downcasing a numeric literal stays a valid literal (hex
-        # digits / `0X` / `E` lowercase fine); upcasing breaks the
-        # lowercase-only rational / imaginary suffixes (`"1r"` →
-        # `"1R"`), so the refinement soundly drops to plain String.
+        # downcasing a numeric literal stays a valid literal (hex digits / `0X` / `E` lowercase fine); upcasing breaks
+        # the lowercase-only rational / imaginary suffixes (`"1r"` → `"1R"`), so the refinement soundly drops to plain
+        # String.
         expect(dispatch(receiver: receiver, method_name: :downcase)).to eq(receiver)
         expect(dispatch(receiver: receiver, method_name: :upcase)).to eq(Rigor::Type::Combinator.nominal_of("String"))
       end

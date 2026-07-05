@@ -490,18 +490,12 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
-  # Regression: a subdirectory file declaring `class Foo::Bar`
-  # (a compact constant path) never names `Foo`, so the
-  # generator records no kind for the `Foo` wrapper segment.
-  # The writer used to default that children-only wrapper to
-  # `module Foo` while the sibling `foo.rb` (declaring
-  # `class Foo`) wrote `class Foo` — and loading both `.rbs`
-  # files raised `RBS::DuplicatedDeclarationError`, aborting
-  # the whole RBS env build. `write_all` now folds every
-  # candidate's per-file kinds into one run-level view where
-  # the authoritative `class Foo` governs the wrapper keyword
-  # across files. (Found on whitequark/parser's
-  # `source/comment.rb` + `source/comment/associator.rb`.)
+  # Regression: a subdirectory file declaring `class Foo::Bar` (a compact constant path) never names `Foo`, so the
+  # generator records no kind for the `Foo` wrapper segment. The writer used to default that children-only wrapper to
+  # `module Foo` while the sibling `foo.rb` (declaring `class Foo`) wrote `class Foo` — and loading both `.rbs` files
+  # raised `RBS::DuplicatedDeclarationError`, aborting the whole RBS env build. `write_all` now folds every candidate's
+  # per-file kinds into one run-level view where the authoritative `class Foo` governs the wrapper keyword across files.
+  # (Found on whitequark/parser's `source/comment.rb` + `source/comment/associator.rb`.)
   describe "cross-file class/module reconciliation (compact constant path)" do
     def write_source(rel_path, contents)
       full = File.join(tmpdir, rel_path)
@@ -518,8 +512,7 @@ RSpec.describe Rigor::SigGen::Writer do
       Rigor::SigGen::Generator.new(configuration: config, paths: [lib]).run
     end
 
-    # Replays `rigor check`'s env-build step: the duplicate is
-    # detected at `add_source`, so a clean build means the
+    # Replays `rigor check`'s env-build step: the duplicate is detected at `add_source`, so a clean build means the
     # generated tree no longer mixes `class` / `module`.
     def build_environment(*sources)
       env = RBS::Environment.new

@@ -21,13 +21,10 @@ RSpec.describe Rigor::RbsExtended::ConformanceChecker do
     end
   end
 
-  # Builds a real `Rigor::Environment::RbsLoader` over a tmpdir containing
-  # `rbs`, mirroring the fixture pattern in
-  # `spec/rigor/environment/rbs_loader_spec.rb` (`signature_paths:` +
-  # `Dir.mktmpdir` + `File.write`). Exercises `.scan` end-to-end (real
-  # `each_class_decl_annotation_with_name` / `instance_definition` /
-  # `interface_definition`), rather than stubbing the loader, so it drives
-  # `check_one` and the signature-mismatch detail generators for real.
+  # Builds a real `Rigor::Environment::RbsLoader` over a tmpdir containing `rbs`, mirroring the fixture pattern in
+  # `spec/rigor/environment/rbs_loader_spec.rb` (`signature_paths:` + `Dir.mktmpdir` + `File.write`). Exercises `.scan`
+  # end-to-end (real `each_class_decl_annotation_with_name` / `instance_definition` / `interface_definition`), rather
+  # than stubbing the loader, so it drives `check_one` and the signature-mismatch detail generators for real.
   def scan_rbs(rbs)
     Dir.mktmpdir("rigor-conformance-checker-spec-") do |tmpdir|
       File.write(File.join(tmpdir, "fixture.rbs"), rbs)
@@ -122,9 +119,8 @@ RSpec.describe Rigor::RbsExtended::ConformanceChecker do
         end
       RBS
 
-      # Only `Buffers::_Stream` exists (no top-level `_Stream`); resolution
-      # must walk the class's own namespace prefixes to find it, rather
-      # than falling through to UnresolvedInterface.
+      # Only `Buffers::_Stream` exists (no top-level `_Stream`); resolution must walk the class's own namespace prefixes
+      # to find it, rather than falling through to UnresolvedInterface.
       expect(records.none?(described_class::UnresolvedInterface)).to be(true)
       unsatisfied = records.find { |r| r.is_a?(described_class::Unsatisfied) }
       expect(unsatisfied).not_to be_nil
@@ -151,8 +147,8 @@ RSpec.describe Rigor::RbsExtended::ConformanceChecker do
         expect(incompatible.class_name).to eq("WidensReturn")
         expect(incompatible.interface_name).to eq("_ReaderDemo")
         expect(incompatible.method_name).to eq(:read)
-        # Load-bearing substrings a consumer depends on: both type names
-        # and the "not a subtype" relation — not the exact prose framing.
+        # Load-bearing substrings a consumer depends on: both type names and the "not a subtype" relation — not the
+        # exact prose framing.
         expect(incompatible.detail).to include("return type")
         expect(incompatible.detail).to match(/String.*Integer|Integer.*String/)
         expect(incompatible.detail).to include("not a subtype")
@@ -479,10 +475,9 @@ RSpec.describe Rigor::RbsExtended::ConformanceChecker do
           end
         RBS
 
-        # signature_mismatch short-circuits to nil for a multi-method-type
-        # required signature, before any of the detail generators run —
-        # even though the single provided overload would otherwise
-        # contravariantly-fail against either required overload.
+        # signature_mismatch short-circuits to nil for a multi-method-type required signature, before any of the detail
+        # generators run — even though the single provided overload would otherwise contravariantly-fail against either
+        # required overload.
         expect(records.none?(described_class::IncompatibleSignature)).to be(true)
       end
 
@@ -504,9 +499,8 @@ RSpec.describe Rigor::RbsExtended::ConformanceChecker do
     end
 
     it "checks missing-method presence and signature compatibility independently per interface method" do
-      # collect_missing and collect_incompatible both run over the same
-      # (required, provided) pair; a class can simultaneously be missing
-      # one required method and provide an incompatible second one.
+      # collect_missing and collect_incompatible both run over the same (required, provided) pair; a class can
+      # simultaneously be missing one required method and provide an incompatible second one.
       records = scan_rbs(<<~RBS)
         interface _Combo
           def rewind: () -> void

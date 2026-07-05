@@ -573,11 +573,9 @@ RSpec.describe Rigor::SigGen::Generator do
 
     # attr_reader + initialize-param observations
     #
-    # When `--params=observed` is active and the observation scan sees
-    # `Person.new("Alice")`, the observed String type flows through the
-    # ivar pre-pass fallback so that `attr_reader :name` can emit a
-    # concrete return type even though the ivar pre-pass itself only
-    # sees `@name = name` with an untyped `name` parameter.
+    # When `--params=observed` is active and the observation scan sees `Person.new("Alice")`, the observed String type
+    # flows through the ivar pre-pass fallback so that `attr_reader :name` can emit a concrete return type even though
+    # the ivar pre-pass itself only sees `@name = name` with an untyped `name` parameter.
     it "resolves attr_reader type from initialize positional-param observations" do
       path = write_fixture("lib/person.rb", <<~RUBY)
         class Person

@@ -122,10 +122,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
     def string_t     = Rigor::Type::Combinator.nominal_of("String")
     def nil_t        = Rigor::Type::Combinator.constant_of(nil)
 
-    # A scope on the truthy match edge: `$~` narrowed to MatchData and
-    # the numbered globals narrowed as
-    # `Narrowing#regex_match_predicate_scopes` leaves them. `$1` present
-    # (String) means capture group 1 is unconditional.
+    # A scope on the truthy match edge: `$~` narrowed to MatchData and the numbered globals narrowed as
+    # `Narrowing#regex_match_predicate_scopes` leaves them. `$1` present (String) means capture group 1 is
+    # unconditional.
     def proven_scope(extra = {})
       defaults = { :$~ => match_data_t, :$1 => string_t }
       defaults.merge(extra).reduce(Rigor::Scope.empty) do |s, (name, type)|

@@ -5,9 +5,8 @@ require "prism"
 require "rigor/inference/protection_scanner"
 require "rigor/scope"
 
-# ADR-63 Tier 1 — the static type-protection proxy: a dispatch site is
-# protected when its receiver types concrete (Rigor's call rules can bite),
-# unprotected when the receiver is Dynamic.
+# ADR-63 Tier 1 — the static type-protection proxy: a dispatch site is protected when its receiver types concrete
+# (Rigor's call rules can bite), unprotected when the receiver is Dynamic.
 RSpec.describe Rigor::Inference::ProtectionScanner do
   def scan(source)
     root = Prism.parse(source).value

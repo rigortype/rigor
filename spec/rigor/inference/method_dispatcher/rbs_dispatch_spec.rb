@@ -92,10 +92,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
 
       it "does NOT confuse instance and singleton namespaces" do
-        # Module#instance_methods is a singleton-side method on every class
-        # type (Foo.instance_methods works), but is NOT itself an instance
-        # method of Integer. Phase 2b must keep these distinct: dispatching
-        # :instance_methods on Nominal[Integer] returns nil.
+        # Module#instance_methods is a singleton-side method on every class type (Foo.instance_methods works), but is
+        # NOT itself an instance method of Integer. Phase 2b must keep these distinct: dispatching :instance_methods on
+        # Nominal[Integer] returns nil.
         instance_recv = Rigor::Type::Combinator.nominal_of(Integer)
         expect(dispatch(instance_recv, :instance_methods)).to be_nil
 
@@ -137,8 +136,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
 
       it "leaves unbound variables as Dynamic[Top] for raw receivers" do
-        # Raw `Nominal[Array]` carries no type_args, so Array#first on
-        # the raw form falls back to the original phase-2c behavior.
+        # Raw `Nominal[Array]` carries no type_args, so Array#first on the raw form falls back to the original phase-2c
+        # behavior.
         type = dispatch(Rigor::Type::Combinator.nominal_of(Array), :first)
         expect(type).to equal(Rigor::Type::Combinator.untyped)
       end

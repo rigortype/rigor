@@ -731,10 +731,8 @@ RSpec.describe Rigor::Type::Combinator do
     describe "partial_of / required_of / readonly_of on Tuple (no-op degrade)" do
       let(:tuple) { described_class.tuple_of(string_t, integer_t) }
 
-      # ADR-13 § "Required-ness flips" doesn't commit to Tuple
-      # semantics; Tuples have positional required-by-structure
-      # entries with no read-only marker carrier. Each function
-      # returns the input unchanged for now.
+      # ADR-13 § "Required-ness flips" doesn't commit to Tuple semantics; Tuples have positional required-by-structure
+      # entries with no read-only marker carrier. Each function returns the input unchanged for now.
       it "partial_of returns the tuple unchanged" do
         expect(described_class.partial_of(tuple)).to eq(tuple)
       end

@@ -5,10 +5,8 @@ require "rigor/language_server"
 require "language_server-protocol"
 
 RSpec.describe Rigor::LanguageServer::Loop do
-  # Wraps one full `initialize → shutdown → exit` round-trip
-  # through the Loop, using IO.pipe pairs for the client → server
-  # and server → client streams. Returns the parsed server-side
-  # responses in order.
+  # Wraps one full `initialize → shutdown → exit` round-trip through the Loop, using IO.pipe pairs for the client →
+  # server and server → client streams. Returns the parsed server-side responses in order.
   def run_loop(messages)
     server_in_r, server_in_w = IO.pipe   # client writes here; server reads.
     server_out_r, server_out_w = IO.pipe # server writes here; client reads.
@@ -128,8 +126,8 @@ RSpec.describe Rigor::LanguageServer::Loop do
                                    { jsonrpc: "2.0", method: "exit" }
                                  ])
 
-      # Three inbound: initialize (request), initialized (notif),
-      # shutdown (request), exit (notif). Two responses expected.
+      # Three inbound: initialize (request), initialized (notif), shutdown (request), exit (notif). Two responses
+      # expected.
       expect(frames.size).to eq(2)
       expect(frames.map { |f| f[:id] }).to eq([1, 2])
     end

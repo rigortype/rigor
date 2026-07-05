@@ -450,10 +450,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     resolvers()
   ].freeze
 
-  # Drift-pinned namespaces that still lack a `sig/rigor/*.rbs`
-  # entry. Tracked here so the RBS sig drift spec can fail
-  # loudly when a sig is added but this list is forgotten —
-  # the bookkeeping stays honest and the sig backlog stays
+  # Drift-pinned namespaces that still lack a `sig/rigor/*.rbs` entry. Tracked here so the RBS sig drift spec can fail
+  # loudly when a sig is added but this list is forgotten — the bookkeeping stays honest and the sig backlog stays
   # visible.
   UNSIGNED_NAMESPACES = %w[
     Rigor::Plugin::FactStore::Fact
@@ -541,10 +539,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     widen_value_pinned(req:type)
   ].freeze
 
-  # `Rigor::Source::Literals` — the literal Symbol/String extraction
-  # helpers ADR-2 exposes to plugins so the
-  # `is_a?(Prism::SymbolNode)` extraction is written once. A
-  # `module_function` module, so its public surface is the
+  # `Rigor::Source::Literals` — the literal Symbol/String extraction helpers ADR-2 exposes to plugins so the
+  # `is_a?(Prism::SymbolNode)` extraction is written once. A `module_function` module, so its public surface is the
   # singleton method set.
   SOURCE_LITERALS_SINGLETON = %w[
     symbol(req:node)
@@ -563,12 +559,9 @@ RSpec.describe "Public API drift", :public_api_drift do
     "#{method.name}(#{params})"
   end
 
-  # When `klass` is `class Foo < Data.define(...)`, the Data-generated
-  # readers live on the anonymous parent class rather than on `Foo`
-  # itself. Walk through any anonymous (name == nil) parent so the
-  # surface snapshot is invariant to whether the carrier was authored
-  # as `Foo = Data.define(...) do ... end` or
-  # `class Foo < Data.define(...)`.
+  # When `klass` is `class Foo < Data.define(...)`, the Data-generated readers live on the anonymous parent class rather
+  # than on `Foo` itself. Walk through any anonymous (name == nil) parent so the surface snapshot is invariant to
+  # whether the carrier was authored as `Foo = Data.define(...) do ... end` or `class Foo < Data.define(...)`.
   def instance_signatures(klass)
     collected = []
     cursor = klass
@@ -864,19 +857,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     end
   end
 
-  # RBS sig drift detection. The runtime drift snapshots above
-  # catch accidental changes to the public Ruby API; this block
-  # catches the dual: when a public Ruby method is added to a
-  # drift-pinned namespace but the matching `sig/rigor/*.rbs`
-  # entry is forgotten. The v0.0.9 cache regression hid for
-  # months because every runtime addition since v0.0.9 had drifted
-  # away from the RBS sigs without any check; landing this spec
-  # ensures the same gap cannot reopen silently.
+  # RBS sig drift detection. The runtime drift snapshots above catch accidental changes to the public Ruby API; this
+  # block catches the dual: when a public Ruby method is added to a drift-pinned namespace but the matching
+  # `sig/rigor/*.rbs` entry is forgotten. The v0.0.9 cache regression hid for months because every runtime addition
+  # since v0.0.9 had drifted away from the RBS sigs without any check; landing this spec ensures the same gap cannot
+  # reopen silently.
   #
-  # Skips namespaces that have no RBS sig at all (yet) — those
-  # are deliberate gaps tracked in the broader sig-coverage
-  # backlog (lib/rigor/plugin/, lib/rigor/flow_contribution/,
-  # lib/rigor/cache/, lib/rigor/analysis/, …).
+  # Skips namespaces that have no RBS sig at all (yet) — those are deliberate gaps tracked in the broader sig-coverage
+  # backlog (lib/rigor/plugin/, lib/rigor/flow_contribution/, lib/rigor/cache/, lib/rigor/analysis/, …).
   describe "RBS sig drift" do
     def sig_env
       @sig_env ||= begin
@@ -911,15 +899,13 @@ RSpec.describe "Public API drift", :public_api_drift do
           singleton << member.name.to_s
         end
       when RBS::AST::Members::AttrReader, RBS::AST::Members::AttrWriter, RBS::AST::Members::AttrAccessor
-        # `attr_reader name: T` declares an instance reader
-        # (and writer for AttrAccessor / AttrWriter).
+        # `attr_reader name: T` declares an instance reader (and writer for AttrAccessor / AttrWriter).
         instance << member.name.to_s
         if member.is_a?(RBS::AST::Members::AttrAccessor) || member.is_a?(RBS::AST::Members::AttrWriter)
           instance << "#{member.name}="
         end
       when RBS::AST::Members::Alias
-        # `alias eql? ==` declares an alias. Both target and
-        # new name resolve at runtime to the same method.
+        # `alias eql? ==` declares an alias. Both target and new name resolve at runtime to the same method.
         bucket = member.kind == :singleton ? singleton : instance
         bucket << member.new_name.to_s
       end
@@ -978,16 +964,13 @@ RSpec.describe "Public API drift", :public_api_drift do
                         snapshot: PublicApiDriftSnapshots::SOURCE_LITERALS_SINGLETON)
     end
 
-    # Namespaces without an RBS sig today — recorded so the
-    # absence is visible in test output, not silent. Adding a
-    # sig file removes the corresponding entry from this list.
+    # Namespaces without an RBS sig today — recorded so the absence is visible in test output, not silent. Adding a sig
+    # file removes the corresponding entry from this list.
     it "lists drift-pinned namespaces that still lack an RBS sig" do
       unsigned = PublicApiDriftSnapshots::UNSIGNED_NAMESPACES
       missing_sig = unsigned.reject { |name| sig_method_kinds_for(name) }
-      # Allow the list to be either fully missing (current state)
-      # or fully signed (someone added all sigs at once). A
-      # partial state means a sig was added but the list wasn't
-      # updated — fail so the bookkeeping stays honest.
+      # Allow the list to be either fully missing (current state) or fully signed (someone added all sigs at once). A
+      # partial state means a sig was added but the list wasn't updated — fail so the bookkeeping stays honest.
       next if missing_sig.empty?
 
       expect(missing_sig).to eq(unsigned)

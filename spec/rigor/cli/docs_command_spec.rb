@@ -5,11 +5,9 @@ require "stringio"
 require "rigor/cli"
 require "rigor/cli/docs_command"
 
-# `rigor docs` serves the docs bundled with the gem OFFLINE (ADR-74).
-# These examples exercise the real on-disk `docs/` tree so the contract
-# an installed Rigor + the SKILL-driven UX depend on is verified
-# end-to-end. The grammar mirrors `rigor skill`: the positional slot is
-# a doc name; alternative outputs are flags (`--list` / `--path`).
+# `rigor docs` serves the docs bundled with the gem OFFLINE (ADR-74). These examples exercise the real on-disk `docs/`
+# tree so the contract an installed Rigor + the SKILL-driven UX depend on is verified end-to-end. The grammar mirrors
+# `rigor skill`: the positional slot is a doc name; alternative outputs are flags (`--list` / `--path`).
 RSpec.describe Rigor::CLI::DocsCommand do
   def run(argv)
     out = StringIO.new
@@ -22,8 +20,8 @@ RSpec.describe Rigor::CLI::DocsCommand do
     it "prints the bundled llms.txt doc index" do
       status, out, = run([])
       expect(status).to eq(0)
-      # ASCII-only assertions: the index is read with the external
-      # encoding, so a non-ASCII substring (an em-dash) would clash.
+      # ASCII-only assertions: the index is read with the external encoding, so a non-ASCII substring (an em-dash) would
+      # clash.
       expect(out).to include("offline doc index")
       expect(out).to include("rigor docs <name>")
     end

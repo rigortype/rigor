@@ -8,8 +8,7 @@ require "rigor/environment/lockfile_resolver"
 RSpec.describe Rigor::Environment::LockfileResolver do
   let(:tmpdir) { Dir.mktmpdir("rigor-lockfile-resolver-spec-") }
 
-  # A minimal valid Gemfile.lock body. Two pure-Ruby gems + one
-  # platform-tagged gem. Matches what `bundle lock` emits.
+  # A minimal valid Gemfile.lock body. Two pure-Ruby gems + one platform-tagged gem. Matches what `bundle lock` emits.
   let(:simple_lockfile_body) do
     <<~LOCKFILE
       GEM
@@ -100,20 +99,17 @@ RSpec.describe Rigor::Environment::LockfileResolver do
     end
 
     it "returns empty and warns when Bundler raises on truly corrupt lockfile" do
-      # Truncating mid-section forces Bundler's state machine into
-      # an unparseable transition (the exact form varies by
-      # Bundler version, so the test just asserts the contract:
-      # never crash, never return junk).
+      # Truncating mid-section forces Bundler's state machine into an unparseable transition (the exact form varies by
+      # Bundler version, so the test just asserts the contract: never crash, never return junk).
       path = write_lockfile("GEM\n  remote:")
       result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
       expect(result).to eq({})
     end
 
     it "warns to stderr (naming the path and error) when the parser raises" do
-      # Deterministically drive the malformed-lockfile rescue: a real
-      # corrupt body's failure mode is Bundler-version-dependent, so
-      # force the raise and assert the warning the user relies on to
-      # learn why their lockfile was ignored.
+      # Deterministically drive the malformed-lockfile rescue: a real corrupt body's failure mode is
+      # Bundler-version-dependent, so force the raise and assert the warning the user relies on to learn why their
+      # lockfile was ignored.
       require "bundler"
       path = write_lockfile(simple_lockfile_body)
       allow(Bundler::LockfileParser).to receive(:new).and_raise(RuntimeError.new("boom"))
@@ -126,9 +122,8 @@ RSpec.describe Rigor::Environment::LockfileResolver do
     end
 
     it "warns to stderr and returns empty when bundler cannot be required" do
-      # The LoadError rescue: bundler is always present in the test
-      # env, so stub the require to drive the branch that tells the
-      # user their lockfile could not be read.
+      # The LoadError rescue: bundler is always present in the test env, so stub the require to drive the branch that
+      # tells the user their lockfile could not be read.
       path = write_lockfile(simple_lockfile_body)
       allow(described_class).to receive(:require).with("bundler").and_raise(LoadError.new("no bundler"))
 
@@ -166,10 +161,8 @@ RSpec.describe Rigor::Environment::LockfileResolver do
       result = described_class.locked_gems(lockfile_path: path, project_root: tmpdir, auto_detect: false)
       ffi = result.fetch("ffi")
       expect(ffi.version).to eq("1.17.4")
-      # The active spec depends on which platform Bundler selected
-      # at parse time; either "ruby" or the platform-tagged form
-      # is acceptable. The point is the resolver returns *some*
-      # consistent platform string.
+      # The active spec depends on which platform Bundler selected at parse time; either "ruby" or the platform-tagged
+      # form is acceptable. The point is the resolver returns *some* consistent platform string.
       expect(ffi.platform).to be_a(String)
       expect(ffi.platform).not_to be_empty
     end

@@ -712,11 +712,10 @@ RSpec.describe Rigor::Plugin::Manifest do
     end
   end
 
-  # Pins the exact reject message of every Array-of-X field. The thirteen
-  # validators delegate to one `validate_array_of!`, so the message format
-  # and each per-field label live in a single place; this table guards
-  # against any of them drifting (the messages are part of the plugin-author
-  # experience even though no analysis path exercises them).
+  # Pins the exact reject message of every Array-of-X field. The thirteen validators delegate to one
+  # `validate_array_of!`, so the message format and each per-field label live in a single place; this table guards
+  # against any of them drifting (the messages are part of the plugin-author experience even though no analysis path
+  # exercises them).
   describe "array-field validation messages" do
     [
       [:produces, [123], "Symbol/String"],

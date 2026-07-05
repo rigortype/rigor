@@ -2,13 +2,10 @@
 
 require "spec_helper"
 
-# Unit-level coverage for {Rigor::Inference::BodyFixpoint} (ADR-56 WD3) —
-# the capped-fixpoint mechanism shared by the non-escaping block
-# captured-local write-back (slice A) and the loop-body fixpoint (slice
-# B). `evaluate_body` and `widen` are plain callables, so the contract
-# pins directly against hand-built `evaluate_body` lambdas rather than
-# going through the flow engine (that integration is exercised by the
-# loop / block specs under `spec/integration/`).
+# Unit-level coverage for {Rigor::Inference::BodyFixpoint} (ADR-56 WD3) — the capped-fixpoint mechanism shared by the
+# non-escaping block captured-local write-back (slice A) and the loop-body fixpoint (slice B). `evaluate_body` and
+# `widen` are plain callables, so the contract pins directly against hand-built `evaluate_body` lambdas rather than
+# going through the flow engine (that integration is exercised by the loop / block specs under `spec/integration/`).
 RSpec.describe Rigor::Inference::BodyFixpoint do
   let(:widen) { Rigor::Type::Combinator.method(:widen_value_pinned) }
 
@@ -68,8 +65,8 @@ RSpec.describe Rigor::Inference::BodyFixpoint do
       )
 
       expect(result).to eq(seed)
-      # Joining the exit type back into an equal assumption is stable on
-      # the very first pass, so the loop breaks instead of running to CAP.
+      # Joining the exit type back into an equal assumption is stable on the very first pass, so the loop breaks instead
+      # of running to CAP.
       expect(calls).to eq(1)
     end
 
@@ -119,8 +116,7 @@ RSpec.describe Rigor::Inference::BodyFixpoint do
         names: [:a], seed_bindings: seed, widen: widen,
         evaluate_body: lambda { |_bindings|
           calls += 1
-          # A fresh Constant every pass (`+= 1`-style accumulator):
-          # never join-stable under plain `union`.
+          # A fresh Constant every pass (`+= 1`-style accumulator): never join-stable under plain `union`.
           { a: constant(calls + 1) }
         }
       )
@@ -138,9 +134,8 @@ RSpec.describe Rigor::Inference::BodyFixpoint do
         names: [:a], seed_bindings: seed, widen: widen,
         evaluate_body: lambda { |bindings|
           calls += 1
-          # `a = [a]` — grows structurally each pass, so even widening
-          # both sides on the final iteration cannot make the join
-          # collapse back to the widened assumption.
+          # `a = [a]` — grows structurally each pass, so even widening both sides on the final iteration cannot make the
+          # join collapse back to the widened assumption.
           { a: Rigor::Type::Combinator.tuple_of(bindings[:a]) }
         }
       )
@@ -171,8 +166,7 @@ RSpec.describe Rigor::Inference::BodyFixpoint do
         evaluate_body: lambda { |bindings|
           calls += 1
           if calls == 1
-            # Only `a` is written this pass; `b` is absent from the
-            # returned hash and must keep its current assumption.
+            # Only `a` is written this pass; `b` is absent from the returned hash and must keep its current assumption.
             { a: Rigor::Type::Combinator.union(bindings[:a], constant(2)) }
           else
             {}

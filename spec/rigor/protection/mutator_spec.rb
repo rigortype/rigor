@@ -3,9 +3,8 @@
 require "spec_helper"
 require "rigor/protection/mutator"
 
-# ADR-63 Tier 2 — the type-visible mutation generator productized from the dev
-# harness. Generates byte-range source splices aimed at the call-rule families,
-# and (with the type-aware filter) keeps only mutations at sites where Rigor
+# ADR-63 Tier 2 — the type-visible mutation generator productized from the dev harness. Generates byte-range source
+# splices aimed at the call-rule families, and (with the type-aware filter) keeps only mutations at sites where Rigor
 # holds a concrete receiver type.
 RSpec.describe Rigor::Protection::Mutator do
   def mutations(source, **)

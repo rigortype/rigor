@@ -147,10 +147,9 @@ RSpec.describe Rigor::Plugin::IoBoundary do
     end
   end
 
-  # The real-`Net::HTTP` wrapper the boundary injects-over in every other
-  # test (a fake `#get`); exercised here with stubbed transport so the
-  # success / non-success / oversize-body branches and their reason codes
-  # have a unit safety net without touching the network.
+  # The real-`Net::HTTP` wrapper the boundary injects-over in every other test (a fake `#get`); exercised here with
+  # stubbed transport so the success / non-success / oversize-body branches and their reason codes have a unit safety
+  # net without touching the network.
   describe Rigor::Plugin::DefaultHttpClient do
     subject(:client) { described_class.new }
 
@@ -159,8 +158,8 @@ RSpec.describe Rigor::Plugin::IoBoundary do
 
     before { allow(Net::HTTP).to receive(:start).and_yield(http) }
 
-    # Real response objects so `#is_a?(Net::HTTPSuccess)` and `#code` are
-    # genuine; only the socket-backed `#read_body` needs stubbing.
+    # Real response objects so `#is_a?(Net::HTTPSuccess)` and `#code` are genuine; only the socket-backed `#read_body`
+    # needs stubbing.
     def respond_with(response)
       allow(http).to receive(:request_get).and_yield(response)
     end

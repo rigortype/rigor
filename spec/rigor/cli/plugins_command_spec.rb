@@ -6,15 +6,11 @@ require "tmpdir"
 
 require "rigor/cli/plugins_command"
 
-# `rigor plugins` is a read-only inspection command that loads
-# the project's `.rigor.yml`, attempts plugin activation, and
-# reports per-plugin status (loaded / load-error) plus every
-# manifest-declared extension surface.
+# `rigor plugins` is a read-only inspection command that loads the project's `.rigor.yml`, attempts plugin activation,
+# and reports per-plugin status (loaded / load-error) plus every manifest-declared extension surface.
 #
-# The integration-style examples here exercise the real
-# `Plugin::Loader` rather than mocking the registry — that is
-# the contract the SKILL / `rigor init` / CI consumers actually
-# depend on.
+# The integration-style examples here exercise the real `Plugin::Loader` rather than mocking the registry — that is the
+# contract the SKILL / `rigor init` / CI consumers actually depend on.
 RSpec.describe Rigor::CLI::PluginsCommand do
   def run(argv)
     out = StringIO.new
@@ -29,14 +25,10 @@ RSpec.describe Rigor::CLI::PluginsCommand do
     end
   end
 
-  # Other plugin integration specs in the suite call
-  # `Rigor::Plugin.unregister!` in their before/after hooks,
-  # which can leave the global registry empty when our spec runs
-  # after them. Since `require` is a no-op for an already-loaded
-  # plugin file, the file's top-level `Rigor::Plugin.register(...)`
-  # call does NOT re-run; the loader then can't match the gem
-  # name to a registered class. Re-register the plugins our
-  # examples reference so the spec is order-independent.
+  # Other plugin integration specs in the suite call `Rigor::Plugin.unregister!` in their before/after hooks, which can
+  # leave the global registry empty when our spec runs after them. Since `require` is a no-op for an already-loaded
+  # plugin file, the file's top-level `Rigor::Plugin.register(...)` call does NOT re-run; the loader then can't match
+  # the gem name to a registered class. Re-register the plugins our examples reference so the spec is order-independent.
   before do
     require "rigor-activesupport-core-ext"
     require "rigor-activerecord"
@@ -68,12 +60,9 @@ RSpec.describe Rigor::CLI::PluginsCommand do
 
   context "with a valid bundled plugin" do
     before do
-      # Use the explicit gem/id form so the loader's id-based
-      # lookup matches the already-registered plugin class even
-      # when the require is a no-op (the plugin gets eager-loaded
-      # by other specs in the suite; `require` is idempotent
-      # which makes the loader's bare-string newly_registered
-      # detector miss).
+      # Use the explicit gem/id form so the loader's id-based lookup matches the already-registered plugin class even
+      # when the require is a no-op (the plugin gets eager-loaded by other specs in the suite; `require` is idempotent
+      # which makes the loader's bare-string newly_registered detector miss).
       File.write(".rigor.yml", <<~YAML)
         paths: [.]
         plugins:
@@ -157,11 +146,9 @@ RSpec.describe Rigor::CLI::PluginsCommand do
 
   context "with an open_receiver-bearing plugin" do
     before do
-      # Activate rigor-activerecord, which declares
-      # open_receivers: ["ActiveRecord::Relation"]. We don't need
-      # a real db/schema.rb because plugin LOADING (manifest
-      # resolution + init) does not require the schema — only the
-      # later analysis pipeline does, and we never run that here.
+      # Activate rigor-activerecord, which declares open_receivers: ["ActiveRecord::Relation"]. We don't need a real
+      # db/schema.rb because plugin LOADING (manifest resolution + init) does not require the schema — only the later
+      # analysis pipeline does, and we never run that here.
       File.write(".rigor.yml", <<~YAML)
         paths: [.]
         plugins:

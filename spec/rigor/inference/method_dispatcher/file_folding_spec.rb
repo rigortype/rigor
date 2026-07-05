@@ -14,8 +14,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FileFolding do
                                  ))
   end
 
-  # Toggle the module-global flag for the duration of a single
-  # test; restore it afterwards so other specs see the default.
+  # Toggle the module-global flag for the duration of a single test; restore it afterwards so other specs see the
+  # default.
   around do |example|
     original = described_class.fold_platform_specific_paths
     example.run

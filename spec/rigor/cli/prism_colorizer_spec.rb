@@ -32,8 +32,7 @@ RSpec.describe Rigor::CLI::PrismColorizer do
   end
 
   it "paints the whole symbol — including a keyword-shaped name — in one colour" do
-    # `:then` lexes as SYMBOL_BEGIN + KEYWORD_THEN; both halves
-    # must carry the symbol colour, never the keyword colour.
+    # `:then` lexes as SYMBOL_BEGIN + KEYWORD_THEN; both halves must carry the symbol colour, never the keyword colour.
     colored = colorize(":then\n")
 
     expect(colored).to include("\e[36m:\e[0m\e[36mthen\e[0m")
@@ -41,8 +40,8 @@ RSpec.describe Rigor::CLI::PrismColorizer do
   end
 
   it "keeps a trailing newline outside the colour span" do
-    # The comment token includes its newline; the reset must sit
-    # before it so the escape does not bleed onto the next line.
+    # The comment token includes its newline; the reset must sit before it so the escape does not bleed onto the next
+    # line.
     expect(colorize("# c\n")).to end_with("\e[0m\n")
   end
 
@@ -53,9 +52,8 @@ RSpec.describe Rigor::CLI::PrismColorizer do
   end
 
   it "retags a US-ASCII-labelled source carrying UTF-8 bytes before lexing" do
-    # Sources read under a POSIX locale arrive tagged US-ASCII; the
-    # colorizer dups and retags to UTF-8 so the token regexes do not
-    # raise on the multibyte comment.
+    # Sources read under a POSIX locale arrive tagged US-ASCII; the colorizer dups and retags to UTF-8 so the token
+    # regexes do not raise on the multibyte comment.
     source = "x = 1  # コメント\n".dup.force_encoding(Encoding::US_ASCII)
     stripped = colorize(source).gsub(/\e\[[0-9;]*m/, "")
 

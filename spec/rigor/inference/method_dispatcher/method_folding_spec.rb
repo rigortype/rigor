@@ -27,10 +27,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MethodFolding do
     end
 
     it "declines on a non-literal symbol argument" do
-      # The receiver `"1"` is precise, but the argument is an
-      # unknown identifier the engine cannot fold to a
-      # `Constant<Symbol>`; the forward fold declines and the
-      # RBS tier answers `Nominal[Method]` instead.
+      # The receiver `"1"` is precise, but the argument is an unknown identifier the engine cannot fold to a
+      # `Constant<Symbol>`; the forward fold declines and the RBS tier answers `Nominal[Method]` instead.
       type = scope.type_of(parse_expression('"1".method(unknown_name)'))
 
       expect(type).not_to be_a(Rigor::Type::BoundMethod)
@@ -86,14 +84,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MethodFolding do
     end
 
     it "preserves Tuple per-element precision through `.curry.call` over a Symbol Array" do
-      # The pre-Option-A behaviour for this expression was
-      # `Tuple[Dynamic[Top]×3]` because `Method#curry`
-      # collapsed to `Nominal[Proc]` and `Proc#call` then
-      # fell through to `Dynamic[Top]`. Option A keeps the
-      # `BoundMethod` carrier through `.curry`, so the
-      # backward fold's recursive dispatch on the bound
-      # `(receiver_type, method_name)` pair runs as if the
-      # `.curry` were never written.
+      # The pre-Option-A behaviour for this expression was `Tuple[Dynamic[Top]×3]` because `Method#curry` collapsed to
+      # `Nominal[Proc]` and `Proc#call` then fell through to `Dynamic[Top]`. Option A keeps the `BoundMethod` carrier
+      # through `.curry`, so the backward fold's recursive dispatch on the bound `(receiver_type, method_name)` pair
+      # runs as if the `.curry` were never written.
       type = scope.type_of(parse_expression(
                              '[:to_i, :to_f, :to_sym].map { |m| "1".method(m).curry.call }'
                            ))

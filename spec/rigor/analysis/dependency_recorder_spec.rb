@@ -3,10 +3,9 @@
 require "spec_helper"
 require "tmpdir"
 
-# ADR-46 slice 1 — the cross-file dependency recorder. Verifies that
-# analysing a file records the OTHER files its inference read from;
-# `Incremental.invert` builds the `dependents` index from these
-# records and the body tier re-analyses only the affected closure.
+# ADR-46 slice 1 — the cross-file dependency recorder. Verifies that analysing a file records the OTHER files its
+# inference read from; `Incremental.invert` builds the `dependents` index from these records and the body tier
+# re-analyses only the affected closure.
 RSpec.describe Rigor::Analysis::DependencyRecorder do
   def run_recording(dir)
     configuration = Rigor::Configuration.new("paths" => [dir])
@@ -32,8 +31,8 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
       record = runner.file_dependencies[File.join(dir, "caller.rb")]
 
       expect(record).not_to be_nil
-      # caller.rb's inference resolved Widget#price through to its body in
-      # model.rb, so model.rb is a recorded dependency.
+      # caller.rb's inference resolved Widget#price through to its body in model.rb, so model.rb is a recorded
+      # dependency.
       expect(record.sources).to include(File.join(dir, "model.rb"))
       # A file does not depend on itself.
       expect(record.sources).not_to include(File.join(dir, "caller.rb"))
@@ -60,9 +59,8 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
       runner = run_recording(dir)
       record = runner.file_dependencies[File.join(dir, "child.rb")]
 
-      # Resolving Child's `greet` walks the superclass chain through
-      # `superclass_of(Child)` and reads Base#greet's body — both edges
-      # attribute to base.rb.
+      # Resolving Child's `greet` walks the superclass chain through `superclass_of(Child)` and reads Base#greet's body
+      # — both edges attribute to base.rb.
       expect(record.sources).to include(File.join(dir, "base.rb"))
     end
   end
@@ -88,19 +86,17 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
       runner = run_recording(dir)
       record = runner.file_dependencies[File.join(dir, "host.rb")]
 
-      # Resolving `greet` against the include chain reads `includes_of(Host)`
-      # and Greeter#greet's body — both attribute to mixin.rb.
+      # Resolving `greet` against the include chain reads `includes_of(Host)` and Greeter#greet's body — both attribute
+      # to mixin.rb.
       expect(record.sources).to include(File.join(dir, "mixin.rb"))
     end
   end
 
   it "records every reopening file of a class whose ancestry is read (ADR-46 slice 1)" do
     Dir.mktmpdir do |dir|
-      # `Account` is declared empty in one file and reopened with its
-      # superclass in another. A consumer that resolves an inherited method
-      # depends on BOTH files — removing the superclass in the reopening
-      # must re-check the consumer, so `superclass_of(Account)` records the
-      # full declaring-file set, not just the first declaration.
+      # `Account` is declared empty in one file and reopened with its superclass in another. A consumer that resolves an
+      # inherited method depends on BOTH files — removing the superclass in the reopening must re-check the consumer, so
+      # `superclass_of(Account)` records the full declaring-file set, not just the first declaration.
       File.write(File.join(dir, "account_decl.rb"), "class Account\nend\n")
       File.write(File.join(dir, "account_super.rb"), <<~RUBY)
         class Base
@@ -143,11 +139,11 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
       runner = run_recording(dir)
       dependents = runner.file_dependents
 
-      # An edit to model.rb must re-check caller.rb (it read Widget#price's
-      # body from there), so caller.rb is a dependent of model.rb.
+      # An edit to model.rb must re-check caller.rb (it read Widget#price's body from there), so caller.rb is a
+      # dependent of model.rb.
       expect(dependents[File.join(dir, "model.rb")]).to include(File.join(dir, "caller.rb"))
-      # A file no one reads from has no dependents entry (nil, not a
-      # mutable default — the frozen index dropped its default proc).
+      # A file no one reads from has no dependents entry (nil, not a mutable default — the frozen index dropped its
+      # default proc).
       expect(dependents[File.join(dir, "caller.rb")]).to be_nil
     end
   end

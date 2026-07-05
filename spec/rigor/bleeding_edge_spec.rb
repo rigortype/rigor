@@ -2,10 +2,8 @@
 
 require "rigor/bleeding_edge"
 
-# ADR-50 § WD2 — the bleeding-edge overlay. The shipped overlay is
-# empty (the foundation slice); the non-empty behaviour is exercised by
-# stubbing FEATURES so the resolution logic the first real feature will
-# rely on is covered now.
+# ADR-50 § WD2 — the bleeding-edge overlay. The shipped overlay is empty (the foundation slice); the non-empty behaviour
+# is exercised by stubbing FEATURES so the resolution logic the first real feature will rely on is covered now.
 RSpec.describe Rigor::BleedingEdge do
   describe "the shipped (empty) overlay" do
     it "carries no features yet" do

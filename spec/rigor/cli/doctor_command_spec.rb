@@ -25,9 +25,8 @@ RSpec.describe Rigor::CLI::DoctorCommand do
 
   describe "with no configuration" do
     it "reports a config issue because no config file exists" do
-      # When no config exists, Configuration.load(nil) uses defaults.
-      # The default paths may not exist, but the runner handles that.
-      # We just assert the command completes without crashing.
+      # When no config exists, Configuration.load(nil) uses defaults. The default paths may not exist, but the runner
+      # handles that. We just assert the command completes without crashing.
       status, out, = run([])
       expect(status).to be_a(Integer)
       expect(out).to include("rigor doctor:")
@@ -103,8 +102,8 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     it "fails with a drift summary when a recorded bucket no longer fires" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\nbaseline: .rigor-baseline.yml\n")
-      # The bucket records one expected call.undefined-method on clean.rb, but
-      # the file is clean now → actual 0 → a :cleared drift row.
+      # The bucket records one expected call.undefined-method on clean.rb, but the file is clean now → actual 0 → a
+      # :cleared drift row.
       File.write(".rigor-baseline.yml", <<~YAML)
         version: 1
         ignored:
@@ -173,10 +172,9 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     end
   end
 
-  # The private summary formatter behind the "Baseline drift detected (...)"
-  # message. Exercised directly with fabricated audit rows (each answers
-  # #status) so the by-status counting, per-status labels, and joining are
-  # pinned without staging a real drifting baseline.
+  # The private summary formatter behind the "Baseline drift detected (...)" message. Exercised directly with fabricated
+  # audit rows (each answers #status) so the by-status counting, per-status labels, and joining are pinned without
+  # staging a real drifting baseline.
   describe "#baseline_drift_summary (private)" do
     let(:command) { described_class.new(argv: [], out: StringIO.new, err: StringIO.new) }
 

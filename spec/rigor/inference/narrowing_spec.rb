@@ -253,8 +253,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       truthy, falsey = described_class.predicate_scopes(pred, bound)
       expect(truthy.local(:x)).to eq(integer_nominal)
       expect(truthy.local(:y)).to eq(string_nominal)
-      # Falsey edge unions the LHS-falsey scope (y untouched) with
-      # the LHS-truthy/RHS-falsey scope (x narrowed, y narrowed).
+      # Falsey edge unions the LHS-falsey scope (y untouched) with the LHS-truthy/RHS-falsey scope (x narrowed, y
+      # narrowed).
       expect(falsey.local(:x)).to eq(union_int_nil)
       expect(falsey.local(:y)).to eq(union_str_nil)
     end
@@ -266,8 +266,7 @@ RSpec.describe Rigor::Inference::Narrowing do
               .with_local(:y, union_str_nil)
       pred = parse_predicate("x || y")
       truthy, falsey = described_class.predicate_scopes(pred, bound)
-      # Truthy edge unions LHS-truthy (x narrowed, y untouched) with
-      # LHS-falsey/RHS-truthy (x = nil, y narrowed).
+      # Truthy edge unions LHS-truthy (x narrowed, y untouched) with LHS-falsey/RHS-truthy (x = nil, y narrowed).
       expect(truthy.local(:x)).to eq(union_int_nil)
       expect(truthy.local(:y)).to eq(union_str_nil)
       # Falsey edge: both are nil.
@@ -302,8 +301,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       truthy, falsey = described_class.predicate_scopes(pred, bound)
       expect(truthy.local(:h).required_key?(:foo)).to be(true)
       expect(truthy.local(:h).optional_key?(:foo)).to be(false)
-      # §4-3 falsey edge: `key?` false proves `:foo` absent, so it is
-      # dropped from the shape (a subsequent `h[:foo]` reads nil).
+      # §4-3 falsey edge: `key?` false proves `:foo` absent, so it is dropped from the shape (a subsequent `h[:foo]`
+      # reads nil).
       expect(falsey.local(:h).pairs).not_to have_key(:foo)
       expect(falsey.local(:h).optional_key?(:foo)).to be(false)
     end
@@ -321,8 +320,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       bound = scope.with_local(:h, required_shape)
       pred = parse_predicate("h.key?(:foo)", locals: %i[h])
       truthy, falsey = described_class.predicate_scopes(pred, bound)
-      # `key?` on a required key is always true → the predicate is opaque,
-      # both edges keep the shape unchanged (no false-edge key removal).
+      # `key?` on a required key is always true → the predicate is opaque, both edges keep the shape unchanged (no
+      # false-edge key removal).
       expect(truthy.local(:h)).to eq(required_shape)
       expect(falsey.local(:h)).to eq(required_shape)
     end
@@ -436,10 +435,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
     end
 
-    # `if x = expr` — `StatementEvaluator#eval_local_write`
-    # binds `x` in `post_pred` before narrowing runs, so the
-    # write narrows the bound local on truthy/falsey edges the
-    # same way a bare local read does.
+    # `if x = expr` — `StatementEvaluator#eval_local_write` binds `x` in `post_pred` before narrowing runs, so the write
+    # narrows the bound local on truthy/falsey edges the same way a bare local read does.
     it "narrows the bound local through a bare assignment predicate" do
       bound = scope.with_local(:x, union_int_nil)
       pred = parse_predicate("x = recv()")
@@ -448,10 +445,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey.local(:x)).to eq(constant_nil)
     end
 
-    # `if y && (x = expr)` — the Redmine-style guard. `&&`
-    # threads `truthy_left` into the right side, and the
-    # `LocalVariableWriteNode` (wrapped in ParenthesesNode) now
-    # narrows `x` on both edges so callers inside the truthy
+    # `if y && (x = expr)` — the Redmine-style guard. `&&` threads `truthy_left` into the right side, and the
+    # `LocalVariableWriteNode` (wrapped in ParenthesesNode) now narrows `x` on both edges so callers inside the truthy
     # block see the non-falsey fragment.
     it "narrows the bound local through `cond && (var = expr)`" do
       bound = scope
@@ -460,15 +455,12 @@ RSpec.describe Rigor::Inference::Narrowing do
       pred = parse_predicate("y && (x = recv())")
       truthy, falsey = described_class.predicate_scopes(pred, bound)
       expect(truthy.local(:x)).to eq(integer_nominal)
-      # Falsey edge: LHS falsey OR (LHS truthy AND RHS falsey)
-      # — `x` falls back to its joined post-predicate binding.
+      # Falsey edge: LHS falsey OR (LHS truthy AND RHS falsey) — `x` falls back to its joined post-predicate binding.
       expect(falsey.local(:x)).not_to eq(integer_nominal)
     end
 
-    # `if y && x = expr` (no parens). Ruby parses this as
-    # `y && (x = expr)` (`=` ends a complete expression
-    # inside `&&`'s RHS), so the AST shape is the same as the
-    # parenthesised form modulo the wrapping ParenthesesNode.
+    # `if y && x = expr` (no parens). Ruby parses this as `y && (x = expr)` (`=` ends a complete expression inside
+    # `&&`'s RHS), so the AST shape is the same as the parenthesised form modulo the wrapping ParenthesesNode.
     it "narrows the bound local through `cond && var = expr` (no parens)" do
       bound = scope
               .with_local(:x, union_int_nil)
@@ -539,10 +531,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey.local(:x)).to eq(literal_b)
     end
 
-    # v0.1.1 Track 1 slice 4 — `String#start_with?` /
-    # `#end_with?` / `#include?` against a literal needle
-    # attaches a flow fact on each edge but does not change
-    # the receiver type (no "starts-with-X" carrier today).
+    # v0.1.1 Track 1 slice 4 — `String#start_with?` / `#end_with?` / `#include?` against a literal needle attaches a
+    # flow fact on each edge but does not change the receiver type (no "starts-with-X" carrier today).
     describe "String predicate flow facts (v0.1.1 Track 1 slice 4)" do
       %i[start_with? end_with? include?].each do |sel|
         it "attaches a #{sel} relational fact with the needle on both edges" do
@@ -660,8 +650,7 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "uses exact equality under instance_of?" do
-      # `Integer.new(...).instance_of?(Numeric)` is FALSE in Ruby
-      # (instance_of? is exact, not inclusive of subclasses).
+      # `Integer.new(...).instance_of?(Numeric)` is FALSE in Ruby (instance_of? is exact, not inclusive of subclasses).
       expect(described_class.narrow_class(integer_nominal, "Numeric", exact: true)).to eq(Rigor::Type::Combinator.bot)
     end
 
@@ -670,8 +659,8 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "leaves the type unchanged when the asked class is unknown to the host Ruby" do
-      # `Foo::Bar` is not defined in the test environment, so the
-      # ordering check returns `:unknown` and we stay conservative.
+      # `Foo::Bar` is not defined in the test environment, so the ordering check returns `:unknown` and we stay
+      # conservative.
       expect(described_class.narrow_class(integer_nominal, "Foo::Bar")).to eq(integer_nominal)
     end
 
@@ -703,8 +692,7 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "preserves Nominal[Numeric] under !is_a?(Integer)" do
-      # The narrower cannot prove a Numeric is NOT an Integer, so it
-      # stays conservative and preserves the type.
+      # The narrower cannot prove a Numeric is NOT an Integer, so it stays conservative and preserves the type.
       numeric = Rigor::Type::Combinator.nominal_of("Numeric")
       expect(described_class.narrow_not_class(numeric, "Integer")).to eq(numeric)
     end
@@ -716,9 +704,8 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "preserves Constant under instance_of? when v.class is a subclass of the asked class but not equal" do
-      # `1.instance_of?(Numeric)` is FALSE, so the falsey edge KEEPS
-      # Constant[1] (it does not satisfy the predicate, so it
-      # belongs to the not-class fragment).
+      # `1.instance_of?(Numeric)` is FALSE, so the falsey edge KEEPS Constant[1] (it does not satisfy the predicate, so
+      # it belongs to the not-class fragment).
       expect(described_class.narrow_not_class(integer_one, "Numeric", exact: true)).to eq(integer_one)
     end
   end
@@ -745,10 +732,8 @@ RSpec.describe Rigor::Inference::Narrowing do
     it "uses exact matching for instance_of?" do
       numeric = Rigor::Type::Combinator.nominal_of("Numeric")
       bound = scope.with_local(:x, numeric)
-      # `Numeric#instance_of?(Numeric)` could be true (a literal
-      # Numeric instance) but `instance_of?(Integer)` requires the
-      # class to be exactly Integer. Under exact matching the
-      # truthy edge therefore collapses (we cannot prove it is
+      # `Numeric#instance_of?(Numeric)` could be true (a literal Numeric instance) but `instance_of?(Integer)` requires
+      # the class to be exactly Integer. Under exact matching the truthy edge therefore collapses (we cannot prove it is
       # Integer-exact from a Nominal[Numeric] alone).
       pred = parse_predicate("x.instance_of?(Integer)")
       truthy, falsey = described_class.predicate_scopes(pred, bound)
@@ -783,8 +768,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       bound = scope.with_local(:x, union_int_str)
       pred = parse_predicate("!x.is_a?(Integer)")
       truthy, falsey = described_class.predicate_scopes(pred, bound)
-      # `!x.is_a?(Integer)` is true exactly when x is not an Integer,
-      # so the truthy edge is the falsey edge of `x.is_a?(Integer)`.
+      # `!x.is_a?(Integer)` is true exactly when x is not an Integer, so the truthy edge is the falsey edge of
+      # `x.is_a?(Integer)`.
       expect(truthy.local(:x)).to eq(string_nominal)
       expect(falsey.local(:x)).to eq(integer_nominal)
     end
@@ -803,8 +788,7 @@ RSpec.describe Rigor::Inference::Narrowing do
         pred = parse_predicate("/foo/ === x")
         truthy, falsey = described_class.predicate_scopes(pred, bound)
         expect(truthy.local(:x)).to eq(string_nominal)
-        # Falsey edge keeps the entry type — Regexp#=== returns
-        # false for non-Strings AND non-matching Strings.
+        # Falsey edge keeps the entry type — Regexp#=== returns false for non-Strings AND non-matching Strings.
         expect(falsey.local(:x)).to eq(union_int_str)
       end
 
@@ -812,8 +796,7 @@ RSpec.describe Rigor::Inference::Narrowing do
         bound = scope.with_local(:x, union_int_str)
         pred = parse_predicate("(1..10) === x")
         truthy, _falsey = described_class.predicate_scopes(pred, bound)
-        # x must be Numeric on the truthy edge; the Integer member
-        # of the union survives, String is dropped.
+        # x must be Numeric on the truthy edge; the Integer member of the union survives, String is dropped.
         expect(truthy.local(:x)).to eq(integer_nominal)
       end
 
@@ -889,9 +872,8 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
 
       it "leaves non-Integer Constants untouched (Bot rather than widen)" do
-        # `Constant["foo"]` cannot satisfy `> 0`; collapses to Bot
-        # rather than the analyser silently leaving a non-numeric
-        # value on the truthy edge of an integer comparison.
+        # `Constant["foo"]` cannot satisfy `> 0`; collapses to Bot rather than the analyser silently leaving a
+        # non-numeric value on the truthy edge of an integer comparison.
         c = Rigor::Type::Combinator.constant_of("foo")
         expect(described_class.narrow_integer_comparison(c, :>, 0))
           .to be_a(Rigor::Type::Bot)
@@ -992,8 +974,7 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "narrows zero? to Constant[0] / Nominal[Integer]" do
-      # truthy: Nominal[Integer] -> Constant[0]
-      # falsey: Nominal[Integer] -> preserved (cannot punch a hole)
+      # truthy: Nominal[Integer] -> Constant[0] falsey: Nominal[Integer] -> preserved (cannot punch a hole)
       expect_truthy_falsey(
         :zero?,
         Rigor::Type::Combinator.constant_of(0),
@@ -1180,9 +1161,8 @@ RSpec.describe Rigor::Inference::Narrowing do
         end
       RUBY
       body = first_when_body_scope(case_node, bound)
-      # `Nominal[String]` is not integer-rooted; the existing
-      # class-narrowing path runs and produces `narrow_class(String, "Numeric")`,
-      # which collapses to Bot since String is disjoint from Numeric.
+      # `Nominal[String]` is not integer-rooted; the existing class-narrowing path runs and produces
+      # `narrow_class(String, "Numeric")`, which collapses to Bot since String is disjoint from Numeric.
       expect(body.local(:n)).to be_a(Rigor::Type::Bot)
     end
   end
@@ -1198,11 +1178,9 @@ RSpec.describe Rigor::Inference::Narrowing do
     let(:integer_nominal) { Rigor::Type::Combinator.nominal_of("Integer") }
     let(:string_nominal) { Rigor::Type::Combinator.nominal_of("String") }
 
-    # Parses a `case` statement with `x` declared as a local
-    # (via the existing `parse_program(locals:)` helper) so
-    # Prism resolves the bare `x` subject as a
-    # `LocalVariableReadNode` rather than the variable-call
-    # `CallNode` that an unbound bare read parses to.
+    # Parses a `case` statement with `x` declared as a local (via the existing `parse_program(locals:)` helper) so Prism
+    # resolves the bare `x` subject as a `LocalVariableReadNode` rather than the variable-call `CallNode` that an
+    # unbound bare read parses to.
     def parse_case_of_x(case_source)
       parse_program(case_source).statements.body.first
     end
@@ -1308,8 +1286,7 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
 
     it "falls back to Difference[String, refined] when no complement pair is registered" do
-      # decimal-int-string has no complement pair registered today, so the
-      # carrier-of-last-resort still applies.
+      # decimal-int-string has no complement pair registered today, so the carrier-of-last-resort still applies.
       di = Rigor::Type::Combinator.decimal_int_string
       result = described_class.narrow_not_refinement(nominal("String"), di)
       expect(result).to eq(Rigor::Type::Combinator.difference(nominal("String"), di))
@@ -1318,9 +1295,8 @@ RSpec.describe Rigor::Inference::Narrowing do
     it "drops the negated refinement itself from a union" do
       lc = Rigor::Type::Combinator.lowercase_string
       union = Rigor::Type::Combinator.union(lc, nominal("Integer"))
-      # ~lowercase-string within (lowercase-string | Integer) = Integer
-      # (Integer is disjoint from String; the lowercase-string member
-      # is the exact negated subset and drops).
+      # ~lowercase-string within (lowercase-string | Integer) = Integer (Integer is disjoint from String; the
+      # lowercase-string member is the exact negated subset and drops).
       expect(described_class.narrow_not_refinement(union, lc)).to eq(nominal("Integer"))
     end
 
@@ -1329,8 +1305,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       union = Rigor::Type::Combinator.union(nominal("String"), nominal("Integer"))
       result = described_class.narrow_not_refinement(union, lc)
       expect(result).to be_a(Rigor::Type::Union)
-      # The Integer member is disjoint from String and survives;
-      # the String member becomes non-lowercase-string via the
+      # The Integer member is disjoint from String and survives; the String member becomes non-lowercase-string via the
       # paired-complement registry.
       expect(result.members).to contain_exactly(
         nominal("Integer"),
@@ -1375,16 +1350,15 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
 
       it "narrows an existing IntegerRange to its meet with the complement halves" do
-        # current = int<0, 20>, refinement = int<5, 10>
-        # ~int<5, 10> ∩ int<0, 20> = int<0, 4> | int<11, 20>
+        # current = int<0, 20>, refinement = int<5, 10> ~int<5, 10> ∩ int<0, 20> = int<0, 4> | int<11, 20>
         result = described_class.narrow_not_refinement(integer_range(0, 20), integer_range(5, 10))
         expect(result).to be_a(Rigor::Type::Union)
         expect(result.members).to contain_exactly(integer_range(0, 4), integer_range(11, 20))
       end
 
       it "drops a Constant[Integer] outside both complement halves" do
-        # current = Constant[7], refinement = int<5, 10>; 7 is in [5,10]
-        # so its complement against [5,10] is empty — return current_type unchanged.
+        # current = Constant[7], refinement = int<5, 10>; 7 is in [5,10] so its complement against [5,10] is empty —
+        # return current_type unchanged.
         result = described_class.narrow_not_refinement(constant_of(7), integer_range(5, 10))
         expect(result).to eq(constant_of(7))
       end

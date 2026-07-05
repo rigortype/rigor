@@ -87,10 +87,9 @@ RSpec.describe Rigor::Inference::MultiTargetBinder do
       expect(result).to eq(a: constant(1), b: constant(2), c: constant(3))
     end
 
-    # ADR-57 slice 3 — a destructured slot that flow typed as optional
-    # (`X | nil`) is softened to its non-nil constituent, because the nil is
-    # almost always excluded by a correlated invariant the per-slot flow
-    # cannot see (the canonical haml `parse_tag` case).
+    # ADR-57 slice 3 — a destructured slot that flow typed as optional (`X | nil`) is softened to its non-nil
+    # constituent, because the nil is almost always excluded by a correlated invariant the per-slot flow cannot see (the
+    # canonical haml `parse_tag` case).
     it "softens an optional `X | nil` slot to its non-nil constituent" do
       node = parse_multi_write("a, b = pair")
       optional = Rigor::Type::Combinator.union(constant("x"), constant(nil))

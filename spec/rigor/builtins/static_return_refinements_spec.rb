@@ -97,9 +97,8 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
     end
 
     it "does NOT fire on the (non-existent) instance shape" do
-      # File has no instance-side `expand_path` / `dirname`; the
-      # row is keyed `:singleton`, so an `:instance` lookup must
-      # return nil rather than the singleton handler.
+      # File has no instance-side `expand_path` / `dirname`; the row is keyed `:singleton`, so an `:instance` lookup
+      # must return nil rather than the singleton handler.
       expect(
         described_class.lookup(
           owner_class_name: "File", method_name: :expand_path, kind: :instance

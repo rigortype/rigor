@@ -3,10 +3,8 @@
 require "spec_helper"
 require "tmpdir"
 
-# ADR-7 § "Slice 6" end-to-end coverage for the plugin-side
-# cache producer surface — the `Plugin::Base.producer` DSL,
-# `Plugin::Base#cache_for` callable, automatic PluginEntry
-# attachment (6-B), and `plugin.<id>.` producer-id sandbox
+# ADR-7 § "Slice 6" end-to-end coverage for the plugin-side cache producer surface — the `Plugin::Base.producer` DSL,
+# `Plugin::Base#cache_for` callable, automatic PluginEntry attachment (6-B), and `plugin.<id>.` producer-id sandbox
 # prefix (6-C).
 RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
                "cache producers (slice 6)" do # rubocop:disable RSpec/DescribeMethod
@@ -251,14 +249,11 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
     end
   end
 
-  # ADR-60 WD3 — `cache_for` rides `Cache::Store#fetch_or_validate`:
-  # the entry is keyed on the stable identity inputs, and the
-  # dependency descriptor (boundary reads + `watch:` globs) is
-  # recorded AFTER the producer block runs. Each "session" below
-  # uses a FRESH `Cache::Store` (empty in-process memo) and a fresh
-  # plugin instance — the faithful simulation of a second
-  # `rigor check` process reading the same on-disk cache, per the
-  # established `pundit_plugin_spec` cross-process pattern.
+  # ADR-60 WD3 — `cache_for` rides `Cache::Store#fetch_or_validate`: the entry is keyed on the stable identity inputs,
+  # and the dependency descriptor (boundary reads + `watch:` globs) is recorded AFTER the producer block runs. Each
+  # "session" below uses a FRESH `Cache::Store` (empty in-process memo) and a fresh plugin instance — the faithful
+  # simulation of a second `rigor check` process reading the same on-disk cache, per the established
+  # `pundit_plugin_spec` cross-process pattern.
   describe "#cache_for record-and-validate (ADR-60 WD3)" do
     let(:cache_root) { File.join(tmpdir, ".rigor", "cache") }
 
@@ -276,10 +271,9 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       file = File.join(tmpdir, "data.txt")
       File.write(file, "v1")
 
-      # The structural hazard being fixed: the block performs the
-      # read, nothing primes the boundary beforehand. Under the old
-      # `fetch_or_compute` call-time snapshot this read was
-      # invisible to the descriptor and session 2 served stale "v1".
+      # The structural hazard being fixed: the block performs the read, nothing primes the boundary beforehand. Under
+      # the old `fetch_or_compute` call-time snapshot this read was invisible to the descriptor and session 2 served
+      # stale "v1".
       klass = Class.new(described_class) do
         manifest(id: "alpha", version: "0.1.0")
       end
@@ -323,8 +317,7 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
         attr_reader :search_root
 
         def init(_services)
-          # `watch:` Procs run at cache_for time, so init-derived
-          # roots like this one are visible to them.
+          # `watch:` Procs run at cache_for time, so init-derived roots like this one are visible to them.
           @search_root = config.fetch("root")
         end
 
@@ -411,8 +404,8 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
         plugin.instance_variable_set(:@io_boundary, boundary)
         expect(plugin.cache_for(:remote, params: {}).call).to eq("remote-body")
       end
-      # ConfigEntry rows in the dependency descriptor make fresh?
-      # false by design — sound (never stale), recompute every run.
+      # ConfigEntry rows in the dependency descriptor make fresh? false by design — sound (never stale), recompute every
+      # run.
       expect(calls).to eq(2)
     end
 

@@ -35,6 +35,23 @@ appears:
 5. **Stale docs** — archaeology about deleted hooks, pinned version
    references that no longer mean anything.
 
+## First: load the version-current copy
+
+This skill audits against a contract that moves release to release (hook
+renames, new helpers, deprecations), so its checklist — in its
+`references/` files — is only as good as the Rigor it ships with. Follow
+the copy that ships with the **installed** Rigor rather than any vendored
+or frozen copy of this file. Get the complete current procedure (body + all
+references, inline) in one call:
+
+```sh
+rigor skill --full rigor-plugin-review
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## When to use / not use
 
 **Use it** when someone asks to review a plugin's quality, check it

@@ -20,6 +20,21 @@ All `rigor-*` plugins ship **bundled inside the `rigortype` gem** — no
 separate install. Enabling one is just adding its id to `plugins:` in
 `.rigor.dist.yml`.
 
+## First: load the version-current copy
+
+This skill's exact commands, flags, and config keys drift between Rigor
+releases, so follow the copy that ships with the **installed** Rigor rather
+than any vendored or frozen copy of this file. Get the complete current
+procedure in one call:
+
+```sh
+rigor skill --full rigor-plugin-tune
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## When to use
 
 - The project added (or removed) a gem since it was onboarded.
@@ -43,9 +58,13 @@ dependencies in `Gemfile.lock`.
 ### Phase 2 — match against the bundled catalogue
 
 The authoritative, current list of bundled plugins (the count drifts as
-new ones land) is the catalogue:
+new ones land) comes from the **installed** Rigor itself — read it there,
+not from a web page that may describe a different version:
 
-<https://github.com/rigortype/rigor/blob/master/plugins/README.md>
+```sh
+rigor docs manual/plugins/README   # the catalogue of every bundled plugin, offline
+rigor plugins                      # what is enabled in THIS project right now
+```
 
 For each Gemfile.lock dependency, check whether a bundled `rigor-<gem>`
 plugin exists and is **not** already in `plugins:`. Common matches:

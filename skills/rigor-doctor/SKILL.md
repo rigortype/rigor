@@ -11,63 +11,49 @@ metadata:
 # Rigor Doctor
 
 `rigor skill describe` reports what *exists* (presence checks). This skill
-goes a level deeper: it *runs* Rigor's validators to confirm the setup is
-actually working — the difference between "a `.rigor.yml` is present" and
-"it parses, loads its plugins, and analyses the right files." Use it when
-the diagnostics look wrong (suspiciously zero, or suspiciously many) or
-after editing the config.
+goes a level deeper: it *runs* Rigor's own validators to confirm the setup
+is actually working — the difference between "a `.rigor.yml` is present"
+and "it parses, loads its plugins, and analyses the right files." Reach for
+it when the diagnostics look wrong (suspiciously zero, or suspiciously
+many) or after editing the config. It needs no special command — it
+orchestrates checks Rigor already ships and interprets the results.
 
-It needs **no special command** — it orchestrates checks Rigor already
-ships and interprets the results.
+## First: load the version-current copy
 
-## Checks
-
-### 1. Config resolves with nothing silently inert
-
-```sh
-rigor check --format json   # read the `config_warnings` array
-```
-
-`rigor check` audits the config and emits `config_warnings` for the typo
-class whose only symptom is a confusing downstream error: a
-`signature_paths:` that is missing / not a directory / holds no `.rbs`
-(which would turn every covered call into a false `call.undefined-method`
-at `evidence_tier: high`), a `libraries:` name RBS does not recognise, a
-`disable:` / `severity_overrides:` id naming no real rule, or a missing
-`bundler` / `rbs_collection` path. **Each warning here is a real
-misconfiguration — fix it.** None appearing is the healthy state.
-
-### 2. Every configured plugin loads
+This skill's exact commands, flags, and config keys drift between Rigor
+releases, so follow the copy that ships with the **installed** Rigor rather
+than any vendored or frozen copy of this file. Get the complete current
+procedure in one call:
 
 ```sh
-rigor plugins --strict
+rigor skill --full rigor-doctor   # this body + all its references/, inline
 ```
 
-Reports the activation status of each plugin in `plugins:`; `--strict`
-exits non-zero on any failure. A failure is usually a misspelled id or a
-plugin whose `signature_paths:` did not resolve. Fix it, or the plugin's
-type knowledge is silently absent.
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed (read any `references/NN-*.md` from the directory the
+header names). If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
 
-### 3. The baseline is not stale (if one exists)
+## When to use
 
-```sh
-rigor baseline drift
-```
+- After editing `.rigor.yml` / `.rigor.dist.yml`.
+- When `rigor check` reports suspiciously few or suspiciously many
+  diagnostics, or the config feels like it isn't taking effect.
+- NOT for first-time setup (→ `rigor-project-init`) or working real
+  diagnostics down (→ `rigor-baseline-reduce`).
 
-Shows whether the live diagnostics have drifted from `.rigor-baseline.yml`
-— entries the baseline ignores that no longer occur (safe to prune) and
-new diagnostics outside the envelope. A large drift means the baseline
-needs regenerating (often after an upgrade — see `rigor-upgrade`).
+## What it validates
 
-### 4. The analysis is actually seeing your code
+Four validators, each a check Rigor already ships. The exact commands and
+how to read each output live in the version-current
+[`references/01-checks.md`](references/01-checks.md) (loaded per the
+directive above):
 
-```sh
-rigor check --format json   # check the "Ruby source files" count
-```
-
-If the file count is `0` or far below your project size, `paths:` /
-`exclude:` are mis-scoped, or the command is running from the wrong
-directory. The analysis is only as good as the files it reads.
+1. **Config resolves with nothing silently inert** — no `config_warnings`.
+2. **Every configured plugin loads** — `rigor plugins --strict` is clean.
+3. **The baseline is not stale** (if one exists) — no large drift.
+4. **The analysis is actually seeing your code** — the source-file count
+   matches the project.
 
 ## Interpreting the result
 
@@ -75,12 +61,16 @@ directory. The analysis is only as good as the files it reads.
   code, not the configuration. Move on to `rigor-baseline-reduce` or
   `rigor-protection-uplift`.
 - **A `config_warning` or a plugin failure** → that is the real problem;
-  fixing it usually resolves a whole cluster of confusing downstream
+  fixing it usually clears a whole cluster of confusing downstream
   diagnostics at once.
 
 For deeper symptoms (hover shows `untyped` everywhere, completion empty,
-LSP silent) see the manual's troubleshooting:
-<https://github.com/rigortype/rigor/blob/master/docs/manual/13-troubleshooting.md>
+LSP silent) read the manual's troubleshooting chapter — offline and
+version-matched:
+
+```sh
+rigor docs troubleshooting
+```
 
 ## Next step
 

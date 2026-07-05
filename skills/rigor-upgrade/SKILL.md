@@ -17,6 +17,22 @@ sharpness exposes. This skill adopts the upgrade without either blindly
 regenerating the baseline (which buries genuine new catches) or treating
 every new line as a regression.
 
+## First: load the version-current copy
+
+This skill's exact commands, flags, and config keys drift between Rigor
+releases, so follow the copy that ships with the **installed** Rigor rather
+than any vendored or frozen copy of this file — doubly so here, since you
+just changed the version this skill is meant to track. Get the complete
+current procedure in one call:
+
+```sh
+rigor skill --full rigor-upgrade
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## When to use
 
 - You just ran `mise use gem:rigortype` / `gem update rigortype` and want

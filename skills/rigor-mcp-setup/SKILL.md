@@ -31,6 +31,20 @@ This skill is the *workflow* around it (identify the client → apply the
 manual's snippet → verify the handshake), so it does not duplicate (and
 cannot stale-out) the config details.
 
+## First: load the version-current copy
+
+The config details already come live from `rigor docs`; this keeps the
+*workflow itself* current too. Prefer the copy of this skill that ships
+with the **installed** Rigor over any vendored or frozen copy of this file:
+
+```sh
+rigor skill --full rigor-mcp-setup
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## When to use
 
 - A developer wants their AI agent to call Rigor's tools mid-session.

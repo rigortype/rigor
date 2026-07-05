@@ -14,10 +14,27 @@ Wire Rigor into a project's CI so type diagnostics appear **inline on the
 pull / merge request**, not just in the job log. This skill is for **users
 running Rigor on their own project** with the published `rigor` executable —
 Rigor is a tool, not a library, so it is **not** added to the project's
-`Gemfile` (see [ADR-27](https://github.com/rigortype/rigor/blob/main/docs/adr/27-tool-distribution-model.md)).
+`Gemfile` (see [ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)).
 
 If the project has no `.rigor.yml` yet, run the **rigor-project-init** skill
 first — this skill assumes `rigor check` already runs locally.
+
+## First: load the version-current copy
+
+The CI templates, `--format` surfaces, and reviewdog reporters below are the
+fastest-moving detail in any skill (new output formats, changed flags, the
+supported Ruby). Follow the copy that ships with the **installed** Rigor,
+not any vendored or frozen copy of this file. Two version-matched sources,
+both offline once Rigor is installed:
+
+```sh
+rigor skill --full rigor-ci-setup   # this skill's current workflow, in one call
+rigor docs ci                       # the manual's CI chapter (authoritative templates)
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
 
 ## The one hard rule: Rigor gets its own job
 
@@ -308,12 +325,13 @@ The templates install the latest `rigortype` at run time. To pin it:
 
 ## References
 
-- Manual: `rigor`'s CI chapter — `docs/manual/11-ci.md` in the repo, or
-  <https://github.com/rigortype/rigor/blob/main/docs/manual/11-ci.md>. The
-  copy-paste template files live at `docs/manual/ci-templates/`.
-- [ADR-51](https://github.com/rigortype/rigor/blob/main/docs/adr/51-ci-diagnostic-output-formats.md)
+- Manual: `rigor`'s CI chapter — read it **offline and version-matched**
+  with `rigor docs ci` (the copy-paste template files: `rigor docs
+  --list manual | grep ci-templates`). Web fallback, before Rigor is
+  installed: <https://github.com/rigortype/rigor/blob/master/docs/manual/11-ci.md>.
+- [ADR-51](https://github.com/rigortype/rigor/blob/master/docs/adr/51-ci-diagnostic-output-formats.md)
   — the output-format surface (the severity / identifier contract).
-- [ADR-27](https://github.com/rigortype/rigor/blob/main/docs/adr/27-tool-distribution-model.md)
+- [ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)
   — why Rigor installs standalone and runs in its own job.
 - [reviewdog](https://github.com/reviewdog/reviewdog) /
   [action-setup](https://github.com/reviewdog/action-setup).

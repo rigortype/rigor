@@ -75,11 +75,33 @@ The skills are bundled inside the gem. Browse and load them with the
 `rigor skill` command:
 
 ```sh
-rigor skill describe              # recommend the next step for this project
-rigor skill --list                # name + absolute path of every bundled skill
-rigor skill rigor-project-init    # print a skill's body to follow
-rigor skill --path rigor-ci-setup # just the SKILL.md path (for a Read tool)
+rigor skill describe                   # recommend the next step for this project
+rigor skill --list                     # name + absolute path of every bundled skill
+rigor skill rigor-project-init         # print a skill's body to follow
+rigor skill --full rigor-baseline-reduce  # body + all its references/, inline (complete)
+rigor skill --path rigor-ci-setup      # just the SKILL.md path (for a Read tool)
 ```
+
+### Why the skills don't go stale (陳腐化) — the thin-shell / live-core split
+
+The routing brain lives in the gem (`rigor skill describe`, ADR-73). The
+same principle is now applied to **each** skill's *body*: every skill
+carries a **"First: load the version-current copy"** directive that points
+the reader at the copy shipped with the **installed** Rigor —
+
+```sh
+rigor skill --full <name>   # this body + all its references/, current to your version
+```
+
+— rather than trusting a copy that may have been vendored into the repo
+months ago (e.g. via `npx skills add`). Because a vendored SKILL.md is
+frozen at install time but `rigor skill --full` always reads the gem, the
+two diverge across upgrades and the directive makes an agent re-fetch the
+current one. Version-coupled step detail (exact flags, config keys, rule
+ids) lives in each skill's `references/` — served fresh by `--full` — so
+the frozen shell stays stable while the practices stay current. The only
+skill that must work *before* Rigor is installed is the entry point
+`rigor-next-steps`, which therefore carries only the install bootstrap.
 
 ### B. Via [vercel-labs/skills](https://github.com/vercel-labs/skills) (works before Rigor is installed)
 
@@ -111,3 +133,12 @@ Skills are packaged by the gemspec's `skills/*/SKILL.md` +
 `skills/*/references/*.md` globs; a new skill directory is picked up
 automatically. The authoring conventions for the contributor-side skills
 are in [`.claude/skills/`](../.claude/skills/).
+
+**New skills must carry the "First: load the version-current copy"
+directive** (the thin-shell / live-core split above), so a vendored copy
+re-fetches the current body via `rigor skill --full <name>`. Put
+version-coupled step detail (exact flags, config keys, rule ids) in
+`references/`, not the SKILL.md body, and keep the body to the stable
+scaffold (goal, when-to-use, phase names, decision points). The exception
+is `rigor-next-steps`, which must run before Rigor exists and so stays a
+pure install bootstrap.

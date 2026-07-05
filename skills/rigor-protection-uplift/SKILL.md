@@ -16,6 +16,21 @@ type. This skill *acts* on that surfacing under the discipline that keeps
 Rigor false-positive-safe: protection goes up, and not one line of
 working code starts reporting a new diagnostic.
 
+## First: load the version-current copy
+
+This skill's exact commands, flags, carrier syntax, and rule ids drift
+between Rigor releases, so follow the copy that ships with the **installed**
+Rigor rather than any vendored or frozen copy of this file. Get the
+complete current procedure in one call:
+
+```sh
+rigor skill --full rigor-protection-uplift
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## When to use
 
 - A user wants to raise how much of their code Rigor can actually catch

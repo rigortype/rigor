@@ -36,6 +36,26 @@ This is the user's shortcut: they only ever need to remember two skills —
 into the right lookup or analysis so they never have to remember the
 command.
 
+## Prefer the live map over this skill's tables
+
+The doc-page names and command flags below are a snapshot; Rigor's pages
+and CLI move release to release, and a vendored copy of this skill (e.g.
+added via `npx skills`) lags further still. Treat the tables as
+orientation, then confirm against the **installed** Rigor, which is always
+current:
+
+```sh
+rigor docs --list              # the live doc map — what pages exist in THIS version
+rigor --help                   # the live command + flag list
+rigor skill --full rigor-ask   # the current version of this skill itself
+```
+
+Never cite a page, flag, or rule id you have not just seen in one of these
+— that is this skill's whole discipline. If `rigor` is not installed, you
+can still answer high-level "what is Rigor?" questions from the web
+<https://rigor.typedduck.fail/llms.txt>, but for anything version-specific
+install it first (see `rigor-next-steps`).
+
 ## The toolbox
 
 Everything here is read-only and needs no network.

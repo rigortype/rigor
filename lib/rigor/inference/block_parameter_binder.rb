@@ -7,62 +7,45 @@ require_relative "multi_target_binder"
 
 module Rigor
   module Inference
-    # Builds the entry scope of a block body by translating the block's
-    # parameter list into a `name -> Rigor::Type` map.
+    # Builds the entry scope of a block body by translating the block's parameter list into a `name ->
+    # Rigor::Type` map.
     #
-    # The binder is the symmetric counterpart of {MethodParameterBinder}
-    # for `Prism::BlockNode`. The expected parameter types come from
-    # the receiving method's RBS signature
-    # ({Rigor::Inference::MethodDispatcher.expected_block_param_types});
-    # parameters that the signature does not cover (or that the binder
-    # cannot match by position) default to `Dynamic[Top]`. The default
-    # is the Slice 1 fail-soft answer for unknown values, so a block
-    # whose receiving method has no signature still binds every name
-    # into the scope (a block body whose `Local x` reads return
-    # `Dynamic[Top]` instead of falling through to the unbound-local
-    # `Dynamic[Top]` event is the same observable type, but the
-    # binding presence is what later slices need to attach narrowing
-    # facts to).
+    # The binder is the symmetric counterpart of {MethodParameterBinder} for `Prism::BlockNode`. The
+    # expected parameter types come from the receiving method's RBS signature
+    # ({Rigor::Inference::MethodDispatcher.expected_block_param_types}); parameters that the signature does
+    # not cover (or that the binder cannot match by position) default to `Dynamic[Top]`. The default is the
+    # Slice 1 fail-soft answer for unknown values, so a block whose receiving method has no signature still
+    # binds every name into the scope (a block body whose `Local x` reads return `Dynamic[Top]` instead of
+    # falling through to the unbound-local `Dynamic[Top]` event is the same observable type, but the binding
+    # presence is what later slices need to attach narrowing facts to).
     #
-    # MultiTargetNode parameters (`|(a, b), c|`) are bound by
-    # delegating each destructuring slot to
-    # {Rigor::Inference::MultiTargetBinder}, so a Tuple-shaped
-    # expected element type projects element-wise into the inner
-    # locals (Slice 6 phase C sub-phase 2). Numbered parameters
-    # (`_1`, `_2`, ...) are bound from `Prism::NumberedParametersNode`
-    # using the same per-position `expected_param_types:` array, so
-    # `[1, 2, 3].each { _1 + _2 }` sees `_1`/`_2` typed identically
-    # to their explicit `|x, y|` counterparts.
+    # MultiTargetNode parameters (`|(a, b), c|`) are bound by delegating each destructuring slot to
+    # {Rigor::Inference::MultiTargetBinder}, so a Tuple-shaped expected element type projects element-wise
+    # into the inner locals (Slice 6 phase C sub-phase 2). Numbered parameters (`_1`, `_2`, ...) are bound
+    # from `Prism::NumberedParametersNode` using the same per-position `expected_param_types:` array, so
+    # `[1, 2, 3].each { _1 + _2 }` sees `_1`/`_2` typed identically to their explicit `|x, y|` counterparts.
     #
-    # The `it` implicit parameter (Ruby 3.4+) is bound from
-    # `Prism::ItParametersNode`. It is the single-argument cousin of
-    # `_1`: the binder produces `{ it: expected_param_types[0] }` so
-    # the body's `Prism::ItLocalVariableReadNode` lookup sees the same
-    # type as the explicit `|x|` form would.
+    # The `it` implicit parameter (Ruby 3.4+) is bound from `Prism::ItParametersNode`. It is the
+    # single-argument cousin of `_1`: the binder produces `{ it: expected_param_types[0] }` so the body's
+    # `Prism::ItLocalVariableReadNode` lookup sees the same type as the explicit `|x|` form would.
     #
-    # Block-local declarations after `;` (e.g., `|x; y, z|`) are
-    # still skipped — they are explicitly block-local, so the outer
-    # scope MUST NOT observe them and the binder leaves them unbound.
+    # Block-local declarations after `;` (e.g., `|x; y, z|`) are still skipped — they are explicitly
+    # block-local, so the outer scope MUST NOT observe them and the binder leaves them unbound.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
     class BlockParameterBinder
-      # @param expected_param_types [Array<Rigor::Type>] positional block
-      #   parameter types in order. Indices the binder cannot fill from
-      #   this array (because the array is shorter than the parameter
-      #   list, or because the slot is a kind we do not pull from the
-      #   array) default to `Dynamic[Top]`.
+      # @param expected_param_types [Array<Rigor::Type>] positional block parameter types in order. Indices
+      #   the binder cannot fill from this array (because the array is shorter than the parameter list, or
+      #   because the slot is a kind we do not pull from the array) default to `Dynamic[Top]`.
       def initialize(expected_param_types: [])
         @expected_param_types = expected_param_types
       end
 
       # @param block_node [Prism::BlockNode]
-      # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter
-      #   name to bound type. Anonymous parameters are skipped;
-      #   MultiTargetNode destructuring slots delegate to
-      #   {MultiTargetBinder} and contribute every named local in
-      #   declaration order. Numbered-parameter forms (`_1`, `_2`,
-      #   ...) bind `:_1`, `:_2`, ... up to the maximum the block
-      #   body refers to.
+      # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter name to bound type. Anonymous
+      #   parameters are skipped; MultiTargetNode destructuring slots delegate to {MultiTargetBinder} and
+      #   contribute every named local in declaration order. Numbered-parameter forms (`_1`, `_2`, ...) bind
+      #   `:_1`, `:_2`, ... up to the maximum the block body refers to.
       def bind(block_node)
         params_root = block_node.parameters
         return {} if params_root.nil?
@@ -81,12 +64,10 @@ module Rigor
 
       private
 
-      # `|_1, _2|` numbered-parameter form. Prism exposes the
-      # implicit count through `NumberedParametersNode#maximum`
-      # (the highest `_N` referenced in the body); we materialise
-      # bindings for `:_1` through `:_maximum` so the block body's
-      # `LocalVariableReadNode` lookups see the same types as the
-      # equivalent explicit `|x, y|` form would.
+      # `|_1, _2|` numbered-parameter form. Prism exposes the implicit count through
+      # `NumberedParametersNode#maximum` (the highest `_N` referenced in the body); we materialise bindings
+      # for `:_1` through `:_maximum` so the block body's `LocalVariableReadNode` lookups see the same types
+      # as the equivalent explicit `|x, y|` form would.
       def bind_numbered_parameters(numbered_node)
         bindings = {}
         numbered_node.maximum.times do |i|
@@ -95,9 +76,8 @@ module Rigor
         bindings
       end
 
-      # `{ it.foo }` — Ruby 3.4 `it` is a single-argument implicit
-      # parameter. Always binds the symbol `:it`; `ItLocalVariableReadNode`
-      # in the body looks the binding up by name.
+      # `{ it.foo }` — Ruby 3.4 `it` is a single-argument implicit parameter. Always binds the symbol `:it`;
+      # `ItLocalVariableReadNode` in the body looks the binding up by name.
       def bind_it_parameter
         { it: positional_type_at(0) }
       end
@@ -117,27 +97,21 @@ module Rigor
         bindings
       end
 
-      # Ruby blocks (NOT lambdas) auto-splat a single yielded
-      # Tuple-shaped value when the block declares more than one
-      # required positional parameter:
+      # Ruby blocks (NOT lambdas) auto-splat a single yielded Tuple-shaped value when the block declares more
+      # than one required positional parameter:
       #
       #   { a: 1 }.each { |k, v| ... }
       #
-      # yields `[key, value]` as a single arg, but the two-param
-      # block sees `k = key, v = value`. RBS / IteratorDispatch
-      # encode this as the block taking ONE `[K, V]` Tuple
-      # parameter; without this fix-up the binder would assign
-      # `k = Tuple[K, V]` and `v = Dynamic[Top]`, and any call
-      # on `k.<method-not-on-Tuple>` would false-fire.
+      # yields `[key, value]` as a single arg, but the two-param block sees `k = key, v = value`. RBS /
+      # IteratorDispatch encode this as the block taking ONE `[K, V]` Tuple parameter; without this fix-up
+      # the binder would assign `k = Tuple[K, V]` and `v = Dynamic[Top]`, and any call on
+      # `k.<method-not-on-Tuple>` would false-fire.
       #
-      # The rule fires only when (a) the receiver yields exactly
-      # one value (`expected_param_types.size == 1`), (b) the
-      # block declares more than one positional slot, and (c)
-      # that single expected element is a Tuple. Multi-arg yields
-      # (e.g. `each_with_index`'s `(element, index)` pair) are
-      # NOT auto-splatted — matching Ruby semantics where a
-      # multi-arg yield to a `|a, b, c|` block fills the extra
-      # slot with nil rather than splatting any element.
+      # The rule fires only when (a) the receiver yields exactly one value (`expected_param_types.size ==
+      # 1`), (b) the block declares more than one positional slot, and (c) that single expected element is a
+      # Tuple. Multi-arg yields (e.g. `each_with_index`'s `(element, index)` pair) are NOT auto-splatted —
+      # matching Ruby semantics where a multi-arg yield to a `|a, b, c|` block fills the extra slot with nil
+      # rather than splatting any element.
       def apply_auto_splat(params_node)
         return unless @expected_param_types.size == 1
 
@@ -180,11 +154,9 @@ module Rigor
         cursor
       end
 
-      # `|*rest|` binds an Array of the leftover positional arguments.
-      # The expected-types array is per-position, not per-rest; we
-      # cannot reliably pick a single element type for rest, so we
-      # default to `Array[Dynamic[Top]]`. Element-type precision for
-      # rest parameters is deferred (demand-gated).
+      # `|*rest|` binds an Array of the leftover positional arguments. The expected-types array is
+      # per-position, not per-rest; we cannot reliably pick a single element type for rest, so we default to
+      # `Array[Dynamic[Top]]`. Element-type precision for rest parameters is deferred (demand-gated).
       def bind_rest(params_node, bindings)
         rest = params_node.rest
         return unless rest.respond_to?(:name) && rest&.name
@@ -219,13 +191,11 @@ module Rigor
         bindings[block.name] = Type::Combinator.nominal_of(Proc)
       end
 
-      # Required parameters in a block list can be either a plain
-      # `RequiredParameterNode` (named) or a `MultiTargetNode` (the
-      # `|(a, b), c|` destructuring form). Slice 6 phase C sub-phase 2
-      # delegates the latter to {MultiTargetBinder}, which decomposes
-      # the slot's expected Tuple element-wise and binds every named
-      # inner local. Other shapes (anonymous required parameters,
-      # forward arguments) are silently skipped.
+      # Required parameters in a block list can be either a plain `RequiredParameterNode` (named) or a
+      # `MultiTargetNode` (the `|(a, b), c|` destructuring form). Slice 6 phase C sub-phase 2 delegates the
+      # latter to {MultiTargetBinder}, which decomposes the slot's expected Tuple element-wise and binds
+      # every named inner local. Other shapes (anonymous required parameters, forward arguments) are
+      # silently skipped.
       def bind_required_param(param, cursor, bindings)
         case param
         when Prism::RequiredParameterNode

@@ -2,21 +2,16 @@
 
 module Rigor
   module Inference
-    # Thread-local event recorder behind `rigor trace`: while a block runs
-    # under {record}, the inference engine emits a flat, ordered event
-    # stream describing HOW it typed the program — expression enter/result
-    # pairs, scope binds, union formation, and method-dispatch outcomes.
-    # The CLI replays that stream as a terminal animation (or dumps it as
-    # JSON); the engine itself never reads the events back, so recording
-    # is purely observational and MUST NOT change any inferred type.
+    # Thread-local event recorder behind `rigor trace`: while a block runs under {record}, the inference engine
+    # emits a flat, ordered event stream describing HOW it typed the program — expression enter/result pairs, scope
+    # binds, union formation, and method-dispatch outcomes. The CLI replays that stream as a terminal animation (or
+    # dumps it as JSON); the engine itself never reads the events back, so recording is purely observational and
+    # MUST NOT change any inferred type.
     #
-    # Modelled on {Analysis::DependencyRecorder}: thread-local state, a
-    # module-level activation count so the disabled fast path ({active?})
-    # is a plain integer read, and a frozen snapshot for consumers. The
-    # instrumented hot paths (`ExpressionTyper#type_of`,
-    # `Scope#with_local`, `Type::Combinator.union`,
-    # `MethodDispatcher.dispatch`) each guard their emit behind {active?},
-    # so a normal (non-tracing) run pays one integer comparison.
+    # Modelled on {Analysis::DependencyRecorder}: thread-local state, a module-level activation count so the
+    # disabled fast path ({active?}) is a plain integer read, and a frozen snapshot for consumers. The instrumented
+    # hot paths (`ExpressionTyper#type_of`, `Scope#with_local`, `Type::Combinator.union`, `MethodDispatcher.dispatch`)
+    # each guard their emit behind {active?}, so a normal (non-tracing) run pays one integer comparison.
     module FlowTracer
       KEY = :__rigor_flow_tracer__
       private_constant :KEY
@@ -25,18 +20,16 @@ module Rigor
       #
       # kind     :enter | :result | :bind | :union | :dispatch
       # depth    expression-recursion depth at emit time (0 = statement level)
-      # location frozen Hash with :start_line/:start_column/:end_line/
-      #          :end_column/:start_offset/:end_offset, or nil. Events
-      #          without a node of their own (:bind, :union) inherit the
-      #          innermost in-flight expression node's location so the
-      #          replayer can still highlight the source being evaluated.
+      # location frozen Hash with :start_line/:start_column/:end_line/:end_column/:start_offset/:end_offset, or nil.
+      #          Events without a node of their own (:bind, :union) inherit the innermost in-flight expression
+      #          node's location so the replayer can still highlight the source being evaluated.
       # stack    frozen Array of short node-class names, outermost first
-      # data     frozen kind-specific Hash (types pre-rendered as Strings
-      #          via `describe(:short)` so events serialise to JSON as-is)
+      # data     frozen kind-specific Hash (types pre-rendered as Strings via `describe(:short)` so events
+      #          serialise to JSON as-is)
       Event = Data.define(:kind, :depth, :location, :stack, :data)
 
-      # Mutable per-thread accumulator; only ever touched by the thread
-      # that activated it, so no locking is needed on the emit path.
+      # Mutable per-thread accumulator; only ever touched by the thread that activated it, so no locking is needed
+      # on the emit path.
       class Recorder
         attr_reader :events
 
@@ -45,9 +38,8 @@ module Rigor
           @stack = []
         end
 
-        # Brackets one `ExpressionTyper#type_of` recursion: emits :enter,
-        # runs the real inference, emits :result with the inferred type,
-        # and returns the type unchanged.
+        # Brackets one `ExpressionTyper#type_of` recursion: emits :enter, runs the real inference, emits :result
+        # with the inferred type, and returns the type unchanged.
         def node(node)
           location = location_of(node)
           name = short_name(node.class)
@@ -100,9 +92,8 @@ module Rigor
 
       module_function
 
-      # Activates recording on the current thread for the duration of the
-      # block and returns the frozen event list. Nests safely; restores
-      # the previous recorder on exit.
+      # Activates recording on the current thread for the duration of the block and returns the frozen event list.
+      # Nests safely; restores the previous recorder on exit.
       def record
         previous = Thread.current[KEY]
         recorder = Recorder.new
@@ -120,9 +111,8 @@ module Rigor
         @active_count.positive?
       end
 
-      # Brackets one expression-typing recursion. Falls through to the
-      # bare block when the current thread is not recording (another
-      # thread may have flipped {active?}).
+      # Brackets one expression-typing recursion. Falls through to the bare block when the current thread is not
+      # recording (another thread may have flipped {active?}).
       def trace_node(node, &)
         recorder = Thread.current[KEY]
         return yield unless recorder
@@ -135,8 +125,7 @@ module Rigor
         Thread.current[KEY]&.emit(:bind, data: { name: name.to_s, type: describe(type) })
       end
 
-      # `Type::Combinator.union` — the moment branch types merge
-      # (including degenerate collapses like `1 | 1 → 1`).
+      # `Type::Combinator.union` — the moment branch types merge (including degenerate collapses like `1 | 1 → 1`).
       def union(members, result)
         Thread.current[KEY]&.emit(
           :union,
@@ -144,8 +133,8 @@ module Rigor
         )
       end
 
-      # `MethodDispatcher.dispatch` — resolution or the fail-soft `nil`
-      # ("no rule matched"; the caller will widen to `Dynamic[Top]`).
+      # `MethodDispatcher.dispatch` — resolution or the fail-soft `nil` ("no rule matched"; the caller will widen
+      # to `Dynamic[Top]`).
       def dispatch(receiver:, method_name:, args:, result:, location: nil)
         recorder = Thread.current[KEY]
         return unless recorder

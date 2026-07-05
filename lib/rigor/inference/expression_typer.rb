@@ -20,52 +20,41 @@ require_relative "struct_fold_safety"
 
 module Rigor
   module Inference
-    # Translates AST nodes into Rigor::Type values, consulting the surrounding
-    # Rigor::Scope for local-variable bindings and the environment registry
-    # for nominal-type resolution. Pure: never mutates the receiver scope.
+    # Translates AST nodes into Rigor::Type values, consulting the surrounding Rigor::Scope for local-variable
+    # bindings and the environment registry for nominal-type resolution. Pure: never mutates the receiver
+    # scope.
     #
-    # Accepts both real Prism nodes and synthetic Rigor::AST::Node
-    # instances; the synthetic family lets callers and plugins ask
-    # "what would the analyzer infer if a value of type T appeared here?"
-    # without building a real Prism expression.
+    # Accepts both real Prism nodes and synthetic Rigor::AST::Node instances; the synthetic family lets
+    # callers and plugins ask "what would the analyzer infer if a value of type T appeared here?" without
+    # building a real Prism expression.
     #
-    # Slice 1 recognises literal expressions, local-variable reads/writes,
-    # shallow Array literals, and Rigor::AST::TypeNode. Slice 2 adds
-    # Prism::CallNode (routed through Rigor::Inference::MethodDispatcher),
-    # Prism::ArgumentsNode (a non-value position whose children are typed
-    # individually by the CallNode handler), constant references resolved
-    # through Rigor::Environment::ClassRegistry, hash and interpolated
-    # string/symbol literals, definition expressions (def/class/module),
-    # and explicit handlers for parameter, block, splat, instance/class/
-    # global-variable, and self positions. Many of those handlers return
-    # Dynamic[Top] silently because they are non-value or out-of-scope
-    # positions for Slice 2; later slices refine them in place.
+    # Slice 1 recognises literal expressions, local-variable reads/writes, shallow Array literals, and
+    # Rigor::AST::TypeNode. Slice 2 adds Prism::CallNode (routed through Rigor::Inference::MethodDispatcher),
+    # Prism::ArgumentsNode (a non-value position whose children are typed individually by the CallNode
+    # handler), constant references resolved through Rigor::Environment::ClassRegistry, hash and interpolated
+    # string/symbol literals, definition expressions (def/class/module), and explicit handlers for parameter,
+    # block, splat, instance/class/global-variable, and self positions. Many of those handlers return
+    # Dynamic[Top] silently because they are non-value or out-of-scope positions for Slice 2; later slices
+    # refine them in place.
     #
-    # Slice 4 phase 2b types bare-constant references (`Foo`, `Foo::Bar`)
-    # as `Singleton[Foo]` rather than `Nominal[Foo]`, so that method
-    # dispatch on the constant correctly looks up *class* methods. The
-    # corresponding instance type is reachable through `Foo.new` and the
-    # value-lattice projections.
+    # Slice 4 phase 2b types bare-constant references (`Foo`, `Foo::Bar`) as `Singleton[Foo]` rather than
+    # `Nominal[Foo]`, so that method dispatch on the constant correctly looks up *class* methods. The
+    # corresponding instance type is reachable through `Foo.new` and the value-lattice projections.
     #
-    # Every other node falls back to Dynamic[Top] per the fail-soft
-    # policy in docs/internal-spec/inference-engine.md. The optional
-    # tracer is a Rigor::Inference::FallbackTracer (or any object
-    # answering #record_fallback) that receives a Fallback event for
-    # each fallback; the tracer MUST NOT change the return value of
-    # type_of.
+    # Every other node falls back to Dynamic[Top] per the fail-soft policy in
+    # docs/internal-spec/inference-engine.md. The optional tracer is a Rigor::Inference::FallbackTracer (or
+    # any object answering #record_fallback) that receives a Fallback event for each fallback; the tracer
+    # MUST NOT change the return value of type_of.
     # rubocop:disable Metrics/ClassLength
     class ExpressionTyper
-      # Hash-based dispatch keeps `type_of` linear and lets future slices add
-      # node kinds without growing a single case statement past RuboCop's
-      # cyclomatic budget. Anonymous Prism subclasses are not expected.
+      # Hash-based dispatch keeps `type_of` linear and lets future slices add node kinds without growing a
+      # single case statement past RuboCop's cyclomatic budget. Anonymous Prism subclasses are not expected.
       PRISM_DISPATCH = {
         # Literals
         Prism::IntegerNode => :type_of_literal_value,
         Prism::FloatNode => :type_of_literal_value,
-        # `1i` / `2.5ri` lift via `node.value` which is already a
-        # `Complex` Ruby value; same for `1r` / `1.5r` whose
-        # value is a `Rational`. `Type::Constant` accepts both
-        # via `SCALAR_CLASSES`.
+        # `1i` / `2.5ri` lift via `node.value` which is already a `Complex` Ruby value; same for `1r` / `1.5r`
+        # whose value is a `Rational`. `Type::Constant` accepts both via `SCALAR_CLASSES`.
         Prism::ImaginaryNode => :type_of_literal_value,
         Prism::RationalNode => :type_of_literal_value,
         Prism::SymbolNode => :symbol_type_for,
@@ -125,12 +114,10 @@ module Rigor
         Prism::IndexOrWriteNode => :type_of_assignment_write,
         Prism::IndexAndWriteNode => :type_of_assignment_write,
         Prism::MultiWriteNode => :type_of_assignment_write,
-        # LHS-only target nodes (destructuring assignment, pattern matching,
-        # `for x in xs`, block parameter `|a, (b, c)|`). They have no value
-        # to extract — the type-of pass acknowledges the node class so the
-        # coverage scanner stops flagging it; binding the inner names back
-        # into the scope is the StatementEvaluator / MultiTargetBinder /
-        # BlockParameterBinder side's concern.
+        # LHS-only target nodes (destructuring assignment, pattern matching, `for x in xs`, block parameter
+        # `|a, (b, c)|`). They have no value to extract — the type-of pass acknowledges the node class so the
+        # coverage scanner stops flagging it; binding the inner names back into the scope is the
+        # StatementEvaluator / MultiTargetBinder / BlockParameterBinder side's concern.
         Prism::LocalVariableTargetNode => :type_of_non_value,
         Prism::MultiTargetNode => :type_of_non_value,
         Prism::InstanceVariableTargetNode => :type_of_non_value,
@@ -203,9 +190,8 @@ module Rigor
         Prism::ForwardingArgumentsNode => :type_of_non_value,
         Prism::WhileNode => :type_of_loop,
         Prism::UntilNode => :type_of_loop,
-        # `for` matches `eval_for`'s statement-path policy: the loop
-        # expression types `Constant[nil]` (no `break VALUE` observed),
-        # same as `while` / `until` — annotating a `for`'s `end` line as
+        # `for` matches `eval_for`'s statement-path policy: the loop expression types `Constant[nil]` (no
+        # `break VALUE` observed), same as `while` / `until` — annotating a `for`'s `end` line as
         # `Dynamic[top]` was a display artifact of the old mapping.
         Prism::ForNode => :type_of_loop,
         Prism::DefinedNode => :type_of_defined,
@@ -242,13 +228,10 @@ module Rigor
       end
 
       def untraced_type_of(node)
-        # Slice A-declarations. ScopeIndexer pre-fills
-        # `scope.declared_types` for declaration-position nodes
-        # (`module Foo` / `class Bar` headers) with the qualified
-        # `Singleton` type so the header itself does not fall
-        # through to `Dynamic[Top]`. The override is consulted
-        # before any other dispatch and bypasses fail-soft
-        # tracing on a recognised match.
+        # Slice A-declarations. ScopeIndexer pre-fills `scope.declared_types` for declaration-position nodes
+        # (`module Foo` / `class Bar` headers) with the qualified `Singleton` type so the header itself does
+        # not fall through to `Dynamic[Top]`. The override is consulted before any other dispatch and
+        # bypasses fail-soft tracing on a recognised match.
         declared = scope.declared_types[node]
         return declared if declared
 
@@ -284,24 +267,19 @@ module Rigor
         Type::Combinator.constant_of(nil)
       end
 
-      # All `*WriteNode` flavours expose a `.value` rvalue child. Their type
-      # is the type of that rvalue. Binding the result back into the scope
-      # is the responsibility of the statement-level evaluator (Slice 3),
-      # never of `type_of` itself.
+      # All `*WriteNode` flavours expose a `.value` rvalue child. Their type is the type of that rvalue.
+      # Binding the result back into the scope is the responsibility of the statement-level evaluator
+      # (Slice 3), never of `type_of` itself.
       def type_of_assignment_write(node)
         type_of(node.value)
       end
 
-      # Slice 7 phase 1 — instance/class/global variable reads.
-      # Each lookup returns the type currently bound in the
-      # surrounding scope's per-kind binding map (populated by
-      # `StatementEvaluator` write handlers within the same
-      # method body), falling through to `Dynamic[Top]` when no
-      # binding is recorded. Cross-method ivar/cvar inference is
-      # a follow-up slice; the read handlers MUST NOT raise on a
-      # missing binding and MUST NOT record a fallback event in
-      # either branch — the absence of a binding is a recognised
-      # semantic outcome, not a fail-soft compromise.
+      # Slice 7 phase 1 — instance/class/global variable reads. Each lookup returns the type currently bound
+      # in the surrounding scope's per-kind binding map (populated by `StatementEvaluator` write handlers
+      # within the same method body), falling through to `Dynamic[Top]` when no binding is recorded.
+      # Cross-method ivar/cvar inference is a follow-up slice; the read handlers MUST NOT raise on a missing
+      # binding and MUST NOT record a fallback event in either branch — the absence of a binding is a
+      # recognised semantic outcome, not a fail-soft compromise.
       def type_of_instance_variable_read(node)
         scope.ivar(node.name) || dynamic_top
       end
@@ -322,22 +300,18 @@ module Rigor
         statements_type_for(node.statements)
       end
 
-      # Recognised position that does not produce a value: parameter lists
-      # and individual parameter declarations, splats inside argument
-      # lists, key-value pairs in hashes, and the implicit-rest token
-      # inside destructuring. Returning Dynamic[Top] silently keeps these
-      # off the unrecognised list without faking a value type.
+      # Recognised position that does not produce a value: parameter lists and individual parameter
+      # declarations, splats inside argument lists, key-value pairs in hashes, and the implicit-rest token
+      # inside destructuring. Returning Dynamic[Top] silently keeps these off the unrecognised list without
+      # faking a value type.
       def type_of_non_value(_node)
         dynamic_top
       end
 
-      # `Prism::SelfNode` resolves to the scope's
-      # `self_type` when one has been injected (by
-      # `StatementEvaluator` at class-body and method-body
-      # boundaries) or `Dynamic[Top]` at the top level. Class-body
-      # `self` is `Singleton[<class>]`; instance-method `self` is
-      # `Nominal[<class>]`; singleton-method `self` is
-      # `Singleton[<class>]`.
+      # `Prism::SelfNode` resolves to the scope's `self_type` when one has been injected (by
+      # `StatementEvaluator` at class-body and method-body boundaries) or `Dynamic[Top]` at the top level.
+      # Class-body `self` is `Singleton[<class>]`; instance-method `self` is `Nominal[<class>]`;
+      # singleton-method `self` is `Singleton[<class>]`.
       def type_of_self_node(_node)
         scope.self_type || dynamic_top
       end
@@ -346,11 +320,9 @@ module Rigor
         dynamic_top
       end
 
-      # `defined?(expr)` returns `String | nil` per Ruby semantics —
-      # a description of the expression's category (`"local-variable"`,
-      # `"method"`, ...) when defined, or `nil` when not. The argument
-      # is not evaluated (it is statically inspected by the runtime),
-      # so the typer does not recurse into it.
+      # `defined?(expr)` returns `String | nil` per Ruby semantics — a description of the expression's
+      # category (`"local-variable"`, `"method"`, ...) when defined, or `nil` when not. The argument is not
+      # evaluated (it is statically inspected by the runtime), so the typer does not recurse into it.
       def type_of_defined(_node)
         Type::Combinator.union(
           Type::Combinator.nominal_of("String"),
@@ -358,10 +330,9 @@ module Rigor
         )
       end
 
-      # `$1`, `$&`, `$'`, `$+`, `$\`` — the regex back-reference and
-      # numbered-capture globals each carry `String | nil`. They share
-      # the typer because the typing rule is identical regardless of
-      # which back-reference shape Prism emitted.
+      # `$1`, `$&`, `$'`, `$+`, `$\`` — the regex back-reference and numbered-capture globals each carry
+      # `String | nil`. They share the typer because the typing rule is identical regardless of which
+      # back-reference shape Prism emitted.
       def type_of_string_or_nil(_node)
         Type::Combinator.union(
           Type::Combinator.nominal_of("String"),
@@ -369,23 +340,20 @@ module Rigor
         )
       end
 
-      # `$1` / `$2` / ... — numbered match-data globals. When the
-      # narrowing tier has bound a tighter type for this number
-      # (typically `String` after a `=~`-success guard like `unless
-      # /(\d+)/ =~ s; raise; end`), prefer the scope-bound type.
-      # Falls back to the default `String | nil`.
+      # `$1` / `$2` / ... — numbered match-data globals. When the narrowing tier has bound a tighter type for
+      # this number (typically `String` after a `=~`-success guard like `unless /(\d+)/ =~ s; raise; end`),
+      # prefer the scope-bound type. Falls back to the default `String | nil`.
       def type_of_numbered_reference(node)
         scope.global(:"$#{node.number}") || type_of_string_or_nil(node)
       end
 
-      # `$&` / `$'` / `$\`` / `$+` — symbolic back-references. Same
-      # narrowing model as numbered references.
+      # `$&` / `$'` / `$\`` / `$+` — symbolic back-references. Same narrowing model as numbered references.
       def type_of_back_reference(node)
         scope.global(node.name) || type_of_string_or_nil(node)
       end
 
-      # `expr in pattern` — pattern-match predicate. Returns `true`
-      # when the pattern matches, `false` otherwise.
+      # `expr in pattern` — pattern-match predicate. Returns `true` when the pattern matches, `false`
+      # otherwise.
       def type_of_match_predicate(_node)
         Type::Combinator.union(
           Type::Combinator.constant_of(true),
@@ -393,23 +361,20 @@ module Rigor
         )
       end
 
-      # `expr => pattern` — one-line pattern-match assertion. Raises
-      # `NoMatchingPatternError` on mismatch; on success the expression
-      # itself evaluates to `nil`.
+      # `expr => pattern` — one-line pattern-match assertion. Raises `NoMatchingPatternError` on mismatch; on
+      # success the expression itself evaluates to `nil`.
       def type_of_match_required(_node)
         Type::Combinator.constant_of(nil)
       end
 
-      # The expression `Foo` evaluates to the *class object* `Foo`, not
-      # an instance. From Slice 4 phase 2b on we therefore type a
-      # bare-constant reference as `Singleton[Foo]`; method dispatch on
-      # that receiver looks up class methods (`Foo.new`, `Foo.bar`, ...).
+      # The expression `Foo` evaluates to the *class object* `Foo`, not an instance. From Slice 4 phase 2b on
+      # we therefore type a bare-constant reference as `Singleton[Foo]`; method dispatch on that receiver
+      # looks up class methods (`Foo.new`, `Foo.bar`, ...).
       #
-      # Slice A constant-walk: when the literal name does not resolve,
-      # we try a lexical walk based on the surrounding class context
-      # exposed through `scope.self_type` so a reference like
-      # `Inference::FallbackTracer` from inside `Rigor::CLI::Foo`
-      # resolves to `Rigor::Inference::FallbackTracer`.
+      # Slice A constant-walk: when the literal name does not resolve, we try a lexical walk based on the
+      # surrounding class context exposed through `scope.self_type` so a reference like
+      # `Inference::FallbackTracer` from inside `Rigor::CLI::Foo` resolves to
+      # `Rigor::Inference::FallbackTracer`.
       def type_of_constant_read(node)
         resolve_constant_name(node.name.to_s) || fallback_for(node, family: :prism)
       end
@@ -421,14 +386,11 @@ module Rigor
         resolve_constant_name(full_name) || fallback_for(node, family: :prism)
       end
 
-      # Try the literal name first, then walk Ruby's lexical lookup by
-      # progressively prefixing the surrounding class path (peeled
-      # one `::segment` at a time). For each candidate the lookup
-      # consults `Environment#singleton_for_name` (a class object)
-      # and then `Environment#constant_for_name` (a non-class
-      # constant value such as `BUCKETS: Array[Symbol]`).
-      # Returns the matched `Rigor::Type` or nil; the caller decides
-      # whether to fall back.
+      # Try the literal name first, then walk Ruby's lexical lookup by progressively prefixing the surrounding
+      # class path (peeled one `::segment` at a time). For each candidate the lookup consults
+      # `Environment#singleton_for_name` (a class object) and then `Environment#constant_for_name` (a
+      # non-class constant value such as `BUCKETS: Array[Symbol]`). Returns the matched `Rigor::Type` or nil;
+      # the caller decides whether to fall back.
       def resolve_constant_name(name)
         env = scope.environment
         discovered = scope.discovered_classes
@@ -440,9 +402,8 @@ module Rigor
           in_source_class = discovered[candidate]
           return in_source_class if in_source_class
 
-          # In-source value-bearing constants take precedence
-          # over RBS constant decls because user code is the
-          # authoritative source for its own constants.
+          # In-source value-bearing constants take precedence over RBS constant decls because user code is
+          # the authoritative source for its own constants.
           in_source_value = in_source[candidate]
           return in_source_value if in_source_value
 
@@ -452,20 +413,17 @@ module Rigor
         nil
       end
 
-      # The candidate qualified names to try, in Ruby's lexical
-      # order: most-qualified first (the surrounding class path
-      # joined to `name`), then progressively less-qualified, then
-      # the bare `name`. Top-level scopes (no `self_type`) yield
-      # only `[name]`, preserving the pre-walk behaviour.
+      # The candidate qualified names to try, in Ruby's lexical order: most-qualified first (the surrounding
+      # class path joined to `name`), then progressively less-qualified, then the bare `name`. Top-level
+      # scopes (no `self_type`) yield only `[name]`, preserving the pre-walk behaviour.
       def lexical_constant_candidates(name)
         prefix = enclosing_class_path
         candidates = []
         while prefix && !prefix.empty?
           candidates << "#{prefix}::#{name}"
-          # Strip the last `::` segment without `rpartition`'s throwaway
-          # 3-element array + extra substrings (this loop is the sole
-          # caller of the `String#rpartition` allocation seen in the
-          # profile): `rindex` + slice gives the same prefix, or nil.
+          # Strip the last `::` segment without `rpartition`'s throwaway 3-element array + extra substrings
+          # (this loop is the sole caller of the `String#rpartition` allocation seen in the profile): `rindex`
+          # + slice gives the same prefix, or nil.
           idx = prefix.rindex("::")
           prefix = idx ? prefix[0, idx] : nil
         end
@@ -473,10 +431,8 @@ module Rigor
         candidates
       end
 
-      # Pulls the enclosing qualified class name out of
-      # `scope.self_type` when one is set. `Nominal[T]` and
-      # `Singleton[T]` both expose `class_name`. Returns nil when
-      # no class context is available (top-level).
+      # Pulls the enclosing qualified class name out of `scope.self_type` when one is set. `Nominal[T]` and
+      # `Singleton[T]` both expose `class_name`. Returns nil when no class context is available (top-level).
       def enclosing_class_path
         st = scope.self_type
         case st
@@ -484,23 +440,16 @@ module Rigor
         end
       end
 
-      # Slice 5 phase 1 upgrades hash literals to `HashShape{...}`
-      # when every entry is a static `AssocNode` whose key is a
-      # `SymbolNode` or `StringNode` with a known value (covering the
-      # `{ a: 1, "b" => 2 }` pattern and falling back to the generic
-      # `Hash[K, V]` form otherwise). Splatted entries
-      # (`{ **other }`) and dynamic keys widen to the underlying
-      # `Hash[K, V]` form by unioning the types each entry exposes;
-      # when no concrete pair survives we fall back to the raw `Hash`
-      # so callers stay backward compatible.
+      # Slice 5 phase 1 upgrades hash literals to `HashShape{...}` when every entry is a static `AssocNode`
+      # whose key is a `SymbolNode` or `StringNode` with a known value (covering the `{ a: 1, "b" => 2 }`
+      # pattern and falling back to the generic `Hash[K, V]` form otherwise). Splatted entries (`{ **other }`)
+      # and dynamic keys widen to the underlying `Hash[K, V]` form by unioning the types each entry exposes;
+      # when no concrete pair survives we fall back to the raw `Hash` so callers stay backward compatible.
       def type_of_hash(node)
         elements = node.respond_to?(:elements) ? node.elements : []
-        # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier
-        # rather than `Nominal[Hash]`, mirroring the v0.0.6 empty-
-        # array literal change. Both forms erase to plain `Hash`,
-        # but `HashShape{}` pins the literal's known size (zero)
-        # so HashShape projections (`empty?`, `first`, `count`,
-        # …) fold against it.
+        # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier rather than `Nominal[Hash]`, mirroring the
+        # v0.0.6 empty-array literal change. Both forms erase to plain `Hash`, but `HashShape{}` pins the
+        # literal's known size (zero) so HashShape projections (`empty?`, `first`, `count`, …) fold against it.
         return Type::Combinator.hash_shape_of({}) if elements.empty?
 
         shape = static_hash_shape_for(elements)
@@ -515,9 +464,8 @@ module Rigor
         )
       end
 
-      # Builds `HashShape{...}` when every entry is an `AssocNode`
-      # whose key is a static Symbol or String literal. Returns nil
-      # otherwise so the caller falls back to the generic shape.
+      # Builds `HashShape{...}` when every entry is an `AssocNode` whose key is a static Symbol or String
+      # literal. Returns nil otherwise so the caller falls back to the generic shape.
       def static_hash_shape_for(elements)
         pairs = {}
         elements.each do |entry|
@@ -534,10 +482,9 @@ module Rigor
         Type::Combinator.hash_shape_of(pairs)
       end
 
-      # Returns the static (Symbol|String) literal carried by a hash
-      # key node, or nil when the key is dynamic. We only treat
-      # SymbolNode#value and StringNode#unescaped as static when they
-      # are non-nil (interpolation produces a nil unescaped).
+      # Returns the static (Symbol|String) literal carried by a hash key node, or nil when the key is
+      # dynamic. We only treat SymbolNode#value and StringNode#unescaped as static when they are non-nil
+      # (interpolation produces a nil unescaped).
       def static_hash_key(node)
         case node
         when Prism::SymbolNode
@@ -560,13 +507,10 @@ module Rigor
         [keys, values]
       end
 
-      # An interpolated string `"#{a}b#{c}"` is `literal-string`
-      # when every part contributes literal-bearing material:
-      # plain text segments are literal by construction, embedded
-      # expressions count when their type is itself literal-string-
-      # compatible (a `Constant<String>`, the `literal-string`
-      # carrier, an `Intersection` containing it, or a `Union`
-      # whose members all qualify). Otherwise the result widens to
+      # An interpolated string `"#{a}b#{c}"` is `literal-string` when every part contributes literal-bearing
+      # material: plain text segments are literal by construction, embedded expressions count when their type
+      # is itself literal-string-compatible (a `Constant<String>`, the `literal-string` carrier, an
+      # `Intersection` containing it, or a `Union` whose members all qualify). Otherwise the result widens to
       # plain `Nominal[String]` as before.
       def type_of_interpolated_string(node)
         return Type::Combinator.literal_string if interpolation_parts_literal?(node.parts)
@@ -601,11 +545,9 @@ module Rigor
         Type::Combinator.constant_of(node.name)
       end
 
-      # `class Foo; body; end`, `module Foo; body; end`, and `class << x;
-      # body; end` evaluate to the value of the body's last expression,
-      # or `nil` when the body is empty. We do not track class/module
-      # scope yet, so the body is typed in the surrounding scope and
-      # that result is returned.
+      # `class Foo; body; end`, `module Foo; body; end`, and `class << x; body; end` evaluate to the value of
+      # the body's last expression, or `nil` when the body is empty. We do not track class/module scope yet,
+      # so the body is typed in the surrounding scope and that result is returned.
       def type_of_class_or_module(node)
         body = node.body
         return Type::Combinator.constant_of(nil) if body.nil?
@@ -613,35 +555,29 @@ module Rigor
         type_of(body)
       end
 
-      # `alias x y`, `alias $x $y`, and `undef foo` all evaluate to nil at
-      # runtime; the constant carrier captures that exactly.
+      # `alias x y`, `alias $x $y`, and `undef foo` all evaluate to nil at runtime; the constant carrier
+      # captures that exactly.
       def type_of_nil_value(_node)
         Type::Combinator.constant_of(nil)
       end
 
-      # `if c; t; (elsif c2; ...; )* else; e; end`. Prism nests `elsif`
-      # branches as `IfNode#subsequent`. Slice 3 phase 1 types both
-      # branches in the receiver scope and returns their union; scope
-      # rebinding is the StatementEvaluator's job (Slice 3 phase 2).
-      # Without an else clause the branch's implicit value is nil, which
-      # is included in the union.
+      # `if c; t; (elsif c2; ...; )* else; e; end`. Prism nests `elsif` branches as `IfNode#subsequent`. Slice
+      # 3 phase 1 types both branches in the receiver scope and returns their union; scope rebinding is the
+      # StatementEvaluator's job (Slice 3 phase 2). Without an else clause the branch's implicit value is nil,
+      # which is included in the union.
       #
-      # v0.0.6 — when the predicate folds to a `Type::Constant` whose
-      # value is Ruby-truthy (resp. Ruby-falsey), the unreachable
-      # branch is elided so the if-expression's type is the live
-      # branch alone. Statement-level branch elision lives in
-      # `StatementEvaluator#eval_if`; this handler covers the
-      # expression-position ternary form (`a ? b : c`) and any
-      # `if`/`unless` reached through `type_of`.
+      # v0.0.6 — when the predicate folds to a `Type::Constant` whose value is Ruby-truthy (resp.
+      # Ruby-falsey), the unreachable branch is elided so the if-expression's type is the live branch alone.
+      # Statement-level branch elision lives in `StatementEvaluator#eval_if`; this handler covers the
+      # expression-position ternary form (`a ? b : c`) and any `if`/`unless` reached through `type_of`.
       def type_of_if(node)
         then_type = statements_or_nil(node.statements)
         else_type = if_else_type(node.subsequent)
         elide_or_union(node.predicate, then_type, else_type)
       end
 
-      # `unless c; t; else; e; end`. Prism uses `else_clause` here (no
-      # `elsif` chain). Branch-elision logic mirrors `type_of_if`,
-      # inverted: a truthy predicate selects the else branch.
+      # `unless c; t; else; e; end`. Prism uses `else_clause` here (no `elsif` chain). Branch-elision logic
+      # mirrors `type_of_if`, inverted: a truthy predicate selects the else branch.
       def type_of_unless(node)
         then_type = statements_or_nil(node.statements)
         else_type = if_else_type(node.else_clause)
@@ -654,11 +590,9 @@ module Rigor
         type_of(subsequent)
       end
 
-      # Routes the predicate's typed value through branch elision.
-      # `live_when_truthy` and `live_when_falsey` are the branch
-      # types selected by the predicate's polarity; the names
-      # match `IfNode` semantics directly and invert at the
-      # `type_of_unless` call site.
+      # Routes the predicate's typed value through branch elision. `live_when_truthy` and `live_when_falsey`
+      # are the branch types selected by the predicate's polarity; the names match `IfNode` semantics
+      # directly and invert at the `type_of_unless` call site.
       def elide_or_union(predicate, live_when_truthy, live_when_falsey)
         case constant_predicate_polarity(predicate)
         when :truthy then live_when_truthy
@@ -667,14 +601,10 @@ module Rigor
         end
       end
 
-      # Returns `:truthy`, `:falsey`, or `nil` for an arbitrary
-      # predicate expression under three-valued logic.
-      # {Narrowing.predicate_certainty} owns the judgment (the same
-      # one `StatementEvaluator#live_branch_for_if` reads on the
-      # scope side): `Nominal[Integer]` (always truthy in Ruby),
-      # `Constant[nil]`, and `Constant[false]` fold one branch;
-      # `Union[true, false]`, `Dynamic[T]`, and `Top` keep both
-      # branches live.
+      # Returns `:truthy`, `:falsey`, or `nil` for an arbitrary predicate expression under three-valued logic.
+      # {Narrowing.predicate_certainty} owns the judgment (the same one `StatementEvaluator#live_branch_for_if`
+      # reads on the scope side): `Nominal[Integer]` (always truthy in Ruby), `Constant[nil]`, and
+      # `Constant[false]` fold one branch; `Union[true, false]`, `Dynamic[T]`, and `Top` keep both branches live.
       def constant_predicate_polarity(predicate)
         return nil if predicate.nil?
 
@@ -685,27 +615,22 @@ module Rigor
         statements_or_nil(node.statements)
       end
 
-      # `a && b` and `a || b` short-circuit at the value level:
-      # `a && b` returns `a` when `a` is falsey, else `b`.
-      # `a || b` returns `a` when `a` is truthy,  else `b`.
+      # `a && b` and `a || b` short-circuit at the value level: `a && b` returns `a` when `a` is falsey, else
+      # `b`. `a || b` returns `a` when `a` is truthy, else `b`.
       #
-      # v0.0.6 — when the left operand folds to a `Type::Constant`,
-      # we know which side actually flows through, so the result
-      # is one operand's type instead of a union. Otherwise the
-      # union-of-both-operands fallback is preserved.
+      # v0.0.6 — when the left operand folds to a `Type::Constant`, we know which side actually flows
+      # through, so the result is one operand's type instead of a union. Otherwise the union-of-both-operands
+      # fallback is preserved.
       def type_of_and_or(node)
         left_type = type_of(node.left)
         polarity = constant_value_polarity(left_type)
         return short_circuit_for(node, left_type, polarity) if polarity
 
-        # The left operand only flows through on the edge that short-
-        # circuits: `a || b` yields `a` solely when `a` is truthy, so its
-        # falsey constituents (`nil` / `false`) can never be the value of
-        # the OrNode (they hand off to `b`); `a && b` yields `a` solely
-        # when `a` is falsey. Narrow the surviving left edge before the
-        # union so `s || full` (with `s : String?`) types `String |
-        # <full>` rather than re-admitting the stripped `nil`. Mirrors
-        # `StatementEvaluator#eval_and_or`'s `skipped_type`.
+        # The left operand only flows through on the edge that short-circuits: `a || b` yields `a` solely
+        # when `a` is truthy, so its falsey constituents (`nil` / `false`) can never be the value of the
+        # OrNode (they hand off to `b`); `a && b` yields `a` solely when `a` is falsey. Narrow the surviving
+        # left edge before the union so `s || full` (with `s : String?`) types `String | <full>` rather than
+        # re-admitting the stripped `nil`. Mirrors `StatementEvaluator#eval_and_or`'s `skipped_type`.
         surviving_left =
           if node.is_a?(Prism::AndNode)
             Narrowing.narrow_falsey(left_type)
@@ -724,37 +649,30 @@ module Rigor
         end
       end
 
-      # Returns `:truthy` / `:falsey` for a `Type::Constant`,
-      # nil otherwise. Mirrors `constant_predicate_polarity` but
-      # operates on a typed value (already-type-of'd) rather
-      # than a Prism node, so the same predicate analysis can
-      # be reused in both contexts.
+      # Returns `:truthy` / `:falsey` for a `Type::Constant`, nil otherwise. Mirrors
+      # `constant_predicate_polarity` but operates on a typed value (already-type-of'd) rather than a Prism
+      # node, so the same predicate analysis can be reused in both contexts.
       def constant_value_polarity(type)
         return nil unless type.is_a?(Type::Constant)
 
         type.value ? :truthy : :falsey
       end
 
-      # Three-valued evaluation of `case predicate when pattern`
-      # dispatch. For each `when` clause we ask: under static types,
-      # does `pattern === predicate` definitely match (`:yes`),
-      # definitely not match (`:no`), or possibly match (`:maybe`)?
-      # Walking in source order:
+      # Three-valued evaluation of `case predicate when pattern` dispatch. For each `when` clause we ask:
+      # under static types, does `pattern === predicate` definitely match (`:yes`), definitely not match
+      # (`:no`), or possibly match (`:maybe`)? Walking in source order:
       #
-      # - `:yes` — this branch fires, subsequent branches are
-      #   unreachable. Result = union(prior `:maybe` branches, this
-      #   `:yes` branch).
+      # - `:yes` — this branch fires, subsequent branches are unreachable. Result = union(prior `:maybe`
+      #   branches, this `:yes` branch).
       # - `:no`  — branch dropped.
       # - `:maybe` — branch is a candidate, continue.
       #
-      # If no `:yes` was reached, the else clause (or `Constant[nil]`
-      # when absent) is added to the candidate set.
+      # If no `:yes` was reached, the else clause (or `Constant[nil]` when absent) is added to the candidate
+      # set.
       #
-      # The `case ... in` pattern-matching form (`CaseMatchNode`) and
-      # the predicate-less form (`case; when c1; ...`) bypass the
-      # `===` analysis: pattern matching has richer semantics, and a
-      # predicate-less `case` reduces to a `if c1; ...; elsif c2`
-      # chain that statement-level narrowing already handles.
+      # The `case ... in` pattern-matching form (`CaseMatchNode`) and the predicate-less form (`case; when
+      # c1; ...`) bypass the `===` analysis: pattern matching has richer semantics, and a predicate-less
+      # `case` reduces to a `if c1; ...; elsif c2` chain that statement-level narrowing already handles.
       def type_of_case(node)
         return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode) || node.predicate.nil?
 
@@ -789,10 +707,8 @@ module Rigor
         type_of(node.else_clause)
       end
 
-      # Combines per-pattern certainty across a `when` clause's
-      # conditions (`when a, b, c` ≡ `a === s || b === s || c === s`).
-      # `:yes` if any pattern is `:yes`; `:no` if all are `:no`;
-      # `:maybe` otherwise.
+      # Combines per-pattern certainty across a `when` clause's conditions (`when a, b, c` ≡ `a === s || b
+      # === s || c === s`). `:yes` if any pattern is `:yes`; `:no` if all are `:no`; `:maybe` otherwise.
       def case_when_branch_certainty(subject_type, when_node)
         return :maybe unless when_node.respond_to?(:conditions)
 
@@ -804,23 +720,17 @@ module Rigor
         :maybe
       end
 
-      # Static three-valued certainty for `pattern === subject`.
-      # Specialises two pattern shapes:
+      # Static three-valued certainty for `pattern === subject`. Specialises two pattern shapes:
       #
-      # - **Class / Module reference** (`Integer`, `Foo::Bar`):
-      #   reduce to `subject.is_a?(class)` via
-      #   `Narrowing.narrow_class` / `narrow_not_class`. A Bot
-      #   truthy fragment means no inhabitant matches (`:no`); a
-      #   Bot falsey fragment means every inhabitant matches
-      #   (`:yes`).
-      # - **Value-equality literal** (numeric / String / Symbol /
-      #   true / false / nil) against a `Constant[c]` subject:
-      #   the static comparison `pattern_value === c` is exact.
-      #   Other subject carriers stay `:maybe` because the
-      #   runtime value isn't pinned.
+      # - **Class / Module reference** (`Integer`, `Foo::Bar`): reduce to `subject.is_a?(class)` via
+      #   `Narrowing.narrow_class` / `narrow_not_class`. A Bot truthy fragment means no inhabitant matches
+      #   (`:no`); a Bot falsey fragment means every inhabitant matches (`:yes`).
+      # - **Value-equality literal** (numeric / String / Symbol / true / false / nil) against a
+      #   `Constant[c]` subject: the static comparison `pattern_value === c` is exact. Other subject
+      #   carriers stay `:maybe` because the runtime value isn't pinned.
       #
-      # Other pattern shapes (Range, Regexp, custom `===`) stay
-      # `:maybe` — the existing union fallback handles them.
+      # Other pattern shapes (Range, Regexp, custom `===`) stay `:maybe` — the existing union fallback
+      # handles them.
       def case_when_pattern_certainty(subject_type, pattern_node)
         class_name = Source::ConstantPath.qualified_name_or_nil(pattern_node)
         return Narrowing.class_pattern_certainty(subject_type, class_name, environment: scope.environment) if class_name
@@ -831,11 +741,9 @@ module Rigor
         :maybe
       end
 
-      # Returns `{ value: v }` when `pattern_node` types to a
-      # `Constant[v]` of a value-equality-safe class (so `===`
-      # reduces to `==`), else nil. Wrapped in a hash so a literal
-      # `nil` / `false` value doesn't collide with the "no literal"
-      # signal.
+      # Returns `{ value: v }` when `pattern_node` types to a `Constant[v]` of a value-equality-safe class
+      # (so `===` reduces to `==`), else nil. Wrapped in a hash so a literal `nil` / `false` value doesn't
+      # collide with the "no literal" signal.
       def literal_pattern_value(pattern_node)
         type = type_of(pattern_node)
         return nil unless type.is_a?(Type::Constant)
@@ -844,19 +752,16 @@ module Rigor
         { value: type.value }
       end
 
-      # `when` clauses for `case` and `in` clauses for `case ... in` have
-      # the same body shape; we reuse one handler for both Prism node
-      # classes.
+      # `when` clauses for `case` and `in` clauses for `case ... in` have the same body shape; we reuse one
+      # handler for both Prism node classes.
       def type_of_when_or_in(node)
         statements_or_nil(node.statements)
       end
 
-      # `begin; body; rescue R => e; r1; rescue; r2; else; e; ensure; f; end`.
-      # The result is the union of every value-producing branch: the body
-      # (or the else-clause when present, since it replaces the body's
-      # value when no exception fires), plus each rescue body in the
-      # rescue chain. The ensure clause runs but does not contribute to
-      # the begin's value.
+      # `begin; body; rescue R => e; r1; rescue; r2; else; e; ensure; f; end`. The result is the union of
+      # every value-producing branch: the body (or the else-clause when present, since it replaces the body's
+      # value when no exception fires), plus each rescue body in the rescue chain. The ensure clause runs but
+      # does not contribute to the begin's value.
       def type_of_begin(node)
         rescue_clause = node.rescue_clause
         else_clause = node.else_clause
@@ -888,10 +793,8 @@ module Rigor
         statements_or_nil(node.statements)
       end
 
-      # `expr rescue fallback` is RescueModifierNode in Prism. The result
-      # is `expr`'s type when no exception is raised and `fallback`'s
-      # type otherwise; both paths are reachable, so the result is their
-      # union.
+      # `expr rescue fallback` is RescueModifierNode in Prism. The result is `expr`'s type when no exception
+      # is raised and `fallback`'s type otherwise; both paths are reachable, so the result is their union.
       def type_of_rescue_modifier(node)
         Type::Combinator.union(type_of(node.expression), type_of(node.rescue_expression))
       end
@@ -900,20 +803,16 @@ module Rigor
         statements_or_nil(node.statements)
       end
 
-      # `return`, `break`, `next`, `retry`, and `redo` all transfer
-      # control instead of producing a value. Their type is Bot, the
-      # empty type that absorbs cleanly under union (e.g.
-      # `Constant[1] | Bot == Constant[1]`), so the surrounding
-      # control-flow handlers collapse correctly when one branch jumps.
+      # `return`, `break`, `next`, `retry`, and `redo` all transfer control instead of producing a value.
+      # Their type is Bot, the empty type that absorbs cleanly under union (e.g. `Constant[1] | Bot ==
+      # Constant[1]`), so the surrounding control-flow handlers collapse correctly when one branch jumps.
       def type_of_jump(_node)
         Type::Combinator.bot
       end
 
-      # `while` and `until` loops produce nil unless interrupted by
-      # `break VALUE`; the expression value of `break VALUE` is not yet
-      # modeled (scope break-path propagation landed in `eval_loop`).
-      # Returning Constant[nil] is safe and matches Ruby semantics for
-      # the common case.
+      # `while` and `until` loops produce nil unless interrupted by `break VALUE`; the expression value of
+      # `break VALUE` is not yet modeled (scope break-path propagation landed in `eval_loop`). Returning
+      # Constant[nil] is safe and matches Ruby semantics for the common case.
       def type_of_loop(_node)
         Type::Combinator.constant_of(nil)
       end
@@ -930,12 +829,10 @@ module Rigor
         nominal_range_for_endpoints(node.left, node.right)
       end
 
-      # Derives `Nominal[Range, [T]]` from the endpoint expression
-      # types when at least one endpoint is statically typeable. The
-      # element parameter is the union of the endpoint types (lifted
-      # from `Constant<v>` to `Nominal<v.class>` so the carrier matches
-      # what `Range#each` would yield). Falls back to bare
-      # `Nominal[Range]` when no endpoint contributes a typable shape.
+      # Derives `Nominal[Range, [T]]` from the endpoint expression types when at least one endpoint is
+      # statically typeable. The element parameter is the union of the endpoint types (lifted from
+      # `Constant<v>` to `Nominal<v.class>` so the carrier matches what `Range#each` would yield). Falls back
+      # to bare `Nominal[Range]` when no endpoint contributes a typable shape.
       def nominal_range_for_endpoints(left_node, right_node)
         endpoints = [left_node, right_node].compact.map { |n| range_endpoint_element_type(n) }
         endpoints.reject! { |t| t.equal?(Type::Combinator.untyped) }
@@ -959,12 +856,10 @@ module Rigor
         end
       end
 
-      # v0.0.7 — non-interpolated regex literals lift to
-      # `Constant<Regexp>` so `Constant<String>#scan(/regex/)`
-      # / `#match(/regex/)` etc. can fold through the catalog
-      # tier. Interpolated regexes (`/foo#{x}/`) reach the
-      # second `Prism::InterpolatedRegularExpressionNode` arm
-      # which keeps the conservative `Nominal[Regexp]` answer.
+      # v0.0.7 — non-interpolated regex literals lift to `Constant<Regexp>` so `Constant<String>#scan(/regex/)`
+      # / `#match(/regex/)` etc. can fold through the catalog tier. Interpolated regexes (`/foo#{x}/`) reach
+      # the second `Prism::InterpolatedRegularExpressionNode` arm which keeps the conservative
+      # `Nominal[Regexp]` answer.
       def type_of_regexp(node)
         return Type::Combinator.nominal_of(Regexp) unless node.is_a?(Prism::RegularExpressionNode)
 
@@ -974,15 +869,12 @@ module Rigor
         Type::Combinator.nominal_of(Regexp)
       end
 
-      # A range endpoint folds to a static value when it is a literal
-      # (`IntegerNode` / `StringNode`) or when its *evaluated* type is a
-      # `Constant<v>` carrying a range-able value (Integer / Float /
-      # String — matching the literal-path value kinds). The evaluated
-      # arm lets `(1..n)` fold to `Constant<Range>` when per-call body
-      # inference has pinned `n` to a constant (fact2 chain). A `nil`
-      # node is a beginless/endless boundary: keep today's static-nil
-      # behaviour (which yields `Constant<Range>` only when the *other*
-      # end is also static, preserving today's beginless/endless path).
+      # A range endpoint folds to a static value when it is a literal (`IntegerNode` / `StringNode`) or when
+      # its *evaluated* type is a `Constant<v>` carrying a range-able value (Integer / Float / String —
+      # matching the literal-path value kinds). The evaluated arm lets `(1..n)` fold to `Constant<Range>`
+      # when per-call body inference has pinned `n` to a constant (fact2 chain). A `nil` node is a
+      # beginless/endless boundary: keep today's static-nil behaviour (which yields `Constant<Range>` only
+      # when the *other* end is also static, preserving today's beginless/endless path).
       def static_range_endpoint(node)
         return [true, nil] if node.nil?
         return [true, node.value] if node.is_a?(Prism::IntegerNode)
@@ -997,10 +889,9 @@ module Rigor
         [false, nil]
       end
 
-      # Helper for the many control-flow handlers that read a body
-      # `Prism::StatementsNode` or treat its absence as nil. Note that
-      # Prism uses nil (rather than an empty `StatementsNode`) for
-      # missing bodies in many node kinds.
+      # Helper for the many control-flow handlers that read a body `Prism::StatementsNode` or treat its
+      # absence as nil. Note that Prism uses nil (rather than an empty `StatementsNode`) for missing bodies
+      # in many node kinds.
       def statements_or_nil(statements_node)
         return Type::Combinator.constant_of(nil) if statements_node.nil?
 
@@ -1050,41 +941,34 @@ module Rigor
         Type::Combinator.constant_of(unescaped)
       end
 
-      # Backtick (`cmd`) and `%x{cmd}` invoke Kernel#` and always return a
-      # String. Even when the content is statically known, we widen to
-      # Nominal[String] because the runtime value depends on the
-      # subprocess output, not the source text.
+      # Backtick (`cmd`) and `%x{cmd}` invoke Kernel#` and always return a String. Even when the content is
+      # statically known, we widen to Nominal[String] because the runtime value depends on the subprocess
+      # output, not the source text.
       def type_of_xstring(_node)
         Type::Combinator.nominal_of(String)
       end
 
-      # __FILE__ is the source file path. Always non-empty when
-      # parsing a real file (the path resolver gives the buffer
-      # name, which is at minimum `"(stdin)"` / `"-e"` / a real
-      # path — never the empty String). Widened to
-      # `non-empty-string` instead of `Nominal[String]` so
-      # downstream String-emptiness checks know the value cannot
-      # be `""`.
+      # __FILE__ is the source file path. Always non-empty when parsing a real file (the path resolver gives
+      # the buffer name, which is at minimum `"(stdin)"` / `"-e"` / a real path — never the empty String).
+      # Widened to `non-empty-string` instead of `Nominal[String]` so downstream String-emptiness checks know
+      # the value cannot be `""`.
       def type_of_source_file(_node)
         Type::Combinator.non_empty_string
       end
 
-      # __LINE__ is the line of the source literal. Ruby line
-      # numbers are 1-indexed, so `__LINE__` is always at least
-      # 1 — `positive-int` (Integer in `[1, +Inf)`) is the
-      # canonical refinement.
+      # __LINE__ is the line of the source literal. Ruby line numbers are 1-indexed, so `__LINE__` is always
+      # at least 1 — `positive-int` (Integer in `[1, +Inf)`) is the canonical refinement.
       def type_of_source_line(_node)
         Type::Combinator.positive_int
       end
 
-      # `# shareable_constant_value:` magic comment wraps the next
-      # constant write. Type is the wrapped write's value.
+      # `# shareable_constant_value:` magic comment wraps the next constant write. Type is the wrapped
+      # write's value.
       def type_of_shareable_constant(node)
         type_of(node.write)
       end
 
-      # `{ x: }` shorthand hash. The implicit value is the call to
-      # `x` (or a local read of `x`). Delegate.
+      # `{ x: }` shorthand hash. The implicit value is the call to `x` (or a local read of `x`). Delegate.
       def type_of_implicit(node)
         type_of(node.value)
       end
@@ -1093,25 +977,20 @@ module Rigor
         scope.local(node.name) || dynamic_top
       end
 
-      # `it` (Ruby 3.4) — `ItLocalVariableReadNode` carries no `name`
-      # field; the implicit name is always `:it`, matching the binding
-      # `BlockParameterBinder` installs for `Prism::ItParametersNode`.
+      # `it` (Ruby 3.4) — `ItLocalVariableReadNode` carries no `name` field; the implicit name is always
+      # `:it`, matching the binding `BlockParameterBinder` installs for `Prism::ItParametersNode`.
       def it_read(_node)
         scope.local(:it) || dynamic_top
       end
 
-      # Slice 5 phase 1 upgrades array literals to `Tuple[T1..Tn]`
-      # when every element is a non-splat value. Splatted entries
-      # (`[*xs, 1]`) preserve the Slice 4 phase 2d behavior: we union
-      # the contributed element types and emit
-      # `Nominal[Array, [union]]`.
+      # Slice 5 phase 1 upgrades array literals to `Tuple[T1..Tn]` when every element is a non-splat value.
+      # Splatted entries (`[*xs, 1]`) preserve the Slice 4 phase 2d behavior: we union the contributed
+      # element types and emit `Nominal[Array, [union]]`.
       #
-      # v0.0.6 — the empty literal `[]` resolves to the empty
-      # `Tuple[]` carrier rather than the raw `Nominal[Array]`.
-      # Both carriers erase to RBS `Array`, but `Tuple[]` pins
-      # the literal's known arity (zero), which lets the
-      # per-element block fold concatenate across all-empty
-      # positions like `[1, 2].flat_map { |_| [] }`.
+      # v0.0.6 — the empty literal `[]` resolves to the empty `Tuple[]` carrier rather than the raw
+      # `Nominal[Array]`. Both carriers erase to RBS `Array`, but `Tuple[]` pins the literal's known arity
+      # (zero), which lets the per-element block fold concatenate across all-empty positions like `[1,
+      # 2].flat_map { |_| [] }`.
       def array_type_for(node)
         elements = node.elements
         return Type::Combinator.tuple_of if elements.empty?
@@ -1141,26 +1020,20 @@ module Rigor
         type_of(body.last)
       end
 
-      # Indexed-collection narrowing — `receiver[key]` after a
-      # prior `receiver[key] ||= default` reads the post-`||=`
-      # type when the receiver and key are stable enough to
-      # address. Sits ahead of `MethodDispatcher.dispatch` so
-      # the standard `Hash#[]` / `Array#[]` answer (which would
-      # fold to `Constant[nil]` for an empty `HashShape{}` or
-      # `Tuple[]`) does not override the narrowing. See
+      # Indexed-collection narrowing — `receiver[key]` after a prior `receiver[key] ||= default` reads the
+      # post-`||=` type when the receiver and key are stable enough to address. Sits ahead of
+      # `MethodDispatcher.dispatch` so the standard `Hash#[]` / `Array#[]` answer (which would fold to
+      # `Constant[nil]` for an empty `HashShape{}` or `Tuple[]`) does not override the narrowing. See
       # {Inference::IndexedNarrowing}.
       def indexed_narrowing_for(node)
         IndexedNarrowing.lookup_for_call(node, scope) || method_chain_narrowing_for(node)
       end
 
-      # Stable single-hop chain narrowing — `receiver.method`
-      # after an `is_a?` / `kind_of?` / `instance_of?` predicate
-      # established the narrowing on the dominated edge. The
-      # call MUST be no-arg + no-block + rooted at a local-var /
-      # ivar read; everything else falls through to the
-      # standard dispatcher. ROADMAP § Future cycles —
-      # "Method-call receiver narrowing across stable
-      # receivers" — Law-of-Demeter-justified single-hop scope.
+      # Stable single-hop chain narrowing — `receiver.method` after an `is_a?` / `kind_of?` / `instance_of?`
+      # predicate established the narrowing on the dominated edge. The call MUST be no-arg + no-block +
+      # rooted at a local-var / ivar read; everything else falls through to the standard dispatcher. ROADMAP
+      # § Future cycles — "Method-call receiver narrowing across stable receivers" — Law-of-Demeter-justified
+      # single-hop scope.
       def method_chain_narrowing_for(node)
         return nil unless node.is_a?(Prism::CallNode)
         return nil unless node.block.nil?
@@ -1174,14 +1047,10 @@ module Rigor
         end
       end
 
-      # v0.0.3 A — implicit-self calls prefer a same-named
-      # top-level `def` over RBS dispatch. Without this,
-      # a helper like `def select(...)` defined inside an
-      # `RSpec.describe ... do ... end` block mis-routes
-      # through `Enumerable#select` / `Object#select` and
-      # the caller observes `Array[Elem]` instead of the
-      # helper's actual return type. The check fires only
-      # for `node.receiver.nil?` (true implicit self), so
+      # v0.0.3 A — implicit-self calls prefer a same-named top-level `def` over RBS dispatch. Without this, a
+      # helper like `def select(...)` defined inside an `RSpec.describe ... do ... end` block mis-routes
+      # through `Enumerable#select` / `Object#select` and the caller observes `Array[Elem]` instead of the
+      # helper's actual return type. The check fires only for `node.receiver.nil?` (true implicit self), so
       # explicit-receiver dispatch is unaffected.
       def try_local_def_dispatch(node, receiver, arg_types)
         local_def = node.receiver.nil? ? scope.top_level_def_for(node.name) : nil
@@ -1190,24 +1059,19 @@ module Rigor
         local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
         return local_inference if local_inference
 
-        # The local def matches by name but the inference was
-        # disqualified — the parameter shape is too complex for the
-        # first-iteration binder (kwargs / optionals / rest), so the
-        # body could not be re-typed. `Dynamic[Top]` is the
-        # safest answer: RBS dispatch would be wrong (the method
-        # is user-defined and shadows whatever ancestor method the
-        # dispatch would find), and `Dynamic[Top]` propagates
-        # correctly through downstream call chains without
-        # surfacing misleading false-positive diagnostics.
+        # The local def matches by name but the inference was disqualified — the parameter shape is too
+        # complex for the first-iteration binder (kwargs / optionals / rest), so the body could not be
+        # re-typed. `Dynamic[Top]` is the safest answer: RBS dispatch would be wrong (the method is
+        # user-defined and shadows whatever ancestor method the dispatch would find), and `Dynamic[Top]`
+        # propagates correctly through downstream call chains without surfacing misleading false-positive
+        # diagnostics.
         dynamic_top
       end
 
-      # Slice 2 routes call expressions through `MethodDispatcher`. The
-      # receiver and every argument are typed first, then the dispatcher is
-      # asked for a result type. A nil result triggers the fail-soft fallback
-      # for the CallNode itself (the inner type_of calls already record
-      # their own fallbacks for unrecognised receivers/args, so the tracer
-      # captures both the immediate dispatch miss and the deeper cause).
+      # Slice 2 routes call expressions through `MethodDispatcher`. The receiver and every argument are typed
+      # first, then the dispatcher is asked for a result type. A nil result triggers the fail-soft fallback
+      # for the CallNode itself (the inner type_of calls already record their own fallbacks for unrecognised
+      # receivers/args, so the tracer captures both the immediate dispatch miss and the deeper cause).
       def call_type_for(node)
         narrowed = indexed_narrowing_for(node)
         return narrowed if narrowed
@@ -1219,15 +1083,11 @@ module Rigor
         local_def_result = try_local_def_dispatch(node, receiver, arg_types)
         return local_def_result if local_def_result
 
-        # v0.0.6 phase 2 — per-element block fold for Tuple
-        # receivers. When `[a, b, c].map { |x| f(x) }` and the
-        # receiver is a `Tuple` carrier with finite elements,
-        # type the block body once per position with the
-        # corresponding element bound to the block parameter
-        # and assemble the results into a `Tuple[U_1..U_n]`.
-        # This sits ahead of `MethodDispatcher.dispatch` so
-        # the RBS tier does not re-widen the answer back to
-        # `Array[union]`.
+        # v0.0.6 phase 2 — per-element block fold for Tuple receivers. When `[a, b, c].map { |x| f(x) }` and
+        # the receiver is a `Tuple` carrier with finite elements, type the block body once per position with
+        # the corresponding element bound to the block parameter and assemble the results into a
+        # `Tuple[U_1..U_n]`. This sits ahead of `MethodDispatcher.dispatch` so the RBS tier does not re-widen
+        # the answer back to `Array[union]`.
         per_element = try_per_element_block_fold(node, receiver)
         return per_element if per_element
 
@@ -1248,48 +1108,38 @@ module Rigor
         )
         return result if result
 
-        # v0.0.2 #5 — inter-procedural inference for
-        # user-defined methods. When dispatch misses but the
-        # receiver is a user class with a `def` body, re-type
-        # the body with the call's argument types bound and
-        # return the body's last-expression type.
+        # v0.0.2 #5 — inter-procedural inference for user-defined methods. When dispatch misses but the
+        # receiver is a user class with a `def` body, re-type the body with the call's argument types bound
+        # and return the body's last-expression type.
         user_inference = try_user_method_inference(receiver, node, arg_types)
         return user_inference if user_inference
 
-        # Module-singleton call resolution (ADR-57 follow-up) — when the
-        # receiver is `Singleton[Foo]` (a module/class constant or a
-        # singleton-method `self`) and `Foo` declares a user-side
-        # `def self.x` / `module_function` body, re-type that body
-        # with the call args bound. Sits after the RBS dispatch tier, so
-        # foreign / RBS-known singletons (`Math.sqrt`) keep their catalog
-        # answer; only project-defined singleton methods reach here.
+        # Module-singleton call resolution (ADR-57 follow-up) — when the receiver is `Singleton[Foo]` (a
+        # module/class constant or a singleton-method `self`) and `Foo` declares a user-side `def self.x` /
+        # `module_function` body, re-type that body with the call args bound. Sits after the RBS dispatch
+        # tier, so foreign / RBS-known singletons (`Math.sqrt`) keep their catalog answer; only
+        # project-defined singleton methods reach here.
         singleton_inference = try_singleton_method_inference(receiver, node, arg_types)
         return singleton_inference if singleton_inference
 
-        # Dynamic-origin propagation: when the receiver is Dynamic[T] and
-        # no positive rule resolves the call, the result inherits the
-        # dynamic origin. Per the value-lattice algebra, this is a
-        # recognised semantic outcome, not a fail-soft compromise, so it
-        # MUST NOT record a tracer event.
+        # Dynamic-origin propagation: when the receiver is Dynamic[T] and no positive rule resolves the call,
+        # the result inherits the dynamic origin. Per the value-lattice algebra, this is a recognised
+        # semantic outcome, not a fail-soft compromise, so it MUST NOT record a tracer event.
         return dynamic_top if receiver.is_a?(Type::Dynamic)
 
-        # ADR-24 slice 4a — this is the engine choke-point where an
-        # implicit-self call has exhausted every resolution tier (RBS
-        # dispatch + user-class ancestor walk) and falls through to
-        # `Dynamic[top]`. When the slice-4 recorder is active, capture the
-        # miss so a later slice's closed-class gate can flag it. Off by
-        # default: `active?` is a plain integer read.
+        # ADR-24 slice 4a — this is the engine choke-point where an implicit-self call has exhausted every
+        # resolution tier (RBS dispatch + user-class ancestor walk) and falls through to `Dynamic[top]`. When
+        # the slice-4 recorder is active, capture the miss so a later slice's closed-class gate can flag it.
+        # Off by default: `active?` is a plain integer read.
         record_unresolved_self_call(node, receiver) if Analysis::SelfCallResolutionRecorder.active?
 
         fallback_for(node, family: :prism)
       end
 
-      # ADR-24 slice 4a — records an unresolved *implicit-self* call (no
-      # explicit receiver) whose `self` types to a concrete user class.
-      # Explicit-receiver misses are out of scope (the existing
-      # `call.undefined-method` rule already owns receiver-typed dispatch);
-      # a non-`Nominal` self (top-level / DSL-block `self`, or a `Dynamic`
-      # self) is skipped so the gradual guarantee is never touched here.
+      # ADR-24 slice 4a — records an unresolved *implicit-self* call (no explicit receiver) whose `self`
+      # types to a concrete user class. Explicit-receiver misses are out of scope (the existing
+      # `call.undefined-method` rule already owns receiver-typed dispatch); a non-`Nominal` self (top-level /
+      # DSL-block `self`, or a `Dynamic` self) is skipped so the gradual guarantee is never touched here.
       def record_unresolved_self_call(node, receiver)
         return unless node.receiver.nil?
         return unless receiver.is_a?(Type::Nominal)
@@ -1306,24 +1156,18 @@ module Rigor
         )
       end
 
-      # The recorder must capture *existence* misses, not type misses.
-      # Reaching the choke-point means RBS dispatch produced no result, but
-      # a project method can still EXIST without an inferable return type —
-      # a `module_function` sibling whose body the engine can't fully type,
-      # an `attr_reader` / `define_method` / `Data.define` member. Recording
-      # those would reproduce the 135 false positives of slice-4 attempt 1.
-      # So skip any name the engine's own existence signals already know:
-      # a `def` resolvable through the ancestor walk, or an own-class entry
-      # in the discovered-methods table (`def` / `attr_*` / `define_method`
-      # / alias). This reuses the engine's real resolution — the
-      # "collect, don't recompute" lesson — so only a name that exists
-      # nowhere a project signal can see reaches the recorder.
-      # `module_function` records its defs as `:singleton` (an implicit-self
-      # call inside such a method dispatches to the module's singleton
-      # method), while ordinary instance methods record `:instance`. The
-      # recorder cannot tell the two contexts apart from the call node, so
-      # existence under EITHER kind suppresses recording — the FP-safe
-      # choice, since either means the method genuinely exists.
+      # The recorder must capture *existence* misses, not type misses. Reaching the choke-point means RBS
+      # dispatch produced no result, but a project method can still EXIST without an inferable return type —
+      # a `module_function` sibling whose body the engine can't fully type, an `attr_reader` /
+      # `define_method` / `Data.define` member. Recording those would reproduce the 135 false positives of
+      # slice-4 attempt 1. So skip any name the engine's own existence signals already know: a `def`
+      # resolvable through the ancestor walk, or an own-class entry in the discovered-methods table (`def` /
+      # `attr_*` / `define_method` / alias). This reuses the engine's real resolution — the "collect, don't
+      # recompute" lesson — so only a name that exists nowhere a project signal can see reaches the recorder.
+      # `module_function` records its defs as `:singleton` (an implicit-self call inside such a method
+      # dispatches to the module's singleton method), while ordinary instance methods record `:instance`. The
+      # recorder cannot tell the two contexts apart from the call node, so existence under EITHER kind
+      # suppresses recording — the FP-safe choice, since either means the method genuinely exists.
       def self_call_method_known?(class_name, method_name)
         return true if resolve_user_def_through_ancestors(class_name, method_name)
 
@@ -1331,94 +1175,68 @@ module Rigor
           scope.discovered_method?(class_name, method_name, :singleton)
       end
 
-      # v0.0.2 #5 — re-types the body of a user-defined
-      # instance method with the call site's argument types
-      # bound to the method's parameters. Used as a
-      # last-resort tier after `MethodDispatcher.dispatch`
-      # has exhausted its catalogue (RBS, shape, constant
-      # folding, user-class fallback). Returns nil when:
+      # v0.0.2 #5 — re-types the body of a user-defined instance method with the call site's argument types
+      # bound to the method's parameters. Used as a last-resort tier after `MethodDispatcher.dispatch` has
+      # exhausted its catalogue (RBS, shape, constant folding, user-class fallback). Returns nil when:
       #
       # - the receiver is not `Nominal[T]` for some T;
-      # - no def_node is recorded for that class/method
-      #   (the receiver is foreign or has only an RBS sig);
-      # - the def has no body, or has a parameter shape we
-      #   cannot bind from the call's positional args;
-      # - the inference is already in progress for this
-      #   (class, method, signature) tuple — recursion
-      #   safety net.
-      # v0.0.3 A — re-types a top-level (or DSL-block-nested)
-      # `def` discovered by `ScopeIndexer` under the
-      # `TOP_LEVEL_DEF_KEY` sentinel. Mirrors the
-      # `infer_user_method_return` shape but uses the
-      # current `scope.self_type` (or implicit `Object`)
-      # as the receiver carrier so the body's own self is
-      # consistent with the call site's. Returns nil when
-      # the parameter shape disqualifies the def, when the
-      # body is empty, or when a recursion cycle is
-      # detected.
+      # - no def_node is recorded for that class/method (the receiver is foreign or has only an RBS sig);
+      # - the def has no body, or has a parameter shape we cannot bind from the call's positional args;
+      # - the inference is already in progress for this (class, method, signature) tuple — recursion safety
+      #   net.
+      # v0.0.3 A — re-types a top-level (or DSL-block-nested) `def` discovered by `ScopeIndexer` under the
+      # `TOP_LEVEL_DEF_KEY` sentinel. Mirrors the `infer_user_method_return` shape but uses the current
+      # `scope.self_type` (or implicit `Object`) as the receiver carrier so the body's own self is
+      # consistent with the call site's. Returns nil when the parameter shape disqualifies the def, when the
+      # body is empty, or when a recursion cycle is detected.
       def infer_top_level_user_method(def_node, receiver, arg_types)
         infer_user_method_return(def_node, receiver, arg_types)
       rescue StandardError
         nil
       end
 
-      # ADR-24 slice 1 — implicit-self method-call resolution.
-      # `discovered_def_nodes` is now carried into method /
-      # class body scopes (see `StatementEvaluator#build_fresh_body_scope`),
-      # so a call written with no explicit receiver inside a
-      # method body resolves against the enclosing class's own
-      # definitions and the file's top-level defs. Before
-      # slice 1 every such call typed `Dynamic[top]`.
+      # ADR-24 slice 1 — implicit-self method-call resolution. `discovered_def_nodes` is now carried into
+      # method / class body scopes (see `StatementEvaluator#build_fresh_body_scope`), so a call written with
+      # no explicit receiver inside a method body resolves against the enclosing class's own definitions and
+      # the file's top-level defs. Before slice 1 every such call typed `Dynamic[top]`.
       #
-      # The resolved return type is adopted UNCONDITIONALLY — a resolved
-      # user-method call site reads the callee's inferred return, exactly as a
-      # toplevel call has since v0.0.3.
+      # The resolved return type is adopted UNCONDITIONALLY — a resolved user-method call site reads the
+      # callee's inferred return, exactly as a toplevel call has since v0.0.3.
       #
-      # ADR-24 WD3 originally gated this: inside a class / method body only a
-      # `Bot` return was adopted, everything else stayed `Dynamic[top]`, because
-      # an early unconditional-adoption experiment regressed `rigor check lib`
-      # by 16 diagnostics. ADR-55 / ADR-56 then chipped the gate open for the
-      # recursive-fixpoint summary and the value-pinned unroll envelope. ADR-57
-      # closed the arc: it re-ran the gate-open experiment per engine generation
-      # and adjudicated every firing as genuine-or-artifact, fixing the
-      # artifacts at their root — the tail-only body evaluator dropping explicit
-      # `return` (slice 1), multi-value returns not contributing a Tuple
-      # (slice 1), escaping block-captured content mutation surviving as a
-      # precise seed both inline and across a method boundary (slices 2/3), two
-      # over-strict self-authored RBS signatures (slice 1), and an over-optional
-      # tuple-slot destructure (slice 3). With the residual all genuine-or-win,
-      # the gate opened permanently on 2026-06-12 (ADR-57 WD2): the gate-open
-      # `rigor check lib` + plugin self-check delta is zero, and the Mastodon /
-      # haml / kramdown corpora show only adjudicated wins (a more precise error
-      # message; FP removals).
+      # ADR-24 WD3 originally gated this: inside a class / method body only a `Bot` return was adopted,
+      # everything else stayed `Dynamic[top]`, because an early unconditional-adoption experiment regressed
+      # `rigor check lib` by 16 diagnostics. ADR-55 / ADR-56 then chipped the gate open for the
+      # recursive-fixpoint summary and the value-pinned unroll envelope. ADR-57 closed the arc: it re-ran the
+      # gate-open experiment per engine generation and adjudicated every firing as genuine-or-artifact,
+      # fixing the artifacts at their root — the tail-only body evaluator dropping explicit `return` (slice
+      # 1), multi-value returns not contributing a Tuple (slice 1), escaping block-captured content mutation
+      # surviving as a precise seed both inline and across a method boundary (slices 2/3), two over-strict
+      # self-authored RBS signatures (slice 1), and an over-optional tuple-slot destructure (slice 3). With
+      # the residual all genuine-or-win, the gate opened permanently on 2026-06-12 (ADR-57 WD2): the
+      # gate-open `rigor check lib` + plugin self-check delta is zero, and the Mastodon / haml / kramdown
+      # corpora show only adjudicated wins (a more precise error message; FP removals).
       #
-      # The historical `adoptable_self_call_result?` predicate (its
-      # `self_type.nil?` / `Bot` / fixpoint-summary / unroll special cases) is
-      # now subsumed by unconditional adoption and removed; `try_local_def_
-      # dispatch` / `try_user_method_inference` simply return the inferred
-      # return. `clamp_unroll_result` still backstops an untrustworthy unrolled
-      # value independently of adoption.
+      # The historical `adoptable_self_call_result?` predicate (its `self_type.nil?` / `Bot` /
+      # fixpoint-summary / unroll special cases) is now subsumed by unconditional adoption and removed;
+      # `try_local_def_dispatch` / `try_user_method_inference` simply return the inferred return.
+      # `clamp_unroll_result` still backstops an untrustworthy unrolled value independently of adoption.
 
-      # An extended (value-keyed) guard frame is `[plain_signature,
-      # value_key]` where `plain_signature` is itself the `[receiver,
-      # method]` pair; a plain frame is that pair directly.
+      # An extended (value-keyed) guard frame is `[plain_signature, value_key]` where `plain_signature` is
+      # itself the `[receiver, method]` pair; a plain frame is that pair directly.
       def extended_frame?(frame)
         frame.is_a?(Array) && frame.size == 2 && frame.first.is_a?(Array)
       end
 
-      # The plain `(receiver, method)` signature carried by a guard frame:
-      # the frame itself for a plain frame, or its first element for an
-      # extended (value-keyed) frame.
+      # The plain `(receiver, method)` signature carried by a guard frame: the frame itself for a plain
+      # frame, or its first element for an extended (value-keyed) frame.
       def plain_part(frame)
         extended_frame?(frame) ? frame.first : frame
       end
 
-      # True when `type` is a concrete value — a `Type::Constant` or a
-      # `Type::Tuple` whose elements are (recursively) all value-pinned.
-      # ADR-55 slice 1: a value-pinned self-call result is adopted even
-      # inside a class/method body (where WD3 otherwise keeps non-`Bot`
-      # returns as `Dynamic[top]`). A concrete value at a call site is
-      # strictly more precise and can never enable an undefined-method or
+      # True when `type` is a concrete value — a `Type::Constant` or a `Type::Tuple` whose elements are
+      # (recursively) all value-pinned. ADR-55 slice 1: a value-pinned self-call result is adopted even
+      # inside a class/method body (where WD3 otherwise keeps non-`Bot` returns as `Dynamic[top]`). A
+      # concrete value at a call site is strictly more precise and can never enable an undefined-method or
       # argument-type false positive — it is FP-neutral by construction.
       def fully_value_pinned?(type)
         case type
@@ -1442,20 +1260,16 @@ module Rigor
         nil
       end
 
-      # Module-singleton call resolution (ADR-57 follow-up) — resolves
-      # `Foo.<name>` on a `Singleton[Foo]` receiver against `Foo`'s
-      # user-side singleton defs (`def self.x`, `def Foo.x`, a
-      # `class << self` body, or a `module_function` method) and re-types
-      # the body with the call's argument types bound. The body scope's
-      # `self_type` is the SAME `Singleton[Foo]` carrier, so an
-      # implicit-self call inside (`def self.via; helper(x); end`)
-      # re-enters this tier and resolves against the same singleton table
+      # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
+      # receiver against `Foo`'s user-side singleton defs (`def self.x`, `def Foo.x`, a `class << self`
+      # body, or a `module_function` method) and re-types the body with the call's argument types bound.
+      # The body scope's `self_type` is the SAME `Singleton[Foo]` carrier, so an implicit-self call inside
+      # (`def self.via; helper(x); end`) re-enters this tier and resolves against the same singleton table
       # — the symmetric counterpart of the instance-side ancestor walk.
       #
-      # Resolution is OWN-class only: the singleton-ancestry chain
-      # (`extend`ed modules, inherited class-method dispatch) is not
-      # walked at this slice. A miss degrades to today's `Dynamic[top]`,
-      # never a false resolution (ADR-57 follow-up § module-singleton).
+      # Resolution is OWN-class only: the singleton-ancestry chain (`extend`ed modules, inherited
+      # class-method dispatch) is not walked at this slice. A miss degrades to today's `Dynamic[top]`, never
+      # a false resolution (ADR-57 follow-up § module-singleton).
       def try_singleton_method_inference(receiver, call_node, arg_types)
         return nil unless receiver.is_a?(Type::Singleton)
 
@@ -1470,42 +1284,30 @@ module Rigor
         nil
       end
 
-      # ADR-24 slice 2 — resolves `method_name` against
-      # `class_name`'s own `def`s, then walks the user-class
-      # ancestor chain: included / prepended modules (transitive)
-      # and the superclass chain. RBS-known ancestors are NOT
-      # walked here — the `MethodDispatcher` RBS tier runs before
-      # `try_user_method_inference` and already covers them; an
-      # ancestor name that resolves to no project-discovered
-      # class/module ends that branch. Cross-file: the chain is
-      # followed through `Scope#discovered_superclasses` /
-      # `#discovered_includes` / `#discovered_def_nodes`, which
-      # the runner seeds from the project-wide pre-pass. The walk
-      # is breadth-first, cycle-guarded, and node-count-capped.
+      # ADR-24 slice 2 — resolves `method_name` against `class_name`'s own `def`s, then walks the user-class
+      # ancestor chain: included / prepended modules (transitive) and the superclass chain. RBS-known
+      # ancestors are NOT walked here — the `MethodDispatcher` RBS tier runs before
+      # `try_user_method_inference` and already covers them; an ancestor name that resolves to no
+      # project-discovered class/module ends that branch. Cross-file: the chain is followed through
+      # `Scope#discovered_superclasses` / `#discovered_includes` / `#discovered_def_nodes`, which the runner
+      # seeds from the project-wide pre-pass. The walk is breadth-first, cycle-guarded, and node-count-capped.
       ANCESTOR_WALK_LIMIT = 100
       private_constant :ANCESTOR_WALK_LIMIT
 
       CLASS_GRAPH_CACHE_KEY = :__rigor_class_graph_cache__
       private_constant :CLASS_GRAPH_CACHE_KEY
 
-      # Run-scoped memo for the static class-graph resolvers below. They
-      # are pure functions of the *frozen* project index trio
-      # (`discovered_def_nodes` / `discovered_superclasses` /
-      # `discovered_includes`) — `user_def_for` / `superclass_of` /
-      # `includes_of` read nothing else, and never touch the current
-      # scope's locals or narrowings — so a result computed for one
-      # `(class, method)` is valid for every `Scope` that shares those
-      # tables. `ExpressionTyper` is rebuilt per `Scope#type_of`, so the
-      # memo lives on `Thread.current` rather than on `self`. It is keyed
-      # by the *identity* of the three frozen tables (nested
-      # `compare_by_identity` stores): a new analysis generation, or any
-      # `Scope` that swaps an index via `with_discovered_*`, transparently
-      # lands in a fresh bucket while everything sharing the tables shares
-      # the memo. Steady-state cost is three identity-keyed hash reads and
-      # zero allocation — the `||=` chains only allocate on the first miss
-      # of a generation. (Pool mode forks per worker, so the
-      # `Thread.current` store is process-local and never crosses a
-      # project boundary.)
+      # Run-scoped memo for the static class-graph resolvers below. They are pure functions of the *frozen*
+      # project index trio (`discovered_def_nodes` / `discovered_superclasses` / `discovered_includes`) —
+      # `user_def_for` / `superclass_of` / `includes_of` read nothing else, and never touch the current
+      # scope's locals or narrowings — so a result computed for one `(class, method)` is valid for every
+      # `Scope` that shares those tables. `ExpressionTyper` is rebuilt per `Scope#type_of`, so the memo lives
+      # on `Thread.current` rather than on `self`. It is keyed by the *identity* of the three frozen tables
+      # (nested `compare_by_identity` stores): a new analysis generation, or any `Scope` that swaps an index
+      # via `with_discovered_*`, transparently lands in a fresh bucket while everything sharing the tables
+      # shares the memo. Steady-state cost is three identity-keyed hash reads and zero allocation — the `||=`
+      # chains only allocate on the first miss of a generation. (Pool mode forks per worker, so the
+      # `Thread.current` store is process-local and never crosses a project boundary.)
       def class_graph_buckets
         store = (Thread.current[CLASS_GRAPH_CACHE_KEY] ||= {}.compare_by_identity)
         by_def = (store[scope.discovered_def_nodes] ||= {}.compare_by_identity)
@@ -1517,14 +1319,11 @@ module Rigor
         resolve_user_def_with_owner(class_name, method_name).first
       end
 
-      # ADR-57 N5 follow-up — resolves the method's def node AND the
-      # ancestor that owns it (the class/module whose own `def` table
-      # holds the body, which may differ from `class_name` when the
-      # method is inherited from a superclass or included module). The
-      # owner is what the overridable-method adoption gate keys on. Both
-      # are cached together (the walk is identical to the def-only path it
-      # replaced) and returned as a `[def_node, owner]` pair; `owner` is
-      # nil exactly when `def_node` is nil.
+      # ADR-57 N5 follow-up — resolves the method's def node AND the ancestor that owns it (the class/module
+      # whose own `def` table holds the body, which may differ from `class_name` when the method is
+      # inherited from a superclass or included module). The owner is what the overridable-method adoption
+      # gate keys on. Both are cached together (the walk is identical to the def-only path it replaced) and
+      # returned as a `[def_node, owner]` pair; `owner` is nil exactly when `def_node` is nil.
       def resolve_user_def_with_owner(class_name, method_name)
         cache = class_graph_buckets[:user_def]
         table = (cache[class_name.to_s] ||= {})
@@ -1557,12 +1356,10 @@ module Rigor
         [nil, nil]
       end
 
-      # Pushes `current`'s direct ancestors onto the BFS queue:
-      # included / prepended modules first (Ruby places mixins
-      # nearer than the superclass), then the superclass. Each
-      # as-written name is resolved against `current`'s lexical
-      # nesting; names that resolve to no project class/module
-      # are dropped (RBS-known / third-party ancestors).
+      # Pushes `current`'s direct ancestors onto the BFS queue: included / prepended modules first (Ruby
+      # places mixins nearer than the superclass), then the superclass. Each as-written name is resolved
+      # against `current`'s lexical nesting; names that resolve to no project class/module are dropped
+      # (RBS-known / third-party ancestors).
       def enqueue_ancestors(current, queue)
         scope.includes_of(current).each do |raw|
           resolved = resolve_ancestor_class_name(current, raw)
@@ -1575,13 +1372,10 @@ module Rigor
         queue.push(resolved_super) if resolved_super
       end
 
-      # Resolves a superclass name AS WRITTEN (`"Base"`, or a
-      # qualified `"A::B"`) to a project-discovered class,
-      # following Ruby's `Module.nesting` constant lookup: try
-      # the raw name under each enclosing namespace of the
-      # subclass, innermost first, then bare. Returns nil when
-      # no candidate names a discovered user class (e.g. the
-      # superclass is an RBS-known or third-party class).
+      # Resolves a superclass name AS WRITTEN (`"Base"`, or a qualified `"A::B"`) to a project-discovered
+      # class, following Ruby's `Module.nesting` constant lookup: try the raw name under each enclosing
+      # namespace of the subclass, innermost first, then bare. Returns nil when no candidate names a
+      # discovered user class (e.g. the superclass is an RBS-known or third-party class).
       def resolve_ancestor_class_name(subclass_qualified, raw_superclass)
         by_subclass = (class_graph_buckets[:name][subclass_qualified] ||= {})
         return by_subclass[raw_superclass] if by_subclass.key?(raw_superclass)
@@ -1605,29 +1399,22 @@ module Rigor
           scope.discovered_includes.key?(name)
       end
 
-      # ADR-57 N5 — overridable-method adoption gate. A self-call resolved
-      # to a project `def` whose owner has a discovered subclass / includer
-      # that REDEFINES the same method (same instance-vs-singleton kind) is
-      # a template-method site: the base body's literal return is the
-      # *default*, not the value every receiver sees, so adopting it as a
-      # flow constant is unsound (rgl `module Graph; def directed?; false`
-      # folds `unless directed?` always-true, ignoring `DirectedAdjacencyGraph`
-      # overriding it to `true` — the entire rgl warning set, per the
-      # 2026-06-13 app/network survey N5 row). On such a hit the precise
-      # return degrades to `Dynamic[top]`, deliberately re-opening a Dynamic
-      # source ONLY for genuinely-overridden methods. A method with no
-      # discovered override folds exactly as before — over-conservatism must
-      # not re-open Dynamic for final methods.
+      # ADR-57 N5 — overridable-method adoption gate. A self-call resolved to a project `def` whose owner has
+      # a discovered subclass / includer that REDEFINES the same method (same instance-vs-singleton kind) is
+      # a template-method site: the base body's literal return is the *default*, not the value every
+      # receiver sees, so adopting it as a flow constant is unsound (rgl `module Graph; def directed?; false`
+      # folds `unless directed?` always-true, ignoring `DirectedAdjacencyGraph` overriding it to `true` — the
+      # entire rgl warning set, per the 2026-06-13 app/network survey N5 row). On such a hit the precise
+      # return degrades to `Dynamic[top]`, deliberately re-opening a Dynamic source ONLY for
+      # genuinely-overridden methods. A method with no discovered override folds exactly as before —
+      # over-conservatism must not re-open Dynamic for final methods.
       #
-      # The gate only inspects a *flow-constant-foldable* result (a
-      # `Constant`, or a `Tuple` of such): only a value-pinned return can
-      # mislead a downstream `if`/`unless`/`case` into an
-      # `always-truthy-condition` fold, which is exactly the unsoundness the
-      # gate exists to remove. A `Nominal` / `Dynamic` / union return cannot
-      # produce a flow constant, so adopting it from an overridden method is
-      # harmless and is left untouched — this keeps the override-relation
-      # walk off the hot path for the overwhelming majority of self-calls
-      # (whose return is not a bare constant).
+      # The gate only inspects a *flow-constant-foldable* result (a `Constant`, or a `Tuple` of such): only a
+      # value-pinned return can mislead a downstream `if`/`unless`/`case` into an `always-truthy-condition`
+      # fold, which is exactly the unsoundness the gate exists to remove. A `Nominal` / `Dynamic` / union
+      # return cannot produce a flow constant, so adopting it from an overridden method is harmless and is
+      # left untouched — this keeps the override-relation walk off the hot path for the overwhelming
+      # majority of self-calls (whose return is not a bare constant).
       def degrade_if_overridable(result, owner, method_name, kind)
         return result if owner.nil?
         return result unless fully_value_pinned?(result)
@@ -1639,14 +1426,11 @@ module Rigor
       OVERRIDE_GATE_CACHE_KEY = :__rigor_overridable_method_gate__
       private_constant :OVERRIDE_GATE_CACHE_KEY
 
-      # Run-scoped memo for {#overridden_in_project?}, keyed (like
-      # `class_graph_buckets`) by the identity of the frozen discovery
-      # trio so a new analysis generation lands in a fresh bucket, then
-      # nested `kind → owner → method_name`. The predicate is a pure
-      # function of those tables. Nesting avoids allocating a composite
-      # cache key on the hot path (the gate runs on every adopted self-call
-      # return), so a steady-state hit is three identity hash reads + two
-      # string/symbol hash reads with zero allocation.
+      # Run-scoped memo for {#overridden_in_project?}, keyed (like `class_graph_buckets`) by the identity of
+      # the frozen discovery trio so a new analysis generation lands in a fresh bucket, then nested `kind →
+      # owner → method_name`. The predicate is a pure function of those tables. Nesting avoids allocating a
+      # composite cache key on the hot path (the gate runs on every adopted self-call return), so a
+      # steady-state hit is three identity hash reads + two string/symbol hash reads with zero allocation.
       def override_gate_buckets
         store = (Thread.current[OVERRIDE_GATE_CACHE_KEY] ||= {}.compare_by_identity)
         by_def = (store[scope.discovered_def_nodes] ||= {}.compare_by_identity)
@@ -1654,12 +1438,10 @@ module Rigor
         by_super[scope.discovered_includes] ||= { instance: {}, singleton: {} }
       end
 
-      # True when some discovered project class/module — distinct from
-      # `owner` — redefines `(method_name, kind)` AND is related to `owner`
-      # (a transitive discovered subclass of an owner class, or a
-      # class/module that includes/prepends — extends, for singleton kind —
-      # an owner module). A same-name reopen of `owner` itself is NOT an
-      # override (monkey-patch reopen shares the owner identity). Memoized
+      # True when some discovered project class/module — distinct from `owner` — redefines `(method_name,
+      # kind)` AND is related to `owner` (a transitive discovered subclass of an owner class, or a
+      # class/module that includes/prepends — extends, for singleton kind — an owner module). A same-name
+      # reopen of `owner` itself is NOT an override (monkey-patch reopen shares the owner identity). Memoized
       # per `(owner, method_name, kind)`.
       def overridden_in_project?(owner, method_name, kind)
         by_owner = (override_gate_buckets[kind][owner] ||= {})
@@ -1676,16 +1458,13 @@ module Rigor
         end
       end
 
-      # Every discovered project class/module whose OWN def table redefines
-      # `(method_name, kind)`. Instance kind reads `discovered_def_nodes`,
-      # singleton kind reads `discovered_singleton_def_nodes` — both are
-      # genuine project `def` bodies (not RBS / accessor synthesis), so a
-      # name's presence is a real redefinition. Served from a per-generation
-      # inverted index (`method_name → [owner names]`) built once per def
-      # table, so the lookup is a single hash read rather than a full-table
-      # scan on every `(method_name, kind)` first-miss — the gate runs on
-      # every adopted self-call return, so the full-table `filter_map` it
-      # replaced was the dominant added allocation on a large `lib`.
+      # Every discovered project class/module whose OWN def table redefines `(method_name, kind)`. Instance
+      # kind reads `discovered_def_nodes`, singleton kind reads `discovered_singleton_def_nodes` — both are
+      # genuine project `def` bodies (not RBS / accessor synthesis), so a name's presence is a real
+      # redefinition. Served from a per-generation inverted index (`method_name → [owner names]`) built once
+      # per def table, so the lookup is a single hash read rather than a full-table scan on every
+      # `(method_name, kind)` first-miss — the gate runs on every adopted self-call return, so the full-table
+      # `filter_map` it replaced was the dominant added allocation on a large `lib`.
       def redefiners_of(method_name, kind)
         method_definers_index(kind)[method_name] || EMPTY_REDEFINERS
       end
@@ -1696,11 +1475,10 @@ module Rigor
       METHOD_DEFINERS_INDEX_KEY = :__rigor_method_definers_index__
       private_constant :METHOD_DEFINERS_INDEX_KEY
 
-      # Per-generation `method_name (Symbol) → [owner names]` inverted index
-      # over the instance / singleton def tables, memoised by the identity
-      # of the def table it inverts (a new analysis generation lands in a
-      # fresh bucket). The toplevel sentinel is excluded — a toplevel `def`
-      # has no class ancestry and so can never be an override.
+      # Per-generation `method_name (Symbol) → [owner names]` inverted index over the instance / singleton
+      # def tables, memoised by the identity of the def table it inverts (a new analysis generation lands in
+      # a fresh bucket). The toplevel sentinel is excluded — a toplevel `def` has no class ancestry and so
+      # can never be an override.
       def method_definers_index(kind)
         table = kind == :singleton ? scope.discovered_singleton_def_nodes : scope.discovered_def_nodes
         store = (Thread.current[METHOD_DEFINERS_INDEX_KEY] ||= {}.compare_by_identity)
@@ -1717,12 +1495,10 @@ module Rigor
         index
       end
 
-      # True when `candidate`'s transitive ancestor chain (superclasses +
-      # included/prepended modules) reaches `owner` — i.e. `candidate` is a
-      # subclass of an owner class or an includer of an owner module. Reuses
-      # the same BFS resolver the method-resolution ancestor walk uses, so
-      # name resolution (lexical nesting, RBS-known-ancestor pruning) is
-      # identical.
+      # True when `candidate`'s transitive ancestor chain (superclasses + included/prepended modules) reaches
+      # `owner` — i.e. `candidate` is a subclass of an owner class or an includer of an owner module. Reuses
+      # the same BFS resolver the method-resolution ancestor walk uses, so name resolution (lexical nesting,
+      # RBS-known-ancestor pruning) is identical.
       def related_to_owner?(candidate, owner)
         queue = []
         enqueue_ancestors(candidate, queue)
@@ -1749,109 +1525,83 @@ module Rigor
       INFERENCE_UNROLL_FUEL_KEY = :__rigor_user_method_unroll_fuel__
       private_constant :INFERENCE_UNROLL_FUEL_KEY
 
-      # ADR-55 slice 2 — thread-local fixpoint return-summary table,
-      # keyed by the plain `(receiver, method)` signature (NOT the
-      # value-extended signature: extended frames from slice 1 share the
-      # same summary). Each entry is `{ assumption:, consulted: }` where
-      # `assumption` is the current Kleene iterate (seeded `bot`) and
-      # `consulted` flips true when an in-cycle re-entry returns it.
+      # ADR-55 slice 2 — thread-local fixpoint return-summary table, keyed by the plain `(receiver, method)`
+      # signature (NOT the value-extended signature: extended frames from slice 1 share the same summary).
+      # Each entry is `{ assumption:, consulted: }` where `assumption` is the current Kleene iterate (seeded
+      # `bot`) and `consulted` flips true when an in-cycle re-entry returns it.
       INFERENCE_SUMMARY_KEY = :__rigor_user_method_return_summary__
       private_constant :INFERENCE_SUMMARY_KEY
 
-      # Monotonic per-thread counter, bumped once each time `consult_summary`
-      # actually reads an in-flight fixpoint assumption (ADR-55 slice 2). A
-      # method return computed across an interval in which this counter does
-      # NOT move depended on no transient Kleene iterate, so it is FINAL and
-      # safe to memoise — even when the `summaries` table is non-empty because
-      # some unrelated outermost frame merely *seeded* (but never consulted)
-      # its own entry. See `infer_user_method_return`'s post-hoc memo gate.
+      # Monotonic per-thread counter, bumped once each time `consult_summary` actually reads an in-flight
+      # fixpoint assumption (ADR-55 slice 2). A method return computed across an interval in which this
+      # counter does NOT move depended on no transient Kleene iterate, so it is FINAL and safe to memoise —
+      # even when the `summaries` table is non-empty because some unrelated outermost frame merely *seeded*
+      # (but never consulted) its own entry. See `infer_user_method_return`'s post-hoc memo gate.
       SUMMARY_CONSULT_COUNTER_KEY = :__rigor_user_method_summary_consults__
       private_constant :SUMMARY_CONSULT_COUNTER_KEY
 
-      # Per-thread append-only log of the seed depths of every in-flight
-      # summary `consult_summary` read (ADR-55 slice 2 mutual-recursion
-      # soundness fix, 2026-06-12). Each fixpoint owner records the guard
-      # stack size at seed time on its entry (`depth:`); a consult appends
-      # the consulted entry's depth here. A fixpoint whose body evaluation
-      # logged a depth SHALLOWER than its own seed depth read an ancestor
-      # signature's transient Kleene iterate -- cross-signature mutual
-      # recursion (`even?`/`odd?`) -- so its computed return is entangled
-      # with a not-yet-converged foreign assumption and must degrade to
-      # `untyped` rather than fold one branch's seed into a "final"
-      # constant. Own-signature consults log depth == own depth, and a
-      # nested fixpoint that completes within the evaluation logs depths
-      # > own depth; neither is foreign. Cleared with the summary table
-      # when the guard stack drains to empty.
+      # Per-thread append-only log of the seed depths of every in-flight summary `consult_summary` read
+      # (ADR-55 slice 2 mutual-recursion soundness fix, 2026-06-12). Each fixpoint owner records the guard
+      # stack size at seed time on its entry (`depth:`); a consult appends the consulted entry's depth here.
+      # A fixpoint whose body evaluation logged a depth SHALLOWER than its own seed depth read an ancestor
+      # signature's transient Kleene iterate -- cross-signature mutual recursion (`even?`/`odd?`) -- so its
+      # computed return is entangled with a not-yet-converged foreign assumption and must degrade to
+      # `untyped` rather than fold one branch's seed into a "final" constant. Own-signature consults log
+      # depth == own depth, and a nested fixpoint that completes within the evaluation logs depths > own
+      # depth; neither is foreign. Cleared with the summary table when the guard stack drains to empty.
       SUMMARY_CONSULT_DEPTHS_KEY = :__rigor_user_method_summary_consult_depths__
       private_constant :SUMMARY_CONSULT_DEPTHS_KEY
 
-      # ADR-57 follow-up — run-scoped memo for resolved user-method
-      # return types. The ADR-57 gate-open made every resolved in-body
-      # self-call adopt the callee's inferred return, which re-types the
-      # callee body once per call site. With a project-wide discovery
-      # index, file N re-types callees defined in files 1..N-1, so
-      # whole-`lib` cost grows superlinearly in files-per-process (the
-      # 2026-06-12 Rails survey's whole-`lib` scaling wall).
+      # ADR-57 follow-up — run-scoped memo for resolved user-method return types. The ADR-57 gate-open made
+      # every resolved in-body self-call adopt the callee's inferred return, which re-types the callee body
+      # once per call site. With a project-wide discovery index, file N re-types callees defined in files
+      # 1..N-1, so whole-`lib` cost grows superlinearly in files-per-process (the 2026-06-12 Rails survey's
+      # whole-`lib` scaling wall).
       #
-      # `infer_user_method_return` is a pure function of
-      # `(def_node, receiver, arg_types)` PLUS the frozen project
-      # discovery index: `build_user_method_body_scope` binds the args
-      # to the params in a FRESH `Scope` seeded from an empty fact /
-      # narrowing store and inherits `scope.discovery` whole by
-      # reference — the caller's narrowing state never enters. (This is
-      # what makes a signature-keyed return memo sound where the
-      # ADR-52 WD5 per-call-NODE contribution cache was not: that cache
-      # keyed scope-sensitive results on the node; this memo keys a
-      # scope-INSENSITIVE result on its real inputs.)
+      # `infer_user_method_return` is a pure function of `(def_node, receiver, arg_types)` PLUS the frozen
+      # project discovery index: `build_user_method_body_scope` binds the args to the params in a FRESH
+      # `Scope` seeded from an empty fact / narrowing store and inherits `scope.discovery` whole by
+      # reference — the caller's narrowing state never enters. (This is what makes a signature-keyed return
+      # memo sound where the ADR-52 WD5 per-call-NODE contribution cache was not: that cache keyed
+      # scope-sensitive results on the node; this memo keys a scope-INSENSITIVE result on its real inputs.)
       #
-      # Two dimensions are call-site-varying and so live IN the key:
-      # the receiver carrier (`describe(:short)`) and the argument-type
-      # signature (`describe(:short)` of each arg) — value-pinned args
-      # change folds (`factorial(5)` vs `factorial(6)`), so a coarser
-      # key would serve a stale fold. The third unsafe dimension —
-      # the ADR-55 recursion machinery (unroll fuel / fixpoint Kleene
-      # assumption / WD1 clamp) producing a TRANSIENT result rather
-      # than a final return — is excluded structurally: the memo is
-      # consulted and populated ONLY when the incoming guard stack is
-      # empty (a genuine top-of-stack entry, whose result is final and
-      # cannot be an in-progress assumption or a clamped value). Frames
-      # entered with a non-empty stack bypass the memo entirely and
-      # compute as before.
+      # Two dimensions are call-site-varying and so live IN the key: the receiver carrier
+      # (`describe(:short)`) and the argument-type signature (`describe(:short)` of each arg) — value-pinned
+      # args change folds (`factorial(5)` vs `factorial(6)`), so a coarser key would serve a stale fold. The
+      # third unsafe dimension — the ADR-55 recursion machinery (unroll fuel / fixpoint Kleene
+      # assumption / WD1 clamp) producing a TRANSIENT result rather than a final return — is excluded
+      # structurally: the memo is consulted and populated ONLY when the incoming guard stack is empty (a
+      # genuine top-of-stack entry, whose result is final and cannot be an in-progress assumption or a
+      # clamped value). Frames entered with a non-empty stack bypass the memo entirely and compute as before.
       #
-      # Keyed by the identity of the frozen discovery `def_nodes`
-      # table (a new analysis generation lands in a fresh bucket,
-      # mirroring `class_graph_buckets`) then by the identity of the
-      # `def_node` and the `[receiver, *args]` descriptor tuple.
-      # `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store
-      # lives on `Thread.current`; fork-pool workers are separate
-      # processes, so it never crosses a project boundary.
+      # Keyed by the identity of the frozen discovery `def_nodes` table (a new analysis generation lands in
+      # a fresh bucket, mirroring `class_graph_buckets`) then by the identity of the `def_node` and the
+      # `[receiver, *args]` descriptor tuple. `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store
+      # lives on `Thread.current`; fork-pool workers are separate processes, so it never crosses a project
+      # boundary.
       RETURN_MEMO_KEY = :__rigor_user_method_return_memo__
       private_constant :RETURN_MEMO_KEY
 
-      # Per-inference recursion context threaded through the guard /
-      # fixpoint helpers (ADR-55 slice 2). Bundles the call descriptor
-      # (`receiver`, `arg_types`, `plain_signature`), the thread-local
-      # summary table, and the WD1 clamp flag so the helpers stay within the
-      # parameter-list budget. `def_node` is carried separately (it is the
-      # body owner, not call context).
+      # Per-inference recursion context threaded through the guard / fixpoint helpers (ADR-55 slice 2).
+      # Bundles the call descriptor (`receiver`, `arg_types`, `plain_signature`), the thread-local summary
+      # table, and the WD1 clamp flag so the helpers stay within the parameter-list budget. `def_node` is
+      # carried separately (it is the body owner, not call context).
       RecursionContext = Data.define(
         :receiver, :arg_types, :plain_signature, :summaries, :would_have_been_guarded
       )
       private_constant :RecursionContext
 
-      # Total body evaluations the fixpoint iteration is permitted per
-      # outermost entry for a signature (ADR-55 WD2). Hard, non-configurable
-      # — the iteration cap is part of the termination story (ADR-41 WD4).
+      # Total body evaluations the fixpoint iteration is permitted per outermost entry for a signature
+      # (ADR-55 WD2). Hard, non-configurable — the iteration cap is part of the termination story (ADR-41
+      # WD4).
       RECURSION_FIXPOINT_CAP = 3
       private_constant :RECURSION_FIXPOINT_CAP
 
-      # Hard, non-configurable caps for the ADR-55 slice 1 constant-arg
-      # unroll. `RECURSION_UNROLL_FUEL` bounds the number of extended
-      # (value-keyed) frames per outermost inference entry;
-      # `RECURSION_VALUE_SIZE_CAP` disqualifies a frame whose pinned
-      # argument values are structurally large. Both are termination
-      # guards (ADR-41 WD4) — not measurement-gated precision budgets —
-      # so they ship default-on with no opt-in.
+      # Hard, non-configurable caps for the ADR-55 slice 1 constant-arg unroll. `RECURSION_UNROLL_FUEL`
+      # bounds the number of extended (value-keyed) frames per outermost inference entry;
+      # `RECURSION_VALUE_SIZE_CAP` disqualifies a frame whose pinned argument values are structurally large.
+      # Both are termination guards (ADR-41 WD4) — not measurement-gated precision budgets — so they ship
+      # default-on with no opt-in.
       RECURSION_UNROLL_FUEL = 32
       private_constant :RECURSION_UNROLL_FUEL
 
@@ -1864,44 +1614,31 @@ module Rigor
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types)
         return nil if body_scope.nil?
 
-        # Recursion-guard signature. Keyed on `(receiver,
-        # method)` only — NOT the argument types. ADR-24 WD5:
-        # a method whose summary is still being computed
-        # resolves to `Dynamic[top]` for that cycle. Keying on
-        # arg types would let mutual recursion through a
-        # `module_function` module (`Acceptance#accepts` →
-        # `accepts_one` → `accepts_dynamic` → `accepts`)
-        # recurse unboundedly whenever the carried argument
-        # types differ at each level — observed as a
-        # `SystemStackError` once implicit-self calls began
-        # resolving during the main walk. `describe(:short)`
-        # keeps non-Nominal receivers (the implicit `Object`
-        # carrier for top-level / DSL-block defs) printable.
+        # Recursion-guard signature. Keyed on `(receiver, method)` only — NOT the argument types. ADR-24 WD5:
+        # a method whose summary is still being computed resolves to `Dynamic[top]` for that cycle. Keying on
+        # arg types would let mutual recursion through a `module_function` module (`Acceptance#accepts` →
+        # `accepts_one` → `accepts_dynamic` → `accepts`) recurse unboundedly whenever the carried argument
+        # types differ at each level — observed as a `SystemStackError` once implicit-self calls began
+        # resolving during the main walk. `describe(:short)` keeps non-Nominal receivers (the implicit
+        # `Object` carrier for top-level / DSL-block defs) printable.
         plain_signature = [receiver.describe(:short), def_node.name]
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
         summaries = (Thread.current[INFERENCE_SUMMARY_KEY] ||= {})
 
-        # ADR-57 follow-up — return memo. The inferred return is a pure
-        # function of `(def_node, receiver, arg_types)` and the frozen
-        # discovery index whenever the computation does NOT depend on a
-        # transient ADR-55 Kleene assumption (an in-flight fixpoint summary).
-        # Two structural preconditions decide whether THIS frame's result is
-        # even a memo candidate, both stable across the body walk: the
-        # signature must not already be on the recursion guard stack (else we
-        # are inside its own cycle) and no constant-arg unroll may be in
-        # flight (its value-keyed frames are transient). When both hold we
-        # consult the memo, and on a miss we compute, then store the result
-        # only if no fixpoint summary was *consulted* during the computation
-        # (the post-hoc consult-counter check) — which is sound regardless of
-        # whether the `summaries` table holds inert *seeded-but-unconsulted*
-        # entries left by unrelated outermost frames. This is the fix for the
-        # whole-`lib` scaling wall: a deep DAG of non-recursive private
-        # readers (ActiveStorage `video_analyzer.rb`) seeded a summary on its
-        # first outermost method and thereafter the old `summaries.empty?`
-        # gate disabled the memo for every nested call, re-walking the shared
-        # sub-readers combinatorially (~932k body evaluations for ~20 tiny
-        # methods). The computation itself lives in
-        # `compute_user_method_return`.
+        # ADR-57 follow-up — return memo. The inferred return is a pure function of `(def_node, receiver,
+        # arg_types)` and the frozen discovery index whenever the computation does NOT depend on a transient
+        # ADR-55 Kleene assumption (an in-flight fixpoint summary). Two structural preconditions decide
+        # whether THIS frame's result is even a memo candidate, both stable across the body walk: the
+        # signature must not already be on the recursion guard stack (else we are inside its own cycle) and
+        # no constant-arg unroll may be in flight (its value-keyed frames are transient). When both hold we
+        # consult the memo, and on a miss we compute, then store the result only if no fixpoint summary was
+        # *consulted* during the computation (the post-hoc consult-counter check) — which is sound
+        # regardless of whether the `summaries` table holds inert *seeded-but-unconsulted* entries left by
+        # unrelated outermost frames. This is the fix for the whole-`lib` scaling wall: a deep DAG of
+        # non-recursive private readers (ActiveStorage `video_analyzer.rb`) seeded a summary on its first
+        # outermost method and thereafter the old `summaries.empty?` gate disabled the memo for every nested
+        # call, re-walking the shared sub-readers combinatorially (~932k body evaluations for ~20 tiny
+        # methods). The computation itself lives in `compute_user_method_return`.
         unless memo_candidate?(stack, plain_signature)
           return compute_user_method_return(def_node, body_scope, stack, summaries,
                                             receiver, arg_types, plain_signature)
@@ -1917,28 +1654,23 @@ module Rigor
                                             receiver, arg_types, plain_signature)
         consults_after = Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
 
-        # Store only a FINAL result. If a fixpoint summary was consulted
-        # during the computation, `result` embeds a transient Kleene iterate
-        # whose value depends on the iteration in flight, so it must not be
-        # shared across call sites.
+        # Store only a FINAL result. If a fixpoint summary was consulted during the computation, `result`
+        # embeds a transient Kleene iterate whose value depends on the iteration in flight, so it must not
+        # be shared across call sites.
         memo[memo_key] = result if consults_after == consults_before
         result
       end
 
-      # The ADR-55 recursion-guard + value-unroll + fixpoint body of
-      # user-method return inference, factored out so
-      # `infer_user_method_return` is a thin memo wrapper (the memo is
-      # the ADR-57 follow-up; this is unchanged from pre-memo behaviour).
+      # The ADR-55 recursion-guard + value-unroll + fixpoint body of user-method return inference, factored
+      # out so `infer_user_method_return` is a thin memo wrapper (the memo is the ADR-57 follow-up; this is
+      # unchanged from pre-memo behaviour).
       def compute_user_method_return(def_node, body_scope, stack, summaries,
                                      receiver, arg_types, plain_signature)
-        # ADR-55 slice 1: when every bound argument is value-pinned,
-        # extend the guard key with a stable descriptor of the argument
-        # *values* so distinct constant frames may recurse (e.g.
-        # `factorial(5)` folds to `Constant[120]`). Distinct constant
-        # frames are bounded by `RECURSION_UNROLL_FUEL` per outermost
-        # entry; exhaustion or value blow-up falls back to the plain
-        # `(receiver, method)` guard — today's behaviour. Non-constant
-        # args never reach this path.
+        # ADR-55 slice 1: when every bound argument is value-pinned, extend the guard key with a stable
+        # descriptor of the argument *values* so distinct constant frames may recurse (e.g. `factorial(5)`
+        # folds to `Constant[120]`). Distinct constant frames are bounded by `RECURSION_UNROLL_FUEL` per
+        # outermost entry; exhaustion or value blow-up falls back to the plain `(receiver, method)` guard —
+        # today's behaviour. Non-constant args never reach this path.
         signature = plain_signature
         value_key = constant_argument_value_key(arg_types)
         extended = value_key && unroll_fuel_remaining(stack).positive?
@@ -1946,25 +1678,20 @@ module Rigor
 
         if stack.include?(signature)
           BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
-          # ADR-55 slice 2: in-cycle re-entries return the current assumed
-          # summary (Kleene iterate, seeded `bot`) instead of bare
-          # `untyped`. The fixpoint loop below seeds the entry on the
-          # outermost frame; if a re-entry beats it here the entry already
-          # exists. The WD4 composition: slice 1's clamp/fuel fallbacks
-          # also route here when a summary is active.
+          # ADR-55 slice 2: in-cycle re-entries return the current assumed summary (Kleene iterate, seeded
+          # `bot`) instead of bare `untyped`. The fixpoint loop below seeds the entry on the outermost frame;
+          # if a re-entry beats it here the entry already exists. The WD4 composition: slice 1's clamp/fuel
+          # fallbacks also route here when a summary is active.
           return consult_summary(summaries, plain_signature)
         end
 
-        # ADR-55 WD1 clamp (governing rule): the constant-arg unroll may
-        # only ever surface a fully value-pinned result; any other outcome
-        # must be byte-identical to the plain guard's `untyped`. A frame
-        # that took the extended (value-keyed) path but whose plain
-        # `(receiver, method)` signature is already on the stack — in
-        # plain form or as the plain part of an extended frame — would
-        # have been guarded before slice 1. If such a frame's body folds
-        # to a non-pinned type, the unroll surfaced a precise value the
-        # plain guard would have masked (and the body evaluator's blind
-        # spots can make that value wrong), so clamp it back to `untyped`.
+        # ADR-55 WD1 clamp (governing rule): the constant-arg unroll may only ever surface a fully
+        # value-pinned result; any other outcome must be byte-identical to the plain guard's `untyped`. A
+        # frame that took the extended (value-keyed) path but whose plain `(receiver, method)` signature is
+        # already on the stack — in plain form or as the plain part of an extended frame — would have been
+        # guarded before slice 1. If such a frame's body folds to a non-pinned type, the unroll surfaced a
+        # precise value the plain guard would have masked (and the body evaluator's blind spots can make
+        # that value wrong), so clamp it back to `untyped`.
         would_have_been_guarded =
           extended &&
           stack.any? { |frame| plain_part(frame) == plain_signature }
@@ -1976,46 +1703,39 @@ module Rigor
         evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
       end
 
-      # True when this frame's result is a candidate for the return memo:
-      # the structural preconditions, both stable across the body walk, that
-      # are necessary (but not sufficient) for a FINAL result. Sufficiency is
-      # decided post-hoc in `infer_user_method_return` by the consult-counter
-      # check (no transient fixpoint summary was read during the compute) —
-      # so unlike the prior `memoisable_return?` this deliberately does NOT
-      # require an empty `summaries` table: inert seeded-but-unconsulted
-      # entries left by unrelated outermost frames do not contaminate a
-      # result, and gating on them disabled the memo for an entire non-
-      # recursive DAG (the scaling wall). The two preconditions: no constant-
-      # arg unroll in flight (its value-keyed frames are transient) and this
-      # plain signature not itself on the recursion guard stack (else we are
-      # inside its own cycle, returning a Kleene iterate).
+      # True when this frame's result is a candidate for the return memo: the structural preconditions, both
+      # stable across the body walk, that are necessary (but not sufficient) for a FINAL result. Sufficiency
+      # is decided post-hoc in `infer_user_method_return` by the consult-counter check (no transient
+      # fixpoint summary was read during the compute) — so unlike the prior `memoisable_return?` this
+      # deliberately does NOT require an empty `summaries` table: inert seeded-but-unconsulted entries left
+      # by unrelated outermost frames do not contaminate a result, and gating on them disabled the memo for
+      # an entire non-recursive DAG (the scaling wall). The two preconditions: no constant-arg unroll in
+      # flight (its value-keyed frames are transient) and this plain signature not itself on the recursion
+      # guard stack (else we are inside its own cycle, returning a Kleene iterate).
       def memo_candidate?(stack, plain_signature)
-        # Read the unroll fuel WITHOUT the decrement side effect of
-        # `unroll_fuel_remaining`: a constant-arg unroll has begun iff the
-        # thread-local is set and the stack is non-empty (the `ensure` in
+        # Read the unroll fuel WITHOUT the decrement side effect of `unroll_fuel_remaining`: a constant-arg
+        # unroll has begun iff the thread-local is set and the stack is non-empty (the `ensure` in
         # `evaluate_guarded_user_method_body` clears it at stack-empty).
         unroll_idle = stack.empty? || Thread.current[INFERENCE_UNROLL_FUEL_KEY].nil?
         unroll_idle &&
           stack.none? { |frame| plain_part(frame) == plain_signature }
       end
 
-      # Run-scoped return-memo bucket for the current discovery
-      # generation. Keyed by the identity of the frozen `def_nodes`
-      # table so a new analysis generation (or any scope that swaps the
-      # index) transparently lands in a fresh bucket. See RETURN_MEMO_KEY.
+      # Run-scoped return-memo bucket for the current discovery generation. Keyed by the identity of the
+      # frozen `def_nodes` table so a new analysis generation (or any scope that swaps the index)
+      # transparently lands in a fresh bucket. See RETURN_MEMO_KEY.
       def return_memo_bucket
         store = (Thread.current[RETURN_MEMO_KEY] ||= {}.compare_by_identity)
         store[scope.discovered_def_nodes] ||= {}
       end
 
-      # Pushes the recursion-guard frame, evaluates the body (the outermost
-      # frame for a plain signature runs the ADR-55 slice 2 fixpoint; nested
-      # extended frames evaluate once and let the owner iterate), and on the
-      # way out pops the frame and resets the per-outermost-entry fuel and
-      # summary tables when the guard stack drains to empty.
+      # Pushes the recursion-guard frame, evaluates the body (the outermost frame for a plain signature runs
+      # the ADR-55 slice 2 fixpoint; nested extended frames evaluate once and let the owner iterate), and on
+      # the way out pops the frame and resets the per-outermost-entry fuel and summary tables when the guard
+      # stack drains to empty.
       def evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
-        # The outermost frame for this plain signature owns the summary
-        # entry and runs the fixpoint loop. ADR-55 WD2.
+        # The outermost frame for this plain signature owns the summary entry and runs the fixpoint loop.
+        # ADR-55 WD2.
         outermost = stack.none? { |frame| plain_part(frame) == context.plain_signature }
         stack.push(signature)
         begin
@@ -2035,19 +1755,16 @@ module Rigor
         end
       end
 
-      # Evaluates a method body and joins the value types of every explicit
-      # `return value` reached during the walk with the body's tail type.
+      # Evaluates a method body and joins the value types of every explicit `return value` reached during
+      # the walk with the body's tail type.
       #
-      # The tail-only evaluator (`statements_type_for` → `type_of(body.last)`)
-      # models only the fall-through value; an early `return false` or a
-      # block-internal `return x` produces `Bot` at its own position and is
-      # otherwise invisible to method-return inference. Without this join a
-      # predicate helper shaped `return false unless cond; ...; true` infers
-      # `Constant[true]` (the early `return false` dropped), which folds
-      # `if helper` to always-truthy. `StatementEvaluator.with_return_sink`
-      # collects the returns (nested `def`/lambda are barriers; block-internal
-      # returns correctly bubble to the enclosing method) so the inferred
-      # return is `tail | return_1 | … | return_n`, matching Ruby semantics.
+      # The tail-only evaluator (`statements_type_for` → `type_of(body.last)`) models only the fall-through
+      # value; an early `return false` or a block-internal `return x` produces `Bot` at its own position and
+      # is otherwise invisible to method-return inference. Without this join a predicate helper shaped
+      # `return false unless cond; ...; true` infers `Constant[true]` (the early `return false` dropped),
+      # which folds `if helper` to always-truthy. `StatementEvaluator.with_return_sink` collects the returns
+      # (nested `def`/lambda are barriers; block-internal returns correctly bubble to the enclosing method)
+      # so the inferred return is `tail | return_1 | … | return_n`, matching Ruby semantics.
       def evaluate_body_with_returns(body_scope, body)
         (type, post_scope), returns = StatementEvaluator.with_return_sink do
           body_scope.evaluate(body)
@@ -2056,16 +1773,13 @@ module Rigor
         [joined, post_scope]
       end
 
-      # ADR-55 slice 2 — Kleene fixpoint over a recursive method's return
-      # summary. Seeds the assumption to `bot`, evaluates the body, and (only
-      # if the summary was actually consulted during evaluation — i.e. the
-      # method really recursed) iterates: if the computed return is subsumed
-      # by the assumption the fixpoint is reached; otherwise the assumption
-      # joins in the computed return and the body re-evaluates. Capped at
-      # `RECURSION_FIXPOINT_CAP` total evaluations; the final permitted
-      # iteration widens value-pinned constituents to their nominal base to
-      # force convergence, and any residual instability collapses to
-      # `untyped` (today's behaviour).
+      # ADR-55 slice 2 — Kleene fixpoint over a recursive method's return summary. Seeds the assumption to
+      # `bot`, evaluates the body, and (only if the summary was actually consulted during evaluation — i.e.
+      # the method really recursed) iterates: if the computed return is subsumed by the assumption the
+      # fixpoint is reached; otherwise the assumption joins in the computed return and the body re-evaluates.
+      # Capped at `RECURSION_FIXPOINT_CAP` total evaluations; the final permitted iteration widens
+      # value-pinned constituents to their nominal base to force convergence, and any residual instability
+      # collapses to `untyped` (today's behaviour).
       def fixpoint_user_method_return(def_node, body_scope, context, widened: false)
         plain_signature = context.plain_signature
         summaries = context.summaries
@@ -2079,34 +1793,27 @@ module Rigor
           type, = evaluate_body_with_returns(body_scope, def_node.body)
           computed = clamp_unroll_result(type, context.would_have_been_guarded)
 
-          # Cross-signature mutual recursion (ADR-55 soundness fix,
-          # 2026-06-12): the evaluation consulted an ANCESTOR signature's
-          # in-flight summary (seed depth shallower than this frame's), so
-          # `computed` embeds a transient foreign Kleene iterate -- e.g.
-          # `odd?` folding `even?`'s seeded `bot` into `Constant[false]`.
-          # The per-signature iteration below cannot converge such an
-          # entangled pair (each side's iterate is conditioned on the
-          # other's unfinished assumption), so degrade this frame to the
+          # Cross-signature mutual recursion (ADR-55 soundness fix, 2026-06-12): the evaluation consulted an
+          # ANCESTOR signature's in-flight summary (seed depth shallower than this frame's), so `computed`
+          # embeds a transient foreign Kleene iterate -- e.g. `odd?` folding `even?`'s seeded `bot` into
+          # `Constant[false]`. The per-signature iteration below cannot converge such an entangled pair (each
+          # side's iterate is conditioned on the other's unfinished assumption), so degrade this frame to the
           # sound `untyped` floor instead of surfacing a one-sided value.
           if consult_depths[consult_mark..].any? { |d| d < depth }
             return degrade_entangled_fixpoint(summaries, plain_signature)
           end
 
-          # The summary was never consulted — the method did not recurse on
-          # this evaluation, so there is no fixpoint to chase. Return the
-          # computed type directly (pre-fixpoint behaviour for non-recursive
+          # The summary was never consulted — the method did not recurse on this evaluation, so there is no
+          # fixpoint to chase. Return the computed type directly (pre-fixpoint behaviour for non-recursive
           # bodies that merely share `infer_user_method_return`).
           return computed unless summaries.dig(plain_signature, :consulted)
 
-          # ADR-55 slice 2 bot-collapse fix (2026-06-11). When the recursive
-          # method's only contribution this evaluation was the seeded `bot`
-          # assumption (so `computed` is `bot` even though the body recursed),
-          # the `joined == assumption` check below would trivially converge at
-          # the seed and return `bot` — UNSOUND for a method with a reachable
-          # non-recursive exit (`passthrough` returns `:done`, `pick` returns
-          # `nil`). `bot` means "never returns", which feeds ADR-47
-          # reachability / always-falsey diagnostics, so it must be reserved
-          # for genuinely diverging methods (`spin`).
+          # ADR-55 slice 2 bot-collapse fix (2026-06-11). When the recursive method's only contribution this
+          # evaluation was the seeded `bot` assumption (so `computed` is `bot` even though the body
+          # recursed), the `joined == assumption` check below would trivially converge at the seed and
+          # return `bot` — UNSOUND for a method with a reachable non-recursive exit (`passthrough` returns
+          # `:done`, `pick` returns `nil`). `bot` means "never returns", which feeds ADR-47 reachability /
+          # always-falsey diagnostics, so it must be reserved for genuinely diverging methods (`spin`).
           if computed.is_a?(Type::Bot)
             resolved = resolve_bot_collapse(def_node, context, widened: widened)
             return resolved unless resolved.nil?
@@ -2117,10 +1824,9 @@ module Rigor
         end
       end
 
-      # Seeds the thread-local summary entry for a fixpoint owner: the `bot`
-      # Kleene seed plus the guard-stack depth at seed time (the frame for
-      # this signature is already pushed), which `consult_summary` logs so
-      # nested fixpoints can detect a foreign in-flight (ancestor) consult.
+      # Seeds the thread-local summary entry for a fixpoint owner: the `bot` Kleene seed plus the
+      # guard-stack depth at seed time (the frame for this signature is already pushed), which
+      # `consult_summary` logs so nested fixpoints can detect a foreign in-flight (ancestor) consult.
       # Returns the seed depth. ADR-55 slice 2.
       def seed_fixpoint_summary(summaries, plain_signature)
         depth = (Thread.current[INFERENCE_GUARD_KEY] || []).size
@@ -2130,9 +1836,8 @@ module Rigor
         depth
       end
 
-      # Degrades an entangled mutual-recursion fixpoint to the sound
-      # `untyped` floor (ADR-55 mutual-recursion soundness fix, 2026-06-12),
-      # parking `untyped` in the assumption so any consumer that still reads
+      # Degrades an entangled mutual-recursion fixpoint to the sound `untyped` floor (ADR-55 mutual-recursion
+      # soundness fix, 2026-06-12), parking `untyped` in the assumption so any consumer that still reads
       # this signature's summary sees the floor, not the stale `bot` seed.
       def degrade_entangled_fixpoint(summaries, plain_signature)
         BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
@@ -2141,12 +1846,10 @@ module Rigor
         Type::Combinator.untyped
       end
 
-      # One Kleene-iteration step of the fixpoint loop. Joins `computed` into
-      # the running assumption (widening value-pinned constituents on the
-      # final permitted iteration to force convergence) and either returns a
-      # final type — convergence, or the capped `untyped` collapse — or
-      # `:continue` to request another body evaluation, having advanced the
-      # stored assumption. ADR-55 WD2.
+      # One Kleene-iteration step of the fixpoint loop. Joins `computed` into the running assumption
+      # (widening value-pinned constituents on the final permitted iteration to force convergence) and
+      # either returns a final type — convergence, or the capped `untyped` collapse — or `:continue` to
+      # request another body evaluation, having advanced the stored assumption. ADR-55 WD2.
       def fixpoint_step(summaries, plain_signature, computed, iteration)
         assumption = summaries[plain_signature][:assumption]
         last_iteration = iteration == RECURSION_FIXPOINT_CAP - 1
@@ -2170,36 +1873,31 @@ module Rigor
         :continue
       end
 
-      # Rebuilds the user-method body scope with every bound positional
-      # parameter widened to its nominal base (`1 | 2 | 3` → `Integer`,
-      # `Constant[:x]` → `Symbol`). Used by the bot-collapse retry in
-      # `fixpoint_user_method_return`: call-site argument narrowing can prune a
-      # recursive method's base case, and widening restores the declared-type
-      # view under which the base case is reachable. Returns `nil` when the
-      # parameter shape is not inferable (mirrors `build_user_method_body_scope`).
+      # Rebuilds the user-method body scope with every bound positional parameter widened to its nominal
+      # base (`1 | 2 | 3` → `Integer`, `Constant[:x]` → `Symbol`). Used by the bot-collapse retry in
+      # `fixpoint_user_method_return`: call-site argument narrowing can prune a recursive method's base
+      # case, and widening restores the declared-type view under which the base case is reachable. Returns
+      # `nil` when the parameter shape is not inferable (mirrors `build_user_method_body_scope`).
       def widened_user_method_body_scope(def_node, receiver, arg_types)
         widened_args = arg_types.map { |arg_type| widen_value_pinned(arg_type) }
         build_user_method_body_scope(def_node, receiver, widened_args)
       end
 
-      # ADR-55 slice 2 bot-collapse resolution (2026-06-11). Called when a
-      # fixpoint iteration computed `bot` for a recursive body. Two escape
-      # hatches keep `bot` reserved for genuinely diverging methods:
+      # ADR-55 slice 2 bot-collapse resolution (2026-06-11). Called when a fixpoint iteration computed `bot`
+      # for a recursive body. Two escape hatches keep `bot` reserved for genuinely diverging methods:
       #
-      #   1. Re-run the fixpoint ONCE over a parameter-widened body scope
-      #      (`1 | 2 | 3` → `Integer`): call-site argument narrowing can prune
-      #      a base-case *tail* branch (`n <= 0 ? :done : recurse` with a
-      #      positive-only `n`), and widening un-prunes it so the base
-      #      constituent (`:done`) surfaces. `passthrough` recovers here.
+      #   1. Re-run the fixpoint ONCE over a parameter-widened body scope (`1 | 2 | 3` → `Integer`):
+      #      call-site argument narrowing can prune a base-case *tail* branch (`n <= 0 ? :done : recurse`
+      #      with a positive-only `n`), and widening un-prunes it so the base constituent (`:done`) surfaces.
+      #      `passthrough` recovers here.
       #
-      #   2. If the (possibly widened) body STILL computes `bot` but contains
-      #      a reachable explicit `return` — whose value the tail-only body
-      #      evaluator never folds into the result (`pick`'s `return nil`) —
-      #      fall to the conservative `Dynamic[top]` floor (the pre-slice-2
-      #      observable) rather than the unsound `bot`.
+      #   2. If the (possibly widened) body STILL computes `bot` but contains a reachable explicit `return`
+      #      — whose value the tail-only body evaluator never folds into the result (`pick`'s `return nil`)
+      #      — fall to the conservative `Dynamic[top]` floor (the pre-slice-2 observable) rather than the
+      #      unsound `bot`.
       #
-      # Returns the resolved type, or `nil` to let the caller's normal
-      # fixpoint convergence proceed (genuine divergence — `spin`).
+      # Returns the resolved type, or `nil` to let the caller's normal fixpoint convergence proceed (genuine
+      # divergence — `spin`).
       def resolve_bot_collapse(def_node, context, widened:)
         unless widened
           widened_scope = widened_user_method_body_scope(def_node, context.receiver, context.arg_types)
@@ -2211,13 +1909,11 @@ module Rigor
         nil
       end
 
-      # True when `node` contains a reachable explicit `return` statement —
-      # one not nested inside a return barrier (`def` / lambda / block). The
-      # tail-only body evaluator in `infer_user_method_return` never folds an
-      # early-return value into the method result, so a recursive method whose
-      # base case is spelled as `return value` (rather than a tail branch)
-      # looks like it only diverges. This detector is the signal that such a
-      # method has a non-recursive exit, so its bot-collapse must floor to
+      # True when `node` contains a reachable explicit `return` statement — one not nested inside a return
+      # barrier (`def` / lambda / block). The tail-only body evaluator in `infer_user_method_return` never
+      # folds an early-return value into the method result, so a recursive method whose base case is
+      # spelled as `return value` (rather than a tail branch) looks like it only diverges. This detector is
+      # the signal that such a method has a non-recursive exit, so its bot-collapse must floor to
       # `Dynamic[top]` rather than `bot` (ADR-55 slice 2, 2026-06-11).
       RETURN_BARRIER_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
       private_constant :RETURN_BARRIER_NODES
@@ -2230,11 +1926,10 @@ module Rigor
         node.compact_child_nodes.any? { |child| body_has_explicit_return?(child) }
       end
 
-      # Returns the current assumed summary for `plain_signature`, recording
-      # that it was consulted (so the fixpoint owner knows the body actually
-      # recursed). Falls back to `untyped` when no summary is active — e.g. a
-      # nested extended frame guarded before its plain signature seeded an
-      # entry, which is the pre-slice-2 observable.
+      # Returns the current assumed summary for `plain_signature`, recording that it was consulted (so the
+      # fixpoint owner knows the body actually recursed). Falls back to `untyped` when no summary is active
+      # — e.g. a nested extended frame guarded before its plain signature seeded an entry, which is the
+      # pre-slice-2 observable.
       def consult_summary(summaries, plain_signature)
         entry = summaries[plain_signature]
         return Type::Combinator.untyped if entry.nil?
@@ -2244,46 +1939,38 @@ module Rigor
         entry[:assumption]
       end
 
-      # ADR-55 WD1 governing-rule clamp. When the just-evaluated frame
-      # took the extended (value-keyed) path but its plain signature was
-      # already guarded (`would_have_been_guarded`), the unroll may only
-      # surface a fully value-pinned result; any other outcome must be
-      # byte-identical to the plain guard's `untyped` (and counts a
-      # `RECURSION_GUARD` hit, matching the pre-slice-1 observable).
+      # ADR-55 WD1 governing-rule clamp. When the just-evaluated frame took the extended (value-keyed) path
+      # but its plain signature was already guarded (`would_have_been_guarded`), the unroll may only surface
+      # a fully value-pinned result; any other outcome must be byte-identical to the plain guard's `untyped`
+      # (and counts a `RECURSION_GUARD` hit, matching the pre-slice-1 observable).
       def clamp_unroll_result(type, would_have_been_guarded)
         return type unless would_have_been_guarded && !fully_value_pinned?(type)
 
         BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
         scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
-        # ADR-55 WD1 clamp: a guarded extended frame whose body is non-pinned
-        # must be byte-identical to the plain guard's `untyped`. This path
-        # deliberately does NOT route to the in-progress fixpoint summary:
-        # the summary is a Kleene lower bound mid-iteration, while the clamp
-        # is a soundness backstop for an untrustworthy unrolled value, so it
-        # must stay the conservative `untyped` upper bound. (WD4's
-        # summary-composition applies to the in-cycle guard and fuel paths,
-        # which DO return the assumed summary — see `consult_summary`.)
+        # ADR-55 WD1 clamp: a guarded extended frame whose body is non-pinned must be byte-identical to the
+        # plain guard's `untyped`. This path deliberately does NOT route to the in-progress fixpoint summary:
+        # the summary is a Kleene lower bound mid-iteration, while the clamp is a soundness backstop for an
+        # untrustworthy unrolled value, so it must stay the conservative `untyped` upper bound. (WD4's
+        # summary-composition applies to the in-cycle guard and fuel paths, which DO return the assumed
+        # summary — see `consult_summary`.)
         Type::Combinator.untyped
       end
 
-      # Widens every value-pinned constituent of `type` to its nominal base
-      # (`Constant[1]` → `Integer`, `Tuple[Constant…]` → its element bases),
-      # leaving non-pinned constituents untouched. Used on the fixpoint's
-      # final permitted iteration (ADR-55 WD2) to force convergence — the
-      # tower of distinct constant iterates collapses to one nominal type.
+      # Widens every value-pinned constituent of `type` to its nominal base (`Constant[1]` → `Integer`,
+      # `Tuple[Constant…]` → its element bases), leaving non-pinned constituents untouched. Used on the
+      # fixpoint's final permitted iteration (ADR-55 WD2) to force convergence — the tower of distinct
+      # constant iterates collapses to one nominal type.
       def widen_value_pinned(type)
         Type::Combinator.widen_value_pinned(type)
       end
 
-      # Consumes one unit from the thread-local unroll-fuel counter and
-      # returns the units that were available *before* this consumption
-      # (so a positive return means the extended value-key may be used).
-      # Fuel is per-outermost inference entry: at the top level (empty
-      # guard stack) it seeds to `RECURSION_UNROLL_FUEL`, and the
-      # `ensure` in `infer_user_method_return` clears it once the stack
-      # drains back to empty. On exhaustion (return 0) it records a
-      # `RECURSION_UNROLL_FUEL` hit so the caller keeps the plain
-      # `(receiver, method)` signature — today's behaviour.
+      # Consumes one unit from the thread-local unroll-fuel counter and returns the units that were
+      # available *before* this consumption (so a positive return means the extended value-key may be used).
+      # Fuel is per-outermost inference entry: at the top level (empty guard stack) it seeds to
+      # `RECURSION_UNROLL_FUEL`, and the `ensure` in `infer_user_method_return` clears it once the stack
+      # drains back to empty. On exhaustion (return 0) it records a `RECURSION_UNROLL_FUEL` hit so the caller
+      # keeps the plain `(receiver, method)` signature — today's behaviour.
       def unroll_fuel_remaining(stack)
         remaining = Thread.current[INFERENCE_UNROLL_FUEL_KEY]
         remaining = RECURSION_UNROLL_FUEL if remaining.nil? || stack.empty?
@@ -2295,12 +1982,11 @@ module Rigor
         remaining
       end
 
-      # A stable, hashable descriptor of the argument values when EVERY
-      # element of `arg_types` is value-pinned: a `Type::Constant`, or a
-      # `Type::Tuple` whose elements are (recursively) all value-pinned.
-      # Returns nil when any argument is not value-pinned (the ordinary
-      # type-keyed path) or when any pinned value's structural size
-      # exceeds `RECURSION_VALUE_SIZE_CAP` (value blow-up → fall back).
+      # A stable, hashable descriptor of the argument values when EVERY element of `arg_types` is
+      # value-pinned: a `Type::Constant`, or a `Type::Tuple` whose elements are (recursively) all
+      # value-pinned. Returns nil when any argument is not value-pinned (the ordinary type-keyed path) or
+      # when any pinned value's structural size exceeds `RECURSION_VALUE_SIZE_CAP` (value blow-up → fall
+      # back).
       def constant_argument_value_key(arg_types)
         return nil if arg_types.empty?
 
@@ -2316,10 +2002,9 @@ module Rigor
         keys.map(&:first)
       end
 
-      # Returns `[descriptor, structural_size]` for a value-pinned type,
-      # or nil for anything else. Strings count by a cheap length proxy
-      # (length > 256 ≈ 64+ nodes) so a long built string disqualifies
-      # the frame without a deep walk; tuples recurse.
+      # Returns `[descriptor, structural_size]` for a value-pinned type, or nil for anything else. Strings
+      # count by a cheap length proxy (length > 256 ≈ 64+ nodes) so a long built string disqualifies the
+      # frame without a deep walk; tuples recurse.
       def pinned_value_descriptor(arg)
         case arg
         when Type::Constant
@@ -2340,35 +2025,27 @@ module Rigor
         end
       end
 
-      # Builds the body scope for a user-defined instance
-      # method call: a fresh `Scope` with `self_type` set to
-      # the receiver's nominal type, the project-wide
-      # accumulators inherited (so the body sees the same
-      # `discovered_classes` / `class_ivars` / etc. the
-      # caller does), and required positional parameters
-      # bound from the call's `arg_types` by index. Returns
-      # nil when the parameter shape is too complex for the
-      # first-iteration binder (rest args, keyword args,
-      # block params, etc.).
+      # Builds the body scope for a user-defined instance method call: a fresh `Scope` with `self_type` set
+      # to the receiver's nominal type, the project-wide accumulators inherited (so the body sees the same
+      # `discovered_classes` / `class_ivars` / etc. the caller does), and required positional parameters
+      # bound from the call's `arg_types` by index. Returns nil when the parameter shape is too complex for
+      # the first-iteration binder (rest args, keyword args, block params, etc.).
       def build_user_method_body_scope(def_node, receiver, arg_types)
         params = def_node.parameters
         required = params&.requireds || []
         return nil unless params.nil? || user_method_param_shape_simple?(params)
         return nil unless required.size == arg_types.size
 
-        # Bind required positionals by index. The body scope starts from an
-        # empty fact store and narrowing set, so `with_local`'s fact /
-        # narrowing invalidations would be no-ops here — build the locals
+        # Bind required positionals by index. The body scope starts from an empty fact store and narrowing
+        # set, so `with_local`'s fact / narrowing invalidations would be no-ops here — build the locals
         # table directly (matching `with_local`'s `name.to_sym` key).
         locals = {}
         required.each_with_index { |param, index| locals[param.name.to_sym] = arg_types[index] }
 
-        # Construct the body scope in a SINGLE allocation — the previous
-        # `Scope.empty.with_*.with_*…` chain allocated a fresh frozen Scope
-        # per field, run per user-method-call inference (ADR-44). The
-        # discovery index is inherited whole by reference (ADR-53 Track A);
-        # the hand-copied per-field list this replaces had silently dropped
-        # `data_member_layouts` and `discovered_method_visibilities`.
+        # Construct the body scope in a SINGLE allocation — the previous `Scope.empty.with_*.with_*…` chain
+        # allocated a fresh frozen Scope per field, run per user-method-call inference (ADR-44). The
+        # discovery index is inherited whole by reference (ADR-53 Track A); the hand-copied per-field list
+        # this replaces had silently dropped `data_member_layouts` and `discovered_method_visibilities`.
         Scope.new(
           environment: scope.environment,
           locals: locals.freeze,
@@ -2379,10 +2056,9 @@ module Rigor
         )
       end
 
-      # ADR-48 Struct slice 3 — the fold-safe-local set for a method body
-      # (runs only on a return-memo miss, so the per-call cost is bounded —
-      # measured perf-neutral). Struct member layouts of constant receivers
-      # are resolved through the discovery side-table the body scope inherits.
+      # ADR-48 Struct slice 3 — the fold-safe-local set for a method body (runs only on a return-memo miss,
+      # so the per-call cost is bounded — measured perf-neutral). Struct member layouts of constant
+      # receivers are resolved through the discovery side-table the body scope inherits.
       def struct_fold_safe_locals_for(body)
         StructFoldSafety.fold_safe_locals(
           body,
@@ -2390,10 +2066,8 @@ module Rigor
         )
       end
 
-      # First iteration accepts only required positional
-      # parameters: `def foo(a, b, c)`. Optionals, rest,
-      # keyword params, and block params disqualify the
-      # method from inference (the caller observes
+      # First iteration accepts only required positional parameters: `def foo(a, b, c)`. Optionals, rest,
+      # keyword params, and block params disqualify the method from inference (the caller observes
       # `Dynamic[Top]` instead).
       def user_method_param_shape_simple?(params)
         return false unless params.is_a?(Prism::ParametersNode)
@@ -2405,16 +2079,12 @@ module Rigor
           params.block.nil?
       end
 
-      # Slice A-engine. Implicit-self calls (no `node.receiver`)
-      # adopt the surrounding scope's `self_type` as their receiver
-      # so calls like `attr_reader_method_name` or
-      # `private_helper(...)` inside an instance method dispatch
-      # against the enclosing class. Slice 7 phase 10 — when
-      # `self_type` is nil (top-level program), the receiver
-      # MUST default to `Nominal[Object]` so Kernel intrinsics
-      # like `require`, `require_relative`, `raise`, and `puts`
-      # dispatch through Object/Kernel rather than falling through
-      # to `Dynamic[Top]`.
+      # Slice A-engine. Implicit-self calls (no `node.receiver`) adopt the surrounding scope's `self_type`
+      # as their receiver so calls like `attr_reader_method_name` or `private_helper(...)` inside an
+      # instance method dispatch against the enclosing class. Slice 7 phase 10 — when `self_type` is nil
+      # (top-level program), the receiver MUST default to `Nominal[Object]` so Kernel intrinsics like
+      # `require`, `require_relative`, `raise`, and `puts` dispatch through Object/Kernel rather than
+      # falling through to `Dynamic[Top]`.
       def call_receiver_type_for(node)
         return type_of(node.receiver) if node.receiver
 
@@ -2432,28 +2102,20 @@ module Rigor
         arguments_node.arguments.map { |argument| type_of(argument) }
       end
 
-      # When the call carries a `Prism::BlockNode`, build the block's
-      # entry scope (outer locals plus parameter bindings driven by
-      # the receiving method's RBS signature), type the block body
-      # under that scope, and return the body's value type. The
-      # result feeds `MethodDispatcher.dispatch`'s `block_type:` so
-      # generic methods like `Array#map[U] { (Elem) -> U } -> Array[U]`
-      # resolve `U` to the block's return type. Returns `nil` when
-      # the call has no block, when the receiver is unknown, or
-      # when typing the body raises (defensive against malformed
-      # subtrees); the dispatcher then runs in its no-block-aware
-      # path.
+      # When the call carries a `Prism::BlockNode`, build the block's entry scope (outer locals plus
+      # parameter bindings driven by the receiving method's RBS signature), type the block body under that
+      # scope, and return the body's value type. The result feeds `MethodDispatcher.dispatch`'s
+      # `block_type:` so generic methods like `Array#map[U] { (Elem) -> U } -> Array[U]` resolve `U` to the
+      # block's return type. Returns `nil` when the call has no block, when the receiver is unknown, or when
+      # typing the body raises (defensive against malformed subtrees); the dispatcher then runs in its
+      # no-block-aware path.
       #
-      # ADR-14 gap-#3 (d): a `Prism::BlockArgumentNode` carrying
-      # `&:symbol` (the Symbol#to_proc shorthand) is treated as
-      # a block. The block's return type is computed by
-      # dispatching `:symbol` on the expected block param type
-      # (per `Symbol#to_proc`'s `{ |x| x.symbol }` semantics).
-      # A precise inner dispatch produces the right return; any
-      # failure step falls back to `Dynamic[Top]` so the
-      # dispatcher still SEES a block — selecting the block-
-      # bearing overload of e.g. `Hash#transform_values` over
-      # the no-block overload that returns `Enumerator`.
+      # ADR-14 gap-#3 (d): a `Prism::BlockArgumentNode` carrying `&:symbol` (the Symbol#to_proc shorthand) is
+      # treated as a block. The block's return type is computed by dispatching `:symbol` on the expected
+      # block param type (per `Symbol#to_proc`'s `{ |x| x.symbol }` semantics). A precise inner dispatch
+      # produces the right return; any failure step falls back to `Dynamic[Top]` so the dispatcher still
+      # SEES a block — selecting the block-bearing overload of e.g. `Hash#transform_values` over the
+      # no-block overload that returns `Enumerator`.
       def block_return_type_for(call_node, receiver_type, arg_types)
         block_arg = call_node.block
         return nil if block_arg.nil?
@@ -2465,11 +2127,9 @@ module Rigor
           arg_types: arg_types,
           environment: scope.environment
         )
-        # ADR-16 Tier A: when a registered plugin's `block_as_methods`
-        # entry matches `(receiver_type, call_node.name)`, narrow the
-        # block body's `self_type` to the receiver class's instance
-        # type. The narrowing is `nil` for unmatched calls, leaving
-        # the existing scope contract unchanged.
+        # ADR-16 Tier A: when a registered plugin's `block_as_methods` entry matches `(receiver_type,
+        # call_node.name)`, narrow the block body's `self_type` to the receiver class's instance type. The
+        # narrowing is `nil` for unmatched calls, leaving the existing scope contract unchanged.
         narrowed_self = MacroBlockSelfType.narrow_self_type_for(
           scope: scope, call_node: call_node, receiver_type: receiver_type
         )
@@ -2490,15 +2150,11 @@ module Rigor
         end
       end
 
-      # `&:symbol` desugars to a one-arg Proc that dispatches
-      # `symbol` against its argument. When the param type is
-      # known and the resulting inner dispatch is precise,
-      # this returns the precise carrier; otherwise it
-      # returns `Dynamic[Top]` (still non-nil) so the outer
-      # dispatcher selects the block-bearing overload.
-      # `&proc_local` / `&method(:foo)` and friends — anything
-      # not a bare SymbolNode — still resolve to
-      # `Dynamic[Top]` for the same block-presence signal.
+      # `&:symbol` desugars to a one-arg Proc that dispatches `symbol` against its argument. When the param
+      # type is known and the resulting inner dispatch is precise, this returns the precise carrier;
+      # otherwise it returns `Dynamic[Top]` (still non-nil) so the outer dispatcher selects the
+      # block-bearing overload. `&proc_local` / `&method(:foo)` and friends — anything not a bare
+      # SymbolNode — still resolve to `Dynamic[Top]` for the same block-presence signal.
       def symbol_block_return_type(block_arg, expected_param_types)
         expression = block_arg.expression
         return dynamic_top unless expression.is_a?(Prism::SymbolNode)
@@ -2525,19 +2181,14 @@ module Rigor
         block_scope.type_of(body)
       end
 
-      # v0.0.6 phase 2 — per-element block fold for Tuple
-      # receivers under `:map` / `:collect`. Walks every Tuple
-      # position, binds the block parameter to that element's
-      # type, and re-types the block body. The per-position
-      # results are assembled into `Tuple[U_1..U_n]`, strictly
-      # tighter than the RBS-projected `Array[union]`.
+      # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
+      # Tuple position, binds the block parameter to that element's type, and re-types the block body. The
+      # per-position results are assembled into `Tuple[U_1..U_n]`, strictly tighter than the RBS-projected
+      # `Array[union]`.
       #
-      # Declines (returns nil) when the receiver is not a
-      # `Tuple` with at least one element, when the call has
-      # no `Prism::BlockNode`, when the method is outside the
-      # supported set, when block typing raises mid-loop, or
-      # when the block has no body. The decline path leaves
-      # the dispatch chain untouched.
+      # Declines (returns nil) when the receiver is not a `Tuple` with at least one element, when the call
+      # has no `Prism::BlockNode`, when the method is outside the supported set, when block typing raises
+      # mid-loop, or when the block has no body. The decline path leaves the dispatch chain untouched.
       PER_ELEMENT_TUPLE_METHODS = Set[
         :map, :collect, :filter_map, :flat_map,
         :select, :filter, :reject,
@@ -2551,12 +2202,10 @@ module Rigor
       ].freeze
       private_constant :HASH_SHAPE_TRANSFORM_METHODS
 
-      # Cardinality cap for per-element block fold over
-      # finite-bound `Constant<Range>` receivers. Walking
-      # `(1..1_000_000).map { … }` element-wise would balloon
-      # block-typing cost and explode the resulting Tuple, so
-      # only short ranges expand into per-position folds.
-      # Larger ranges decline so the RBS tier widens.
+      # Cardinality cap for per-element block fold over finite-bound `Constant<Range>` receivers. Walking
+      # `(1..1_000_000).map { … }` element-wise would balloon block-typing cost and explode the resulting
+      # Tuple, so only short ranges expand into per-position folds. Larger ranges decline so the RBS tier
+      # widens.
       PER_ELEMENT_RANGE_LIMIT = 8
       private_constant :PER_ELEMENT_RANGE_LIMIT
 
@@ -2573,18 +2222,14 @@ module Rigor
         assemble_per_element_result(call_node.name, per_position, element_types)
       end
 
-      # Evaluates the call's block once per receiver element.
-      # Two block shapes are supported:
+      # Evaluates the call's block once per receiver element. Two block shapes are supported:
       #
-      # - `Prism::BlockNode` — a full `do … end` / `{ … }` block;
-      #   the body is re-typed per position with the element
-      #   bound to the block parameter.
-      # - `Prism::BlockArgumentNode` wrapping a `SymbolNode` —
-      #   the `&:predicate` shorthand; the symbol is dispatched
-      #   as a zero-arg method on each element type.
+      # - `Prism::BlockNode` — a full `do … end` / `{ … }` block; the body is re-typed per position with the
+      #   element bound to the block parameter.
+      # - `Prism::BlockArgumentNode` wrapping a `SymbolNode` — the `&:predicate` shorthand; the symbol is
+      #   dispatched as a zero-arg method on each element type.
       #
-      # Any other shape (`&proc_local`, `&method(:foo)`, no
-      # block) returns `nil` so the fold declines.
+      # Any other shape (`&proc_local`, `&method(:foo)`, no block) returns `nil` so the fold declines.
       def per_element_block_results(block, element_types)
         case block
         when Prism::BlockNode
@@ -2613,20 +2258,17 @@ module Rigor
         nil
       end
 
-      # Returns the per-position element types for a finite,
-      # statically-known receiver shape — or nil when the
-      # receiver does not pin a finite element list.
+      # Returns the per-position element types for a finite, statically-known receiver shape — or nil when
+      # the receiver does not pin a finite element list.
       #
       # `Tuple[A, B, …]`        → [A, B, …]
       # `Constant<a..b>`        → [Constant[a], …, Constant[b]]
       # everything else         → nil
       #
-      # Note: `Type::IntegerRange` is the bounded-Integer
-      # carrier (`int<a, b>` represents "an Integer between
-      # a and b"), not a Range value. Calls like `.map` /
-      # `.find` on an `IntegerRange` receiver would resolve
-      # to `Integer#map` / `Integer#find` — neither exists —
-      # so IntegerRange does NOT participate in this fold.
+      # Note: `Type::IntegerRange` is the bounded-Integer carrier (`int<a, b>` represents "an Integer between
+      # a and b"), not a Range value. Calls like `.map` / `.find` on an `IntegerRange` receiver would resolve
+      # to `Integer#map` / `Integer#find` — neither exists — so IntegerRange does NOT participate in this
+      # fold.
       def per_element_elements_of(receiver_type)
         case receiver_type
         when Type::Tuple then receiver_type.elements
@@ -2647,47 +2289,38 @@ module Rigor
       INJECT_METHODS = Set[:inject, :reduce].freeze
       private_constant :INJECT_METHODS
 
-      # Cap on the element count for the Part 2 constant-threading
-      # fold — mirrors `ReduceFolding::CONSTANT_FOLD_ELEMENT_CAP`. The
-      # size is checked BEFORE enumeration so `(1..1_000_000)` declines
-      # without materialising.
+      # Cap on the element count for the Part 2 constant-threading fold — mirrors
+      # `ReduceFolding::CONSTANT_FOLD_ELEMENT_CAP`. The size is checked BEFORE enumeration so `(1..1_000_000)`
+      # declines without materialising.
       INJECT_CONSTANT_ELEMENT_CAP = 64
       private_constant :INJECT_CONSTANT_ELEMENT_CAP
 
-      # Magnitude cap on a folded Integer accumulator — mirrors
-      # `ReduceFolding`'s bit cap so factorial-style blow-up declines
-      # to the Part 1 nominal result rather than parking a heavy
-      # bignum literal in the type graph.
+      # Magnitude cap on a folded Integer accumulator — mirrors `ReduceFolding`'s bit cap so factorial-style
+      # blow-up declines to the Part 1 nominal result rather than parking a heavy bignum literal in the type
+      # graph.
       INJECT_CONSTANT_BIT_CAP = 256
       private_constant :INJECT_CONSTANT_BIT_CAP
 
       # Block-form `inject` / `reduce` return-type fold.
       #
-      # Part 1 (soundness): the accumulator of a block-form fold must
-      # reach a fixpoint over an unknown number of iterations — the
-      # RBS tier's generic `(S) { (S, E) -> S } -> S` binds `S` from a
-      # SINGLE block pass (acc=seed, elem=element-join), so
-      # `(1..5).inject(1) { |a, i| a * i }` types `int<1, 5>` while the
-      # runtime is 120 (out of range — unsound). We iterate the
-      # accumulator type to a capped fixpoint (ADR-55/56 `BodyFixpoint`)
-      # so the multiply converges to `Integer`, never a value-bounded
+      # Part 1 (soundness): the accumulator of a block-form fold must reach a fixpoint over an unknown
+      # number of iterations — the RBS tier's generic `(S) { (S, E) -> S } -> S` binds `S` from a SINGLE
+      # block pass (acc=seed, elem=element-join), so `(1..5).inject(1) { |a, i| a * i }` types `int<1, 5>`
+      # while the runtime is 120 (out of range — unsound). We iterate the accumulator type to a capped
+      # fixpoint (ADR-55/56 `BodyFixpoint`) so the multiply converges to `Integer`, never a value-bounded
       # interval the runtime escapes.
       #
-      # Part 2 (precision): when the receiver is a fully-constant
-      # finite collection (`Constant[Range]` / `Tuple` of `Constant`),
-      # the seed is `Constant` (or the no-seed first element), and the
-      # block body folds to a `Constant` on EVERY iteration with the
-      # running accumulator + element bound, thread the accumulator
-      # through per-element block evaluation and return the final
-      # `Constant` (`(1..5).inject(1) { |a, i| a * i } -> 120`).
+      # Part 2 (precision): when the receiver is a fully-constant finite collection (`Constant[Range]` /
+      # `Tuple` of `Constant`), the seed is `Constant` (or the no-seed first element), and the block body
+      # folds to a `Constant` on EVERY iteration with the running accumulator + element bound, thread the
+      # accumulator through per-element block evaluation and return the final `Constant` (`(1..5).inject(1)
+      # { |a, i| a * i } -> 120`).
       #
-      # The two are layered: Part 2 is attempted first (a constant
-      # answer is strictly tighter); on any decline it falls through to
-      # the Part 1 sound nominal fixpoint, and on a Part 1 decline to
-      # the RBS tier. Captured-local write-back (ADR-56) runs at the
-      # statement level independent of this return-type computation, so
-      # a block that both accumulates and mutates captured state keeps
-      # its write-back regardless of which arm answers here.
+      # The two are layered: Part 2 is attempted first (a constant answer is strictly tighter); on any
+      # decline it falls through to the Part 1 sound nominal fixpoint, and on a Part 1 decline to the RBS
+      # tier. Captured-local write-back (ADR-56) runs at the statement level independent of this return-type
+      # computation, so a block that both accumulates and mutates captured state keeps its write-back
+      # regardless of which arm answers here.
       #
       # @return [Rigor::Type, nil]
       def try_block_inject_fold(call_node, receiver, arg_types)
@@ -2705,9 +2338,8 @@ module Rigor
         try_nominal_inject_fixpoint(receiver, block, seed, has_seed)
       end
 
-      # Splits the positional args into the optional seed. A Symbol
-      # final arg (`inject(seed, :*)`) is the no-block Symbol form and
-      # never reaches here (the block guard already failed for it).
+      # Splits the positional args into the optional seed. A Symbol final arg (`inject(seed, :*)`) is the
+      # no-block Symbol form and never reaches here (the block guard already failed for it).
       #
       # @return [Array(Rigor::Type, nil), Boolean] `[seed, has_seed]`
       def inject_seed(arg_types)
@@ -2717,10 +2349,9 @@ module Rigor
         end
       end
 
-      # Part 2 — thread the accumulator through per-element block
-      # evaluation over a fully-constant finite receiver. Declines
-      # (nil) on a non-constant receiver / seed, a size or magnitude
-      # cap, or any per-step result that is not a foldable `Constant`.
+      # Part 2 — thread the accumulator through per-element block evaluation over a fully-constant finite
+      # receiver. Declines (nil) on a non-constant receiver / seed, a size or magnitude cap, or any per-step
+      # result that is not a foldable `Constant`.
       def try_constant_inject_fold(receiver, block, seed, has_seed)
         members = inject_constant_members(receiver)
         return nil if members.nil?
@@ -2735,8 +2366,7 @@ module Rigor
         acc
       end
 
-      # Extracts the receiver's foldable constant values, size-capped
-      # before enumeration, or nil to decline.
+      # Extracts the receiver's foldable constant values, size-capped before enumeration, or nil to decline.
       def inject_constant_members(receiver)
         case receiver
         when Type::Constant then inject_constant_range_members(receiver.value)
@@ -2767,11 +2397,9 @@ module Rigor
         elements.map(&:value)
       end
 
-      # Seeds the constant accumulator: with a seed the memo starts at
-      # the (foldable) seed value and every member is folded; without a
-      # seed the first member seeds the memo and the rest are folded.
-      # The accumulator is carried as a `Constant` type (so the block
-      # body sees a value-pinned param).
+      # Seeds the constant accumulator: with a seed the memo starts at the (foldable) seed value and every
+      # member is folded; without a seed the first member seeds the memo and the rest are folded. The
+      # accumulator is carried as a `Constant` type (so the block body sees a value-pinned param).
       #
       # @return [Array(Rigor::Type::Constant, nil), Array] `[acc, rest]`
       def inject_constant_start(members, seed, has_seed)
@@ -2786,10 +2414,9 @@ module Rigor
         end
       end
 
-      # Evaluates the block body once with the running constant
-      # accumulator + the next constant element bound to the block
-      # params, returning the result when it is a foldable `Constant`
-      # within the magnitude cap, else nil to decline the whole fold.
+      # Evaluates the block body once with the running constant accumulator + the next constant element
+      # bound to the block params, returning the result when it is a foldable `Constant` within the
+      # magnitude cap, else nil to decline the whole fold.
       def inject_constant_step(block, acc, element_value)
         element = Type::Combinator.constant_of(element_value)
         result = type_block_body_with_param(block, [acc, element])
@@ -2811,13 +2438,10 @@ module Rigor
         value.is_a?(Integer) && value.bit_length > INJECT_CONSTANT_BIT_CAP
       end
 
-      # Part 1 — the sound nominal accumulator fixpoint. Iterates
-      # `acc = join(acc, block(acc, element))` to a capped fixpoint with
-      # final `Constant -> Nominal` widening (ADR-55/56 `BodyFixpoint`),
-      # seeding `acc` from the seed type (or the element type for the
-      # no-seed form) and binding the element-join to the element param.
-      # Declines (nil) when the element type is unknown so the RBS tier
-      # owns the call.
+      # Part 1 — the sound nominal accumulator fixpoint. Iterates `acc = join(acc, block(acc, element))` to
+      # a capped fixpoint with final `Constant -> Nominal` widening (ADR-55/56 `BodyFixpoint`), seeding `acc`
+      # from the seed type (or the element type for the no-seed form) and binding the element-join to the
+      # element param. Declines (nil) when the element type is unknown so the RBS tier owns the call.
       def try_nominal_inject_fixpoint(receiver, block, seed, has_seed)
         element = MethodDispatcher::IteratorDispatch.element_type_of(receiver)
         return nil if element.nil?
@@ -2838,9 +2462,8 @@ module Rigor
         converged[:__inject_acc__] || seed_acc
       end
 
-      # `index(value)` and `find_index(value)` carry a positional
-      # argument and search by `==` rather than running the block.
-      # Decline so the RBS tier owns those forms.
+      # `index(value)` and `find_index(value)` carry a positional argument and search by `==` rather than
+      # running the block. Decline so the RBS tier owns those forms.
       def find_family_with_args?(call_node)
         return false unless %i[find_index index].include?(call_node.name)
 
@@ -2862,19 +2485,14 @@ module Rigor
         end
       end
 
-      # `select` / `filter` / `reject`: keeps each receiver
-      # element whose per-position predicate result folds to a
-      # decisive `Constant` — Ruby-truthy for `select` / `filter`,
-      # Ruby-falsey for `reject`. The surviving elements assemble
-      # into a `Tuple`, strictly tighter than the RBS-projected
-      # `Array[Elem]`.
+      # `select` / `filter` / `reject`: keeps each receiver element whose per-position predicate result
+      # folds to a decisive `Constant` — Ruby-truthy for `select` / `filter`, Ruby-falsey for `reject`. The
+      # surviving elements assemble into a `Tuple`, strictly tighter than the RBS-projected `Array[Elem]`.
       #
-      # Folds tightly only when EVERY position is a `Constant`:
-      # a single non-`Constant` position leaves the result
-      # cardinality unknown (the element might or might not
-      # survive), so the dispatcher declines and the RBS tier
-      # widens to `Array[Elem]`. `[].select` style empty results
-      # are sound — an empty `Tuple` is the empty-array carrier.
+      # Folds tightly only when EVERY position is a `Constant`: a single non-`Constant` position leaves the
+      # result cardinality unknown (the element might or might not survive), so the dispatcher declines and
+      # the RBS tier widens to `Array[Elem]`. `[].select` style empty results are sound — an empty `Tuple`
+      # is the empty-array carrier.
       def assemble_filter_result(per_position, element_types, keep_on_truthy:)
         return nil unless per_position.all?(Type::Constant)
 
@@ -2884,12 +2502,9 @@ module Rigor
         Type::Combinator.tuple_of(*kept)
       end
 
-      # `filter_map` folds tightly only when every per-position
-      # result is a `Constant`: positions whose value is `nil`
-      # or `false` drop, the rest survive in declaration order.
-      # When any position is non-Constant the dispatcher
-      # declines (returns nil) so the RBS tier widens to
-      # `Array[U]`.
+      # `filter_map` folds tightly only when every per-position result is a `Constant`: positions whose
+      # value is `nil` or `false` drop, the rest survive in declaration order. When any position is
+      # non-Constant the dispatcher declines (returns nil) so the RBS tier widens to `Array[U]`.
       def assemble_filter_map_result(per_position)
         return nil unless per_position.all?(Type::Constant)
 
@@ -2897,18 +2512,14 @@ module Rigor
         Type::Combinator.tuple_of(*kept)
       end
 
-      # `flat_map` flattens a single level: if the per-position
-      # result is a `Tuple`, its elements are concatenated; if
-      # it's a non-Array scalar carrier (`Constant<…>` over a
-      # non-Array literal) it contributes one element. We fold
-      # tightly only when every per-position result is one of
-      # those two recognisable shapes — `Nominal[Array[T]]`,
-      # `Union[…]`, and other opaque carriers decline so the
-      # RBS tier widens to `Array[U]`.
+      # `flat_map` flattens a single level: if the per-position result is a `Tuple`, its elements are
+      # concatenated; if it's a non-Array scalar carrier (`Constant<…>` over a non-Array literal) it
+      # contributes one element. We fold tightly only when every per-position result is one of those two
+      # recognisable shapes — `Nominal[Array[T]]`, `Union[…]`, and other opaque carriers decline so the RBS
+      # tier widens to `Array[U]`.
       #
-      # `Type::Constant` only ever holds non-Array scalars (the
-      # carrier rejects Array literals), so a single `Constant`
-      # safely contributes itself as a single Tuple element.
+      # `Type::Constant` only ever holds non-Array scalars (the carrier rejects Array literals), so a single
+      # `Constant` safely contributes itself as a single Tuple element.
       def assemble_flat_map_result(per_position)
         flattened = per_position.flat_map { |type| flat_map_contribution(type) }
         return nil if flattened.nil? || flattened.any?(&:nil?)
@@ -2924,16 +2535,13 @@ module Rigor
         end
       end
 
-      # `find` / `detect`: returns the first receiver element
-      # whose block result is Ruby-truthy, or `nil` when no
-      # position folds to truthy.
+      # `find` / `detect`: returns the first receiver element whose block result is Ruby-truthy, or `nil`
+      # when no position folds to truthy.
       #
-      # Folds tightly only when every per-position block result
-      # is a `Type::Constant` — otherwise we cannot decide which
-      # position (if any) is "the first matching one". When the
-      # first decisive truthy position is found, the answer is
-      # the corresponding receiver element. When every position
-      # folds to falsey, the answer is `Constant[nil]`.
+      # Folds tightly only when every per-position block result is a `Type::Constant` — otherwise we cannot
+      # decide which position (if any) is "the first matching one". When the first decisive truthy position
+      # is found, the answer is the corresponding receiver element. When every position folds to falsey,
+      # the answer is `Constant[nil]`.
       def assemble_find_result(per_position, element_types)
         return nil unless per_position.all?(Type::Constant)
 
@@ -2943,8 +2551,8 @@ module Rigor
         element_types[first_truthy_index]
       end
 
-      # `find_index` / `index`: returns the index of the first
-      # truthy position, or `Constant[nil]` when nothing matches.
+      # `find_index` / `index`: returns the index of the first truthy position, or `Constant[nil]` when
+      # nothing matches.
       def assemble_find_index_result(per_position)
         return nil unless per_position.all?(Type::Constant)
 
@@ -2958,28 +2566,22 @@ module Rigor
         type.is_a?(Type::Constant) && type.value && type.value != false
       end
 
-      # Per-pair block fold for `HashShape#transform_keys` and
-      # `HashShape#transform_values` (and their bang variants).
+      # Per-pair block fold for `HashShape#transform_keys` and `HashShape#transform_values` (and their bang
+      # variants).
       #
-      # When the receiver is a closed `HashShape` with no optional
-      # keys, applies the call's block (a `Prism::BlockNode` or
-      # `Prism::BlockArgumentNode`) to each key/value pair
-      # independently and assembles a new `HashShape`:
+      # When the receiver is a closed `HashShape` with no optional keys, applies the call's block (a
+      # `Prism::BlockNode` or `Prism::BlockArgumentNode`) to each key/value pair independently and
+      # assembles a new `HashShape`:
       #
-      # - `transform_values` / `transform_values!`: re-types
-      #   each VALUE by binding it to the block parameter; keys
-      #   are preserved unchanged.
-      # - `transform_keys` / `transform_keys!`: re-types each
-      #   KEY by wrapping it in `Constant[k]` and passing it to
-      #   the block; values are preserved unchanged. The result
-      #   key must be a `Constant[Symbol | String]` — otherwise
-      #   the tier declines (the new key cannot be used as a
-      #   static HashShape index). Collisions (two old keys
-      #   mapping to the same new key) also decline.
+      # - `transform_values` / `transform_values!`: re-types each VALUE by binding it to the block
+      #   parameter; keys are preserved unchanged.
+      # - `transform_keys` / `transform_keys!`: re-types each KEY by wrapping it in `Constant[k]` and
+      #   passing it to the block; values are preserved unchanged. The result key must be a
+      #   `Constant[Symbol | String]` — otherwise the tier declines (the new key cannot be used as a static
+      #   HashShape index). Collisions (two old keys mapping to the same new key) also decline.
       #
-      # Returns `nil` on any decline so the dispatcher falls
-      # through to `RbsDispatch` and gets the widened `Hash[K, V]`
-      # answer.
+      # Returns `nil` on any decline so the dispatcher falls through to `RbsDispatch` and gets the widened
+      # `Hash[K, V]` answer.
       def try_hash_shape_block_fold(call_node, receiver_type)
         return nil unless HASH_SHAPE_TRANSFORM_METHODS.include?(call_node.name)
         return nil unless receiver_type.is_a?(Type::HashShape)
@@ -3023,9 +2625,8 @@ module Rigor
         Type::Combinator.hash_shape_of(new_pairs)
       end
 
-      # Applies a single-argument block (either a full BlockNode
-      # or a `&:symbol` BlockArgumentNode) to `param_type` and
-      # returns the resulting type, or `nil` on failure.
+      # Applies a single-argument block (either a full BlockNode or a `&:symbol` BlockArgumentNode) to
+      # `param_type` and returns the resulting type, or `nil` on failure.
       def apply_hash_block(block_arg, param_type)
         case block_arg
         when Prism::BlockNode

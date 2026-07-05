@@ -9,20 +9,17 @@ module Rigor
   module Inference
     # Walks an AST and reports per-node-class coverage of `Rigor::Scope#type_of`.
     #
-    # For every visited node the scanner runs `type_of` with a fresh
-    # `FallbackTracer` and inspects the first recorded event:
+    # For every visited node the scanner runs `type_of` with a fresh `FallbackTracer` and inspects the first
+    # recorded event:
     #
-    # * If the first event's `node_class` matches the visited node's class,
-    #   the engine entered the fallback (else) branch *for this very node* —
-    #   the node is counted as **directly unrecognized**.
-    # * Otherwise the typer either succeeded outright or recursed into a child
-    #   that itself was unrecognized; the visited node is counted as
-    #   recognized so pass-through wrappers (`ProgramNode`, `StatementsNode`,
+    # * If the first event's `node_class` matches the visited node's class, the engine entered the fallback
+    #   (else) branch *for this very node* — the node is counted as **directly unrecognized**.
+    # * Otherwise the typer either succeeded outright or recursed into a child that itself was unrecognized;
+    #   the visited node is counted as recognized so pass-through wrappers (`ProgramNode`, `StatementsNode`,
     #   `ParenthesesNode`, ...) are not double-counted along with their leaves.
     #
-    # This class is intended for tooling probes and CI gates rather than the
-    # hot inference path: it allocates a tracer per visited node and discards
-    # the inferred type values.
+    # This class is intended for tooling probes and CI gates rather than the hot inference path: it allocates
+    # a tracer per visited node and discards the inferred type values.
     class CoverageScanner
       class Result < Data.define(:visits, :unrecognized, :events)
         # @return [Integer] sum of all visits across node classes.
@@ -56,13 +53,11 @@ module Rigor
         unrecognized = Hash.new(0)
         events = []
 
-        # Build the per-node scope index once per scan so locals bound
-        # earlier in the program flow into the scope used to type every
-        # later node. The indexer walks the program with a tracer-less
-        # StatementEvaluator and propagates the recorded scope down to
-        # expression-interior nodes the evaluator does not visit. The
-        # second pass below re-types each node with its own tracer so
-        # the per-class fallback statistics stay attributable.
+        # Build the per-node scope index once per scan so locals bound earlier in the program flow into the
+        # scope used to type every later node. The indexer walks the program with a tracer-less
+        # StatementEvaluator and propagates the recorded scope down to expression-interior nodes the evaluator
+        # does not visit. The second pass below re-types each node with its own tracer so the per-class
+        # fallback statistics stay attributable.
         scope_index = ScopeIndexer.index(root, default_scope: @scope)
 
         Source::NodeWalker.each(root) do |node|

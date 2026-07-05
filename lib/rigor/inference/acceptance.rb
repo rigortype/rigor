@@ -6,32 +6,23 @@ module Rigor
   module Inference
     # Shared dispatch table for `Rigor::Type#accepts(other, mode:)`.
     #
-    # The acceptance query answers "is `other` passable to `self` at a
-    # method-parameter or assignment boundary?". It uses gradual-typing
-    # rules from docs/type-specification/value-lattice.md and the
+    # The acceptance query answers "is `other` passable to `self` at a method-parameter or assignment
+    # boundary?". It uses gradual-typing rules from docs/type-specification/value-lattice.md and the
     # acceptance contract in docs/internal-spec/internal-type-api.md.
     #
-    # Each concrete type's `accepts` method delegates here so the
-    # case-analysis stays in one place. Type instances remain thin value
-    # objects; routing logic lives in the inference layer.
+    # Each concrete type's `accepts` method delegates here so the case-analysis stays in one place. Type
+    # instances remain thin value objects; routing logic lives in the inference layer.
     #
-    # Slice 4 phase 2c implements the `:gradual` mode in full and
-    # reserves `:strict` for later slices (the entry point raises
-    # ArgumentError on strict for now). The table covers the leaf and
-    # combinator types added through phase 2b: Top, Bot, Dynamic,
-    # Nominal, Singleton, Constant, and Union.
+    # Slice 4 phase 2c implements the `:gradual` mode in full and reserves `:strict` for later slices (the
+    # entry point raises ArgumentError on strict for now). The table covers the leaf and combinator types
+    # added through phase 2b: Top, Bot, Dynamic, Nominal, Singleton, Constant, and Union.
     #
-    # Slice 5 registers the shape carriers `Tuple` and `HashShape`.
-    # Tuple/HashShape acceptance compares per-position element types
-    # (covariant) and per-key entry types (depth covariant), including
-    # HashShape required/optional/closed-extra-key policy. When the
-    # receiver side is a
-    # generic `Nominal[Array, [E]]` or `Nominal[Hash, [K, V]]` the
-    # shape is projected to its underlying nominal so the existing
-    # generic-acceptance pipeline continues to apply; the converse
-    # direction (a Tuple receiver accepting a generic Array) stays
-    # conservative because the analyzer cannot verify arity from a
-    # raw nominal alone.
+    # Slice 5 registers the shape carriers `Tuple` and `HashShape`. Tuple/HashShape acceptance compares
+    # per-position element types (covariant) and per-key entry types (depth covariant), including HashShape
+    # required/optional/closed-extra-key policy. When the receiver side is a generic `Nominal[Array, [E]]` or
+    # `Nominal[Hash, [K, V]]` the shape is projected to its underlying nominal so the existing
+    # generic-acceptance pipeline continues to apply; the converse direction (a Tuple receiver accepting a
+    # generic Array) stays conservative because the analyzer cannot verify arity from a raw nominal alone.
     # rubocop:disable Metrics/ModuleLength
     module Acceptance
       module_function
@@ -48,13 +39,10 @@ module Rigor
           return Type::AcceptsResult.yes(mode: mode, reasons: "gradual: Dynamic[T] passes any boundary")
         end
 
-        # Structural equality short-circuit. Two identical carriers
-        # describe the same value set, so they always accept each
-        # other. This is sound for any mode and covers cases where
-        # neither side has a per-class rule for the other's exact
-        # carrier kind (the canonical example is
-        # `Intersection.accepts(Intersection)`, where the disjunction
-        # rule below would otherwise reject equal-but-narrow LHSes).
+        # Structural equality short-circuit. Two identical carriers describe the same value set, so they always
+        # accept each other. This is sound for any mode and covers cases where neither side has a per-class rule
+        # for the other's exact carrier kind (the canonical example is `Intersection.accepts(Intersection)`,
+        # where the disjunction rule below would otherwise reject equal-but-narrow LHSes).
         return Type::AcceptsResult.yes(mode: mode, reasons: "structural equality") if self_type == other_type
 
         return accepts_union_other(self_type, other_type, mode) if other_type.is_a?(Type::Union)
@@ -63,10 +51,9 @@ module Rigor
         accepts_one(self_type, other_type, mode)
       end
 
-      # Hash dispatch keeps `accepts_one` linear and lets future shape
-      # carriers register their handlers without re-tripping the
-      # cyclomatic budget on a growing `case` arm. Anonymous Type
-      # subclasses are not expected.
+      # Hash dispatch keeps `accepts_one` linear and lets future shape carriers register their handlers
+      # without re-tripping the cyclomatic budget on a growing `case` arm. Anonymous Type subclasses are not
+      # expected.
       TYPE_HANDLERS = {
         Type::Top => :accepts_top,
         Type::Bot => :accepts_bot,
@@ -107,9 +94,8 @@ module Rigor
           )
         end
 
-        # Dynamic[T] in gradual mode is liberally inhabited; any concrete
-        # other type is accepted because gradual consistency permits the
-        # crossing. (Other being Dynamic was handled in {.accepts}.)
+        # Dynamic[T] in gradual mode is liberally inhabited; any concrete other type is accepted because
+        # gradual consistency permits the crossing. (Other being Dynamic was handled in {.accepts}.)
         def accepts_dynamic(_self_type, _other_type, mode)
           Type::AcceptsResult.yes(
             mode: mode,
@@ -117,10 +103,8 @@ module Rigor
           )
         end
 
-        # Union[A,B].accepts(X) iff some member accepts X. Yes wins as
-        # soon as we find one; otherwise we surface "maybe" only when at
-        # least one member returned maybe (cannot rule out coverage),
-        # else "no".
+        # Union[A,B].accepts(X) iff some member accepts X. Yes wins as soon as we find one; otherwise we
+        # surface "maybe" only when at least one member returned maybe (cannot rule out coverage), else "no".
         def accepts_union_self(union, other_type, mode)
           results = union.members.map { |m| accepts(m, other_type, mode: mode) }
 
@@ -141,12 +125,9 @@ module Rigor
           end
         end
 
-        # self.accepts(Intersection[Y, Z]) iff self accepts at least
-        # one Y_i. Disjunction across members because the intersection
-        # is the meet of its members' value sets, so containment in
-        # any one member implies containment of the whole
-        # intersection. Symmetric counterpart to
-        # `accepts_union_other`.
+        # self.accepts(Intersection[Y, Z]) iff self accepts at least one Y_i. Disjunction across members
+        # because the intersection is the meet of its members' value sets, so containment in any one member
+        # implies containment of the whole intersection. Symmetric counterpart to `accepts_union_other`.
         def accepts_intersection_other(self_type, intersection, mode)
           results = intersection.members.map { |m| accepts(self_type, m, mode: mode) }
 
@@ -162,9 +143,8 @@ module Rigor
           end
         end
 
-        # self.accepts(Union[Y, Z]) iff self accepts every Y_i. Strict
-        # AND across members: any "no" turns the whole result no, any
-        # "maybe" without a "no" gives maybe, all "yes" gives yes.
+        # self.accepts(Union[Y, Z]) iff self accepts every Y_i. Strict AND across members: any "no" turns the
+        # whole result no, any "maybe" without a "no" gives maybe, all "yes" gives yes.
         def accepts_union_other(self_type, union, mode)
           results = union.members.map { |m| accepts(self_type, m, mode: mode) }
 
@@ -185,10 +165,9 @@ module Rigor
           end
         end
 
-        # Singleton[C] only accepts another Singleton[D] where D is a
-        # subclass of (or equal to) C. Any other carrier (instance,
-        # constant, ...) is no, because the singleton type's inhabitants
-        # are the class objects themselves.
+        # Singleton[C] only accepts another Singleton[D] where D is a subclass of (or equal to) C. Any other
+        # carrier (instance, constant, ...) is no, because the singleton type's inhabitants are the class
+        # objects themselves.
         def accepts_singleton(self_type, other_type, mode)
           unless other_type.is_a?(Type::Singleton)
             return Type::AcceptsResult.no(
@@ -206,17 +185,15 @@ module Rigor
         end
 
         # Nominal[C] accepts:
-        # - Nominal[D] when D <= C (Ruby class subtype) and the
-        #   `type_args` are compatible (see {#accepts_nominal_args});
-        # - Constant[v] when v.is_a?(klass(C)). The type_args of self
-        #   are ignored here because a Constant carries a concrete
-        #   value, not a generic instantiation, and the analyzer has no
-        #   way to refute the args from a literal alone.
-        # - Tuple[*] when self is the Array (or a supertype) family.
-        #   The Tuple is projected to `Nominal[Array, [union(elements)]]`
-        #   so the existing generic-arg machinery handles it.
-        # - HashShape{*} when self is the Hash (or a supertype) family,
-        #   projected to `Nominal[Hash, [union(keys), union(values)]]`.
+        # - Nominal[D] when D <= C (Ruby class subtype) and the `type_args` are compatible (see
+        #   {#accepts_nominal_args});
+        # - Constant[v] when v.is_a?(klass(C)). The type_args of self are ignored here because a Constant
+        #   carries a concrete value, not a generic instantiation, and the analyzer has no way to refute the
+        #   args from a literal alone.
+        # - Tuple[*] when self is the Array (or a supertype) family. The Tuple is projected to
+        #   `Nominal[Array, [union(elements)]]` so the existing generic-arg machinery handles it.
+        # - HashShape{*} when self is the Hash (or a supertype) family, projected to
+        #   `Nominal[Hash, [union(keys), union(values)]]`.
         # - Singleton: never (wrong value kind).
         def accepts_nominal(self_type, other_type, mode)
           case other_type
@@ -228,13 +205,10 @@ module Rigor
           end
         end
 
-        # Tail of `accepts_nominal` that handles structural shape
-        # carriers (`Tuple` / `HashShape`) and refinement carriers
-        # (`Difference` / `Refined`). Each branch projects the
-        # other-side carrier to the nominal layer it sits above
-        # and re-runs acceptance — soundness follows because the
-        # carrier's value set is contained in the projected
-        # nominal's value set.
+        # Tail of `accepts_nominal` that handles structural shape carriers (`Tuple` / `HashShape`) and
+        # refinement carriers (`Difference` / `Refined`). Each branch projects the other-side carrier to the
+        # nominal layer it sits above and re-runs acceptance — soundness follows because the carrier's value
+        # set is contained in the projected nominal's value set.
         def accepts_nominal_from_shape(self_type, other_type, mode)
           case other_type
           when Type::Tuple
@@ -244,26 +218,20 @@ module Rigor
             accepts(self_type, project_hash_shape_to_nominal(other_type), mode: mode)
               .with_reason("projected HashShape to Nominal[Hash]")
           when Type::DataInstance
-            # ADR-48: a class-tagged member instance is exactly one value of
-            # its tagging class, so it projects to that class's nominal (the
-            # anonymous local-bound form projects to `Data` itself).
+            # ADR-48: a class-tagged member instance is exactly one value of its tagging class, so it projects
+            # to that class's nominal (the anonymous local-bound form projects to `Data` itself).
             accepts(self_type, project_data_instance_to_nominal(other_type), mode: mode)
               .with_reason("projected DataInstance to Nominal[#{other_type.class_name || 'Data'}]")
           when Type::StructInstance
-            # ADR-48 Struct follow-up: same projection as DataInstance — a
-            # class-tagged Struct value is exactly one value of its tagging
-            # class (the anonymous form projects to `Struct` itself).
+            # ADR-48 Struct follow-up: same projection as DataInstance — a class-tagged Struct value is exactly
+            # one value of its tagging class (the anonymous form projects to `Struct` itself).
             accepts(self_type, project_struct_instance_to_nominal(other_type), mode: mode)
               .with_reason("projected StructInstance to Nominal[#{other_type.class_name || 'Struct'}]")
           when Type::Difference, Type::Refined
-            # A refinement carrier's value set is a subset of its
-            # base. So if `self` (Nominal) accepts the base, it
-            # also accepts the refinement; if it rejects the
-            # base, it cannot accept any subset of it. Forward
-            # through to the base nominal so the standard subtype
-            # check applies. The recursion is bounded because
-            # every refinement carrier's `base` is closer to the
-            # nominal layer.
+            # A refinement carrier's value set is a subset of its base. So if `self` (Nominal) accepts the
+            # base, it also accepts the refinement; if it rejects the base, it cannot accept any subset of
+            # it. Forward through to the base nominal so the standard subtype check applies. The recursion
+            # is bounded because every refinement carrier's `base` is closer to the nominal layer.
             accepts(self_type, other_type.base, mode: mode)
               .with_reason("projected #{other_type.class.name.split('::').last} to its base")
           else
@@ -274,9 +242,9 @@ module Rigor
           end
         end
 
-        # `Nominal[Integer]` (and anything Integer is-a, like Numeric) accepts
-        # any `IntegerRange`; nothing else does. Argument-bearing `Nominal`s
-        # never accept `IntegerRange` because IntegerRange has no type args.
+        # `Nominal[Integer]` (and anything Integer is-a, like Numeric) accepts any `IntegerRange`; nothing
+        # else does. Argument-bearing `Nominal`s never accept `IntegerRange` because IntegerRange has no
+        # type args.
         INTEGER_NOMINAL_ANCESTORS = %w[Integer Numeric Comparable Object BasicObject].freeze
         private_constant :INTEGER_NOMINAL_ANCESTORS
 
@@ -301,18 +269,12 @@ module Rigor
           end
         end
 
-        # v0.0.2 — meta-type rule. A `Singleton[T]` is the
-        # class object for `T`, so it is an instance of
-        # `Class` (when `T` is a class) and always an instance
-        # of `Module`. Without this rule a method whose
-        # parameter is typed `Class | Module` would reject
-        # every `is_a?(SomeClass)` call and similar
-        # introspection patterns. The rule conservatively
-        # answers `:yes` for `Module` (every singleton is at
-        # least a Module) and for `Class` / `Object` /
-        # `BasicObject` (the class object inherits from
-        # those). Other Nominals fall through to the default
-        # `:no`.
+        # v0.0.2 — meta-type rule. A `Singleton[T]` is the class object for `T`, so it is an instance of
+        # `Class` (when `T` is a class) and always an instance of `Module`. Without this rule a method whose
+        # parameter is typed `Class | Module` would reject every `is_a?(SomeClass)` call and similar
+        # introspection patterns. The rule conservatively answers `:yes` for `Module` (every singleton is at
+        # least a Module) and for `Class` / `Object` / `BasicObject` (the class object inherits from those).
+        # Other Nominals fall through to the default `:no`.
         META_NOMINALS_FROM_SINGLETON = %w[Module Class Object BasicObject].freeze
         private_constant :META_NOMINALS_FROM_SINGLETON
 
@@ -339,27 +301,21 @@ module Rigor
           )
           return class_result if class_result.no?
 
-          # Parametrized-ancestor projection. When `actual <:= target`
-          # holds at the class level but the type-arg arities differ,
-          # the actual's parametrization has to be projected into the
-          # target's view before the element-wise covariance check.
-          # The canonical case is `Hash[K, V] <:= Enumerable[[K, V]]`:
-          # Hash carries two type_args, Enumerable carries one, and
-          # the inherited parametrization at the Enumerable boundary
-          # is `Tuple[K, V]`. RBS encodes this as
-          # `include Enumerable[[K, V]]` in `Hash`'s definition.
+          # Parametrized-ancestor projection. When `actual <:= target` holds at the class level but the
+          # type-arg arities differ, the actual's parametrization has to be projected into the target's view
+          # before the element-wise covariance check. The canonical case is `Hash[K, V] <:= Enumerable[[K,
+          # V]]`: Hash carries two type_args, Enumerable carries one, and the inherited parametrization at
+          # the Enumerable boundary is `Tuple[K, V]`. RBS encodes this as `include Enumerable[[K, V]]` in
+          # `Hash`'s definition.
           projected_other = project_to_target_arity(self_type, other_type) || other_type
           args_result = accepts_nominal_args(self_type, projected_other, mode)
           combine_results(class_result, args_result, mode)
         end
 
-        # Returns `other_type` rewritten so its type_args have the
-        # same arity as `self_type.type_args`, or `nil` if no
-        # projection is known. Today only the Hash → Enumerable
-        # projection is hand-rolled; a general RBS-driven
-        # implementation that consults `definition.ancestors[i].args`
-        # for arbitrary subclass / module-include relations is the
-        # principled follow-up.
+        # Returns `other_type` rewritten so its type_args have the same arity as `self_type.type_args`, or
+        # `nil` if no projection is known. Today only the Hash → Enumerable projection is hand-rolled; a
+        # general RBS-driven implementation that consults `definition.ancestors[i].args` for arbitrary
+        # subclass / module-include relations is the principled follow-up.
         def project_to_target_arity(self_type, other_type)
           return nil if self_type.type_args.size == other_type.type_args.size
           return nil if self_type.type_args.empty? || other_type.type_args.empty?
@@ -410,13 +366,10 @@ module Rigor
           )
         end
 
-        # Slice 4 phase 2d generic acceptance. Type arguments are
-        # treated covariantly element-wise (gradual default; declared
-        # variance lands in Slice 5+). When either side has no
-        # type_args we are lenient: the absent side is the "raw" form
-        # that historically meant "any instantiation", so we keep
-        # backward compatibility for call sites that have not yet
-        # learned to carry generics.
+        # Slice 4 phase 2d generic acceptance. Type arguments are treated covariantly element-wise (gradual
+        # default; declared variance lands in Slice 5+). When either side has no type_args we are lenient:
+        # the absent side is the "raw" form that historically meant "any instantiation", so we keep backward
+        # compatibility for call sites that have not yet learned to carry generics.
         def accepts_nominal_args(self_type, other_type, mode)
           shortcut = nominal_args_shortcut(self_type, other_type, mode)
           return shortcut if shortcut
@@ -427,9 +380,8 @@ module Rigor
           combine_arg_results(per_arg, mode)
         end
 
-        # Returns an `AcceptsResult` for the universal short-circuits
-        # (raw self, raw other, arity mismatch) or `nil` when the full
-        # element-wise check still has to run.
+        # Returns an `AcceptsResult` for the universal short-circuits (raw self, raw other, arity mismatch)
+        # or `nil` when the full element-wise check still has to run.
         def nominal_args_shortcut(self_type, other_type, mode)
           return Type::AcceptsResult.yes(mode: mode, reasons: "self has no type_args") if self_type.type_args.empty?
           if other_type.type_args.empty?
@@ -468,14 +420,11 @@ module Rigor
           ruby_class = resolve_class(self_type.class_name)
           return constant_is_a_result(ruby_class, constant, self_type, mode) if ruby_class
 
-          # The host process may not have required the constant's
-          # declared self_type (e.g. `BigDecimal` since Ruby 3.4
-          # is no longer a default gem). Fall back to inspecting
-          # the value's own class ancestor chain — always loadable
-          # because the value already exists. Required for
-          # OverloadSelector to reject `Integer#+(BigDecimal) ->
-          # BigDecimal` overloads contributed by `bigdecimal`'s
-          # RBS reopening when the actual arg is a Constant<Integer>.
+          # The host process may not have required the constant's declared self_type (e.g. `BigDecimal`
+          # since Ruby 3.4 is no longer a default gem). Fall back to inspecting the value's own class
+          # ancestor chain — always loadable because the value already exists. Required for OverloadSelector
+          # to reject `Integer#+(BigDecimal) -> BigDecimal` overloads contributed by `bigdecimal`'s RBS
+          # reopening when the actual arg is a Constant<Integer>.
           ancestor_names = constant.value.class.ancestors.map(&:name)
           if ancestor_names.include?(self_type.class_name)
             Type::AcceptsResult.yes(
@@ -518,9 +467,8 @@ module Rigor
         # IntegerRange[a..b] accepts:
         # - Constant[n] where n is an Integer covered by [a..b];
         # - IntegerRange[c..d] where [c..d] ⊆ [a..b];
-        # - Nominal[Integer] only when self is the universal range
-        #   (`int<min, max>`), since otherwise an arbitrary Integer
-        #   could fall outside the bound.
+        # - Nominal[Integer] only when self is the universal range (`int<min, max>`), since otherwise an
+        #   arbitrary Integer could fall outside the bound.
         # Anything else is rejected.
         def accepts_integer_range(self_type, other_type, mode)
           case other_type
@@ -594,19 +542,13 @@ module Rigor
           end
         end
 
-        # `Difference[base, removed]` accepts another type X when
-        # the base accepts X *and* X's value set is provably
-        # disjoint from `removed`. The disjointness test is the
-        # subtle part — it is NOT the same as `removed.accepts(X)`,
-        # because `Nominal[String]` includes `""` even though
-        # `Constant[""]` does not "accept" `Nominal[String]`.
-        # The conservative rule here: we can prove disjointness
-        # only when X is itself a `Constant` carrier (compare
-        # values directly) or another `Difference` with the same
-        # removed value (already exhibits the disjointness). Any
-        # other shape — Nominal, Union, IntegerRange — could
-        # overlap the removed value, so the difference rejects
-        # it under gradual mode.
+        # `Difference[base, removed]` accepts another type X when the base accepts X *and* X's value set is
+        # provably disjoint from `removed`. The disjointness test is the subtle part — it is NOT the same as
+        # `removed.accepts(X)`, because `Nominal[String]` includes `""` even though `Constant[""]` does not
+        # "accept" `Nominal[String]`. The conservative rule here: we can prove disjointness only when X is
+        # itself a `Constant` carrier (compare values directly) or another `Difference` with the same
+        # removed value (already exhibits the disjointness). Any other shape — Nominal, Union, IntegerRange
+        # — could overlap the removed value, so the difference rejects it under gradual mode.
         def accepts_difference(self_type, other_type, mode)
           base_result = accepts(self_type.base, other_type, mode: mode)
           return base_result if base_result.no?
@@ -626,43 +568,31 @@ module Rigor
           when Type::Constant
             !(removed.is_a?(Type::Constant) && removed.value == other_type.value)
           when Type::Difference
-            # `Difference[A, R].accepts(Difference[B, R])`: the
-            # other carrier already excludes `R` at its difference
-            # layer, so the disjointness is exhibited regardless of
-            # how `B` (its base) relates to `R`. We do NOT recurse
-            # into `other_type.base` because that would always fail
-            # (a Nominal base contains the removed value).
+            # `Difference[A, R].accepts(Difference[B, R])`: the other carrier already excludes `R` at its
+            # difference layer, so the disjointness is exhibited regardless of how `B` (its base) relates to
+            # `R`. We do NOT recurse into `other_type.base` because that would always fail (a Nominal base
+            # contains the removed value).
             other_type.removed == removed
           when Type::Intersection
-            # Disjointness is monotonic over Intersection: if any
-            # member is provably disjoint from `removed`, the meet
-            # is too.
+            # Disjointness is monotonic over Intersection: if any member is provably disjoint from
+            # `removed`, the meet is too.
             other_type.members.any? { |m| provably_disjoint_from_removed?(m, removed) }
           end
         end
 
-        # `Refined[base, predicate]` accepts another type X when
-        # the base accepts the *base* of X *and* X is provably
-        # contained in the predicate's value set. The base
-        # check is delegated to `accepts(self.base, X.base)`
-        # so handlers like `accepts_nominal` see Nominal-vs-
-        # Nominal and return their normal answer (the inner
-        # `accepts_nominal` does not register `Refined` /
-        # `Difference` as direct other-shapes — projecting to
-        # the base is what makes the comparison meaningful).
+        # `Refined[base, predicate]` accepts another type X when the base accepts the *base* of X *and* X is
+        # provably contained in the predicate's value set. The base check is delegated to
+        # `accepts(self.base, X.base)` so handlers like `accepts_nominal` see Nominal-vs-Nominal and return
+        # their normal answer (the inner `accepts_nominal` does not register `Refined` / `Difference` as
+        # direct other-shapes — projecting to the base is what makes the comparison meaningful).
         #
-        # Provability rules in gradual mode (the conservative
-        # analogue of `accepts_difference`):
+        # Provability rules in gradual mode (the conservative analogue of `accepts_difference`):
         #
-        # - X is a `Refined` with the *same* predicate_id —
-        #   exact predicate match, accept.
-        # - X is a `Constant` whose value the predicate's
-        #   recogniser accepts — the value is statically
+        # - X is a `Refined` with the *same* predicate_id — exact predicate match, accept.
+        # - X is a `Constant` whose value the predicate's recogniser accepts — the value is statically
         #   contained, accept. A recognised non-match is `:no`.
-        # - Anything else (Nominal, Union, IntegerRange,
-        #   Difference) — predicate-subset cannot be proven
-        #   without a runtime test, so reject under gradual
-        #   mode rather than degrade to `:maybe`. Mirrors the
+        # - Anything else (Nominal, Union, IntegerRange, Difference) — predicate-subset cannot be proven
+        #   without a runtime test, so reject under gradual mode rather than degrade to `:maybe`. Mirrors the
         #   `accepts_difference` policy.
         def accepts_refined(self_type, other_type, mode)
           case other_type
@@ -717,13 +647,10 @@ module Rigor
           )
         end
 
-        # `Intersection[M1, M2, …]` accepts X iff *every* member
-        # accepts X — the meet of value sets is contained iff the
-        # candidate is contained in each. Conjunctive combine: any
-        # `:no` makes the result `:no`, any `:maybe` without a
-        # `:no` makes the result `:maybe`, all `:yes` makes the
-        # result `:yes`. The 0-member case is unreachable because
-        # `Combinator.intersection` collapses empty intersections
+        # `Intersection[M1, M2, …]` accepts X iff *every* member accepts X — the meet of value sets is
+        # contained iff the candidate is contained in each. Conjunctive combine: any `:no` makes the result
+        # `:no`, any `:maybe` without a `:no` makes the result `:maybe`, all `:yes` makes the result `:yes`.
+        # The 0-member case is unreachable because `Combinator.intersection` collapses empty intersections
         # to `Top`.
         def accepts_intersection(self_type, other_type, mode)
           per_member = self_type.members.map { |m| accepts(m, other_type, mode: mode) }
@@ -748,9 +675,8 @@ module Rigor
           end
         end
 
-        # Constant[v] accepts only Constant[v'] with structurally equal
-        # value. Any other type is rejected (modulo the universal
-        # Bot/Dynamic short-circuits already applied upstream).
+        # Constant[v] accepts only Constant[v'] with structurally equal value. Any other type is rejected
+        # (modulo the universal Bot/Dynamic short-circuits already applied upstream).
         def accepts_constant(self_type, other_type, mode)
           if other_type.is_a?(Type::Constant) && self_type == other_type
             Type::AcceptsResult.yes(mode: mode, reasons: "structural literal match")
@@ -763,10 +689,8 @@ module Rigor
         end
 
         # Tuple[A1..An] accepts:
-        # - Tuple[B1..Bn] when arities match and each Ai accepts Bi
-        #   (covariant per-position).
-        # - Anything else: no (we cannot prove the arity from a generic
-        #   nominal alone).
+        # - Tuple[B1..Bn] when arities match and each Ai accepts Bi (covariant per-position).
+        # - Anything else: no (we cannot prove the arity from a generic nominal alone).
         def accepts_tuple(self_type, other_type, mode)
           unless other_type.is_a?(Type::Tuple)
             return Type::AcceptsResult.no(
@@ -788,14 +712,11 @@ module Rigor
           combine_arg_results(per_element, mode)
         end
 
-        # HashShape{k1: T1, ...} accepts another HashShape when every
-        # required key of self is required on the other side and Ti
-        # accepts Ui (depth covariant). Optional keys may be absent on
-        # the other side; when present, their values are checked. A
-        # closed self rejects known or possible extra keys. Other
-        # types are rejected; the converse direction (a Nominal
-        # accepting a HashShape) is handled by `accepts_nominal` via
-        # projection.
+        # HashShape{k1: T1, ...} accepts another HashShape when every required key of self is required on
+        # the other side and Ti accepts Ui (depth covariant). Optional keys may be absent on the other side;
+        # when present, their values are checked. A closed self rejects known or possible extra keys. Other
+        # types are rejected; the converse direction (a Nominal accepting a HashShape) is handled by
+        # `accepts_nominal` via projection.
         def accepts_hash_shape(self_type, other_type, mode)
           unless other_type.is_a?(Type::HashShape)
             return Type::AcceptsResult.no(
@@ -832,30 +753,23 @@ module Rigor
           Type::AcceptsResult.no(mode: mode, reasons: reason)
         end
 
-        # Uses Ruby's actual class hierarchy via Object.const_get to answer
-        # "is D a subclass of C?" for core, stdlib, and application classes.
-        # When either name fails to resolve we surface "maybe": the caller
-        # (overload selector) treats yes/maybe identically, so the conservative
-        # answer keeps overload coverage intact. RbsHierarchy exists but this
-        # path does not yet consult it; migration to an RBS-driven lookup
-        # is deferred.
+        # Uses Ruby's actual class hierarchy via Object.const_get to answer "is D a subclass of C?" for core,
+        # stdlib, and application classes. When either name fails to resolve we surface "maybe": the caller
+        # (overload selector) treats yes/maybe identically, so the conservative answer keeps overload
+        # coverage intact. RbsHierarchy exists but this path does not yet consult it; migration to an
+        # RBS-driven lookup is deferred.
         def class_subtype_result(target_name:, actual_name:, mode:, kind:)
           return Type::AcceptsResult.yes(mode: mode, reasons: "exact name match") if target_name == actual_name
 
           target_class = resolve_class(target_name)
           actual_class = resolve_class(actual_name)
-          # When only `actual` resolves, we can still rule out
-          # `actual <:= target` by inspecting `actual`'s ancestor
-          # chain. The canonical case: `target=BigDecimal` is not
-          # loadable in the host process (no `require` in rigor's
-          # own runtime), but `actual=Integer` IS, and Integer's
-          # ancestors do not include `BigDecimal`, so the subtype
-          # relation MUST be `:no` rather than the conservative
-          # `:maybe`. The reverse asymmetry (target resolves,
-          # actual doesn't) does not let us conclude anything —
-          # the unloaded `actual` could be an unrelated class or
-          # a subclass of `target` we can't see, so we still
-          # answer `:maybe` there.
+          # When only `actual` resolves, we can still rule out `actual <:= target` by inspecting `actual`'s
+          # ancestor chain. The canonical case: `target=BigDecimal` is not loadable in the host process (no
+          # `require` in rigor's own runtime), but `actual=Integer` IS, and Integer's ancestors do not
+          # include `BigDecimal`, so the subtype relation MUST be `:no` rather than the conservative
+          # `:maybe`. The reverse asymmetry (target resolves, actual doesn't) does not let us conclude
+          # anything — the unloaded `actual` could be an unrelated class or a subclass of `target` we can't
+          # see, so we still answer `:maybe` there.
           return subtype_result_via_ancestors(actual_class, target_name, mode) if target_class.nil? && actual_class
           if target_class.nil? || actual_class.nil?
             return Type::AcceptsResult.maybe(

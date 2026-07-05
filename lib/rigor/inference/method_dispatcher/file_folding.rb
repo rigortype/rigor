@@ -8,51 +8,36 @@ module Rigor
     module MethodDispatcher
       # IO / File support — the pure-path-manipulation tier.
       #
-      # File and IO carry a lot of side-effecting surface (filesystem
-      # reads, descriptor mutations, line iteration) the analyzer
-      # cannot fold. Several `File` class methods, however, are
-      # functions over their path-string arguments — they do NOT
-      # touch the filesystem and do NOT depend on the current
-      # working directory.
+      # File and IO carry a lot of side-effecting surface (filesystem reads, descriptor mutations, line iteration)
+      # the analyzer cannot fold. Several `File` class methods, however, are functions over their path-string
+      # arguments — they do NOT touch the filesystem and do NOT depend on the current working directory.
       #
-      # Folding them is platform-sensitive: every recognised method
-      # ([:basename, :dirname, :extname, :join, :split,
-      # :absolute_path?]) reads `File::SEPARATOR` /
-      # `File::ALT_SEPARATOR` and produces different answers on
-      # Windows vs POSIX hosts. The Ruby process running the
-      # analyzer hosts ONE platform; folding to a `Constant<String>`
-      # would silently bake that platform's answer into the
-      # analyzer's result and mis-report it on a host with a
+      # Folding them is platform-sensitive: every recognised method ([:basename, :dirname, :extname, :join, :split,
+      # :absolute_path?]) reads `File::SEPARATOR` / `File::ALT_SEPARATOR` and produces different answers on Windows
+      # vs POSIX hosts. The Ruby process running the analyzer hosts ONE platform; folding to a `Constant<String>`
+      # would silently bake that platform's answer into the analyzer's result and mis-report it on a host with a
       # different separator policy.
       #
-      # Default policy (`fold_platform_specific_paths == false`):
-      # decline the fold so the RBS tier answers with `Nominal[String]`
-      # / `Tuple[Nominal[String], Nominal[String]]` / `bool`. That is
-      # the platform-agnostic envelope — every concrete answer the
-      # method could legally return on any platform fits inside it.
-      # The future `non-empty-string` refinement carrier (see
-      # [imported-built-in-types.md](../../../../../docs/type-specification/imported-built-in-types.md))
-      # will tighten the basename/dirname/join cases further without
-      # leaking platform specifics; today we leave them at the
-      # nominal envelope.
+      # Default policy (`fold_platform_specific_paths == false`): decline the fold so the RBS tier answers with
+      # `Nominal[String]` / `Tuple[Nominal[String], Nominal[String]]` / `bool`. That is the platform-agnostic
+      # envelope — every concrete answer the method could legally return on any platform fits inside it. The future
+      # `non-empty-string` refinement carrier (see
+      # [imported-built-in-types.md](../../../../../docs/type-specification/imported-built-in-types.md)) will
+      # tighten the basename/dirname/join cases further without leaking platform specifics; today we leave them at
+      # the nominal envelope.
       #
-      # Opt-in policy (`fold_platform_specific_paths == true`):
-      # the analyzer trusts that its host platform matches the
-      # callers' deployment target and folds to a precise
-      # `Constant<String>`. Single-platform projects (most internal
-      # tooling, Rails apps deployed to Linux containers) can
-      # enable this in `.rigor.yml`:
+      # Opt-in policy (`fold_platform_specific_paths == true`): the analyzer trusts that its host platform matches
+      # the callers' deployment target and folds to a precise `Constant<String>`. Single-platform projects (most
+      # internal tooling, Rails apps deployed to Linux containers) can enable this in `.rigor.yml`:
       #
       #   fold_platform_specific_paths: true
       #
-      # The runner reads this on startup (`Rigor::Analysis::Runner`)
-      # and writes the flag here. Tests toggle the flag explicitly.
+      # The runner reads this on startup (`Rigor::Analysis::Runner`) and writes the flag here. Tests toggle the
+      # flag explicitly.
       #
-      # See [ADR-5 — robustness principle](../../../../../docs/adr/5-robustness-principle.md):
-      # the platform-agnostic default is clause-1 of the principle
-      # applied with the constraint that "as strict as can be
-      # *correctness-preservingly* proved" excludes Constants whose
-      # value is host-specific.
+      # See [ADR-5 — robustness principle](../../../../../docs/adr/5-robustness-principle.md): the
+      # platform-agnostic default is clause-1 of the principle applied with the constraint that "as strict as can
+      # be *correctness-preservingly* proved" excludes Constants whose value is host-specific.
       module FileFolding
         # File class methods the analyzer can fold when the opt-in
         # flag is set. Currently identical to PLATFORM_DEPENDENT_METHODS

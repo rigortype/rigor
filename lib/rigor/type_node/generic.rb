@@ -9,20 +9,13 @@ module Rigor
     # sequence of type-argument nodes already produced by the
     # parser at one level of depth.
     #
-    # Args are themselves {TypeNode::Identifier} or
-    # {TypeNode::Generic}. Nested generics ride the same shape:
-    # `Pick<Address, "name" | "surname">` reaches the resolver as
-    # `Generic("Pick", [Identifier("Address"), Generic("Union", [...])])`
-    # — actually the union spelling depends on the parser's
-    # eventual convention (slice 3 pins it); for now the field
-    # set is the only public commitment.
+    # Args are themselves {TypeNode::Identifier} or {TypeNode::Generic}. Nested generics ride the same
+    # shape: `Pick<Address, "name" | "surname">` reaches the resolver as
+    # `Generic("Pick", [Identifier("Address"), Union([...])])`.
     #
-    # The carrier is intentionally permissive about `args.size`.
-    # The grammar-level rule "no brackets ⇒ Identifier; brackets ⇒
-    # Generic" lives on the parser side; nothing here forbids a
-    # zero-arg Generic so plugins can synthesise nodes for
-    # diagnostic or testing purposes without the parser fighting
-    # back.
+    # The carrier is intentionally permissive about `args.size`. The grammar-level rule "no brackets ⇒
+    # Identifier; brackets ⇒ Generic" lives on the parser side; nothing here forbids a zero-arg Generic
+    # so plugins can synthesise nodes for diagnostic or testing purposes without the parser fighting back.
     class Generic < Data.define(:head, :args)
       def initialize(head:, args:)
         unless head.is_a?(String) && !head.empty?
@@ -38,10 +31,9 @@ module Rigor
                 "TypeNode::IntegerLiteral, got #{args.inspect}"
         end
 
-        # Freeze the String head + Array args so the Data
-        # object is `Ractor.shareable?`. Each `a` is already a
-        # shareable TypeNode value object (checked above), so
-        # freezing the wrapping Array is sufficient.
+        # Freeze the String head + Array args so the Data object is `Ractor.shareable?`. Each `a` is
+        # already a shareable TypeNode value object (checked above), so freezing the wrapping Array
+        # is sufficient.
         frozen_head = head.frozen? ? head : head.dup.freeze
         frozen_args = args.frozen? ? args : args.dup.freeze
         super(head: frozen_head, args: frozen_args)
@@ -49,15 +41,11 @@ module Rigor
 
       private
 
-      # ADR-13 slice 3 expanded the accepted set to include
-      # {IntegerLiteral} so the parser can emit a uniform AST for
-      # `int<5, 10>` (angle bounds) and `int_mask[1, 2, 4]`
-      # (square-bracketed bitflag union). The follow-up further
-      # admits {SymbolLiteral} / {StringLiteral} / {IndexedAccess}
-      # / {Union} so `Pick[T, :a | "b"]` carries through to the
-      # resolver as a uniform AST. Slice 1 originally accepted
-      # only `Identifier` / `Generic`; every later addition stays
-      # additive — every slice-1-shape Generic remains valid.
+      # ADR-13 slice 3 expanded the accepted set to include {IntegerLiteral} so the parser can emit a
+      # uniform AST for `int<5, 10>` (angle bounds) and `int_mask[1, 2, 4]` (square-bracketed bitflag
+      # union). The follow-up further admits {SymbolLiteral} / {StringLiteral} / {IndexedAccess} /
+      # {Union} so `Pick[T, :a | "b"]` carries through to the resolver as a uniform AST. Every addition
+      # stays additive — every earlier-shape Generic remains valid.
       def valid_arg?(arg)
         arg.is_a?(Identifier) || arg.is_a?(Generic) || arg.is_a?(IntegerLiteral) ||
           arg.is_a?(SymbolLiteral) || arg.is_a?(StringLiteral) ||

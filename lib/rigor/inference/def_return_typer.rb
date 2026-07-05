@@ -6,22 +6,17 @@ require_relative "../type"
 
 module Rigor
   module Inference
-    # Returns the inferred return type of a `Prism::DefNode`, or nil
-    # when no type can be derived (empty body, scope-lookup miss,
-    # or any failure during inference — caller surfaces "no
-    # annotation" on a nil).
+    # Returns the inferred return type of a `Prism::DefNode`, or nil when no type can be derived (empty body,
+    # scope-lookup miss, or any failure during inference — caller surfaces "no annotation" on a nil).
     #
     # The inferred type is the union of:
     #
     # - the body's last-statement type, and
-    # - the type of every explicit `return value` reachable in the
-    #   body. Nested `def` / lambda / block bodies are return
-    #   barriers — their `return`s do not bubble up to the enclosing
-    #   method.
+    # - the type of every explicit `return value` reachable in the body. Nested `def` / lambda / block bodies
+    #   are return barriers — their `return`s do not bubble up to the enclosing method.
     #
-    # Extracted from `Rigor::SigGen::Generator#infer_return_type` so
-    # `LineTypeCollector` (`rigor annotate`'s def-line annotator)
-    # and the sig-generator share one source of truth.
+    # Extracted from `Rigor::SigGen::Generator#infer_return_type` so `LineTypeCollector` (`rigor annotate`'s
+    # def-line annotator) and the sig-generator share one source of truth.
     module DefReturnTyper
       RETURN_BARRIER_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
       private_constant :RETURN_BARRIER_NODES
@@ -79,9 +74,8 @@ module Rigor
 
         scope = scope_index[return_node] || scope_index[args.first]
         return if scope.nil?
-        # `return a, b` packs into a Tuple at runtime; the MVP only
-        # handles the single-value form. Multi-arg returns
-        # contribute no type to keep the implementation focused.
+        # `return a, b` packs into a Tuple at runtime; the MVP only handles the single-value form. Multi-arg
+        # returns contribute no type to keep the implementation focused.
         return unless args.size == 1
 
         type = safe_type_of(scope, args.first)

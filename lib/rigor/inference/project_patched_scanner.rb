@@ -8,22 +8,17 @@ require_relative "../source/constant_path"
 
 module Rigor
   module Inference
-    # ADR-17 slice 2 — pre-pass scanner. Walks every file the user
-    # listed under `pre_eval:` and harvests every `def` /
-    # `def self.` declaration inside a class / module body into a
-    # {ProjectPatchedMethods} registry the dispatcher consults
-    # below the plugin tier.
+    # ADR-17 slice 2 — pre-pass scanner. Walks every file the user listed under `pre_eval:` and
+    # harvests every `def` / `def self.` declaration inside a class / module body into a
+    # {ProjectPatchedMethods} registry the dispatcher consults below the plugin tier.
     #
-    # The walker is intentionally a strict subset of
-    # {Rigor::Inference::ScopeIndexer}'s machinery: it only needs
-    # `class C; def m; end; end` shape recognition, not full
-    # inference. Parse errors degrade to a fail-soft `:warning`
-    # `pre-eval.parse-error` diagnostic accumulated alongside
-    # the registry; per ADR-17 § "Failure modes" a parse failure
-    # in a pre-eval file MUST NOT abort the rest of the run.
+    # The walker is intentionally a strict subset of {Rigor::Inference::ScopeIndexer}'s machinery: it
+    # only needs `class C; def m; end; end` shape recognition, not full inference. Parse errors degrade
+    # to a fail-soft `:warning` `pre-eval.parse-error` diagnostic accumulated alongside the registry;
+    # per ADR-17 § "Failure modes" a parse failure in a pre-eval file MUST NOT abort the rest of the run.
     module ProjectPatchedScanner
-      # Frozen scan outcome carrying the populated registry and
-      # the per-file warnings the runner emits at run start.
+      # Frozen scan outcome carrying the populated registry and the per-file warnings the runner emits
+      # at run start.
       class Result < Data.define(:registry, :diagnostics)
         def initialize(registry:, diagnostics: [])
           super(
@@ -35,18 +30,13 @@ module Rigor
 
       module_function
 
-      # @param paths [Array<String>] absolute paths to the
-      #   pre-eval files. The runner has already validated that
-      #   each path exists (slice-1 `pre-eval.file-not-found`
-      #   `:error` covers missing entries); the scanner does NOT
-      #   re-check existence.
-      # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      #   editor-mode buffer binding. When set, the scanner reads
-      #   the buffer's physical bytes if a pre-eval entry matches
-      #   the logical path, so users editing a monkey-patch file
-      #   see the in-flight version in their analysis.
-      # @return [Result] the populated registry plus any
-      #   per-file warnings.
+      # @param paths [Array<String>] absolute paths to the pre-eval files. The runner has already
+      #   validated that each path exists (slice-1 `pre-eval.file-not-found` `:error` covers missing
+      #   entries); the scanner does NOT re-check existence.
+      # @param buffer [Rigor::Analysis::BufferBinding, nil] editor-mode buffer binding. When set, the
+      #   scanner reads the buffer's physical bytes if a pre-eval entry matches the logical path, so
+      #   users editing a monkey-patch file see the in-flight version in their analysis.
+      # @return [Result] the populated registry plus any per-file warnings.
       def scan(paths, buffer: nil)
         entries = []
         diagnostics = []
@@ -58,13 +48,10 @@ module Rigor
         )
       end
 
-      # ADR-17 § "Failure modes" — when two pre-eval entries
-      # declare the same `(class_name, method_name, kind)` triple,
-      # emit one `:info` `pre-eval.duplicate-declaration`
-      # diagnostic per collision. The registry's first-write-wins
-      # behaviour is unchanged; the diagnostic just makes the
-      # shadowing visible so users notice when a later patch
-      # is silently masked.
+      # ADR-17 § "Failure modes" — when two pre-eval entries declare the same `(class_name, method_name,
+      # kind)` triple, emit one `:info` `pre-eval.duplicate-declaration` diagnostic per collision. The
+      # registry's first-write-wins behaviour is unchanged; the diagnostic just makes the shadowing
+      # visible so users notice when a later patch is silently masked.
       def duplicate_declaration_diagnostics(entries)
         seen = {}
         entries.each_with_object([]) do |entry, acc|
@@ -129,10 +116,9 @@ module Rigor
       end
       private_class_method :parse_error_diagnostic
 
-      # Builds a diagnostic Hash-shape the runner translates to a
-      # `Rigor::Analysis::Diagnostic`. The scanner intentionally
-      # does NOT depend on the analysis layer (it's a pre-pass);
-      # the runner adapts at the call site.
+      # Builds a diagnostic Hash-shape the runner translates to a `Rigor::Analysis::Diagnostic`. The
+      # scanner intentionally does NOT depend on the analysis layer (it's a pre-pass); the runner
+      # adapts at the call site.
       def build_diagnostic(path:, line:, column:, severity:, rule:, message:)
         { path: path, line: line, column: column, severity: severity, rule: rule, message: message }
       end

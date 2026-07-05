@@ -2,33 +2,24 @@
 
 module Rigor
   module Inference
-    # ADR-17 § "Inference contract" — project-wide patched-method
-    # registry populated by the pre-eval pre-pass (slice 2) from
-    # the user's `.rigor.yml` `pre_eval:` list.
+    # ADR-17 § "Inference contract" — project-wide patched-method registry populated by the pre-eval
+    # pre-pass (slice 2) from the user's `.rigor.yml` `pre_eval:` list.
     #
-    # Each entry records one `def` declaration the pre-pass
-    # observed inside a class / module body. The dispatcher's
-    # `try_project_patched_method` tier consults this registry
-    # between the plugin tier and the dependency-source tier so
-    # project-side `lib/core_ext/string_extensions.rb` patches
-    # are visible to cross-file dispatch.
+    # Each entry records one `def` declaration the pre-pass observed inside a class / module body. The
+    # dispatcher's `try_project_patched_method` tier consults this registry between the plugin tier and
+    # the dependency-source tier so project-side `lib/core_ext/string_extensions.rb` patches are visible
+    # to cross-file dispatch.
     #
-    # The dispatcher answers `Dynamic[T]` (with a heuristic static
-    # facet) when `Entry#return_type` is non-nil, or `Dynamic[Top]`
-    # when the heuristic declined (`nil`). See {Entry} for the
-    # per-field contract.
+    # The dispatcher answers `Dynamic[T]` (with a heuristic static facet) when `Entry#return_type` is
+    # non-nil, or `Dynamic[Top]` when the heuristic declined (`nil`). See {Entry} for the per-field
+    # contract.
     class ProjectPatchedMethods
-      # Frozen value-object recording one `def` observed by the
-      # pre-pass. `class_name` is the qualified prefix
-      # (`"String"`, `"Foo::Bar"`); `method_name` is the
-      # declared name; `kind` is `:instance` or `:singleton`;
-      # `source_path` / `source_line` carry attribution for
-      # diagnostics; `return_type` is the
-      # {Analysis::DependencySourceInference::ReturnTypeHeuristic}-
-      # extracted static facet (a `Rigor::Type::*`) or `nil`
-      # when the heuristic declined. The dispatcher wraps a
-      # non-nil `return_type` in `Dynamic[T]`; a `nil`
-      # `return_type` falls back to `Dynamic[top]`.
+      # Frozen value-object recording one `def` observed by the pre-pass. `class_name` is the qualified
+      # prefix (`"String"`, `"Foo::Bar"`); `method_name` is the declared name; `kind` is `:instance` or
+      # `:singleton`; `source_path` / `source_line` carry attribution for diagnostics; `return_type` is
+      # the {Analysis::DependencySourceInference::ReturnTypeHeuristic}-extracted static facet (a
+      # `Rigor::Type::*`) or `nil` when the heuristic declined. The dispatcher wraps a non-nil
+      # `return_type` in `Dynamic[T]`; a `nil` `return_type` falls back to `Dynamic[top]`.
       Entry = Data.define(:class_name, :method_name, :kind, :source_path, :source_line, :return_type) do
         def initialize(class_name:, method_name:, kind:, source_path:, source_line:, return_type: nil)
           super
@@ -37,11 +28,9 @@ module Rigor
 
       attr_reader :by_key
 
-      # @param entries [Array<Entry>] flat list of declarations
-      #   observed during the pre-pass. First-write-wins on
-      #   `(class_name, method_name, kind)` duplicates so the
-      #   `pre-eval.duplicate-declaration` diagnostic emission
-      #   stays decoupled from registry behaviour.
+      # @param entries [Array<Entry>] flat list of declarations observed during the pre-pass.
+      #   First-write-wins on `(class_name, method_name, kind)` duplicates so the
+      #   `pre-eval.duplicate-declaration` diagnostic emission stays decoupled from registry behaviour.
       def initialize(entries: [])
         @by_key = entries.each_with_object({}) do |entry, acc|
           key = [entry.class_name, entry.method_name, entry.kind]
@@ -50,9 +39,8 @@ module Rigor
         freeze
       end
 
-      # @return [Entry, nil] the recorded entry for the given
-      #   `(class_name, method_name, kind)` triple, or `nil`
-      #   when no pre-eval file declared it.
+      # @return [Entry, nil] the recorded entry for the given `(class_name, method_name, kind)` triple,
+      #   or `nil` when no pre-eval file declared it.
       def lookup(class_name:, method_name:, kind:)
         @by_key[[class_name, method_name, kind]]
       end

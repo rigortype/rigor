@@ -5,18 +5,16 @@ require_relative "../source/node_walker"
 
 module Rigor
   module Inference
-    # ADR-63 Tier 1 — the static type-protection proxy. Walks every dispatch
-    # site (a method call with an explicit receiver) and classifies it by
-    # whether the receiver types to a concrete (non-`Dynamic`) type — i.e. a
-    # site where Rigor's call rules *can* bite (undefined-method / wrong-arity /
-    # argument-type-mismatch). A `Dynamic` / `Top` receiver (or a union with such
-    # an arm — gradually valid) is *unprotected*: Rigor is blind there, and a
-    # type annotation on it would buy real catching power.
+    # ADR-63 Tier 1 — the static type-protection proxy. Walks every dispatch site (a method call with an
+    # explicit receiver) and classifies it by whether the receiver types to a concrete (non-`Dynamic`)
+    # type — i.e. a site where Rigor's call rules *can* bite (undefined-method / wrong-arity /
+    # argument-type-mismatch). A `Dynamic` / `Top` receiver (or a union with such an arm — gradually
+    # valid) is *unprotected*: Rigor is blind there, and a type annotation on it would buy real catching
+    # power.
     #
-    # This is a sound UPPER BOUND on protection — a concrete receiver is
-    # necessary but not sufficient for a diagnostic to actually fire — and it is
-    # one `type_of` pass, so it runs interactively and in CI. The truth tier
-    # (does a diagnostic fire) is the phased mutation tier.
+    # This is a sound UPPER BOUND on protection — a concrete receiver is necessary but not sufficient
+    # for a diagnostic to actually fire — and it is one `type_of` pass, so it runs interactively and in
+    # CI. The truth tier (does a diagnostic fire) is the phased mutation tier.
     class ProtectionScanner
       # A single unprotected call site.
       Site = Data.define(:line, :receiver, :method_name, :dynamic_origin)
@@ -24,8 +22,8 @@ module Rigor
       FileResult = Data.define(:protected_count, :unprotected_count, :sites) do
         def total = protected_count + unprotected_count
 
-        # Protected ratio; a file with no dispatch sites is vacuously fully
-        # protected (nothing to get wrong).
+        # Protected ratio; a file with no dispatch sites is vacuously fully protected (nothing to get
+        # wrong).
         def ratio = total.zero? ? 1.0 : protected_count.to_f / total
       end
 
@@ -67,10 +65,9 @@ module Rigor
         node.is_a?(Prism::CallNode) && !node.receiver.nil?
       end
 
-      # A receiver Rigor can reason about: anything that is not `Dynamic` /
-      # `Top`, and (for a union) only when every arm is concrete — a single
-      # `Dynamic` arm makes the whole call gradually valid, so the rules stay
-      # silent there.
+      # A receiver Rigor can reason about: anything that is not `Dynamic` / `Top`, and (for a union)
+      # only when every arm is concrete — a single `Dynamic` arm makes the whole call gradually valid,
+      # so the rules stay silent there.
       def concrete_receiver?(type)
         case type
         when Type::Dynamic, Type::Top then false

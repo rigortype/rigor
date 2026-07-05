@@ -10,13 +10,10 @@ require_relative "synthetic_method_index"
 
 module Rigor
   module Inference
-    # ADR-16 slice 2b pre-pass — scans the project's source paths
-    # for class-level DSL calls that match any registered plugin's
-    # `Plugin::Macro::HeredocTemplate` entry, instantiates the
-    # corresponding {SyntheticMethod} records, and returns a frozen
-    # {SyntheticMethodIndex} the dispatcher consults below the RBS
-    # tier (per WD13 — user-authored RBS overrides substrate
-    # synthesis).
+    # ADR-16 slice 2b pre-pass — scans the project's source paths for class-level DSL calls that match any registered
+    # plugin's `Plugin::Macro::HeredocTemplate` entry, instantiates the corresponding {SyntheticMethod} records, and
+    # returns a frozen {SyntheticMethodIndex} the dispatcher consults below the RBS tier (per WD13 — user-authored RBS
+    # overrides substrate synthesis).
     #
     # Two-phase walk:
     #
@@ -32,36 +29,31 @@ module Rigor
     #    class must equal or inherit (lexically OR through the
     #    RBS env) from the template's `receiver_constraint`.
     #
-    # Per WD4 the pre-pass mechanism is "scan all files once at
-    # startup, populate the index before per-file inference."
-    # Slice 2b ships this strategy; future iterations may revisit
-    # to lazy emit (per WD4 alternatives) if the warm-cache profile
-    # justifies it.
+    # Per WD4 the pre-pass mechanism is "scan all files once at startup, populate the index before per-file inference."
+    # Slice 2b ships this strategy; future iterations may revisit to lazy emit (per WD4 alternatives) if the warm-cache
+    # profile justifies it.
     #
-    # Per WD13 floor — `return_type` is recorded but not resolved.
-    # `Macro::HeredocTemplate::Emit#returns` strings round-trip
-    # through {SyntheticMethod#return_type} verbatim; the
-    # dispatcher's slice-2b tier translates every match to
-    # `Dynamic[T]`. Precise resolution via the ADR-13 resolver
-    # chain is the ceiling, deferred.
+    # Per WD13 floor — `return_type` is recorded but not resolved. `Macro::HeredocTemplate::Emit#returns` strings
+    # round-trip through {SyntheticMethod#return_type} verbatim; the dispatcher's slice-2b tier translates every match
+    # to `Dynamic[T]`. Precise resolution via the ADR-13 resolver chain is the ceiling, deferred.
     module SyntheticMethodScanner # rubocop:disable Metrics/ModuleLength
       module_function
 
       # @param plugin_registry [Rigor::Plugin::Registry]
-      # @param paths           [Array<String>] absolute paths to the project
+      # @param paths [Array<String>] absolute paths to the project
       #   source files to scan.
-      # @param environment     [Rigor::Environment, nil] used for
+      # @param environment [Rigor::Environment, nil] used for
       #   inheritance resolution against RBS-known classes
       #   (ActiveRecord::Base, Dry::Struct, etc.) that aren't
       #   declared in project source.
-      # @param fact_store      [Rigor::Plugin::FactStore, nil]
+      # @param fact_store [Rigor::Plugin::FactStore, nil]
       #   the per-run cross-plugin fact store. ADR-18 lookups
       #   (`Plugin::Macro::HeredocTemplate::Emit#returns_from_arg`)
       #   consult this at scan time to resolve per-call-site
       #   return types from published facts; without it, those
       #   emit rows fall back to their static `returns:` (or
       #   `"untyped"` → `Dynamic[Top]`).
-      # @param buffer          [Rigor::Analysis::BufferBinding, nil]
+      # @param buffer [Rigor::Analysis::BufferBinding, nil]
       #   editor-mode buffer binding. When set, reads for the
       #   logical path resolve to the buffer's physical path so
       #   the pre-pass sees the in-flight bytes instead of the
@@ -94,8 +86,7 @@ module Rigor
         SyntheticMethodIndex.new(entries: entries, class_names: class_names)
       end
 
-      # Aggregates `(plugin_id, template)` pairs across every
-      # plugin's `manifest.heredoc_templates` in registration
+      # Aggregates `(plugin_id, template)` pairs across every plugin's `manifest.heredoc_templates` in registration
       # order. Empty when no plugin contributes Tier C entries.
       def collect_templates(plugin_registry)
         return [] if plugin_registry.nil? || plugin_registry.empty?
@@ -108,10 +99,8 @@ module Rigor
         end
       end
 
-      # ADR-16 Tier B (slice 3b). Aggregates `(plugin_id, registry)`
-      # pairs across every plugin's `manifest.trait_registries` in
-      # registration order. Empty when no plugin contributes Tier B
-      # entries.
+      # ADR-16 Tier B (slice 3b). Aggregates `(plugin_id, registry)` pairs across every plugin's
+      # `manifest.trait_registries` in registration order. Empty when no plugin contributes Tier B entries.
       def collect_trait_registries(plugin_registry)
         return [] if plugin_registry.nil? || plugin_registry.empty?
 
@@ -123,9 +112,8 @@ module Rigor
         end
       end
 
-      # ADR-36 — aggregates `(plugin_id, template)` pairs across
-      # every plugin's `manifest.nested_class_templates`. Empty when
-      # no plugin contributes the nested-class emission tier.
+      # ADR-36 — aggregates `(plugin_id, template)` pairs across every plugin's `manifest.nested_class_templates`. Empty
+      # when no plugin contributes the nested-class emission tier.
       def collect_nested_class_templates(plugin_registry)
         return [] if plugin_registry.nil? || plugin_registry.empty?
 
@@ -137,10 +125,8 @@ module Rigor
         end
       end
 
-      # ADR-36 nested-class emission. For each class that `extend`s a
-      # template's `receiver_constraint` and carries a
-      # `<block_method> do ... end` block, mint one synthetic
-      # subclass per `<variant_method> <Const>, <Type>` row:
+      # ADR-36 nested-class emission. For each class that `extend`s a template's `receiver_constraint` and carries a
+      # `<block_method> do ... end` block, mint one synthetic subclass per `<variant_method> <Const>, <Type>` row:
       #
       #   class Shape
       #     extend Mangrove::Enum
@@ -149,13 +135,10 @@ module Rigor
       #     end
       #   end
       #
-      # yields synthetic class `Shape::Circle` + instance method
-      # `Shape::Circle#inner -> Float`. The variant subclass name is
-      # recorded in `class_names` so `Environment#class_known?`
-      # resolves the constant (and `.new` dispatches through
-      # `meta_new`); `#inner`'s return type is the literal constant
-      # type argument (non-constant inner shapes degrade to
-      # `Dynamic[Top]` per the slice-A floor).
+      # yields synthetic class `Shape::Circle` + instance method `Shape::Circle#inner -> Float`. The variant subclass
+      # name is recorded in `class_names` so `Environment#class_known?` resolves the constant (and `.new` dispatches
+      # through `meta_new`); `#inner`'s return type is the literal constant type argument (non-constant inner shapes
+      # degrade to `Dynamic[Top]` per the slice-A floor).
       def collect_nested_class_entries(entries, class_names, nested_templates, ast, path)
         return if ast.nil?
 
@@ -173,9 +156,8 @@ module Rigor
         end
       end
 
-      # Walks every class declaration, yielding its fully-qualified
-      # name and the `Prism::ClassNode`. Mirrors `walk_class_bodies`'
-      # scope-stack bookkeeping but hands back the class node itself.
+      # Walks every class declaration, yielding its fully-qualified name and the `Prism::ClassNode`. Mirrors
+      # `walk_class_bodies`' scope-stack bookkeeping but hands back the class node itself.
       def walk_classes(node, scope_stack = [], &)
         return unless node.respond_to?(:compact_child_nodes)
 
@@ -198,9 +180,8 @@ module Rigor
         body.respond_to?(:body) ? body.body.compact : []
       end
 
-      # True when the class body carries `extend <constraint>`
-      # (receiverless `extend` call with the constraint constant as
-      # its first argument).
+      # True when the class body carries `extend <constraint>` (receiverless `extend` call with the constraint constant
+      # as its first argument).
       def body_extends?(body, constraint)
         body.any? do |stmt|
           stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && stmt.name == :extend &&
@@ -208,9 +189,8 @@ module Rigor
         end
       end
 
-      # Yields `(variant_const_name, inner_type_node)` for every
-      # `<variant_method> <Const>, <Type>` call inside the template's
-      # `<block_method> do ... end` block(s).
+      # Yields `(variant_const_name, inner_type_node)` for every `<variant_method> <Const>, <Type>` call inside the
+      # template's `<block_method> do ... end` block(s).
       def each_variant_call(body, template, &)
         body.each do |stmt|
           next unless variants_block_call?(stmt, template)
@@ -275,8 +255,7 @@ module Rigor
 
       # ADR-16 slice 4 — Concern re-targeting index.
       #
-      # Walks every top-level / nested `module M` decl looking for
-      # the ActiveSupport::Concern shape:
+      # Walks every top-level / nested `module M` decl looking for the ActiveSupport::Concern shape:
       #
       #     module M
       #       extend ActiveSupport::Concern
@@ -287,9 +266,8 @@ module Rigor
       #       end
       #     end
       #
-      # The returned Hash maps `module_name => [deferred_call_node, ...]`.
-      # When a class body later contains `include M`, the substrate
-      # replays each deferred call against the including class.
+      # The returned Hash maps `module_name => [deferred_call_node, ...]`. When a class body later contains `include M`,
+      # the substrate replays each deferred call against the including class.
       #
       # Slice 4 scope (floor):
       # - constant-path `include M` only (not `include some_var`).
@@ -334,8 +312,8 @@ module Rigor
         end
       end
 
-      # Recognises a module body that begins with (or contains at
-      # top level) an `extend ActiveSupport::Concern` statement.
+      # Recognises a module body that begins with (or contains at top level) an `extend ActiveSupport::Concern`
+      # statement.
       def concern_module_body?(body)
         return false unless body.respond_to?(:body)
 
@@ -358,13 +336,10 @@ module Rigor
         end
       end
 
-      # Slice 4 hook. When the current class body contains
-      # `include M` and M is a Concern with deferred DSL calls,
-      # replay each deferred call against the including class.
-      # Acts as a re-targeting walker — no new manifest entries
-      # needed; downstream `collect_entries` /
-      # `collect_trait_entries` fire just as if the calls had been
-      # written directly in X's body.
+      # Slice 4 hook. When the current class body contains `include M` and M is a Concern with deferred DSL calls,
+      # replay each deferred call against the including class. Acts as a re-targeting walker — no new manifest entries
+      # needed; downstream `collect_entries` / `collect_trait_entries` fire just as if the calls had been written
+      # directly in X's body.
       def collect_concern_re_targeted_entries(entries, call_node, class_name, concern_index, # rubocop:disable Metrics/ParameterLists
                                               templates, registries, hierarchy, environment, path, fact_store = nil)
         return unless call_node.name == :include && call_node.receiver.nil?
@@ -383,9 +358,8 @@ module Rigor
         end
       end
 
-      # Builds a lexical inheritance map `class_name => parent_class_name`
-      # by walking every top-level / nested `class X < Y` decl
-      # across the AST set.
+      # Builds a lexical inheritance map `class_name => parent_class_name` by walking every top-level / nested `class X
+      # < Y` decl across the AST set.
       def build_hierarchy(asts)
         hierarchy = {}
         asts.each_value do |ast|
@@ -415,11 +389,9 @@ module Rigor
         end
       end
 
-      # Yields `(class_name, call_node)` for every Prism::CallNode
-      # at class-body top level (singleton-context calls). Nested
-      # method bodies, blocks, and conditionals are skipped — the
-      # Tier C call shapes the substrate targets all live at the
-      # class body's top level.
+      # Yields `(class_name, call_node)` for every Prism::CallNode at class-body top level (singleton-context calls).
+      # Nested method bodies, blocks, and conditionals are skipped — the Tier C call shapes the substrate targets all
+      # live at the class body's top level.
       def walk_class_bodies(node, scope_stack = [], &) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
         return unless node.respond_to?(:compact_child_nodes)
 
@@ -487,18 +459,14 @@ module Rigor
         end
       end
 
-      # ADR-16 Tier B (slice 3b). For each matching call like
-      # `<X>.<method_name>(:trait_a, :trait_b)` where X inherits
-      # from the registry's receiver_constraint: collect every
-      # registered trait symbol's module (silently skipping
-      # unknown traits per design decision (2)) plus the
-      # always_included modules, then per-method-explode each
-      # module's RBS instance methods into the index.
+      # ADR-16 Tier B (slice 3b). For each matching call like `<X>.<method_name>(:trait_a, :trait_b)` where X inherits
+      # from the registry's receiver_constraint: collect every registered trait symbol's module (silently skipping
+      # unknown traits per design decision (2)) plus the always_included modules, then per-method-explode each module's
+      # RBS instance methods into the index.
       #
-      # Per slice 3 floor (per user agreement): the synthesised
-      # methods adopt `return_type: "untyped"` (Dynamic[T] at
-      # dispatch). Precision promotion — looking up the module's
-      # actual RBS return type — is reserved for the ceiling slice.
+      # Per slice 3 floor (per user agreement): the synthesised methods adopt `return_type: "untyped"` (Dynamic[T] at
+      # dispatch). Precision promotion — looking up the module's actual RBS return type — is reserved for the ceiling
+      # slice.
       def collect_trait_entries(entries, registries, class_name, call_node, hierarchy, environment, path)
         registries.each do |(plugin_id, registry)|
           next unless call_node.name == registry.method_name
@@ -511,16 +479,14 @@ module Rigor
         end
       end
 
-      # Resolves the set of modules to include from a Tier B
-      # call site:
+      # Resolves the set of modules to include from a Tier B call site:
       #
       # - `always_included` modules (unconditional);
       # - one module per literal Symbol argument the call carries
       #   (resolved through `registry.modules_by_symbol`; unknown
       #   symbols silently skipped per design decision (2)).
       #
-      # Returns an Array<String> of module names in
-      # `always_included` order followed by argument order.
+      # Returns an Array<String> of module names in `always_included` order followed by argument order.
       def resolve_trait_modules(registry, call_node)
         modules = registry.always_included.dup
         positional_symbols(call_node, registry).each do |symbol|
@@ -558,10 +524,9 @@ module Rigor
         end
       end
 
-      # Returns the Symbol method-name list defined on `module_name`'s
-      # RBS instance definition. Empty Array when the module is not
-      # in the RBS env (silent skip — the synthetic emit produces
-      # nothing rather than fabricating method names).
+      # Returns the Symbol method-name list defined on `module_name`'s RBS instance definition. Empty Array when the
+      # module is not in the RBS env (silent skip — the synthetic emit produces nothing rather than fabricating method
+      # names).
       def module_instance_method_names(module_name, environment)
         return [] if environment.nil?
 
@@ -630,8 +595,7 @@ module Rigor
         )
       end
 
-      # ADR-18 three-tier fallback for the synthetic method's
-      # `return_type` string:
+      # ADR-18 three-tier fallback for the synthetic method's `return_type` string:
       #
       # 1. When `row.returns_from_arg` is present AND the
       #    call-site argument at the declared position is a
@@ -663,13 +627,10 @@ module Rigor
         fact[source_rep]
       end
 
-      # Extracts the source-text qualified-constant representation
-      # of the call's positional argument (e.g.,
-      # `"Types::String"`). Returns nil for non-constant shapes
-      # (literals, method chains, blocks, …). The floor
-      # intentionally accepts only ConstantReadNode /
-      # ConstantPathNode per ADR-18; chained-call argument
-      # resolution stays deferred.
+      # Extracts the source-text qualified-constant representation of the call's positional argument (e.g.,
+      # `"Types::String"`). Returns nil for non-constant shapes (literals, method chains, blocks, …). The floor
+      # intentionally accepts only ConstantReadNode / ConstantPathNode per ADR-18; chained-call argument resolution
+      # stays deferred.
       def argument_source_representation(call_node, position)
         args = call_node.arguments&.arguments
         return nil if args.nil? || position >= args.size
@@ -709,8 +670,7 @@ module Rigor
           current = parent
         end
 
-        # Fall back to the env's RBS-aware ordering for the case
-        # where the chain terminates at an RBS-known class
+        # Fall back to the env's RBS-aware ordering for the case where the chain terminates at an RBS-known class
         # (ActiveRecord::Base, Dry::Struct, Sinatra::Base, …).
         return false if environment.nil?
 

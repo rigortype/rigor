@@ -23,6 +23,22 @@ chapter for the install channels (`mise` recommended). This skill
 references only public CLI flags and config keys — the same surface
 `rigor --help` documents.
 
+## First: load the version-current copy
+
+This skill's step detail lives in its `references/` files, and its exact
+commands, flags, and config keys drift between Rigor releases — so follow
+the copy that ships with the **installed** Rigor rather than any vendored
+or frozen copy of this file. Get the complete current procedure (body + all
+references, inline) in one call:
+
+```sh
+rigor skill --full rigor-project-init
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## Phase 0 — When to use this skill
 
 Trigger when the user says "set up Rigor here", "configure rigor for

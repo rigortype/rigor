@@ -290,6 +290,43 @@ RSpec.describe Rigor::CLI::SkillCommand do
     end
   end
 
+  describe "--full <name>" do
+    it "prints the SKILL.md body followed by each references/*.md inline" do
+      # rigor-doctor is a thin shell whose step detail lives in
+      # references/01-checks.md; --full re-assembles the complete,
+      # version-current procedure so a frozen copy can re-fetch it.
+      status, out, = run(%w[--full rigor-doctor])
+      expect(status).to eq(0)
+      expect(out).to start_with("# Rigor skill: rigor-doctor\n")
+      expect(out).to include("\n---\nname: rigor-doctor\n")
+      # The references are appended, each behind a labelled separator.
+      expect(out).to include("references/01-checks.md")
+      expect(out).to include("# 01 — The four checks")
+      # The separator names the shipping version so the reader can tell
+      # a stale vendored copy from the installed one.
+      expect(out).to include("bundled with rigortype #{Rigor::VERSION}")
+    end
+
+    it "prints just the body for a skill with no references/ dir" do
+      status, out, = run(%w[--full rigor-next-steps])
+      expect(status).to eq(0)
+      expect(out).to start_with("# Rigor skill: rigor-next-steps\n")
+      expect(out).not_to include("<!-- ===== references/")
+    end
+
+    it "is a usage error when no name follows the flag" do
+      status, _out, err = run(["--full"])
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("requires a skill name")
+    end
+
+    it "exits 1 on an unknown skill name" do
+      status, _out, err = run(%w[--full no-such-skill])
+      expect(status).to eq(1)
+      expect(err).to include("Unknown skill: no-such-skill")
+    end
+  end
+
   describe "--path <name>" do
     it "prints the absolute SKILL.md path on a single line" do
       status, out, = run(%w[--path rigor-baseline-reduce])

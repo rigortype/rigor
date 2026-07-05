@@ -19,6 +19,22 @@ This skill is for **users improving their own project**. It uses the
 published `rigor` executable on `PATH` and references only public CLI
 flags and config keys.
 
+## First: load the version-current copy
+
+The step-by-step commands live in this skill's `references/` files, and
+their exact flags drift between Rigor releases — so follow the copy that
+ships with the **installed** Rigor rather than any vendored or frozen copy
+of this file. Get the complete current procedure in one call:
+
+```sh
+rigor skill --full rigor-baseline-reduce   # this body + all its references/, inline
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed (read any `references/NN-*.md` from the directory the
+header names). If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## Phase 0 — When to use this skill
 
 Trigger when the user says "reduce the rigor baseline", "fix some

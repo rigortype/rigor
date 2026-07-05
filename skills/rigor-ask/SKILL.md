@@ -1,7 +1,7 @@
 ---
 name: rigor-ask
 description: |
-  Rigor is a niche, fast-moving Ruby type checker; its rules, flags, and type behaviour are version-specific, so what you "remember" about it is likely wrong or stale — do NOT answer from memory or guess. For ANY question about Rigor, use this skill and investigate procedurally: run `rigor docs` (handbook + manual, bundled OFFLINE and version-matched), `rigor explain` for a diagnostic id, and for the user's own code `rigor check` / `annotate` / `type-of`, then answer only from what you read. Covers: why a line is flagged or if it's a false positive; the type model (narrowing, refinements, `Dynamic`, RBS); config keys, flags, baselines; comparisons to Sorbet, Steep, mypy, PHPStan; whether it handles Rails, RSpec, or a gem; writing an RBS signature; "what is Rigor / why use it / is it right for us?". Trigger on any Rigor mention seeking understanding — even casual, comparative, or grumbling. Skip only when Rigor isn't mentioned, or it's purely "set it up / fix / reduce it for me" (→ rigor-next-steps).
+  Answer any question about Rigor by investigating, not from memory — Rigor is niche and version-specific, so run its tools and read its bundled docs, then answer from what you saw. Use `rigor docs` (handbook + manual, offline and version-matched) and `rigor explain <rule>`; for the user's own code, `rigor check` / `annotate` / `type-of`. Covers: why a line is flagged or whether it's a false positive; the type model (narrowing, refinements, `Dynamic`, RBS); config keys, flags, baselines; comparisons to Sorbet, Steep, mypy, PHPStan; whether Rigor handles Rails, RSpec, or a given gem; how to type a method; "what is Rigor / why use it / is it right for us?". Trigger on any Rigor question seeking understanding — even casual, comparative, or grumbling. Skip only when it's purely "set it up / fix / reduce it for me" (use rigor-next-steps).
 license: MPL-2.0
 metadata:
   version: 0.2.0
@@ -35,6 +35,26 @@ This is the user's shortcut: they only ever need to remember two skills —
 ("answer this about Rigor"). They ask in plain language; *you* turn it
 into the right lookup or analysis so they never have to remember the
 command.
+
+## Prefer the live map over this skill's tables
+
+The doc-page names and command flags below are a snapshot; Rigor's pages
+and CLI move release to release, and a vendored copy of this skill (e.g.
+added via `npx skills`) lags further still. Treat the tables as
+orientation, then confirm against the **installed** Rigor, which is always
+current:
+
+```sh
+rigor docs --list              # the live doc map — what pages exist in THIS version
+rigor --help                   # the live command + flag list
+rigor skill --full rigor-ask   # the current version of this skill itself
+```
+
+Never cite a page, flag, or rule id you have not just seen in one of these
+— that is this skill's whole discipline. If `rigor` is not installed, you
+can still answer high-level "what is Rigor?" questions from the web
+<https://rigor.typedduck.fail/llms.txt>, but for anything version-specific
+install it first (see `rigor-next-steps`).
 
 ## The toolbox
 

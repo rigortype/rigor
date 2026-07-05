@@ -108,6 +108,7 @@ source checkout. The `rigor skill` command surfaces them:
 rigor skill describe        # probe the project + recommend the next skill (alias: rigor describe)
 rigor skill --list          # name + absolute path for each bundled skill
 rigor skill <name>          # print the SKILL.md body (with a references/ header)
+rigor skill --full <name>   # the body + every references/*.md inline (complete procedure)
 rigor skill --path <name>   # one-line absolute SKILL.md path, for a file-reading tool
 ```
 
@@ -132,6 +133,26 @@ npx skills add rigortype/rigor
 
 (The contributor-only skills under `.claude/skills/` are marked internal
 and are not installed by a bulk `npx skills add`.)
+
+### Keeping installed skills current
+
+A skill copied into your project this way is **frozen at install time**,
+while Rigor keeps evolving — flags, config keys, and rule ids move release
+to release. To keep that from going stale (陳腐化), every skill opens with
+a **"First: load the version-current copy"** directive: before following
+its steps, an agent re-fetches the authoritative body from the *installed*
+Rigor with
+
+```sh
+rigor skill --full <name>   # the current body + all its references/, in one call
+```
+
+Because the vendored copy is fixed at install time but `rigor skill` always
+reads the gem, the two diverge as you upgrade, and the directive makes the
+agent prefer the gem's current version. You therefore do **not** need to
+re-install the skills after upgrading Rigor — only the thin entry point
+(`rigor-next-steps`) needs to work before Rigor exists; everything
+version-specific is served live by the installed binary.
 
 ## Running a skill
 

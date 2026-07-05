@@ -18,6 +18,21 @@ top-level helper). `pre_eval:` ([ADR-17](https://github.com/rigortype/rigor/blob
 fixes this: it pre-evaluates the listed project files and registers every
 method they define with a **literal** `def` / `def self.`.
 
+## First: load the version-current copy
+
+This skill's exact commands, flags, and config keys drift between Rigor
+releases, so follow the copy that ships with the **installed** Rigor rather
+than any vendored or frozen copy of this file. Get the complete current
+procedure in one call:
+
+```sh
+rigor skill --full rigor-monkeypatch-resolve
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## When to use
 
 - `rigor triage` shows a cluster of `call.undefined-method` /

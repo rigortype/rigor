@@ -27,6 +27,22 @@ environment.
 > covers the in-repo layout, `plugin_helpers.rb`, and `make verify`.
 > This skill is for plugins that live in *your* project.
 
+## First: load the version-current copy
+
+The plugin contract is pre-1.0 and moving (see the next section), so this
+skill's step detail — in its `references/` files — is exactly the kind that
+drifts between releases. Follow the copy that ships with the **installed**
+Rigor rather than any vendored or frozen copy of this file. Get the complete
+current procedure (body + all references, inline) in one call:
+
+```sh
+rigor skill --full rigor-plugin-author
+```
+
+If you already loaded this skill *via* `rigor skill` you have the current
+copy — just proceed. If the `rigor` command is not available, run
+**`rigor-next-steps`** to install Rigor first, then come back.
+
 ## Important — the plugin contract is a preview (pre-1.0)
 
 Rigor's plugin contract (ADR-2) is **not yet frozen**. It stabilises

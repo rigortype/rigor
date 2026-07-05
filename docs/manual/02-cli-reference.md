@@ -452,13 +452,14 @@ The positional slot is a skill *name*; alternative outputs are flags,
 so a skill can never be shadowed by a verb.
 
 ```sh
-rigor skill [<name>] [--path <name>] [--list] [--describe]
+rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]
 ```
 
 | Form | Purpose |
 | --- | --- |
 | (none) / `--list` | Table of every bundled skill (name + absolute path). |
 | `<name>` | Print the `SKILL.md` body to stdout, with a header pointing at the skill's `references/` directory. |
+| `--full <name>` | Print the `SKILL.md` body **followed by every `references/*.md` inline** — the complete, version-current procedure in one call. This is what a skill's "First: load the version-current copy" directive points at, so a copy vendored into a project (e.g. via `npx skills add`) re-fetches its current steps from the installed gem instead of following a frozen copy. |
 | `--path <name>` | Print the single-line absolute `SKILL.md` path, suitable as input to a file-reading tool. |
 | `--describe` | Probe the project's state (config / baseline / `sig/` / CI — presence only, never runs `rigor check`) and recommend the next skill to run. Also spelled `describe`; surfaced top-level as [`rigor describe`](#rigor-describe) below. |
 

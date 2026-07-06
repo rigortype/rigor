@@ -112,5 +112,8 @@ baseline regenerate` to shrink the file. The
 [`rigor-baseline-reduce` skill](08-skills.md) walks this loop
 interactively.
 
-To make CI fail when the baseline *grows*, add
-`--baseline-strict` to `rigor check`.
+To make CI fail on *any* baseline drift, add `--baseline-strict`
+to `rigor check`. It fails not only when a bucket grows past its
+recorded count (excess drift, which the surfaced diagnostics already
+fail on) but also when the code has *shrunk* below it (deficit drift:
+the baseline is now looser than the code and should be regenerated).

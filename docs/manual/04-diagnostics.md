@@ -20,16 +20,19 @@ Every rule has a two-segment `family.rule` identifier:
 | `dump` | `dump_type` notices. |
 
 `rigor explain <rule>` prints the full catalogue entry for any
-ID; `rigor explain` with no argument lists them all.
+built-in rule ID; `rigor explain` with no argument lists them all.
 
 ### Catalogue
 
-Each rule has a stable per-rule anchor on this page
+Each built-in rule has a stable per-rule anchor on this page
 (`#rule-<family>-<name>`, dots written as dashes) — the
 `documentation_url` field in `--format json` and `rigor explain`'s
 `Documentation:` line both point here. The `Evidence` column is
 Rigor's confidence that a firing is a true positive (see
-[Evidence tier](#evidence-tier) below).
+[Evidence tier](#evidence-tier) below). The one exception is
+`rbs_extended.unsatisfied-conformance`, an `rbs_extended`-family rule
+rather than a built-in: `rigor explain` does not resolve it and it
+carries no `documentation_url`.
 
 | Rule | Fires when | Evidence |
 | --- | --- | --- |
@@ -86,7 +89,7 @@ re-stamps it for the run. Three profiles, set with the
 | --- | --- |
 | `lenient` | Only proven diagnostics are errors; uncertain ones drop to `warning` / `info`. For incremental adoption on legacy code. |
 | `balanced` *(default)* | Most rules `error`; `dump.type` `info`; uncertain rules `warning`. |
-| `strict` | Every rule is an `error`. CI-friendly. |
+| `strict` | Nearly every rule is an `error` — the exceptions are `call.self-undefined-method` (stays `off`, opt-in only) and `flow.unreachable-clause` (`warning`, pending its false-positive gate). CI-friendly. |
 
 For finer control, `severity_overrides:` maps a rule ID or a
 family to one of `error`, `warning`, `info`, or `off`:

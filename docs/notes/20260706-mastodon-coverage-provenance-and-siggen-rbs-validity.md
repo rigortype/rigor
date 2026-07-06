@@ -161,8 +161,8 @@ app/models 単独 +5.4pp と違い、app+lib フルは controllers/services/lib 
 ## Follow-up
 
 - **[ADR-82](../adr/82-dynamic-provenance-wiring.md)** — provenance-wiring（G1 伝播 + G2 記録 +
-  新 cause）。本ノートが根拠。**WD2+WD3 LANDED 2026-07-06**（下記「実装」節）、WD1 は計測で
-  必須確認・未実装。
+  新 cause）。本ノートが根拠。**WD1+WD2+WD3+WD6 LANDED 2026-07-06**（下記「実装」節）。次は
+  chain root cause 充実（implicit-self → inferred_return_untyped 等、demand-gated）。
 - **sig-gen record-key 修正** — LANDED（`Type::HashShape#erase_key_prefix`、本セッション、CHANGELOG）。
 - **env-build resilience** — 未着手（07-04 H2(b)/H3 と統合、demand-gated）。不正 sig ファイルの
   quarantine + 可視化。sig-gen block-param 修正はこれで頑健化されるまでの暫定でしかない。
@@ -246,6 +246,48 @@ measured/adjudicated/bench-perf-gated スライスに defer（WD2/3→WD1 と同
 `make bench-perf` は FAIL するが、**master 自身も FAIL**: committed baseline（19.77M alloc / 16.6s
 wall）が stale で、master 27.51M/7.2s・WD1 27.54M/7.2s（**+0.1%、perf-neutral**）。baseline
 再取得（CI Linux 計測）は別 follow-up。
+
+## 実装（2026-07-06）: ADR-82 WD6 チェーン origin 継承
+
+WD1 の計測が示した「dominant はチェーン receiver」を受け、WD6 を実装。`call_type_for` の
+**既存コメント**（「Dynamic receiver の結果は dynamic origin を継承する」— 未実装だった）を実装:
+`ExpressionTyper#inherit_receiver_origin` が Dynamic receiver の呼び出し結果 call ノードに
+receiver の実効 origin を記録（`return dynamic_top` は不変）。実効 origin は共有
+`Inference::OriginLookup.origin_for`（`dynamic_origins[node] || local/ivar 伝播`）で、WD1 の
+ルックアップと統一（`ProtectionScanner` も同ヘルパへ）。
+
+### 計測（mastodon app+lib, no-sig, cause 別 site 数、group-dominant 集計）
+
+| cause | WD1 | WD6 |
+| --- | --- | --- |
+| unsupported_syntax | 17,854 | 19,405 |
+| **(null)** | 2,550 | **1,356** |
+| explicit_untyped | 462 | 217 |
+| inferred_return_untyped | 253 | 141 |
+| ratio | 0.3148 | 0.3148 |
+
+**WD6 は null（causeless）バケットを 2,550 → 1,356（−1,194）削減** — WD1(−322) の約4倍。累積
+baseline 2,921 → 1,356（null の半分超をラベル化）。probe で3ホップ伝播確認（`y.foo.bar.baz` の
+全ホップが `y` の binding origin を継承）。ratio 不変（precision-additive）。
+
+### 正直な読み: 完全性↑、actionability は限定的 → 次レバー = root cause 充実
+
+ラベルは **unsupported_syntax 支配**（null→unsupported +1,551）。理由: チェーンの **root** が
+unsupported を記録する — implicit-self の memoized reader、`params[:x]` の index、metaprog accessor。
+`unsupported_syntax` も null も tractability は engine_gap なので、WD6 は **provenance 完全性**
+（causeless ホール半減）を買うが **actionability**（enable_plugin/add_rbs へのルーティング）は
+あまり動かさない。inferred/explicit の group-dominant 減は集計ノイズ（root が unsupported 化した
+チェーンが group を flip）。
+
+→ **次レバー = chain root の cause 充実**: implicit-self 解決経路が `inferred_return_untyped` を
+記録（WD2 の explicit-receiver tier と同様）、framework index read（`params`/`session`）に framework
+cause。これらを WD1/WD6 の伝播が chain 全体に無料で広げる。demand-gated follow-up。
+
+### perf
+
+`make bench-perf` は stale baseline で FAIL するが A/B は perf-neutral: master 27,540,795 alloc /
+7.77s、WD6 27,548,368 / 7.83s（**+0.03%、+7,573 alloc**）。record は Dynamic-receiver 呼び出し
+毎の O(1) hash write。self-check `lib` は Dynamic チェーンが少なく影響最小。
 
 ## GOTCHAs（再実行者向け）
 

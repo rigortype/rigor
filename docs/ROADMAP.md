@@ -425,9 +425,14 @@ Five layers, run in order (full cycle at milestones; individual layers on demand
 not into the doc directories themselves.
 
 **Pending work, in priority order:**
-1. Implement the L0 harness as `spec/docs/` and wire `make docs-check` into CI.
+1. **DONE** — the L0 harness ships as `spec/docs/` (`handbook_snippets_spec.rb`,
+   `manual_drift_spec.rb`, `link_integrity_spec.rb`) with the `make docs-check`
+   target, gated by the `test` suite (so `verify` + `ci.yml` run it). 2026-07-06
+   added a fourth `manual_drift` axis: rule `documentation_url` anchor integrity
+   (ADR-65 public URLs must resolve). Not yet covered mechanically: CLI *flag*
+   drift (flags lack a clean registry — FP-prone; demand-gated).
 2. Author `.claude/skills/rigor-docs-review/SKILL.md` (freeze L1–L4 lens
-   personas + layer-gate protocol).
+   personas + layer-gate protocol). **← now the top remaining item.**
 3. Run the first full cycle; L1 is expected to surface ADR-51 CI-format
    follow-through gaps (`11-ci.md` was rewritten after the v0.1.16
    code-verification pass).

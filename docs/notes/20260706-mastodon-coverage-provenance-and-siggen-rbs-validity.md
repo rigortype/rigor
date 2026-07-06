@@ -161,8 +161,9 @@ app/models 単独 +5.4pp と違い、app+lib フルは controllers/services/lib 
 ## Follow-up
 
 - **[ADR-82](../adr/82-dynamic-provenance-wiring.md)** — provenance-wiring（G1 伝播 + G2 記録 +
-  新 cause）。本ノートが根拠。**WD1+WD2+WD3+WD6 LANDED 2026-07-06**（下記「実装」節）。次は
-  chain root cause 充実（implicit-self → inferred_return_untyped 等、demand-gated）。
+  新 cause）。本ノートが根拠。**WD1+WD2+WD3+WD6+WD7 LANDED 2026-07-06**（下記「実装」節）。
+  WD7 = 正確 per-site メトリクス + param enrichment（~3,100 → ADR-67）。次は unbound ivar
+  enrichment（ADR-58、demand-gated）。
 - **sig-gen record-key 修正** — LANDED（`Type::HashShape#erase_key_prefix`、本セッション、CHANGELOG）。
 - **env-build resilience** — 未着手（07-04 H2(b)/H3 と統合、demand-gated）。不正 sig ファイルの
   quarantine + 可視化。sig-gen block-param 修正はこれで頑健化されるまでの暫定でしかない。
@@ -288,6 +289,46 @@ cause。これらを WD1/WD6 の伝播が chain 全体に無料で広げる。de
 `make bench-perf` は stale baseline で FAIL するが A/B は perf-neutral: master 27,540,795 alloc /
 7.77s、WD6 27,548,368 / 7.83s（**+0.03%、+7,573 alloc**）。record は Dynamic-receiver 呼び出し
 毎の O(1) hash write。self-check `lib` は Dynamic チェーンが少なく影響最小。
+
+## 実装（2026-07-06）: ADR-82 WD7 — 正確 per-site メトリクス + param root-enrichment
+
+WD6 まで group-dominant 集計で測っていたが、それが lossy と判明。2つの結合した変更。
+
+### 正確メトリクス（+ WD1/WD6 計測の訂正）
+
+`coverage --protection` は holes を method でグループ化し各 group の **dominant** cause を報告、
+`tractability_summary` もそれを group count で加重していた。mixed group の少数派 cause（特に
+causeless サイト）が消える。per-site 正確な `cause_site_counts`（`"none"` 含む、tractability_summary
+もこれ由来に修正）を追加すると **真の状態**が判明:
+
+| cause | per-site 正確（WD1+2+3+6 後） |
+| --- | --- |
+| **none（causeless）** | **10,390（49%）** |
+| unsupported_syntax | 10,126（48%） |
+| inferred_return_untyped | 351 |
+| explicit_untyped | 252 |
+
+**本ノート/ADR の WD1/WD6 の「null 2,921→1,356」は group-dominant アーティファクトだった。** 真の
+causeless は WD6 後も **10,390（49%）**。WD1/WD6 は実仕事をした（ラベル済みは維持）が、その規模は
+lossy メトリクスで過大表示されていた。provenance 完全性は ~51%（~94% ではない）。
+
+### param enrichment（causeless の最大 actionable スライス）
+
+49% causeless の最大 actionable 部分は **未宣言 param**（`def f(x); x.foo` は `x` を untyped に
+bind、bare param receiver は cause 無し）。`build_method_entry_scope` が untyped param の
+`local_origins` を `inferred_return_untyped` で seed（untyped param は ADR-67 の典型ギャップ）→
+WD1 ルックアップが `x.foo` をラベル、WD6 が `x.foo.bar` へ伝播。seed-time のみ（hot read path 不変）。
+
+| cause | before | param-enrich |
+| --- | --- | --- |
+| none | 10,390 | **7,305** |
+| inferred_return_untyped | 351 | **3,460** |
+| unsupported_syntax | 10,126 | 10,102 |
+
+**~3,100 サイトが causeless → inferred_return_untyped（ADR-67 ルーティング）** = 本物の
+actionability 利得。ratio 不変（precision-additive）、perf-neutral（A/B +0.15% alloc）。残る
+causeless 7,305 は主に unbound ivar read（ADR-58）+ dynamic_top ノード種（yield/super/block）で、
+ivar スライスが次の enrichment。
 
 ## GOTCHAs（再実行者向け）
 

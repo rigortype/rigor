@@ -1,6 +1,6 @@
 # ADR-82 — `Dynamic[T]` provenance wiring: breaking the catch-all on real apps
 
-Status: **WD1+WD2+WD3+WD6 implemented 2026-07-06.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
+Status: **WD1+WD2+WD3+WD6+WD7 implemented 2026-07-06.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
 provenance side-channel and surfaced it through `coverage --protection`
 tractability labels, but a field measurement on Mastodon shows the labels are
 **uninformative on a real Rails app**: 84% of unprotected dispatch sites carry
@@ -170,7 +170,41 @@ that re-labels without improving attribution accuracy is not landed.
   implicit-self resolution path record `inferred_return_untyped` like WD2's
   explicit-receiver tiers, and give framework index reads (`params[:x]`,
   `session[:x]`) a framework cause — which WD6 then propagates through the chains
-  for free. That root-enrichment is the demand-gated follow-up.
+  for free. WD7 lands the first and highest-value slice of that root-enrichment.
+
+- **WD7 — root-cause enrichment for untyped parameters, plus an accurate per-site
+  cause metric. (Implemented 2026-07-06.)** Two coupled changes, prompted by
+  discovering that the WD1/WD6 measurements were read off a *lossy* aggregation.
+
+  - **The accurate metric (and a correction).** `coverage --protection` grouped
+    holes by method and reported each group's *dominant* cause, and
+    `tractability_summary` weighted that dominant cause by the group's full count.
+    That massively undercounts a mixed group's minority causes — including the
+    causeless (null) sites, which vanish entirely from a group that has any
+    origin'd site. The new per-site `cause_site_counts` (exact tally, `"none"`
+    included; `tractability_summary` now derives from it) reveals the true state,
+    and it **corrects the WD1/WD6 numbers in this ADR**: those slices' "null
+    2,921→1,356" was the dominant-cause artifact — the *accurate* causeless count
+    on Mastodon app+lib after WD1+WD2+WD3+WD6 is **10,390 of 21,119 (49%)**, with
+    10,126 `unsupported_syntax` and only ~600 in the actionable buckets. WD1/WD6
+    still did real work (chains and bindings that *were* labeled now stay
+    labeled), but their magnitude was overstated by the lossy metric; provenance
+    completeness after them is ~51%, not the ~94% the old metric implied.
+
+  - **The enrichment.** The largest actionable slice of that 49% causeless bucket
+    is undeclared method parameters: `def f(x); x.foo` binds `x` to `untyped`, and
+    a bare param receiver had no cause. `build_method_entry_scope` now seeds an
+    untyped param's `local_origins` to `inferred_return_untyped` (an untyped param
+    is the archetypal [ADR-67](67-parameter-type-inference.md) gap — no call-site
+    type flows in), so WD1's lookup labels `x.foo` and WD6 carries it through
+    `x.foo.bar`. Seed-time only (not a hot read path), precision-additive,
+    perf-neutral (+0.15% `lib` allocations). **Outcome:** Mastodon causeless
+    10,390→**7,305** (−3,085) and `inferred_return_untyped` 351→**3,460** (+3,109),
+    ratio unchanged — a genuine *actionability* gain (3,100 holes now route to
+    ADR-67) on top of WD6's completeness. The remaining 7,305 causeless is
+    dominated by unbound instance-variable reads (the [ADR-58](58-ivar-field-typing.md)
+    ivar-field gap) and `dynamic_top`-returning node kinds (yield / super / block);
+    the ivar slice is the next demand-gated enrichment.
 
 - **WD2 — record a cause at the two unlabeled user-method tiers. (Implemented
   2026-07-06.)** `try_discovered_method` and `try_user_class_fallback` now record
@@ -239,26 +273,30 @@ that re-labels without improving attribution accuracy is not landed.
 
 ## Consequences
 
-- `coverage --protection` provenance is far more *complete* on real Rails apps:
-  WD2+WD3 split `inferred_return_untyped` (→ ADR-58/67 roadmap) out of the
-  catch-all, WD1 propagates a binding's cause to a bare-variable receiver, and WD6
-  carries it through method chains — together more than halving the causeless
-  (null) bucket on Mastodon (2,921→1,356). Provenance *actionability* is a further
-  step: most of the residue is `unsupported_syntax` because the chain roots record
-  it, so the next lever is enriching those roots (implicit-self →
-  `inferred_return_untyped`, framework index reads → a framework cause), which the
-  landed WD1/WD6 propagation then spreads for free.
+- `coverage --protection` provenance is measured accurately (WD7's per-site
+  `cause_site_counts`) and materially more complete *and* actionable on real Rails
+  apps: WD2+WD3 split `inferred_return_untyped` out of the catch-all, WD1 + WD6
+  propagate a cause to bare-variable and chained receivers, and WD7 routes untyped
+  parameters to ADR-67. On Mastodon app+lib the causeless bucket is now 7,305 of
+  21,119 (down from a true 10,390 before WD7), with 3,460 sites routed to
+  parameter/ivar inference. The remaining causeless is dominated by unbound ivar
+  reads (ADR-58) and `dynamic_top`-returning node kinds — the next enrichment.
+- Provenance is measured **per-site**, never per-method-group-dominant. The
+  `add_a_type_here` list still shows a per-group dominant cause for the ranked "add
+  a type here" view, but `cause_site_counts` and `tractability_summary` are exact
+  site tallies — the earlier group-dominant `tractability_summary` was a real
+  undercount of mixed groups (WD7).
 - No change to types, diagnostics, severity, or the diagnostic corpus (additive
   side-channel). The gate is re-bucketing measurement + attribution
   adjudication, not a zero-delta corpus run.
 - WD3 extends the ADR-75 cause set by one symbol; `DynamicOrigin::CAUSES` and
-  `TRACTABILITY` grow accordingly. The new cause id is public `--format json`
-  vocabulary and freezes at v1.0 under [ADR-50](50-release-engineering-and-stability-strategy.md)
-  WD1.
-- WD1 adds two flow-varying `Scope` side-tables (`local_origins` / `ivar_origins`)
-  and WD6 adds one `record_dynamic_origin` per Dynamic-receiver dispatch; both
-  measured perf-neutral (WD1 +0.1%, WD6 +0.03% `lib` allocations vs master). Note
-  the committed `bench/baseline.json` is stale (19.77M allocations / 16.6s wall vs
-  today's ~27.5M / ~7.2s — master fails the gate too), so `make bench-perf` needs a
-  re-baselined commit to be meaningful again; that recalibration is out of scope
-  here but flagged as a follow-up.
+  `TRACTABILITY` grow accordingly. The new cause id, and WD7's `cause_site_counts`
+  JSON field, are public `--format json` vocabulary and freeze at v1.0 under
+  [ADR-50](50-release-engineering-and-stability-strategy.md) WD1.
+- WD1 adds two flow-varying `Scope` side-tables, WD6 one `record_dynamic_origin`
+  per Dynamic-receiver dispatch, WD7 one `with_local_origin` per untyped param at
+  method entry; all measured perf-neutral (WD1 +0.1%, WD6 +0.03%, WD7 +0.15% `lib`
+  allocations vs master). Note the committed `bench/baseline.json` is stale (19.77M
+  allocations / 16.6s wall vs today's ~27.5M / ~7–9s — master fails the gate too),
+  so `make bench-perf` needs a re-baselined commit to be meaningful again; that
+  recalibration is out of scope here but flagged as a follow-up.

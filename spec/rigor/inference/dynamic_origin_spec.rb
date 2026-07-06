@@ -4,11 +4,12 @@ require "spec_helper"
 require "rigor/inference/dynamic_origin"
 
 RSpec.describe Rigor::Inference::DynamicOrigin do
-  it "exports the five v1 cause symbols" do
+  it "exports the cause symbols" do
     expect(described_class::EXTERNAL_GEM_WITHOUT_RBS).to eq(:external_gem_without_rbs)
     expect(described_class::FRAMEWORK_DSL_BOUNDARY).to eq(:framework_dsl_boundary)
     expect(described_class::ANALYZER_BUDGET_CUTOFF).to eq(:analyzer_budget_cutoff)
     expect(described_class::EXPLICIT_UNTYPED).to eq(:explicit_untyped)
+    expect(described_class::INFERRED_RETURN_UNTYPED).to eq(:inferred_return_untyped)
     expect(described_class::UNSUPPORTED_SYNTAX).to eq(:unsupported_syntax)
   end
 
@@ -18,6 +19,7 @@ RSpec.describe Rigor::Inference::DynamicOrigin do
       :framework_dsl_boundary,
       :analyzer_budget_cutoff,
       :explicit_untyped,
+      :inferred_return_untyped,
       :unsupported_syntax
     )
   end
@@ -36,8 +38,9 @@ RSpec.describe Rigor::Inference::DynamicOrigin do
       expect(described_class.tractability(:framework_dsl_boundary)).to eq(:enable_plugin)
     end
 
-    it "maps a budget cutoff / unsupported syntax to :engine_gap" do
+    it "maps a budget cutoff / inferred-untyped / unsupported syntax to :engine_gap" do
       expect(described_class.tractability(:analyzer_budget_cutoff)).to eq(:engine_gap)
+      expect(described_class.tractability(:inferred_return_untyped)).to eq(:engine_gap)
       expect(described_class.tractability(:unsupported_syntax)).to eq(:engine_gap)
     end
 

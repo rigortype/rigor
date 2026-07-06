@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[rigor coverage]** `rigor coverage --protection` now labels a dynamic hole whose receiver came from a resolved-but-uninferable user method with a distinct `inferred_return_untyped` cause instead of the generic `unsupported_syntax` ([ADR-82](docs/adr/82-dynamic-provenance-wiring.md) WD2/WD3).
+  - When a call resolves to a known project method (a memoized reader, an attribute helper) whose return the engine cannot yet infer, the value is dynamic for an *inference* reason — not unmodeled syntax and not an authored `untyped`. The new cause routes such holes to their real lever (parameter inference / ivar-field typing, [ADR-67](docs/adr/67-parameter-type-inference.md) / [ADR-58](docs/adr/58-ivar-field-typing.md)) rather than mislabeling them intractable. Precision-additive: no type, diagnostic, or severity change; the protection ratio is unchanged.
+
 ### Fixed
 
 - **[rigor sig-gen]** A record-shaped return type with a non-identifier key now erases to valid RBS, so it no longer collapses the whole RBS environment.

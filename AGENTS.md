@@ -180,7 +180,12 @@ Treat any tightening that **loses union members** compared to the declared RBS a
 - Keep the subject self-contained and reasonably short; detail belongs in the body. Wrap the body at ~72 columns and write it for humans — explain the why and any context a future reader will need, not the diff itself.
 - Release version bumps follow the fixed form `Bump up version to x.y.z`. See [`.claude/skills/rigor-release-prep/SKILL.md`](.claude/skills/rigor-release-prep/SKILL.md) for the full release-prep flow.
 
-## Release Cadence
+## Documentation-only changes
+
+Markdown / documentation-only changes — ADRs, `docs/notes/`, [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md), `CHANGELOG.md` `[Unreleased]` entries, READMEs, skills — land as **direct commits to `master`, not through a pull request.** CI's `paths-ignore: ["**/*.md"]` (on the `push` trigger in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) skips the whole Ruby test / lint / self-check suite for a push whose files are all Markdown, so a docs PR only buys a redundant full CI run plus review noise. The filter is deliberately **not** applied to `pull_request` — a path-filtered *required* check hangs pending and blocks the merge — so the skip only takes effect on the direct-push path. Practical rules:
+
+- **Never open a pull request whose only change is `docs/CURRENT_WORK.md`.** It is a transient resume bookmark; refresh it with a direct commit to `master`, or fold the refresh into the substantive PR it accompanies.
+- A Markdown-only change commits straight to `master`. A change that also touches Ruby (or any non-`.md` file) is code and goes through a branch + PR as usual — a mixed commit runs the full suite, which is correct.
 
 - **No autonomous version bumps.** `Rigor::VERSION` (in `lib/rigor/version.rb`), `CHANGELOG.md` released-version sections, and `Gemfile.lock` MUST only be bumped on explicit user request. Land feature commits with their `## [Unreleased]` CHANGELOG entries — written user-facing at landing per § "CHANGELOG Style" — and stop there; the user drives the cut-over to a numbered release. Adding entries under `## [Unreleased]` does NOT count as a version bump.
 - **Single-digit version components.** Each `x.y.z` component stays single-digit. `0.0.9`'s successor is `0.1.0` — never `0.0.10`. `0.9.x`'s successor is `1.0.0`. Same rule applies recursively at every position.

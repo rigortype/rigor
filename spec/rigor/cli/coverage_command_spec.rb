@@ -112,7 +112,9 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     end
 
     it "omits dynamic_origin in JSON output when nil" do
-      File.write("dyn.rb", "def f(x)\n  x.whatever\nend\n")
+      # An unbound instance-variable read has no propagated cause (unlike an undeclared parameter, which
+      # routes to `inferred_return_untyped`), so its hole exercises the omit-when-nil path.
+      File.write("dyn.rb", "def f\n  @x.whatever\nend\n")
 
       status, out, = run(["--protection", "--format", "json", "dyn.rb"])
 

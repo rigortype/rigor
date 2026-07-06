@@ -10,8 +10,12 @@ RSpec.describe Rigor::CLI::ProtectionReport do
     )
   end
 
-  def report(calls)
-    described_class.new(files: [], untyped_calls: calls, parse_errors: [])
+  def report(calls, cause_site_counts: nil)
+    # Default the per-site cause tally to one site per call at its dominant origin, matching the shape the
+    # accumulator produces for these single-origin fixtures; tractability tests override it explicitly.
+    cause_site_counts ||= calls.each_with_object(Hash.new(0)) { |c, acc| acc[c.dynamic_origin] += c.count }
+    described_class.new(files: [], untyped_calls: calls, parse_errors: [],
+                        cause_site_counts: cause_site_counts)
   end
 
   describe "#to_h add_a_type_here tractability (ADR-73 P6 / ADR-75 WD2)" do
@@ -51,6 +55,22 @@ RSpec.describe Rigor::CLI::ProtectionReport do
       r = report([untyped_call(:whatever, count: 3)])
       expect(r.tractability_summary).to eq({})
       expect(r.to_h["tractability_summary"]).to eq({})
+    end
+  end
+
+  describe "#cause_site_totals (ADR-82)" do
+    it "reports an exact per-site cause tally including the causeless sites" do
+      # A method group's dominant origin is lossy for a mixed group; the per-site tally is exact and is what
+      # tractability_summary is now computed from.
+      r = report(
+        [untyped_call(:foo, count: 10)],
+        cause_site_counts: { :inferred_return_untyped => 6, :unsupported_syntax => 3, nil => 1 }
+      )
+      expect(r.to_h["cause_site_counts"]).to eq(
+        "inferred_return_untyped" => 6, "unsupported_syntax" => 3, "none" => 1
+      )
+      # tractability derives per-site: 6 + 3 engine_gap, the causeless site excluded.
+      expect(r.tractability_summary).to eq(engine_gap: 9)
     end
   end
 end

@@ -171,7 +171,14 @@ app/models 単独 +5.4pp と違い、app+lib フルは controllers/services/lib 
   実証: good+broken 混在 sig で `RBS classes available` が 0 でなく生存（good 側のクラスは型付く）。
   これで sig-gen block-param 等の残バグに対しても env は頑健化。**残**: 専用診断 / 非ゼロ exit
   （07-04 H3、CI 可視性）は未着手（新 rule id は ADR-50 の vocabulary freeze 対象なので要検討）。
-- **sig-gen block-param レンダリング** — 未修正、characterize 済み。
+- **sig-gen block-param レンダリング** — **FIXED 2026-07-06**（`Generator#block_signature_suffix`）。
+  `def initialize(**opts, &block)` が `(**untyped, ?{ (?) -> void })` = block を括弧内にカンマ結合
+  （RBS は `optional keyword argument type is expected` で拒否、`(?)` も不正）で出していた。RBS では
+  block は括弧の**外**なので `(**untyped) ?{ (*untyped) -> untyped } -> void` に修正（block signature は
+  未観測なので ADR-5 で最も寛大な `*untyped`→`untyped`）。generator/writer の block 出力箇所は
+  `render_initialize_param_list` のみ（`render_param_list` は block を出さない）。回帰テスト2本
+  + RBS::Parser パース検証。env-resilience（上記）で被害は既に封じ込め済みだが、そもそも不正 RBS を
+  出さなくなった。3.2 の残バグ解消。
 
 ## 実装（2026-07-06）: ADR-82 WD2+WD3 + re-bucketing 計測
 

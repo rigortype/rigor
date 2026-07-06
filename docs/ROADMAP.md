@@ -93,6 +93,77 @@ is the active backend. The Ractor pool stays parked behind
 `RIGOR_POOL_BACKEND=ractor` and ADR-15 § OQ1; completing it is
 NOT a `0.2.x` goal and waits on upstream CRuby fixes.
 
+### The next two cuts — v0.2.9 (final `0.2.x`) then v0.3.0
+
+The single-digit version policy makes **v0.2.9 the last `0.2.x` cut** (its
+successor is `0.3.0`), so the two upcoming releases have distinct, deliberately
+separated charters:
+
+**v0.2.9 — a type-inference strengthening cut, still inside the `0.2.x`
+minor-non-break pledge.** Land as much *observable, FP-safe* inference precision
+as fits, staying compatibility-safe ([ADR-50](adr/50-release-engineering-and-stability-strategy.md):
+a new diagnostic ships `:off` / `:info` behind a stable id; a default-severity
+promotion flows only through a green `rigor-survey` corpus diff; nothing is
+removed). Candidate content, readiness-ordered:
+
+1. **Deterministic FP-safe folds** (compatibility-safe backlog bucket 1) — the
+   remaining builtin / stdlib method folds that reduce a `Dynamic` receiver
+   without firing a new diagnostic (the `rigor-type-coverage-uplift` skill; the
+   carrier sweep is largely drained, so this is the odd scalar / structure gap).
+2. **FP-safe narrowing extensions** — the Elixir-v1.20 § 4-4 upper-bound length
+   track (`tuple_size(x) < 3`, needs a length-range carrier) and any sibling
+   narrowing that adds protection without a new firing.
+3. **[ADR-47](adr/47-narrowing-driven-clause-reachability.md) WD3b** —
+   deconstructing / value / variable-catch-all `case`/`in` exhaustiveness,
+   shipped `:off` / `:info` first per the discipline.
+4. **The bucket-3 default-widening diagnostics** (survey P0) — receiver-typing /
+   nilability / flow / override precision that already *exists* internally; each
+   promotion into the default profile is gated on a clean Rails / ActiveSupport /
+   DSL / monkey-patch / RBS-gap corpus diff. This is the highest-value
+   strengthening, so ship the ones that pass the sweep and hold the rest.
+
+The M3 / member-shape arc ([ADR-67](adr/67-parameter-type-inference.md) `check`-walk
+wiring → [ADR-68](adr/68-class-builder-folding.md) → [ADR-66](adr/66-discriminated-union-member-typing.md))
+is **not** the v0.2.9 focus: ADR-67 WD2 in-body inference was spiked and deferred
+(the protection ceiling is a measured hard floor, see `docs/notes/20260706-adr67-wd2-in-body-inference-design-spike.md`),
+and the `check`-walk wiring's value is murky. It stays demand-gated.
+
+**v0.3.0 — the deprecation-clearance + performance minor (the first cut that may
+break).** Semver `0.x` permits a minor to break, and every hard deprecation was
+scheduled with an alias/warning window through `0.2.x` for removal here:
+
+1. **CLI verb subcommands removed** — `rigor docs list` / `path` and `rigor skill
+   list` / `print` / `path` (the flags `--list` / `--path` / `--print` are
+   canonical). `LEGACY_VERB_REMOVAL = "v0.3.0"` in `cli/docs_command.rb` +
+   `cli/skill_command.rb`; see § "Scheduled CLI deprecations" below.
+2. **`type_specifier` plugin hook removed** — the deprecated alias drops; the
+   `narrowing_facts` verb is the only spelling ([ADR-80](adr/80-narrowing-facts-rename.md),
+   `plugin/base.rb`). The alias removal is also when ADR-80's carry-over — the
+   internal reader `type_specifiers` and the `rigor plugins --capabilities` JSON
+   `type_specifier_methods` key — is revisited (a distinct rename decision).
+3. **`parallel_tests` dependency dropped** — `binpacker` is the primary test
+   runner (PR #27); remove the gem dep + the `test-parallel` / `spec_parallel`
+   target.
+
+Alongside the removals, **as much performance optimization as ships cleanly**:
+
+1. **[ADR-46](adr/46-incremental-dependency-graph.md) incremental analysis** —
+   the headline lever: per-file incremental via the cross-file dependency graph,
+   soundness-gated by the mandatory `--verify-incremental` byte-identical
+   cross-check (slice 1a landed off-by-default; maturing it toward
+   default-capable is the perf headline).
+2. **Other perf levers** (§ "Future cycles" → "other levers") — the O4 Layer 3
+   `gem_rbs_collection` version-matching table, fork-based file parallelism, and
+   a *scope-safe* run-scoped return memo (the naive cache is forbidden by
+   [ADR-52](adr/52-compiled-plugin-contribution-dispatch.md) / [ADR-24](adr/24-self-method-call-resolution.md)
+   WD5 on FP grounds, so it needs a design).
+
+Removals must land with a `docs/compatibility.md` update and a `CHANGELOG.md`
+migration note; recalibrate `bench/baseline.json` from CI-measured values as perf
+work shifts allocations. The [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
+v1.0 hard freeze is still ahead — `0.3.0` is a normal `0.x` minor that clears the
+deprecation backlog and banks perf, not the freeze.
+
 ### Scheduled CLI deprecations — `docs` / `skill` verb subcommands → flags (removal v0.3.0)
 
 `rigor docs` and `rigor skill` moved their discovery subcommands to

@@ -424,6 +424,54 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "unparseable project signature quarantine (env-build resilience)" do
+    # A single unparseable user `.rbs` used to collapse the WHOLE env (`from_loader` parses all-or-nothing),
+    # degrading every type-of query to Dynamic[top] — the "sig looks harmful" failure of the 2026-07-06 mastodon
+    # coverage note. The loader now loads project sigs per-file and quarantines the broken one so the rest survives.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-quarantine-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "keeps the valid sigs when a sibling file does not parse" do
+      File.write(File.join(tmpdir, "good.rbs"),
+                 "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n")
+      # A bare non-identifier record key — the exact mastodon `application_helper.rbs` failure
+      # (`unexpected record key token, token=`data``) a sig-gen bug emitted for `data-contrast:`.
+      File.write(File.join(tmpdir, "bad.rbs"),
+                 "module Acme\n  class Broken\n    def h: () -> { data-contrast: Integer }\n  end\nend\n")
+      loader = described_class.new(signature_paths: [tmpdir])
+      allow(loader).to receive(:warn) # silence the quarantine notice for this assertion
+      expect(loader.send(:env)).not_to be_nil
+      expect(loader.class_decl_paths["::Acme::Widget"]).to eq(File.join(tmpdir, "good.rbs"))
+      expect(loader.class_known?("Acme::Broken")).to be(false)
+    end
+
+    it "warns once, naming the quarantined file and its parse error" do
+      File.write(File.join(tmpdir, "good.rbs"),
+                 "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n")
+      File.write(File.join(tmpdir, "bad.rbs"),
+                 "module Acme\n  class Broken\n    def h: () -> { data-contrast: Integer }\n  end\nend\n")
+      loader = described_class.new(signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      3.times { loader.send(:env) }
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("QUARANTINED")
+      expect(messages.first).to include("record key")
+      expect(messages.first).to include(File.join(tmpdir, "bad.rbs"))
+    end
+
+    it "does not warn when every project sig parses" do
+      File.write(File.join(tmpdir, "good.rbs"),
+                 "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n")
+      loader = described_class.new(signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      loader.send(:env)
+      expect(messages).to be_empty
+    end
+  end
+
   describe "missing-namespace synthesis (ADR-5 robustness)" do
     # A project sig set that declares qualified names without ever declaring the enclosing namespace is invalid upstream
     # (`rbs validate` rejects it); pre-fix every method on every such class degraded to Dynamic[Top] because

@@ -132,6 +132,15 @@ RSpec.describe Rigor::Type::HashShape do
       string_keyed = described_class.new("a" => int_nominal)
       expect(string_keyed.erase_to_rbs).to eq("Hash[String, Integer]")
     end
+
+    it "erases a non-identifier Symbol key with the quoted fat-arrow form so RBS parses it" do
+      # A hyphenated Symbol key (e.g. Mastodon's html_attributes `:"data-contrast"`) is invalid as a
+      # bare RBS record key and also invalid quoted-with-colon; it MUST erase to `"key" => T`.
+      shape = described_class.new(lang: int_nominal, "data-contrast": str_nominal)
+      rbs = shape.erase_to_rbs
+      expect(rbs).to eq("{ lang: Integer, \"data-contrast\" => String }")
+      expect { RBS::Parser.parse_type(rbs) }.not_to raise_error
+    end
   end
 
   describe "structural equality" do

@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[rigor sig-gen]** A record-shaped return type with a non-identifier key now erases to valid RBS, so it no longer collapses the whole RBS environment.
+  - Generating `sig/` for Mastodon emitted `def html_attributes: () -> (… | { lang: untyped, "data-contrast": untyped, … })` for a hash with a hyphenated key, which RBS cannot parse (a bare `data-contrast:` and a quoted `"data-contrast":` are both rejected; only `"data-contrast" =>` is valid). One such file made the whole `sig/` env build fail, degrading every type-of query to `Dynamic[top]` — which read as a ~5pt *drop* in `rigor coverage --protection` (a crash masquerading as a real result). `Type::HashShape` erasure now emits the quoted fat-arrow form for any non-identifier Symbol key; identifier keys (incl. Ruby keywords like `class`) are unchanged, and the human-readable `describe` output is untouched. Surfaced onboarding mastodon (2026-07-06).
+
 ## [0.2.7] - 2026-07-05
 
 v0.2.7 sharpens type coverage on real Rails apps, from onboarding the Redmine and Mastodon survey targets: `rigor-actionpack` now types a controller's request-context readers so the single largest dispatch cluster stops reading `Dynamic`, and two fixes make `rigor coverage --protection` report the protection Rigor actually achieves. It also keeps the bundled Agent Skills current across upgrades — a new `rigor skill --full` and a per-skill directive re-fetch each skill's steps from the installed gem, so a copy installed into a project no longer goes stale ([ADR-81](docs/adr/81-skill-set-optimization.md)). A `rigor sig-gen` fix and the engine fix it surfaced (a malformed project `.rbs` no longer collapses the whole RBS environment) round out the cycle.

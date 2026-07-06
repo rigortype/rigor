@@ -232,34 +232,41 @@ module Rigor
         return if callee.nil?
 
         class_name, method, kind, def_node = callee
-        requireds = simple_requireds(def_node)
-        return if requireds.nil? || requireds.size != args.size
+        requireds = leading_requireds(def_node)
+        # Enough positional arguments to fill every leading required (extra args map to trailing
+        # optional / rest parameters, which this pass does not infer). Fewer would be an arity error
+        # or a mis-resolved callee; skip rather than mis-attribute.
+        return if requireds.nil? || args.size < requireds.size
 
         key = [class_name, method, kind]
-        args.each_with_index do |arg, i|
-          arg_scope = index[arg]
-          accumulate(key, requireds[i].name, arg_scope&.type_of(arg))
+        requireds.each_with_index do |param, i|
+          arg_scope = index[args[i]]
+          accumulate(key, param.name, arg_scope&.type_of(args[i]))
         end
       end
 
-      # The plain positional arguments, or nil when the call carries any non-plain argument
-      # (splat / keyword / block-pass / forwarding) — those break the positional-index ↔
-      # parameter mapping, so the call site is skipped rather than mis-attributed.
+      # The plain leading positional arguments. A trailing keyword hash (`f(x, k: 1)`) or block-pass
+      # (`f(x, &blk)`) is dropped — it occupies no positional slot, so the leading args still map to
+      # the leading required parameters. Returns nil when the call carries a splat (`f(*xs, x)`) or
+      # forwarding (`f(...)`) argument: those make an argument's position depend on runtime length,
+      # breaking the positional-index ↔ parameter mapping, so the call site is skipped.
       def positional_args(call_node)
         arguments = call_node.arguments
         return [] if arguments.nil?
 
         list = arguments.arguments
-        return nil if list.any? { |arg| non_plain_argument?(arg) }
+        return nil if list.any? { |arg| position_breaking_argument?(arg) }
 
-        list
+        list.reject { |arg| non_positional_argument?(arg) }
       end
 
-      def non_plain_argument?(arg)
-        arg.is_a?(Prism::SplatNode) ||
-          arg.is_a?(Prism::KeywordHashNode) ||
+      def position_breaking_argument?(arg)
+        arg.is_a?(Prism::SplatNode) || arg.is_a?(Prism::ForwardingArgumentsNode)
+      end
+
+      def non_positional_argument?(arg)
+        arg.is_a?(Prism::KeywordHashNode) ||
           arg.is_a?(Prism::BlockArgumentNode) ||
-          arg.is_a?(Prism::ForwardingArgumentsNode) ||
           arg.is_a?(Prism::AssocNode) ||
           arg.is_a?(Prism::AssocSplatNode)
       end
@@ -298,16 +305,19 @@ module Rigor
         per_class && per_class[method]
       end
 
-      # The required-positional parameters, or nil when the method's parameter list is not a
-      # simple all-required shape (matching the single-level contract
-      # `ExpressionTyper#user_method_param_shape_simple?` uses) or contains a destructured
-      # `(a, b)` slot (no bindable name).
-      def simple_requireds(def_node)
+      # The leading required-positional parameters — the ones a call's leading positional arguments
+      # map to. Ruby orders parameters requireds-first, so optional / rest / keyword / block
+      # parameters that FOLLOW the requireds do not disturb the leading positional-index ↔
+      # required-parameter mapping; this covers the common `def f(x, opts = {}, **kw)` /
+      # `def f(x, y, &block)` shapes the earlier all-required contract skipped entirely. Returns nil
+      # only when a required slot is a destructured `(a, b)` (no bindable name) or a post-rest
+      # required (`def f(a, *b, c)` — `c` maps to a trailing arg, breaking the leading-prefix
+      # assumption for the whole call), which would mis-attribute arguments.
+      def leading_requireds(def_node)
         params = def_node.parameters
         return [] if params.nil?
         return nil unless params.is_a?(Prism::ParametersNode)
-        return nil unless params.optionals.empty? && params.rest.nil? && params.posts.empty? &&
-                          params.keywords.empty? && params.keyword_rest.nil? && params.block.nil?
+        return nil unless params.posts.empty?
         return nil unless params.requireds.all?(Prism::RequiredParameterNode)
 
         params.requireds

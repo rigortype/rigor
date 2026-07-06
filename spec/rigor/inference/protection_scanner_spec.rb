@@ -32,6 +32,25 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(result.sites.first.dynamic_origin).to be_nil
   end
 
+  it "propagates a local binding's origin to a later bare-receiver read (ADR-82 WD1)" do
+    # `y` binds to the (dynamic) result of a resolved user method, so its own read node carries no
+    # origin — the cause was recorded on the assignment's rhs. WD1 follows the binding, so `y.save`'s
+    # receiver resolves to that propagated cause instead of a bare nil.
+    result = scan(<<~RUBY)
+      class C
+        def helper; end
+
+        def f
+          y = helper
+          y.save
+        end
+      end
+    RUBY
+    save_site = result.sites.find { |s| s.method_name == "save" }
+    expect(save_site).not_to be_nil
+    expect(save_site.dynamic_origin).not_to be_nil
+  end
+
   it "carries dynamic_origin when the scope seeds it for the receiver" do
     source = <<~RUBY
       def f(x)

@@ -22,7 +22,7 @@ module Rigor
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
-                :dynamic_origins
+                :dynamic_origins, :local_origins, :ivar_origins
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -93,9 +93,17 @@ module Rigor
     # never mutated / aliased / escaped). A static per-scope context like {#source_path}: inherited unchanged
     # through flow transitions and ignored by `==` / `hash`.
     EMPTY_FOLD_SAFE = Set.new.freeze
+    # ADR-82 WD1 — provenance propagation across the receiver-node lookup. `local_origins` / `ivar_origins`
+    # map a `name` (Symbol) to the {Inference::DynamicOrigin} cause of the `Dynamic` value currently bound to
+    # it, so a downstream dispatch whose receiver is a bare `x` / `@x` read resolves to why that value is
+    # dynamic (the cause was recorded on the *assignment*'s rhs node, which the receiver-read node is not).
+    # Advisory metadata like {#dynamic_origins}: ignored by `==` / `hash` (never varies a flow decision) and
+    # threaded by reference through transitions; reset per method body (a fresh entry scope drops it), so the
+    # name keys never collide across bodies.
+    EMPTY_ORIGINS = {}.freeze
     private_constant :EMPTY_VAR_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
                      :EMPTY_CHAIN_NARROWINGS, :EMPTY_DECLARATION_SOURCED,
-                     :EMPTY_FOLD_SAFE
+                     :EMPTY_FOLD_SAFE, :EMPTY_ORIGINS
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -122,7 +130,9 @@ module Rigor
       declaration_sourced: EMPTY_DECLARATION_SOURCED,
       source_path: nil,
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
-      dynamic_origins: {}.compare_by_identity
+      dynamic_origins: {}.compare_by_identity,
+      local_origins: EMPTY_ORIGINS,
+      ivar_origins: EMPTY_ORIGINS
     )
       @environment = environment
       @locals = locals
@@ -138,7 +148,29 @@ module Rigor
       @source_path = source_path
       @struct_fold_safe_locals = struct_fold_safe_locals
       @dynamic_origins = dynamic_origins
+      @local_origins = local_origins
+      @ivar_origins = ivar_origins
       freeze
+    end
+
+    # ADR-82 WD1 — the propagated origin of the `Dynamic` value currently bound to a local / instance
+    # variable, or `nil` when none is tracked. Consulted by `Inference::ProtectionScanner` when a dispatch's
+    # receiver is a bare `x` / `@x` read whose own node carries no origin.
+    def local_origin(name) = @local_origins[name.to_sym]
+    def ivar_origin(name) = @ivar_origins[name.to_sym]
+
+    # Records the cause of the `Dynamic` value being bound to `name`. A `nil` cause is a no-op (the common
+    # case — most bindings are concrete or have no recorded origin), so callers need not pre-check.
+    def with_local_origin(name, cause)
+      return self if cause.nil?
+
+      rebuild(local_origins: @local_origins.merge(name.to_sym => cause).freeze)
+    end
+
+    def with_ivar_origin(name, cause)
+      return self if cause.nil?
+
+      rebuild(ivar_origins: @ivar_origins.merge(name.to_sym => cause).freeze)
     end
 
     def local(name)
@@ -164,7 +196,8 @@ module Rigor
       rebuild(locals: new_locals, fact_store: new_fact_store,
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
-              declaration_sourced: drop_declaration_sourced_for(:local, name))
+              declaration_sourced: drop_declaration_sourced_for(:local, name),
+              local_origins: drop_origin(@local_origins, name))
     end
 
     def with_fact(fact)
@@ -229,7 +262,8 @@ module Rigor
       rebuild(ivars: @ivars.merge(name.to_sym => type).freeze,
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
-              declaration_sourced: drop_declaration_sourced_for(:ivar, name))
+              declaration_sourced: drop_declaration_sourced_for(:ivar, name),
+              ivar_origins: drop_origin(@ivar_origins, name))
     end
 
     # ADR-58 WD1 — used by the method-entry seed to mark an ivar whose only provenance is the class-ivar index.
@@ -615,7 +649,9 @@ module Rigor
       declaration_sourced: @declaration_sourced,
       source_path: @source_path,
       struct_fold_safe_locals: @struct_fold_safe_locals,
-      dynamic_origins: @dynamic_origins
+      dynamic_origins: @dynamic_origins,
+      local_origins: @local_origins,
+      ivar_origins: @ivar_origins
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -627,7 +663,9 @@ module Rigor
         declaration_sourced: declaration_sourced,
         source_path: source_path,
         struct_fold_safe_locals: struct_fold_safe_locals,
-        dynamic_origins: dynamic_origins
+        dynamic_origins: dynamic_origins,
+        local_origins: local_origins,
+        ivar_origins: ivar_origins
       )
     end
 
@@ -662,8 +700,28 @@ module Rigor
         # flow-live and `possible-nil-receiver` fires as before.
         declaration_sourced: join_declaration_sourced(other),
         source_path: source_path,
-        dynamic_origins: @dynamic_origins
+        dynamic_origins: @dynamic_origins,
+        local_origins: join_origins(@local_origins, other.local_origins),
+        ivar_origins: join_origins(@ivar_origins, other.ivar_origins)
       )
+    end
+
+    # ADR-82 WD1 — merge two branches' propagated origins (self wins on a name conflict; advisory metadata, so
+    # a disagreement is harmless). Zero-alloc when either side is empty — the common case, keeping the join
+    # hot-path cost negligible.
+    def join_origins(mine, theirs)
+      return mine if mine.equal?(theirs) || theirs.empty?
+      return theirs if mine.empty?
+
+      theirs.merge(mine).freeze
+    end
+
+    # ADR-82 WD1 — rebinding drops any propagated origin for the name (the new value's provenance is set
+    # afterward by `with_local_origin` when it is a `Dynamic` with a recorded cause). Zero-alloc when the name
+    # carries no origin — the overwhelming common case, so this stays off the with_local hot-path budget.
+    def drop_origin(origins, name)
+      key = name.to_sym
+      origins.key?(key) ? origins.reject { |k, _| k == key }.freeze : origins
     end
 
     def join_declaration_sourced(other)

@@ -46,7 +46,7 @@ module Rigor
           if concrete_receiver?(receiver_type)
             protected_count += 1
           else
-            origin = scope.dynamic_origins[node.receiver]
+            origin = scope.dynamic_origins[node.receiver] || propagated_origin(node.receiver, scope)
             sites << Site.new(
               line: node.location.start_line,
               receiver: safe_describe(receiver_type),
@@ -63,6 +63,18 @@ module Rigor
 
       def dispatch_site?(node)
         node.is_a?(Prism::CallNode) && !node.receiver.nil?
+      end
+
+      # ADR-82 WD1 — when a dispatch's receiver is a bare local / instance-variable read, the origin was
+      # recorded on the *assignment*'s rhs node, not on this read node, so `dynamic_origins[receiver]` misses
+      # it. Follow the binding to the propagated cause the scope threaded from the assignment
+      # (`Scope#with_local_origin` / `#with_ivar_origin`). Returns `nil` for any other receiver shape (a
+      # method-chain call node keeps its own recorded origin) or when no origin was propagated.
+      def propagated_origin(receiver, scope)
+        case receiver
+        when Prism::LocalVariableReadNode then scope.local_origin(receiver.name)
+        when Prism::InstanceVariableReadNode then scope.ivar_origin(receiver.name)
+        end
       end
 
       # A receiver Rigor can reason about: anything that is not `Dynamic` / `Top`, and (for a union)

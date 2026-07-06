@@ -57,6 +57,33 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  describe "propagated dynamic-origins (ADR-82 WD1)" do
+    it "records and reads a local / ivar origin" do
+      s = scope.with_local_origin(:x, :inferred_return_untyped).with_ivar_origin(:@y, :unsupported_syntax)
+      expect(s.local_origin(:x)).to eq(:inferred_return_untyped)
+      expect(s.ivar_origin(:@y)).to eq(:unsupported_syntax)
+    end
+
+    it "treats a nil cause as a no-op returning self" do
+      s = scope.with_local_origin(:x, nil)
+      expect(s).to equal(scope)
+      expect(s.local_origin(:x)).to be_nil
+    end
+
+    it "drops a local's origin when the local is rebound (the new value sets its own)" do
+      s = scope.with_local_origin(:x, :unsupported_syntax)
+               .with_local(:x, Rigor::Type::Combinator.constant_of(1))
+      expect(s.local_origin(:x)).to be_nil
+    end
+
+    it "is ignored by == and hash (advisory metadata, never varies a flow decision)" do
+      base = scope.with_local(:x, Rigor::Type::Combinator.constant_of(1))
+      with_origin = base.with_local_origin(:x, :inferred_return_untyped)
+      expect(with_origin).to eq(base)
+      expect(with_origin.hash).to eq(base.hash)
+    end
+  end
+
   describe "declaration-sourced provenance (ADR-58 WD1)" do
     let(:type) { Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("P"), Rigor::Type::Combinator.constant_of(nil)) }
 

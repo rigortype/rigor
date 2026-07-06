@@ -222,7 +222,19 @@ module Rigor
           return [rhs_type, post_rhs.with_declaration_sourced_local(node.name, rhs_type)]
         end
 
-        [rhs_type, post_rhs.with_local(node.name, rhs_type)]
+        bound = post_rhs.with_local(node.name, rhs_type)
+        bound = bound.with_local_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
+        [rhs_type, bound]
+      end
+
+      # ADR-82 WD1 — the {Inference::DynamicOrigin} cause to propagate onto a local / ivar being bound to `rhs`.
+      # Returns the cause recorded on the assignment's rhs node when the value is `Dynamic` (so a later
+      # `x` / `@x` receiver-read resolves to why it is dynamic), else `nil` — `with_local_origin` /
+      # `with_ivar_origin` treat `nil` as a no-op, so this is safe to call unconditionally.
+      def rhs_origin(value_node, scope_after_rhs, rhs_type)
+        return nil unless rhs_type.is_a?(Type::Dynamic)
+
+        scope_after_rhs.dynamic_origins[value_node]
       end
 
       # True when `value_node` is a bare instance-variable read whose binding in `scope_at_read` is currently marked
@@ -240,7 +252,9 @@ module Rigor
       # lands.
       def eval_ivar_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
-        [rhs_type, post_rhs.with_ivar(node.name, rhs_type)]
+        bound = post_rhs.with_ivar(node.name, rhs_type)
+        bound = bound.with_ivar_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
+        [rhs_type, bound]
       end
 
       def eval_cvar_write(node)

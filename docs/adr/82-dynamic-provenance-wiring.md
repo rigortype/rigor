@@ -1,7 +1,6 @@
 # ADR-82 — `Dynamic[T]` provenance wiring: breaking the catch-all on real apps
 
-Status: **WD2+WD3 implemented 2026-07-06; WD1 required (measurement-confirmed),
-not yet implemented.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
+Status: **WD1+WD2+WD3 implemented 2026-07-06.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
 provenance side-channel and surfaced it through `coverage --protection`
 tractability labels, but a field measurement on Mastodon shows the labels are
 **uninformative on a real Rails app**: 84% of unprotected dispatch sites carry
@@ -25,6 +24,30 @@ small size **confirms the G1 diagnosis**: the dominant 84% has local/ivar-read
 receivers whose origin the call-node record does not reach, so **WD1 (lookup
 propagation) is required, not demand-gated** — the measurement resolves WD5's
 open question in favour of building WD1.
+
+**WD1 outcome (2026-07-06) — implemented, perf-neutral, and honestly modest.**
+WD1 propagates a local / ivar binding's origin to a later bare `x` / `@x`
+receiver read (`Scope#local_origins` / `#ivar_origins` side-tables, set at
+assignment, consulted by `ProtectionScanner` when the receiver's own node has no
+origin). It is perf-neutral — Mastodon `lib` allocations move +0.1% (27.54M vs
+master's 27.51M; the `make bench-perf` gate fails only because its committed
+baseline, 19.77M / 16.6s wall, is stale — master itself fails it at the same
+27.5M / 7.2s). But the coverage payoff is **smaller than the "primary lever"
+framing predicted**: on Mastodon app+lib it moves ~**322 sites out of the null
+(no-cause) bucket** (null 2,872→2,550), ratio unchanged. The reason, found by
+adjudicating the residual: the dominant catch-all receivers are **not** bare
+local/ivar reads (those are the small null bucket WD1 addresses) but
+**intermediate-expression / chain receivers** — `signed_request_account.uri[…]`
+(the `[]` receiver is a call chain), `account_id_param.present?` (the receiver is
+a method call), `Status.tagged_with(tag.id)`. A chain link's `.foo` dispatched on
+a `Dynamic` receiver records the *generic* `unsupported_syntax` on its result and
+loses the upstream cause. So the evidenced **next** lever is **WD6 — chain-origin
+inheritance**: a dispatch on a `Dynamic` receiver inherits the receiver's origin
+onto its result, so provenance survives a method chain. It touches the hottest
+path (every call dispatch) and needs its own measured, FP-analyzed slice, so it
+is deliberately deferred rather than tacked on here. WD1 is retained: it is
+correct, precision-additive, perf-neutral, reduces the null bucket, and is the
+binding-propagation half of the foundation WD6 builds on.
 
 Grounding: the [2026-07-06 Mastodon coverage/provenance note](../notes/20260706-mastodon-coverage-provenance-and-siggen-rbs-validity.md)
 §2 (measurement + the two engine gaps G1/G2) and the
@@ -103,21 +126,36 @@ that re-labels without improving attribution accuracy is not landed.
 
 ### Working decisions
 
-- **WD1 — propagate provenance across the receiver-node lookup (the primary
-  lever).** Resolve the receiver's cause transitively rather than reading only
-  its own node: for a local-variable-read receiver, follow to the origin of the
-  node that last bound it; for an instance-variable-read receiver, follow to the
-  field's assignment origin; a call-node receiver keeps today's direct lookup
-  (already correct for chains). Mechanism: a `binding → origin-node` association
-  maintained alongside the local/ivar bindings, consulted by
-  `ProtectionScanner` (and any future consumer) when the receiver's own node
-  carries no cause. **Design constraints (why this is the hard, deferred slice):**
-  the association must obey the ADR-53 discovery-index litmus in reverse — it
-  *does* vary with flow (a rebind changes the origin), so it lives on `Scope`
-  proper, must be copied/joined correctly across branches, and must not
-  regress the per-dispatch allocation budget (ADR-44). Landing this without a
-  perf regression or a stale-origin bug is the bulk of the work and gates the
-  ADR's acceptance.
+- **WD1 — propagate a binding's origin to a bare receiver read. (Implemented
+  2026-07-06.)** Resolve the receiver's cause transitively rather than reading
+  only its own node: a local-variable-read receiver follows to the origin of the
+  value last bound to it, an instance-variable-read receiver to its field's
+  assignment origin; a call-node receiver keeps today's direct lookup. Mechanism:
+  flow-threaded `Scope#local_origins` / `#ivar_origins` name→cause side-tables,
+  set at assignment (`Scope#with_local_origin`, called from
+  `StatementEvaluator#eval_local_write` / `#eval_ivar_write` when the rhs is a
+  `Dynamic` with a recorded origin) and consulted by `ProtectionScanner`
+  (`#propagated_origin`) when the receiver's own node carries no cause. The tables
+  obey the ADR-53 litmus in reverse — they *do* vary with flow (a rebind drops the
+  name, `with_local` clears it copy-on-write) so they live on `Scope`, but they
+  are excluded from `==` / `hash` (advisory, never varies a flow decision) and
+  reset per method body (a fresh entry scope drops them, so name keys never
+  collide across bodies). Zero-alloc in the common case (empty tables share the
+  frozen `EMPTY_ORIGINS`; `drop_origin` allocates only when the rebound name
+  actually carries an origin), so the ADR-44 per-dispatch budget holds — measured
+  perf-neutral (see the WD1 outcome above). The payoff is modest (the bare-read
+  receivers are the small null bucket); the bigger lever is WD6.
+
+- **WD6 — chain-origin inheritance (the evidenced next lever; not implemented).**
+  The WD1 measurement showed the dominant catch-all receivers are intermediate
+  call/chain expressions, not bare variable reads: `a.b.c` and `x.foo[…]` lose
+  provenance because `.b` / `.foo` dispatched on a `Dynamic` receiver records the
+  generic `unsupported_syntax` on its result. WD6 makes a dispatch on a `Dynamic`
+  receiver *inherit* the receiver's origin onto its result, so a specific cause
+  survives a chain. It is where most of the 84% lives, but it touches the hottest
+  path (every call dispatch) and carries FP/perf risk on the shared origin table,
+  so it is deferred to its own measured, adjudicated, `bench-perf`-gated slice
+  rather than rushed here — the same discipline WD2+WD3 followed before WD1.
 
 - **WD2 — record a cause at the two unlabeled user-method tiers. (Implemented
   2026-07-06.)** `try_discovered_method` and `try_user_class_fallback` now record
@@ -157,11 +195,13 @@ that re-labels without improving attribution accuracy is not landed.
   **211 sites (~1%)** into `inferred_return_untyped`, all correctly attributed
   chained-receiver holes, leaving the 84% catch-all essentially intact. The
   residual is dominated by local/ivar-read receivers exactly as the §2 sample
-  predicted, so the gate resolves to: **WD1 (lookup propagation) is required, not
-  demand-gated.** WD2+WD3 served their purpose as a cheap confirmation of the G1
-  diagnosis; WD1's design (the flow-varying `Scope` `binding → origin-node`
-  association) is now the next work item, gated on `make bench-perf` and the
-  discovery/self-check gates.
+  predicted, so the gate resolved WD1 in. **WD1 then landed and was itself
+  measured** (the gate applies to every slice): it is perf-neutral but moves only
+  ~322 sites (the null bucket), because the §2 sample over-weighted bare-variable
+  receivers — adjudicating the residual shows the dominant catch-all is
+  intermediate call/chain expressions, redirecting the next lever to WD6. Each
+  slice measuring the *next* one is the intended loop; WD1's measurement is what
+  turned "primary lever" into "foundation for WD6."
 
 ## Rejected alternatives
 
@@ -184,10 +224,11 @@ that re-labels without improving attribution accuracy is not landed.
 
 ## Consequences
 
-- `coverage --protection` tractability becomes actionable on real Rails apps:
-  the catch-all breaks into `inferred_return_untyped` (→ ADR-58/67 roadmap),
-  `explicit_untyped`/`external_gem_without_rbs` (→ add RBS), leaving a smaller,
-  honest `unsupported_syntax` residue.
+- `coverage --protection` tractability is more honest on real Rails apps: WD2+WD3
+  split `inferred_return_untyped` (→ ADR-58/67 roadmap) out of the catch-all, and
+  WD1 moves bare-variable receivers out of the no-cause bucket. The bulk of the
+  84% `unsupported_syntax` residue awaits WD6 (chain-origin inheritance) — the
+  measured, evidenced next lever.
 - No change to types, diagnostics, severity, or the diagnostic corpus (additive
   side-channel). The gate is re-bucketing measurement + attribution
   adjudication, not a zero-delta corpus run.
@@ -195,6 +236,9 @@ that re-labels without improving attribution accuracy is not landed.
   `TRACTABILITY` grow accordingly. The new cause id is public `--format json`
   vocabulary and freezes at v1.0 under [ADR-50](50-release-engineering-and-stability-strategy.md)
   WD1.
-- WD1, if required, adds a flow-varying `Scope` side-association; its perf and
-  join-correctness are the acceptance risk and must clear `make bench-perf` and
-  the discovery/self-check gates.
+- WD1 adds two flow-varying `Scope` side-tables (`local_origins` / `ivar_origins`);
+  measured perf-neutral (+0.1% `lib` allocations vs master). Note the committed
+  `bench/baseline.json` is stale (19.77M allocations / 16.6s wall vs today's
+  ~27.5M / ~7.2s — master fails the gate too), so `make bench-perf` needs a
+  re-baselined commit to be meaningful again; that recalibration is out of scope
+  here but flagged as a follow-up.

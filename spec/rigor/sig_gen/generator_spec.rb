@@ -341,6 +341,29 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(init.rbs).to eq(%(def initialize: ("Alice") -> void))
     end
+
+    it "renders a `&block` constructor param as a valid RBS block AFTER the parens" do
+      src = "class Box\n  def initialize(&block)\n    @block = block\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      init = generator(paths: [path]).run.find { |c| c.method_name == :initialize }
+
+      expect(init.rbs).to eq("def initialize: () ?{ (*untyped) -> untyped } -> void")
+    end
+
+    it "places the block suffix after a keyword-rest param (the mastodon `(**untyped) ?{ … }` shape)" do
+      src = "class Box\n  def initialize(**opts, &block)\n    @opts = opts\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      init = generator(paths: [path]).run.find { |c| c.method_name == :initialize }
+
+      # Regression: this used to emit `(**untyped, ?{ (?) -> void })`, which RBS rejects and which then
+      # collapsed the whole `sig/` env build (the 2026-07-06 mastodon coverage note's `connection_pool` /
+      # `elasticsearch` files). The block belongs after the parens.
+      expect(init.rbs).to eq("def initialize: (**untyped) ?{ (*untyped) -> untyped } -> void")
+      expect { RBS::Parser.parse_signature(RBS::Buffer.new(name: "x.rbs", content: "class C\n  #{init.rbs}\nend\n")) }
+        .not_to raise_error
+    end
   end
 
   describe "explicit-return union (post-dogfood body-typer enhancement)" do

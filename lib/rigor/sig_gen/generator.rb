@@ -342,7 +342,9 @@ module Rigor
       # per-position / per-keyword union of observed types; otherwise every position keeps `untyped` per ADR-5
       # clause 2.
       def initialize_stub_candidate(path, def_node, class_name)
-        rbs = "def initialize: (#{render_initialize_param_list(def_node.parameters, class_name)}) -> void"
+        params = def_node.parameters
+        rbs = "def initialize: (#{render_initialize_param_list(params, class_name)})" \
+              "#{block_signature_suffix(params)} -> void"
         build_candidate(
           path: path, class_name: class_name, method_name: :initialize,
           kind: :instance, classification: Classification::NEW_METHOD,
@@ -369,8 +371,21 @@ module Rigor
         parts << "*untyped" if params.rest
         params.keywords.each { |kw| parts << render_keyword_param(kw, observations) }
         parts << "**untyped" if params.keyword_rest
-        parts << "?{ (?) -> void }" if params.block
         parts.join(", ")
+      end
+
+      # The RBS block suffix for a `def` that takes a `&block` parameter, e.g. ` ?{ (*untyped) -> untyped }`.
+      # A block belongs AFTER the parameter parens in RBS (`(params) ?{ block } -> ret`), not inside them —
+      # emitting it as a comma-joined member produced `(**untyped, ?{ (?) -> void })`, which RBS rejects
+      # (`optional keyword argument type is expected`) and which then collapsed the whole env build. sig-gen
+      # never observes the block's own signature, so it is rendered maximally lenient (ADR-5): an optional
+      # block (`?{`, since a `&block` need not be passed) taking `*untyped` and returning `untyped`. Returns
+      # "" when the method takes no block.
+      def block_signature_suffix(params)
+        return "" unless params.is_a?(Prism::ParametersNode)
+        return "" if params.block.nil?
+
+        " ?{ (*untyped) -> untyped }"
       end
 
       # Picks observations under `[class_name, :initialize]` whose positional arity matches the def's accepted

@@ -1,6 +1,6 @@
 # ADR-82 — `Dynamic[T]` provenance wiring: breaking the catch-all on real apps
 
-Status: **WD1+WD2+WD3+WD6+WD7 implemented 2026-07-06.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
+Status: **WD1+WD2+WD3+WD6+WD7+WD8 implemented 2026-07-06.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
 provenance side-channel and surfaced it through `coverage --protection`
 tractability labels, but a field measurement on Mastodon shows the labels are
 **uninformative on a real Rails app**: 84% of unprotected dispatch sites carry
@@ -204,7 +204,28 @@ that re-labels without improving attribution accuracy is not landed.
     ADR-67) on top of WD6's completeness. The remaining 7,305 causeless is
     dominated by unbound instance-variable reads (the [ADR-58](58-ivar-field-typing.md)
     ivar-field gap) and `dynamic_top`-returning node kinds (yield / super / block);
-    the ivar slice is the next demand-gated enrichment.
+    the ivar slice is WD8.
+
+- **WD8 — root-cause enrichment for unbound instance-variable reads. (Implemented
+  2026-07-06.)** The second root-enrichment slice, and the largest remaining one
+  after WD7's parameters. An `@x` read whose field the engine does not track
+  (`scope.ivar(name)` is nil — the ivar is assigned in another method, or never
+  seen) returned `dynamic_top` with no cause, so `@x.foo` on it was causeless.
+  `ExpressionTyper#type_of_instance_variable_read` now records
+  `inferred_return_untyped` on the unbound read (an untyped field is the
+  archetypal [ADR-58](58-ivar-field-typing.md) gap), and WD6 carries it through
+  `@x.foo.bar`. Unlike WD7's parameters this cannot be seeded at method entry (the
+  read site is where "unbound" is known), so it records at read time — but only on
+  the already-`dynamic_top` branch, precision-additive, and measured perf-neutral
+  (+0.03% `lib` allocations, same shape as WD6). **Outcome:** Mastodon causeless
+  7,305→**5,405** (−1,900) and `inferred_return_untyped` 3,460→**5,399** (+1,939),
+  ratio unchanged. Cumulative across WD7+WD8 the causeless bucket fell from a true
+  10,390 (49%) to 5,405 (26%) and the actionable `inferred_return_untyped` bucket
+  grew 351→5,399 (15×). The residual causeless is now `dynamic_top`-returning node
+  kinds (yield / super / block / embedded var) and class-/global-variable reads —
+  mostly genuinely unmodeled, so the arc's actionability lever is largely spent;
+  remaining `unsupported_syntax` (10,063, still 48%) is chains rooted at unresolved
+  calls, the honest engine-gap floor.
 
 - **WD2 — record a cause at the two unlabeled user-method tiers. (Implemented
   2026-07-06.)** `try_discovered_method` and `try_user_class_fallback` now record
@@ -276,11 +297,15 @@ that re-labels without improving attribution accuracy is not landed.
 - `coverage --protection` provenance is measured accurately (WD7's per-site
   `cause_site_counts`) and materially more complete *and* actionable on real Rails
   apps: WD2+WD3 split `inferred_return_untyped` out of the catch-all, WD1 + WD6
-  propagate a cause to bare-variable and chained receivers, and WD7 routes untyped
-  parameters to ADR-67. On Mastodon app+lib the causeless bucket is now 7,305 of
-  21,119 (down from a true 10,390 before WD7), with 3,460 sites routed to
-  parameter/ivar inference. The remaining causeless is dominated by unbound ivar
-  reads (ADR-58) and `dynamic_top`-returning node kinds — the next enrichment.
+  propagate a cause to bare-variable and chained receivers, and WD7/WD8 route
+  untyped parameters (ADR-67) and unbound ivar fields (ADR-58) to inference. On
+  Mastodon app+lib the causeless bucket fell from a true 10,390 (49%) to 5,405
+  (26%) and the actionable `inferred_return_untyped` bucket grew 351→5,399 (15×),
+  ratio unchanged throughout. The residual causeless is `dynamic_top`-returning
+  node kinds (yield / super / block) and class-/global-variable reads — mostly
+  genuinely unmodeled, so the actionability lever is largely spent; the remaining
+  `unsupported_syntax` (48%) is chains rooted at unresolved calls, the honest
+  engine-gap floor.
 - Provenance is measured **per-site**, never per-method-group-dominant. The
   `add_a_type_here` list still shows a per-group dominant cause for the ranked "add
   a type here" view, but `cause_site_counts` and `tractability_summary` are exact
@@ -295,8 +320,9 @@ that re-labels without improving attribution accuracy is not landed.
   [ADR-50](50-release-engineering-and-stability-strategy.md) WD1.
 - WD1 adds two flow-varying `Scope` side-tables, WD6 one `record_dynamic_origin`
   per Dynamic-receiver dispatch, WD7 one `with_local_origin` per untyped param at
-  method entry; all measured perf-neutral (WD1 +0.1%, WD6 +0.03%, WD7 +0.15% `lib`
-  allocations vs master). Note the committed `bench/baseline.json` is stale (19.77M
-  allocations / 16.6s wall vs today's ~27.5M / ~7–9s — master fails the gate too),
-  so `make bench-perf` needs a re-baselined commit to be meaningful again; that
+  method entry, WD8 one `record_dynamic_origin` per unbound ivar read; all measured
+  perf-neutral (WD1 +0.1%, WD6 +0.03%, WD7 +0.15%, WD8 +0.03% `lib` allocations vs
+  master). Note the committed `bench/baseline.json` is stale (19.77M allocations /
+  16.6s wall vs today's ~27.5M / ~7–9s — master fails the gate too), so
+  `make bench-perf` needs a re-baselined commit to be meaningful again; that
   recalibration is out of scope here but flagged as a follow-up.

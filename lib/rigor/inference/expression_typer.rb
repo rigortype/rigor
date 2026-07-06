@@ -10,6 +10,7 @@ require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "dynamic_origin"
+require_relative "origin_lookup"
 require_relative "fallback"
 require_relative "flow_tracer"
 require_relative "indexed_narrowing"
@@ -1125,7 +1126,7 @@ module Rigor
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and no positive rule resolves the call,
         # the result inherits the dynamic origin. Per the value-lattice algebra, this is a recognised
         # semantic outcome, not a fail-soft compromise, so it MUST NOT record a tracer event.
-        return dynamic_top if receiver.is_a?(Type::Dynamic)
+        return inherit_receiver_origin(node) if receiver.is_a?(Type::Dynamic)
 
         # ADR-24 slice 4a — this is the engine choke-point where an implicit-self call has exhausted every
         # resolution tier (RBS dispatch + user-class ancestor walk) and falls through to `Dynamic[top]`. When
@@ -1134,6 +1135,18 @@ module Rigor
         record_unresolved_self_call(node, receiver) if Analysis::SelfCallResolutionRecorder.active?
 
         fallback_for(node, family: :prism)
+      end
+
+      # ADR-82 WD6 — carry the receiver's provenance onto the call it produces (returning the unchanged
+      # `dynamic_top` result), so a specific cause survives a method chain (`x.foo.bar`): without this,
+      # `.foo` on a Dynamic `x` records nothing and `.bar`'s receiver looks causeless. Side-channel only
+      # (the result type is untouched); a nil cause is skipped. This is the lever for the
+      # intermediate-expression / chain receivers that dominate a real app's `coverage --protection`
+      # catch-all.
+      def inherit_receiver_origin(node)
+        inherited = OriginLookup.origin_for(scope, node.receiver)
+        scope.record_dynamic_origin(node, inherited) if inherited
+        dynamic_top
       end
 
       # ADR-24 slice 4a — records an unresolved *implicit-self* call (no explicit receiver) whose `self`

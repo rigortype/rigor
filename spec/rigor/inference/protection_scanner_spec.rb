@@ -51,6 +51,26 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(save_site.dynamic_origin).not_to be_nil
   end
 
+  it "carries a dynamic receiver's origin across a method chain (ADR-82 WD6)" do
+    # Each hop of `y.foo.bar.baz` dispatches on a Dynamic receiver; without WD6 only `foo`'s receiver
+    # (`y`) resolves a cause and the later hops look causeless. WD6 inherits the receiver's origin onto
+    # the call it produces, so every hop reports the same propagated cause.
+    result = scan(<<~RUBY)
+      class C
+        def helper; end
+
+        def f
+          y = helper
+          y.foo.bar.baz
+        end
+      end
+    RUBY
+    chain = result.sites.select { |s| %w[foo bar baz].include?(s.method_name) }
+    expect(chain.size).to eq(3)
+    expect(chain.map(&:dynamic_origin)).to all(be_truthy)
+    expect(chain.map(&:dynamic_origin).uniq.size).to eq(1)
+  end
+
   it "carries dynamic_origin when the scope seeds it for the receiver" do
     source = <<~RUBY
       def f(x)

@@ -188,7 +188,15 @@ module Rigor
         # spot on implicit-self calls (`sibling_private(...)`) inside `lib/rigor/`'s own
         # internals (analyser private helpers don't have RBS).
         discovered_result = try_discovered_method(receiver_type, method_name, scope)
-        return discovered_result if discovered_result
+        if discovered_result
+          # ADR-82 WD2/WD3 — the call resolved to a discovered user method but its return could not be
+          # inferred (bare `def`, untyped-parameter chain). Record it as an inference gap, not the
+          # generic `unsupported_syntax`, so `coverage --protection` routes it to ADR-58/67.
+          if discovered_result.is_a?(Type::Dynamic)
+            scope&.record_dynamic_origin(call_node, DynamicOrigin::INFERRED_RETURN_UNTYPED)
+          end
+          return discovered_result
+        end
 
         # ADR-5 robustness — synthesized-stub-type tier. When the receiver is a type Rigor
         # invented to make an otherwise-unbuildable project signature resolve (a
@@ -207,7 +215,14 @@ module Rigor
         # intrinsics (`require`, `raise`, `puts`, ...) and Module/Class introspection
         # (`attr_reader`, `private`, ...) on user classes without requiring the user to author
         # their own RBS.
-        try_user_class_fallback(receiver_type, environment, call_node, context)
+        fallback_result = try_user_class_fallback(receiver_type, environment, call_node, context)
+        # ADR-82 WD2/WD3 — a user-class receiver whose call resolved to the lenient ancestor fallback
+        # with no inferable return. Same inference-gap provenance as the discovered-method tier, so a
+        # downstream dispatch on this value is labeled honestly rather than `unsupported_syntax`.
+        if fallback_result.is_a?(Type::Dynamic)
+          scope&.record_dynamic_origin(call_node, DynamicOrigin::INFERRED_RETURN_UNTYPED)
+        end
+        fallback_result
       end
 
       # v0.1.3 — discovered-method dispatch tier. `scope` carries the `discovered_methods` table

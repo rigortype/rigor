@@ -1,17 +1,30 @@
 # ADR-82 — `Dynamic[T]` provenance wiring: breaking the catch-all on real apps
 
-Status: **Proposed — not implemented; measurement-gated.** [ADR-75](75-dynamic-provenance.md)
-added the `Dynamic[T]` provenance side-channel and surfaced it through
-`coverage --protection` tractability labels, but a field measurement on
-Mastodon shows the labels are **uninformative on a real Rails app**: 84% of
-unprotected dispatch sites carry the catch-all `unsupported_syntax`
-(→ `engine_gap`) cause and another 14% carry no cause at all, while the two
-*user-actionable* causes the label exists to surface — `framework_dsl_boundary`
-(→ enable a plugin) and `external_gem_without_rbs` (→ add RBS) — fire on **zero**
-sites. This ADR proposes wiring the provenance recording and lookup so the
-catch-all breaks into the actionable buckets a user (or agent) can act on. It
-is precision-additive throughout — no type, diagnostic, or severity changes,
-per ADR-75's side-channel contract.
+Status: **WD2+WD3 implemented 2026-07-06; WD1 required (measurement-confirmed),
+not yet implemented.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
+provenance side-channel and surfaced it through `coverage --protection`
+tractability labels, but a field measurement on Mastodon shows the labels are
+**uninformative on a real Rails app**: 84% of unprotected dispatch sites carry
+the catch-all `unsupported_syntax` (→ `engine_gap`) cause and another 14% carry
+no cause at all, while the two *user-actionable* causes the label exists to
+surface — `framework_dsl_boundary` (→ enable a plugin) and
+`external_gem_without_rbs` (→ add RBS) — fire on **zero** sites. This ADR wires
+the provenance recording and lookup so the catch-all breaks into the actionable
+buckets a user (or agent) can act on. It is precision-additive throughout — no
+type, diagnostic, or severity changes, per ADR-75's side-channel contract.
+
+**WD5 measurement outcome (2026-07-06):** WD2+WD3 landed the cheap recording
+slices — a new `inferred_return_untyped` cause recorded at the discovered-method
+and user-class-fallback tiers. On Mastodon app+lib they re-bucket **211 sites**
+(unsupported_syntax 17,727→17,565, null 2,921→2,872) out of 21,119 unprotected —
+~1%, protection ratio unchanged (precision-additive confirmed). Spot-adjudicated:
+the moved sites are `<user-method>.foo` chains where the receiver is a resolved
+memoized/attribute method whose return the engine cannot infer (`parsed_uri.path`
+with `def parsed_uri`, `media_attachment_file.path`), correctly attributed. The
+small size **confirms the G1 diagnosis**: the dominant 84% has local/ivar-read
+receivers whose origin the call-node record does not reach, so **WD1 (lookup
+propagation) is required, not demand-gated** — the measurement resolves WD5's
+open question in favour of building WD1.
 
 Grounding: the [2026-07-06 Mastodon coverage/provenance note](../notes/20260706-mastodon-coverage-provenance-and-siggen-rbs-validity.md)
 §2 (measurement + the two engine gaps G1/G2) and the
@@ -106,25 +119,28 @@ that re-labels without improving attribution accuracy is not landed.
   perf regression or a stale-origin bug is the bulk of the work and gates the
   ADR's acceptance.
 
-- **WD2 — record a cause at the two unlabeled user-method tiers.** Have
-  `try_discovered_method` and `try_user_class_fallback` record a cause on their
-  call node when they return `Dynamic`. These are "the engine resolved the call
-  to a known user/ancestor method but cannot infer its return" — distinct from
-  an unmodeled syntax fallback. This is a one-line `record_dynamic_origin` per
-  tier, side-channel-only, and gives the chained-receiver holes an honest cause
-  even before WD1 lands.
+- **WD2 — record a cause at the two unlabeled user-method tiers. (Implemented
+  2026-07-06.)** `try_discovered_method` and `try_user_class_fallback` now record
+  `INFERRED_RETURN_UNTYPED` on their call node when they return `Dynamic`
+  (`method_dispatcher.rb`). These are "the engine resolved the call to a known
+  user/ancestor method but cannot infer its return" — distinct from an unmodeled
+  syntax fallback. A one-line `record_dynamic_origin` per tier, side-channel-only,
+  giving the chained-receiver holes an honest cause even before WD1 lands.
 
-- **WD3 — a new cause `inferred-return-untyped` (`inferred_return_untyped`) with
-  `engine_gap` tractability, routed to parameter/ivar inference.** The WD2 tier
-  and the `ExpressionTyper` user-method-inference fallthrough are not
-  `unsupported_syntax` (the call resolved) nor `explicit_untyped` (no authored
-  RBS said `untyped`); they are an *inference* gap whose real lever is
+- **WD3 — a new cause `inferred_return_untyped` with `engine_gap` tractability,
+  routed to parameter/ivar inference. (Implemented 2026-07-06.)** The WD2 tiers
+  are not `unsupported_syntax` (the call resolved) nor `explicit_untyped` (no
+  authored RBS said `untyped`); they are an *inference* gap whose real lever is
   [ADR-67](67-parameter-type-inference.md) (call-site param inference sharpens
-  the body's return) / [ADR-58](58-ivar-field-typing.md). A distinct cause lets
+  the body's return) / [ADR-58](58-ivar-field-typing.md). The distinct cause lets
   `coverage --protection` say "the engine can't infer this return yet" instead of
-  "unsupported syntax", which is both more honest and points at the right
-  roadmap item. This extends ADR-75's cause set; the set is not yet frozen (the
-  ADR-50 v1.0 vocabulary freeze is future), and the extension is the point.
+  "unsupported syntax", more honest and pointing at the right roadmap item. Added
+  to `DynamicOrigin::CAUSES` / `TRACTABILITY`; the CLI reads tractability centrally
+  so no renderer change was needed. Extends ADR-75's cause set (not yet frozen;
+  the ADR-50 v1.0 vocabulary freeze is future), the extension is the point.
+  (Applying it to the `ExpressionTyper` user-method-inference fallthrough as well
+  is a follow-up; the two dispatcher tiers are where the measured 211 sites came
+  from.)
 
 - **WD4 — record `framework_dsl_boundary` for framework *reader* objects even
   when concrete-typed is out of scope; the gap is elsewhere.** G2's observation
@@ -136,13 +152,16 @@ that re-labels without improving attribution accuracy is not landed.
   follow-up, not wired generically here — guessing "framework boundary" for any
   unresolved receiver would violate the honesty criterion.
 
-- **WD5 — the measurement gate.** Land WD2+WD3 first (cheap, no scope change),
-  measure the Mastodon/Redmine re-bucketing, and only then decide whether WD1's
-  cost is justified by the residual catch-all share. If WD2+WD3 alone break up a
-  large fraction (the chained-receiver holes), WD1 may be demand-gated behind
-  demonstrated need; if the residual is dominated by local/ivar receivers
-  (likely, per the §2 receiver sample), WD1 is required and its design is the
-  next work item.
+- **WD5 — the measurement gate. (Resolved 2026-07-06.)** WD2+WD3 landed first
+  (cheap, no scope change) and were measured on Mastodon app+lib: they re-bucket
+  **211 sites (~1%)** into `inferred_return_untyped`, all correctly attributed
+  chained-receiver holes, leaving the 84% catch-all essentially intact. The
+  residual is dominated by local/ivar-read receivers exactly as the §2 sample
+  predicted, so the gate resolves to: **WD1 (lookup propagation) is required, not
+  demand-gated.** WD2+WD3 served their purpose as a cheap confirmation of the G1
+  diagnosis; WD1's design (the flow-varying `Scope` `binding → origin-node`
+  association) is now the next work item, gated on `make bench-perf` and the
+  discovery/self-check gates.
 
 ## Rejected alternatives
 

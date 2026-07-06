@@ -204,6 +204,49 @@ call ノードにいくら cause を記録しても receiver-node ルックア�
 役目を果たし、次は WD1 の設計（flow-varying な `Scope` binding→origin-node アソシエーション、
 `make bench-perf` + discovery/self-check ゲート）。
 
+## 実装（2026-07-06）: ADR-82 WD1 + 計測（modest、次レバー = WD6 に redirect）
+
+WD1（bare receiver への binding origin 伝播）を実装。`Scope#local_origins`/`#ivar_origins`
+（name→cause 側テーブル、==/hash 除外、メソッド境界でリセット）を代入時に set
+（`StatementEvaluator#eval_local_write/#eval_ivar_write`、rhs が origin 付き Dynamic の時）、
+`ProtectionScanner#propagated_origin` が receiver 自身のノードに origin が無い時に辿る。
+
+### 計測（mastodon app+lib, no-sig, cause 別 site 数、group-dominant 集計）
+
+| cause | baseline | WD2/3 | WD1 |
+| --- | --- | --- | --- |
+| unsupported_syntax | 17,727 | 17,565 | 17,854 |
+| (null) | 2,921 | 2,872 | **2,550** |
+| explicit_untyped | 471 | 471 | 462 |
+| inferred_return_untyped | 0 | 211 | 253 |
+| ratio | 0.3148 | 0.3148 | 0.3148 |
+
+**WD1 は null バケット（cause 無し）を ~322 サイト削減**（2,872→2,550、ratio 不変）。だが
+**dominant な 84% unsupported_syntax はほぼ不変**（むしろ +289、null だった local が「未解決RHS」
+由来 unsupported を伝播）。
+
+### adjudication → 「primary lever」は誤り、次レバーは WD6
+
+residual を実サンプルすると、dominant なホール receiver は **bare 変数読みではなく中間式/チェーン**:
+- `signed_request_account.uri[…]`（`[]` の receiver は call チェーン）
+- `account_id_param.present?`（receiver は method call）
+- `Status.tagged_with(tag.id)`
+
+チェーンの `.foo` が **Dynamic receiver 上でディスパッチされると結果に汎用 `unsupported_syntax` を
+記録し、上流の cause を失う**。WD1（local/ivar 読みのみ）はこれに届かない。制御ケースで伝播自体は
+発火確認済み（`y = helper; y.save` で `y.save` receiver が binding origin を継承）。
+
+→ **次レバー = WD6 チェーン origin 継承**（Dynamic receiver 上の呼び出し結果が receiver の origin を
+継承）。84% の大半がここ。ただし最ホットな dispatch 経路に触れ FP/perf リスクが高いため、独立した
+measured/adjudicated/bench-perf-gated スライスに defer（WD2/3→WD1 と同じ規律）。WD1 は保持
+（正しい・perf-neutral・null 削減・WD6 の基盤）。
+
+### perf
+
+`make bench-perf` は FAIL するが、**master 自身も FAIL**: committed baseline（19.77M alloc / 16.6s
+wall）が stale で、master 27.51M/7.2s・WD1 27.54M/7.2s（**+0.1%、perf-neutral**）。baseline
+再取得（CI Linux 計測）は別 follow-up。
+
 ## GOTCHAs（再実行者向け）
 
 - `coverage --protection` の with-sig 数値は **env-build 成否を必ず確認**すること（stderr の

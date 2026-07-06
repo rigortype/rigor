@@ -15,6 +15,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[rigor coverage]** `rigor coverage --protection` now labels a dynamic hole whose receiver came from a resolved-but-uninferable user method with a distinct `inferred_return_untyped` cause instead of the generic `unsupported_syntax` ([ADR-82](docs/adr/82-dynamic-provenance-wiring.md) WD2/WD3).
   - When a call resolves to a known project method (a memoized reader, an attribute helper) whose return the engine cannot yet infer, the value is dynamic for an *inference* reason — not unmodeled syntax and not an authored `untyped`. The new cause routes such holes to their real lever (parameter inference / ivar-field typing, [ADR-67](docs/adr/67-parameter-type-inference.md) / [ADR-58](docs/adr/58-ivar-field-typing.md)) rather than mislabeling them intractable. Precision-additive: no type, diagnostic, or severity change; the protection ratio is unchanged.
+- **[rigor coverage]** `rigor coverage --protection` now carries a dynamic hole's cause across a variable binding, so a bare `x` / `@x` receiver read reports why its value is dynamic instead of no cause at all ([ADR-82](docs/adr/82-dynamic-provenance-wiring.md) WD1).
+  - The cause is recorded on an assignment's right-hand side, which the later receiver-read node is not; the scope now threads a local / ivar name → cause side-table (advisory metadata, ignored by scope equality, reset per method body) so the coverage scan can follow the binding. Precision-additive and perf-neutral (`lib` allocations +0.1%). Modest by itself — it fills the no-cause bucket for bare-variable receivers; the dominant catch-all is intermediate call/chain receivers, whose fix (chain-origin inheritance) is a queued follow-up.
 
 ### Fixed
 

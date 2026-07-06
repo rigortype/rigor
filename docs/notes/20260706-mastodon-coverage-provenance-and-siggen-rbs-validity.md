@@ -161,11 +161,48 @@ app/models 単独 +5.4pp と違い、app+lib フルは controllers/services/lib 
 ## Follow-up
 
 - **[ADR-82](../adr/82-dynamic-provenance-wiring.md)** — provenance-wiring（G1 伝播 + G2 記録 +
-  新 cause）。本ノートが根拠。proposed。
+  新 cause）。本ノートが根拠。**WD2+WD3 LANDED 2026-07-06**（下記「実装」節）、WD1 は計測で
+  必須確認・未実装。
 - **sig-gen record-key 修正** — LANDED（`Type::HashShape#erase_key_prefix`、本セッション、CHANGELOG）。
 - **env-build resilience** — 未着手（07-04 H2(b)/H3 と統合、demand-gated）。不正 sig ファイルの
   quarantine + 可視化。sig-gen block-param 修正はこれで頑健化されるまでの暫定でしかない。
 - **sig-gen block-param レンダリング** — 未修正、characterize 済み。
+
+## 実装（2026-07-06）: ADR-82 WD2+WD3 + re-bucketing 計測
+
+ADR-82 の WD5（「WD2+WD3 を先に land して re-bucketing を測り、WD1 のコストを判断」）を実施。
+
+- **WD3**: 新 cause `DynamicOrigin::INFERRED_RETURN_UNTYPED`（tractability = `engine_gap`）。
+  「call は解決したが戻りを推論できない」= `unsupported_syntax`（未モデル構文）でも
+  `explicit_untyped`（RBS で untyped 宣言）でもない、推論ギャップ。CLI は
+  `DynamicOrigin.tractability` を中央参照するので renderer 変更不要。
+- **WD2**: `MethodDispatcher` の `try_discovered_method` と `try_user_class_fallback` が
+  Dynamic を返す時に call ノードへ `INFERRED_RETURN_UNTYPED` を記録（各1行の
+  `record_dynamic_origin`）。連鎖 `a.b.c` で `.b` が解決済みユーザメソッドの時、`.c` の
+  receiver（= `a.b` call ノード）が正しい cause を得る。
+
+### 計測（mastodon app+lib, no-sig, cause 別 site 数）
+
+| cause | baseline | WD2/3 | Δ |
+| --- | --- | --- | --- |
+| unsupported_syntax | 17,727 | 17,565 | −162 |
+| (null) | 2,921 | 2,872 | −49 |
+| **inferred_return_untyped** | 0 | **211** | +211 |
+| explicit_untyped | 471 | 471 | 0 |
+| protection ratio | 0.3148 | 0.3148 | 0（precision-additive 確認） |
+
+**211 サイト（全体の ~1%）のみ再バケット。** adjudication（正しい帰属を確認）: 移動した
+サイトは `<解決済みユーザメソッド>.foo` の連鎖 — `parsed_uri.path`（`def parsed_uri` あり）、
+`media_attachment_file.path`（`def media_attachment_file`）等で、いずれも「戻りを推論できない
+ユーザメソッド」= `inferred_return_untyped` が正当。少数派の `directory_url.path`
+（`directory_url = Addressable::URI.parse(...)` のローカル）は group の dominant-origin 表示に
+混ざるだけで、これこそ G1（local receiver は call-node 記録に届かない）の実例。
+
+**結論（WD5 の解決）**: 小ささが G1 診断を実証した。残る 84% は local/ivar receiver で、
+call ノードにいくら cause を記録しても receiver-node ルックアップが届かない。ゆえに
+**WD1（ルックアップ伝播）は demand-gated でなく必須**。WD2+WD3 は「安価な診断確認」として
+役目を果たし、次は WD1 の設計（flow-varying な `Scope` binding→origin-node アソシエーション、
+`make bench-perf` + discovery/self-check ゲート）。
 
 ## GOTCHAs（再実行者向け）
 

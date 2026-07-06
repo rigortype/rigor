@@ -165,8 +165,12 @@ app/models 単独 +5.4pp と違い、app+lib フルは controllers/services/lib 
   WD7 = 正確 per-site メトリクス + param enrichment（ADR-67）、WD8 = unbound ivar enrichment
   （ADR-58）。累積 causeless 49%→26%、inferred 15倍。actionability レバーはほぼ出し切り。
 - **sig-gen record-key 修正** — LANDED（`Type::HashShape#erase_key_prefix`、本セッション、CHANGELOG）。
-- **env-build resilience** — 未着手（07-04 H2(b)/H3 と統合、demand-gated）。不正 sig ファイルの
-  quarantine + 可視化。sig-gen block-param 修正はこれで頑健化されるまでの暫定でしかない。
+- **env-build resilience** — **quarantine + 可視化 LANDED 2026-07-06**（`RbsLoader.add_project_signatures`
+  が project `signature_paths:` を1ファイルずつロードし、parse 失敗を quarantine → env 全体は生存。
+  `RbsLoader#warn_about_quarantined_signatures` が skip したファイル名 + parse エラーを一度警告）。
+  実証: good+broken 混在 sig で `RBS classes available` が 0 でなく生存（good 側のクラスは型付く）。
+  これで sig-gen block-param 等の残バグに対しても env は頑健化。**残**: 専用診断 / 非ゼロ exit
+  （07-04 H3、CI 可視性）は未着手（新 rule id は ADR-50 の vocabulary freeze 対象なので要検討）。
 - **sig-gen block-param レンダリング** — 未修正、characterize 済み。
 
 ## 実装（2026-07-06）: ADR-82 WD2+WD3 + re-bucketing 計測

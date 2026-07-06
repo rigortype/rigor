@@ -133,6 +133,24 @@ proceed without breaching the robustness principle.
     larger change than the "cheapest" framing implied. Re-scoped: introduce the carrier, or
     keep WD2 deferred. The WD3 call-site path (which yields real nominals) stays the
     higher-confidence lever.
+  - **Design-spike verdict (2026-07-06): keep WD2 deferred — payoff does not justify the
+    carrier** ([spike note](../notes/20260706-adr67-wd2-in-body-inference-design-spike.md)).
+    A pure-AST probe over mastodon/redmine/rigor-lib classifies untyped `req`+`opt` params by
+    their in-body call set: **44–58% are never an in-body receiver** (param flows into an ivar
+    / return / another arg → WD3 or [ADR-58](58-ivar-field-typing.md), *not* WD2's domain),
+    **19–27% call only universal/duck methods** (`to_s`/`==`/`[]`/`each`… — the set pins no
+    nominal), leaving a **23–29% ceiling** with any distinctive method; of that, only the *2+
+    distinctive* subset (**~10% of params**) could pin a nominal. Two facts sink even that 10%:
+    (i) the pinnable-looking domain params are Rails helpers whose distinctive methods are
+    **AR-dynamic accessors** (`username`/`display_name` — columns/associations absent from the
+    static `discovered_methods` def-scan a set-resolver would consult, so they resolve to
+    nothing); (ii) a body-derived structural bound is **circular for the protection metric** —
+    it marks protected exactly the sites it is built from and cannot bite a same-body typo, so
+    real protection needs the check-walk dispatch that is the FP-risky path. Matches the
+    provenance note's lever ranking (env-build resilience / sig-gen validity rank *above* the
+    ADR-67/58 big-feature work). The re-eval trigger gains a new falsifier: WD2 is worth
+    revisiting only on a codebase where the AR-attribute trap is absent (schema+plugin complete,
+    or non-Rails domain-object code).
 - **WD3 — call-site union (TypeProf-style; the real lever for apps). Implemented.** A
   param's inferred type = the union of resolved call-site argument types (needs ≥1 resolved
   call site). `ParameterInferenceCollector` resolves a call to its user `def` via the

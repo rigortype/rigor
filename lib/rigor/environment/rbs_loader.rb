@@ -38,6 +38,11 @@ module Rigor
       # into the set {MethodDispatcher} resolves to `Dynamic[Top]` (no false `call.undefined-method`).
       SYNTHETIC_STUB_BUFFER = "(rigor: synthesized stub types)"
 
+      # Cap on how many quarantined `signature_paths:` files {#warn_about_quarantined_signatures} lists by name
+      # before collapsing the tail to "… and N more" — a broken generator can emit many, and a wall of parse
+      # errors buries the signal.
+      QUARANTINE_WARN_LIMIT = 10
+
       class << self
         def default
           @default ||= new.freeze
@@ -65,10 +70,12 @@ module Rigor
 
             rbs_loader.add(library: library, version: nil)
           end
-          signature_paths.each do |path|
-            path = Pathname(path) unless path.is_a?(Pathname)
-            rbs_loader.add(path: path) if path.directory?
-          end
+          # Project `signature_paths:` are loaded per-file by {.add_project_signatures} AFTER `from_loader`,
+          # NOT added to the loader here: `RBS::Environment.from_loader` parses every added file all-or-nothing,
+          # so one unparseable user `.rbs` raises `RBS::ParsingError` and collapses the WHOLE env to nil (every
+          # type-of query then degrades to `Dynamic[top]` — the "sig looks harmful" failure of the 2026-07-06
+          # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
+          # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
           vendored_gem_sig_paths.each do |path|
             rbs_loader.add(path: path) if path.directory?
           end
@@ -80,6 +87,7 @@ module Rigor
             rbs_loader.add(path: path) if path.directory?
           end
           env = RBS::Environment.from_loader(rbs_loader)
+          add_project_signatures(env, signature_paths)
           add_virtual_rbs(env, virtual_rbs)
           synthesize_missing_namespaces(env)
           resolved = env.resolve_type_names
@@ -172,6 +180,54 @@ module Rigor
 
             Dir.glob(path.join("**", "*.rbs")).map { |p| File.expand_path(p) }
           end.to_set
+        end
+
+        # Load the project's `signature_paths:` RBS files into `env` ONE FILE AT A TIME, quarantining any file
+        # that fails to parse rather than letting it collapse the whole env (the `from_loader` batch parse is
+        # all-or-nothing — see {.build_env_for}). A quarantined file's declarations are simply absent, so calls
+        # into the types it would have declared read `Dynamic[top]`; the rest of the project's (and all
+        # bundled) RBS still loads. The user is told which files were skipped via
+        # {RbsLoader#warn_about_quarantined_signatures}, so this is a graceful degrade, not a silent one.
+        #
+        # Buffer names are the file's absolute path (matching {.project_sig_files}) so {.project_entry?} — which
+        # attributes a `class_decls` entry to the project by buffer name — still recognises these declarations.
+        # Sorted for a deterministic add order (the env feeds the cache, ADR-54).
+        def add_project_signatures(env, signature_paths)
+          project_sig_files(signature_paths).sort.each do |file|
+            parsed = parse_signature_file(file)
+            next if parsed.nil? # quarantined (unparseable) or unreadable — skip so the env survives
+
+            buffer, directives, decls = parsed
+            add_parsed_decls(env, buffer, directives, decls)
+          end
+        end
+
+        # Parse one project `.rbs` into `[buffer, directives, decls]`, or nil when it is unparseable /
+        # unreadable. Mirrors `RBS::EnvironmentLoader#each_signature`'s per-file parse so the decls register
+        # identically to the loader's batch path.
+        def parse_signature_file(file)
+          buffer = ::RBS::Buffer.new(name: file, content: File.read(file, encoding: "UTF-8"))
+          _buffer, directives, decls = ::RBS::Parser.parse_signature(buffer)
+          [buffer, directives, decls]
+        rescue ::RBS::ParsingError, Errno::ENOENT, Errno::EISDIR, Errno::EACCES
+          nil
+        end
+
+        # The project `signature_paths:` files that FAIL to parse, as `[absolute_path, first_error_line]` pairs
+        # (sorted, deterministic). Detection is independent of {.add_project_signatures} so the warning fires
+        # even on a cache hit (where the env was already built with the file quarantined). Cheap: it only
+        # re-parses the user's own (usually small) `sig/` set, and returns empty immediately when there is no
+        # `signature_paths:`.
+        def quarantined_project_signatures(signature_paths)
+          project_sig_files(signature_paths).sort.filter_map do |file|
+            buffer = ::RBS::Buffer.new(name: file, content: File.read(file, encoding: "UTF-8"))
+            ::RBS::Parser.parse_signature(buffer)
+            nil
+          rescue ::RBS::ParsingError => e
+            [file, e.message.to_s.lines.first.to_s.strip]
+          rescue Errno::ENOENT, Errno::EISDIR, Errno::EACCES
+            nil
+          end
         end
 
         # Builds every project class (instance + singleton side) and returns the `::`-stripped names of the
@@ -913,9 +969,37 @@ module Rigor
 
         @state[:env_loaded] = true
         @state[:env] = cache_store ? cached_env : build_env
+        warn_about_quarantined_signatures
+        @state[:env]
       rescue ::RBS::BaseError => e
         warn_about_env_build_failure_once(e)
         @state[:env] = nil
+      end
+
+      # Tell the user, once per run, which of their `signature_paths:` `.rbs` files were skipped because they
+      # do not parse ({RbsLoader.add_project_signatures} quarantines them so the rest of the env survives). A
+      # skipped file's types are absent, so calls into them read `Dynamic[top]` — silently, without this. This
+      # is the visibility half of the fix: a shrinking diagnostic count must never be mistaken for a clean run
+      # when it actually means "your sig/ stopped loading". No-op when `signature_paths:` is empty (the cost is
+      # then a single empty-set check) or every file parses.
+      def warn_about_quarantined_signatures
+        return if @state[:quarantine_warned]
+
+        quarantined = self.class.quarantined_project_signatures(@signature_paths)
+        return if quarantined.empty?
+
+        @state[:quarantine_warned] = true
+        listed = quarantined.first(QUARANTINE_WARN_LIMIT)
+        more = quarantined.size - listed.size
+        lines = listed.map { |_path, first_line| "    - #{first_line}" }
+        lines << "    … and #{more} more" if more.positive?
+        warn(
+          "rigor: skipped #{quarantined.size} unparseable RBS file(s) under `signature_paths:`.\n  " \
+          "They were QUARANTINED so the rest of your RBS env still loads, but the types they\n  " \
+          "declare are absent — calls into them read `Dynamic[top]`, so coverage and diagnostics\n  " \
+          "are reduced. Fix the parse error(s) to restore that coverage:\n" \
+          "#{lines.join("\n")}"
+        )
       end
 
       def warn_about_env_build_failure_once(error)

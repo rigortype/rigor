@@ -102,17 +102,20 @@ RSpec.describe Rigor::Inference::ParameterInferenceCollector do
     expect(table[["Hub", :handle, :instance]]).to be_nil
   end
 
-  it "skips a non-simple parameter shape (keyword / optional / rest / block)" do
+  it "infers a leading required parameter even when trailing optional / keyword / block params follow" do
     table = collect(<<~RUBY)
       class A; end
       class Hub
-        def run = handle(A.new)
-        def handle(x, y = 1)
+        def run = handle(A.new, extra: 1)
+        def handle(x, y = 1, **opts, &block)
           x
         end
       end
     RUBY
-    expect(table[["Hub", :handle, :instance]]).to be_nil
+    inferred = table.fetch(["Hub", :handle, :instance])
+    expect(inferred[:x].describe(:short)).to eq("A")
+    # The trailing optional `y` is not inferred (extra positional args are not mapped).
+    expect(inferred).not_to have_key(:y)
   end
 
   it "skips a call whose arity does not match the parameter count" do

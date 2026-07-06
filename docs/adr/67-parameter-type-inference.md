@@ -1,7 +1,8 @@
 # ADR-67 — Parameter type inference (the M3 frontier): call-site and in-body, precision-additive only
 
-Status: **Accepted — WD1 + WD3 + WD5 (capped fixpoint) implemented 2026-06-16; the
-`check`-walk wiring deferred (demand-gated).** Re-opens the algorithm-corpora
+Status: **Accepted — WD1 + WD3 + WD5 (capped fixpoint) implemented 2026-06-16; WD3
+argument-shape coverage extended 2026-07-06; the `check`-walk wiring and WD2 in-body
+inference still deferred.** Re-opens the algorithm-corpora
 survey's "M3 — untyped-param → whole-method Dynamic: **EXCUSED, do not pursue**" verdict
 on new **protection-coverage** evidence. Method / ctor parameters default to `untyped`
 today (the gradual entry point); the pilot shows a param flowing into an ivar or
@@ -36,6 +37,26 @@ protected sites; +6 of them from the fixpoint over single-level), haml 0.3188 �
 called with constructed AST nodes) is the sweet spot, the cited `env` / `numeric` clusters
 are not. The `check`-walk wiring (and with it the WD1 in-body provenance *mark*) is the
 remaining follow-up, budget-gated per the cost discussion below.
+
+**WD3 argument-shape extension (2026-07-06).** The original collector only inferred a
+method whose parameter list was *entirely* required-positional
+(`ParameterInferenceCollector#simple_requireds`), skipping any method with a trailing
+optional / keyword / rest / block parameter — a shape common on real Rails methods
+(`def f(x, opts = {}, **kw)`), so their leading required params were never inferred even
+when called with concrete arguments. The collector now maps a call's leading positional
+arguments to the method's **leading required** parameters (`leading_requireds`): Ruby
+orders parameters requireds-first, so trailing optional / rest / keyword / block params
+do not disturb the leading positional-index ↔ required-parameter mapping. A call with a
+trailing keyword hash or block-pass is accepted (they occupy no positional slot); a splat
+/ forwarding argument still skips the site (position becomes runtime-dependent), and a
+post-rest required def (`def f(a, *b, c)`) is still skipped (its `c` maps to a trailing
+arg). Soundness is unchanged — the inferred type is still the union of *resolved actual
+argument types*, so it never manufactures a boundary false positive (WD1). Measured on
+Mastodon app+lib: WD3 as-was contributes +190 protected sites (0.3086 → 0.3148), the
+shape extension +36 more (→ 0.3160). The gain is modest because most Mastodon parameter
+holes are reached by dynamic dispatch / framework callbacks (`before_action`, middleware),
+which call-site inference fundamentally cannot see — the ceiling that motivates the still-
+deferred WD2 (in-body structural) inference for params with no resolvable call site.
 
 Grounding: the algorithm-corpora survey
 ([`docs/notes/20260612-algorithm-corpora-survey.md`](../notes/20260612-algorithm-corpora-survey.md)

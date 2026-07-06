@@ -33,6 +33,19 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(result.sites.first.dynamic_origin).to eq(:inferred_return_untyped)
   end
 
+  it "routes an unbound instance-variable's chain to inference (ADR-82 root-enrichment)" do
+    # `@x` is not assigned in this scope — the engine does not track the field's type (an ADR-58 gap) —
+    # so `@x.foo` and, via WD6, `@x.foo.bar` route to `inferred_return_untyped` instead of no cause.
+    result = scan(<<~RUBY)
+      def f
+        @x.foo.bar
+      end
+    RUBY
+    chain = result.sites.select { |s| %w[foo bar].include?(s.method_name) }
+    expect(chain.size).to eq(2)
+    expect(chain.map(&:dynamic_origin)).to all(eq(:inferred_return_untyped))
+  end
+
   it "routes an undeclared parameter's chain to parameter inference (ADR-82 root-enrichment)" do
     # `x` is an untyped parameter — the archetypal ADR-67 inference gap — so `x.foo` and, via WD6 chain
     # inheritance, `x.foo.bar` route to `inferred_return_untyped` instead of reporting no cause.

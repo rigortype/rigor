@@ -431,11 +431,20 @@ not into the doc directories themselves.
    added a fourth `manual_drift` axis: rule `documentation_url` anchor integrity
    (ADR-65 public URLs must resolve). Not yet covered mechanically: CLI *flag*
    drift (flags lack a clean registry — FP-prone; demand-gated).
-2. Author `.claude/skills/rigor-docs-review/SKILL.md` (freeze L1–L4 lens
-   personas + layer-gate protocol). **← now the top remaining item.**
-3. Run the first full cycle; L1 is expected to surface ADR-51 CI-format
-   follow-through gaps (`11-ci.md` was rewritten after the v0.1.16
-   code-verification pass).
+2. **DONE (2026-07-06)** — `.claude/skills/rigor-docs-review/SKILL.md` freezes
+   the five-layer battery (L0 mechanical gate → L1 fidelity → L2 reader lenses →
+   L3 inverted bloat detector → L4 copyedit) as independent-context subagents,
+   parallel-within / sequential-across, findings to `docs/notes/`.
+3. **In progress** — first cycle. **L1 fidelity over the manual's operational
+   chapters DONE (2026-07-06)** — three parallel reviewers vs the real CLI +
+   implementation; 4 verified fixes landed (strict-profile "every rule is error"
+   overstatement, a missing `dynamic_origin` cause `inferred_return_untyped`, the
+   `--baseline-strict` any-drift semantics, and the non-built-in
+   `rbs_extended.unsatisfied-conformance` `rigor explain`/`documentation_url`
+   claim), ledger [`docs/notes/20260706-docs-review-fidelity.md`](notes/20260706-docs-review-fidelity.md).
+   `02-cli` / `11-ci` came back clean — the predicted ADR-51 CI-format gap did not
+   materialize. **Remaining:** L2 reader lenses, L3 bloat, L4 copyedit over the
+   same chapters, then a handbook-vs-spec-corpus fidelity pass.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 

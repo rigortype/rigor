@@ -9,6 +9,7 @@ require_relative "../source/node_walker"
 require_relative "../source/constant_path"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
+require_relative "dynamic_origin"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "indexed_narrowing"
@@ -2465,7 +2466,20 @@ module Rigor
             def_node.body, ->(name) { scope.struct_member_layout(name)&.[](:members) }
           )
         )
-        bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
+        bindings.reduce(fresh) { |acc, (name, type)| bind_param(acc, name, type) }
+      end
+
+      # ADR-82 root-enrichment — bind a method parameter, and for an *undeclared* (untyped) parameter seed its
+      # provenance to `inferred_return_untyped`. An untyped param is the archetypal inference gap ([ADR-67](
+      # docs/adr/67-parameter-type-inference.md): no call-site type flows in), so a `x.foo` receiver on it should
+      # route to parameter inference rather than reporting no cause at all. Reuses the WD1 `local_origins`
+      # channel, so WD6 then carries the cause through any chain rooted at the parameter (`x.foo.bar`). An
+      # RBS-declared / call-site-inferred parameter (a non-untyped binding) keeps no origin — it is not a hole.
+      def bind_param(acc, name, type)
+        bound = acc.with_local(name, type)
+        return bound unless untyped_binding?(type)
+
+        bound.with_local_origin(name, DynamicOrigin::INFERRED_RETURN_UNTYPED)
       end
 
       # ADR-67 WD3 — consult the call-site parameter-inference table for this `def` and replace each undeclared

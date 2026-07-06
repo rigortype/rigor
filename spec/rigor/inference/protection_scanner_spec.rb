@@ -29,7 +29,21 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(result.unprotected_count).to eq(1)
     expect(result.protected_count).to eq(0)
     expect(result.sites.first.method_name).to eq("save")
-    expect(result.sites.first.dynamic_origin).to be_nil
+    # An undeclared parameter routes to parameter inference (ADR-82 root-enrichment).
+    expect(result.sites.first.dynamic_origin).to eq(:inferred_return_untyped)
+  end
+
+  it "routes an undeclared parameter's chain to parameter inference (ADR-82 root-enrichment)" do
+    # `x` is an untyped parameter — the archetypal ADR-67 inference gap — so `x.foo` and, via WD6 chain
+    # inheritance, `x.foo.bar` route to `inferred_return_untyped` instead of reporting no cause.
+    result = scan(<<~RUBY)
+      def f(x)
+        x.foo.bar
+      end
+    RUBY
+    chain = result.sites.select { |s| %w[foo bar].include?(s.method_name) }
+    expect(chain.size).to eq(2)
+    expect(chain.map(&:dynamic_origin)).to all(eq(:inferred_return_untyped))
   end
 
   it "propagates a local binding's origin to a later bare-receiver read (ADR-82 WD1)" do

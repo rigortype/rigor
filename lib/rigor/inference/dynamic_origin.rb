@@ -18,10 +18,12 @@ module Rigor
       ANALYZER_BUDGET_CUTOFF  = :analyzer_budget_cutoff
       # Authored `untyped` contract.
       EXPLICIT_UNTYPED        = :explicit_untyped
-      # The call resolved to a known user / ancestor method, but the engine cannot yet infer that
-      # method's return type (a bare `def` whose body it cannot fold, an untyped-parameter chain). The
-      # call is NOT unmodeled syntax (it resolved) and NOT an authored `untyped` (no RBS said so) — it
-      # is an inference gap whose lever is parameter / ivar-field inference (ADR-67 / ADR-58).
+      # The engine cannot yet infer a value's type although it is not unmodeled syntax and no RBS declared
+      # it `untyped`: a resolved user/ancestor method whose return body it cannot fold, or an undeclared
+      # method *parameter* with no call-site type flowing in (`def f(x); x.foo`). The lever is inference —
+      # parameter inference (ADR-67) or ivar-field typing (ADR-58) — not a hand-written type, so it is an
+      # engine gap that routes to that roadmap rather than to "add RBS". (The `_return_` in the name is
+      # historical; it now covers the parameter case too.)
       INFERRED_RETURN_UNTYPED = :inferred_return_untyped
       # Inference fallback on unmodeled construct.
       UNSUPPORTED_SYNTAX      = :unsupported_syntax

@@ -282,7 +282,15 @@ module Rigor
       # binding and MUST NOT record a fallback event in either branch — the absence of a binding is a
       # recognised semantic outcome, not a fail-soft compromise.
       def type_of_instance_variable_read(node)
-        scope.ivar(node.name) || dynamic_top
+        bound = scope.ivar(node.name)
+        return bound if bound
+
+        # ADR-82 — an unbound instance-variable read is dynamic because the engine does not track this
+        # field's type (it is assigned in another method, or never seen). Route it to ivar-field typing
+        # (ADR-58) rather than reporting no cause, and let WD6 carry it through a `@x.foo.bar` chain. This
+        # records provenance only (still `dynamic_top`), never a fallback / tracer event.
+        scope.record_dynamic_origin(node, DynamicOrigin::INFERRED_RETURN_UNTYPED)
+        dynamic_top
       end
 
       def type_of_class_variable_read(node)

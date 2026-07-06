@@ -161,9 +161,9 @@ app/models 単独 +5.4pp と違い、app+lib フルは controllers/services/lib 
 ## Follow-up
 
 - **[ADR-82](../adr/82-dynamic-provenance-wiring.md)** — provenance-wiring（G1 伝播 + G2 記録 +
-  新 cause）。本ノートが根拠。**WD1+WD2+WD3+WD6+WD7 LANDED 2026-07-06**（下記「実装」節）。
-  WD7 = 正確 per-site メトリクス + param enrichment（~3,100 → ADR-67）。次は unbound ivar
-  enrichment（ADR-58、demand-gated）。
+  新 cause）。本ノートが根拠。**WD1+WD2+WD3+WD6+WD7+WD8 LANDED 2026-07-06**（下記「実装」節）。
+  WD7 = 正確 per-site メトリクス + param enrichment（ADR-67）、WD8 = unbound ivar enrichment
+  （ADR-58）。累積 causeless 49%→26%、inferred 15倍。actionability レバーはほぼ出し切り。
 - **sig-gen record-key 修正** — LANDED（`Type::HashShape#erase_key_prefix`、本セッション、CHANGELOG）。
 - **env-build resilience** — 未着手（07-04 H2(b)/H3 と統合、demand-gated）。不正 sig ファイルの
   quarantine + 可視化。sig-gen block-param 修正はこれで頑健化されるまでの暫定でしかない。
@@ -327,8 +327,25 @@ WD1 ルックアップが `x.foo` をラベル、WD6 が `x.foo.bar` へ伝播�
 
 **~3,100 サイトが causeless → inferred_return_untyped（ADR-67 ルーティング）** = 本物の
 actionability 利得。ratio 不変（precision-additive）、perf-neutral（A/B +0.15% alloc）。残る
-causeless 7,305 は主に unbound ivar read（ADR-58）+ dynamic_top ノード種（yield/super/block）で、
-ivar スライスが次の enrichment。
+causeless 7,305 は主に unbound ivar read（ADR-58）+ dynamic_top ノード種（yield/super/block）。
+
+### WD8 = unbound ivar enrichment（ADR-58 ルーティング）
+
+`type_of_instance_variable_read` が unbound ivar（`scope.ivar` nil）で `inferred_return_untyped` を
+記録（untyped field = ADR-58 の典型ギャップ）→ WD6 が `@x.foo.bar` へ伝播。param と違い method
+entry で seed 不可（read 地点で unbound が判明）なので read 時記録だが、already-`dynamic_top` 分岐
+のみ・perf-neutral（A/B +0.03%）。
+
+| cause | param(WD7) | ivar(WD8) |
+| --- | --- | --- |
+| none | 7,305 | **5,405** |
+| inferred_return_untyped | 3,460 | **5,399** |
+| unsupported_syntax | 10,102 | 10,063 |
+
+**~1,900 サイト causeless→inferred。累積 WD7+WD8: causeless 10,390(49%)→5,405(26%)、actionable
+inferred 351→5,399（15倍）。** ratio 不変。残る causeless は dynamic_top ノード種（yield/super/
+block）+ cvar/gvar で概ね真に未モデル → actionability レバーはほぼ出し切り。unsupported 10,063
+（48%）は未解決 call 根のチェーン = honest な engine-gap floor。
 
 ## GOTCHAs（再実行者向け）
 

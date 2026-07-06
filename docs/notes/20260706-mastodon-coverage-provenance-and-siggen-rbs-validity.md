@@ -347,6 +347,29 @@ inferred 351→5,399（15倍）。** ratio 不変。残る causeless は dynamic
 block）+ cvar/gvar で概ね真に未モデル → actionability レバーはほぼ出し切り。unsupported 10,063
 （48%）は未解決 call 根のチェーン = honest な engine-gap floor。
 
+## 検証（2026-07-06）: redmine で provenance-wiring が一般化する
+
+ADR-82 の全スライスは mastodon 駆動だったので、redmine（同オンボード、6プラグイン、AR は inert
+＝ `db/schema.rb` 未コミット）で正確 per-site メトリクスを取り一般化を確認。
+
+| cause | mastodon (18,695→21,119 unprot) | redmine (18,695 unprot) |
+| --- | --- | --- |
+| none（causeless） | 5,405（26%） | 6,913（37%） |
+| unsupported_syntax | 10,063（48%） | 6,019（32%） |
+| **inferred_return_untyped** | **5,399（26%）** | **5,634（30%）** |
+| explicit_untyped | 252 | 127 |
+| analyzer_budget_cutoff | 0 | 2 |
+
+**両アプリで actionable な `inferred_return_untyped`（param+ivar → ADR-67/58）が 26-30%** を占め、
+provenance-wiring が mastodon 専用でないことを実証。redmine の inert AR で causeless がやや多い
+（37% vs 26%）が構造は一致。redmine では `analyzer_budget_cutoff`(2) も捕捉（budget 由来 Dynamic も
+provenance が拾う）。ratio redmine 0.3386 / mastodon 0.3148。
+
+**結論: provenance-wiring アークは完了・一般化検証済み。** 残る actionability レバーは provenance 配線
+ではなく**実 inference**（ADR-67 param inference / ADR-58 ivar typing = untyped param/ivar を
+*concrete* に型付けて実際に保護 → ratio を上げる大型 feature）。provenance 作業はその穴マップを
+正確に描いた: 保護天井は両アプリで param/ivar inference + 未解決 call が支配。
+
 ## GOTCHAs（再実行者向け）
 
 - `coverage --protection` の with-sig 数値は **env-build 成否を必ず確認**すること（stderr の

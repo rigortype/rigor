@@ -11,6 +11,14 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[cache]** Persistent cache entries are now rebuilt after a Rigor upgrade, stale generations are reclaimed more aggressively, and a broken cache root degrades to memory-only instead of raising.
+  - The cache root marker now folds in `Rigor::VERSION`, so Marshal payloads written by an older release are never reused after an upgrade — the first writable run after upgrading rebuilds the cache.
+  - A read-only store (LSP / editor mode) now checks that marker itself before trusting a disk hit, instead of reading through it unconditionally; a stale or missing marker there is treated as an empty cache until a writable run repairs it, closing the one path where an ABI-stale payload could still be unmarshalled after an upgrade.
+  - Whole-project cache producers (the RBS environment / ancestor / constant tables, `analysis.run-diagnostics`) now keep only a small number of recent generations, reclaiming content-keyed orphans that sat below the global byte cap indefinitely — this runs even when `cache.max_bytes` is left unbounded.
+  - A cache root that cannot be read or repaired (permission error, disk full, deleted root) no longer fails the run — analysis continues with the disk tier disabled for that run.
+
 ## [0.2.8] - 2026-07-06
 
 v0.2.8 makes `rigor coverage --protection` explain itself: every unprotected site now carries the reason its receiver is dynamic and the action that would close it, so the report points you at the highest-leverage fix ([ADR-82](docs/adr/82-dynamic-provenance-wiring.md)). Call-site parameter inference reaches more method shapes, protecting more sites. It also hardens the RBS environment against malformed signatures — a single unparseable `.rbs`, whether hand-written or from `rigor sig-gen`, is now contained instead of blanking every type in the run.

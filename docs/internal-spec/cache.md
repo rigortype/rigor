@@ -150,6 +150,16 @@ arms the LRU `#evict!` pass (the production default is 256 MB, set by
 the CLI per [ADR-54](../adr/54-cache-slimming.md) WD3 — `nil` here
 leaves the cache unbounded).
 
+Every `fetch_or_compute` / `fetch_or_validate` call first resolves the disk
+tier's availability for the Store's lifetime (memoized after the first
+check — see "Schema-version marker" below): unavailable means the
+producer block still runs and its result still lands in the
+in-process memo, but no disk read or write is attempted. This covers
+two situations — a read-only store facing a marker it must not trust,
+and a writable store whose cache root cannot be read/repaired
+(permission error, disk full, deleted root, read-only mount) — neither
+of which may ever break an analysis run.
+
 ### `store.fetch_or_compute(producer_id:, params:, descriptor:, serialize: nil, deserialize: nil) { ... } -> Object`
 
 The single producer-facing entry point.
@@ -228,24 +238,47 @@ boundary, per ADR-2's trusted-gem trust model.
 
 `<root>/schema_version.txt` carries
 `Store.schema_marker_value` —
-`"<Descriptor::SCHEMA_VERSION>.<Store::FORMAT_VERSION>"`
-(currently `4.2`), covering both invalidation axes: the
-descriptor schema and the on-disk byte layout. Checked once per
-`Store` instance (first `fetch_or_compute` / `fetch_or_validate`):
+`"<PAYLOAD_ABI_VERSION>.<Descriptor::SCHEMA_VERSION>.<Store::FORMAT_VERSION>"`,
+where `PAYLOAD_ABI_VERSION` is `Rigor::VERSION`. Three invalidation
+axes fold into one marker: the installed Rigor release (an entry's
+Marshal payload is a blob of Rigor/RBS objects, so a release upgrade
+is an ABI boundary even when neither of the other two versions
+changes — this is the same axis `IncrementalSnapshot`'s fingerprint
+already covers), the descriptor schema, and the on-disk byte layout.
 
-- Marker missing → write the current value, proceed.
-- Marker matches → proceed.
-- Marker disagrees → wipe every entry under `<root>` (`unlink`
-  every child via `FileUtils.rm_rf`), rewrite the marker, and
-  proceed as if the cache were empty.
+Checked at most once per `Store` instance (the result is memoized as
+the boolean "is the disk tier available" — see `Store.new` above),
+with different semantics for a writable vs. a read-only store:
 
-A bump of either version therefore drops every cache file on
-the next writable run without any explicit migration step. The
-format-version half matters for disk reclamation: a format bump
-alone makes old entries unreadable (header mismatch → miss) but
-would never delete them — they can sit below the eviction cap
-indefinitely. The marker mismatch is what reclaims their bytes
-(ADR-54).
+**Writable store:**
+
+- Marker missing → write the current value, proceed. Disk available.
+- Marker matches → proceed. Disk available.
+- Marker disagrees → wipe every entry under `<root>` (`unlink` every
+  child via `FileUtils.rm_rf`), rewrite the marker, and proceed as if
+  the cache were empty. Disk available.
+- Any filesystem failure while checking or repairing the marker
+  (permission error, disk full, deleted root) → disk unavailable for
+  this Store's lifetime; no partial repair is left in place beyond
+  whatever the failing call itself did.
+
+**Read-only store** (LSP / editor mode, see `docs/design/20260516-editor-mode.md`):
+never touches the root — no `mkdir`, no marker write, no destructive
+clear on mismatch. Disk is available ONLY when the on-disk marker is
+present and matches current exactly; a missing or stale marker (e.g.
+a Rigor upgrade with no writable run yet) reports unavailable rather
+than risk unmarshalling a payload from a different ABI. The next
+writable run repairs the cache as above.
+
+A version bump therefore drops every cache file on the next writable
+run without any explicit migration step — the Rigor-version axis
+means this now happens on every release upgrade, at the cost of a
+cold rebuild on the first writable run after upgrading. The
+format-version axis matters for disk reclamation independently of
+that: a format bump alone makes old entries unreadable (header
+mismatch → miss) but would never delete them — they can sit below
+the eviction cap indefinitely. The marker mismatch is what reclaims
+their bytes (ADR-54).
 
 ### On-disk layout
 
@@ -273,7 +306,13 @@ Writes follow the standard rename-into-place dance:
    (`<entry>.tmp.<pid>.<rand-hex>`).
 4. `fsync` the temp file.
 5. `rename` the temp file over the destination.
-6. Release the lock by closing the destination file descriptor.
+6. Best-effort `fsync` of the destination directory (some
+   platforms cannot fsync a directory; failure is ignored).
+7. Release the lock by closing the destination file descriptor.
+
+If the write or rename fails partway through, the temp file from
+this attempt is removed on the way out (`ensure`) rather than left
+for the sweep below to find later.
 
 Readers do not lock; they tolerate seeing an old version (always
 a fully committed entry, never a torn write — POSIX guarantees
@@ -310,6 +349,46 @@ compressed bytes) are unchanged. Compression is invisible to
 producers: a custom `serialize:` / `deserialize:` pair still
 round-trips its exact bytes. v1 entries fail the header check
 and read as silent misses — no migration.
+
+### Compaction (`#evict!`)
+
+`evict!` is a no-op on a read-only store. Otherwise it runs three
+passes, in order:
+
+1. **Stale temp-file cleanup.** Any `*.tmp.*` sibling older than
+   one hour is unlinked. Under normal operation `atomically_replace`
+   never leaves one behind (see "Atomicity and locking" above); this
+   is a backstop for a process that died between the temp-file
+   write and the rename.
+2. **Whole-project generation cap.** Some producers are
+   content-keyed (the cache key is a function of the value's
+   dependencies, not a stable per-project key), so re-running with
+   different inputs writes a new entry and leaves the old one
+   unreachable — but still on disk. A small hardcoded allow-list of
+   whole-project producer ids
+   (`rbs.environment`, `rbs.class_ancestor_table`,
+   `rbs.class_type_param_names`, `rbs.constant_type_table`,
+   `rbs.known_class_names`, `analysis.run-diagnostics`) caps how many
+   generations of each survive a compaction pass; beyond the cap the
+   oldest-by-mtime generations are unlinked first. Per-file and
+   per-plugin producers are deliberately absent from this table —
+   many current entries under one such producer id can be live at
+   once, so a generation count is not a meaningful proxy for
+   staleness there. The cap is presently a maintained constant, not
+   producer-declared metadata; a new whole-project producer must be
+   added to the list by hand to benefit.
+3. **Size-based LRU pass.** Unchanged from prior releases: walks
+   every remaining `.entry` file, sorts by mtime ascending, and
+   unlinks from the oldest until the total is at or below
+   `max_bytes:`.
+
+Passes 1 and 2 run **regardless of whether `max_bytes:` is
+configured** — they reclaim bytes that are provably dead (a leaked
+temp file, an unreachable content-keyed generation) rather than
+enforcing a size budget, so an explicitly unbounded store
+(`max_bytes: nil`) still benefits from them. Only pass 3 is gated on
+`max_bytes:` being set. Any filesystem error during any pass is
+swallowed — `evict!` must never break a run.
 
 ## Bundled RBS producer contract
 
@@ -545,7 +624,7 @@ counters from the runner's `Cache::Store`. Output sample:
 
 ```
 Cache (root: .rigor/cache)
-  schema_version: 4.2
+  schema_version: 0.2.8.4.2
   3 entries, 12.4 KiB
     rbs.constant_type_table: 1 entries, 11.0 KiB
     reflection.instance_method_definition: 2 entries, 1.4 KiB

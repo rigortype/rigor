@@ -103,6 +103,22 @@ a new key and orphans the old entries forever. Default the cap to a
 generous **256 MB** (post-WD1/WD2 a full per-project set is ~2 MB, so the
 cap only ever trims orphans); explicit `max_bytes:` config still overrides.
 
+*Addendum (2026-07-07 follow-up):* the generous 256 MB cap is exactly why
+small repos never trigger it — an audit of a real repository's
+`.rigor/cache` found ~7 orphaned generations of `rbs.environment`
+(~1.77 MB each, ~16 MB cache total) that the byte cap had no reason to
+touch. The byte cap alone leaves orphan generations of a content-keyed
+whole-project producer sitting below the cap indefinitely. `Store#evict!`
+now runs a generation cap as a second, orthogonal compaction axis: a small
+hardcoded allow-list of whole-project producer ids keeps only their most
+recent N generations (2 for the RBS producers, 16 for
+`analysis.run-diagnostics`), independent of `max_bytes:` — it runs even
+when the store is unbounded (`max_bytes: nil`), since it reclaims
+provably-dead bytes rather than enforcing a size budget. See
+`docs/internal-spec/cache.md` § "Compaction (`#evict!`)" for the full
+mechanics, including the co-landed stale temp-file sweep and the
+`Rigor::VERSION`-carrying marker (payload ABI boundary on upgrade).
+
 **WD4 (minor) — memoise `RbsDescriptor.build` per loader.** It runs once per
 producer fetch (7×/run, identical result). Measured 1.3 ms × 7 today —
 noise — but it scales linearly with `signature_paths:` size

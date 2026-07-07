@@ -7,6 +7,7 @@ require "monitor"
 require "securerandom"
 require "zlib"
 
+require_relative "../version"
 require_relative "descriptor"
 
 module Rigor
@@ -30,6 +31,27 @@ module Rigor
       # bytes.
       FORMAT_VERSION = 2
 
+      # Payload ABI version. Store values are mostly Marshal blobs of Rigor/RBS objects, so a Rigor release
+      # upgrade is an ABI boundary even when the byte layout and descriptor schema are unchanged. Folding the
+      # gem version into the root marker makes installed-version upgrades rebuild rather than silently reuse a
+      # blob whose class layout still happens to unmarshal.
+      PAYLOAD_ABI_VERSION = Rigor::VERSION
+
+      # Whole-project producers are content-keyed, so dependency / signature churn writes a new entry and leaves
+      # the old generation unreachable. The global 256 MB cap is intentionally generous and often never fires on
+      # one project, so these producers get a small generation cap as a second compaction axis. Per-file / plugin
+      # producers are deliberately absent from this table: many current entries under one producer id can be live.
+      GENERATION_CAP_BY_PRODUCER = {
+        "analysis.run-diagnostics" => 16,
+        "rbs.class_ancestor_table" => 2,
+        "rbs.class_type_param_names" => 2,
+        "rbs.constant_type_table" => 2,
+        "rbs.environment" => 2,
+        "rbs.known_class_names" => 2
+      }.freeze
+
+      STALE_TEMP_FILE_AGE_SECONDS = 60 * 60
+
       # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte format version.
       HEADER = "RIGOR\x00#{FORMAT_VERSION.chr}".b.freeze
 
@@ -37,17 +59,19 @@ module Rigor
 
       # @param root [String] cache root directory.
       # @param read_only [Boolean] when true, every disk-side side-effect is suppressed: `fetch_or_compute`
-      #   still reads existing entries (hits) and still runs the producer block on miss, but it does NOT
-      #   write the produced value to disk, does NOT update the `schema_version.txt` marker, and does NOT
-      #   touch the on-disk root directory. The in-process memo is still populated so repeated lookups within
-      #   the same run stay cheap. Used by editor mode so multiple buffer-mode invocations can read from the
-      #   same cache concurrently without churning it. See `docs/design/20260516-editor-mode.md` § "Cache
-      #   behaviour".
+      #   still reads existing entries (hits, gated on a current `schema_version.txt` marker — see
+      #   {#ensure_schema_version!}) and still runs the producer block on miss, but it does NOT write the
+      #   produced value to disk, does NOT update the marker, and does NOT touch the on-disk root directory.
+      #   The in-process memo is still populated so repeated lookups within the same run stay cheap. Used by
+      #   editor mode so multiple buffer-mode invocations can read from the same cache concurrently without
+      #   churning it. See `docs/design/20260516-editor-mode.md` § "Cache behaviour".
       def initialize(root:, read_only: false, max_bytes: nil)
         @root = root.to_s.dup.freeze
         @read_only = read_only
         @max_bytes = max_bytes&.then { |n| Integer(n) }
-        @schema_version_ensured = false
+        # Tri-state: nil = not yet checked, true/false = the disk tier's availability for this Store's
+        # lifetime (see {#ensure_schema_version!}).
+        @disk_available = nil
         @hits = 0
         @misses = 0
         @writes = 0
@@ -100,7 +124,7 @@ module Rigor
       # the eviction cap forever. Folding the format version into the marker routes the bump through the
       # established clear-the-root path instead.
       def self.schema_marker_value
-        "#{Descriptor::SCHEMA_VERSION}.#{FORMAT_VERSION}"
+        "#{PAYLOAD_ABI_VERSION}.#{Descriptor::SCHEMA_VERSION}.#{FORMAT_VERSION}"
       end
 
       def self.disk_inventory(root:)
@@ -154,7 +178,7 @@ module Rigor
       def fetch_or_compute(producer_id:, params:, descriptor:,
                            serialize: nil, deserialize: nil, &block)
         validate_producer_id!(producer_id)
-        ensure_schema_version!
+        disk = ensure_schema_version!
 
         key = descriptor.cache_key_for(producer_id: producer_id, params: params)
         memo_key = [producer_id, key].freeze
@@ -164,8 +188,8 @@ module Rigor
           return memoed
         end
 
-        path = entry_path(producer_id, key)
-        cached = read_entry(path, deserialize: deserialize)
+        path = disk ? entry_path(producer_id, key) : nil
+        cached = path && read_entry(path, deserialize: deserialize)
         unless cached.nil?
           @monitor.synchronize do
             record(:hits, producer_id)
@@ -175,10 +199,10 @@ module Rigor
         end
 
         value = block.call
-        write_entry(path, descriptor, value, serialize: serialize) unless @read_only
+        wrote = path && try_write_entry(path, descriptor, value, serialize: serialize)
         @monitor.synchronize do
           record(:misses, producer_id)
-          record(:writes, producer_id) unless @read_only
+          record(:writes, producer_id) if wrote
           @memo[memo_key] = value
         end
         value
@@ -195,11 +219,11 @@ module Rigor
       # validation always re-checks the filesystem — but a single run only looks up once.
       def fetch_or_validate(producer_id:, key_descriptor:, params: {}, serialize: nil, deserialize: nil)
         validate_producer_id!(producer_id)
-        ensure_schema_version!
+        disk = ensure_schema_version!
 
         key = key_descriptor.cache_key_for(producer_id: producer_id, params: params)
-        path = entry_path(producer_id, key)
-        cached = read_entry(path, deserialize: deserialize)
+        path = disk ? entry_path(producer_id, key) : nil
+        cached = path && read_entry(path, deserialize: deserialize)
         if cached && (pair = cached.value).is_a?(Array) && pair.size == 2 &&
            pair[1].is_a?(Descriptor) && pair[1].fresh?
           @monitor.synchronize { record(:hits, producer_id) }
@@ -207,17 +231,7 @@ module Rigor
         end
 
         value, dependency_descriptor = block_given? ? yield : [nil, Descriptor.new]
-        wrote = false
-        unless @read_only
-          # A cache write must never break the run. If the value is not Marshal-clean (or any disk error
-          # occurs) skip caching and return the freshly-computed value — the next run recomputes.
-          begin
-            write_entry(path, key_descriptor, [value, dependency_descriptor], serialize: serialize)
-            wrote = true
-          rescue StandardError
-            wrote = false
-          end
-        end
+        wrote = path && try_write_entry(path, key_descriptor, [value, dependency_descriptor], serialize: serialize)
         @monitor.synchronize do
           record(:misses, producer_id)
           record(:writes, producer_id) if wrote
@@ -225,27 +239,30 @@ module Rigor
         value
       end
 
-      # ADR-6 § "Eviction" — LRU pass over the on-disk cache. No-op when `max_bytes:` was not configured or
-      # the store is read-only. Walks all `.entry` files, sorts by mtime ascending (oldest = least recently
-      # used), and unlinks from the oldest until the total is at or below the cap. Touch-on-disk-read
-      # ({read_entry}) is the cross-process LRU signal: every disk hit (not in-process-memo hit) updates the
-      # mtime so recently-read entries survive the eviction pass. Any FS error is swallowed — eviction must
-      # never break a run.
+      # ADR-6 § "Eviction" — compaction pass over the on-disk cache. No-op when the store is read-only. Stale
+      # temp file cleanup and the whole-project generation cap run regardless of `max_bytes:` — they reclaim
+      # provably-dead bytes (leaked temp files, unreachable content-keyed generations) rather than enforcing a
+      # size budget, so an explicitly unbounded store (`max_bytes: nil`) still benefits from them. The
+      # size-based LRU pass below stays gated on `max_bytes:` being configured: it walks all remaining
+      # `.entry` files, sorts by mtime ascending (oldest = least recently used), and unlinks from the oldest
+      # until the total is at or below the cap. Touch-on-disk-read ({read_entry}) is the cross-process LRU
+      # signal: every disk hit (not in-process-memo hit) updates the mtime so recently-read entries survive
+      # the eviction pass. Any FS error is swallowed — eviction must never break a run.
       def evict!
-        return if @max_bytes.nil? || @read_only
+        return if @read_only
 
-        entries = collect_entry_stats
-        total   = entries.sum { |e| e[:bytes] }
+        cleanup_stale_temp_files
+        entries = evict_excess_generations(collect_entry_stats)
+        return if @max_bytes.nil?
+
+        total = entries.sum { |e| e[:bytes] }
         return if total <= @max_bytes
 
         entries.sort_by! { |e| e[:mtime] }
         entries.each do |entry|
           break if total <= @max_bytes
 
-          File.unlink(entry[:path])
-          total -= entry[:bytes]
-        rescue StandardError
-          next
+          total -= entry[:bytes] if unlink_entry(entry[:path])
         end
         nil
       rescue StandardError
@@ -372,44 +389,95 @@ module Rigor
         File.open(path, File::RDWR | File::CREAT, 0o644) do |lock_fd|
           lock_fd.flock(File::LOCK_EX)
           tmp = "#{path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
-          File.open(tmp, "wb") do |f|
-            f.write(body)
-            f.fsync
+          begin
+            File.open(tmp, "wb") do |f|
+              f.write(body)
+              f.fsync
+            end
+            File.rename(tmp, path)
+          ensure
+            # A failed write/rename must not leak its temp file — rely on the 1-hour `cleanup_stale_temp_files`
+            # sweep only as a backstop for crashes that skip this ensure entirely.
+            unlink_entry(tmp) if File.exist?(tmp)
           end
-          File.rename(tmp, path)
+          fsync_directory(File.dirname(path))
         end
       end
 
+      # Checks (and, for a writable store, repairs) the `schema_version.txt` marker, and reports whether the
+      # disk tier is usable for the rest of this Store's lifetime. The result is memoized in `@disk_available`
+      # — one check per Store is enough; a benign double-check under a thread race would just repeat
+      # idempotent work.
+      #
+      # A writable store clears the cache root and rewrites the marker on a stale/missing marker, then reports
+      # available. A read-only store never touches the root — no mkdir, no marker write, no destructive clear
+      # — so it reports available ONLY when the on-disk marker already matches current exactly; a stale or
+      # missing marker (e.g. a Rigor upgrade with no writable run yet, as in LSP / editor mode) reports
+      # unavailable rather than risk unmarshalling a payload from a different ABI. Any filesystem failure
+      # (permission, disk full, deleted root) also reports unavailable, degrading this Store instance to
+      # in-memory-memo-only for the rest of its lifetime — the producer block still runs, its result still
+      # lands in `@memo`, and disk reads/writes are simply skipped.
+      #
+      # @return [Boolean]
       def ensure_schema_version!
-        # Read-only stores never touch the cache root — no mkdir, no marker write, no destructive clear on
-        # schema mismatch. A stale or wrong-schema marker simply yields nothing back (entries read through
-        # the version check are content-keyed, so a write under the new schema never collides with a read
-        # under the old). The next writable run will repair the cache.
-        return if @read_only
-        # The marker is process-stable; one check per Store is enough (a benign double-check under a thread
-        # race just repeats idempotent work).
-        return if @schema_version_ensured
+        return @disk_available unless @disk_available.nil?
 
-        @schema_version_ensured = true
+        @disk_available = @read_only ? read_only_marker_current? : repair_writable_marker!
+      end
+
+      def read_only_marker_current?
+        marker = File.join(@root, "schema_version.txt")
+        return false unless File.file?(marker)
+
+        File.read(marker).strip == self.class.schema_marker_value
+      rescue StandardError
+        false
+      end
+
+      def repair_writable_marker!
         FileUtils.mkdir_p(@root)
         marker = File.join(@root, "schema_version.txt")
         current = self.class.schema_marker_value
 
         if File.file?(marker)
           on_disk = File.read(marker).strip
-          return if on_disk == current
+          return true if on_disk == current
 
           clear_cache_root!
         end
 
         FileUtils.mkdir_p(@root)
         File.write(marker, "#{current}\n")
+        true
+      rescue StandardError
+        false
       end
 
       def clear_cache_root!
         Dir.children(@root).each do |entry|
           FileUtils.rm_rf(File.join(@root, entry))
         end
+      end
+
+      # Shared write path for both {#fetch_or_compute} and {#fetch_or_validate}. A cache write must never
+      # break the run: filesystem-side failures (permission, disk full, deleted root, read-only mount) are
+      # swallowed and read as "did not write". Programmer errors — a custom serializer that doesn't return a
+      # `String`, or any other producer contract violation — still raise so the bug is visible.
+      def try_write_entry(path, descriptor, value, serialize: nil)
+        return false if @read_only
+
+        write_entry(path, descriptor, value, serialize: serialize)
+        true
+      rescue SystemCallError, IOError
+        false
+      end
+
+      # Best-effort durability for the rename itself. Some platforms cannot fsync directories (or do not need to),
+      # so failures are ignored; the entry envelope still turns any lost/partial write into a miss.
+      def fsync_directory(dir)
+        File.open(dir, File::RDONLY, &:fsync)
+      rescue StandardError
+        nil
       end
 
       # LEB128 unsigned varint encoder/decoder. Lengths fit easily in five bytes (cap at 2^35); the cache
@@ -437,15 +505,64 @@ module Rigor
         nil
       end
 
-      # Returns an array of `{ path:, mtime:, bytes: }` hashes for every `.entry` file under the cache root,
-      # skipping unreadable entries.
+      def cleanup_stale_temp_files
+        cutoff = Time.now - STALE_TEMP_FILE_AGE_SECONDS
+        Dir.glob(File.join(@root, "**", "*.tmp.*")).each do |path|
+          next unless File.file?(path)
+          next if File.mtime(path) > cutoff
+
+          unlink_entry(path)
+        rescue StandardError
+          next
+        end
+      rescue StandardError
+        nil
+      end
+
+      def evict_excess_generations(entries)
+        removed = {}
+        entries.group_by { |entry| entry[:producer] }.each do |producer, producer_entries|
+          cap = GENERATION_CAP_BY_PRODUCER[producer]
+          next if cap.nil? || producer_entries.size <= cap
+
+          producer_entries.sort_by { |entry| [entry[:mtime], entry[:path]] }
+                          .first(producer_entries.size - cap)
+                          .each do |entry|
+            removed[entry[:path]] = true if unlink_entry(entry[:path])
+          end
+        end
+        return entries if removed.empty?
+
+        entries.reject { |entry| removed[entry[:path]] }
+      end
+
+      def unlink_entry(path)
+        File.unlink(path)
+        true
+      rescue StandardError
+        false
+      end
+
+      # Returns an array of `{ path:, producer:, mtime:, bytes: }` hashes for every `.entry` file under the
+      # cache root, skipping unreadable entries.
       def collect_entry_stats
         Dir.glob(File.join(@root, "**", "*.entry")).filter_map do |path|
           stat = File.stat(path)
-          { path: path, mtime: stat.mtime, bytes: stat.size }
+          producer = producer_id_for_entry(path)
+          next nil if producer.nil?
+
+          { path: path, producer: producer, mtime: stat.mtime, bytes: stat.size }
         rescue StandardError
           nil
         end
+      end
+
+      def producer_id_for_entry(path)
+        root_prefix = @root.end_with?(File::SEPARATOR) ? @root : "#{@root}#{File::SEPARATOR}"
+        return nil unless path.start_with?(root_prefix)
+
+        producer = path.delete_prefix(root_prefix).split(File::SEPARATOR, 2).first
+        producer.empty? ? nil : producer
       end
 
       def read_varint(bytes, offset)

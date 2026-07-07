@@ -99,6 +99,13 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
+  describe "schema_marker_value (payload ABI version)" do
+    it "folds Rigor::VERSION into the marker alongside the descriptor and format versions" do
+      expect(described_class.schema_marker_value)
+        .to eq("#{Rigor::VERSION}.#{Rigor::Cache::Descriptor::SCHEMA_VERSION}.#{described_class::FORMAT_VERSION}")
+    end
+  end
+
   describe "schema-version mismatch" do
     it "drops the cache directory when the marker disagrees with SCHEMA_VERSION" do
       store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :first }
@@ -352,6 +359,15 @@ RSpec.describe Rigor::Cache::Store do
       expect(File.exist?(File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry"))).to be(false)
       expect(ro.stats).to include(writes: 0, misses: 1)
     end
+
+    it "raises TypeError when serialize returns a non-String (write-contract errors stay visible)" do
+      bad = ->(_) { 42 }
+      expect do
+        store.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: {}, serialize: bad) do
+          ["v", Rigor::Cache::Descriptor.new]
+        end
+      end.to raise_error(TypeError, /serialize must return a String/)
+    end
   end
 
   describe "#stats (v0.0.9 group A slice 3)" do
@@ -496,6 +512,16 @@ RSpec.describe Rigor::Cache::Store do
       allow(SecureRandom).to receive(:hex).and_call_original
       store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
       expect(SecureRandom).to have_received(:hex).with(4)
+    end
+
+    it "leaves no .tmp file behind when the rename itself fails" do
+      allow(File).to receive(:rename).and_raise(Errno::ENOSPC)
+
+      expect do
+        store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { "v" }
+      end.not_to raise_error
+
+      expect(Dir.glob(File.join(cache_root, "**", "*.tmp.*"))).to be_empty
     end
 
     it "does not collide across concurrent writers targeting the same entry (unique temp names)" do
@@ -659,6 +685,117 @@ RSpec.describe Rigor::Cache::Store do
       end
 
       expect(called).to eq(1)
+    end
+  end
+
+  describe "read-only marker gate (ABI safety)" do
+    it "treats a stale marker as unavailable: no disk hit, no recompute writeback" do
+      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :warm }
+      File.write(File.join(cache_root, "schema_version.txt"), "stale-marker\n")
+
+      ro = described_class.new(root: cache_root, read_only: true)
+      called = 0
+      result = ro.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+        called += 1
+        :recomputed
+      end
+
+      expect(called).to eq(1)
+      expect(result).to eq(:recomputed)
+      # Read-only never repairs the marker, even after observing a mismatch.
+      expect(File.read(File.join(cache_root, "schema_version.txt")).strip).to eq("stale-marker")
+    end
+
+    it "treats a missing marker (fresh root) as unavailable without creating the root" do
+      expect(Dir.exist?(cache_root)).to be(false)
+
+      ro = described_class.new(root: cache_root, read_only: true)
+      called = 0
+      result = ro.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+        called += 1
+        :produced
+      end
+
+      expect(called).to eq(1)
+      expect(result).to eq(:produced)
+      expect(Dir.exist?(cache_root)).to be(false)
+    end
+  end
+
+  describe "disk-disabled degrade (filesystem failure)" do
+    it "falls back to memo-only operation without raising when the marker cannot be established" do
+      allow(FileUtils).to receive(:mkdir_p).and_raise(Errno::EACCES)
+
+      called = 0
+      result = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+        called += 1
+        :produced
+      end
+      expect(called).to eq(1)
+      expect(result).to eq(:produced)
+
+      # Same instance, same lookup: served from the in-process memo, never re-attempts disk.
+      called_again = 0
+      result_again = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+        called_again += 1
+        :ignored
+      end
+      expect(called_again).to eq(0)
+      expect(result_again).to eq(:produced)
+    end
+  end
+
+  describe "#evict! (generation cap for whole-project producers, ADR-54 follow-up)" do
+    def cache_key_path(producer_id, params)
+      key = Rigor::Cache::Descriptor.new.cache_key_for(producer_id: producer_id, params: params)
+      File.join(cache_root, producer_id, key[0, 2], "#{key[2..]}.entry")
+    end
+
+    it "keeps only the cap for a listed producer, removing the oldest generations first, " \
+       "even when max_bytes is nil" do
+      st = described_class.new(root: cache_root, max_bytes: nil)
+      paths = Array.new(4) do |i|
+        st.fetch_or_compute(
+          producer_id: "rbs.environment", params: { i: i }, descriptor: Rigor::Cache::Descriptor.new
+        ) { i }
+        path = cache_key_path("rbs.environment", { i: i })
+        # Force a deterministic write-order mtime; same-millisecond writes would otherwise tie.
+        stamp = Time.now - (10 - i)
+        File.utime(stamp, stamp, path)
+        path
+      end
+
+      st.evict!
+
+      remaining = Dir.glob(File.join(cache_root, "rbs.environment", "**", "*.entry"))
+      expect(remaining.size).to eq(2)
+      expect(remaining).to contain_exactly(paths[2], paths[3])
+    end
+
+    it "does not cap a producer absent from the allow-list" do
+      st = described_class.new(root: cache_root, max_bytes: nil)
+      5.times { |i| st.fetch_or_compute(producer_id: "custom.thing", params: { i: i }, descriptor: descriptor) { i } }
+
+      st.evict!
+
+      expect(Dir.glob(File.join(cache_root, "custom.thing", "**", "*.entry")).size).to eq(5)
+    end
+  end
+
+  describe "#evict! (stale temp-file cleanup)" do
+    it "removes .tmp files older than the 1-hour cutoff and keeps fresh ones" do
+      stale = File.join(cache_root, "p", "ab", "cdef.entry.tmp.123.deadbeef")
+      fresh = File.join(cache_root, "p", "ab", "cdef.entry.tmp.456.cafebabe")
+      FileUtils.mkdir_p(File.dirname(stale))
+      File.write(stale, "x")
+      File.write(fresh, "y")
+      old_time = Time.now - ((60 * 60) + 60)
+      File.utime(old_time, old_time, stale)
+
+      described_class.new(root: cache_root, max_bytes: nil).evict!
+
+      expect(File.exist?(stale)).to be(false)
+      expect(File.exist?(fresh)).to be(true)
     end
   end
 end

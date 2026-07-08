@@ -1,5 +1,10 @@
 # Cache hardening / compaction — actionable plan
 
+**Status (2026-07-08): executed and landed via [PR #57](https://github.com/rigortype/rigor/pull/57)**
+(three commits) — phases 1–6 below are all complete (implementation, specs, docs,
+CHANGELOG, verification green). Only the "Deferred" section remains open, now
+tracked in `docs/ROADMAP.md`.
+
 Re-planned from the handover note [`20260707-cache-mechanism-audit-sakana.md`](20260707-cache-mechanism-audit-sakana.md),
 after auditing that note against the actual working-tree diff of `lib/rigor/cache/store.rb`
 (the only changed file, ~+107/−17, syntax-clean, no specs/docs/CHANGELOG yet, no Flake verification yet).

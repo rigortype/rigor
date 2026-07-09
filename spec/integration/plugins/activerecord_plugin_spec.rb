@@ -214,6 +214,81 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(errors.size).to eq(1)
       expect(errors.first.message).to include("`invented`")
     end
+
+    it "does not fire on a nested / joined-table condition (`where(assoc: { ... })`)" do
+      # `where(posts: { title: 'x' })` is a join condition — `posts` names a joined table, not a column on
+      # `User` — so it must not read as an unknown column. Rails resolves the nested hash through the join.
+      diags = plugin_diagnostics(run_ar("User.where(posts: { title: 'x' })\n"))
+      expect(diags.find { |d| d.rule == "unknown-column" }).to be_nil
+    end
+
+    it "still fires unknown-column when the value is a non-hash literal" do
+      # An Array value is an IN query on a real column, not a nested condition — a typo'd key still fires.
+      diags = plugin_diagnostics(run_ar("User.where(rols: ['a', 'b'])\n"))
+      expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+    end
+  end
+
+  describe "type-overridden columns (serialize / mount_uploader / custom attribute)" do
+    # A `serialize` / `mount_uploader` / custom-`attribute` column is a rich object at runtime, not its SQL
+    # scalar. Its `ruby_type` is remapped to `"Object"` so instance-side narrowing declines — else
+    # `note.position.diff_refs` (position stored `text`, deserialized to a Position) false-positives. The
+    # column stays queryable, so `where(col: ...)` still validates existence.
+    let(:override_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema.define do
+          create_table :users do |t|
+            t.string :name
+            t.text   :prefs
+            t.string :avatar
+          end
+        end
+      SCHEMA
+    end
+    let(:override_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => <<~RUBY,
+          class User < ApplicationRecord
+            serialize :prefs
+            mount_uploader :avatar, AvatarUploader
+          end
+        RUBY
+        # A concern declares a serialize inside `included do` — the global-set collection must see it even
+        # though the discoverer does not follow `include`.
+        "app/models/concerns/positionable.rb" => <<~RUBY
+          module Positionable
+            extend ActiveSupport::Concern
+            included do
+              serialize :name, SomeCoder
+            end
+          end
+        RUBY
+      }
+    end
+
+    it "remaps serialize / mount_uploader / concern-serialized columns to Object, keeps scalars" do
+      _result, index = run_ar_with_index("User.find(1)\n", models: override_models, schema: override_schema)
+      user = index.find("User")
+      expect(user.column("prefs").ruby_type).to eq("Object")  # serialize
+      expect(user.column("avatar").ruby_type).to eq("Object") # mount_uploader
+      expect(user.column("name").ruby_type).to eq("Object")   # concern `included do serialize :name`
+    end
+
+    it "keeps a normal column's schema type when nothing overrides it" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => "class User < ApplicationRecord\nend\n"
+      }
+      _result, index = run_ar_with_index("User.find(1)\n", models: models, schema: override_schema)
+      expect(index.find("User").column("name").ruby_type).to eq("String")
+    end
+
+    it "still validates existence of a type-overridden column (`where(col:)`)" do
+      # Overriding the value type must not remove the column — a real key passes, a typo still fires.
+      diags = plugin_diagnostics(run_ar("User.where(prefs: 1)\n", models: override_models, schema: override_schema))
+      expect(diags.find { |d| d.rule == "unknown-column" }).to be_nil
+    end
   end
 
   describe "wrong-arity diagnostics" do
@@ -334,6 +409,81 @@ RSpec.describe "plugins/rigor-activerecord" do
           expect(plugin.instance_variable_get(:@load_errors).size).to eq(1)
         end
       end
+    end
+  end
+
+  describe "structure.sql fallback (schema_format = :sql)" do
+    # GitLab-class apps commit a PostgreSQL `db/structure.sql` and no `db/schema.rb`, which used to leave
+    # the plugin inert. The producer now falls back to parsing the DDL through StructureSqlParser.
+    let(:structure_sql) { <<~SQL }
+      CREATE TABLE users (
+          id bigint NOT NULL,
+          name character varying NOT NULL,
+          email character varying NOT NULL,
+          admin boolean DEFAULT false,
+          role character varying DEFAULT '--- 0
+      '::character varying NOT NULL,
+          tag_ids bigint[],
+          created_at timestamp without time zone,
+          CONSTRAINT check_email CHECK ((email IS NOT NULL))
+      );
+
+      CREATE TABLE posts (
+          id bigint NOT NULL,
+          title character varying,
+          body text,
+          user_id bigint
+      );
+
+      CREATE TABLE gitlab_partitions_dynamic.users_part (
+          id bigint NOT NULL,
+          shadow character varying
+      );
+    SQL
+
+    def run_structure(source, structure:, models: DEFAULT_MODELS)
+      run_plugin(source: source, files: { "db/structure.sql" => structure }.merge(models))
+    end
+
+    it "recognises a `Model.where(col:)` call against structure.sql columns" do
+      diags = plugin_diagnostics(run_structure("User.where(admin: true)\n", structure: structure_sql))
+      expect(diags.find { |d| d.rule == "load-error" }).to be_nil
+      expect(diags.map(&:message).join).to include("`User.where` (:admin) on table `users`")
+    end
+
+    it "fires unknown-column for a typo against structure.sql columns" do
+      diags = plugin_diagnostics(run_structure("User.where(amdin: true)\n", structure: structure_sql))
+      unknown = diags.find { |d| d.rule == "unknown-column" }
+      expect(unknown).not_to be_nil
+      expect(unknown.message).to include("amdin")
+      expect(unknown.message).to include("did you mean `:admin`?")
+    end
+
+    it "parses a multi-line quoted default without inventing a bogus column" do
+      # The `role` column's DEFAULT is a multi-line YAML string; the continuation line must not read as a
+      # `'::character` column, and `role` itself must be a valid, recognised column.
+      diags = plugin_diagnostics(run_structure("User.where(role: 'x')\n", structure: structure_sql))
+      expect(diags.find { |d| d.rule == "unknown-column" }).to be_nil
+    end
+
+    it "skips partition tables in non-public schemas (no phantom `shadow` column masking)" do
+      # `gitlab_partitions_dynamic.users_part` is a partition, not the base `users` table — its `shadow`
+      # column must not leak onto any queryable model.
+      diags = plugin_diagnostics(run_structure("User.where(shadow: 1)\n", structure: structure_sql))
+      expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+    end
+
+    it "prefers db/schema.rb when both files are present" do
+      # schema.rb defines `admin`; a conflicting structure.sql must not be consulted when schema.rb loads.
+      diags = plugin_diagnostics(
+        run_plugin(
+          source: "User.where(admin: true)\n",
+          files: { "db/schema.rb" => DEFAULT_SCHEMA, "db/structure.sql" => "CREATE TABLE users (\n  id bigint\n);\n" }
+            .merge(DEFAULT_MODELS)
+        )
+      )
+      expect(diags.find { |d| d.rule == "load-error" }).to be_nil
+      expect(diags.map(&:message).join).to include("`User.where` (:admin)")
     end
   end
 

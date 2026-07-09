@@ -4,6 +4,7 @@ require "rigor/plugin"
 
 require_relative "activerecord/schema_table"
 require_relative "activerecord/schema_parser"
+require_relative "activerecord/structure_sql_parser"
 require_relative "activerecord/model_index"
 require_relative "activerecord/model_discoverer"
 require_relative "activerecord/analyzer"
@@ -18,7 +19,8 @@ module Rigor
     # Two cached producers per plugin run:
     #
     # 1. `:schema_table` reads `db/schema.rb` via the `IoBoundary` and parses it through {SchemaParser} into
-    #    a {SchemaTable} mapping `table_name → { column_name → Column }`.
+    #    a {SchemaTable} mapping `table_name → { column_name → Column }`. When `db/schema.rb` is absent it
+    #    falls back to a PostgreSQL `db/structure.sql` (`schema_format = :sql` apps) via {StructureSqlParser}.
     # 2. `:model_index` walks every `.rb` file under the configured `model_search_paths`, finds class
     #    declarations whose direct superclass is in `model_base_classes`, and composes them with the schema
     #    table into a {ModelIndex}.
@@ -57,6 +59,9 @@ module Rigor
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
+          # `schema_format = :sql` projects (GitLab-class apps) commit a PostgreSQL `db/structure.sql`
+          # instead of `db/schema.rb`. Used as the fallback schema source when `schema_file` is absent.
+          "structure_sql_file" => { kind: :string, default: "db/structure.sql" },
           "model_search_paths" => { kind: :array, default: ["app/models"] },
           "model_base_classes" => { kind: :array, default: %w[ApplicationRecord ActiveRecord::Base] }
         },
@@ -76,26 +81,34 @@ module Rigor
       RELATION_CLASS_NAME = "ActiveRecord::Relation"
 
       # Cached: parsed schema table. The producer reads `@schema_file` via `io_boundary.read_file` so the
-      # descriptor picks up the digest, then parses through {SchemaParser}.
+      # descriptor picks up the digest, then parses through {SchemaParser}. When `db/schema.rb` is absent
+      # the producer falls back to a PostgreSQL `db/structure.sql` (`schema_format = :sql` apps) parsed
+      # through {StructureSqlParser} — both reads are captured into the record-and-validate descriptor.
       producer :schema_table do |_params|
-        contents = io_boundary.read_file(@schema_file)
-        SchemaParser.parse(contents)
+        SchemaParser.parse(io_boundary.read_file(@schema_file))
+      rescue Errno::ENOENT
+        StructureSqlParser.parse(io_boundary.read_file(@structure_sql_file))
       end
 
       # Cached: model index. Walks every model file, then composes the rows with the cached schema table.
       # `watch:` (ADR-60 WD3) covers model-file additions; the discoverer's in-block reads are captured
       # into the record-and-validate dependency descriptor after the block runs.
       producer :model_index, watch: -> { [[@model_search_paths, "**/*.rb"]] } do |_params|
-        rows = ModelDiscoverer.new(
+        discoverer = ModelDiscoverer.new(
           io_boundary: io_boundary,
           search_paths: @model_search_paths,
           base_classes: @model_base_classes
-        ).discover
-        ModelIndex.build(model_rows: rows, schema_table: schema_table_or_nil)
+        )
+        rows = discoverer.discover
+        ModelIndex.build(
+          model_rows: rows, schema_table: schema_table_or_nil,
+          type_override_columns: discoverer.type_override_columns
+        )
       end
 
       def init(_services)
         @schema_file = config.fetch("schema_file")
+        @structure_sql_file = config.fetch("structure_sql_file")
         @model_search_paths = Array(config.fetch("model_search_paths")).map(&:to_s)
         @model_base_classes = Array(config.fetch("model_base_classes")).map(&:to_s)
         @schema_table = nil
@@ -518,7 +531,8 @@ module Rigor
         @load_errors << "rigor-activerecord: #{e.message}"
         nil
       rescue Errno::ENOENT
-        @load_errors << "rigor-activerecord: schema file `#{@schema_file}` not found; AR call checks skipped"
+        @load_errors << "rigor-activerecord: schema file `#{@schema_file}` (or `#{@structure_sql_file}`) " \
+                        "not found; AR call checks skipped"
         nil
       rescue StandardError => e
         @load_errors << "rigor-activerecord: failed to parse `#{@schema_file}`: #{e.class}: #{e.message}"

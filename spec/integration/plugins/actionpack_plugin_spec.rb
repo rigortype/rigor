@@ -784,6 +784,21 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    it "does not fire unknown-permit-key for a virtual (non-column, non-typo) attribute" do
+      # Permitting a virtual attribute is ordinary Rails — Devise's `password` / `password_confirmation`,
+      # a state-machine `*_event`, an `attr_accessor` setter. None is a column and none is a near-typo of
+      # one, so the strong-params check (a typo detector) must stay silent.
+      with_strong_params(<<~RUBY) do |result|
+        class UsersController
+          def create
+            params.require(:user).permit(:name, :password, :password_confirmation, :remember_me)
+          end
+        end
+      RUBY
+        expect(actionpack_diagnostics(result).select { |d| d.rule == "unknown-permit-key" }).to be_empty
+      end
+    end
+
     it "skips silently when the model isn't in the published index" do
       with_strong_params(<<~RUBY) do |result|
         class UsersController

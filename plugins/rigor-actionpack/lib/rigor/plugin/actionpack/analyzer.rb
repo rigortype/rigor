@@ -58,6 +58,12 @@ module Rigor
         # receiver is `params.require(:symbol)`.
         STRONG_PARAMS_RECEIVER_NAMES = %i[require permit_params strong_params].freeze
 
+        # Max edit distance between a non-column permit key and a real column for the key to count as a
+        # typo (and fire `unknown-permit-key`) rather than a legitimate virtual attribute. A tight bound
+        # keeps genuine typos (`emial`→`email`, distance 2) while never firing on a virtual attribute,
+        # whose name is nothing like any column.
+        PERMIT_KEY_TYPO_MAX_DISTANCE = 2
+
         # One Action Pack observation. Carries no path — the caller (the `node_rule` block) positions
         # it via `Plugin::Base#diagnostic`. `location` is the Prism location the diagnostic should point
         # at (a call's `message_loc` for the call itself, or a sub-argument's location for
@@ -150,12 +156,11 @@ module Rigor
           return [] if entry.nil? # unknown model — skip; the model lookup is best-effort.
 
           columns = entry[:columns]
-          spell_checker = DidYouMean::SpellChecker.new(dictionary: columns)
-          literal_permit_keys(call_node).map do |key_node, key_name|
+          literal_permit_keys(call_node).filter_map do |key_node, key_name|
             if columns.include?(key_name)
               permit_call_violation(call_node, model_class, key_name)
             else
-              unknown_permit_key_violation(key_node, model_class, key_name, spell_checker)
+              unknown_permit_key_violation(key_node, model_class, key_name, columns)
             end
           end
         end
@@ -347,13 +352,23 @@ module Rigor
           )
         end
 
-        def unknown_permit_key_violation(key_node, model_class, key_name, spell_checker)
-          base = "Action Pack permit `#{key_name}` is not a column on `#{model_class}`."
-          suggestion = spell_checker.correct(key_name).first
-          message = suggestion ? "#{base} Did you mean `:#{suggestion}`?" : base
+        # A permit key that is not a column is only a violation when it is a near-miss TYPO of a real
+        # column. Permitting a non-column is ordinary Rails: a Devise virtual attribute (`password`,
+        # `remember_me`, `otp_attempt`), a state-machine `*_event`, an `attr_accessor` setter, or a nested
+        # `*_attributes` key are all mass-assignable but absent from the schema. So fire only when a column
+        # sits within a tight edit distance of the key (a typo like `emial`→`email`); a key with no close
+        # column is presumed a deliberate virtual attribute and passes silently. Firing on every non-column
+        # key false-positives across the whole strong-params surface of a Devise/state-machine app.
+        def unknown_permit_key_violation(key_node, model_class, key_name, columns)
+          nearest = columns.min_by { |col| DidYouMean::Levenshtein.distance(key_name, col) }
+          return nil if nearest.nil?
+          return nil if DidYouMean::Levenshtein.distance(key_name, nearest) > PERMIT_KEY_TYPO_MAX_DISTANCE
+
           Violation.new(
             location: key_node.location,
-            message: message, severity: :error, rule: "unknown-permit-key"
+            message: "Action Pack permit `#{key_name}` is not a column on `#{model_class}`. " \
+                     "Did you mean `:#{nearest}`?",
+            severity: :error, rule: "unknown-permit-key"
           )
         end
 

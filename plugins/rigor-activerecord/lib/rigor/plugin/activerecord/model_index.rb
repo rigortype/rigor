@@ -88,15 +88,16 @@ module Rigor
         def class_names = entries.keys
         def empty? = entries.empty?
 
-        def self.build(model_rows:, schema_table:)
+        def self.build(model_rows:, schema_table:, type_override_columns: nil)
           rows_by_name = model_rows.to_h { |row| [row.fetch(:class_name), row] }
+          overrides = type_override_columns || []
 
           entries = model_rows.each_with_object({}) do |row, acc|
             class_name = row.fetch(:class_name)
             # The STI ancestry chain, root → self. For a plain (non-STI) model this is just `[row]`.
             chain = sti_chain(row, rows_by_name)
             table_name = sti_table_name(chain)
-            columns = schema_table.columns_for(table_name) || []
+            columns = apply_type_overrides(schema_table.columns_for(table_name) || [], overrides)
 
             # STI children inherit their ancestors' declared associations / enums / aliases / scopes /
             # validations / callbacks. Without the merge a `where(<parent-association>: ...)` on the
@@ -114,6 +115,23 @@ module Rigor
             ).freeze
           end
           new(entries.freeze)
+        end
+
+        # Remaps every type-overridden column's `ruby_type` to `"Object"` so instance-side column narrowing
+        # declines to narrow it (the `"Object"` case in `ruby_type_to_type`). A `serialize` / `mount_uploader`
+        # / custom-`attribute` column reads as a rich object at runtime, not its SQL scalar, so narrowing it
+        # to e.g. `String` false-positives on the object's methods (`note.position.diff_refs`). The column
+        # stays in the set, so `where(col: ...)` existence validation is unaffected — only its value type.
+        def self.apply_type_overrides(columns, overrides)
+          return columns if overrides.empty?
+
+          columns.map do |column|
+            next column unless overrides.include?(column.name)
+
+            SchemaTable::Column.new(
+              name: column.name, type: column.type, ruby_type: "Object", array: column.array
+            )
+          end
         end
 
         # The STI ancestry chain for a row, ordered root → self. Walks `sti_parent` pointers, guarding

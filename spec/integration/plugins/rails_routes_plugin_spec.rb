@@ -1295,6 +1295,104 @@ RSpec.describe "plugins/rigor-rails-routes" do
       diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
       expect(diags).to be_empty
     end
+
+    it "names a multi-segment string collection action via `normalize_name` (slashes → underscores)" do
+      # GitLab shape (`config/routes/user_settings.rb`): a multi-segment static string path inside a
+      # `collection do` block. Rails' `Mapper.normalize_name` turns `granular/new` into `granular_new`, and
+      # the `:collection` action-name ordering is `[prefix, name_prefix, collection_name]` →
+      # `granular_new_user_settings_personal_access_tokens_path`. Pre-fix the parser fell through to the
+      # generic explicit-route handler, producing the wrong singular / mis-ordered name and firing a false
+      # `unknown-helper`.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          namespace :user_settings do
+            resources :personal_access_tokens do
+              collection do
+                get 'granular/new'
+                get 'legacy/new'
+              end
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "granular_new_user_settings_personal_access_tokens_path\n" \
+                "legacy_new_user_settings_personal_access_tokens_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "does not turn a bare `get '/'` collection root into an empty-named action helper" do
+      # GitLab shape (`config/routes/organizations.rb`): `collection { get '/', action: :index }`. The `'/'`
+      # is the collection root, NOT an action shorthand — it must not register a malformed
+      # `_organizations_path` (empty action name + plural prefix), which would both mask the site and pollute
+      # did-you-mean suggestions. Rails names this after the resource; the plugin's generic handler keeps its
+      # prior name. The guard: no route helper name may begin with an underscore.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :organizations, only: [:new] do
+            collection do
+              get '/', action: :index
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        # `organization_path` is what the generic handler names this collection-root route (the plugin's
+        # prior behaviour) — it must stay recognised, and the malformed `_organizations_path` must never be
+        # registered (so calling it reads as unknown, not a silent hit).
+        source: "organization_path\n_organizations_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      unknown_names = unknowns.map { |d| d.message[/no route helper `([^`]+)`/, 1] }
+      # The old, recognised name still resolves; only the (never-registered) malformed name is unknown.
+      expect(unknown_names).to include("_organizations_path")
+      expect(unknown_names).not_to include("organization_path")
+      # No did-you-mean suggestion offers an underscore-leading name (the malformed entry is gone).
+      suggestions = plugin_diagnostics(result).map(&:message).join.scan(/did you mean `([^`]+)`/).flatten
+      expect(suggestions).to all(satisfy { |s| !s.start_with?("_") })
+    end
+  end
+
+  describe "bare symbol routes inside a named scope" do
+    it "composes `<scope_as>_<action>_path` for `get :activity` in `scope(as: :user)`" do
+      # GitLab shape (`config/routes/user.rb`): `scope(path: 'users/:username', as: :user) do get :activity
+      # end`. Rails uses the symbol as both the `/activity` path segment and the action name, composing
+      # `user_activity_path(username)` (arity 1 from the `:username` scope segment). Pre-fix the parser saw
+      # a symbol first-arg with no `:as` outside any resource / member / collection block and registered
+      # nothing, so `user_activity_path` read as `unknown-helper`.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope(path: 'users/:username', as: :user) do
+            get :activity
+            get :calendar
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "user_activity_path(1)\nuser_calendar_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
+      expect(diags).to be_empty
+    end
+
+    it "composes `<action>_path` for a top-level `get :status`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          get :status
+        end
+      RUBY
+      result = run_plugin(
+        source: "status_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
   end
 
   describe "shadowing locals suppress diagnostics" do

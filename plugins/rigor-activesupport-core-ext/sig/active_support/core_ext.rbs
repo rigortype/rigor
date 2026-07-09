@@ -62,6 +62,9 @@ class Object
   # `acts_like?(:string)` / `acts_like?(:date)` / `acts_like?(:time)`
   # is ActiveSupport's "duck-typing helper" predicate.
   def acts_like?: (Symbol | String) -> bool
+
+  # `core_ext/object/inclusion` — `x.in?([a, b])` / `x.in?(1..10)`.
+  def in?: (untyped) -> bool
 end
 
 # `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
@@ -99,6 +102,9 @@ class String
   def demodulize: () -> String
   def deconstantize: () -> String
   def titleize: () -> String
+  def titlecase: () -> String
+  def dasherize: () -> String
+  def upcase_first: () -> String
   def parameterize: (?separator: String, ?preserve_case: bool, ?locale: Symbol?) -> String
   def tableize: () -> String
   def foreign_key: (?bool separate_class_name_and_id_with_underscore) -> String
@@ -112,6 +118,9 @@ class String
   def truncate: (Integer truncate_at, ?omission: String, ?separator: String | Regexp | nil) -> String
   def truncate_bytes: (Integer truncate_at, ?omission: String) -> String
   def truncate_words: (Integer words_count, ?omission: String, ?separator: String | Regexp | nil) -> String
+  # `remove` / `remove!` delete every occurrence of the given patterns.
+  def remove: (*Regexp | String patterns) -> String
+  def remove!: (*Regexp | String patterns) -> String
 
   # `core_ext/string/output_safety` — `html_safe` returns an
   # `ActiveSupport::SafeBuffer` (a String subclass). The closest
@@ -274,6 +283,9 @@ class Time
   def noon: () -> Time
   def utc?: () -> bool
   def acts_like_time?: () -> true
+  # `advance(days: 1, months: -2)` and `all_day` (a `beginning_of_day..end_of_day` Range).
+  def advance: (untyped options) -> Time
+  def all_day: () -> Range[Time]
 end
 
 # ---------------------------------------------------------------
@@ -314,6 +326,11 @@ class Date
   def at_beginning_of_day: () -> Time
   def end_of_day: () -> Time
   def at_end_of_day: () -> Time
+  # `advance(days: 1)`, `all_day` (a Time Range), and `to_time(form)` — the
+  # `:local` / `:utc` form arg core RBS' `Date#to_time` (arity 0) omits.
+  def advance: (untyped options) -> Date
+  def all_day: () -> Range[Time]
+  def to_time: (?Symbol form) -> Time
 end
 
 # ---------------------------------------------------------------
@@ -475,4 +492,19 @@ end
 # coverage was added after a second-round survey.)
 class String
   def exclude?: (String) -> bool
+end
+
+# ---------------------------------------------------------------
+# ERB::Util — ActionView extends it with `html_escape_once`
+# ---------------------------------------------------------------
+
+# `ERB` is a CLASS in Ruby / RBS (not a module), so reopen it as a class —
+# a `module ERB` wrapper collides with upstream `class ERB` once the `erb`
+# stdlib is in scope. `ERB::Util` itself is a module.
+class ERB
+  module Util
+    # `ERB::Util.html_escape_once(s)` escapes HTML without double-escaping
+    # an already-escaped entity. ActionView adds it on top of stdlib ERB.
+    def self.html_escape_once: (untyped) -> String
+  end
 end

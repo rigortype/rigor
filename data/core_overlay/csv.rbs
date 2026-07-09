@@ -1,0 +1,28 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- CSV::MalformedCSVError.new(message, line_number) ---
+#
+# The pinned `rbs` gem's `csv.rbs` never declares `MalformedCSVError`'s own
+# constructor, so it falls back to the inherited `StandardError#initialize`
+# (arity 0..1). But the `csv` gem's real, documented constructor takes two
+# arguments — the message and the 1-based line number:
+#
+#   raise CSV::MalformedCSVError.new("Unquoted fields...", line)
+#
+# Without the two-arg form a raise like GitLab's
+# `import_csv/base_service.rb` false-fires `call.wrong-arity`
+# ("expected 0..1, got 2"). The line number is optional here so the
+# inherited single-arg form still type-checks.
+
+# `CSV` is a CLASS in Ruby / RBS (a `module CSV` wrapper collides with upstream
+# once the `csv` stdlib is in scope). It must be declared EXPLICITLY here — the
+# overlay loads unconditionally, but `csv` is a stdlib library loaded only on
+# demand, so a bare `class CSV::MalformedCSVError` would make RBS *synthesize*
+# the `CSV` parent namespace (ADR-5) in every env that does not load `csv`,
+# polluting `synthesized_namespaces`. Declaring `class CSV` reopens it cleanly
+# when `csv` is loaded and declares it plainly when it is not.
+class CSV
+  class MalformedCSVError
+    def initialize: (String message, ?Integer line_number) -> void
+  end
+end

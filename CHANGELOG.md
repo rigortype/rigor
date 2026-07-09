@@ -21,7 +21,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
-- **[rigor-actionpack]** `unknown-permit-key` no longer fires on a virtual (non-column) attribute in strong-parameters.
+- **[rigor-activesupport-core-ext]** More ActiveSupport core extensions are covered, so calls on them no longer read as `undefined-method`: `String#upcase_first` / `#remove` / `#titlecase` / `#dasherize`, `Object#in?`, `Date`/`Time#advance` / `#all_day`, `Date#to_time(form)`, and `ERB::Util.html_escape_once`. Surfaced onboarding GitLab (real String columns now typed by rigor-activerecord get these ActiveSupport methods called on them).
+- **[core RBS overlay]** Two stdlib signatures the pinned `rbs` gem omits are supplied so real calls stop false-firing: `Psych.parse` / `.parse_stream` (`= YAML.parse`, a real method missing from `psych.rbs`) no longer reads as `undefined-method`, and `CSV::MalformedCSVError.new(message, line_number)` (the gem's documented two-arg constructor) no longer reads as `wrong-arity`.
   - Permitting a non-column is ordinary Rails — a Devise virtual attribute (`password`, `remember_me`, `otp_attempt`), a state-machine `*_event`, an `attr_accessor` setter. The check is now a typo detector: it fires only when the permit key is a near-miss edit-distance match of a real column (`emial`→`email`), never on a legitimate virtual attribute nothing like any column.
 - **[rigor-activerecord]** A nested / joined-table condition (`Model.where(assoc: { ... })`) no longer reads as an unknown column — the Hash value marks a join condition whose key names an association or joined table, not a column on the receiver.
 - **[rigor-rails-routes]** Two route-helper name-composition gaps that fired false `unknown-helper` on working code are now resolved, matching Rails' own naming.

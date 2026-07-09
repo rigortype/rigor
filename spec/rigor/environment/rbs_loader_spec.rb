@@ -241,6 +241,28 @@ RSpec.describe Rigor::Environment::RbsLoader do
         expect(return_types).to all(eq("::Pathname"))
       end
     end
+
+    # `Psych.parse` (= `YAML.parse`) and the two-arg `CSV::MalformedCSVError.new(message, line)` are real
+    # stdlib API the pinned `rbs` gem omits; the overlay restores them so GitLab's `YAML.parse(...)` and
+    # `raise CSV::MalformedCSVError.new(msg, line)` don't false-fire undefined-method / wrong-arity. See
+    # data/core_overlay/psych.rbs + csv.rbs.
+    context "with the psych / csv stdlib libraries loaded" do
+      let(:stdlib_loader) { described_class.new(libraries: %w[psych csv]) }
+
+      it "resolves the singleton `Psych.parse` added by the overlay" do
+        method = stdlib_loader.singleton_definition("Psych")&.methods&.[](:parse)
+        expect(method).not_to be_nil, "expected overlay to declare Psych.parse"
+        expect(method.method_types).not_to be_empty
+      end
+
+      it "resolves the two-arg `CSV::MalformedCSVError#initialize` added by the overlay" do
+        method = stdlib_loader.instance_method(class_name: "CSV::MalformedCSVError", method_name: :initialize)
+        expect(method).not_to be_nil, "expected overlay to declare CSV::MalformedCSVError#initialize"
+        # A `(String, ?Integer)` overload — at least one positional beyond the inherited single-arg form.
+        positionals = method.method_types.flat_map { |mt| mt.type.required_positionals + mt.type.optional_positionals }
+        expect(positionals.size).to be >= 2
+      end
+    end
   end
 
   describe "#instance_definition" do

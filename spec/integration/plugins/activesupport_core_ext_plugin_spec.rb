@@ -40,4 +40,20 @@ RSpec.describe "plugins/rigor-activesupport-core-ext" do
     undefined = result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }
     expect(undefined).to be_empty
   end
+
+  it "declares the GitLab-surfaced String / Object / Date / ERB extensions in its RBS bundle" do
+    # `upcase_first` / `remove` / `in?` fired `undefined-method` on GitLab once AR typed real String
+    # columns; `titlecase` / `dasherize` / `advance` / `all_day` / `Date#to_time(form)` /
+    # `ERB::Util.html_escape_once` are the activesupport-core-ext gaps the survey adjudicated. The bundle
+    # is validated against `rbs` by the `check-plugins` gate; this locks the specific additions.
+    rbs = File.read(
+      File.expand_path("../../../plugins/rigor-activesupport-core-ext/sig/active_support/core_ext.rbs", __dir__)
+    )
+    %w[upcase_first remove titlecase dasherize advance all_day].each do |method|
+      expect(rbs).to match(/def #{method}:/), "expected RBS to declare `#{method}`"
+    end
+    expect(rbs).to include("def in?:")
+    expect(rbs).to match(/def to_time: \(\?Symbol form\) -> Time\b/)
+    expect(rbs).to include("def self.html_escape_once:")
+  end
 end

@@ -1,0 +1,22 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Psych.parse / Psych.parse_stream ---
+#
+# The pinned `rbs` gem's `psych.rbs` declares `Psych.load` / `load_file` /
+# `safe_load` / `unsafe_load*` but omits `Psych.parse` — a real, documented
+# stdlib method (`YAML.parse` is the same method, `YAML` being an alias of
+# `Psych`). It parses one YAML document into a `Psych::Nodes::Document` AST
+# (used for structure-preserving inspection) and raises on a syntax error.
+#
+#   YAML.parse(File.read("config.yml"))   # => Psych::Nodes::Document
+#
+# Without the declaration a call like GitLab's
+# `release_highlights/validator.rb` `YAML.parse(...)` false-fires
+# `call.undefined-method`. The return is left `untyped` — the node AST is
+# rarely consumed with per-method precision, and depending on
+# `Psych::Nodes::Document` being present in the pinned RBS would be brittle.
+
+module Psych
+  def self.parse: (String yaml, ?filename: untyped) -> untyped
+  def self.parse_stream: (String yaml, ?filename: untyped) -> untyped
+end

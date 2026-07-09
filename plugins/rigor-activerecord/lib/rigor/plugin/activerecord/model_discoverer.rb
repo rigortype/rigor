@@ -33,11 +33,24 @@ module Rigor
         # @param io_boundary [Rigor::Plugin::IoBoundary]
         # @param search_paths [Array<String>] absolute or project-relative paths.
         # @param base_classes [Array<String>] superclass names that identify a class as an AR model.
+        # Declaration macros whose column's runtime value is a rich object, not the SQL scalar. Their column
+        # must NOT be narrowed to the schema type (see {ModelIndex.build}'s type-override remap).
+        TYPE_OVERRIDE_METHODS = %i[serialize mount_uploader mount_uploaders].freeze
+
         def initialize(io_boundary:, search_paths:, base_classes:)
           @io_boundary = io_boundary
           @search_paths = search_paths
           @base_classes = base_classes.to_set
+          # Global set of column names whose declared runtime type overrides the schema scalar
+          # (`serialize` / `mount_uploader` / `attribute :x, CustomType`). Collected across every class AND
+          # concern module walked — a serialize inside a concern's `included do … end` is invisible to the
+          # per-model view (the discoverer doesn't follow `include`), so overrides are tracked globally by
+          # column name and applied wherever that column appears. Over-suppresses a same-named scalar
+          # column elsewhere (a precision cost, never a false positive).
+          @type_override_columns = Set.new
         end
+
+        attr_reader :type_override_columns
 
         # @return [Array<Hash>] rows of { class_name:, table_name_override:, sti_parent:, ... }
         def discover
@@ -141,6 +154,8 @@ module Rigor
           full_name = (lexical_path + [class_local_name]).join("::")
           superclass = constant_path_name(node.superclass) if node.superclass
 
+          collect_type_overrides(node.body)
+
           yield({
             class_name: full_name,
             superclass_name: superclass,
@@ -162,8 +177,54 @@ module Rigor
           module_local_name = constant_path_name(node.constant_path)
           return if module_local_name.nil?
 
+          # Concerns (`module DiffPositionableNote`) carry `serialize` / `mount_uploader` inside an
+          # `included do … end` block; collect their overrides even though the module itself is not a model.
+          collect_type_overrides(node.body)
+
           inner_path = lexical_path + [module_local_name]
           walk_for_classes(node.body, inner_path, &) if node.body
+        end
+
+        # Records the column name of every `serialize :col` / `mount_uploader(s) :col` / `attribute :col,
+        # CustomType` in `body` (descending into `with_options` and concern `included do` blocks) into the
+        # global {#type_override_columns} set. `attribute :col, :symbol_type` (a built-in scalar type) is
+        # NOT an override — only a custom type CONSTANT is.
+        def collect_type_overrides(body)
+          type_override_declaration_calls(body).each do |node|
+            next if node.receiver
+
+            column = Rigor::Source::Literals.symbol_name(node.arguments&.arguments&.first)
+            next if column.nil?
+
+            if TYPE_OVERRIDE_METHODS.include?(node.name)
+              @type_override_columns << column
+            elsif node.name == :attribute && custom_type_attribute?(node)
+              @type_override_columns << column
+            end
+          end
+        end
+
+        # `declaration_calls` variant that also descends into a concern's `included do … end` block (the
+        # ActiveSupport::Concern idiom where models' shared `serialize` declarations live).
+        def type_override_declaration_calls(body)
+          return [] if body.nil?
+
+          body.compact_child_nodes.flat_map do |node|
+            next [] unless node.is_a?(Prism::CallNode)
+
+            if %i[with_options included].include?(node.name) && node.block.is_a?(Prism::BlockNode)
+              type_override_declaration_calls(node.block.body)
+            else
+              [node]
+            end
+          end
+        end
+
+        # True when an `attribute :col, <type>` call's type argument is a custom type CLASS (a constant),
+        # whose runtime value is a rich object — not a built-in `:symbol` type, which stays a scalar.
+        def custom_type_attribute?(node)
+          type_arg = node.arguments&.arguments&.[](1)
+          type_arg.is_a?(Prism::ConstantReadNode) || type_arg.is_a?(Prism::ConstantPathNode)
         end
 
         # Renders a constant-path node (`Admin::User`, `::ApplicationRecord`) as a String. Returns nil for

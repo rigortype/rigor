@@ -90,7 +90,7 @@ module Rigor
           # than firing a false `unknown-column` against every key.
           return push_recognised(node, entry, keyword_pairs.map { |p| p[:key] }) if entry.column_names.empty?
 
-          unknown = keyword_pairs.reject { |pair| valid_query_key?(entry, pair[:key]) }
+          unknown = keyword_pairs.reject { |pair| nested_condition?(pair[:value]) || valid_query_key?(entry, pair[:key]) }
           if unknown.empty?
             keyword_pairs.each { |pair| validate_enum_value(node, entry, pair) }
             push_recognised(node, entry, keyword_pairs.map { |p| p[:key] })
@@ -127,6 +127,15 @@ module Rigor
 
           assoc = entry.association(key)
           assoc && assoc[:kind] == :singular
+        end
+
+        # A keyword pair with a Hash value is a nested / joined-table condition (`Approval.where(approvals:
+        # { user_id: 1 })`, `where(users: { name: 'x' })`), where the key names an association or a joined
+        # table, not a column on the receiver. Rails resolves it through the join, so it must not be checked
+        # against the receiver's own columns. (An Array value — `where(status: [:a, :b])` — is an IN query on
+        # a real column, not nested, so only a Hash is skipped.)
+        def nested_condition?(value_node)
+          value_node.is_a?(Prism::HashNode) || value_node.is_a?(Prism::KeywordHashNode)
         end
 
         # When the column is an enum-bearing column AND the passed value is a Symbol literal, the value

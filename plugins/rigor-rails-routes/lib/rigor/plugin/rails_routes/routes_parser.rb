@@ -808,6 +808,12 @@ module Rigor
           # String key in the trailing keyword/options hash (its value is the `controller#action`). Without
           # this, the arity check underestimates because the placeholder count comes from a nil path.
           path = string_argument(node, 0) || hashrocket_path_key(node)
+          # `get :activity` inside a `scope(as: :user)` — NOT a resources / member / collection block (that
+          # shape returned early above), so the symbol is both the path segment (`/activity`) and the action
+          # name. Rails composes `<scope_as>_activity_path`. Fall the symbol back into the path so the
+          # name-and-arity derivation below picks it up; without it the route registered nothing and every
+          # `user_activity_path` call read as `unknown-helper`.
+          path ||= symbol_action_path(node)
           as_name = keyword_symbol(node, :as)
           return if as_name.nil? && path.nil?
 
@@ -842,6 +848,14 @@ module Rigor
               http_method: node.name, action: :custom
             )
           end
+        end
+
+        # `/activity` for a bare `get :activity` first-arg symbol (used as both path and action name), else
+        # nil. Only reached outside a resources / member / collection block — the symbol-shorthand there is
+        # already handled as a member/collection action upstream.
+        def symbol_action_path(node)
+          symbol = symbol_argument(node, 0)
+          symbol && "/#{symbol}"
         end
 
         # Builds the helper name for an explicit `get` / `post` / `match` route. Rails uses two distinct
@@ -879,12 +893,24 @@ module Rigor
 
           first_arg = node.arguments&.arguments&.first
           return true if first_arg.is_a?(Prism::SymbolNode)
+          return false unless first_arg.is_a?(Prism::StringNode)
 
-          # A plain action-name string with no `/` or `:` — treat it as if it were a symbol (`get 'report'`
-          # == `get :report` inside member/collection block).
-          first_arg.is_a?(Prism::StringNode) &&
-            !first_arg.unescaped.include?("/") &&
-            !first_arg.unescaped.include?(":")
+          path = first_arg.unescaped
+          # A dynamic segment (`get 'foo/:id'`) is a real path, not a plain action name — leave it to the
+          # generic explicit-route handler.
+          return false if path.include?(":")
+
+          # A bare `get '/'` (or `''`) inside a `collection do` block is the collection root, not an action
+          # shorthand — Rails names it after the enclosing resource, not `<empty>_<plural>_path`. An empty
+          # normalized action name means "not a shorthand"; fall through to the generic handler.
+          return false if path.delete_prefix("/").tr("/", "_").empty?
+
+          # A single-segment string is an action name in any resource context (`get 'report'` == `get
+          # :report`). A MULTI-segment static path (`get 'granular/new'`) is an action too, but only inside
+          # an explicit `member do` / `collection do` block, where Rails' `Mapper.normalize_name` maps the
+          # slashes to underscores (`granular_new_<scope>_<plural>_path`). Outside such a block (a bare
+          # `resources` scope) a multi-segment path is a nested custom route, so keep the generic handler.
+          !path.include?("/") || !context.innermost_action_block.nil?
         end
 
         # Generates the member / collection action helper.
@@ -893,8 +919,10 @@ module Rigor
         # Collection: `<action>_<plural_helper_prefix>path`,
         #   arity = parent_segment_count - 1 (no `:id` segment; the collection URL is /<resource>/<action>).
         def register_member_collection_action(node, context)
+          # A multi-segment string action (`get 'granular/new'` in a `collection do` block) is named by
+          # Rails via `normalize_name` — leading slash stripped, remaining slashes → underscores.
           action_name = symbol_argument(node, 0)&.to_s ||
-                        string_argument(node, 0).to_s
+                        string_argument(node, 0).to_s.delete_prefix("/").tr("/", "_")
           frame = context.innermost_action_block
           # No `member do` / `collection do` wrapper but we're inside a resources block — Rails defaults a
           # bare `<verb> :symbol` inside resources to a MEMBER action (e.g. `get :preview` →

@@ -13,6 +13,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[rigor-rails-routes]** Two route-helper name-composition gaps that fired false `unknown-helper` on working code are now resolved, matching Rails' own naming.
+  - A multi-segment string action inside a `member do` / `collection do` block (`collection { get 'granular/new' }`) is now named the way Rails' `Mapper.normalize_name` does — slashes become underscores and the collection ordering applies (`granular_new_<scope>_<plural>_path`) — instead of falling through to the generic (mis-ordered, singularised) name.
+  - A bare symbol action in a named scope (`scope(as: :user) { get :activity }`) now registers `<scope_as>_activity_path`; previously a symbol first-arg with no `:as` outside a resources / member / collection block registered no helper at all, so every such call read as `unknown-helper`. Surfaced onboarding GitLab (`schema_format = :sql`, `config/routes/*`).
 - **[cache]** Persistent cache entries are now rebuilt after a Rigor upgrade, stale generations are reclaimed more aggressively, and a broken cache root degrades to memory-only instead of raising.
   - The cache root marker now folds in `Rigor::VERSION`, so Marshal payloads written by an older release are never reused after an upgrade — the first writable run after upgrading rebuilds the cache.
   - A read-only store (LSP / editor mode) now checks that marker itself before trusting a disk hit, instead of reading through it unconditionally; a stale or missing marker there is treated as an empty cache until a writable run repairs it, closing the one path where an ABI-stale payload could still be unmarshalled after an upgrade.

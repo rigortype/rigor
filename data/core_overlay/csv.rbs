@@ -14,8 +14,15 @@
 # ("expected 0..1, got 2"). The line number is optional here so the
 # inherited single-arg form still type-checks.
 
-# Reopen the flat `CSV::MalformedCSVError` path (upstream declares `CSV` as a
-# class, so a `module CSV` wrapper would conflict); no superclass is restated.
-class CSV::MalformedCSVError
-  def initialize: (String message, ?Integer line_number) -> void
+# `CSV` is a CLASS in Ruby / RBS (a `module CSV` wrapper collides with upstream
+# once the `csv` stdlib is in scope). It must be declared EXPLICITLY here — the
+# overlay loads unconditionally, but `csv` is a stdlib library loaded only on
+# demand, so a bare `class CSV::MalformedCSVError` would make RBS *synthesize*
+# the `CSV` parent namespace (ADR-5) in every env that does not load `csv`,
+# polluting `synthesized_namespaces`. Declaring `class CSV` reopens it cleanly
+# when `csv` is loaded and declares it plainly when it is not.
+class CSV
+  class MalformedCSVError
+    def initialize: (String message, ?Integer line_number) -> void
+  end
 end

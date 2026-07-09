@@ -1,0 +1,21 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- CSV::MalformedCSVError.new(message, line_number) ---
+#
+# The pinned `rbs` gem's `csv.rbs` never declares `MalformedCSVError`'s own
+# constructor, so it falls back to the inherited `StandardError#initialize`
+# (arity 0..1). But the `csv` gem's real, documented constructor takes two
+# arguments — the message and the 1-based line number:
+#
+#   raise CSV::MalformedCSVError.new("Unquoted fields...", line)
+#
+# Without the two-arg form a raise like GitLab's
+# `import_csv/base_service.rb` false-fires `call.wrong-arity`
+# ("expected 0..1, got 2"). The line number is optional here so the
+# inherited single-arg form still type-checks.
+
+# Reopen the flat `CSV::MalformedCSVError` path (upstream declares `CSV` as a
+# class, so a `module CSV` wrapper would conflict); no superclass is restated.
+class CSV::MalformedCSVError
+  def initialize: (String message, ?Integer line_number) -> void
+end

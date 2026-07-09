@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[rigor-actionpack]** The strong-parameters fluent chain now stays typed, so `coverage --protection` counts the chained sites as protected.
+  - `params` typed to `ActionController::Parameters`, but `params.require(:user)` / `.permit(:name)` returned `Dynamic` at the first hop (the class ships no bundled RBS), leaking every downstream site (`.permit`, `.to_h`, `.each`). `require` / `permit` / `permit!` on a `Parameters` receiver now re-type to the same lenient nominal, keeping the chain a concrete receiver end-to-end. Precision-additive and FP-safe — the value stays engine-lenient (no `undefined-method`), and this types the container, never a caller's argument. Surfaced onboarding GitLab (one controller's protected sites went 2 → 9).
+
 ### Fixed
 
 - **[rigor-rails-routes]** Two route-helper name-composition gaps that fired false `unknown-helper` on working code are now resolved, matching Rails' own naming.

@@ -182,6 +182,27 @@ module Rigor
         Rigor::Type::Combinator.nominal_of(class_name)
       end
 
+      # Phase 5b (2026-07-10) — keep the strong-parameters fluent chain typed. `params` types to
+      # `ActionController::Parameters` (above), but the chained `params.require(:user).permit(:name)` /
+      # `params.permit(...)` calls returned `Dynamic` at the first hop (Parameters ships no bundled RBS,
+      # so a call on it resolves lenient-to-Dynamic), leaking every downstream site (`.permit`, `.to_h`,
+      # `.each`) to unprotected. These three methods return another `Parameters`, so gate on a
+      # `Parameters` receiver and re-type the result as the same lenient nominal — the chain stays a
+      # concrete receiver end-to-end and `coverage --protection` counts the sites as protected.
+      #
+      # `require` may return a scalar for a flat key at runtime (`params.require(:id) → String`), but
+      # typing it as the RBS-less `Parameters` is FP-safe by the same argument as the readers: every
+      # method on a Parameters value stays engine-lenient (no `undefined-method`), and this types the
+      # container only, never a caller's argument (ADR-5). The GitLab strong-params survey (108 leaked
+      # `.permit` sites) is the demand.
+      STRONG_PARAMS_CHAIN_METHODS = %i[require permit permit!].freeze
+
+      dynamic_return receivers: [REQUEST_CONTEXT_READER_TYPES[:params]], methods: STRONG_PARAMS_CHAIN_METHODS do |call_node, _scope|
+        next nil unless call_node.is_a?(Prism::CallNode)
+
+        Rigor::Type::Combinator.nominal_of(REQUEST_CONTEXT_READER_TYPES[:params])
+      end
+
       private
 
       # True when the current `self` is a controller — the enclosing class is one the discoverer

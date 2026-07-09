@@ -193,6 +193,43 @@ RSpec.describe "plugins/rigor-actionpack" do
         expect(dump.message).not_to include("ActionController::Parameters")
       end
     end
+
+    it "keeps `require` / `permit` chained off `params` typed as Parameters (Phase 5b)" do
+      # Pre-fix `params.require(:user)` returned Dynamic (Parameters ships no RBS), leaking the chained
+      # `.permit` and every downstream site to unprotected. The chain now stays a concrete Parameters
+      # receiver end-to-end.
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(params.require(:user))
+            Rigor.dump_type(params.require(:user).permit(:name))
+            Rigor.dump_type(params.permit(:q))
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dumps = result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+        expect(dumps.size).to eq(3)
+        expect(dumps).to all(include("ActionController::Parameters"))
+      end
+    end
+
+    it "does not re-type `require` / `permit` on a non-Parameters receiver" do
+      # The receiver gate is `ActionController::Parameters` — a bare `require 'x'` (Kernel) or a `permit`
+      # on some other object must not become Parameters.
+      source = <<~RUBY
+        class C
+          def create
+            Rigor.dump_type(require("set"))
+          end
+        end
+      RUBY
+      with_demo(source) do |result|
+        dump = result.diagnostics.find { |d| d.rule == "dump.type" }
+        expect(dump).not_to be_nil
+        expect(dump.message).not_to include("ActionController::Parameters")
+      end
+    end
   end
 
   describe "helper-call error diagnostics (canonically delegated to rigor-rails-routes)" do

@@ -8,6 +8,7 @@ require_relative "environment/reflection"
 require_relative "environment/reporters"
 require_relative "environment/hkt_registry_holder"
 require_relative "environment/constant_type_cache_holder"
+require_relative "environment/missing_gem_constant_index"
 require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/rbs_collection_discovery"
@@ -84,7 +85,7 @@ module Rigor
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil,
                    source_rbs_synthesis_reporter: nil,
                    synthetic_method_index: nil, project_patched_methods: nil,
-                   hkt_registry: nil)
+                   hkt_registry: nil, missing_rbs_gems: [], missing_rbs_bundle_path: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
@@ -109,6 +110,12 @@ module Rigor
       @hkt_registry_base = hkt_registry || Inference::HktRegistry::EMPTY
       @hkt_registry_holder = HktRegistryHolder.new
       @constant_type_cache = ConstantTypeCacheHolder.new
+      # ADR-82 WD9 — `[gem_name, version]` pairs for the locked gems with no resolvable RBS. The
+      # root-constant ownership index over them is built lazily (first unresolved constant read) so runs
+      # whose constants all resolve never pay the entry-file scan.
+      @missing_rbs_gems = missing_rbs_gems.freeze
+      @missing_rbs_bundle_path = missing_rbs_bundle_path
+      @missing_rbs_gem_constants_holder = HktRegistryHolder.new
       @name_scope = build_name_scope
       freeze
     end
@@ -131,6 +138,21 @@ module Rigor
           reporter: rbs_extended_reporter
         )
       end
+    end
+
+    # ADR-82 WD9 — the gem name owning `root_constant_name`, when that gem is locked in the project's
+    # Gemfile.lock, ships no resolvable RBS, and its entry file declares the constant at top level. Nil for
+    # everything else — the caller then keeps the generic provenance cause. The index is built once, lazily,
+    # from RubyGems metadata + a Prism parse of each gem's entry file; no gem code runs (see
+    # {MissingGemConstantIndex}). Under the fork pool a worker that never meets an unresolved constant never
+    # builds it.
+    def missing_rbs_gem_owner(root_constant_name)
+      return nil if @missing_rbs_gems.empty?
+
+      index = @missing_rbs_gem_constants_holder.fetch do
+        MissingGemConstantIndex.build(@missing_rbs_gems, bundle_path: @missing_rbs_bundle_path)
+      end
+      index[root_constant_name.to_s]
     end
 
     # Backwards-compatible reporter accessors — every existing consumer (rbs_extended, method_dispatcher)
@@ -220,6 +242,12 @@ module Rigor
           auto_detect: bundler_auto_detect,
           locked_gems: locked.empty? ? nil : locked
         ).map(&:to_s)
+        # ADR-82 WD9 — the resolved bundle root, so the missing-gem constant index reads each RBS-less gem's
+        # entry file from the TARGET's bundle (not rigor's own — see `MissingGemConstantIndex`). Resolved
+        # once here; passed through to the lazy index build.
+        bundle_root = BundleSigDiscovery.resolve_bundle_path(
+          bundle_path: bundler_bundle_path, project_root: root, auto_detect: bundler_auto_detect
+        )&.to_s
         # O4 Layer 3 slice 2 — when `rbs collection install` has been run for the target project, parse the
         # resulting `rbs_collection.lock.yaml` and feed each gem's `<collection_path>/<name>/<version>/`
         # directory into `signature_paths:`. Stdlib-typed entries are skipped (already covered by
@@ -248,10 +276,9 @@ module Rigor
         # diagnostic. Appended last so any RBS the project already supplies wins, and skipped for a gem whose
         # opt-in plugin twin is loaded (no duplicate declaration). The paths ride in
         # `loader_signature_paths`, so the env cache descriptor digests them for free.
-        overlay_paths = gem_overlay_paths(
-          locked: locked, default_libraries: merged_libraries,
-          bundle_sig_paths: gem_sig_paths, rbs_collection_paths: collection_paths,
-          plugin_registry: plugin_registry
+        missing_gems, overlay_paths = missing_gems_and_overlay_paths(
+          locked: locked, default_libraries: merged_libraries, bundle_sig_paths: gem_sig_paths,
+          rbs_collection_paths: collection_paths, plugin_registry: plugin_registry
         )
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths +
                                  collection_paths + overlay_paths
@@ -286,7 +313,9 @@ module Rigor
           source_rbs_synthesis_reporter: source_rbs_synthesis_reporter,
           synthetic_method_index: synthetic_method_index,
           project_patched_methods: project_patched_methods,
-          hkt_registry: Builtins::HktBuiltins.registry
+          hkt_registry: Builtins::HktBuiltins.registry,
+          missing_rbs_gems: missing_gems,
+          missing_rbs_bundle_path: bundle_root
         )
       end
       # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists
@@ -298,22 +327,29 @@ module Rigor
         sig.directory? ? [sig] : []
       end
 
-      # ADR-72 — resolve the bundled RBS overlay directories to load for this project. A gem is eligible when
-      # it is locked in the Gemfile.lock, classified `:missing` by {RbsCoverageReport} (no RBS through
-      # default-library / vendored / bundle-`sig/` / rbs-collection), and its conflicting opt-in plugin (if
-      # any) is not loaded. Returns `[Pathname]`, deterministically ordered, or `[]` when no lockfile / no
-      # eligible gem.
-      def gem_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
-                            rbs_collection_paths:, plugin_registry:)
-        return [] if locked.empty?
+      # The `:missing` classification (locked gems with no RBS through any resolution path), computed once
+      # and consumed twice: as `[gem_name, version]` pairs for the ADR-82 WD9 constant-ownership index, and
+      # as the eligible-gem set for the ADR-72 overlay resolution. Returns `[pairs, overlay_paths]`.
+      def missing_gems_and_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
+                                         rbs_collection_paths:, plugin_registry:)
+        return [[], []] if locked.empty?
 
-        missing = RbsCoverageReport.classify(
+        rows = RbsCoverageReport.classify(
           locked_gems: locked, default_libraries: default_libraries,
           bundle_sig_paths: bundle_sig_paths, rbs_collection_paths: rbs_collection_paths
-        ).select { |row| row.source == :missing }.map(&:gem_name)
+        ).select { |row| row.source == :missing }
+        overlays = gem_overlay_paths(missing_gem_names: rows.map(&:gem_name), plugin_registry: plugin_registry)
+        [rows.map { |row| [row.gem_name, row.version] }, overlays]
+      end
+
+      # ADR-72 — resolve the bundled RBS overlay directories to load for this project. A gem is eligible when
+      # it is classified `:missing` (see {missing_rbs_gem_rows}) and its conflicting opt-in plugin (if any)
+      # is not loaded. Returns `[Pathname]`, deterministically ordered, or `[]` when no eligible gem.
+      def gem_overlay_paths(missing_gem_names:, plugin_registry:)
+        return [] if missing_gem_names.empty?
 
         loaded_ids = plugin_registry ? plugin_registry.ids.to_set : Set.new
-        eligible = missing.reject do |gem_name|
+        eligible = missing_gem_names.reject do |gem_name|
           plugin_id = GEM_OVERLAY_PLUGIN_IDS[gem_name]
           plugin_id && loaded_ids.include?(plugin_id)
         end.sort

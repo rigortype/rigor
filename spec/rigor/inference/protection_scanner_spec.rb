@@ -13,6 +13,32 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     described_class.new(scope: Rigor::Scope.empty).scan(root)
   end
 
+  # ADR-82 WD9 — an unresolved constant owned by a locked, RBS-less gem labels its chain `add_rbs`-tractable.
+  it "routes a chain rooted at an RBS-less locked gem's constant to `external_gem_without_rbs`" do
+    allow(Rigor::Environment::MissingGemConstantIndex).to receive(:build)
+      .and_return({ "Faraday" => "faraday" })
+    environment = Rigor::Environment.new(missing_rbs_gems: [["faraday", "2.0.0"]])
+    root = Prism.parse("Faraday.new.get(\"/\")\n").value
+    result = described_class.new(scope: Rigor::Scope.empty(environment: environment)).scan(root)
+
+    chain = result.sites.select { |s| %w[new get].include?(s.method_name) }
+    expect(chain.size).to eq(2)
+    expect(chain.map(&:dynamic_origin)).to all(eq(:external_gem_without_rbs))
+  end
+
+  # A constant no gem owns (a typo, an unanalyzed project path) keeps the generic cause — the fail-open
+  # direction is a missing label, never a wrong one.
+  it "keeps the generic cause for an unresolved constant no locked gem declares" do
+    allow(Rigor::Environment::MissingGemConstantIndex).to receive(:build)
+      .and_return({ "Faraday" => "faraday" })
+    environment = Rigor::Environment.new(missing_rbs_gems: [["faraday", "2.0.0"]])
+    root = Prism.parse("Farraday.new\n").value
+    result = described_class.new(scope: Rigor::Scope.empty(environment: environment)).scan(root)
+
+    site = result.sites.find { |s| s.method_name == "new" }
+    expect(site.dynamic_origin).to eq(:unsupported_syntax)
+  end
+
   it "counts a call on a concrete receiver as protected" do
     result = scan(%("hello".upcase\n))
     expect(result.protected_count).to eq(1)

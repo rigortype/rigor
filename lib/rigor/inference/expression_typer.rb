@@ -385,14 +385,32 @@ module Rigor
       # `Inference::FallbackTracer` from inside `Rigor::CLI::Foo` resolves to
       # `Rigor::Inference::FallbackTracer`.
       def type_of_constant_read(node)
-        resolve_constant_name(node.name.to_s) || fallback_for(node, family: :prism)
+        resolve_constant_name(node.name.to_s) || unresolved_constant_fallback(node, node.name.to_s)
       end
 
       def type_of_constant_path(node)
         full_name = Source::ConstantPath.qualified_name_or_nil(node)
         return fallback_for(node, family: :prism) if full_name.nil?
 
-        resolve_constant_name(full_name) || fallback_for(node, family: :prism)
+        resolve_constant_name(full_name) || unresolved_constant_fallback(node, full_name)
+      end
+
+      # ADR-82 WD9 — an unresolved constant whose root name a locked, RBS-less gem declares carries the
+      # `external_gem_without_rbs` cause instead of the generic `unsupported_syntax`. The constant read is
+      # where the class name is last visible (a no-RBS gem's receiver never types Nominal, so the dispatch
+      # tiers that record this cause under ADR-10 / `pre_eval:` opt-ins can't see it); WD6 chain inheritance
+      # then carries the cause through `Faraday.new.get(...)`. Side-channel only — the type stays the same
+      # `Dynamic[top]`, and an unindexed constant (project typo, unanalyzed project path) keeps the generic
+      # cause: the fail-open direction is a missing label, never a wrong one.
+      def unresolved_constant_fallback(node, full_name)
+        root = full_name.delete_prefix("::").split("::").first
+        owner = root && scope.environment.missing_rbs_gem_owner(root)
+        return fallback_for(node, family: :prism) unless owner
+
+        inner = dynamic_top
+        record_fallback(node, family: :prism, inner_type: inner, origin: DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+        scope.record_dynamic_origin(node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+        inner
       end
 
       # Try the literal name first, then walk Ruby's lexical lookup by progressively prefixing the surrounding

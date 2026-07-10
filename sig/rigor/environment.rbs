@@ -29,6 +29,7 @@ module Rigor
     def rbs_module?: (String | Symbol name) -> bool
     def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
     def reflection: () -> untyped?
+    def missing_rbs_gem_owner: (String | Symbol root_constant_name) -> String?
 
     class ClassRegistry
       def self.default: () -> ClassRegistry

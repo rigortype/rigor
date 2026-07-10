@@ -59,12 +59,23 @@ plugins:
       routes_file: "config/routes.rb"   # default
       helper_paths: ["app"]             # default; dirs scanned for
                                         # project-defined *_path / *_url methods
+      grape_api_paths: ["lib/api", "app/api"]
+                                        # default; dirs scanned for Grape API classes
 ```
 
 `helper_paths` lets the plugin also register URL builders you
 define yourself (e.g. a private `def callback_url` under
 `app/controllers` or `app/lib`), so calls to them are not flagged
 as unknown helpers.
+
+`grape_api_paths` is where the plugin looks for Grape API classes.
+If you mount one, the `grape-path-helpers` gem generates helpers
+named after each route's path (`api_v4_groups_badges_path`) from
+grape's *runtime* route table, which no static parser can
+enumerate. The plugin reads your API's `prefix` and `version`
+declarations instead and treats the namespace they open as
+unknowable-but-valid, so those calls are never flagged. The `_url`
+form still is: `grape-path-helpers` defines only `_path` helpers.
 
 ## What it provides
 

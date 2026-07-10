@@ -848,6 +848,40 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "ADR-57 WD3 — cross-file module-singleton resolution" do
+    it "resolves a `class << self` call on a module constant declared in a sibling file" do # rubocop:disable RSpec/ExampleLength
+      Dir.mktmpdir("rigor-adr57-wd3-") do |tmpdir|
+        File.write(File.join(tmpdir, "feature.rb"), <<~RUBY)
+          module Feature
+            class << self
+              def label
+                "flag"
+              end
+            end
+          end
+        RUBY
+        File.write(File.join(tmpdir, "caller.rb"), <<~RUBY)
+          require "rigor/testing"
+          include Rigor::Testing
+
+          assert_type("singleton(Feature)", Feature)
+          assert_type(""flag"", Feature.label)
+        RUBY
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [tmpdir])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }
+
+          expect(mismatches).to(
+            be_empty,
+            "expected `Feature` to seed cross-file as `singleton(Feature)`; got: " \
+            "#{mismatches.map(&:message).inspect}"
+          )
+        end
+      end
+    end
+  end
+
   describe "ADR-34 slice 1 — call.unresolved-toplevel" do
     def write_main(dir, body)
       path = File.join(dir, "main.rb")

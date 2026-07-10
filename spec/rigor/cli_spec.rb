@@ -1328,6 +1328,18 @@ RSpec.describe Rigor::CLI do
       end
     end
 
+    it "renders every declared format and raises when FORMATS and the dispatch drift apart" do
+      require "rigor/cli/diagnostic_formats"
+      result = Rigor::Analysis::Result.new(diagnostics: [], stats: nil)
+
+      Rigor::CLI::DiagnosticFormats::FORMATS.each do |format|
+        expect(Rigor::CLI::DiagnosticFormats.render(result, format)).to be_a(String)
+      end
+      expect do
+        Rigor::CLI::DiagnosticFormats.render(result, "nope")
+      end.to raise_error(ArgumentError, /unsupported format/)
+    end
+
     it "emits a valid SARIF 2.1.0 document with the diagnostic as a result" do
       status, out, _err = run_format("sarif")
 

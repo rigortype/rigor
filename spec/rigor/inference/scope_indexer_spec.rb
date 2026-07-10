@@ -528,7 +528,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(discovered["App::Bar"]).to eq(Rigor::Type::Combinator.singleton_of("App::Bar"))
     end
 
-    it "does NOT register modules (only classes) to avoid module_function fall-through" do
+    it "registers modules on the same terms as classes (ADR-57 WD3)" do
       a = write("a.rb", <<~RUBY)
         module App
           module Helpers
@@ -538,8 +538,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         end
       RUBY
       discovered = described_class.discovered_classes_for_paths([a])
-      expect(discovered).not_to have_key("App::Helpers")
-      expect(discovered).not_to have_key("App")
+      expect(discovered["App"]).to eq(Rigor::Type::Combinator.singleton_of("App"))
+      expect(discovered["App::Helpers"]).to eq(Rigor::Type::Combinator.singleton_of("App::Helpers"))
     end
 
     it "registers classes nested inside modules" do

@@ -882,6 +882,76 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "union-arm predicate polarity narrowing" do
+    # An ActiveSupport-shaped signature: `present?` / `blank?` are declared on Object, and NilClass
+    # overrides them with the literal answers the narrowing reads.
+    def write_presence_signature(tmpdir)
+      FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+      File.write(File.join(tmpdir, "sig", "presence.rbs"), <<~RBS)
+        class Object
+          def present?: () -> bool
+          def blank?: () -> bool
+        end
+
+        class NilClass
+          def present?: () -> false
+          def blank?: () -> true
+        end
+      RBS
+    end
+
+    def run_with_signature(source)
+      Dir.mktmpdir("rigor-union-polarity-") do |tmpdir|
+        write_presence_signature(tmpdir)
+        File.write(File.join(tmpdir, "main.rb"), source)
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(tmpdir, "main.rb")],
+            "signature_paths" => [File.join(tmpdir, "sig")]
+          )
+          yield described_class.new(configuration: configuration, cache_store: nil).run
+        end
+      end
+    end
+
+    it "drops the nil arm on the truthy edge of a predicate declared `() -> false` for nil" do
+      run_with_signature(<<~RUBY) do |result|
+        def probe(raw)
+          login = raw.nil? ? nil : "x"
+          login.downcase if login.present?
+        end
+      RUBY
+        expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+      end
+    end
+
+    it "drops the nil arm on the falsey edge of a predicate declared `() -> true` for nil" do
+      run_with_signature(<<~RUBY) do |result|
+        def probe(raw)
+          login = raw.nil? ? nil : "x"
+          return if login.blank?
+
+          login.downcase
+        end
+      RUBY
+        expect(result.diagnostics.map(&:rule)).not_to include("call.possible-nil-receiver")
+      end
+    end
+
+    # `login&.blank?` yields `nil` (falsey) for a nil receiver rather than NilClass#blank?'s declared
+    # `true`, so the falsey edge admits nil and `login.downcase` really can raise.
+    it "keeps the nil arm through a safe-navigation predicate" do
+      run_with_signature(<<~RUBY) do |result|
+        def probe(raw)
+          login = raw.nil? ? nil : "x"
+          login.downcase unless login&.blank?
+        end
+      RUBY
+        expect(result.diagnostics.map(&:rule)).to include("call.possible-nil-receiver")
+      end
+    end
+  end
+
   describe "ADR-34 slice 1 — call.unresolved-toplevel" do
     def write_main(dir, body)
       path = File.join(dir, "main.rb")

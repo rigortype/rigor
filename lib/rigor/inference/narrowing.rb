@@ -873,6 +873,15 @@ module Rigor
             string_predicate_result = analyse_string_predicate(node, scope)
             return apply_safe_nav_non_nil(node, scope, string_predicate_result) if string_predicate_result
 
+            # A predicate whose RBS says it always returns `false` for one union arm cannot have
+            # been called on that arm when it answered truthily. `NilClass#present?: () -> false`
+            # (ActiveSupport) is the motivating case: `if login.present?` must narrow `String | nil`
+            # to `String`, and nothing else in the catalogue does it — `present?` is a gem method the
+            # engine must not hardcode, and `rigor:v1:predicate-if-true` facts never reach a union
+            # receiver.
+            polarity_result = analyse_union_predicate_polarity(node, scope)
+            return polarity_result if polarity_result
+
             # A safe-navigation call (`v&.foo`) whose result is truthy proves the receiver was
             # non-nil — `&.` returns `nil` when the receiver is nil, so a truthy outcome can
             # only come from a non-nil receiver. Narrow the receiver on the truthy edge even
@@ -2349,6 +2358,115 @@ module Rigor
               scope.with_ivar(receiver.name, narrow_nil(current)),
               scope.with_ivar(receiver.name, narrow_non_nil(current))
             ]
+          end
+        end
+
+        # The three value-pinned classes a union arm can name whose instances are the single
+        # value itself. Their finality is what makes the polarity rule below sound: no subclass
+        # can override the predicate, because there is no subclass.
+        POLARITY_ARM_CLASSES = { nil => "NilClass", true => "TrueClass", false => "FalseClass" }.freeze
+        private_constant :POLARITY_ARM_CLASSES
+
+        # Drops union arms a zero-argument predicate's own signature rules out on each edge.
+        #
+        # `if x.present?` with `x: String | nil` must see `String` in the body. Rigor could not:
+        # `present?` is an ActiveSupport method (so the engine must not join the hardcoded
+        # `nil?` / `empty?` catalogue with it), and `resolve_rbs_extended_method` hands a union
+        # receiver no `rigor:v1:predicate-if-true` facts, so annotating the RBS would not help
+        # either. But the answer is already written down: the bundled ActiveSupport signature
+        # declares `NilClass#present?: () -> false`, and a method that always returns `false` for
+        # `nil` cannot have answered truthily on a `nil` receiver.
+        #
+        # Soundness rests on the arm being a value-pinned `nil` / `true` / `false`. For an
+        # ordinary `Nominal[Foo]` arm the static type admits Foo's subclasses, any of which may
+        # override the predicate and return the other polarity; the three classes here have no
+        # subclasses, so the declared return is the runtime return.
+        #
+        # Safe navigation is excluded: `x&.blank?` yields `nil` (falsey) for a nil receiver
+        # rather than `NilClass#blank?`'s declared `true`, so the falsey edge would wrongly drop
+        # the nil arm. `analyse_safe_nav_receiver` below handles that shape's truthy edge.
+        #
+        # Returns `[truthy_scope, falsey_scope]`, or nil when no arm is ruled out, when an edge
+        # would be emptied, or when the receiver has no scope binding to narrow.
+        def analyse_union_predicate_polarity(node, scope)
+          return nil if node.safe_navigation? || !argument_free?(node)
+          return nil unless node.name.end_with?("?")
+
+          receiver_type = receiver_binding_type(node.receiver, scope)
+          return nil unless receiver_type.is_a?(Type::Union)
+
+          truthy, falsey = partition_arms_by_polarity(receiver_type.members, node.name, scope)
+          return nil if truthy.size == receiver_type.members.size && falsey.size == receiver_type.members.size
+          return nil if truthy.empty? || falsey.empty?
+
+          [
+            narrow_receiver_binding(node.receiver, scope, Type::Combinator.union(*truthy)),
+            narrow_receiver_binding(node.receiver, scope, Type::Combinator.union(*falsey))
+          ]
+        end
+
+        # Splits `members` into the arms that survive the truthy edge and those that survive the
+        # falsey edge. An arm whose polarity is unknown survives both.
+        def partition_arms_by_polarity(members, method_name, scope)
+          truthy = []
+          falsey = []
+          members.each do |arm|
+            case arm_predicate_polarity(arm, method_name, scope)
+            when :always_false then falsey << arm
+            when :always_true then truthy << arm
+            else
+              truthy << arm
+              falsey << arm
+            end
+          end
+          [truthy, falsey]
+        end
+
+        # `:always_false` / `:always_true` when every RBS overload of `method_name` on the arm's
+        # class returns that literal; nil for any other arm, signature, or lookup failure.
+        def arm_predicate_polarity(arm, method_name, scope)
+          returns = arm_predicate_return_types(arm, method_name, scope)
+          return nil if returns.nil? || returns.empty?
+          return :always_false if returns.all? { |type| literal_boolean?(type, false) }
+          return :always_true if returns.all? { |type| literal_boolean?(type, true) }
+
+          nil
+        end
+
+        # Declared return type of every RBS overload of `method_name` on the arm's class, or nil
+        # when the arm is not one of the three value-pinned classes or the lookup fails.
+        def arm_predicate_return_types(arm, method_name, scope)
+          return nil unless arm.is_a?(Type::Constant)
+
+          class_name = POLARITY_ARM_CLASSES[arm.value]
+          return nil if class_name.nil?
+
+          definition = Rigor::Reflection.instance_method_definition(class_name, method_name, scope: scope)
+          definition&.method_types&.map { |method_type| method_type.type.return_type }
+        rescue StandardError
+          nil
+        end
+
+        def literal_boolean?(rbs_type, value)
+          rbs_type.is_a?(RBS::Types::Literal) && rbs_type.literal == value
+        end
+
+        # The four receiver shapes with a scope binding the edges can rebind, mirroring
+        # `apply_self_fact`. A method chain or arbitrary expression has none, so it reads nil and
+        # the caller declines.
+        def receiver_binding_type(receiver, scope)
+          case receiver
+          when Prism::LocalVariableReadNode then scope.local(receiver.name)
+          when Prism::InstanceVariableReadNode then scope.ivar(receiver.name)
+          when Prism::SelfNode then scope.self_type
+          end
+        end
+
+        def narrow_receiver_binding(receiver, scope, narrowed)
+          case receiver
+          when Prism::LocalVariableReadNode then scope.with_local(receiver.name, narrowed)
+          when Prism::InstanceVariableReadNode then scope.with_ivar(receiver.name, narrowed)
+          when Prism::SelfNode then scope.with_self_type(narrowed)
           end
         end
 

@@ -110,8 +110,54 @@ Deliberately **out of scope**, recorded so they are not re-triaged:
 - **`extend self` registration into `singleton_def_nodes`.** F3 shows the instance-def consult
   already resolves these bodies; an explicit registration is precision polish.
 
+## Results (2026-07-10)
+
+**Protection.** GitLab `lib` (4,748 files, the scope that contains both `lib/feature.rb` and the
+`Gitlab::Utils` family), `coverage --protection --format json`, master vs. branch:
+
+| | protected | unprotected | total | ratio |
+|---|---:|---:|---:|---:|
+| before | 23,044 | 70,752 | 93,796 | 0.2457 |
+| after | 25,856 | 67,940 | 93,796 | **0.2757** |
+
+**+3.00 pp, +2,812 protected sites**, with an identical denominator (the denominator's equality is
+itself the check that the two runs scanned the same sites). For scale: the entire ADR-67 call-site
+parameter-inference lever measured +0.75 pp on Mastodon.
+
+The scope is `lib` rather than the survey's `app lib` because the P0/P1 slices that landed the same
+week (`structure.sql`, strong-params, AS core-ext) moved protection too, so the recorded 0.2836
+app+lib figure is no longer a valid "before". Both sides here were re-measured.
+
+**Diagnostics.** haml, kramdown, liquid, rgl, Mastodon `app/models`, and GitLab `app` are all
+byte-identical (`check --no-cache --no-baseline`). Two firings needed adjudication:
+
+- rigor's own `lib` (2 errors) — `CLI::DiagnosticFormats.render` is a `case/when` with no `else`, so
+  its now-inferred return is `String | nil` while both call sites gate on `.supports?` and call
+  `output.empty?`. The adopted type was right; the invariant was real but unencoded. Fixed at root by
+  raising on an unrecognised format. Self-check clean.
+- Redmine (+1 `possible nil receiver` warning, 72 → 73) — `Redmine::CodesetUtil.replace_invalid_utf8`
+  now resolves cross-file to its honest `String | nil`. The call site excludes the nil arm only
+  through an ActiveSupport `login.present?` guard.
+
+The Redmine firing's root cause is **independent of this change**:
+`Narrowing#resolve_rbs_extended_method` reads a method's `rigor:v1:predicate-if-true` facts only for
+a `Nominal` / `Singleton` receiver (`rbs_extended_class_name` returns nil for a `Union`), so a union
+receiver never receives predicate facts at all — and `Object#present?` carries no such annotation to
+begin with. Reproduced in six lines, and confirmed unfixed by adding the annotation. Any precision
+work that turns a `Dynamic` into `T | nil` under a `present?` guard surfaces it.
+
+Its own slice, with its own corpus gate, because a new narrowing rule carries a new false-positive
+envelope. The general form needs no annotation at all: on the truthy edge of a zero-arg, block-less
+predicate call over a union receiver, drop every arm whose RBS return type is literally `false`
+(`NilClass#present?: () -> false` already says so), and the mirror on the falsey edge
+(`NilClass#blank?: () -> true`). That also covers `blank?`, `presence`, and every future
+`-> false`-on-nil predicate for free.
+
 ## Cost
 
 `ADR-57`'s own gate-open cost was ~+12 % cold wall on `rigor check --no-cache lib`, from the
 intrinsic re-typing of newly-resolved callees. Seeding modules opens the same door for cross-file
-module-singleton calls, so `make bench-perf` is a gate, not a formality.
+module-singleton calls, so `make bench-perf` is a gate, not a formality. It passes: 28.52 M
+allocations against a 29.17 M ceiling (baseline 27.78 M), `lib` wall 8.3 s. Rigor's own `lib` is
+class-dominated, so the newly-resolved-callee population is small here; GitLab `lib`'s check wall was
+unchanged within noise.

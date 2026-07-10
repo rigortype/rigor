@@ -324,6 +324,13 @@ nil`; the nil arm is excluded at the call site only by an
 `ActiveSupport` `login.present?` guard that Rigor does not narrow
 through.
 
+**Payoff.** GitLab `lib` (the scope holding `lib/feature.rb` and the
+`Gitlab::Utils` family), `coverage --protection`, both sides re-measured
+against an identical 93,796-site denominator: protection 0.2457 → 0.2757,
+**+3.00 pp / +2,812 protected sites**. For scale, the whole ADR-67
+call-site parameter-inference lever measured +0.75 pp on Mastodon.
+`make bench-perf` passes (28.52 M allocations, ceiling 29.17 M).
+
 That guard is the one adjudicated **artifact class, and its root is not
 this change**: `Narrowing#resolve_rbs_extended_method` reads a method's
 `rigor:v1:predicate-if-true` facts only for a `Nominal` / `Singleton`

@@ -200,6 +200,19 @@ the "Add a type here" header, and the JSON carries the same totals as
 `tractability_summary`. Start with the `add_rbs` holes — they are the
 ones a type actually catches.
 
+> **`external_gem_without_rbs` needs your gems installed where Rigor
+> can read them.** To tell whether an unresolved constant belongs to
+> a gem, Rigor reads that gem's source — so it must find the gem on
+> disk. It looks in the project's Bundler install tree (a
+> `vendor/bundle`, or a path set with `bundler.bundle_path:`; see
+> [Configuration](03-configuration.md)). A project whose gems live in
+> the active Ruby's default gem home — the common `rbenv` / `mise`
+> case with no `--path` set — is invisible to the isolated analyzer by
+> design ([ADR-27](https://github.com/rigortype/rigor/blob/master/docs/adr/27-tool-distribution-model.md)):
+> point Rigor at it with `bundler.bundle_path:`. Until you do, these
+> holes keep the generic `engine_gap` cause instead of `add_rbs` —
+> the label is missing, never wrong.
+
 Provenance is precision-additive only: it never changes a type, fires
 no diagnostic, and never affects severity or the protection ratio.
 

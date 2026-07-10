@@ -1989,13 +1989,12 @@ module Rigor
       # reads for the bound logical path to the buffer's physical path so editor-mode pre-passes see the in-flight
       # bytes.
       #
-      # **Modules are intentionally excluded** from the project-wide seed: a `module M; module_function; def x; end;
-      # end` body, when surfaced as `singleton(M)` to the dispatcher, falls through to `Kernel#x` (or any Module
-      # ancestor method) when the project's per-file `discovered_methods` doesn't know `M.x` — leading to surprising
-      # types like `Kernel.select → Array[String]`. Until cross-file `discovered_methods` follows the same project-wide
-      # seed, registering modules here would introduce regressions in modules-with-module_function idioms that
-      # previously resolved to `Dynamic[Top]`. Class declarations are safe because per-file `discovered_methods` already
-      # tracks `def self.x` / `def x` instance and singleton methods consistently.
+      # Modules are registered on the same terms as classes, matching `record_declarations`' per-file behaviour (ADR-57
+      # WD3). An earlier revision excluded them, fearing an undiscovered `M.x` would fall through to `Kernel#x`; the
+      # exclusion was retired once measurement showed Kernel's private instance methods (`select`, `puts`, `load`, …)
+      # resolve to nothing on a `Singleton[M]` receiver, and that a project-side `def self.x` body wins over the lenient
+      # `Singleton[Object]` fallback anyway. The residual leak is `Class`-only (`M.new`, `M.superclass`), which mistypes
+      # only code that raises `NoMethodError` at runtime.
       #
       # @param paths [Array<String>] project file paths.
       # @param buffer [Rigor::Analysis::BufferBinding, nil]
@@ -2136,22 +2135,19 @@ module Rigor
         end
       end
 
-      # Class-only variant of `record_declarations` — descends into nested module bodies (so `module Foo; class Bar`
-      # registers `Foo::Bar`) but never registers the module itself in `accumulator`.
+      # Cross-file counterpart of `record_declarations` — registers every `class` / `module` declaration under its
+      # qualified name and descends into the body (so `module Foo; class Bar` registers both `Foo` and `Foo::Bar`).
       def collect_class_decls(node, qualified_prefix, accumulator)
         return unless node.is_a?(Prism::Node)
 
         case node
-        when Prism::ClassNode
+        when Prism::ClassNode, Prism::ModuleNode
           name = Source::ConstantPath.qualified_name(node.constant_path)
           if name
             full = (qualified_prefix + [name]).join("::")
             accumulator[full] = Type::Combinator.singleton_of(full)
             return collect_class_decls(node.body, qualified_prefix + [name], accumulator) if node.body
           end
-        when Prism::ModuleNode
-          name = Source::ConstantPath.qualified_name(node.constant_path)
-          return collect_class_decls(node.body, qualified_prefix + [name], accumulator) if name && node.body
         when Prism::ConstantWriteNode
           record_class_new_constant_decl(node, qualified_prefix, accumulator)
         end

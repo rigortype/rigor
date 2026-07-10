@@ -33,7 +33,9 @@ module Rigor
         FORMATS.include?(format)
       end
 
-      # Renders `result` in the named CI format. Callers gate on {.supports?} first; an unrecognised format returns nil.
+      # Renders `result` in the named CI format. Callers gate on {.supports?} first, so an unrecognised format means
+      # {FORMATS} and the dispatch below have drifted apart — raise rather than return nil, which every caller would
+      # then have to guard.
       def render(result, format)
         case format
         when "sarif" then Sarif.new(result).render
@@ -42,6 +44,7 @@ module Rigor
         when "checkstyle" then Checkstyle.new(result).render
         when "junit" then Junit.new(result).render
         when "teamcity" then Teamcity.new(result).render
+        else raise ArgumentError, "unsupported format: #{format}"
         end
       end
 

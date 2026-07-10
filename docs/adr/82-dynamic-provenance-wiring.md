@@ -279,11 +279,17 @@ that re-labels without improving attribution accuracy is not landed.
   (`<bundle>/ruby/*/gems/<name>-<version>/`, the `BundleSigDiscovery` layout),
   with `Gem::Specification` only a fallback for a no-bundle project (sound
   because a gem's top-level namespace constant is version-stable). Coverage
-  tracks the target's install layout: a `vendor/bundle` project (Docker/CI norm)
-  gets the full external-gem population; a global-gems project (mise/rbenv, both
-  survey corpora) gets only gems rigor itself bundles, until target-`GEM_PATH`
-  awareness lands (a follow-up shared with `BundleSigDiscovery`'s same
-  limitation). Measured (identical denominators): Mastodon `app/models` 47 and
+  tracks the target's install layout: a `vendor/bundle` project (auto-detected)
+  gets the full external-gem population; a default-gem-home project (rbenv/mise,
+  no `--path`) needs `bundler.bundle_path:` — the existing ADR-27 opt-in, not new
+  engine work: auto-detecting the target's gem home would run its toolchain
+  (ADR-27 forbids) or guess every version manager's layout. Confirmed
+  ([2026-07-11 install-boundary note](../notes/20260711-external-gem-install-boundary.md)):
+  installing Redmine's full bundle to `vendor/bundle` and re-running on unchanged
+  engine code yields **279** external-gem sites (`Rails`→railties, loofah, i18n),
+  all adjudicated correct — the survey apps' floor was that their gems were never
+  installed, not an engine gap. Measured (identical denominators): Mastodon
+  `app/models` 47 and
   GitLab `lib` 124 sites `unsupported_syntax` → `external_gem_without_rbs` (the
   shared-gem floor — `i18n`/`rack`/`activesupport`; sampled sites root at
   `I18n`, whose RBS exists in `gem_rbs_collection`, so `add_rbs` is genuinely

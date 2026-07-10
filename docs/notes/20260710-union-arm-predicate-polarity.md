@@ -1,8 +1,9 @@
 # Union-arm predicate polarity narrowing
 
 Design note, 2026-07-10. The FP-removal slice the [module-singleton seed](20260710-module-singleton-cross-file-seed.md)
-adjudication isolated, landed ahead of it per the front-load discipline (remove false positives
-before adding precision — ADR-58 / ADR-78 ordering).
+adjudication isolated and ADR-57 WD3 queued: the one firing that change added to the standing corpus
+was an ActiveSupport `present?` guard the engine could not narrow through, and its root lies
+elsewhere. This closes it.
 
 ## The gap
 
@@ -69,18 +70,21 @@ edge. A regression spec pins it.
 
 ## Gate
 
-`make verify`, `make bench-perf` (27.89 M allocations, ceiling 29.17 M), `make docs-check` clean.
-Corpus diff (`check --no-cache --no-baseline`):
+`make verify`, `make bench-perf` (28.55 M allocations, ceiling 29.17 M), `make docs-check` clean, and
+the `lib` self-check silent. Corpus diff (`check --no-cache --no-baseline`), against a master that
+already carries the module-singleton seed:
 
 | corpus | before | after | |
 |---|---:|---:|---|
 | haml / kramdown / liquid / rgl `lib` | 59 / 68 / 2 / 70 | identical | no ActiveSupport |
 | Mastodon `app/models` | 5 | 5 | |
-| Redmine `app`+`lib` | 72 | **69** | three false positives removed |
+| Redmine `app`+`lib` | 73 | **69** | four false positives removed |
 | GitLab `app` | 284 | **268** | sixteen false positives removed |
 
-**Zero new firings anywhere.** All nineteen removals were adjudicated, not assumed. Redmine and
-fourteen of GitLab's are the guarded shape the rule targets directly:
+**Zero new firings anywhere.** All twenty removals were adjudicated, not assumed. One of Redmine's is
+the ADR-57 WD3 firing this slice exists to close (`user.rb:559`, `login.downcase` under
+`if login.present?`). Redmine's other three and fourteen of GitLab's are the same guarded shape the
+rule targets directly:
 
 - `issue_import.rb:306` — `return if content.blank?` then `content.split(",")`
 - `query.rb:765` — `values.present? ? values.split('|') : ['']`

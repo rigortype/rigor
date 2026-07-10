@@ -337,12 +337,21 @@ this change**: `Narrowing#resolve_rbs_extended_method` reads a method's
 receiver, so a union receiver never receives predicate facts, and
 `Object#present?` carries no such annotation to begin with. Any
 precision work that turns a `Dynamic` into `T | nil` under a `present?`
-guard surfaces it. It is queued as its own FP-removal slice — the
-general form is to drop, on the truthy edge of a zero-arg predicate over
-a union receiver, every arm whose RBS return type is literally `false`
-(`NilClass#present?: () -> false` already says so), and its mirror on
-the falsey edge — with its own corpus gate, because a new narrowing rule
-carries its own false-positive envelope.
+guard surfaces it.
+
+**That slice landed immediately after, 2026-07-10**, in its own change
+with its own corpus gate — a new narrowing rule carries its own
+false-positive envelope. On the truthy edge of a zero-argument predicate
+over a union receiver, every arm whose RBS return type is literally
+`false` is dropped (`NilClass#present?: () -> false` already says so),
+and the mirror on the falsey edge. Soundness rests on the arm being a
+value-pinned `nil` / `true` / `false`, whose class has no subclass that
+could override the predicate; safe navigation is excluded, because
+`x&.blank?` yields `nil` for a nil receiver rather than the declared
+`true`. It removes the WD3 Redmine firing at its root plus three more
+Redmine and sixteen GitLab false positives, with zero new firings.
+Design note:
+[`20260710-union-arm-predicate-polarity.md`](../notes/20260710-union-arm-predicate-polarity.md).
 
 Left as future slices, unchanged by this one: the `Singleton[Object]`
 fallback receiver for modules (the `M.new` / `M.superclass` leak — it

@@ -1,0 +1,116 @@
+# Union-arm predicate polarity narrowing
+
+Design note, 2026-07-10. The FP-removal slice the [module-singleton seed](20260710-module-singleton-cross-file-seed.md)
+adjudication isolated and ADR-57 WD3 queued: the one firing that change added to the standing corpus
+was an ActiveSupport `present?` guard the engine could not narrow through, and its root lies
+elsewhere. This closes it.
+
+## The gap
+
+```ruby
+login = CodesetUtil.replace_invalid_utf8(raw)   # String | nil
+login.downcase if login.present?                # `possible nil receiver` — a false positive
+```
+
+`login.present?` excludes nil at runtime, and Rigor could not see it. Three separate mechanisms all
+miss:
+
+1. `present?` is an **ActiveSupport** method. The hardcoded predicate catalogue in `Narrowing`
+   (`nil?`, `empty?`, `respond_to?`, …) must not grow gem methods — the engine does not know which
+   gems a project loads.
+2. The `rigor:v1:predicate-if-true` RBS annotation exists for exactly this, but
+   `Narrowing#resolve_rbs_extended_method` reads facts only for a `Nominal` / `Singleton` receiver:
+   `rbs_extended_class_name` returns nil for a `Union`, so **a union receiver never receives
+   predicate facts at all**. Verified — annotating `Object#present?` changes nothing.
+3. The nilable receiver is precisely the case where the narrowing is needed.
+
+The reach is not one call site. Any precision work that turns a `Dynamic` into `T | nil` under a
+`present?` / `blank?` guard surfaces it, which is how it was found.
+
+## The observation
+
+The answer is already written down, in the signature the project already loads:
+
+```rbs
+class NilClass
+  def present?: () -> false
+  def blank?: () -> true
+end
+```
+
+A method that always returns `false` for `nil` cannot have answered truthily on a `nil` receiver.
+So on the truthy edge of `login.present?`, the `nil` arm of `String | nil` is impossible. No
+annotation, no hardcoded method list, no plugin hook — the polarity is a consequence of the declared
+return type.
+
+## The rule
+
+For a zero-argument, block-less predicate call `recv.m?` used as a condition, where `recv` is a
+union with a scope binding (local / ivar / `self`):
+
+- an arm whose every RBS overload of `m?` returns literally `false` is dropped from the **truthy** edge;
+- an arm whose every overload returns literally `true` is dropped from the **falsey** edge;
+- any other arm survives both edges.
+
+No-ops when nothing is dropped or when an edge would be emptied.
+
+### Where the soundness comes from
+
+Only arms that are a **value-pinned `nil` / `true` / `false`** participate. A `Nominal[Foo]` arm
+statically admits Foo's *subclasses*, any of which may override the predicate and return the other
+polarity, so dropping it would be unsound. `NilClass`, `TrueClass`, and `FalseClass` have no
+subclasses — the declared return is the runtime return. That restriction is not a conservative
+approximation that costs coverage: the nilable union is the whole motivating population.
+
+**Safe navigation is excluded.** `login&.blank?` yields `nil` (falsey) for a nil receiver rather than
+`NilClass#blank?`'s declared `true`, so the falsey edge admits nil. Dropping the arm there would
+manufacture the exact false negative the rule exists to avoid — `login.downcase unless
+login&.blank?` really can raise. `analyse_safe_nav_receiver` continues to own that shape's truthy
+edge. A regression spec pins it.
+
+## Gate
+
+`make verify`, `make bench-perf` (28.55 M allocations, ceiling 29.17 M), `make docs-check` clean, and
+the `lib` self-check silent. Corpus diff (`check --no-cache --no-baseline`), against a master that
+already carries the module-singleton seed:
+
+| corpus | before | after | |
+|---|---:|---:|---|
+| haml / kramdown / liquid / rgl `lib` | 59 / 68 / 2 / 70 | identical | no ActiveSupport |
+| Mastodon `app/models` | 5 | 5 | |
+| Redmine `app`+`lib` | 73 | **69** | four false positives removed |
+| GitLab `app` | 284 | **268** | sixteen false positives removed |
+
+**Zero new firings anywhere.** All twenty removals were adjudicated, not assumed. One of Redmine's is
+the ADR-57 WD3 firing this slice exists to close (`user.rb:559`, `login.downcase` under
+`if login.present?`). Redmine's other three and fourteen of GitLab's are the same guarded shape the
+rule targets directly:
+
+- `issue_import.rb:306` — `return if content.blank?` then `content.split(",")`
+- `query.rb:765` — `values.present? ? values.split('|') : ['']`
+- `bamboo.rb:123` — `if result.blank? … else result.dig(…)` (the falsey edge)
+- `jira.rb:637` — `comments.present? && comments.any? { … }` (the `&&` right operand)
+- `create_service.rb:189` — `params[:description] = default_template.content if default_template.present?`
+
+The remaining two (`clusters_controller.rb:106` and `:109`, on a `response` with no guard in sight)
+are **transitive**, and worth naming because they look unexplained at the call site. The callee
+`Clusters::Migration::CreateService#execute` opens with `return validation_error if
+validation_error.present?`. On the truthy edge the nil arm is now dropped, so that early return
+contributes a non-nil type, so `execute`'s inferred return loses its nil arm, so ADR-57's return
+adoption makes `response` non-nil at both call sites. The narrowing is correct at every hop: `return
+X if X.present?` never returns nil.
+
+That is the shape to expect from this rule generally — its yield is not bounded by the guarded
+expression, because a sharper method return propagates.
+
+## What this does not do
+
+It reads a *declared* return type, so a project gains the narrowing only where the signature declares
+the literal. That is the AS core-ext bundle and the ADR-72 `data/gem_overlay/activesupport` twin
+today. Nothing infers polarity from a Ruby body — a project's own `def present? = false` on a
+NilClass reopen would not be read, and should not be: the rule's soundness rests on the signature
+being the contract.
+
+The general `rigor:v1:predicate-if-true`-facts-for-union-receivers gap in
+`resolve_rbs_extended_method` remains open. It is a larger surface (arbitrary target refinements
+across arms, not a boolean polarity) and no corpus demands it yet.

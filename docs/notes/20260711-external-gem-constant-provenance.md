@@ -34,8 +34,14 @@ wastes the user's time, the failure ADR-75 exists to avoid.
 Instead, ownership is established by reading. For each locked gem classified `:missing` by
 `RbsCoverageReport`:
 
-1. Resolve its installed source root from RubyGems **metadata** (`Gem::Specification#full_gem_path`
-   — no gem code loads; the same posture as ADR-72's "loads RBS data only" and the ADR-10 walker).
+1. Resolve its installed source root. **The primary resolver is the target project's own bundle**
+   (`<bundle>/ruby/*/gems/<name>-<version>/`, the pure-filesystem layout `BundleSigDiscovery`
+   already walks — no `Bundler` API, no gem code). This is load-bearing: rigor runs under *its own*
+   bundle (`BUNDLE_GEMFILE=<rigor>/Gemfile`), so `Gem::Specification.find_by_name` sees rigor's
+   gems, not the target's — it would resolve only the handful of gems both bundles share and miss
+   every project-specific gem, the very ones a Rails app's holes root at. `Gem::Specification`
+   remains a last-resort **fallback** for a project with no discoverable bundle (see the coverage
+   note below).
 2. Parse its conventional entry file (`lib/<name>.rb`, plus the dash → directory variant) with Prism
    and record the **top-level** class / module / constant declarations under their root name. The
    entry-file path is the require-name convention `Bundler.require` itself depends on — a filename
@@ -49,6 +55,27 @@ a root constant declared only in a deeper file, a project typo (`Farraday`) — 
 cause. The failure mode is a missing label, never a wrong one, which is what makes the bounded scan
 acceptable: coverage can grow later (full-tree scan behind a per-gem-version cache) without any
 soundness question.
+
+## Coverage depends on how the target installed its gems
+
+The label lands only where rigor can *read* the gem's entry file, and that varies by install layout:
+
+- **A `vendor/bundle` / `BUNDLE_PATH` project** (the Docker / CI norm) — the primary resolver reads
+  the target's actual gems, so **every** RBS-less gem is covered. This is the case the fix is built
+  for.
+- **A global-gems project** (`mise` / `rbenv` / system, no `vendor/bundle`) — the bundle resolver
+  finds nothing (rigor cannot see the target's `GEM_PATH`, which is under a different Ruby), so
+  coverage falls to the `Gem::Specification` fallback: **only gems rigor itself bundles**, and only
+  when read soundly (the top-level namespace constant of a gem — `I18n`, `Rack`, `ActiveSupport` —
+  is stable across versions, so reading rigor's copy for the *name* is correct even under a
+  version skew). Both survey corpora (Mastodon, GitLab) are this case, which is why their measured
+  yield is the shared-gem subset — correct, but a floor, not the ceiling a `vendor/bundle` run
+  reaches.
+
+Closing the global-gems gap needs rigor to learn the target's `GEM_PATH` — the *same* limitation
+`BundleSigDiscovery` already has for finding gem-shipped `sig/` dirs (a mise-global target's sigs
+aren't discovered either). It is a shared follow-up, out of scope here; the fail-open design means
+the missing coverage is a missing label, never a wrong one.
 
 ### Known imprecision, accepted
 
@@ -75,11 +102,20 @@ Redmine `app`+`lib` diagnostics are byte-identical. The functional gate is ADR-8
 **re-bucketing measurement**: the cause distribution (`cause_site_counts`) before/after on a real
 corpus, plus hand-adjudication of a sample of newly-labeled sites (is the constant really the gem's?).
 
-**Results (Mastodon `app/models`, identical denominator):** 47 sites moved `unsupported_syntax` →
-`external_gem_without_rbs`; every other bucket byte-stable (`none` 923, `inferred_return_untyped`
-824, `explicit_untyped` 41). Every sampled labeled site adjudicated **correct**: all root at `I18n`
-(`I18n.t` validation messages, `I18n.locale`, `I18n.available_locales`) — the i18n gem is locked,
-ships no RBS, and its RBS exists in `gem_rbs_collection`, so the `add_rbs` routing is genuinely
-actionable. The yield on `app/models` is small by construction (models are ActiveRecord-dominated,
-and AR is plugin-typed); the gem-facade population lives in services / lib. GitLab `lib` measurement
-recorded in the ADR-82 WD9 entry.
+**Results (both survey corpora are global-gems installs → the shared-gem floor above):**
+
+- Mastodon `app/models`, identical denominator: 47 sites `unsupported_syntax` →
+  `external_gem_without_rbs`; every other bucket byte-stable. Every sampled site adjudicated
+  **correct** — all root at `I18n` (`I18n.t` validation messages, `I18n.locale`,
+  `I18n.available_locales`).
+- GitLab `lib`, identical denominator: 124 sites `unsupported_syntax` → `external_gem_without_rbs`,
+  every other bucket byte-stable. All resolved via shared gems (`i18n`, `rack`, `activesupport`) —
+  the `add_a_type_here` group examples are group-dominant (WD7's lossy-aggregation caveat), so the
+  authoritative signal is the `cause_site_counts` tally, and the mechanism guarantees every one
+  roots at a gem-constant read (`external_gem` originates *only* at `unresolved_constant_fallback`;
+  a project-owned or unresolved-non-gem constant keeps the generic cause).
+
+The i18n gem's RBS exists in `gem_rbs_collection`, so the `add_rbs` routing is genuinely actionable
+on the sites this labels. A `vendor/bundle` run of either corpus would label the full external-gem
+population (`grape`, `banzai`, `globalid`, …), not just the rigor-shared subset — that is the
+coverage the fix unlocks and the global-gems limitation withholds here.

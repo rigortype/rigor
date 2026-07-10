@@ -24,20 +24,32 @@ module Rigor
     # The scan is bounded to entry files (one or two per gem) so building the index over a real app's
     # hundreds of RBS-less gems stays sub-second; it is built lazily on the first unresolved constant, so a
     # project whose constants all resolve never pays it.
+    #
+    # **Gem-directory resolution.** Rigor runs under its OWN bundle (`BUNDLE_GEMFILE=<rigor>/Gemfile`), so
+    # `Gem::Specification.find_by_name` sees rigor's gems, not the target project's — it would resolve only
+    # the handful of gems both bundles happen to share (i18n, rack) and miss every project-specific gem
+    # (the very ones a Rails app's holes root at). So the primary resolver is the **target's bundle install
+    # tree** (`<bundle>/ruby/*/gems/<name>-<version>/`, the same pure-filesystem layout
+    # {BundleSigDiscovery} walks — no `Bundler` API, no gem code). `Gem::Specification` remains a last-resort
+    # fallback for a project installed against system gems with no discoverable bundle; reading a gem's own
+    # entry file for its own top-level namespace constant is version-stable, so even a rigor-vs-target
+    # version skew on a shared gem yields the same constant name.
     module MissingGemConstantIndex
       module_function
 
       # @param gems [Enumerable<Array(String, String)>] `[gem_name, version]` pairs (the `:missing` rows of
       #   {RbsCoverageReport}).
-      # @param spec_resolver [#call] `(name, version) -> String?` returning the gem's installed root
-      #   directory. Injectable for specs; the default consults RubyGems metadata only (no code load).
+      # @param bundle_path [String, Pathname, nil] the target's resolved bundler install root, or nil.
+      # @param spec_resolver [#call] `(name, version) -> String?` fallback dir resolver. Injectable for
+      #   specs; the default is the RubyGems-metadata lookup (no code load).
       # @return [Hash{String => String}] frozen `root constant name => gem name`. On a collision (two gems
       #   declaring the same top-level constant) the first gem wins — the CAUSE recorded downstream
       #   (external gem without RBS) is true under either owner.
-      def build(gems, spec_resolver: method(:installed_gem_dir))
+      def build(gems, bundle_path: nil, spec_resolver: method(:installed_gem_dir))
+        bundle_dirs = bundle_gem_dirs(bundle_path)
         index = {}
         gems.each do |gem_name, version|
-          dir = spec_resolver.call(gem_name, version)
+          dir = bundle_dirs["#{gem_name}-#{version}"] || spec_resolver.call(gem_name, version)
           next unless dir
 
           entry_files(dir, gem_name).each do |file|
@@ -47,8 +59,23 @@ module Rigor
         index.freeze
       end
 
+      # `{"<name>-<version>" => gem_dir}` for the target's bundle, or `{}` when no bundle is resolvable. The
+      # glob mirrors {BundleSigDiscovery}: `<bundle>/ruby/X.Y.Z/gems/<name>-<version>/`. Keyed on the dir
+      # basename so a platform-tagged variant (`ffi-1.17.4-aarch64-linux-gnu`) simply doesn't match a
+      # `<name>-<version>` lookup — those gems ship native code, not the pure-Ruby constants this indexes.
+      def bundle_gem_dirs(bundle_path)
+        return {} if bundle_path.nil?
+
+        base = Pathname.new(bundle_path)
+        return {} unless base.directory?
+
+        Dir.glob(base.join("ruby", "*", "gems", "*")).each_with_object({}) do |dir, acc|
+          acc[File.basename(dir)] ||= dir
+        end
+      end
+
       # RubyGems spec metadata lookup — the gem's on-disk source root, without loading any of its code.
-      # Exact-version first (the Bundler-installed copy), any-version fallback for out-of-band installs.
+      # Exact-version first, any-version fallback. See the class note on why this is only a fallback.
       def installed_gem_dir(name, version)
         spec = begin
           Gem::Specification.find_by_name(name, "= #{version}")

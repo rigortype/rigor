@@ -17,6 +17,16 @@ RSpec.describe Rigor::Environment::MissingGemConstantIndex do
     described_class.build(gems, spec_resolver: ->(name, _version) { dirs[name] })
   end
 
+  # Lays out a `<bundle>/ruby/X.Y.Z/gems/<name>-<version>/lib/<name>.rb` tree and returns the bundle root.
+  def write_bundle(root, gems)
+    gems.each do |name, version, source|
+      path = File.join(root, "ruby", "4.0.0", "gems", "#{name}-#{version}", "lib", "#{name}.rb")
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, source)
+    end
+    root
+  end
+
   it "maps a gem's top-level declarations to the gem, by reading — not by camelizing the gem name" do
     Dir.mktmpdir do |root|
       dirs = {
@@ -77,6 +87,42 @@ RSpec.describe Rigor::Environment::MissingGemConstantIndex do
         "bbb" => write_gem(root, "bbb", "lib/bbb.rb", "module Util; end\n")
       }
       expect(build([["aaa", "1.0.0"], ["bbb", "1.0.0"]], dirs)).to eq("Util" => "aaa")
+    end
+  end
+
+  it "resolves a gem's entry file from the target bundle, keyed on name-version" do
+    Dir.mktmpdir do |root|
+      bundle = write_bundle(File.join(root, "vendor", "bundle"), [
+                              ["faraday", "2.0.0", "module Faraday; end\n"],
+                              ["grape", "2.1.0", "module Grape; end\n"]
+                            ])
+      # spec_resolver returns nil so ONLY the bundle path is exercised.
+      index = described_class.build(
+        [["faraday", "2.0.0"], ["grape", "2.1.0"]],
+        bundle_path: bundle, spec_resolver: ->(_n, _v) {}
+      )
+      expect(index).to eq("Faraday" => "faraday", "Grape" => "grape")
+    end
+  end
+
+  it "prefers the bundle copy over the Gem::Specification fallback" do
+    Dir.mktmpdir do |root|
+      bundle = write_bundle(File.join(root, "b"), [["i18n", "1.14.0", "module I18n; end\n"]])
+      fallback = write_gem(root, "i18n", "lib/i18n.rb", "module WrongVersion; end\n")
+      index = described_class.build(
+        [["i18n", "1.14.0"]], bundle_path: bundle, spec_resolver: ->(_n, _v) { fallback }
+      )
+      expect(index).to eq("I18n" => "i18n")
+    end
+  end
+
+  it "falls back to Gem::Specification for a gem the bundle lacks (no-bundle project)" do
+    Dir.mktmpdir do |root|
+      fallback = write_gem(root, "i18n", "lib/i18n.rb", "module I18n; end\n")
+      index = described_class.build(
+        [["i18n", "1.14.0"]], bundle_path: nil, spec_resolver: ->(name, _v) { name == "i18n" ? fallback : nil }
+      )
+      expect(index).to eq("I18n" => "i18n")
     end
   end
 end

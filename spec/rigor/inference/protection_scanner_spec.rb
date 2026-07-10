@@ -16,7 +16,6 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
   # ADR-82 WD9 — an unresolved constant owned by a locked, RBS-less gem labels its chain `add_rbs`-tractable.
   it "routes a chain rooted at an RBS-less locked gem's constant to `external_gem_without_rbs`" do
     allow(Rigor::Environment::MissingGemConstantIndex).to receive(:build)
-      .with([["faraday", "2.0.0"]])
       .and_return({ "Faraday" => "faraday" })
     environment = Rigor::Environment.new(missing_rbs_gems: [["faraday", "2.0.0"]])
     root = Prism.parse("Faraday.new.get(\"/\")\n").value

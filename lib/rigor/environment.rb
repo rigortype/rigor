@@ -85,7 +85,7 @@ module Rigor
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil,
                    source_rbs_synthesis_reporter: nil,
                    synthetic_method_index: nil, project_patched_methods: nil,
-                   hkt_registry: nil, missing_rbs_gems: [])
+                   hkt_registry: nil, missing_rbs_gems: [], missing_rbs_bundle_path: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
@@ -114,6 +114,7 @@ module Rigor
       # root-constant ownership index over them is built lazily (first unresolved constant read) so runs
       # whose constants all resolve never pay the entry-file scan.
       @missing_rbs_gems = missing_rbs_gems.freeze
+      @missing_rbs_bundle_path = missing_rbs_bundle_path
       @missing_rbs_gem_constants_holder = HktRegistryHolder.new
       @name_scope = build_name_scope
       freeze
@@ -148,7 +149,9 @@ module Rigor
     def missing_rbs_gem_owner(root_constant_name)
       return nil if @missing_rbs_gems.empty?
 
-      index = @missing_rbs_gem_constants_holder.fetch { MissingGemConstantIndex.build(@missing_rbs_gems) }
+      index = @missing_rbs_gem_constants_holder.fetch do
+        MissingGemConstantIndex.build(@missing_rbs_gems, bundle_path: @missing_rbs_bundle_path)
+      end
       index[root_constant_name.to_s]
     end
 
@@ -239,6 +242,12 @@ module Rigor
           auto_detect: bundler_auto_detect,
           locked_gems: locked.empty? ? nil : locked
         ).map(&:to_s)
+        # ADR-82 WD9 — the resolved bundle root, so the missing-gem constant index reads each RBS-less gem's
+        # entry file from the TARGET's bundle (not rigor's own — see `MissingGemConstantIndex`). Resolved
+        # once here; passed through to the lazy index build.
+        bundle_root = BundleSigDiscovery.resolve_bundle_path(
+          bundle_path: bundler_bundle_path, project_root: root, auto_detect: bundler_auto_detect
+        )&.to_s
         # O4 Layer 3 slice 2 — when `rbs collection install` has been run for the target project, parse the
         # resulting `rbs_collection.lock.yaml` and feed each gem's `<collection_path>/<name>/<version>/`
         # directory into `signature_paths:`. Stdlib-typed entries are skipped (already covered by
@@ -305,7 +314,8 @@ module Rigor
           synthetic_method_index: synthetic_method_index,
           project_patched_methods: project_patched_methods,
           hkt_registry: Builtins::HktBuiltins.registry,
-          missing_rbs_gems: missing_gems
+          missing_rbs_gems: missing_gems,
+          missing_rbs_bundle_path: bundle_root
         )
       end
       # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists

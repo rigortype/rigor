@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "scope_indexer"
+require_relative "fork_map"
 require_relative "../source/node_walker"
 
 module Rigor
@@ -120,15 +121,20 @@ module Rigor
       # @param target_ruby [String, nil] Prism parse target.
       # @param max_rounds [Integer] the WD5 fixpoint cap (1 = single-level).
       # @return [Hash{[String,Symbol,Symbol] => Hash{Symbol => Rigor::Type}}] frozen.
-      def self.collect(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS)
-        new(files: files, environment: environment, target_ruby: target_ruby, max_rounds: max_rounds).collect
+      def self.collect(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS, workers: 0)
+        new(files: files, environment: environment, target_ruby: target_ruby,
+            max_rounds: max_rounds, workers: workers).collect
       end
 
-      def initialize(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS)
+      def initialize(files:, environment:, target_ruby: nil, max_rounds: DEFAULT_ROUNDS, workers: 0)
         @files = files
         @environment = environment
         @target_ruby = target_ruby
         @max_rounds = max_rounds
+        # P3-10 — fork-parallelism for the per-round re-typing (the dominant coverage-protection cost). A
+        # round's per-file typing is independent; contributions merge associatively (see {#merge_round}), so
+        # forking over file slices is byte-identical to the sequential pass. 0/1 → sequential.
+        @workers = workers
         # Reset per round (see {#run_round}). `[[class, method, kind], param_sym]` => [Type] of
         # observed concrete arguments (a default-block Hash, not a `{}` literal, so the
         # analyzer types its reads generically — {#finalize}), plus the ids widened to
@@ -139,6 +145,10 @@ module Rigor
 
       def collect
         parsed = parse_all
+        # Force the full RBS load on the parent so forked round-workers copy-on-write inherit a warm
+        # environment instead of each rebuilding it (mirrors the check / scan fork pools). A no-op on the
+        # sequential path.
+        @environment.rbs_loader&.prewarm if ForkMap.parallel?([@workers, parsed.size].min)
         discovery = discovery_seed_tables
         table = EMPTY
         @max_rounds.times do
@@ -164,18 +174,51 @@ module Rigor
       end
 
       # One fixpoint round: re-type every file with `seed_table` (the previous round's inferred
-      # parameters) seeded, collecting the next round's table.
+      # parameters) seeded, collecting the next round's table. The per-file typing is fork-mapped over
+      # `@workers` (byte-identical to sequential — see {#merge_round}); each slice returns a marshalable
+      # `[observations, poisoned]` contribution the parent merges in slice order.
       def run_round(parsed, discovery_tables, seed_table)
+        seed_scope = build_seed_scope(discovery_tables, seed_table)
+        contributions = ForkMap.call(items: parsed, workers: @workers) do |slice|
+          accumulate_slice(slice, seed_scope)
+        end
+        merge_round(contributions)
+      end
+
+      # Types every call in one contiguous file slice, returning a marshalable contribution: the per-`id`
+      # observed argument types (default proc stripped for `Marshal`) and the poisoned-`id` list. Uses the
+      # per-process observation ivars, so a forked worker and the sequential single-slice call share this
+      # exact code.
+      def accumulate_slice(parsed_slice, seed_scope)
         @type_observations = Hash.new { |hash, id| hash[id] = [] }
         @poisoned_params = Set.new
-        seed_scope = build_seed_scope(discovery_tables, seed_table)
-        parsed.each do |path, ast|
+        parsed_slice.each do |path, ast|
           index = ScopeIndexer.index(ast, default_scope: seed_scope.with_source_path(path))
           Source::NodeWalker.each(ast) do |node|
             record_call(node, index) if node.is_a?(Prism::CallNode)
           end
         end
-        finalize
+        # Copy into a plain Hash, dropping the default proc — a Marshal-unfriendly proc the fork worker
+        # would otherwise fail to dump. (`.to_h` returns self here, keeping the proc, so copy explicitly.)
+        observations = @type_observations.each_with_object({}) { |(id, types), plain| plain[id] = types }
+        [observations, @poisoned_params.to_a]
+      end
+
+      # Merges the per-slice contributions into the round's table. Associative and order-preserving, so the
+      # result is identical to a sequential single-slice run: a parameter is poisoned if ANY slice poisoned
+      # it, its observations are the file-order concatenation across slices, and the {MAX_CALL_SITE_TYPES}
+      # cap re-applies over the merged total (a per-slice sub-cap can undercount, so the parent enforces the
+      # real cap — the same "poisoned" outcome the sequential mid-stream cap reaches).
+      def merge_round(contributions)
+        poisoned = contributions.each_with_object(Set.new) { |(_obs, pois), set| set.merge(pois) }
+        observations = {}
+        contributions.each do |(obs, _pois)|
+          obs.each do |id, types|
+            (observations[id] ||= []).concat(types) unless poisoned.include?(id)
+          end
+        end
+        observations.each { |id, types| poisoned << id if types.length > MAX_CALL_SITE_TYPES }
+        finalize(observations, poisoned)
       end
 
       # A scope carrying the cross-file discovery index (so `Foo.new` receivers and
@@ -343,13 +386,15 @@ module Rigor
         @type_observations.delete(id)
       end
 
-      def finalize
+      # Builds the round's frozen `[class, method, kind] => {param => Type}` table from the merged
+      # observations and poisoned set.
+      def finalize(merged_observations, poisoned)
         # `result` is a default-block Hash (not a `{}` literal) so the analyzer types its reads
         # generically rather than folding the empty shape — the nesting writes stay plain
         # assignments, no literal-fold conditions.
         result = Hash.new { |hash, key| hash[key] = {} }
-        @type_observations.each do |id, observations|
-          next if @poisoned_params.include?(id)
+        merged_observations.each do |id, observations|
+          next if poisoned.include?(id)
           next if observations.empty?
 
           union = Type::Combinator.union(*observations)

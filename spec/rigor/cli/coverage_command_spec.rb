@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "json"
 require "stringio"
 require "tmpdir"
@@ -72,11 +73,23 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(out).not_to be_empty
     end
 
-    it "errors with a usage message when given no paths and no git changes" do
+    it "falls back to the configured paths: when given no paths (parity with `rigor check`)" do
+      # The default config `paths:` is `["lib"]`; a real lib/ file is scanned instead of erroring.
+      FileUtils.mkdir_p("lib")
+      File.write("lib/greet.rb", %(def greet\n  "hello".upcase\nend\n))
+
+      status, out, = run([])
+
+      expect(status).to eq(0)
+      expect(out).not_to be_empty
+    end
+
+    it "usage-errors when no paths are given and the configured paths do not exist" do
+      # No argv → falls back to the default config `paths:` (`["lib"]`), which is absent in this tmpdir.
       status, _out, err = run([])
 
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-      expect(err).to include("at least one path is required")
+      expect(err).to include("not a file or directory: lib")
     end
 
     it "exits 1 when the precision ratio is below --threshold, 0 when it meets it" do
@@ -125,6 +138,21 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       entry = payload["add_a_type_here"].first
       expect(entry).to have_key("method")
       expect(entry).not_to have_key("dynamic_origin")
+    end
+
+    # P3-10 — the fork pool is a pure performance change: its output MUST be byte-identical to the
+    # sequential path (the accumulator's per-method examples / per-file list are order-sensitive, so the
+    # parent absorbs worker results in original path order).
+    it "produces byte-identical JSON under --workers as sequential (multi-file)" do
+      FileUtils.mkdir_p("lib")
+      6.times do |i|
+        File.write("lib/f#{i}.rb", "def m#{i}(x)\n  x.thing#{i}\n  \"s\".upcase\nend\n")
+      end
+
+      _, sequential, = run(["--protection", "--format", "json", "lib"])
+      _, forked, = run(["--protection", "--workers", "3", "--format", "json", "lib"])
+
+      expect(forked).to eq(sequential)
     end
   end
 

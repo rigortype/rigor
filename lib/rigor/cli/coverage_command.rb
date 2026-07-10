@@ -25,6 +25,8 @@ require_relative "mutation_protection_renderer"
 require_relative "fused_protection_report"
 require_relative "fused_protection_renderer"
 require_relative "coverage_mutation"
+require_relative "protection_fork_scan"
+require_relative "check_runner_factory"
 require_relative "command"
 
 module Rigor
@@ -58,23 +60,32 @@ module Rigor
         return include_dynamic_misuse_error if options[:include_dynamic] && !options[:with_tests]
         return run_mutation_protection(options) if options[:mutation]
 
-        paths = collect_paths(@argv, command_name: "coverage")
+        configuration = Configuration.load(options.fetch(:config))
+        paths = resolve_paths(configuration)
         return CLI::EXIT_USAGE if paths.nil?
         return usage_error if paths.empty?
 
-        return run_protection(paths, options) if options[:protection]
+        return run_protection(paths, options, configuration) if options[:protection]
 
-        report = scan_paths(paths, options)
+        report = scan_paths(paths, configuration)
         CoverageRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_exit(report, options)
       end
 
       private
 
+      # Like `rigor check`, fall back to the configured `paths:` when no path is given on the command line
+      # (`coverage` previously required an explicit path — operational friction the two commands should not
+      # differ on). The mutation mode keeps its own git-changed-files default and returns before this.
+      def resolve_paths(configuration)
+        args = @argv.empty? ? configuration.paths : @argv
+        collect_paths(args, command_name: "coverage")
+      end
+
       def parse_options
         options = { format: "text", threshold: nil, config: nil, protection: false, mutation: false,
                     with_tests: false, test_command: DEFAULT_TEST_COMMAND, include_dynamic: false,
-                    limit: nil, seed: 1 }
+                    limit: nil, seed: 1, workers: nil }
         OptionParser.new { |opts| define_options(opts, options) }.parse!(@argv)
         options
       end
@@ -87,6 +98,10 @@ module Rigor
           options[:protection] = true
         end
         define_mutation_options(opts, options)
+        opts.on("--workers=N", Integer, "With --protection: fork N workers over the scanned files " \
+                                        "(default: config parallel.workers / RIGOR_RACTOR_WORKERS / 0)") do |v|
+          options[:workers] = v
+        end
         opts.on("--threshold=RATIO", Float, "Exit 1 when the precision (or, with --protection, " \
                                             "protection/effectiveness) ratio is below RATIO (0.0–1.0)") do |v|
           options[:threshold] = v
@@ -135,21 +150,37 @@ module Rigor
         CLI::EXIT_USAGE
       end
 
-      def run_protection(paths, options)
-        report = scan_protection(paths, options)
+      def run_protection(paths, options, configuration)
+        report = scan_protection(paths, options, configuration)
         ProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_protection_exit(report, options)
       end
 
-      def scan_protection(paths, options)
-        configuration = Configuration.load(options.fetch(:config))
+      # Builds the plugin-aware environment and the seeded scope ONCE on the parent, then fork-pools the
+      # per-file scan across the resolved worker count (P3-10). The scan is pure-read and each file is
+      # independent, so this is a fork-map + ordered reduce: {ProtectionForkScan} returns `{path => result}`
+      # and the parent absorbs in `paths` order so the report is byte-identical to a sequential run.
+      def scan_protection(paths, options, configuration)
         environment = plugin_aware_environment(configuration)
-        scope = scope_with_inferred_params(paths, configuration, environment)
+        workers = CheckRunnerFactory.resolve_workers(options, configuration)
+        scope = scope_with_inferred_params(paths, configuration, environment, workers)
         scanner = Inference::ProtectionScanner.new(scope: scope)
         accumulator = ProtectionAccumulator.new
 
-        paths.each { |path| scan_one(path, scanner, accumulator, configuration) }
+        results = ProtectionForkScan.run(
+          paths: paths, scanner: scanner, environment: environment,
+          configuration: configuration, workers: workers
+        )
+        paths.each { |path| absorb_protection_result(accumulator, path, results.fetch(path)) }
         accumulator.to_report
+      end
+
+      def absorb_protection_result(accumulator, path, result)
+        if result.is_a?(ProtectionForkScan::ParseError)
+          accumulator.record_parse_error_count(path, result.count)
+        else
+          accumulator.absorb(path, result)
+        end
       end
 
       # Seed the protection scan's scope with the same cross-file facts `rigor check` resolves against, so a receiver
@@ -168,7 +199,7 @@ module Rigor
       #
       # Both span the scanned `paths` only (no whole-project pre-pass) — a site that gains neither is classified exactly
       # as before.
-      def scope_with_inferred_params(paths, configuration, environment)
+      def scope_with_inferred_params(paths, configuration, environment, workers)
         base = Scope.empty(environment: environment)
         seed = {}
 
@@ -176,7 +207,7 @@ module Rigor
         seed[:discovered_classes] = discovered unless discovered.empty?
 
         table = Inference::ParameterInferenceCollector.collect(
-          files: paths, environment: environment, target_ruby: configuration.target_ruby
+          files: paths, environment: environment, target_ruby: configuration.target_ruby, workers: workers
         )
         seed[:param_inferred_types] = table unless table.empty?
 
@@ -200,29 +231,19 @@ module Rigor
         CLI::EXIT_USAGE
       end
 
-      def scan_paths(paths, options)
-        CoverageScan.precision_report(files: paths, configuration: Configuration.load(options.fetch(:config)))
-      end
-
-      # Delegated to the shared scan module (see {CoverageScan}); the protection path below reuses both, and `rigor
-      # check --coverage` reuses `precision_report` over the same machinery.
-      def project_environment(configuration)
-        CoverageScan.project_environment(configuration)
+      def scan_paths(paths, configuration)
+        CoverageScan.precision_report(files: paths, configuration: configuration)
       end
 
       # The protection scan must see the same receiver types `rigor check` does — including plugin-contributed
       # `dynamic_return` types (a controller's `params` → `ActionController::Parameters`, a `Model.where` →
-      # `ActiveRecord::Relation[Model]`). The bare `project_environment` carries only the RBS environment (no plugin
-      # registry), so every plugin-typed receiver reads `Dynamic` and its dispatch site is miscounted as *unprotected* —
-      # a systematic undercount of what Rigor actually types on a plugin-using project. `ProjectContext` builds the
-      # plugin-aware environment (registry materialised + the per-run prepare pass that primes producers like the
-      # controller / model index) exactly as the LSP and the runner do.
+      # `ActiveRecord::Relation[Model]`). The bare `CoverageScan.project_environment` carries only the RBS environment
+      # (no plugin registry), so every plugin-typed receiver reads `Dynamic` and its dispatch site is miscounted as
+      # *unprotected* — a systematic undercount of what Rigor actually types on a plugin-using project.
+      # `ProjectContext` builds the plugin-aware environment (registry materialised + the per-run prepare pass that
+      # primes producers like the controller / model index) exactly as the LSP and the runner do.
       def plugin_aware_environment(configuration)
         LanguageServer::ProjectContext.new(configuration: configuration).environment
-      end
-
-      def scan_one(path, scanner, accumulator, configuration)
-        CoverageScan.scan_into(path, scanner, accumulator, configuration)
       end
 
       def determine_exit(report, options)

@@ -8,14 +8,15 @@ require "rigor/environment"
 # ADR-67 WD3 — single-level call-site parameter inference. A parameter's inferred type is the union of resolved
 # call-site argument types; an argument that is itself untyped (the fixpoint case) poisons the parameter.
 RSpec.describe Rigor::Inference::ParameterInferenceCollector do
-  def collect(*sources, max_rounds: described_class::DEFAULT_ROUNDS)
+  def collect(*sources, max_rounds: described_class::DEFAULT_ROUNDS, workers: 0)
     Dir.mktmpdir do |dir|
       paths = sources.each_with_index.map do |source, i|
         path = File.join(dir, "f#{i}.rb")
         File.write(path, source)
         path
       end
-      described_class.collect(files: paths, environment: Rigor::Environment.default, max_rounds: max_rounds)
+      described_class.collect(files: paths, environment: Rigor::Environment.default,
+                              max_rounds: max_rounds, workers: workers)
     end
   end
 
@@ -213,5 +214,50 @@ RSpec.describe Rigor::Inference::ParameterInferenceCollector do
     CALLER
     inferred = table.fetch(["Hub", :handle, :instance])
     expect(inferred[:x].describe(:short)).to eq("A")
+  end
+
+  # P3-10 — the fork-parallel round is a pure performance change: its table MUST equal the sequential one.
+  # The merge must reproduce cross-file union, cross-file poison (a poison in ANY slice wins), and the
+  # over-cap poison across the merged total — so the fixture spreads all three across separate files.
+  describe "fork-parallel equivalence (workers > 1)" do
+    # `A.new` in one file, `B.new` in another → the merge must union across slices; a third file passes an
+    # untyped argument → the merge must poison `handle` despite the concrete sites; and `solo`'s many
+    # distinct-class args (one file) exercise a per-slice-vs-merged cap decision.
+    let(:sources) do
+      base = <<~RUBY
+        class A; end
+        class B; end
+        class C; end
+        class Hub
+          def handle(x) = x
+          def solo(y) = y
+        end
+      RUBY
+      site_a = "class Hub\n  def one = handle(A.new)\nend\n"
+      site_b = "class Hub\n  def two = handle(B.new)\nend\n"
+      poison = "class Hub\n  def bad(item) = handle(item)\nend\n"
+      solo   = "class Hub\n  def s1 = solo(A.new)\n  def s2 = solo(B.new)\n  def s3 = solo(C.new)\nend\n"
+      [base, site_a, site_b, poison, solo]
+    end
+
+    it "produces the same table forked as sequential" do
+      skip "fork unavailable on this platform" unless Process.respond_to?(:fork)
+
+      sequential = collect(*sources, workers: 0)
+      forked = collect(*sources, workers: 4)
+
+      expect(forked).to eq(sequential)
+    end
+
+    it "reproduces cross-file poison from a single slice's untyped call site" do
+      skip "fork unavailable on this platform" unless Process.respond_to?(:fork)
+
+      table = collect(*sources, workers: 4)
+      # `handle` is poisoned by the untyped `handle(item)` site even though A/B sites are concrete.
+      expect(table[["Hub", :handle, :instance]]).to be_nil
+      # `solo` unions its three concrete sites unaffected by the split.
+      expect(table.fetch(["Hub", :solo, :instance])[:y].members.map { |m| m.describe(:short) }.sort)
+        .to eq(%w[A B C])
+    end
   end
 end

@@ -76,16 +76,28 @@ Corpus diff (`check --no-cache --no-baseline`):
 |---|---:|---:|---|
 | haml / kramdown / liquid / rgl `lib` | 59 / 68 / 2 / 70 | identical | no ActiveSupport |
 | Mastodon `app/models` | 5 | 5 | |
-| GitLab `app` | 284 | 284 | |
 | Redmine `app`+`lib` | 72 | **69** | three false positives removed |
+| GitLab `app` | 284 | **268** | sixteen false positives removed |
 
-The three Redmine removals are the guarded shape the rule targets, hand-verified:
+**Zero new firings anywhere.** All nineteen removals were adjudicated, not assumed. Redmine and
+fourteen of GitLab's are the guarded shape the rule targets directly:
 
 - `issue_import.rb:306` — `return if content.blank?` then `content.split(",")`
 - `query.rb:765` — `values.present? ? values.split('|') : ['']`
-- `time_entry_query.rb:247` — same shape
+- `bamboo.rb:123` — `if result.blank? … else result.dig(…)` (the falsey edge)
+- `jira.rb:637` — `comments.present? && comments.any? { … }` (the `&&` right operand)
+- `create_service.rb:189` — `params[:description] = default_template.content if default_template.present?`
 
-Zero new firings anywhere.
+The remaining two (`clusters_controller.rb:106` and `:109`, on a `response` with no guard in sight)
+are **transitive**, and worth naming because they look unexplained at the call site. The callee
+`Clusters::Migration::CreateService#execute` opens with `return validation_error if
+validation_error.present?`. On the truthy edge the nil arm is now dropped, so that early return
+contributes a non-nil type, so `execute`'s inferred return loses its nil arm, so ADR-57's return
+adoption makes `response` non-nil at both call sites. The narrowing is correct at every hop: `return
+X if X.present?` never returns nil.
+
+That is the shape to expect from this rule generally — its yield is not bounded by the guarded
+expression, because a sharper method return propagates.
 
 ## What this does not do
 

@@ -5,6 +5,7 @@ require "rigor/plugin"
 require_relative "rails_routes/helper_table"
 require_relative "rails_routes/routes_parser"
 require_relative "rails_routes/helper_discoverer"
+require_relative "rails_routes/grape_api_discoverer"
 require_relative "rails_routes/analyzer"
 
 module Rigor
@@ -34,6 +35,11 @@ module Rigor
     #         config:
     #           routes_file: config/routes.rb   # default; optional
     #
+    # A project mounting a Grape API keeps its `grape-path-helpers` helpers (`api_v4_groups_badges_path`)
+    # out of `unknown-helper`: those names come from grape's runtime route table, so {GrapeApiDiscoverer}
+    # recognises the namespace their `prefix` / `version` declarations open rather than enumerating names
+    # it cannot know.
+    #
     # ## Limitations (v0.1.0)
     #
     # - `scope :path:` / `scope :module:` / `scope :as:` are not interpreted — helpers nested inside these
@@ -50,8 +56,10 @@ module Rigor
         # ':project_id', as: :project)` — path read from the `:path` keyword, not only from the positional
         # first arg; (c) detection of iterative `direct(name.sub(FROM, TO)) do ... end` alias-generation
         # idiom — generates `<TO>_*` aliases for every registered `<FROM>_*` helper. GitLab uses this to
-        # shorten `namespace_project_*` → `project_*`.
-        version: "0.27.0",
+        # shorten `namespace_project_*` → `project_*`. Bumped 2026-07-10 — recognises the open helper
+        # namespace `grape-path-helpers` generates (`api_v4_*_path`), grounded in the project's own Grape
+        # `prefix` / `version` declarations (see {GrapeApiDiscoverer}).
+        version: "0.28.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => { kind: :string, default: "config/routes.rb" },
@@ -63,7 +71,12 @@ module Rigor
           # `app/serializers`, `app/presenters`, `app/decorators`, not only `app/helpers/`. Walking the
           # whole tree is the honest answer to "does this `_path` / `_url` name exist anywhere in the
           # project?"; the cost is a one-time Prism parse per file at startup, which is bounded.
-          "helper_paths" => { kind: :array, default: ["app"] }
+          "helper_paths" => { kind: :array, default: ["app"] },
+          # `grape_api_paths` — the directories scanned for Grape API classes, whose `prefix` / `version`
+          # declarations ground the open `api_v4_*_path` helper namespace `grape-path-helpers` generates
+          # (see {GrapeApiDiscoverer}). Defaults cover the two conventional homes; a project with no grape
+          # API declares no prefixes and nothing changes for it.
+          "grape_api_paths" => { kind: :array, default: ["lib/api", "app/api"] }
         },
         produces: [:helper_table]
       )
@@ -73,11 +86,12 @@ module Rigor
       # routes-file edits.
       #
       # Passes a `file_reader` lambda so the parser can follow `draw(:admin)` → `config/routes/admin.rb`
-      # partials. `watch:` (ADR-60 WD3) covers every `.rb` under `helper_paths:` so ADDING a helper file
-      # invalidates the table — the producer's own in-block reads (the routes file + the partials it
-      # follows via `draw`) are captured post-compute, but a brand-new helper file the prior run never read
-      # would otherwise read as fresh.
-      producer :helper_table, watch: -> { @helper_paths.map { |dir| [dir, "**/*.rb"] } } do |_params|
+      # partials. `watch:` (ADR-60 WD3) covers every `.rb` under `helper_paths:` and `grape_api_paths:` so
+      # ADDING a helper file — or a Grape API whose `version` declaration opens a new namespace —
+      # invalidates the table. The producer's own in-block reads (the routes file + the partials it follows
+      # via `draw`) are captured post-compute, but a brand-new file the prior run never read would otherwise
+      # read as fresh.
+      producer :helper_table, watch: -> { (@helper_paths + @grape_api_paths).map { |dir| [dir, "**/*.rb"] } } do |_p|
         routes_dir = "#{File.dirname(@routes_file)}/routes"
         file_reader = lambda do |name|
           io_boundary.read_file("#{routes_dir}/#{name}")
@@ -85,13 +99,14 @@ module Rigor
           nil
         end
         contents = io_boundary.read_file(@routes_file)
-        custom_helpers = discover_custom_helpers
-        RoutesParser.parse(contents, file_reader: file_reader, custom_helpers: custom_helpers)
+        RoutesParser.parse(contents, file_reader: file_reader, custom_helpers: discover_custom_helpers,
+                                     grape_prefixes: discover_grape_prefixes)
       end
 
       def init(_services)
         @routes_file = config.fetch("routes_file")
         @helper_paths = Array(config.fetch("helper_paths")).map(&:to_s)
+        @grape_api_paths = Array(config.fetch("grape_api_paths")).map(&:to_s)
         @helper_table = nil
         @helper_table_built = false
         @load_error = nil
@@ -112,8 +127,23 @@ module Rigor
         HelperDiscoverer.discover(contents_per_path)
       end
 
-      def each_helper_file(&)
-        @helper_paths.each do |dir|
+      # Walks `grape_api_paths:` through the trusted `IoBoundary` and returns the helper-name prefixes the
+      # project's Grape API classes generate (`["api_v3", "api_v4"]`). Empty for a project with no grape API,
+      # which leaves `unknown-helper` behaviour exactly as it was.
+      def discover_grape_prefixes
+        contents_per_path = {}
+        each_ruby_file(@grape_api_paths) do |path|
+          contents_per_path[path] = io_boundary.read_file(path)
+        rescue Plugin::AccessDeniedError, Errno::ENOENT
+          next
+        end
+        GrapeApiDiscoverer.discover(contents_per_path)
+      end
+
+      def each_helper_file(&) = each_ruby_file(@helper_paths, &)
+
+      def each_ruby_file(dirs, &)
+        dirs.each do |dir|
           absolute = File.expand_path(dir)
           next unless File.directory?(absolute)
 

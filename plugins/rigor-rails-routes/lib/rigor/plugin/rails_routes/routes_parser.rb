@@ -56,9 +56,11 @@ module Rigor
         #   draw partial from `config/routes/name.rb`. Returns file contents
         #   or nil when the file is absent.
         # @return [HelperTable]
-        def parse(contents, file_reader: nil, custom_helpers: [])
+        def parse(contents, file_reader: nil, custom_helpers: [], grape_prefixes: [])
           parse_result = Prism.parse(contents)
-          return HelperTable.new([], custom_helpers: custom_helpers) unless parse_result.errors.empty?
+          unless parse_result.errors.empty?
+            return HelperTable.new([], custom_helpers: custom_helpers, grape_prefixes: grape_prefixes)
+          end
 
           context = Context.new(file_reader: file_reader)
           interpret(parse_result.value, context)
@@ -80,7 +82,8 @@ module Rigor
               )
             ]
           end
-          HelperTable.new(paired, custom_helpers: custom_helpers, devise_resources: context.devise_resources)
+          HelperTable.new(paired, custom_helpers: custom_helpers, devise_resources: context.devise_resources,
+                                  grape_prefixes: grape_prefixes)
         end
 
         # For every registered alias rule `(from_str, to_str, arity_delta)`, find every existing entry whose

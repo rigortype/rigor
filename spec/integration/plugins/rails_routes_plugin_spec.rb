@@ -1515,6 +1515,90 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  # `grape-path-helpers` names each helper after its route's path segments, which grape builds at runtime.
+  # Only the leading `prefix` / `version` segments are static, so the namespace beyond them is open.
+  describe "grape-path-helpers open namespace" do
+    let(:grape_files) do
+      {
+        "config/routes.rb" => DEFAULT_ROUTES_RB,
+        "lib/api/base.rb" => <<~RUBY,
+          module API
+            class Base < Grape::API::Instance
+            end
+          end
+        RUBY
+        "lib/api/api.rb" => <<~RUBY
+          module API
+            class API < ::API::Base
+              prefix :api
+
+              version 'v3', using: :path do
+              end
+
+              version 'v4', using: :path
+            end
+          end
+        RUBY
+      }
+    end
+
+    def grape_unknown_helper_diagnostics(source, files)
+      result = run_plugin(source: source, files: files)
+      plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+    end
+
+    it "recognises a generated `_path` helper under a declared prefix and version" do
+      diags = grape_unknown_helper_diagnostics("api_v4_groups_badges_path\n", grape_files)
+      expect(diags).to be_empty
+    end
+
+    it "recognises every declared version, and the namespace root" do
+      diags = grape_unknown_helper_diagnostics("api_v3_projects_path\napi_v4_path\n", grape_files)
+      expect(diags).to be_empty
+    end
+
+    # The gem's `method_missing` returns `super` unless the name ends with `_path`, so it defines no `_url`
+    # helper and an `api_v4_*_url` call is a genuine unknown helper.
+    it "still fires on the `_url` form, which the gem never defines" do
+      diags = grape_unknown_helper_diagnostics("api_v4_groups_badges_url\n", grape_files)
+      expect(diags.map(&:message)).to include(a_string_including("api_v4_groups_badges_url"))
+    end
+
+    it "still fires on a name outside every declared prefix" do
+      diags = grape_unknown_helper_diagnostics("api_v9_groups_path\n", grape_files)
+      expect(diags.map(&:message)).to include(a_string_including("api_v9_groups_path"))
+    end
+
+    # A class that never reaches `Grape::API` declares no namespace, however grape-shaped its body looks.
+    it "ignores `prefix` / `version` calls in a non-grape class" do
+      files = grape_files.merge(
+        "lib/api/base.rb" => "module API\n  class Base\n  end\nend\n"
+      )
+      diags = grape_unknown_helper_diagnostics("api_v4_groups_badges_path\n", files)
+      expect(diags.map(&:message)).to include(a_string_including("api_v4_groups_badges_path"))
+    end
+
+    # `using: :header` keeps the version out of the URL, so it contributes no helper-name segment and the
+    # open namespace widens to the bare prefix. `api_v4_groups_path` stays recognised under it — a route
+    # could be declared `namespace :v4`, and nothing in the source distinguishes that from a typo.
+    it "widens the namespace to the bare prefix when the version strategy is not `:path`" do
+      files = grape_files.merge(
+        "lib/api/api.rb" => <<~RUBY
+          module API
+            class API < ::API::Base
+              prefix :api
+              version 'v4', using: :header
+            end
+          end
+        RUBY
+      )
+      expect(grape_unknown_helper_diagnostics("api_groups_path\n", files)).to be_empty
+      expect(grape_unknown_helper_diagnostics("api_v4_groups_path\n", files)).to be_empty
+      diags = grape_unknown_helper_diagnostics("apiary_groups_path\n", files)
+      expect(diags.map(&:message)).to include(a_string_including("apiary_groups_path"))
+    end
+  end
+
   describe "ADR-9 cross-plugin fact publication" do
     it "publishes the `:helper_table` fact during prepare" do
       # FactStore is constructed once per Services / per run; capture it as the runner builds Services so we

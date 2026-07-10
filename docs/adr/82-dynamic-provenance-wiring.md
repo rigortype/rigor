@@ -1,6 +1,6 @@
 # ADR-82 — `Dynamic[T]` provenance wiring: breaking the catch-all on real apps
 
-Status: **WD1+WD2+WD3+WD6+WD7+WD8 implemented 2026-07-06.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
+Status: **WD1+WD2+WD3+WD6+WD7+WD8 implemented 2026-07-06; WD9 (external-gem constant ownership) implemented 2026-07-11.** [ADR-75](75-dynamic-provenance.md) added the `Dynamic[T]`
 provenance side-channel and surfaced it through `coverage --protection`
 tractability labels, but a field measurement on Mastodon shows the labels are
 **uninformative on a real Rails app**: 84% of unprotected dispatch sites carry
@@ -249,6 +249,35 @@ that re-labels without improving attribution accuracy is not landed.
   (Applying it to the `ExpressionTyper` user-method-inference fallthrough as well
   is a follow-up; the two dispatcher tiers are where the measured 211 sites came
   from.)
+
+- **WD9 — label an unresolved constant owned by an RBS-less locked gem.
+  (Implemented 2026-07-11.)** Closes the `external_gem_without_rbs = 0` half of
+  G2 (WD4 defers the `framework_dsl_boundary` half to per-plugin follow-ups).
+  The context's framing — record the cause "when a dispatch's receiver class is
+  owned by an RBS-less gem" — is mechanically impossible: a no-RBS gem's
+  receiver never carries the class name, because the constant read itself
+  (`Faraday`) fails resolution and widens to `Dynamic[top]` with the generic
+  `unsupported_syntax` cause; by dispatch time the name is gone (the two
+  dispatcher tiers that do record this cause require ADR-10 / `pre_eval:`
+  opt-ins — exactly why the bucket measured zero). The honest recording site is
+  the **constant-resolution miss** (`ExpressionTyper#unresolved_constant_fallback`),
+  and WD6 chain inheritance carries the cause through `Faraday.new.get(...)`
+  for free. Ownership is established by *reading, never guessing*: each
+  `:missing`-classified locked gem's conventional entry file (`lib/<name>.rb`,
+  dash → directory variant) is parsed with Prism and its top-level declarations
+  indexed under their root constant name
+  (`Environment::MissingGemConstantIndex`, built lazily on the first unresolved
+  constant; RubyGems metadata only, no gem code runs — the ADR-72 posture). A
+  camelize-the-gem-name heuristic is deliberately rejected (breaks on
+  `activesupport` → `ActiveSupport`; the guessing the honesty criterion
+  forbids). Everything **fails open** — uninstalled gem, absent/unparseable
+  entry file, deeper-file declaration, project typo all keep the generic cause;
+  the failure mode is a missing label, never a wrong one. Measured (Mastodon
+  `app/models`, identical denominator): 47 sites `unsupported_syntax` →
+  `external_gem_without_rbs`, all sampled sites adjudicated correct (all root
+  at `I18n`, whose RBS exists in `gem_rbs_collection` — the `add_rbs` routing
+  is genuinely actionable); other buckets byte-stable, diagnostics
+  byte-identical (Redmine), `make bench-perf` green.
 
 - **WD4 — record `framework_dsl_boundary` for framework *reader* objects even
   when concrete-typed is out of scope; the gap is elsewhere.** G2's observation

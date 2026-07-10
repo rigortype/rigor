@@ -272,6 +272,79 @@ keeps the `make bench-perf` allocation envelope within band. The
 `app/models` / kramdown `lib` / haml `lib` corpora are byte-identical;
 `rgl` loses all 13 warnings.
 
+## WD3 — Module constants in the cross-file discovery seed (2026-07-10)
+
+Tier 4 above landed the *typing* half of module-singleton resolution: a
+call on a module constant re-types the callee's `def self.x` body. It
+left one half undone, and the omission was invisible because it lives in
+a different pass. `ScopeIndexer#record_declarations` registers `module`
+and `class` declarations identically, but the project-wide seed
+`collect_class_decls` registered only classes. So `Feature.enabled?`
+resolved inside `feature.rb` and typed `Dynamic[top]` from every other
+file — the module-singleton *facade*, which is how real applications
+consume these modules. GitLab quantifies it: `Feature.enabled?` alone is
+695 unprotected sites, and `Gitlab::Utils.*` repeats the shape.
+
+The seed excluded modules on a stated hazard: surfacing `singleton(M)`
+would let an undiscovered `M.x` fall through to `Kernel#x`, "leading to
+surprising types like `Kernel.select → Array[String]`", and the comment
+deferred until cross-file `discovered_methods` followed the same seed.
+Both halves expired. The cross-file `singleton_def_nodes` index landed
+with ADR-24 slice 2. And the hazard does not reproduce: Kernel's private
+instance methods resolve to nothing on a `Singleton[M]` receiver. Of the
+28 Object / Kernel / Module / Class methods that *do* resolve on a bare
+`module Empty; end`, 26 are correct for a module object; the two that
+are not (`M.new`, `M.superclass`) mistype only code that raises
+`NoMethodError` at runtime, and they pre-date the change, since the
+per-file pass has always registered modules.
+
+**Decision.** Register module declarations in the project-wide seed on
+the same terms as classes. The seed range is *every* module declaration,
+matching `record_declarations` exactly — symmetry with the per-file pass
+is the property that makes the change reviewable, and the alternative
+(seed only modules carrying a `def`) introduces a second registration
+rule without excluding `Feature` or `Gitlab::Utils` anyway.
+
+**Criterion.** WD2 binds unchanged: the delta is adjudicated per firing
+class, artifacts are fixed at their root, nothing is suppressed.
+
+**Adjudication.** `lib` self-check surfaced one firing, and it was the
+latent-strictness class WD2's tier-4 CRuby survey predicted rather than
+an artifact: `CLI::DiagnosticFormats.render` is a `case/when` with no
+`else`, so its now-inferred return is `String | nil`, while both call
+sites gate on `.supports?` and immediately call `output.empty?`. The
+adopted type was right and the invariant was real but unencoded; the
+root fix makes `render` total by raising on an unrecognised format,
+which also turns a `FORMATS`/dispatch drift into a loud failure instead
+of a nil every caller must guard. Corpus: haml, kramdown, liquid, rgl,
+and Mastodon `app/models` are byte-identical. Redmine gains one
+`possible nil receiver` warning where `Redmine::CodesetUtil
+.replace_invalid_utf8` now resolves cross-file to its honest `String |
+nil`; the nil arm is excluded at the call site only by an
+`ActiveSupport` `login.present?` guard that Rigor does not narrow
+through.
+
+That guard is the one adjudicated **artifact class, and its root is not
+this change**: `Narrowing#resolve_rbs_extended_method` reads a method's
+`rigor:v1:predicate-if-true` facts only for a `Nominal` / `Singleton`
+receiver, so a union receiver never receives predicate facts, and
+`Object#present?` carries no such annotation to begin with. Any
+precision work that turns a `Dynamic` into `T | nil` under a `present?`
+guard surfaces it. It is queued as its own FP-removal slice — the
+general form is to drop, on the truthy edge of a zero-arg predicate over
+a union receiver, every arm whose RBS return type is literally `false`
+(`NilClass#present?: () -> false` already says so), and its mirror on
+the falsey edge — with its own corpus gate, because a new narrowing rule
+carries its own false-positive envelope.
+
+Left as future slices, unchanged by this one: the `Singleton[Object]`
+fallback receiver for modules (the `M.new` / `M.superclass` leak — it
+mistypes only code that raises, so it is precision hygiene, not FP
+work), singleton-ancestry resolution (`extend SomeModule`, inherited
+class methods), and registering `extend self` bodies into
+`singleton_def_nodes` (the instance-def consult in
+`try_user_method_inference` already resolves them).
+
 ## Rejected / deferred alternatives
 
 - **Open wholesale now, absorb via baseline.** Rejected — 4 of the 25

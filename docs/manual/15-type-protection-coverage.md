@@ -48,6 +48,14 @@ power. `--threshold=RATIO` turns it into a CI gate (exit `1`
 below the ratio) and `--format=json` carries the structured
 fields.
 
+On a large project, `--workers=N` fork-parallelizes the scan
+(both the parameter-inference pre-pass and the per-file scan),
+with output byte-identical to a sequential run. The worker count
+resolves the same way `rigor check` does — `--workers` ›
+`RIGOR_RACTOR_WORKERS` › [`parallel.workers:`](03-configuration.md)
+› `0` (sequential default) — so a project already configured for
+parallel `check` gets parallel coverage for free.
+
 This is the everyday number. When you want the truth behind it,
 move to Tier 2.
 

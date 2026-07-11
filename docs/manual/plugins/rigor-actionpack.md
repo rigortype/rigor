@@ -39,7 +39,7 @@ no-op rather than erroring.
 | `plugin.actionpack.render-target` | info | an explicit `render :symbol` / `"string"` / `partial:` resolved to a view template |
 | `plugin.actionpack.missing-template` | error | an explicit `render` resolved to a view path that doesn't exist under any `view_search_paths` |
 | `plugin.actionpack.permit-call` | info | a `params.require(:m).permit(:key, …)` chain resolved to a known model; keys matched against its columns |
-| `plugin.actionpack.unknown-permit-key` | error | a literal `permit(:key)` isn't a column on the model (with a did-you-mean) |
+| `plugin.actionpack.unknown-permit-key` | error | a literal `permit(:key)` is a near-miss (edit distance ≤ 2) of a real column but not one — a likely typo (with a did-you-mean). A key nothing like any column (a legitimate virtual attribute) does not fire |
 
 Filter and render resolution honours nested-module controller
 qualification (`module Admin; class WidgetsController` resolves

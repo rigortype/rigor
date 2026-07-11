@@ -30,9 +30,9 @@ errors_demo.rb:25:1: error: `User.find` expects at least 1 argument, got 0 [plug
 | Recognised `Model.find` / `Model.find_by` / `Model.where` call | `:info` | `plugin.activerecord.model-call` |
 | `Model.find_by(unknown: ...)` / `Model.where(unknown: ...)` | `:error` | `plugin.activerecord.unknown-column` |
 | `Model.find` with 0 args | `:error` | `plugin.activerecord.wrong-arity` |
-| `db/schema.rb` not readable | `:warning` | `plugin.activerecord.load-error` |
+| No schema source (`db/schema.rb` or `db/structure.sql`) readable | `:warning` | `plugin.activerecord.load-error` |
 
-Did-you-mean suggestions use Levenshtein distance ≤ 3 against
+Did-you-mean suggestions use `DidYouMean` fuzzy matching against
 the resolved table's column names.
 
 ## Configuration
@@ -42,13 +42,16 @@ plugins:
   - gem: rigor-activerecord
     config:
       schema_file: "db/schema.rb"                                  # default
+      structure_sql_file: "db/structure.sql"                       # default (fallback when schema_file is absent)
       model_search_paths: ["app/models"]                           # default
       model_base_classes: ["ApplicationRecord", "ActiveRecord::Base"]  # default
 ```
 
-All three keys are optional. Tweak them when:
+All keys are optional. Tweak them when:
 
 - the schema lives elsewhere (`schema_file: "shared/db/schema.rb"`);
+- the project uses `schema_format = :sql` and its dump is not at the
+  default path (`structure_sql_file: "db/structure.sql"`);
 - models are in a non-standard directory
   (`model_search_paths: ["domain/models", "engines/billing/app/models"]`);
 - the base class is custom
@@ -78,8 +81,12 @@ never surfaces a false `call.undefined-method`.
   `User < ApplicationRecord` is not discovered. Either add `User`
   to `model_base_classes`, or list every concrete model
   explicitly.
-- **`db/schema.rb` only.** `db/structure.sql` (raw SQL dumps) is
-  not supported in this iteration.
+- **PostgreSQL `db/structure.sql` fallback.** When `db/schema.rb` is
+  absent, the plugin parses `db/structure.sql` (the `schema_format =
+  :sql` dump) for the same column/type table. It reads PostgreSQL DDL
+  only; a column whose SQL type has no Ruby mapping (a custom enum,
+  `tsvector`, `ltree`) degrades to `Object` (never dropped), and
+  non-`public`-schema partition tables are skipped.
 - **Column reads, not setters.** The plugin types instance-side
   column *reads* (`user.name`, `user.admin?`) and singular
   associations, but not the `name=` setter or the dirty-tracking

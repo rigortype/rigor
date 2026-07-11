@@ -279,6 +279,10 @@ inferring".
 rigor coverage [paths]
 ```
 
+`paths` are files or directories; when omitted, Rigor uses the
+`paths:` list from the configuration file (default `lib`), the same
+as [`rigor check`](#rigor-check).
+
 `--format=text|json` selects the output format and
 `--config=PATH` overrides config discovery. `--threshold=RATIO`
 exits `1` when the precision ratio falls below `RATIO`
@@ -295,7 +299,13 @@ ranked "add a type here" list (the methods most often called on
 an untyped receiver), then the least-protected files;
 `--threshold` and `--format=json` work the same. It is a sound
 upper bound on real protection — a concrete receiver is necessary
-but not sufficient for a diagnostic to fire.
+but not sufficient for a diagnostic to fire. `--workers=N`
+fork-parallelizes the protection scan (both the parameter-inference
+pre-pass and the per-file scan) with output byte-identical to a
+sequential run; it resolves the worker count the same way `check`
+does — `--workers` › `RIGOR_RACTOR_WORKERS` ›
+[`parallel.workers:`](03-configuration.md) › `0` (sequential
+default).
 
 Adding `--mutation` (with `--protection`) switches to the
 **effectiveness** tier: it measures whether Rigor *does* catch a

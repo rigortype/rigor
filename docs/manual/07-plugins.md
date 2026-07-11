@@ -27,7 +27,7 @@ configuration takes the object form:
 plugins:
   - gem: rigor-activerecord
     config:
-      schema: db/schema.rb
+      schema_file: db/schema.rb
 ```
 
 ## Available plugins

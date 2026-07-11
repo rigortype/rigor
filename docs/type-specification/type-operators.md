@@ -73,7 +73,7 @@ The final case is intentionally not `Dynamic[String - "foo"]`. A comparison with
 
 ### Finite vs open domains
 
-When the current domain is finite, negative facts SHOULD normalize precisely. When the current domain is large or unknown, negative facts SHOULD be retained with a budget rather than expanded into unbounded difference chains. If the budget is exceeded, Rigor SHOULD widen the display and retain provenance that additional negative facts were omitted. The specific budget is `budgets.negative_fact_display`; see [inference-budgets.md](inference-budgets.md).
+When the current domain is finite, negative facts SHOULD normalize precisely. When the current domain is large or unknown, negative facts SHOULD be retained with a budget rather than expanded into unbounded difference chains. If the budget is exceeded, Rigor SHOULD widen the display and retain provenance that additional negative facts were omitted. The specific budget is `budgets.negative_fact_display` (a fixed constant today; the configurable `.rigor.yml` key is planned but not yet wired — see [inference-budgets.md](inference-budgets.md) § implementation status).
 
 ## Diagnostic display contract
 
@@ -101,7 +101,7 @@ top - nil           # Any Ruby value except nil
 
 The omission contract has a concrete shape so default diagnostics stay readable while explanations stay complete:
 
-- The default display budget keeps the top three retained exclusions and ends the rendered list with `+N more` when more exclusions were retained internally. The display budget is `budgets.negative_fact_display` and is configurable in `.rigor.yml`. See [inference-budgets.md](inference-budgets.md).
+- The default display budget keeps the top three retained exclusions and ends the rendered list with `+N more` when more exclusions were retained internally. The display budget is `budgets.negative_fact_display` (a fixed constant today; the configurable `.rigor.yml` key is planned but not yet wired). See [inference-budgets.md](inference-budgets.md).
 - Selection prefers exclusions that participated most recently in narrowing decisions, then literal values over nominal bases, then lexicographic order so output is stable.
 - The `+N more` suffix links to the diagnostic identifier so the user knows the full breakdown is available.
 - `rigor explain <diagnostic-id>` (also `--explain` on the CLI) prints every retained exclusion, the budget that was exceeded, and the order of selection. This is Rigor's analogue to PHPStan's analysis explanation.

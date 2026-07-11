@@ -62,6 +62,8 @@ The result-object surface mirrors PHPStan's `IsSuperTypeOfResult` and `AcceptsRe
 
 ## Method Surface
 
+> **Implementation-status note.** This section states the *as-designed* carrier contract (ADR-3, open question 2 still open on final spellings). The current engine realized several of these operations **off the carriers**: acceptance and subtyping (`accepts` / `subtype_of` / `consistent_with`) live in `Rigor::Inference::Acceptance` + `Rigor::Type::AcceptanceRouter`; capability and structural queries are `Rigor::Type::Combinator` compatibility predicates; and there is no per-carrier `normalize` / `traverse`. The concrete carriers (`Rigor::Type::Nominal`, …) expose `describe`, `erase_to_rbs`, and structural equality directly. Treat the surface below as the intended abstract contract, not a literal per-class method list.
+
 Every concrete type implementation MUST expose the method surface listed below. Method names without the `?` suffix follow the abstract form used in this specification; the final concrete spelling is fixed by the resolution of open question 2 in ADR-3 and applies uniformly across every method that returns `Rigor::Trinary`.
 
 ### Capability predicates

@@ -23,6 +23,7 @@ The exhaustive erasure rules, including the hash-shape erasure algorithm, are in
 | `instance` | Current class instance type in classish-context | Same when the RBS context allows it |
 | `class` | Current class singleton type in classish-context | Same when the RBS context allows it |
 | `bool` | Alias for `true \| false` | `bool` |
+| `boolish` | Any value used in boolean context (treated as `top`) | `boolish` |
 | `nil` | The singleton `nil` value | `nil` |
 | `untyped` | Dynamic type | `untyped` |
 | `top` | Greatest static value type | `top` |

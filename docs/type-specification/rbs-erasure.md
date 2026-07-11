@@ -98,7 +98,7 @@ The literal-key and literal-value unions have **separate** budgets because keys 
 - `budgets.hash_erasure_keys` (default 16, range 1–256) controls the literal-key union.
 - `budgets.hash_erasure_values` (default 8, range 1–256) controls the literal-value union.
 
-Both are configurable in `.rigor.yml`. See [inference-budgets.md](inference-budgets.md) for the full budget table.
+Both are fixed constants today; the configurable `.rigor.yml` `budgets.*` keys are planned but not yet wired. See [inference-budgets.md](inference-budgets.md) for the full budget table and its implementation status.
 
 When one budget is exceeded, only that axis widens to the nearest nominal base; the other axis remains a literal union if it still fits. Widening is deterministic:
 

@@ -1,6 +1,6 @@
 # Rigor production plugins
 
-Thirty-one entries targeting real Ruby gems, frameworks, and DSLs.
+Thirty entries targeting real Ruby gems, frameworks, and DSLs.
 Each keeps a self-contained layout (`lib/` + README + demo +
 integration spec), and the set **ships bundled inside the single
 `rigortype` gem** (v0.1.11) — you do not add them to your
@@ -111,7 +111,13 @@ subset; they cross-reference through ADR-9 facts.
 | [`rigor-typescript-utility-types`](rigor-typescript-utility-types/) | **Type-language vocabulary extension** via `Plugin::TypeNodeResolver` ([ADR-13](../docs/adr/13-typenode-resolver-plugin.md)) — maps `Pick<T, K>` / `Omit<T, K>` / `Partial<T>` / `Required<T>` / `Readonly<T>` onto Rigor-canonical shape-projection type functions. |
 | [`rigor-mangrove`](rigor-mangrove/) | **Carrier-generic instantiation** for the [Mangrove](https://github.com/kazzix14/mangrove) functional toolkit — contributes `type_args[0]` (the `OkType` / `InnerType`) as the return type of `Result#unwrap!` / `#unwrap_in` / `Option#unwrap_or` and siblings via `dynamic_return`, so unwrapped values dispatch against the carried type instead of `untyped`. Layers on `rigor-sorbet` (which supplies the carrier signatures); emits no diagnostics of its own. The `is_a?` narrowing + `variants do … end` Enum surfaces are deferred ([survey note](../docs/notes/20260530-mangrove-library-survey.md) / [ADR-36](../docs/adr/36-mangrove-enum-nested-class-emission.md)). |
 | [`rigor-rbs-inline`](rigor-rbs-inline/) | **Inline-RBS ingestion** ([ADR-32](../docs/adr/32-rbs-inline-comment-ingestion.md)) — runs the upstream rbs-inline library at env-build time via the `source_rbs_synthesizer:` manifest field and contributes the synthesised RBS, gated by the `# rbs_inline: enabled` magic comment (override with the `require_magic_comment: false` plugin-config knob). Backs `rigor check --treat-all-as-inline-rbs`. |
-| [`rigor-playground`](rigor-playground/) | **Browser-playground backend** ([ADR-29](../docs/adr/29-browser-playground.md)) — a Rack/Puma app exposing `/check` / `/annotate-lines` / `/type-of` JSON endpoints behind a CodeMirror frontend. A companion gem, **not an analyzer plugin**; the `rigor playground` CLI command requires it. Loads `rigor-rbs-inline` with `require_magic_comment: false` so pasted snippets are analysed as inline-RBS. |
+
+> **Not here:** `rigor-playground` — the browser-playground backend
+> ([ADR-29](../docs/adr/29-browser-playground.md)) — is a Rack/Puma
+> **companion application, not an analyzer plugin**: it defines no
+> `Rigor::Plugin::Base` subclass, ships as its own gem (the `rigor
+> playground` CLI command requires it), and is not bundled into
+> `rigortype`. It lives under [`apps/rigor-playground/`](../apps/rigor-playground/).
 
 ## What's in scope for each plugin
 

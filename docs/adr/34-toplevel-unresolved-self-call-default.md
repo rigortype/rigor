@@ -14,7 +14,7 @@ metaprogramming — is [ADR-17](17-monkey-patch-pre-evaluation.md)'s
 ship, with severity mapped through `severity_profile:` and the
 cross-file toplevel-`def` index in place; the ADR-29 Playground
 default-severity wiring shipped too — its sandbox config
-(`plugins/rigor-playground/.rigor.yml`) sets `severity_profile: strict`
+(`apps/rigor-playground/.rigor.yml`) sets `severity_profile: strict`
 so the rule fires on pasted snippets.
 
 This ADR is intentionally narrow: only the **toplevel** slice flips

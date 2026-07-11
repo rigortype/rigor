@@ -4,7 +4,7 @@ source "https://rubygems.org"
 
 gemspec
 
-gem "rigor-rbs-inline", path: "../rigor-rbs-inline"
+gem "rigor-rbs-inline", path: "../../plugins/rigor-rbs-inline"
 gem "rigortype",        path: "../.."
 
 group :development, :test do

@@ -9,7 +9,7 @@ require_relative "../../../lib/rigor/playground/app"
 # ADR-29 backend smoke tests. Runs against an in-process `Rigor::Playground::App` via `Rack::Test::Methods`;
 # no Puma boot.
 #
-# Run from `plugins/rigor-playground/`:
+# Run from `apps/rigor-playground/`:
 #
 #   bundle exec rspec spec/rigor/playground/app_spec.rb
 #

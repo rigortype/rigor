@@ -107,7 +107,7 @@ test-binpacker:
 	bundle exec binpacker run
 
 lint:
-	bundle exec rubocop lib/ spec/ plugins/ examples/
+	bundle exec rubocop lib/ spec/ plugins/ examples/ apps/
 
 # `--no-cache`: the self-check is a verification gate and must never trust
 # a cached result. The ADR-45 record-and-validate run cache serves an

@@ -38,12 +38,12 @@ Gem::Specification.new do |spec|
       docs/manual/**/*.md
       docs/handbook/**/*.md
     ]
-  ) + Dir.glob("plugins/*/lib/**/*.rb").reject { |f| f.include?("/rigor-playground/") } \
-    + Dir.glob("plugins/*/sig/**/*.rbs").reject { |f| f.include?("/rigor-playground/") }
+  ) + Dir.glob("plugins/*/lib/**/*.rb") \
+    + Dir.glob("plugins/*/sig/**/*.rbs")
   spec.bindir = "exe"
   spec.executables = ["rigor"]
   spec.require_paths = ["lib"] +
-                       Dir.glob("plugins/*/lib").reject { |f| f.include?("/rigor-playground/") }
+                       Dir.glob("plugins/*/lib")
 
   spec.add_dependency "language_server-protocol", ">= 3.17", "< 4.0"
   spec.add_dependency "prism", ">= 1.0", "< 2.0"

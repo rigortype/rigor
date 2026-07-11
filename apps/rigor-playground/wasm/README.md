@@ -34,7 +34,7 @@ download. You need:
 ## Build & run
 
 ```sh
-cd plugins/rigor-playground/wasm
+cd apps/rigor-playground/wasm
 bundle install
 rake build          # → rigor-playground.wasm
 rake serve          # → http://localhost:8000  (open in a browser)

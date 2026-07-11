@@ -9,7 +9,7 @@
 # because the playground's Gemfile references `path: "../.."`
 # (rigortype) and `path: "../rigor-rbs-inline"`:
 #
-#   docker build -f plugins/rigor-playground/Dockerfile -t rigor-playground .
+#   docker build -f apps/rigor-playground/Dockerfile -t rigor-playground .
 #
 # # Image tag pinning
 #
@@ -51,9 +51,9 @@ COPY exe /app/exe
 COPY data /app/data
 COPY README.md LICENSE /app/
 COPY plugins/rigor-rbs-inline /app/plugins/rigor-rbs-inline
-COPY plugins/rigor-playground /app/plugins/rigor-playground
+COPY apps/rigor-playground /app/apps/rigor-playground
 
-WORKDIR /app/plugins/rigor-playground
+WORKDIR /app/apps/rigor-playground
 RUN bundle install --jobs=4 --retry=3
 
 # ──────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ COPY --from=builder --chown=rigor:rigor /usr/local/bundle /usr/local/bundle
 COPY --from=builder --chown=rigor:rigor /app /app
 
 USER rigor
-WORKDIR /app/plugins/rigor-playground
+WORKDIR /app/apps/rigor-playground
 
 EXPOSE 8080
 

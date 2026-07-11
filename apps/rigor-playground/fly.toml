@@ -5,7 +5,7 @@
 #
 # Deploy (one-time):
 #
-#   cd plugins/rigor-playground
+#   cd apps/rigor-playground
 #   fly launch --no-deploy --name <your-app-name> --region <region>
 #   fly deploy --remote-only
 #
@@ -20,7 +20,7 @@ primary_region = "nrt"
 # context MUST be the rigor repo root (the playground's
 # Gemfile references `path: "../.."`). The Fly.io builder
 # composes `dockerfile` against the working directory of
-# `fly deploy`; running it from `plugins/rigor-playground/` with
+# `fly deploy`; running it from `apps/rigor-playground/` with
 # this dockerfile path traverses up two levels at build time.
 [build]
   dockerfile = "Dockerfile"
@@ -31,7 +31,7 @@ primary_region = "nrt"
   # rigor repo root, so deploy with:
   #
   #   fly deploy --remote-only --build-target runtime \
-  #     --dockerfile plugins/rigor-playground/Dockerfile
+  #     --dockerfile apps/rigor-playground/Dockerfile
   #
   # from the rigor repo root. Or temporarily symlink the
   # rigor repo root into this directory and deploy from here.

@@ -1,6 +1,6 @@
 # ADR-29 WD8 — config packed into the wasm VFS at /playground/.rigor.yml.
 #
-# A verbatim copy of plugins/rigor-playground/.rigor.yml. The in-VM
+# A verbatim copy of apps/rigor-playground/.rigor.yml. The in-VM
 # adapter (boot.rb) `Dir.chdir`s here before invoking the CLI, so
 # `Rigor::CLI.start`'s normal cwd-based config discovery finds it —
 # identical wiring to the Rack backend, which inherits this file from

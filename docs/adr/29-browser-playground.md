@@ -10,7 +10,7 @@ server-side API fronted by a static site. The **server-side API** is
 the accepted short-term path; a concrete set of gating conditions
 (WD6) defines when migration to in-browser WASM becomes viable. The
 server-side API + static frontend shipped as the
-`plugins/rigor-playground/` plugin and the `rigor playground`
+`apps/rigor-playground/` plugin and the `rigor playground`
 command (local serving, with `rigor-rbs-inline` loaded at
 `require_magic_comment: false` per WD4 / ADR-32 WD10); deploying it
 to Cloudflare Pages / Fly.io is an ops step, and the ruby.wasm
@@ -40,7 +40,7 @@ links a bundle's gem C extensions — so the `prism`/`rbs` blocker is
 now a *build-and-verify* task, not a missing-upstream one. WD6 is
 revised with per-condition status; **WD8** records the concrete
 `rbwasm` build pipeline and **WD9** the in-browser transport, both
-implemented as the `plugins/rigor-playground/wasm/` scaffolding.
+implemented as the `apps/rigor-playground/wasm/` scaffolding.
 Crucially, the [try.ruby-lang.org](https://try.ruby-lang.org/playground/)
 hosting model (the wasm module served as a *static asset*)
 sidesteps blocker 4 entirely: the ~1 MB cap is a Cloudflare
@@ -205,7 +205,7 @@ CORS headers on the backend allow cross-origin requests from the Pages
 domain.
 
 The frontend and backend are co-located in
-`plugins/rigor-playground/` — `frontend/` for the static assets
+`apps/rigor-playground/` — `frontend/` for the static assets
 and the gem root for the Rack/Puma backend. They are deployed
 independently; the frontend's `RIGOR_API_URL` is injected at build
 time as an environment variable.
@@ -350,7 +350,7 @@ configuration without cost.
 If traffic warrants scaling, Fly.io autoscaling or a move to a
 different host is straightforward — the backend is a plain Rack app
 with no stateful coupling to the host. The backend deployment manifest
-(`plugins/rigor-playground/fly.toml`) is committed to the repository.
+(`apps/rigor-playground/fly.toml`) is committed to the repository.
 
 Rate limiting (50 requests/minute per IP) is enforced at the Fly.io
 proxy layer via `fly.toml` `http_service.rate_limiting`. A global
@@ -387,7 +387,7 @@ status line under each records the 2026-06-14 re-evaluation.
      one wiring gap — `psych`'s `-lyaml` did not reach the final static
      link even though `libyaml.a` was built and `--with-libyaml-dir`
      passed — fixed by a confined build patch
-     ([`wasm/build_patches/libyaml_link.rb`](../../plugins/rigor-playground/wasm/build_patches/libyaml_link.rb))
+     ([`wasm/build_patches/libyaml_link.rb`](../../apps/rigor-playground/wasm/build_patches/libyaml_link.rb))
      that forces `libyaml.a` onto the crossruby XLDFLAGS the way
      `ruby_wasm` already does for wasi-vfs. The C-extension risk this
      condition was about is fully cleared; what remains is WD6 ③
@@ -403,7 +403,7 @@ status line under each records the 2026-06-14 re-evaluation.
      **diagnostics byte-identical to the Rack backend** (the
      `nil.upcase` undefined-method *and* the `rigor-rbs-inline`
      argument-type-mismatch), confirmed headlessly by `rake smoke`
-     ([`wasm/smoke.mjs`](../../plugins/rigor-playground/wasm/smoke.mjs),
+     ([`wasm/smoke.mjs`](../../apps/rigor-playground/wasm/smoke.mjs),
      which replicates the browser `DefaultRubyVM` WASI). Four
      wasm-runtime integration fixes were needed and are in place:
      (a) `gem "js"` in the bundle — `DefaultRubyVM` requires it to
@@ -443,7 +443,7 @@ real-user feedback on whether the toggle UX is sufficient.
 ### WD8 — `rbwasm` build pipeline (added 2026-06-14)
 
 The in-browser build lives in
-[`plugins/rigor-playground/wasm/`](../../plugins/rigor-playground/wasm/)
+[`apps/rigor-playground/wasm/`](../../apps/rigor-playground/wasm/)
 and is produced by `rbwasm` (the `ruby_wasm` gem) over a dedicated
 `Gemfile` containing the `rigortype` path gem, `rigor-rbs-inline`, and
 `rbs-inline` — the playground's exact runtime set. Because `rbs` carries
@@ -473,7 +473,7 @@ Packing decisions:
 - **Contract fidelity by construction.** The adapter calls
   `Rigor::CLI.start(argv, out:, err:)` against `StringIO` buffers,
   byte-for-byte the same invocation as the backend's `run_cli`
-  ([`app.rb`](../../plugins/rigor-playground/lib/rigor/playground/app.rb)).
+  ([`app.rb`](../../apps/rigor-playground/lib/rigor/playground/app.rb)).
   The WD2 JSON shapes are therefore identical between transports; only
   the bytes' origin (network vs in-VM) differs.
 
@@ -497,7 +497,7 @@ the request on a JS global and calls `vm.eval` against the adapter,
 which reads it and returns the same JSON string. To keep the working
 backend page (`frontend/index.html`) untouched, the wasm variant is a
 **separate self-contained static page**
-([`wasm/index.html`](../../plugins/rigor-playground/wasm/)) — the two
+([`wasm/index.html`](../../apps/rigor-playground/wasm/)) — the two
 deployments (Pages-over-backend vs fully-static-wasm) stay independent,
 matching WD1's independent-deploy stance. `vm.eval` runs Ruby
 synchronously on the main thread; offloading analysis to a Web Worker
@@ -552,8 +552,8 @@ track that does not block the `0.2.x` evaluation line.
 
 | Slice | Scope |
 | --- | --- |
-| 1 | `plugins/rigor-playground/` — Rack application, `/check` endpoint, `Tempfile`-per-request isolation, 10 s timeout, 64 KB cap, fixed `.rigor.yml` (loads `rigor-rbs-inline` with `require_magic_comment: false` per WD4 / ADR-32 WD10). Deployed to Fly.io. Slice 1 is gated on ADR-32 slice 1 (the `source_rbs_synthesizer:` manifest field and the `rigor-rbs-inline` plugin existing). |
-| 2 | `plugins/rigor-playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
+| 1 | `apps/rigor-playground/` — Rack application, `/check` endpoint, `Tempfile`-per-request isolation, 10 s timeout, 64 KB cap, fixed `.rigor.yml` (loads `rigor-rbs-inline` with `require_magic_comment: false` per WD4 / ADR-32 WD10). Deployed to Fly.io. Slice 1 is gated on ADR-32 slice 1 (the `source_rbs_synthesizer:` manifest field and the `rigor-rbs-inline` plugin existing). |
+| 2 | `apps/rigor-playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
 | 3 | `/annotate` endpoint + frontend toggle view. |
 | 4 | `/type-of` endpoint + frontend hover integration. |
-| 5 | ruby.wasm migration (WD8/WD9/WD10). **Scaffolding + green build landed 2026-06-14** under `plugins/rigor-playground/wasm/` — `rbwasm` Gemfile + build task, in-VM CLI adapter, packed `.rigor.yml`, static wasm frontend. **`rake build` now succeeds**: `prism` + `rbs` + `psych` link under wasi-sdk-24.0 (WD6 ② MET, via the `libyaml_link` build patch), producing a **~70 MB** `rigor-playground.wasm` — which, being ≫ 25 MiB, confirms the WD10 R2 hosting path. **Runtime verified (WD6 ③)**: `rake smoke` runs the adapter in a browser-representative VM and reproduces the backend's diagnostics byte-for-byte (after four wasm integration fixes — `gem "js"`, `require "rubygems"`, `/bundle/setup`, writable `/work`). Remaining before shipping: R2 bucket + secrets, and the docs-site sync wiring. |
+| 5 | ruby.wasm migration (WD8/WD9/WD10). **Scaffolding + green build landed 2026-06-14** under `apps/rigor-playground/wasm/` — `rbwasm` Gemfile + build task, in-VM CLI adapter, packed `.rigor.yml`, static wasm frontend. **`rake build` now succeeds**: `prism` + `rbs` + `psych` link under wasi-sdk-24.0 (WD6 ② MET, via the `libyaml_link` build patch), producing a **~70 MB** `rigor-playground.wasm` — which, being ≫ 25 MiB, confirms the WD10 R2 hosting path. **Runtime verified (WD6 ③)**: `rake smoke` runs the adapter in a browser-representative VM and reproduces the backend's diagnostics byte-for-byte (after four wasm integration fixes — `gem "js"`, `require "rubygems"`, `/bundle/setup`, writable `/work`). Remaining before shipping: R2 bucket + secrets, and the docs-site sync wiring. |

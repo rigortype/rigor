@@ -409,9 +409,9 @@ endpoint with `Tempfile`-per-request isolation + 64 KB cap +
 CORS preflight (slice 1); CodeMirror 6 editor with debounced
 lint markers (slice 2); `/annotate-lines` toggle view (slice 3);
 `/type-of` hover via CodeMirror's `hoverTooltip` extension
-(slice 4). Slice 1's Fly.io deploy artefacts (`plugins/rigor-playground/Dockerfile`
-+ `plugins/rigor-playground/fly.toml`) and slice 2's Cloudflare Pages
-deploy config (`plugins/rigor-playground/frontend/_headers` + `_redirects` +
+(slice 4). Slice 1's Fly.io deploy artefacts (`apps/rigor-playground/Dockerfile`
++ `apps/rigor-playground/fly.toml`) and slice 2's Cloudflare Pages
+deploy config (`apps/rigor-playground/frontend/_headers` + `_redirects` +
 README) ship as committable config; the actual `fly deploy` /
 `wrangler pages deploy` steps require credentials and are not
 part of any landed cycle. Slice 5 (ruby.wasm migration) stays

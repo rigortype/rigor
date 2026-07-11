@@ -17,6 +17,11 @@ require "spec_helper"
 
 LINK_INTEGRITY_DOCS_ROOT = File.expand_path("../../docs", __dir__)
 
+# The `references/` git submodules hold vendored upstream sources. Contributors check them out, but CI
+# does not (the test job runs without submodules), so a link into `references/` is legitimately present
+# locally yet absent in CI — never gate it here.
+LINK_INTEGRITY_REFERENCES_ROOT = File.expand_path("../../references", __dir__)
+
 # Paths (relative to docs/) whose links are intentionally not gated — see the header comment.
 LINK_INTEGRITY_EXCLUDE = %r{\A(notes/|CHANGELOG-0\.\d+\.x\.md\z)}
 
@@ -33,7 +38,11 @@ module LinkIntegrityHelpers
       path = href.split("#").first&.sub(/:\d+(?::\d+)?\z/, "")
       next if path.nil? || path.empty?
 
-      File.expand_path(path, base_dir)
+      resolved = File.expand_path(path, base_dir)
+      # Links into the `references/` submodules are not gated (see LINK_INTEGRITY_REFERENCES_ROOT).
+      next if resolved.start_with?("#{LINK_INTEGRITY_REFERENCES_ROOT}/")
+
+      resolved
     end
   end
 end
@@ -58,7 +67,7 @@ RSpec.describe "documentation link integrity" do
         File.dirname(md_path)
       ).reject { |t| File.exist?(t) }
       expect(broken).to be_empty,
-                        "Broken links in #{rel}:\n" +
+                        "Broken links in #{md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")}:\n" +
                         broken.map { |t| "  → #{t.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/")} " }.join("\n")
     end
   end

@@ -142,9 +142,9 @@ shipped severities:
 
 | Profile | Behaviour |
 | --- | --- |
-| `lenient` | Most rules → `warning`; uncertain rules drop to `info`. CI-friendly for legacy code. |
-| `balanced` (default) | Most rules → `error`; `dump.type` → `info`. The shipped behaviour. |
-| `strict` | Everything → `error` including the `:warning` rules under `balanced`. Suitable for new projects with no legacy noise. |
+| `lenient` | Only proven rules stay `error` (`call.undefined-method`, `wrong-arity`, `assert.type-mismatch`); uncertain rules drop to `warning`, and several to `off`. For incremental adoption on legacy code. |
+| `balanced` (default) | Most rules → `error`; uncertain rules → `warning`; `dump.type` → `info`. The shipped behaviour. |
+| `strict` | Nearly every rule → `error`. The exceptions: `call.self-undefined-method` stays `off` (opt-in only), and `flow.unreachable-clause` is `warning` (pending its false-positive gate). Suitable for new projects with no legacy noise. |
 
 Set in `.rigor.yml`:
 

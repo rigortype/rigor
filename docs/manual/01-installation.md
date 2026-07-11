@@ -291,6 +291,7 @@ side.
 it for the project, then install the gem into that Ruby:
 
 ```sh
+asdf plugin add ruby        # once, if the ruby plugin isn't added yet
 asdf install ruby latest:4.0
 asdf local ruby latest:4.0
 gem install rigortype

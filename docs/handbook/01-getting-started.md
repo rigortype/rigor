@@ -87,6 +87,14 @@ silent everywhere it cannot prove a narrower type.
 A diagnostic only fires when Rigor has enough static
 information to be confident.
 
+Where a *signature* does appear in this book — like
+`def foo: (String) -> Integer` — that is **RBS**, Ruby's standard
+signature language; read it as "takes a `String`, returns an
+`Integer`." You write none of it to get started; Rigor consumes
+whatever RBS your gems and the standard library already ship.
+[Chapter 7](07-rbs-and-extended.md) covers RBS in full — if you
+have never seen it, skim that chapter first.
+
 ## The smallest working session
 
 Drop into your project root and run:
@@ -191,7 +199,7 @@ assert_type(":int | :str | nil", kind(7))  # union of all case branches
 
 ```ruby
 greeting = "Hello, "                 # Constant<"Hello, ">
-name     = ARGV.first                # String?  (RBS-declared)
+name     = ARGV.first                # String?  (String or nil — RBS-declared)
 hello    = "#{greeting}#{name}!"     # literal-string carrier:
                                      # every interpolated part
                                      # is itself literal-string-

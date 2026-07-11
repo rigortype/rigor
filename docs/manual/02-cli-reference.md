@@ -279,6 +279,10 @@ inferring".
 rigor coverage [paths]
 ```
 
+`paths` are files or directories; when omitted, Rigor uses the
+`paths:` list from the configuration file (default `lib`), the same
+as [`rigor check`](#rigor-check).
+
 `--format=text|json` selects the output format and
 `--config=PATH` overrides config discovery. `--threshold=RATIO`
 exits `1` when the precision ratio falls below `RATIO`
@@ -295,7 +299,13 @@ ranked "add a type here" list (the methods most often called on
 an untyped receiver), then the least-protected files;
 `--threshold` and `--format=json` work the same. It is a sound
 upper bound on real protection — a concrete receiver is necessary
-but not sufficient for a diagnostic to fire.
+but not sufficient for a diagnostic to fire. `--workers=N`
+fork-parallelizes the protection scan (both the parameter-inference
+pre-pass and the per-file scan) with output byte-identical to a
+sequential run; it resolves the worker count the same way `check`
+does — `--workers` › `RIGOR_RACTOR_WORKERS` ›
+[`parallel.workers:`](03-configuration.md) › `0` (sequential
+default).
 
 Adding `--mutation` (with `--protection`) switches to the
 **effectiveness** tier: it measures whether Rigor *does* catch a
@@ -403,7 +413,7 @@ catalogue** ([ADR-37](../adr/37-plugin-interface-segregation.md)):
 a focused, machine-readable map of what each loaded plugin
 contributes — the AST node types its `node_rule`s match, the
 receiver classes its `dynamic_return`s gate on, the methods its
-`narrowing_facts`s narrow, and the facts it `produces` /
+`narrowing_facts` hooks narrow, and the facts it `produces` /
 `consumes`. Combine with `--format=json` for tooling (an AI
 agent can enumerate every plugin's behaviour without reading a
 line of plugin source). The same narrow surfaces also appear in
@@ -557,8 +567,7 @@ rigor doctor [--config PATH] [--format text|json]
 Runs a scoped analysis and audits:
 
 - **Configuration audit** — unresolved `signature_paths:`, unknown
-  `libraries:`, inert `disable:` / `severity_overrides:` tokens
-  ({ConfigAudit}).
+  `libraries:`, inert `disable:` / `severity_overrides:` tokens.
 - **RBS environment health** — whether the RBS class universe built
   successfully (`0` classes means a broken setup).
 - **Plugin load errors** — whether every configured plugin loaded.
@@ -568,7 +577,7 @@ Runs a scoped analysis and audits:
   but no Rails plugin is enabled.
 
 Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
-routed hint (e.g. "Run `rigor baseline regenerate`").  JSON output
+routed hint (e.g. "Run `rigor baseline regenerate`"). JSON output
 is a stable contract:
 
 ```json
@@ -585,7 +594,7 @@ Exits `1` when any check fails, `0` when all pass.
 ## `rigor upgrade`
 
 Migration command skeleton ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
-WD7).  The real body lands when a concrete backwards-compatibility
+WD7). The real body lands when a concrete backwards-compatibility
 break gives it a target (e.g. re-running `baseline regenerate`
 against a strengthened default profile, surfacing renamed
 suppression ids, reporting `bleeding_edge:` graduations).
@@ -595,7 +604,7 @@ rigor upgrade
 ```
 
 Until then it prints the current version and notes that upgrade is
-queued.  Exits `0`.
+queued. Exits `0`.
 
 ## Environment variables
 

@@ -27,7 +27,7 @@ You need:
 - **`mise` wired into your shell** — add
   `eval "$(mise activate zsh)"` (or the equivalent for your
   shell) to your shell rc so that `rigor` reaches your `PATH`.
-  See [Installing Rigor § Putting rigor on your PATH](01-installation.md)
+  See [Installing Rigor § Putting rigor on your PATH](01-installation.md#putting-rigor-on-your-path)
   for detail.
 - **An existing Rails project** at a known path.
 
@@ -156,7 +156,9 @@ source-of-truth copy is
 
 If your first `rigor check` reports more than ~100 diagnostics,
 acknowledge mode is the natural starting point. You can tighten
-it later.
+it later. In `.rigor.dist.yml` (Step 3) the mode maps to a
+`severity_profile:` — acknowledge → `lenient`, strict → `strict`
+(omit the key for the default `balanced`).
 
 ### Step 3 — Write .rigor.dist.yml
 

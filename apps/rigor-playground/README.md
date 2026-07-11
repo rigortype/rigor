@@ -21,13 +21,13 @@ See [`fly.toml`](fly.toml) and [`Dockerfile`](Dockerfile). The
 build context must be the rigor repo root:
 
 ```sh
-docker build -f plugins/rigor-playground/Dockerfile -t rigor-playground .
+docker build -f apps/rigor-playground/Dockerfile -t rigor-playground .
 ```
 
 Or from the repo root:
 
 ```sh
-fly deploy --remote-only --dockerfile plugins/rigor-playground/Dockerfile
+fly deploy --remote-only --dockerfile apps/rigor-playground/Dockerfile
 ```
 
 ## Frontend (Cloudflare Pages)

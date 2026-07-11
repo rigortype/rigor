@@ -1,7 +1,7 @@
-# plugins/rigor-playground/frontend — Rigor playground frontend
+# apps/rigor-playground/frontend — Rigor playground frontend
 
 The static frontend for the browser playground (backend lives
-at [`../`](../), i.e. `plugins/rigor-playground/`). A single
+at [`../`](../), i.e. `apps/rigor-playground/`). A single
 `index.html` that imports [CodeMirror 6](https://codemirror.net/)
 from [esm.sh](https://esm.sh/) at runtime, applies design-system
 styling, and talks to the backend over `/check`,
@@ -34,7 +34,7 @@ origin (`Rigor::Playground::App` falls back to serving
 `index.html` on `GET /`). So:
 
 ```sh
-cd plugins/rigor-playground
+cd apps/rigor-playground
 bundle install              # one-time
 bundle exec puma -C puma.rb  # serves on http://localhost:9292
 ```
@@ -52,7 +52,7 @@ The directory is deploy-ready for Cloudflare Pages: drag-and-
 drop it into the dashboard or use Wrangler:
 
 ```sh
-cd plugins/rigor-playground/frontend
+cd apps/rigor-playground/frontend
 npx wrangler pages deploy . --project-name=rigor-playground
 ```
 

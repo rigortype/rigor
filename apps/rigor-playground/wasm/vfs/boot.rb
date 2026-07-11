@@ -2,7 +2,7 @@
 
 # ADR-29 WD8/WD9 — the in-VM adapter packed into the ruby.wasm build.
 #
-# This is the wasm analogue of plugins/rigor-playground/lib/rigor/playground/app.rb: it exposes the same
+# This is the wasm analogue of apps/rigor-playground/lib/rigor/playground/app.rb: it exposes the same
 # four operations (check / annotate / annotate-lines / type-of) but as in-process Ruby callable from
 # JavaScript via `vm.eval`, with no Rack, no HTTP, and no network. The frontend (index.html) sets the
 # request as a JSON string on a JS global, calls `vm.eval`, and reads the returned JSON string back.

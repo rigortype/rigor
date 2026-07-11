@@ -23,9 +23,10 @@ ALL_PLUGINS_DIRS = (
   Dir[File.join(ALL_PLUGINS_REPO_ROOT, "examples", "*", "")]
 ).sort.freeze
 
-# `rigor-playground` is a standalone Rack application, not a Rigor plugin — it has no `lib/rigor-playground.rb`
-# entry and registers no `Plugin::Base`, so it is out of scope for this guard.
-ALL_PLUGINS_SKIP = %w[rigor-playground].freeze
+# Directories under plugins/ that are not loadable Rigor plugins (no `lib/<name>.rb` entry, no `Plugin::Base`)
+# and are therefore out of scope for this guard. Currently empty: the one historical exception,
+# `rigor-playground` (a standalone Rack application), now lives under `apps/`, outside these globs entirely.
+ALL_PLUGINS_SKIP = %w[].freeze
 
 ALL_PLUGINS_LOADABLE_DIRS = ALL_PLUGINS_DIRS.reject do |dir|
   ALL_PLUGINS_SKIP.include?(File.basename(dir))
@@ -96,8 +97,9 @@ RSpec.describe "bundled plugins and examples all load (structural guard)" do
   end
 
   it "covers every plugins/* and examples/* directory" do
-    # Guards the guard: if a new top-level directory appears with no gem entry (and it is not the known
-    # Rack-app exception), surface it so the omission is a deliberate decision, not an oversight.
+    # Guards the guard: if a new plugins/* or examples/* directory appears with no gem entry (and it is not
+    # a declared exception in ALL_PLUGINS_SKIP), surface it so the omission is a deliberate decision, not an
+    # oversight.
     skipped = ALL_PLUGINS_DIRS.map { |dir| File.basename(dir) } -
               ALL_PLUGINS_LOADABLE_DIRS.map { |dir| File.basename(dir) }
     expect(skipped).to eq(ALL_PLUGINS_SKIP)

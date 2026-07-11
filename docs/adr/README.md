@@ -42,7 +42,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-26 | [ActiveRecord Relation Typing](26-activerecord-relation-typing.md) | Accepted |
 | ADR-27 | [Tool Distribution and Installation Model](27-tool-distribution-model.md) | Accepted (partially implemented; Nix flake + container image + machine-readable install guide shipped, and the copy-paste CI workflow templates landed via [ADR-51](51-ci-diagnostic-output-formats.md) WD6 — `docs/manual/ci-templates/` + the bundled `rigor-ci-setup` skill; the self-contained single binary remains deferred) |
 | ADR-28 | [Path-scoped Method-Protocol Contracts](28-path-scoped-protocol-contracts.md) | Accepted |
-| ADR-29 | [Browser Playground](29-browser-playground.md) | Accepted (server-side playground in v0.1.10–0.1.11; the in-browser `ruby.wasm` build (Option A / WD8–WD10) went green and shipped 2026-06-14/15 — `plugins/rigor-playground/wasm/`, published to Cloudflare R2 on release tags and served as a static asset by the docs site) |
+| ADR-29 | [Browser Playground](29-browser-playground.md) | Accepted (server-side playground in v0.1.10–0.1.11; the in-browser `ruby.wasm` build (Option A / WD8–WD10) went green and shipped 2026-06-14/15 — `apps/rigor-playground/wasm/`, published to Cloudflare R2 on release tags and served as a static asset by the docs site) |
 | ADR-30 | [`rigor-ffi` Plugin Shape](30-rigor-ffi-plugin-shape.md) | Proposed (not implemented) |
 | ADR-31 | [Contribution and Supply-chain Policy](31-contribution-and-supply-chain-policy.md) | Accepted (in force) |
 | ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Accepted (implemented in v0.1.10) |

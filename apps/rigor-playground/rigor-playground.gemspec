@@ -19,5 +19,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "puma",      "~> 6.0"
   spec.add_dependency "rack",      "~> 3.0"
-  spec.add_dependency "rigortype", ">= 0.1.0", "< 0.2.0"
+  spec.add_dependency "rigortype", ">= 0.1.0", "< 0.3.0"
 end

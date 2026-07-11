@@ -7,7 +7,7 @@
 # commit. It runs on demand and (once enabled) on release.
 #
 # STATUS: the build currently aborts on psych/libyaml static-link wiring (see
-# plugins/rigor-playground/wasm/README.md "Status"). This workflow is ready,
+# apps/rigor-playground/wasm/README.md "Status"). This workflow is ready,
 # but will not produce a runnable artifact until that is resolved — which is
 # why the `release` trigger below is commented out (enable it once a green
 # build lands, so a release is never blocked by a known-red job).
@@ -33,7 +33,7 @@ on:
     branches:
       - master
     paths:
-      - "plugins/rigor-playground/**"
+      - "apps/rigor-playground/**"
 
 concurrency:
   group: playground-wasm-${{ github.ref }}
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: plugins/rigor-playground/wasm
+        working-directory: apps/rigor-playground/wasm
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -66,18 +66,18 @@ jobs:
       - name: Cache ruby_wasm toolchain + build
         uses: actions/cache@v6
         with:
-          path: plugins/rigor-playground/wasm/build
-          key: ruby-wasm-${{ runner.os }}-${{ hashFiles('plugins/rigor-playground/wasm/Gemfile') }}
+          path: apps/rigor-playground/wasm/build
+          key: ruby-wasm-${{ runner.os }}-${{ hashFiles('apps/rigor-playground/wasm/Gemfile') }}
 
       - name: Install build gems
         run: bundle install
         env:
-          BUNDLE_GEMFILE: ${{ github.workspace }}/plugins/rigor-playground/wasm/Gemfile
+          BUNDLE_GEMFILE: ${{ github.workspace }}/apps/rigor-playground/wasm/Gemfile
 
       - name: Build wasm
         run: bundle exec rake build
         env:
-          BUNDLE_GEMFILE: ${{ github.workspace }}/plugins/rigor-playground/wasm/Gemfile
+          BUNDLE_GEMFILE: ${{ github.workspace }}/apps/rigor-playground/wasm/Gemfile
 
       - name: Resolve version label
         id: ver
@@ -89,7 +89,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: rigor-playground-wasm-${{ steps.ver.outputs.v }}
-          path: plugins/rigor-playground/wasm/rigor-playground.wasm
+          path: apps/rigor-playground/wasm/rigor-playground.wasm
           if-no-files-found: error
 
       # Publish to R2 only when the secrets are present (skipped on forks/PRs).

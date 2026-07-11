@@ -30,8 +30,9 @@ CONTRACT_PLUGIN_DIRS = (
   Dir[File.join(CONTRACT_REPO_ROOT, "examples", "*", "")]
 ).sort.freeze
 
-# `rigor-playground` is a Rack app, not a plugin (mirrors `all_plugins_load_spec.rb`).
-CONTRACT_PLUGIN_SKIP = %w[rigor-playground].freeze
+# plugins/* directories that are not loadable plugins and are out of scope for this guard (mirrors
+# `all_plugins_load_spec.rb`). Currently empty: `rigor-playground` (a Rack app) now lives under `apps/`.
+CONTRACT_PLUGIN_SKIP = %w[].freeze
 
 CONTRACT_LOADABLE_DIRS = CONTRACT_PLUGIN_DIRS.reject do |dir|
   CONTRACT_PLUGIN_SKIP.include?(File.basename(dir))

@@ -42,7 +42,10 @@ this chapter is the carrier zoo.
 One note on notation before the zoo: angle brackets hold a
 concrete value or bound — `Constant<3>`, `int<0, max>` —
 while square brackets hold type parameters, exactly as in RBS
-— `Nominal[String]`, `Hash[K, V]`, `Dynamic[top]`.
+— `Nominal[String]`, `Hash[K, V]`, `Dynamic[top]`. A type
+parameter names the type of a *part*: `Hash[K, V]` is a Hash
+whose keys are type `K` and values type `V`, just as
+`Array[String]` is "an array of strings."
 
 ## Seeing carriers yourself — `rigor annotate`
 

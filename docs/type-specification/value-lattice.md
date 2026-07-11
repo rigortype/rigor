@@ -36,25 +36,18 @@ The detailed semantics of `untyped`, `Dynamic[T]`, gradual consistency, and the 
 
 ### Algebraic rules
 
-Dynamic-origin joins preserve the marker instead of pretending the value is purely static:
+Rigor does **not** fold a dynamic-origin operand into the combined type. A `Dynamic[T]` operand of a union stays a distinct union arm rather than absorbing the other operands into a single `Dynamic`:
 
 ```text
-Dynamic[A] | Dynamic[B] = Dynamic[A | B]
-T | Dynamic[U]          = Dynamic[T | U]
+Dynamic[A] | Dynamic[B] = Dynamic[A] | Dynamic[B]   (distinct arms, NOT Dynamic[A | B])
+T | Dynamic[U]          = T | Dynamic[U]            (the concrete arm T is preserved)
 ```
 
-Dynamic-origin intersection and difference preserve both precision and provenance:
+Keeping the arms distinct is more precise than absorbing them: the concrete arm `T` stays a concrete type — and, where every arm is concrete, a *protected* dispatch — while provenance stays per-arm (which arm crossed the boundary is known). A union with any dynamic-origin arm is still gradually valid at a dispatch, so the gradual-consistency guarantee is unchanged.
 
-```text
-Dynamic[T] & U = Dynamic[T & U]
-Dynamic[T] - U = Dynamic[T - U]
-```
+A guarded dynamic-origin value is narrowed by **concretizing** it, not by intersecting a marker: a trusted guard such as `x.is_a?(String)` narrows a `Dynamic[top]` receiver to `Nominal[String]` (a fully concrete, protected `String`), so the guarded call resolves against `String` method facts directly. See [control-flow-analysis.md](control-flow-analysis.md).
 
-When `U` is `top`, the result MAY be displayed as `untyped`, but the internal form MUST still record dynamic-origin provenance. Diagnostic display rules are in [diagnostic-policy.md](diagnostic-policy.md).
-
-### Worked example
-
-`untyped & String` becomes `Dynamic[String]`, not plain `String` and not raw `untyped`. A trusted guard MAY narrow `Dynamic[top]` to `Dynamic[String]`; a method call such as `upcase` MAY then use `String` method facts. The receiver remains traceable to the unchecked source, and diagnostics MAY record that the call was enabled by a dynamic-origin fact.
+The founding-era dynamic-origin **join** algebra (`T | Dynamic[U] = Dynamic[T | U]`, absorbing concrete arms into `Dynamic`) and the **meet** rule (`Dynamic[T] & U = Dynamic[T & U]`, provenance-preserving narrowing) are **superseded** by this behaviour — see [ADR-83](../adr/83-dynamic-origin-algebra.md) for the measurement and rationale. Provenance-preserving narrowing is deferred to a future strict-dynamic discipline ([ADR-75](../adr/75-dynamic-provenance.md) WD4); until then narrowing concretizes.
 
 ### Generic positions
 

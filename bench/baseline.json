@@ -1,13 +1,13 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-07-06T00:00:00Z",
-  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.2.8 @ run 28798789779",
-  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated for the v0.2.8 cut: allocations grew ~+40% since the v0.2.6 baseline (19.77M -> 27.78M) — cumulative, individually-reviewed feature cost across two cuts that were never rebaselined (v0.2.7's rigor-actionpack request-context readers + coverage-scope work, and v0.2.8's ADR-82 Dynamic-provenance side-tables), each measured perf-neutral A/B against the prior state, with the OSS-corpus (Mastodon) sweep staying green (no new false positives) — so the increase is blessed feature cost, not a regression. peak_rss_kb and wall_s refreshed to the same run's values. The allocations_pct band stays tight at 5%.",
+  "calibrated_at": "2026-07-11T00:00:00Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.2.9 @ run 29152992231",
+  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated for the v0.2.9 cut: allocations grew ~+5.6% since the v0.2.8 baseline (27.78M -> 29.33M) — individually-reviewed feature cost from this cycle's engine additions (the ADR-57 WD3 module-singleton discovery seed widens the seed pass, plus the ADR-82 external-gem provenance and the structure.sql schema-source paths), each measured perf-neutral A/B against the prior state, with the OSS-corpus (Mastodon) sweep staying green (no new false positives) — so the increase is blessed feature cost, not a regression. peak_rss_kb and wall_s refreshed to the same run's values. The allocations_pct band stays tight at 5%.",
   "targets": {
     "lib": {
-      "wall_s": 19.564,
-      "allocations": 27778097,
-      "peak_rss_kb": 244336,
+      "wall_s": 21.243,
+      "allocations": 29330383,
+      "peak_rss_kb": 260228,
       "diagnostics": 1
     }
   }

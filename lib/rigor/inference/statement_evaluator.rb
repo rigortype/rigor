@@ -1825,10 +1825,19 @@ module Rigor
         def_node = resolve_self_callee_def(node)
         return base_scope if def_node.nil?
 
-        escaped = escaped_content_parameters(def_node)
-        return base_scope if escaped.empty?
+        mutated = callee_content_mutated_parameters(def_node)
+        return base_scope if mutated.empty?
 
-        floor_arguments_at_positions(node, escaped, base_scope)
+        floor_arguments_at_positions(node, mutated, base_scope)
+      end
+
+      # The `{ name => position }` positional parameters whose content the callee mutates, from either channel: those
+      # escape-mutated inside a block (which may run later / repeatedly) AND those mutated directly in the method body
+      # during the call itself (`declaration[:prefix] = v`). Both leave the caller's argument binding stale after the
+      # call, so both floor it. Memoised per def node (the merge is otherwise recomputed at every call site).
+      def callee_content_mutated_parameters(def_node)
+        cache = (@callee_mutated_param_cache ||= {}.compare_by_identity)
+        cache[def_node] ||= escaped_content_parameters(def_node).merge(direct_content_parameters(def_node))
       end
 
       # The user def a self-dispatch `node` resolves to in the enclosing class, or nil. Reuses the discovery index
@@ -1870,6 +1879,42 @@ module Rigor
           end
         end
         positions.slice(*mutated)
+      end
+
+      # The `{ name => position }` positional parameters whose CONTENT the callee mutates directly in its method body —
+      # a top-level `param[k] = v` / `param << x`, outside a nested block. Memoised per def node. The block-nested case
+      # is `escaped_content_parameters`'s job; walking only outside nested blocks / defs / lambdas here means a matching
+      # parameter-name read is genuinely at method scope (depth 0) rather than a block-local of the same name that
+      # merely shadows the parameter — so we never floor a caller argument the callee did not actually mutate.
+      def direct_content_parameters(def_node)
+        cache = (@direct_param_cache ||= {}.compare_by_identity)
+        cache[def_node] ||= compute_direct_content_parameters(def_node)
+      end
+
+      def compute_direct_content_parameters(def_node)
+        positions = positional_parameter_positions(def_node)
+        return {} if positions.empty?
+
+        mutated = Set.new
+        each_node_outside_nested_scopes(def_node.body) do |descendant|
+          name, = content_mutation_target(descendant) { |r| r.is_a?(Prism::LocalVariableReadNode) && r.depth.zero? }
+          mutated << name if !name.nil? && positions.key?(name)
+        end
+        positions.slice(*mutated)
+      end
+
+      # Yields every node reachable from `body` without crossing into a nested block / def / lambda — i.e. the nodes
+      # that execute in the method's own scope. A local-variable read found here has depth 0 relative to the method, so
+      # a content mutation whose receiver is a positional-parameter name is a genuine mutation of that parameter.
+      def each_node_outside_nested_scopes(node, &)
+        return if node.nil?
+
+        yield node
+        node.compact_child_nodes.each do |child|
+          next if child.is_a?(Prism::BlockNode) || child.is_a?(Prism::DefNode) || child.is_a?(Prism::LambdaNode)
+
+          each_node_outside_nested_scopes(child, &)
+        end
       end
 
       # A receiver-independent over-approximation of `ClosureEscapeAnalyzer`'s non-escaping verdict, used when scanning

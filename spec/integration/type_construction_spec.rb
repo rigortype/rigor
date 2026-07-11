@@ -158,6 +158,18 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/callee_body_mutation_floor.rb — a callee filling its Hash param floors the caller argument" do
+    let(:harness) { harness_for("callee_body_mutation_floor") }
+
+    # A helper that content-mutates its parameter directly in its body (`declaration[:prefix] = …`) now floors
+    # the caller's captured argument, so `declaration[:prefix].empty? && declaration[:versions].empty?` no longer
+    # folds to a constant (the rigor-rails-routes Grape discoverer false positive).
+    it "is diagnostic-clean — the post-`absorb` `.empty? && .empty?` guard no longer folds" do
+      messages = harness.diagnostics.map(&:message)
+      expect(messages.grep(/always-(truthy|falsey)|condition is always/)).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

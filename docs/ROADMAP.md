@@ -93,40 +93,39 @@ is the active backend. The Ractor pool stays parked behind
 `RIGOR_POOL_BACKEND=ractor` and ADR-15 § OQ1; completing it is
 NOT a `0.2.x` goal and waits on upstream CRuby fixes.
 
-### The next two cuts — v0.2.9 (final `0.2.x`) then v0.3.0
+### The next cut — v0.3.0 (v0.2.9 shipped 2026-07-11)
 
-The single-digit version policy makes **v0.2.9 the last `0.2.x` cut** (its
-successor is `0.3.0`), so the two upcoming releases have distinct, deliberately
-separated charters:
+The single-digit version policy made **v0.2.9 the last `0.2.x` cut**; its
+successor `0.3.0` is the next release.
 
-**v0.2.9 — a type-inference strengthening cut, still inside the `0.2.x`
-minor-non-break pledge.** Land as much *observable, FP-safe* inference precision
-as fits, staying compatibility-safe ([ADR-50](adr/50-release-engineering-and-stability-strategy.md):
-a new diagnostic ships `:off` / `:info` behind a stable id; a default-severity
-promotion flows only through a green `rigor-survey` corpus diff; nothing is
-removed). Candidate content, readiness-ordered:
+**v0.2.9 (shipped 2026-07-11) — a large-Rails type-coverage cut.** The planned
+"type-inference strengthening" framing was superseded by the GitLab-scale
+onboarding arc. It shipped `db/structure.sql` schema support, strong-parameters
+chain typing, route-helper naming fidelity, cross-file module-facade resolution
+([ADR-57](adr/57-self-call-return-adoption.md) WD3), external-gem missing-RBS
+provenance labelling ([ADR-82](adr/82-dynamic-provenance-wiring.md) WD9), a
+fork-parallel `coverage --protection` scan, persistent-cache upgrade / ABI
+hardening, and the `rigor-playground` → `apps/` relocation. Full record:
+`CHANGELOG.md` § `[0.2.9]`.
 
-1. **Deterministic FP-safe folds** (compatibility-safe backlog bucket 1) — the
-   remaining builtin / stdlib method folds that reduce a `Dynamic` receiver
-   without firing a new diagnostic (the `rigor-type-coverage-uplift` skill; the
-   carrier sweep is largely drained, so this is the odd scalar / structure gap).
-2. **FP-safe narrowing extensions** — the Elixir-v1.20 § 4-4 upper-bound length
-   track (`tuple_size(x) < 3`, needs a length-range carrier) and any sibling
-   narrowing that adds protection without a new firing.
-3. **[ADR-47](adr/47-narrowing-driven-clause-reachability.md) WD3b** —
-   deconstructing / value / variable-catch-all `case`/`in` exhaustiveness,
-   shipped `:off` / `:info` first per the discipline.
-4. **The bucket-3 default-widening diagnostics** (survey P0) — receiver-typing /
-   nilability / flow / override precision that already *exists* internally; each
-   promotion into the default profile is gated on a clean Rails / ActiveSupport /
-   DSL / monkey-patch / RBS-gap corpus diff. This is the highest-value
-   strengthening, so ship the ones that pass the sweep and hold the rest.
+The FP-safe inference-precision candidates that did **not** make v0.2.9 —
+deterministic builtin / stdlib folds (`rigor-type-coverage-uplift`), the
+Elixir-v1.20 § 4-4 upper-bound length narrowing track (`tuple_size(x) < 3`,
+needs a length-range carrier), [ADR-47](adr/47-narrowing-driven-clause-reachability.md)
+WD3b deconstructing / value / variable `case`/`in` exhaustiveness, and the
+bucket-3 default-widening diagnostics (survey P0, receiver-typing / nilability /
+flow / override precision that already exists internally) — roll forward as
+compatibility-safe candidates for v0.3.0 and later. Nothing about them is
+`0.2.x`-specific: each ships `:off` / `:info` behind a stable id and promotes
+into the default profile only through a green `rigor-survey` corpus diff per
+[ADR-50](adr/50-release-engineering-and-stability-strategy.md), so a minor that
+otherwise breaks (v0.3.0) can still carry them.
 
 The M3 / member-shape arc ([ADR-67](adr/67-parameter-type-inference.md) `check`-walk
 wiring → [ADR-68](adr/68-class-builder-folding.md) → [ADR-66](adr/66-discriminated-union-member-typing.md))
-is **not** the v0.2.9 focus: ADR-67 WD2 in-body inference was spiked and deferred
+stays demand-gated: ADR-67 WD2 in-body inference was spiked and deferred
 (the protection ceiling is a measured hard floor, see `docs/notes/20260706-adr67-wd2-in-body-inference-design-spike.md`),
-and the `check`-walk wiring's value is murky. It stays demand-gated.
+and the `check`-walk wiring's value is murky.
 
 **v0.3.0 — the deprecation-clearance + performance minor (the first cut that may
 break).** Semver `0.x` permits a minor to break, and every hard deprecation was

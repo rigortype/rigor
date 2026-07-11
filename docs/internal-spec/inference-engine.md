@@ -62,7 +62,7 @@ The fact-store buckets are an internal optimisation boundary. `Scope` may expose
 
 ### Discovery Index (ADR-53 Track A)
 
-Alongside its flow state, every `Rigor::Scope` snapshot carries a single immutable **discovery index** (`Rigor::Scope::DiscoveryIndex`) holding the seed-time discovery tables — `declared_types`, `class_ivars`, `class_cvars`, `program_globals`, `discovered_classes`, `in_source_constants`, `discovered_methods`, `discovered_def_nodes`, `discovered_singleton_def_nodes`, `discovered_def_sources`, `discovered_method_visibilities`, `discovered_superclasses`, `discovered_includes`, `discovered_class_sources`, `data_member_layouts`, and `struct_member_layouts`. Membership is fixed by the criterion in [ADR-53](../adr/53-scope-discovery-index-separation.md): a field belongs in the index **iff no flow transition ever produces a scope whose value for that field differs from its seed**.
+Alongside its flow state, every `Rigor::Scope` snapshot carries a single immutable **discovery index** (`Rigor::Scope::DiscoveryIndex`) holding the seed-time discovery tables — `declared_types`, `class_ivars`, `class_cvars`, `program_globals`, `discovered_classes`, `in_source_constants`, `discovered_methods`, `discovered_def_nodes`, `discovered_singleton_def_nodes`, `discovered_def_sources`, `discovered_method_visibilities`, `discovered_superclasses`, `discovered_includes`, `discovered_class_sources`, `data_member_layouts`, `struct_member_layouts`, and `param_inferred_types` (the ADR-67 call-site parameter-inference table). Membership is fixed by the criterion in [ADR-53](../adr/53-scope-discovery-index-separation.md): a field belongs in the index **iff no flow transition ever produces a scope whose value for that field differs from its seed**.
 
 - The index MUST be immutable; it is a frozen `Data` and a seeded index is derived through `DiscoveryIndex#with`.
 - Every flow transition (`with_local`, `with_fact`, `join`, …) MUST carry the receiver's index through to the result by reference, unexamined. `Scope#==` MUST NOT compare the index (it is ambient context, not flow state).
@@ -98,6 +98,7 @@ tracer.record_fallback(event)
 - `location` — the Prism source location object for real Prism nodes, or `nil` for synthetic nodes that do not expose a location.
 - `family` — the symbol `:prism` for real Prism nodes and `:virtual` for nodes that include `Rigor::AST::Node`.
 - `inner_type` — the `Rigor::Type` returned to the caller. This is `Dynamic[top]` today; later slices MAY enrich the inner type while keeping the fallback observable.
+- `origin` — the `Rigor::Inference::DynamicOrigin` cause symbol (ADR-75) recorded as provenance for the widened value, or `nil` when no cause is known.
 
 The tracer protocol exposed by `Rigor::Inference::FallbackTracer` MUST satisfy:
 

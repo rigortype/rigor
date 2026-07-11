@@ -4,8 +4,16 @@ source "https://rubygems.org"
 
 gemspec
 
-gem "rigor-rbs-inline", path: "../../plugins/rigor-rbs-inline"
-gem "rigortype",        path: "../.."
+gem "rigortype", path: "../.."
+
+# Runtime dependency of the rigor-rbs-inline plugin (ADR-32), which the
+# playground pre-loads (ADR-29 WD4). The plugin itself has no gemspec — it
+# rides along inside `rigortype` via the gemspec's `require_paths`
+# (`plugins/*/lib`), so it is not declared as a gem here; only its upstream
+# dependency is. `rigortype` lists `rbs-inline` as a *development* dependency
+# (ADR-0 zero-runtime-dep), so a consumer of the path gem must declare it
+# directly. Pinned to the same range the top-level gemspec declares.
+gem "rbs-inline", ">= 0.5", "< 1.0"
 
 group :development, :test do
   gem "rack-test", ">= 2.0", "< 3.0"

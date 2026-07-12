@@ -11,10 +11,18 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[perf]** `rigor check` and `rigor coverage` now enable YJIT once a run outlasts a short amortization deadline, cutting wall time on large projects with no penalty to quick runs.
+  - Ruby ships YJIT but leaves it off, and enabling it up front is a net loss on short runs because the JIT compile cost never amortizes (measured: a ~4s run regressed ~20%). Rigor now arms a background thread at the start of a check / coverage run that enables YJIT only after 5s, so a run that finishes first never pays the compile cost while a long run JITs its dominant tail. Measured cold on Mastodon `app`+`lib`: 25.4s → 15.1s (1.7×), matching always-on YJIT; the short-run cases (kramdown, Mastodon `app/models`, mail) stay at parity. The long-lived `rigor lsp` / `rigor mcp` servers enable YJIT at boot. Set `RIGOR_DISABLE_YJIT=1` to opt out, or `RIGOR_YJIT_DEADLINE=<seconds>` to tune the deadline. Diagnostics and allocations are unchanged.
+
 ### Changed
 
+- **[rigor-dry-types]** The dry-types alias scan is now cached across runs, so a warm `rigor check` re-validates file digests instead of re-parsing the whole project ([ADR-60](docs/adr/60-pre-freeze-plugin-contract-consolidation.md) WD3).
+  - The plugin's `#prepare` used to Prism-parse every `.rb` file under the project's `paths:` on every invocation — cold and warm alike — to find `include Dry.Types()` declarations, which dominated warm-run wall time on large Rails apps (measured at roughly a third of GitLab `app/models` warm time). The scan now rides a cached `producer` with a `watch:` glob covering the same tree: a warm run re-globs and re-digests the watched files (a cheap SHA over file bytes, no AST build) and reuses the cached alias table, recomputing only when a source file under those paths is edited, added, or removed. The empty result for a project that ships no dry-types module is cached too. `--no-cache` recomputes fresh, exactly as before.
 - **[engine]** AST tree walks no longer allocate a throwaway array per node visited, cutting total allocations on every `rigor check` run — most sharply on leaf-heavy sources.
   - `Prism::Node#compact_child_nodes` builds a fresh `Array` on every call, and Rigor's walkers called it unconditionally on every node of every walk. On a Ragel-generated parser (mail's `lib`, with hundreds of thousands of integer-literal leaf nodes) those arrays were over half of all allocations. A new `Rigor::Source::NodeChildren.each_child` yields the same children in the same order without the array — reading each child field directly and reusing list fields' stored arrays — and the engine's tree walkers (the shared node walker, the plugin/check-rule walk, the scope-discovery seed pass, the collectors, and the sig-gen / dependency / mutation scanners) now use it. Diagnostics are byte-identical; the field map is derived from `Prism::Reflection` so it tracks the installed `prism`.
+
 
 ## [0.2.9] - 2026-07-11
 

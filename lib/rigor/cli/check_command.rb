@@ -8,6 +8,7 @@ require_relative "../configuration"
 require_relative "../config_audit"
 require_relative "../analysis/result"
 require_relative "../analysis/rule_catalog"
+require_relative "../runtime/jit"
 require_relative "coverage_scan"
 require_relative "command"
 require_relative "options"
@@ -30,6 +31,11 @@ module Rigor
     class CheckCommand < Command # rubocop:disable Metrics/ClassLength
       # @return [Integer] CLI exit status.
       def run # rubocop:disable Metrics/AbcSize
+        # Arm deferred YJIT enablement before any analysis work: the deadline
+        # thread only fires once a run outlasts the amortization window, so a
+        # short check finishes before it ever pays JIT compile cost while a
+        # long run JITs its dominant tail (Runtime::Jit).
+        Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
         load_check_dependencies
         options = parse_check_options
         buffer = Options.resolve_buffer_binding(options, err: @err)

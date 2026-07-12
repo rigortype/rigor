@@ -2,6 +2,7 @@
 
 require_relative "command"
 require_relative "options"
+require_relative "../runtime/jit"
 
 require "optionparser"
 
@@ -24,6 +25,10 @@ module Rigor
           @err.puts("rigor lsp: unsupported transport: #{transport.inspect} (only `stdio` is supported in v1)")
           return CLI::EXIT_USAGE
         end
+
+        # A long-lived server always outlasts the JIT compile cost, so enable
+        # YJIT at boot rather than on the analysis deadline (Runtime::Jit).
+        Runtime::Jit.enable_now
 
         require_relative "../language_server"
         require_relative "../configuration"

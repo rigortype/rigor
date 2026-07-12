@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../source/constant_path"
+require_relative "../source/node_children"
 
 module Rigor
   module Inference
@@ -156,7 +157,7 @@ module Rigor
       # Yields each child to recurse into, skipping the subtree of a nested local-variable-scope boundary (a `def` /
       # `class` / `module`).
       def each_local_scope_child(node)
-        node.compact_child_nodes.each do |child|
+        Source::NodeChildren.each_child(node) do |child|
           next if scope_boundary?(child)
 
           yield child

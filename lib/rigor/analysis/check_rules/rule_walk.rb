@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/constant_path"
+require_relative "../../source/node_children"
 
 module Rigor
   module Analysis
@@ -145,7 +146,7 @@ module Rigor
 
             dispatch(node, hooks, context)
             child_context = descend(node, context)
-            node.compact_child_nodes.each { |child| walk(child, hooks, child_context) }
+            Source::NodeChildren.each_child(node) { |child| walk(child, hooks, child_context) }
           end
 
           def dispatch(node, hooks, context)

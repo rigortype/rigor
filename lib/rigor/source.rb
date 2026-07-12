@@ -10,6 +10,7 @@ module Rigor
   end
 end
 
+require_relative "source/node_children"
 require_relative "source/node_locator"
 require_relative "source/node_walker"
 require_relative "source/literals"

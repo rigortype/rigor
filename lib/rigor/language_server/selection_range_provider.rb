@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "uri"
 require_relative "buffer_resolution"
+require_relative "../source/node_children"
 
 module Rigor
   module LanguageServer
@@ -48,7 +49,7 @@ module Rigor
         return chain unless node.location && offset_in?(node.location, offset)
 
         chain << node
-        node.compact_child_nodes.each { |child| ancestor_chain(child, offset, chain) }
+        Source::NodeChildren.each_child(node) { |child| ancestor_chain(child, offset, chain) }
         chain
       end
 

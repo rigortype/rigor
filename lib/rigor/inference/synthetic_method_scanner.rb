@@ -5,6 +5,7 @@ require "prism"
 require_relative "../plugin/macro/heredoc_template"
 require_relative "../plugin/macro/trait_registry"
 require_relative "../source/literals"
+require_relative "../source/node_children"
 require_relative "synthetic_method"
 require_relative "synthetic_method_index"
 
@@ -166,12 +167,12 @@ module Rigor
           name = class_name_from(node, scope_stack)
           yield name, node if name
           new_stack = scope_stack + [node]
-          node.body&.compact_child_nodes&.each { |child| walk_classes(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_classes(child, new_stack, &) }
         when Prism::ModuleNode
           new_stack = scope_stack + [node]
-          node.body&.compact_child_nodes&.each { |child| walk_classes(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_classes(child, new_stack, &) }
         else
-          node.compact_child_nodes.each { |child| walk_classes(child, scope_stack, &) }
+          Source::NodeChildren.each_child(node) { |child| walk_classes(child, scope_stack, &) }
         end
       end
 
@@ -303,12 +304,12 @@ module Rigor
           name = class_name_from(node, scope_stack)
           yield name, node.body
           new_stack = scope_stack + [node]
-          node.body&.compact_child_nodes&.each { |child| walk_module_decls(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_module_decls(child, new_stack, &) }
         when Prism::ClassNode
           new_stack = scope_stack + [node]
-          node.body&.compact_child_nodes&.each { |child| walk_module_decls(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_module_decls(child, new_stack, &) }
         else
-          node.compact_child_nodes.each { |child| walk_module_decls(child, scope_stack, &) }
+          Source::NodeChildren.each_child(node) { |child| walk_module_decls(child, scope_stack, &) }
         end
       end
 
@@ -372,7 +373,7 @@ module Rigor
         hierarchy.freeze
       end
 
-      def walk_class_decls(node, scope_stack, &) # rubocop:disable Metrics/PerceivedComplexity
+      def walk_class_decls(node, scope_stack, &)
         return unless node.respond_to?(:compact_child_nodes)
 
         if node.is_a?(Prism::ClassNode)
@@ -380,19 +381,19 @@ module Rigor
           parent = parent_name_from(node, scope_stack)
           yield name, parent if name
           new_stack = scope_stack + [node]
-          node.body&.compact_child_nodes&.each { |child| walk_class_decls(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_class_decls(child, new_stack, &) }
         elsif node.is_a?(Prism::ModuleNode)
           new_stack = scope_stack + [node]
-          node.body&.compact_child_nodes&.each { |child| walk_class_decls(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_class_decls(child, new_stack, &) }
         else
-          node.compact_child_nodes.each { |child| walk_class_decls(child, scope_stack, &) }
+          Source::NodeChildren.each_child(node) { |child| walk_class_decls(child, scope_stack, &) }
         end
       end
 
       # Yields `(class_name, call_node)` for every Prism::CallNode at class-body top level (singleton-context calls).
       # Nested method bodies, blocks, and conditionals are skipped — the Tier C call shapes the substrate targets all
       # live at the class body's top level.
-      def walk_class_bodies(node, scope_stack = [], &) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+      def walk_class_bodies(node, scope_stack = [], &)
         return unless node.respond_to?(:compact_child_nodes)
 
         if node.is_a?(Prism::ClassNode)
@@ -403,12 +404,12 @@ module Rigor
               yield name, stmt if stmt.is_a?(Prism::CallNode) && stmt.receiver.nil?
             end
           end
-          node.body&.compact_child_nodes&.each { |child| walk_class_bodies(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_class_bodies(child, new_stack, &) }
         elsif node.is_a?(Prism::ModuleNode)
           new_stack = scope_stack + [node]
-          node.body&.compact_child_nodes&.each { |child| walk_class_bodies(child, new_stack, &) }
+          Source::NodeChildren.each_child(node.body) { |child| walk_class_bodies(child, new_stack, &) }
         else
-          node.compact_child_nodes.each { |child| walk_class_bodies(child, scope_stack, &) }
+          Source::NodeChildren.each_child(node) { |child| walk_class_bodies(child, scope_stack, &) }
         end
       end
 

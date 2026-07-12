@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "node_children"
+
 module Rigor
   module Source
     # Yields every `Prism::Node` reachable from a root in DFS pre-order.
@@ -28,7 +30,7 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         yield node
-        node.compact_child_nodes.each { |child| walk(child, &) }
+        NodeChildren.each_child(node) { |child| walk(child, &) }
       end
 
       # Like {.each}, but also yields the node's lexical ancestor chain (outermost first, EXCLUDING the node
@@ -51,7 +53,7 @@ module Rigor
 
         block.call(node, ancestors)
         ancestors.push(node)
-        node.compact_child_nodes.each { |child| walk_with_ancestors(child, ancestors, &block) }
+        NodeChildren.each_child(node) { |child| walk_with_ancestors(child, ancestors, &block) }
         ancestors.pop
       end
     end

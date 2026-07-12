@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../scope"
 require_relative "../inference/scope_indexer"
+require_relative "../source/node_children"
 
 module Rigor
   # ADR-63 Tier 2 — the productized subset of the dev-only mutation-testing harness (`tool/mutation/`, ADR-62).
@@ -111,7 +112,7 @@ module Rigor
         return if node.nil?
 
         blk.call(node)
-        node.compact_child_nodes.each { |child| walk(child, &blk) }
+        Source::NodeChildren.each_child(node) { |child| walk(child, &blk) }
       end
 
       def collect(node, out)
@@ -136,7 +137,7 @@ module Rigor
             @anchor_for[arg] = [node.receiver, node.name.to_s] if literal?(arg)
           end
         end
-        node.compact_child_nodes.each { |child| index_literal_anchors(child) }
+        Source::NodeChildren.each_child(node) { |child| index_literal_anchors(child) }
       end
 
       def literal?(node)

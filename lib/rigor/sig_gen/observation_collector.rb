@@ -6,6 +6,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../type"
 require_relative "../source/literals"
+require_relative "../source/node_children"
 require_relative "../inference/scope_indexer"
 
 module Rigor
@@ -126,7 +127,7 @@ module Rigor
           end
         end
 
-        node.compact_child_nodes.each { |child| walk_class_decls(child, prefix, accumulator) }
+        Source::NodeChildren.each_child(node) { |child| walk_class_decls(child, prefix, accumulator) }
       end
 
       def qualified_constant_path(constant_path)
@@ -146,7 +147,7 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         record_call(node, scope_index, bindings, observations) if node.is_a?(Prism::CallNode)
-        node.compact_child_nodes.each { |child| walk_calls(child, scope_index, bindings, observations) }
+        Source::NodeChildren.each_child(node) { |child| walk_calls(child, scope_index, bindings, observations) }
       end
 
       def record_call(call_node, scope_index, bindings, observations)
@@ -244,7 +245,7 @@ module Rigor
         recognise_describe(node, bindings)
         recognise_subject_or_let(node, bindings, scope_index)
 
-        node.compact_child_nodes.each { |child| walk_rspec_bindings(child, bindings, scope_index) }
+        Source::NodeChildren.each_child(node) { |child| walk_rspec_bindings(child, bindings, scope_index) }
       end
 
       def recognise_describe(node, bindings)

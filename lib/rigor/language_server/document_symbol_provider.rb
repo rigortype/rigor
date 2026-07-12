@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "uri"
 require_relative "buffer_resolution"
+require_relative "../source/node_children"
 
 module Rigor
   module LanguageServer
@@ -67,7 +68,7 @@ module Rigor
         when Prism::DefNode
           block.call(def_symbol(node, in_namespace: in_namespace))
         else
-          node.compact_child_nodes.each do |child|
+          Source::NodeChildren.each_child(node) do |child|
             each_decl(child, in_namespace: in_namespace, &block)
           end
         end

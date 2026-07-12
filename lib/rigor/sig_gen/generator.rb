@@ -8,6 +8,7 @@ require_relative "../scope"
 require_relative "../reflection"
 require_relative "../type"
 require_relative "../source/literals"
+require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/rbs_type_translator"
@@ -159,7 +160,7 @@ module Rigor
           return
         end
 
-        node.compact_child_nodes.each do |child|
+        Source::NodeChildren.each_child(node) do |child|
           walk_defs(child, prefix, in_singleton_class, module_function_active, out)
         end
       end
@@ -796,7 +797,7 @@ module Rigor
           collect_attr_call(node, prefix, in_singleton_class, ctx)
         end
 
-        node.compact_child_nodes.each { |child| walk_attr_calls(child, prefix, in_singleton_class, ctx) }
+        Source::NodeChildren.each_child(node) { |child| walk_attr_calls(child, prefix, in_singleton_class, ctx) }
       end
 
       def collect_attr_call(call_node, prefix, in_singleton_class, ctx)
@@ -872,7 +873,7 @@ module Rigor
           return
         end
 
-        node.compact_child_nodes.each { |c| collect_init_ivar_obs(c, prefix, result) }
+        Source::NodeChildren.each_child(node) { |c| collect_init_ivar_obs(c, prefix, result) }
       end
 
       # Derive { attr_name_sym => Type } for a single `def initialize` by matching `@ivar = param_name`
@@ -950,7 +951,7 @@ module Rigor
                   node.is_a?(Prism::ClassNode) ||
                   node.is_a?(Prism::ModuleNode)
 
-        node.compact_child_nodes.each { |c| scan_ivar_param_assignments(c, param_names, result) }
+        Source::NodeChildren.each_child(node) { |c| scan_ivar_param_assignments(c, param_names, result) }
       end
 
       def build_attr_candidates(call_name, class_name, attr_name, ivar_type, ctx)

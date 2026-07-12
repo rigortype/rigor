@@ -8,6 +8,7 @@ require_relative "../environment"
 require_relative "../reflection"
 require_relative "../scope"
 require_relative "../source/node_locator"
+require_relative "../source/node_children"
 require_relative "../inference/scope_indexer"
 require_relative "../type/nominal"
 require_relative "../type/singleton"
@@ -99,7 +100,7 @@ module Rigor
           if n.is_a?(Prism::CallNode) && n.arguments && offset_in?(n.arguments.location, cursor_offset)
             result = n # Innermost-wins because we keep walking children.
           end
-          n.compact_child_nodes.each(&walk)
+          Source::NodeChildren.each_child(n, &walk)
         end
         walk.call(root)
         result

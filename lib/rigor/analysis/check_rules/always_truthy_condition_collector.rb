@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "../../source/node_children"
+
 module Rigor
   module Analysis
     module CheckRules
@@ -81,7 +83,7 @@ module Rigor
           visit(node) if conditional_node?(node) && !in_loop_or_block
 
           child_in_loop_or_block = in_loop_or_block || enters_loop_or_block?(node)
-          node.compact_child_nodes.each { |child| walk(child, in_loop_or_block: child_in_loop_or_block) }
+          Source::NodeChildren.each_child(node) { |child| walk(child, in_loop_or_block: child_in_loop_or_block) }
         end
 
         def conditional_node?(node)

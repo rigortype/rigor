@@ -8,6 +8,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../cache/rbs_descriptor"
+require_relative "../cache/file_digest"
 require_relative "../plugin"
 require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
@@ -150,6 +151,13 @@ module Rigor
       # errors. The Environment is built once at run start through `Environment.for_project` so all files
       # share the same RBS load.
       def run(paths = @configuration.paths)
+        # One per-run file-digest memo spans the whole run, so a path is SHA-256'd at most once across the
+        # run-diagnostics dependency descriptor, its `fresh?` validation, the RBS signature tree, and every
+        # plugin producer's watched-glob validation (they overlap heavily on the warm path).
+        Cache::FileDigest.with_run { run_analysis(paths) }
+      end
+
+      def run_analysis(paths)
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
 
@@ -262,7 +270,13 @@ module Rigor
         return assemble_run_diagnostics(expansion) unless run_result_cacheable?
 
         environment = @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
-        rbs_descriptor = environment&.rbs_loader ? Cache::RbsDescriptor.build(environment.rbs_loader) : Cache::Descriptor.new
+        # Lazy-files descriptor: the cache KEY reads only `gems` + `configs`; the RBS signature-tree `files`
+        # are digested solely by `run_dependency_descriptor` on a MISS, so a warm HIT never walks the tree.
+        rbs_descriptor = if environment&.rbs_loader
+                           Cache::RbsDescriptor.build_run(environment.rbs_loader)
+                         else
+                           Cache::Descriptor.new
+                         end
         key_descriptor = run_key_descriptor(expansion, rbs_descriptor)
         return assemble_run_diagnostics(expansion, environment: environment) if key_descriptor.nil?
 
@@ -356,7 +370,7 @@ module Rigor
         expansion.fetch(:files).map do |path|
           physical = @buffer ? @buffer.resolve(path) : path
           Cache::Descriptor::FileEntry.new(
-            path: physical, comparator: :digest, value: Digest::SHA256.file(physical).hexdigest
+            path: physical, comparator: :digest, value: Cache::FileDigest.hexdigest(physical)
           )
         end
       end

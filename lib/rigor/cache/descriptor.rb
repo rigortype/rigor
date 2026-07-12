@@ -3,6 +3,7 @@
 require "digest"
 require "json"
 require_relative "../value_semantics"
+require_relative "file_digest"
 
 module Rigor
   module Cache
@@ -180,7 +181,7 @@ module Rigor
           rows = Dir.glob(File.join(root, pattern)).filter_map do |path|
             next nil unless File.file?(path)
 
-            "#{path}\0#{Digest::SHA256.file(path).hexdigest}\n"
+            "#{path}\0#{FileDigest.hexdigest(path)}\n"
           rescue StandardError
             nil
           end
@@ -313,7 +314,9 @@ module Rigor
       def file_entry_fresh?(entry)
         case entry.comparator
         when :digest
-          File.file?(entry.path) && Digest::SHA256.file(entry.path).hexdigest == entry.value
+          # `FileDigest` serves a per-run memo when a run is active (validation digests overlap the
+          # dependency descriptor's), and falls back to a direct digest otherwise — same value either way.
+          File.file?(entry.path) && FileDigest.hexdigest(entry.path) == entry.value
         when :mtime
           File.exist?(entry.path) && File.mtime(entry.path).to_i.to_s == entry.value
         when :exists

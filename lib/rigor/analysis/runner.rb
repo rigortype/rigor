@@ -8,6 +8,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../cache/rbs_descriptor"
+require_relative "../cache/file_digest"
 require_relative "../plugin"
 require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
@@ -150,6 +151,13 @@ module Rigor
       # errors. The Environment is built once at run start through `Environment.for_project` so all files
       # share the same RBS load.
       def run(paths = @configuration.paths)
+        # One per-run file-digest memo spans the whole run, so a path is SHA-256'd at most once across the
+        # run-diagnostics dependency descriptor, its `fresh?` validation, the RBS signature tree, and every
+        # plugin producer's watched-glob validation (they overlap heavily on the warm path).
+        Cache::FileDigest.with_run { run_analysis(paths) }
+      end
+
+      def run_analysis(paths)
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
 
@@ -160,12 +168,19 @@ module Rigor
 
         expansion = expand_paths(paths)
         @snapshots.reset_for_run
+        # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
+        @project_discovery_done = false
 
         if @prebuilt
           adopt_prebuilt_project_scan(@prebuilt)
         else
           run_project_pre_passes(expansion: expansion)
         end
+
+        # The recording / subset (ADR-46) modes read the discovery tables outside the analysis assembly, so
+        # they force the build eagerly here (matching pre-slice-1 timing); every other mode defers it to the
+        # miss path so a warm cache HIT skips the two whole-project parse passes entirely.
+        ensure_project_discovery(expansion) if force_eager_discovery?
 
         diagnostics = compute_run_diagnostics(expansion)
 
@@ -255,7 +270,13 @@ module Rigor
         return assemble_run_diagnostics(expansion) unless run_result_cacheable?
 
         environment = @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
-        rbs_descriptor = environment&.rbs_loader ? Cache::RbsDescriptor.build(environment.rbs_loader) : Cache::Descriptor.new
+        # Lazy-files descriptor: the cache KEY reads only `gems` + `configs`; the RBS signature-tree `files`
+        # are digested solely by `run_dependency_descriptor` on a MISS, so a warm HIT never walks the tree.
+        rbs_descriptor = if environment&.rbs_loader
+                           Cache::RbsDescriptor.build_run(environment.rbs_loader)
+                         else
+                           Cache::Descriptor.new
+                         end
         key_descriptor = run_key_descriptor(expansion, rbs_descriptor)
         return assemble_run_diagnostics(expansion, environment: environment) if key_descriptor.nil?
 
@@ -277,6 +298,11 @@ module Rigor
       end
 
       def assemble_run_diagnostics(expansion, environment: nil)
+        # Force the deferred cross-file discovery pre-pass on the analysis (miss) path. Memoised, so the
+        # eager force in `#run` (recording / subset modes) makes this a no-op. A warm cache HIT never calls
+        # `assemble_run_diagnostics`, so it never runs the two whole-project parse passes. Runs over the FULL
+        # expansion — subset (`analyze_only`) mode still needs the complete cross-file index (ADR-46 §2).
+        ensure_project_discovery(expansion)
         diagnostics = @diagnostic_aggregator.pre_file_diagnostics(expansion)
         # ADR-46 — record which project files this run actually analyzed (the `analyze_only` subset, or
         # all of them). The incremental orchestrator serves every analyzed-but-not-affected file from the
@@ -344,7 +370,7 @@ module Rigor
         expansion.fetch(:files).map do |path|
           physical = @buffer ? @buffer.resolve(path) : path
           Cache::Descriptor::FileEntry.new(
-            path: physical, comparator: :digest, value: Digest::SHA256.file(physical).hexdigest
+            path: physical, comparator: :digest, value: Cache::FileDigest.hexdigest(physical)
           )
         end
       end
@@ -399,35 +425,63 @@ module Rigor
         apply_pre_passes_result(@pre_passes.adopt_prebuilt(scan))
       end
 
-      # Internal: copies a {ProjectPrePasses::Result} bundle onto the runner's ivars in the assignment
-      # order the original inline pre-pass body used, so every downstream reader (per-file analysis seed,
-      # pool environment build, diagnostic aggregator) sees the same ivar surface. The prebuilt path leaves
-      # the discovery tables at their frozen-empty constructor defaults (the bundle carries `nil` for them,
-      # matching the original adopt path that never touched them).
-      def apply_pre_passes_result(result) # rubocop:disable Metrics/AbcSize
+      # Internal: copies a {ProjectPrePasses::Result} bundle's EAGER (env-input) slots onto the runner's
+      # ivars, so every downstream reader (pool environment build, diagnostic aggregator) sees the same ivar
+      # surface. The cross-file discovery tables are NOT carried here — `#run` (prebuilt-less) and
+      # `adopt_prebuilt` both leave them at their frozen-empty constructor defaults, and the analysis path
+      # fills them lazily via {#ensure_project_discovery}. The prebuilt (LSP) path never fills them, matching
+      # the original adopt behaviour that seeded an empty project scope.
+      def apply_pre_passes_result(result)
         @plugin_registry = result.plugin_registry
         @dependency_source_index = result.dependency_source_index
         @cached_plugin_prepare_diagnostics = result.cached_plugin_prepare_diagnostics
         @synthetic_method_index = result.synthetic_method_index
         @project_patched_methods = result.project_patched_methods
         @pre_eval_diagnostics_from_scanner = result.pre_eval_diagnostics_from_scanner
-        @project_discovered_classes = result.discovered_classes if result.discovered_classes
-        @project_discovered_def_nodes = result.discovered_def_nodes if result.discovered_def_nodes
-        if result.discovered_singleton_def_nodes
-          @project_discovered_singleton_def_nodes = result.discovered_singleton_def_nodes
-        end
-        @project_discovered_def_sources = result.discovered_def_sources if result.discovered_def_sources
-        @project_discovered_superclasses = result.discovered_superclasses if result.discovered_superclasses
-        @project_discovered_includes = result.discovered_includes if result.discovered_includes
-        @project_discovered_class_sources = result.discovered_class_sources if result.discovered_class_sources
-        if result.discovered_method_visibilities
-          @project_discovered_method_visibilities = result.discovered_method_visibilities
-        end
-        @project_discovered_methods = result.discovered_methods if result.discovered_methods
-        @project_data_member_layouts = result.data_member_layouts if result.data_member_layouts
-        @project_struct_member_layouts = result.struct_member_layouts if result.struct_member_layouts
       end
-      private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result
+
+      # Internal: adopts a {ProjectPrePasses::Discovery} bundle (the two whole-project discovery passes)
+      # onto the runner's discovery ivars, in the same assignment order the original inline pre-pass used.
+      # Called only from {#ensure_project_discovery}.
+      def apply_discovery_result(discovery)
+        @project_discovered_classes = discovery.discovered_classes
+        @project_discovered_def_nodes = discovery.discovered_def_nodes
+        @project_discovered_singleton_def_nodes = discovery.discovered_singleton_def_nodes
+        @project_discovered_def_sources = discovery.discovered_def_sources
+        @project_discovered_superclasses = discovery.discovered_superclasses
+        @project_discovered_includes = discovery.discovered_includes
+        @project_discovered_class_sources = discovery.discovered_class_sources
+        @project_discovered_method_visibilities = discovery.discovered_method_visibilities
+        @project_discovered_methods = discovery.discovered_methods
+        @project_data_member_layouts = discovery.data_member_layouts
+        @project_struct_member_layouts = discovery.struct_member_layouts
+      end
+
+      # Internal: builds the deferred cross-file discovery tables at most once per run and adopts them.
+      # Memoised on `@project_discovery_done` (reset at the start of `#run`). No-op under `@prebuilt` — the
+      # LSP path deliberately seeds an empty project scope from a snapshot that carries no discovery tables,
+      # so forcing a build there would change that contract. Called eagerly from `#run` for the recording /
+      # subset (ADR-46) modes and lazily from `#assemble_run_diagnostics` on the analysis path, so a warm
+      # cache HIT (which never assembles) never pays the double parse.
+      def ensure_project_discovery(expansion)
+        return if @prebuilt
+        return if @project_discovery_done
+
+        @project_discovery_done = true
+        apply_discovery_result(@pre_passes.discover(expansion: expansion))
+      end
+
+      # ADR-46 — the dependency-recording and subset-analysis modes read the discovery tables OUTSIDE the
+      # analysis assembly (`Runner#symbol_fingerprints` / `#class_declarations`, consumed by
+      # {IncrementalSession} after the run), so they force the build eagerly — matching the pre-slice-1
+      # timing where discovery always ran before `compute_run_diagnostics`. Every other mode defers to the
+      # lazy build inside `#assemble_run_diagnostics`.
+      def force_eager_discovery?
+        @record_dependencies || !@analyze_only.nil?
+      end
+
+      private :run_project_pre_passes, :adopt_prebuilt_project_scan, :apply_pre_passes_result,
+              :apply_discovery_result, :ensure_project_discovery, :force_eager_discovery?
 
       # Ruby versions probed (ascending) to discover the lowest one this Prism build accepts for
       # `version:`. Prism exposes no version list, so the floor is found empirically — only when a

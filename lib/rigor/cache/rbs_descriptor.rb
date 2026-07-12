@@ -3,6 +3,7 @@
 require "digest"
 
 require_relative "descriptor"
+require_relative "file_digest"
 
 module Rigor
   module Cache
@@ -17,8 +18,24 @@ module Rigor
         Descriptor.new(
           gems: [rbs_gem_entry],
           files: file_entries(loader),
-          configs: [libraries_entry(loader), virtual_rbs_entry(loader)].compact
+          configs: config_entries(loader)
         )
+      end
+
+      # Lazy-files variant for the ADR-45 run-diagnostics record-and-validate cache. The cache KEY reads only
+      # `gems` + `configs` ({Runner#run_key_descriptor}); the RBS signature-tree `files` are read solely on a
+      # MISS, by the dependency descriptor ({Runner#run_dependency_descriptor}). So a warm HIT never digests
+      # the (large, vendored) RBS tree. {RunDescriptor} is NOT a {Descriptor} — it is never composed, hashed,
+      # or `==`'d, only its three readers are consulted — so deferring `files` costs no soundness, and `gems`
+      # / `configs` are byte-identical to {.build} (the key is unchanged).
+      def self.build_run(loader)
+        RunDescriptor.new(loader: loader, gems: [rbs_gem_entry], configs: config_entries(loader))
+      end
+
+      # The `gems` + `configs` slots the run cache key reads. Cheap — no RBS env load, no file digesting
+      # (only the configured library names + any plugin-synthesised virtual RBS are hashed).
+      def self.config_entries(loader)
+        [libraries_entry(loader), virtual_rbs_entry(loader)].compact
       end
 
       def self.rbs_gem_entry
@@ -36,7 +53,7 @@ module Rigor
             Descriptor::FileEntry.new(
               path: path,
               comparator: :digest,
-              value: Digest::SHA256.file(path).hexdigest
+              value: FileDigest.hexdigest(path)
             )
           end
         end
@@ -66,7 +83,25 @@ module Rigor
         )
       end
 
-      private_class_method :rbs_gem_entry, :file_entries, :libraries_entry, :virtual_rbs_entry
+      private_class_method :rbs_gem_entry, :libraries_entry, :virtual_rbs_entry
+
+      # The lazy-files run descriptor {RbsDescriptor.build_run} returns. Exposes the three readers the
+      # run-diagnostics cache consults — `gems` + `configs` are supplied eagerly (they feed the cache KEY,
+      # and are cheap); `files` (the RBS signature-tree digests, read only on a MISS) is computed once on
+      # first access and memoised, so a warm HIT never pays for it.
+      class RunDescriptor
+        attr_reader :gems, :configs
+
+        def initialize(loader:, gems:, configs:)
+          @loader = loader
+          @gems = gems
+          @configs = configs
+        end
+
+        def files
+          @files ||= RbsDescriptor.file_entries(@loader)
+        end
+      end
     end
   end
 end

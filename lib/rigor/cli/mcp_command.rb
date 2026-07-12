@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "command"
+require_relative "../runtime/jit"
 
 require "optionparser"
 
@@ -26,6 +27,10 @@ module Rigor
           @err.puts("rigor mcp: unsupported transport: #{transport.inspect} (only `stdio` is supported in v1)")
           return CLI::EXIT_USAGE
         end
+
+        # A long-lived server always outlasts the JIT compile cost, so enable
+        # YJIT at boot rather than on the analysis deadline (Runtime::Jit).
+        Runtime::Jit.enable_now
 
         require_relative "../mcp"
         require_relative "../version"

@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[perf]** `rigor check` and `rigor coverage` now enable YJIT once a run outlasts a short amortization deadline, cutting wall time on large projects with no penalty to quick runs.
+  - Ruby ships YJIT but leaves it off, and enabling it up front is a net loss on short runs because the JIT compile cost never amortizes (measured: a ~4s run regressed ~20%). Rigor now arms a background thread at the start of a check / coverage run that enables YJIT only after 5s, so a run that finishes first never pays the compile cost while a long run JITs its dominant tail. Measured cold on Mastodon `app`+`lib`: 25.4s → 15.1s (1.7×), matching always-on YJIT; the short-run cases (kramdown, Mastodon `app/models`, mail) stay at parity. The long-lived `rigor lsp` / `rigor mcp` servers enable YJIT at boot. Set `RIGOR_DISABLE_YJIT=1` to opt out, or `RIGOR_YJIT_DEADLINE=<seconds>` to tune the deadline. Diagnostics and allocations are unchanged.
+
 ## [0.2.9] - 2026-07-11
 
 v0.2.9 sharpens Rigor on large Rails applications, with GitLab-scale projects as the proving ground: PostgreSQL `db/structure.sql` is accepted as a schema source, the strong-parameters chain stays typed, several route-helper and ActiveSupport coverage gaps close, and module facades now resolve across files. Protection-coverage tooling gets faster with a fork-parallel scan and more actionable — it now names when a missing-RBS gem is the cause of a hole ([ADR-82](docs/adr/82-dynamic-provenance-wiring.md)). Other fixes strengthen control-flow narrowing around `present?` / `blank?` guards and in-body mutation, and make the persistent cache robust across upgrades.

@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "../ast"
 require_relative "../source/constant_path"
+require_relative "../source/node_children"
 require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
@@ -1962,7 +1963,14 @@ module Rigor
         return false if RETURN_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
         return true if node.is_a?(Prism::ReturnNode)
 
-        node.compact_child_nodes.any? { |child| body_has_explicit_return?(child) }
+        found = false
+        Source::NodeChildren.each_child(node) do |child|
+          next unless body_has_explicit_return?(child)
+
+          found = true
+          break
+        end
+        found
       end
 
       # Returns the current assumed summary for `plain_signature`, recording that it was consulted (so the

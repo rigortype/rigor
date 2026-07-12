@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/constant_path"
+require_relative "../../source/node_children"
 
 module Rigor
   module Analysis
@@ -78,7 +79,7 @@ module Rigor
             return
           end
 
-          node.compact_child_nodes.each { |child| walk(child, qualified_prefix) }
+          Source::NodeChildren.each_child(node) { |child| walk(child, qualified_prefix) }
         end
 
         def collect_def_writes(def_node, qualified_prefix)
@@ -95,7 +96,7 @@ module Rigor
           record_write(node, class_name) if node.is_a?(Prism::InstanceVariableWriteNode)
           return if BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
-          node.compact_child_nodes.each { |child| gather_writes(child, class_name) }
+          Source::NodeChildren.each_child(node) { |child| gather_writes(child, class_name) }
         end
 
         def record_write(node, class_name)

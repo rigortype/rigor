@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../type"
 require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
+require_relative "../source/node_children"
 require_relative "../source/constant_path"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
@@ -748,7 +749,14 @@ module Rigor
                         node.is_a?(Prism::ModuleNode) ||
                         node.is_a?(Prism::BlockNode)
 
-        node.compact_child_nodes.any? { |c| arm_contains_retry?(c) }
+        found = false
+        Source::NodeChildren.each_child(node) do |c|
+          next unless arm_contains_retry?(c)
+
+          found = true
+          break
+        end
+        found
       end
 
       def absorb_retry_rebinds(accumulator, entry_scope, arm_post_scope)
@@ -936,7 +944,7 @@ module Rigor
         return if node.nil?
 
         found[node] = true if node.is_a?(Prism::BreakNode)
-        node.compact_child_nodes.each do |child|
+        Source::NodeChildren.each_child(node) do |child|
           next if BREAK_BOUNDARY_NODES.any? { |klass| child.is_a?(klass) }
 
           collect_direct_breaks(child, found)
@@ -1910,7 +1918,7 @@ module Rigor
         return if node.nil?
 
         yield node
-        node.compact_child_nodes.each do |child|
+        Source::NodeChildren.each_child(node) do |child|
           next if child.is_a?(Prism::BlockNode) || child.is_a?(Prism::DefNode) || child.is_a?(Prism::LambdaNode)
 
           each_node_outside_nested_scopes(child, &)

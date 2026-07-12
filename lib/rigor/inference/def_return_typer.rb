@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "../source/node_children"
 
 module Rigor
   module Inference
@@ -62,7 +63,7 @@ module Rigor
         return if RETURN_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
         type_return_node(node, scope_index, out) if node.is_a?(Prism::ReturnNode)
-        node.compact_child_nodes.each { |c| collect_return_types(c, scope_index, out) }
+        Source::NodeChildren.each_child(node) { |c| collect_return_types(c, scope_index, out) }
       end
 
       def type_return_node(return_node, scope_index, out)

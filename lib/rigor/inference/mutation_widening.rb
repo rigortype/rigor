@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../type"
+require_relative "../source/node_children"
 
 module Rigor
   module Inference
@@ -160,7 +161,7 @@ module Rigor
         # scope's locals) trigger widening, so descending into nested blocks is safe and
         # necessary for the hkt_registry-shape case (an outer collection mutated inside an
         # iterator block whose body is itself inside another block).
-        node.compact_child_nodes.each do |child|
+        Source::NodeChildren.each_child(node) do |child|
           scope = walk_for_outer_mutations(child, scope)
         end
         scope

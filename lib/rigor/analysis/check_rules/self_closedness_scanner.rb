@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/constant_path"
+require_relative "../../source/node_children"
 
 module Rigor
   module Analysis
@@ -52,7 +53,7 @@ module Rigor
             names << child_prefix.join("::") if name && class_surface_open?(node)
             walk(node.body, child_prefix, names) if node.body
           else
-            node.compact_child_nodes.each { |child| walk(child, prefix, names) }
+            Source::NodeChildren.each_child(node) { |child| walk(child, prefix, names) }
           end
         end
 

@@ -5,6 +5,7 @@ require "prism"
 require_relative "project_patched_methods"
 require_relative "../analysis/dependency_source_inference/return_type_heuristic"
 require_relative "../source/constant_path"
+require_relative "../source/node_children"
 
 module Rigor
   module Inference
@@ -141,7 +142,7 @@ module Rigor
       private_class_method :walk_node
 
       def walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
-        node.compact_child_nodes.each do |child|
+        Source::NodeChildren.each_child(node) do |child|
           walk_node(child, qualified_prefix, in_singleton_class, source_path, entries)
         end
       end

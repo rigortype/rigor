@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Changed
+
+- **[engine]** AST tree walks no longer allocate a throwaway array per node visited, cutting total allocations on every `rigor check` run — most sharply on leaf-heavy sources.
+  - `Prism::Node#compact_child_nodes` builds a fresh `Array` on every call, and Rigor's walkers called it unconditionally on every node of every walk. On a Ragel-generated parser (mail's `lib`, with hundreds of thousands of integer-literal leaf nodes) those arrays were over half of all allocations. A new `Rigor::Source::NodeChildren.each_child` yields the same children in the same order without the array — reading each child field directly and reusing list fields' stored arrays — and the engine's tree walkers (the shared node walker, the plugin/check-rule walk, the scope-discovery seed pass, the collectors, and the sig-gen / dependency / mutation scanners) now use it. Diagnostics are byte-identical; the field map is derived from `Prism::Reflection` so it tracks the installed `prism`.
+
 ## [0.2.9] - 2026-07-11
 
 v0.2.9 sharpens Rigor on large Rails applications, with GitLab-scale projects as the proving ground: PostgreSQL `db/structure.sql` is accepted as a schema source, the strong-parameters chain stays typed, several route-helper and ActiveSupport coverage gaps close, and module facades now resolve across files. Protection-coverage tooling gets faster with a fork-parallel scan and more actionable — it now names when a missing-RBS gem is the cause of a hole ([ADR-82](docs/adr/82-dynamic-provenance-wiring.md)). Other fixes strengthen control-flow narrowing around `present?` / `blank?` guards and in-body mutation, and make the persistent cache robust across upgrades.

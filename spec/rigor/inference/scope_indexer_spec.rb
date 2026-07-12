@@ -568,6 +568,91 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
+  describe ".discovered_project_index_for_paths (single-parse combined pre-pass)" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write(name, body)
+      path = File.join(tmpdir, name)
+      File.write(path, body)
+      path
+    end
+
+    def fixture_paths
+      a = write("a.rb", <<~RUBY)
+        module App
+          class Base
+            def shared; end
+          end
+          Point = Data.define(:x, :y)
+        end
+      RUBY
+      b = write("b.rb", <<~RUBY)
+        module App
+          class Child < Base
+            include Comparable
+            attr_reader :name
+            def self.build = new
+          end
+        end
+      RUBY
+      [a, b]
+    end
+
+    it "returns the same classes + def_index the two separate passes produce" do
+      paths = fixture_paths
+      combined = described_class.discovered_project_index_for_paths(paths)
+      di = combined.fetch(:def_index)
+      sep_def = described_class.discovered_def_index_for_paths(paths)
+
+      expect(combined.fetch(:classes)).to eq(described_class.discovered_classes_for_paths(paths))
+      # String/symbol-valued tables compare directly (value-equal across parses).
+      %i[def_sources superclasses includes class_sources method_visibilities methods
+         data_member_layouts struct_member_layouts].each do |key|
+        expect(di[key]).to eq(sep_def[key]), "def_index[#{key}] mismatch"
+      end
+      # Node-bearing tables: Prism nodes from two independent parses are not `==`, so compare the
+      # class -> method-name key structure instead.
+      %i[def_nodes singleton_def_nodes].each do |key|
+        expect(di[key].transform_values(&:keys)).to eq(sep_def[key].transform_values(&:keys)), "#{key} mismatch"
+      end
+    end
+
+    it "parses each file exactly once (vs twice for the two separate passes)" do
+      paths = fixture_paths
+
+      allow(Prism).to receive(:parse).and_call_original
+      described_class.discovered_project_index_for_paths(paths)
+      # One combined walk = one parse per file.
+      expect(Prism).to have_received(:parse).exactly(paths.size).times
+
+      RSpec::Mocks.space.proxy_for(Prism).reset
+      allow(Prism).to receive(:parse).and_call_original
+      described_class.discovered_classes_for_paths(paths)
+      described_class.discovered_def_index_for_paths(paths)
+      # The two separate passes parse every file twice.
+      expect(Prism).to have_received(:parse).exactly(paths.size * 2).times
+    end
+
+    it "fails-soft on unreadable / unparseable files (contributes nothing to either table)" do
+      a = write("ok.rb", "class A; def m; end; end")
+      bogus = "/nonexistent/path/never/exists.rb"
+      combined = described_class.discovered_project_index_for_paths([bogus, a])
+
+      expect(combined.fetch(:classes)["A"]).to eq(Rigor::Type::Combinator.singleton_of("A"))
+      expect(combined.fetch(:def_index)[:def_nodes]).to have_key("A")
+    end
+
+    it "freezes the classes table and each def_index sub-table (matching the two separate passes)" do
+      paths = fixture_paths
+      combined = described_class.discovered_project_index_for_paths(paths)
+      expect(combined.fetch(:classes)).to be_frozen
+      expect(combined.fetch(:def_index)[:def_nodes]).to be_frozen
+      expect(combined.fetch(:def_index)[:superclasses]).to be_frozen
+    end
+  end
+
   describe "declaration overrides (Slice A-declarations)" do
     it "annotates the constant_path of `module Foo` with Singleton[Foo]" do
       program = parse("module Foo\nend")

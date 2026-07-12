@@ -113,19 +113,22 @@ module Rigor
         end
 
         # Internal: the DEFERRED cross-file discovery pre-pass, run lazily on the analysis (miss) path only —
-        # a warm cache HIT skips it entirely. Two whole-project passes today:
-        # - Class discovery: walks every project file for `class Foo` / `module Bar` so a `Foo.method_call`
-        #   receiver in one file resolves a `class Foo` declared in a sibling file (without it, lexical
-        #   lookup fell back to stdlib `::Foo` for any user class shadowing a stdlib name).
+        # a warm cache HIT skips it entirely. Builds two whole-project tables in ONE walk:
+        # - Class discovery: every project file's `class Foo` / `module Bar` so a `Foo.method_call` receiver
+        #   in one file resolves a `class Foo` declared in a sibling file (without it, lexical lookup fell
+        #   back to stdlib `::Foo` for any user class shadowing a stdlib name).
         # - ADR-24 slice 2 def-node / superclass / include index so an implicit-self call inside a subclass
         #   resolves a superclass `def` declared in a sibling file.
-        # Returns a frozen {Discovery} bundle; the {Runner} adopts it onto its discovery ivars.
+        # Returns a frozen {Discovery} bundle; the {Runner} adopts it onto its discovery ivars. Both tables
+        # share ONE parse per file via `discovered_project_index_for_paths` — the file is parsed, both
+        # collectors walk the tree, and the AST is dropped before the next file (peak RSS stays flat).
         def discover(expansion:)
-          files = expansion.fetch(:files)
-          discovered_classes = Inference::ScopeIndexer.discovered_classes_for_paths(files, buffer: @buffer)
-          def_index = Inference::ScopeIndexer.discovered_def_index_for_paths(files, buffer: @buffer)
+          index = Inference::ScopeIndexer.discovered_project_index_for_paths(
+            expansion.fetch(:files), buffer: @buffer
+          )
+          def_index = index.fetch(:def_index)
           Discovery.new(
-            discovered_classes: discovered_classes,
+            discovered_classes: index.fetch(:classes),
             discovered_def_nodes: def_index.fetch(:def_nodes),
             discovered_singleton_def_nodes: def_index.fetch(:singleton_def_nodes),
             discovered_def_sources: def_index.fetch(:def_sources),

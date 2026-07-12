@@ -2032,9 +2032,7 @@ module Rigor
       # @return [Hash{Symbol => Hash}]
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
-        acc = { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, superclasses: {}, includes: {},
-                method_visibilities: {}, methods: {}, class_sources: {}, data_member_layouts: {},
-                struct_member_layouts: {} }
+        acc = new_def_index_accumulator
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
@@ -2043,6 +2041,47 @@ module Rigor
           # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
           next
         end
+        finalize_def_index(acc)
+      end
+
+      # Combined single-parse cross-file pre-pass used by the project-wide runner pre-pass
+      # ({Analysis::Runner::ProjectPrePasses#discover}). {#discovered_classes_for_paths} and
+      # {#discovered_def_index_for_paths} each `Prism.parse` every project file independently; this walks the
+      # project ONCE, parsing each file a single time and driving BOTH collectors over the same tree, then
+      # returns `{ classes:, def_index: }`. Each file is parsed, collected, and dropped before the next
+      # iteration, so no more than one AST is held alive at a time (peak RSS stays flat on large projects).
+      #
+      # Error degradation is identical to the two independent loops it replaces: a read / parse failure (the
+      # rescue's real target) contributes nothing to either table. The subset-scoped callers
+      # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
+      #
+      # @param paths [Array<String>] project file paths.
+      # @param buffer [Rigor::Analysis::BufferBinding, nil]
+      # @return [Hash{Symbol => Object}] `{ classes: Hash, def_index: Hash }`.
+      def discovered_project_index_for_paths(paths, buffer: nil)
+        classes = {}
+        acc = new_def_index_accumulator
+        paths.each do |path|
+          physical = buffer ? buffer.resolve(path) : path
+          root = Prism.parse(File.read(physical), filepath: path).value
+          collect_class_decls(root, [], classes)
+          accumulate_project_index(acc, path, root)
+        rescue StandardError
+          # Skip files that fail to parse or read; the per-file analyzer surfaces the parse error separately.
+          next
+        end
+        { classes: classes.freeze, def_index: finalize_def_index(acc) }
+      end
+
+      # The empty per-run accumulator the def-index passes fold each file into.
+      def new_def_index_accumulator
+        { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, superclasses: {}, includes: {},
+          method_visibilities: {}, methods: {}, class_sources: {}, data_member_layouts: {},
+          struct_member_layouts: {} }
+      end
+
+      # Post-processes and freezes a fully-folded def-index accumulator.
+      def finalize_def_index(acc)
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
         # deliberately surfaces (fire + def-site annotation, nudging `pre_eval:`), so dropping the `def`-declared names

@@ -43,25 +43,22 @@ RSpec.describe Rigor::Analysis::Runner do
     )
   end
 
-  it "runs the two discovery passes on a cold miss and SKIPS them on the warm hit" do
+  it "runs the discovery pass on a cold miss and SKIPS it on the warm hit" do
     Dir.mktmpdir("rigor-lazy-prepass-hit-") do |dir|
       write_project(dir)
       cache_root = File.join(dir, ".rigor", "cache")
 
-      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_classes_for_paths).and_call_original
-      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_def_index_for_paths).and_call_original
+      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
 
       cold = Dir.chdir(dir) { build_runner(dir, cache_root).run }
-      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_classes_for_paths).once
-      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_def_index_for_paths).once
+      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
 
       # A fresh Store at the same root forces a real disk hit (not the in-memory memo).
       warm_runner = build_runner(dir, cache_root)
       warm = Dir.chdir(dir) { warm_runner.run }
 
-      # The warm run served from cache added NO further discovery parses.
-      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_classes_for_paths).once
-      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_def_index_for_paths).once
+      # The warm run served from cache added NO further discovery parse.
+      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
       expect(warm_runner.send(:run_result_cacheable?)).to be(true)
       # Byte-identical diagnostics warm vs cold.
       expect(warm.diagnostics.map(&:to_h)).to eq(cold.diagnostics.map(&:to_h))
@@ -71,11 +68,11 @@ RSpec.describe Rigor::Analysis::Runner do
   it "still runs discovery when the cache is disabled (--no-cache / cache_store nil)" do
     Dir.mktmpdir("rigor-lazy-prepass-nocache-") do |dir|
       write_project(dir)
-      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_classes_for_paths).and_call_original
+      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
 
       Dir.chdir(dir) { build_runner(dir, nil).run }
 
-      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_classes_for_paths).once
+      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
     end
   end
 
@@ -87,13 +84,13 @@ RSpec.describe Rigor::Analysis::Runner do
       # Prime the run-diagnostics cache so a second run WOULD hit.
       Dir.chdir(dir) { build_runner(dir, cache_root).run }
 
-      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_def_index_for_paths).and_call_original
+      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
       recording = build_runner(dir, cache_root, record_dependencies: true)
       Dir.chdir(dir) { recording.run }
 
       # Eager force (the recording mode reads the discovery tables via `symbol_fingerprints` /
       # `class_declarations` OUTSIDE the analysis assembly), so discovery ran even on the hittable run.
-      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_def_index_for_paths).once
+      expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
       expect(recording.symbol_fingerprints).not_to be_empty
       expect(recording.class_declarations).not_to be_empty
     end
@@ -108,8 +105,7 @@ RSpec.describe Rigor::Analysis::Runner do
                        .prepare_project_scan
       end
 
-      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_classes_for_paths).and_call_original
-      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_def_index_for_paths).and_call_original
+      allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
 
       runner = described_class.new(
         configuration: config, cache_store: nil, collect_stats: false, prebuilt: scan
@@ -117,8 +113,7 @@ RSpec.describe Rigor::Analysis::Runner do
       Dir.chdir(dir) { runner.run }
 
       # The prebuilt path deliberately seeds an empty project scope, so the deferred discovery is a no-op.
-      expect(Rigor::Inference::ScopeIndexer).not_to have_received(:discovered_classes_for_paths)
-      expect(Rigor::Inference::ScopeIndexer).not_to have_received(:discovered_def_index_for_paths)
+      expect(Rigor::Inference::ScopeIndexer).not_to have_received(:discovered_project_index_for_paths)
     end
   end
 end

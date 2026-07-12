@@ -1610,17 +1610,100 @@ module Rigor
       # args change folds (`factorial(5)` vs `factorial(6)`), so a coarser key would serve a stale fold. The
       # third unsafe dimension — the ADR-55 recursion machinery (unroll fuel / fixpoint Kleene
       # assumption / WD1 clamp) producing a TRANSIENT result rather than a final return — is excluded
-      # structurally: the memo is consulted and populated ONLY when the incoming guard stack is empty (a
-      # genuine top-of-stack entry, whose result is final and cannot be an in-progress assumption or a
-      # clamped value). Frames entered with a non-empty stack bypass the memo entirely and compute as before.
+      # post-hoc (ADR-84 WD3): candidacy only requires that the plain signature not already be on the
+      # recursion guard stack (a frame inside its own cycle returns a Kleene iterate by construction), and
+      # the store gate brackets the compute over the transient-event depth log
+      # (TRANSIENT_EVENT_DEPTHS_KEY), refusing only when an event referenced a frame BELOW the bracket's
+      # entry depth — proof the ancestor context (an in-flight ancestor summary, the shared unroll fuel, a
+      # possibly-ancestor-caused clamp) influenced the result. Events at-or-above the entry depth are the
+      # compute's own deterministic machinery — a recursive method's own converged fixpoint stores from a
+      # top-of-stack entry (standalone by construction: fuel reseeds, summary tables cleared at the
+      # previous drain) — and a nested compute whose bracket saw no below-entry event ran as if standalone
+      # (fuel consumed without exhausting is invisible; every summary read fires a logged guard event). A
+      # memo HIT while an unroll is merely in flight elsewhere on the stack is legal (stored values are
+      # final and context-free). This replaced the blanket unroll-in-flight candidacy exclusion, which
+      # refused 82% of mail's body evaluations for results that were overwhelmingly final (PR #79
+      # counters; ADR-84).
       #
-      # Keyed by the identity of the frozen discovery `def_nodes` table (a new analysis generation lands in
-      # a fresh bucket, mirroring `class_graph_buckets`) then by the identity of the `def_node` and the
-      # `[receiver, *args]` descriptor tuple. `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store
-      # lives on `Thread.current`; fork-pool workers are separate processes, so it never crosses a project
-      # boundary.
+      # Bucket scope (ADR-84 WD2): ONE bucket per analysis run, keyed by the identity of the run-generation
+      # token `Analysis::Runner#run_analysis` mints and seeds through `scope.discovery` — hits cross
+      # consumer-file boundaries within a run, and a re-run in the same process (LSP re-check, ADR-62 warm
+      # loop) rolls the bucket over. Scopes without a runner seed (single-file probes) fall back to the
+      # per-file merged `discovered_def_nodes` identity — exactly the pre-WD2 per-file scope. Inside the
+      # bucket, entries key on the `def_node`'s object identity (the identity Hash holds the node strongly,
+      # so a collected parse can never recycle an object id into a stale hit) and then on the
+      # `[receiver, *args]` descriptor tuple; a callee may appear under at most two node identities per run
+      # (the project-index parse every OTHER file resolves through, plus the defining file's own analysis
+      # parse). Only the current generation's bucket is retained (single slot) — a rolled-over run's entries
+      # become garbage instead of accumulating across LSP runs. `ExpressionTyper` is rebuilt per
+      # `Scope#type_of`, so the store lives on `Thread.current`; fork-pool workers are separate processes,
+      # so it never crosses a project boundary (ADR-84 WD5).
       RETURN_MEMO_KEY = :__rigor_user_method_return_memo__
       private_constant :RETURN_MEMO_KEY
+
+      # ADR-84 WD2 — one memo entry: the final inferred return plus, when the entry was computed under
+      # ADR-46 dependency recording, the frozen `Analysis::DependencyRecorder::ReadSet` its body walk
+      # produced (nil on non-recording runs — recording is decided per run and the bucket never outlives a
+      # run, so a recording run only ever hits entries that carry a read-set; pinned by
+      # return_memo_recording_spec's rollover example).
+      MemoEntry = Data.define(:result, :read_set)
+      private_constant :MemoEntry
+
+      # ADR-84 WD3 — thread-local transient-machinery event log, appended by `note_transient_fallback` at
+      # EVERY site where the ADR-55 recursion machinery substitutes transient state for a plain body
+      # evaluation. Each entry is the STACK POSITION (guard-stack index) of the frame whose in-flight state
+      # the event referenced — the consulted owner for a guard hit, 0 for the whole-stack resources (shared
+      # unroll fuel; conservatively the clamp), the owner's own position for its cap collapse.
+      # `consult_and_store_return_memo` brackets a candidate's compute over the log and refuses to store
+      # only when an event referenced a frame BELOW the bracket's entry depth: such an event proves the
+      # ancestor context influenced the result, while events at-or-above the entry depth are the compute's
+      # OWN deterministic machinery (a recursive method's own converged fixpoint, a sub-cycle that opened
+      # and closed inside the bracket) which a standalone recompute reproduces event-for-event. A
+      # top-of-stack compute (entry depth 0) can never see a below-entry event — it is standalone by
+      # construction (fuel reseeds on an empty stack, the summary tables were cleared at the previous
+      # drain). Cleared with the other per-outermost-entry tables when the guard stack drains. LOAD-BEARING:
+      # unlike `BudgetTrace` counters the log must be maintained on every run, not only under
+      # RIGOR_BUDGET_TRACE.
+      #
+      # Audit table (ADR-84 WD3) — every early-return / fallback in the recursion machinery, each either
+      # LOGGED (routes through `note_transient_fallback` with the referenced frame's position) or PROVABLY
+      # FINAL (a deterministic pure function of the frame's own inputs, so a standalone recompute
+      # reproduces it):
+      #
+      #   compute_user_method_return
+      #     - in-cycle re-entry (`stack.include?(signature)` → `consult_summary`)  LOGGED at the consulted
+      #       owner's stack position (the outermost frame carrying the plain signature — the seeder whose
+      #       in-flight Kleene iterate the re-entry returns)
+      #   evaluate_guarded_user_method_body
+      #     - non-outermost plain evaluation, clamp pass-through                   PROVABLY FINAL (plain
+      #       body eval; nested transient events log at their own sites)
+      #     - `clamp_unroll_result` clamp branch (ADR-55 WD1 → `untyped`)          LOGGED at 0 (the
+      #       would-have-been-guarded match may be an ancestor frame; position not threaded — conservative)
+      #   fixpoint_user_method_return
+      #     - `degrade_entangled_fixpoint` (foreign in-flight consult)             LOGGED at the degrading
+      #       owner's own position (the foreign consult that caused it was already logged at the ancestor's
+      #       position by the guard site, which is what taints the enclosing brackets)
+      #     - "summary never consulted" early return (body did not recurse)        PROVABLY FINAL
+      #     - `resolve_bot_collapse` (widened re-run / explicit-return floor)      PROVABLY FINAL in itself
+      #       (deterministic); transient events inside the re-run log at their own sites
+      #     - `fixpoint_step` convergence (`joined == assumption`)                 converged value; any
+      #       consults the iterations performed were already LOGGED at the guard site
+      #     - `fixpoint_step` cap collapse (`RECURSION_FIXPOINT_CAP` → `untyped`)  LOGGED at the owner's own
+      #       position (per-owner constant cap — deterministic for every enclosing bracket; the iterates'
+      #       context-dependence, if any, logs separately at its own sites)
+      #   unroll helpers
+      #     - `unroll_fuel_remaining` exhaustion (extended key denied → plain)     LOGGED at 0 (fuel is ONE
+      #       shared resource seeded at stack bottom, so a nested frame's unroll budget depends on what ran
+      #       before it — the hazard the blanket exclusion used to over-approximate)
+      #     - `constant_argument_value_key` / `pinned_value_descriptor` nil        PROVABLY FINAL (pure
+      #       functions of `arg_types`)
+      #
+      # Adding a fallback? Route it through `note_transient_fallback` unless it is provably final in the
+      # sense above — position 0 is always a sound (conservative) choice; spec/rigor/inference/
+      # return_memo_taint_spec.rb pins this (no raw `BudgetTrace.hit` on the recursion categories outside
+      # the helper).
+      TRANSIENT_EVENT_DEPTHS_KEY = :__rigor_user_method_transient_event_depths__
+      private_constant :TRANSIENT_EVENT_DEPTHS_KEY
 
       # Per-inference recursion context threaded through the guard / fixpoint helpers (ADR-55 slice 2).
       # Bundles the call descriptor (`receiver`, `arg_types`, `plain_signature`), the thread-local summary
@@ -1688,53 +1771,98 @@ module Rigor
                                             receiver, arg_types, plain_signature)
         end
 
-        # INVARIANT (ADR-46 recording soundness) — the deep cross-file dependency edges (the reads a callee
-        # body's dispatches perform through the instrumented `Scope` accessors) are recorded, per consumer,
-        # only as a side effect of evaluating that body, and a memo hit serves the return WITHOUT
-        # re-evaluating it. Recording soundness currently rests on the memo's PER-FILE bucket scope: the
-        # bucket key is the per-file merged def-table identity (`ScopeIndexer#merge_project_method_indexes`
-        # rebuilds `discovered_def_nodes` for every file), so a hit never crosses a consumer-file boundary,
-        # and within one consumer the first infer of a signature is a miss whose body eval records the deep
-        # edges — a later hit is edge-idempotent for that same consumer. Any change that makes hits
-        # CROSS-FILE (e.g. promoting the bucket to run scope, which the RETURN_MEMO_KEY generation framing
-        # anticipates) MUST pair with cache-and-replay of the callee's recorded read-set onto the current
-        # consumer — a naive bypass-the-memo-while-recording alternative measured >200x wall on
-        # analyzer-shaped files (ActiveStorage video_analyzer.rb's subtree, 0.43s -> >90s; PR #79). Pinned by
-        # spec/rigor/inference/return_memo_recording_spec.rb and dependency_recorder_spec.rb's transitive
-        # deep-edge example.
+        # INVARIANT (ADR-46 recording soundness, ADR-84 WD2) — the deep cross-file dependency edges (the
+        # reads a callee body's dispatches perform through the instrumented `Scope` accessors) are recorded,
+        # per consumer, only as a side effect of evaluating that body, and a memo hit serves the return
+        # WITHOUT re-evaluating it. Since the bucket is run-scoped, hits CROSS consumer-file boundaries, so
+        # every cross-file hit is PAIRED WITH CACHE-AND-REPLAY of the callee's read-set: under recording,
+        # the first evaluation of a key captures the recorder events of its body walk
+        # (`DependencyRecorder.capture` — observe-and-forward, so the first consumer's own record is
+        # untouched) onto the entry, and a hit replays that set into the current consumer's accumulator
+        # (`DependencyRecorder.replay`, which re-applies the per-consumer self-read filter). A memo hit is
+        # thereby edge-equivalent to a fresh body evaluation for EVERY consumer. The naive alternative —
+        # bypassing the memo while the recorder is active — measured >200x wall on analyzer-shaped files
+        # (ActiveStorage video_analyzer.rb's subtree, 0.43s -> >90s; PR #79) and stays rejected. Pinned by
+        # spec/rigor/inference/return_memo_recording_spec.rb (cross-file replay completeness) and
+        # dependency_recorder_spec.rb's transitive deep-edge example.
         consult_and_store_return_memo(def_node, body_scope, stack, summaries,
                                       receiver, arg_types, plain_signature)
       end
 
-      # The candidate-frame memo path: consult the current discovery generation's bucket, and on a miss
-      # compute and store a FINAL result. Reached only when `memo_candidate?` held (see
-      # `infer_user_method_return`). A result is stored only if no ADR-55 fixpoint summary was *consulted*
-      # during the compute (the post-hoc consult-counter check) — otherwise `result` embeds a transient Kleene
-      # iterate whose value depends on the iteration in flight and must not be shared across call sites (the
-      # WD0 `MEMO_REFUSE_CONSULT_TAINTED` non-store).
+      # The candidate-frame memo path: consult the current run generation's bucket, and on a miss compute
+      # and store a FINAL result. Reached only when `memo_candidate?` held (see `infer_user_method_return`).
+      # The store gate (ADR-84 WD3): a result is stored when the ADR-55 fixpoint consult counter did not
+      # move across the compute (the WD0 `MEMO_REFUSE_CONSULT_TAINTED` non-store) AND no transient-machinery
+      # event during the bracket referenced a stack frame BELOW the bracket's entry depth (see
+      # TRANSIENT_EVENT_DEPTHS_KEY). Below-entry events — an ancestor's in-flight Kleene iterate read by a
+      # guard hit, a shared-fuel exhaustion, a possibly-ancestor-caused WD1 clamp — mean the ancestor
+      # context influenced `result`, which a standalone recompute would not reproduce; at-or-above-entry
+      # events are the compute's own deterministic machinery (its own converged fixpoint, sub-cycles that
+      # opened and closed inside the bracket) and do not block the store. A top-of-stack compute (entry
+      # depth 0) is standalone by construction. A hit under ADR-46 recording replays the entry's captured
+      # read-set into the current consumer (see the INVARIANT comment at the call site).
       def consult_and_store_return_memo(def_node, body_scope, stack, summaries,
                                         receiver, arg_types, plain_signature)
-        memo = return_memo_bucket
-        memo_key = [def_node.object_id, receiver.describe(:short),
+        per_def = (return_memo_bucket[def_node] ||= {})
+        memo_key = [receiver.describe(:short),
                     arg_types.map { |type| type.describe(:short) }]
-        if memo.key?(memo_key)
+        if (entry = per_def[memo_key])
           BudgetTrace.hit(BudgetTrace::MEMO_HITS)
-          return memo[memo_key]
+          Analysis::DependencyRecorder.replay(entry.read_set) if Analysis::DependencyRecorder.active?
+          return entry.result
         end
         BudgetTrace.hit(BudgetTrace::MEMO_MISSES)
-        trace_distinct_memo_key(plain_signature, memo_key)
+        trace_distinct_memo_key(plain_signature, def_node, memo_key)
 
-        consults_before = Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
-        result = compute_user_method_return(def_node, body_scope, stack, summaries,
-                                            receiver, arg_types, plain_signature)
-        consults_after = Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
+        entry_depth = stack.size
+        event_mark = transient_event_mark
+        consults_before = summary_consult_count
+        result, read_set = compute_with_read_capture(def_node, body_scope, stack, summaries,
+                                                     receiver, arg_types, plain_signature)
 
-        if consults_after == consults_before
-          memo[memo_key] = result
-        else
+        if summary_consult_count != consults_before
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_CONSULT_TAINTED)
+        elsif context_tainted?(event_mark, entry_depth)
+          BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
+        else
+          per_def[memo_key] = MemoEntry.new(result: result, read_set: read_set)
         end
         result
+      end
+
+      def transient_event_mark
+        Thread.current[TRANSIENT_EVENT_DEPTHS_KEY]&.size || 0
+      end
+
+      def summary_consult_count
+        Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
+      end
+
+      # ADR-84 WD3 — true when a transient-machinery event logged during the bracket (entries past
+      # `event_mark`) referenced a frame below `entry_depth`. The log is cleared when the guard stack drains
+      # (only possible mid-bracket for a top-of-stack compute, whose events are deterministic anyway), so a
+      # missing / shorter log reads as untainted.
+      def context_tainted?(event_mark, entry_depth)
+        log = Thread.current[TRANSIENT_EVENT_DEPTHS_KEY]
+        return false if log.nil? || log.size <= event_mark
+
+        log[event_mark..].any? { |depth| depth < entry_depth }
+      end
+
+      # ADR-84 WD2 — the memo-miss compute, wrapped in a `DependencyRecorder.capture` window when ADR-46
+      # recording is active so the entry can carry its replayable read-set. Returns `[result, read_set]`
+      # (`read_set` nil when not recording).
+      def compute_with_read_capture(def_node, body_scope, stack, summaries,
+                                    receiver, arg_types, plain_signature)
+        unless Analysis::DependencyRecorder.active?
+          return [compute_user_method_return(def_node, body_scope, stack, summaries,
+                                             receiver, arg_types, plain_signature), nil]
+        end
+
+        Analysis::DependencyRecorder.capture do
+          compute_user_method_return(def_node, body_scope, stack, summaries,
+                                     receiver, arg_types, plain_signature)
+        end
       end
 
       # The ADR-55 recursion-guard + value-unroll + fixpoint body of user-method return inference, factored
@@ -1754,7 +1882,10 @@ module Rigor
         signature = [plain_signature, value_key] if extended
 
         if stack.include?(signature)
-          BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+          # ADR-84 WD3 — the referenced frame is the consulted owner: the OUTERMOST frame carrying this
+          # plain signature (the seeder whose in-flight iterate the re-entry returns).
+          note_transient_fallback(BudgetTrace::RECURSION_GUARD,
+                                  stack.index { |frame| plain_part(frame) == plain_signature } || 0)
           # ADR-55 slice 2: in-cycle re-entries return the current assumed summary (Kleene iterate, seeded
           # `bot`) instead of bare `untyped`. The fixpoint loop below seeds the entry on the outermost frame;
           # if a re-entry beats it here the entry already exists. The WD4 composition: slice 1's clamp/fuel
@@ -1780,37 +1911,41 @@ module Rigor
         evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
       end
 
-      # True when this frame's result is a candidate for the return memo: the structural preconditions, both
-      # stable across the body walk, that are necessary (but not sufficient) for a FINAL result. Sufficiency
-      # is decided post-hoc in `infer_user_method_return` by the consult-counter check (no transient
-      # fixpoint summary was read during the compute) — so unlike the prior `memoisable_return?` this
-      # deliberately does NOT require an empty `summaries` table: inert seeded-but-unconsulted entries left
-      # by unrelated outermost frames do not contaminate a result, and gating on them disabled the memo for
-      # an entire non-recursive DAG (the scaling wall). The two preconditions: no constant-arg unroll in
-      # flight (its value-keyed frames are transient) and this plain signature not itself on the recursion
-      # guard stack (else we are inside its own cycle, returning a Kleene iterate).
+      # True when this frame's result is a candidate for the return memo: the one structural precondition,
+      # stable across the body walk, that is necessary (but not sufficient) for a FINAL result — this plain
+      # signature must not itself be on the recursion guard stack (else we are inside its own cycle,
+      # returning a Kleene iterate by construction). Sufficiency is decided post-hoc in
+      # `consult_and_store_return_memo` by the two bracket counters (fixpoint consults + ADR-84 WD3
+      # transient-machinery events) — so unlike the prior form this deliberately does NOT refuse while a
+      # constant-arg unroll is in flight: a nested frame whose compute finishes without a single transient
+      # event ran exactly as it would standalone (fuel consumption without exhaustion is invisible), and
+      # the blanket exclusion refused 82% of mail's body evaluations for such final results (ADR-84).
       def memo_candidate?(stack, plain_signature)
-        # Read the unroll fuel WITHOUT the decrement side effect of `unroll_fuel_remaining`: a constant-arg
-        # unroll has begun iff the thread-local is set and the stack is non-empty (the `ensure` in
-        # `evaluate_guarded_user_method_body` clears it at stack-empty).
-        unroll_idle = stack.empty? || Thread.current[INFERENCE_UNROLL_FUEL_KEY].nil?
-        unroll_idle &&
-          stack.none? { |frame| plain_part(frame) == plain_signature }
+        stack.none? { |frame| plain_part(frame) == plain_signature }
       end
 
-      # Run-scoped return-memo bucket for the current discovery generation. Keyed by the identity of the
-      # frozen `def_nodes` table so a new analysis generation (or any scope that swaps the index)
-      # transparently lands in a fresh bucket. See RETURN_MEMO_KEY.
+      # Run-scoped return-memo bucket (ADR-84 WD2): a single retained slot keyed by the identity of the
+      # run-generation token the runner seeds (`Scope#run_generation`), falling back to the per-file merged
+      # `def_nodes` table identity for runner-less scopes (single-file probes) — the pre-WD2 per-file
+      # scope. A generation mismatch drops the previous bucket whole, so a re-run in one process (LSP,
+      # ADR-62 warm loop) can neither hit stale entries nor accumulate them. The bucket maps `def_node`
+      # (object identity, held strongly — see RETURN_MEMO_KEY) to its per-descriptor entries.
       def return_memo_bucket
-        store = (Thread.current[RETURN_MEMO_KEY] ||= {}.compare_by_identity)
-        store[scope.discovered_def_nodes] ||= {}
+        generation = scope.run_generation || scope.discovered_def_nodes
+        slot = Thread.current[RETURN_MEMO_KEY]
+        unless slot && slot[0].equal?(generation)
+          slot = [generation, {}.compare_by_identity]
+          Thread.current[RETURN_MEMO_KEY] = slot
+        end
+        slot[1]
       end
 
       # WD0 (RIGOR_BUDGET_TRACE) trace helpers. Each guards on `BudgetTrace.enabled?` before doing any work
       # beyond a single boolean check, so a normal run pays nothing (no signature-label string built, no
-      # stack scan). Attributes a non-candidate frame's non-store to on-stack vs unroll-in-flight, mirroring
-      # `memo_candidate?`: on-stack takes precedence (a genuine in-cycle frame would be refused even without
-      # an unroll); the only other way to fail candidacy is an unroll in flight.
+      # stack scan). Attributes a non-candidate frame's non-store to on-stack vs unroll-in-flight; since
+      # ADR-84 WD3 reduced candidacy to the on-stack check alone, the unroll-in-flight branch is
+      # structurally unreachable and is kept only so the printed counter table still shows the category
+      # (pinned ~0 — the ADR-84 WD3 gate).
       def trace_memo_refusal(stack, plain_signature)
         return unless BudgetTrace.enabled?
 
@@ -1821,11 +1956,15 @@ module Rigor
         end
       end
 
-      def trace_distinct_memo_key(plain_signature, memo_key)
+      # The observed member is the full `(def-node identity, receiver, args)` entry key, so the per-signature
+      # count also surfaces the ADR-84 WD2 dual-parse duplication (project-index parse vs the defining
+      # file's own parse — at most 2 node identities per def per run).
+      def trace_distinct_memo_key(plain_signature, def_node, memo_key)
         return unless BudgetTrace.enabled?
 
         BudgetTrace.observe_distinct(
-          BudgetTrace::MEMO_DISTINCT_KEY_BY_SIGNATURE, signature_label(plain_signature), memo_key
+          BudgetTrace::MEMO_DISTINCT_KEY_BY_SIGNATURE, signature_label(plain_signature),
+          [def_node.object_id, memo_key]
         )
       end
 
@@ -1840,6 +1979,17 @@ module Rigor
       # for the WD0 per-signature distributions. Built only under `BudgetTrace.enabled?`.
       def signature_label(plain_signature)
         "#{plain_signature[0]}##{plain_signature[1]}"
+      end
+
+      # ADR-84 WD3 — the single choke point every transient-machinery fallback routes through: appends the
+      # referenced frame's stack position to the load-bearing thread-local event log (regardless of
+      # RIGOR_BUDGET_TRACE) and forwards the category to `BudgetTrace`. The taint spec pins that no
+      # recursion-machinery `BudgetTrace.hit` exists outside this helper, so a future fallback cannot
+      # silently join unlogged (see the audit table at TRANSIENT_EVENT_DEPTHS_KEY; `context_depth` 0 is
+      # always a sound conservative choice).
+      def note_transient_fallback(category, context_depth)
+        (Thread.current[TRANSIENT_EVENT_DEPTHS_KEY] ||= []) << context_depth
+        BudgetTrace.hit(category)
       end
 
       # Pushes the recursion-guard frame, evaluates the body (the outermost frame for a plain signature runs
@@ -1864,6 +2014,7 @@ module Rigor
             Thread.current[INFERENCE_UNROLL_FUEL_KEY] = nil
             Thread.current[INFERENCE_SUMMARY_KEY] = nil
             Thread.current[SUMMARY_CONSULT_DEPTHS_KEY] = nil
+            Thread.current[TRANSIENT_EVENT_DEPTHS_KEY] = nil
           end
         end
       end
@@ -1953,10 +2104,19 @@ module Rigor
       # soundness fix, 2026-06-12), parking `untyped` in the assumption so any consumer that still reads
       # this signature's summary sees the floor, not the stale `bot` seed.
       def degrade_entangled_fixpoint(summaries, plain_signature)
-        BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+        # ADR-84 WD3 — logged at the degrading owner's own position: the foreign consult that caused the
+        # entanglement was already logged at the ANCESTOR's position by the guard site.
+        note_transient_fallback(BudgetTrace::RECURSION_GUARD, own_guard_frame_position)
         scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
         summaries[plain_signature][:assumption] = Type::Combinator.untyped
         Type::Combinator.untyped
+      end
+
+      # The stack position of the currently-evaluating owner frame (the guard stack's top) — the
+      # self-referential `context_depth` for events that are deterministic per owner (ADR-84 WD3).
+      def own_guard_frame_position
+        size = Thread.current[INFERENCE_GUARD_KEY]&.size || 0
+        size.positive? ? size - 1 : 0
       end
 
       # One Kleene-iteration step of the fixpoint loop. Joins `computed` into the running assumption
@@ -1974,9 +2134,9 @@ module Rigor
         return candidate if joined == assumption
 
         if last_iteration
-          # Out of iterations and still unstable — collapse to today's
-          # widening behaviour.
-          BudgetTrace.hit(BudgetTrace::RECURSION_FIXPOINT_CAP)
+          # Out of iterations and still unstable — collapse to today's widening behaviour. ADR-84 WD3: the
+          # cap is a per-owner constant, so the event references the owner's own frame.
+          note_transient_fallback(BudgetTrace::RECURSION_FIXPOINT_CAP, own_guard_frame_position)
           scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
           summaries[plain_signature][:assumption] = Type::Combinator.untyped
           return Type::Combinator.untyped
@@ -2066,7 +2226,9 @@ module Rigor
       def clamp_unroll_result(type, would_have_been_guarded)
         return type unless would_have_been_guarded && !fully_value_pinned?(type)
 
-        BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+        # ADR-84 WD3 — position 0 (conservative): the would-have-been-guarded match may be an ancestor
+        # frame, and the matched position is not threaded through RecursionContext.
+        note_transient_fallback(BudgetTrace::RECURSION_GUARD, 0)
         scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
         # ADR-55 WD1 clamp: a guarded extended frame whose body is non-pinned must be byte-identical to the
         # plain guard's `untyped`. This path deliberately does NOT route to the in-progress fixpoint summary:
@@ -2097,7 +2259,9 @@ module Rigor
         if remaining.positive?
           Thread.current[INFERENCE_UNROLL_FUEL_KEY] = remaining - 1
         else
-          BudgetTrace.hit(BudgetTrace::RECURSION_UNROLL_FUEL)
+          # ADR-84 WD3 — position 0: fuel is one shared resource seeded at the stack bottom, so its
+          # exhaustion is context-dependent for every nested bracket.
+          note_transient_fallback(BudgetTrace::RECURSION_UNROLL_FUEL, 0)
         end
         remaining
       end

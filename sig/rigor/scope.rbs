@@ -35,6 +35,7 @@ module Rigor
     def data_member_layouts: () -> Hash[String, Array[Symbol]]
     def struct_member_layouts: () -> Hash[String, { members: Array[Symbol], keyword_init: bool }]
     def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
+    def run_generation: () -> Object?
     def record_dynamic_origin: (untyped node, Symbol cause) -> Scope
 
     class DiscoveryIndex
@@ -55,10 +56,11 @@ module Rigor
       attr_reader data_member_layouts: Hash[String, Array[Symbol]]
       attr_reader struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }]
       attr_reader param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
+      attr_reader run_generation: Object?
 
       EMPTY: DiscoveryIndex
 
-      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]) -> DiscoveryIndex
+      def with: (?declared_types: Hash[untyped, Type::t], ?class_ivars: Hash[String, Hash[Symbol, Type::t]], ?class_cvars: Hash[String, Hash[Symbol, Type::t]], ?program_globals: Hash[Symbol, Type::t], ?discovered_classes: Hash[String, Type::Singleton], ?in_source_constants: Hash[String, Type::t], ?discovered_methods: Hash[String, Hash[Symbol, Symbol]], ?discovered_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_singleton_def_nodes: Hash[String, Hash[Symbol, untyped]], ?discovered_def_sources: Hash[String, Hash[Symbol, String]], ?discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]], ?discovered_superclasses: Hash[String, String], ?discovered_includes: Hash[String, Array[String]], ?discovered_class_sources: Hash[String, Set[String]], ?data_member_layouts: Hash[String, Array[Symbol]], ?struct_member_layouts: Hash[String, { members: Array[Symbol], keyword_init: bool }], ?param_inferred_types: Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]], ?run_generation: Object?) -> DiscoveryIndex
     end
 
     class IndexedKey

@@ -52,6 +52,9 @@ module Rigor
     # call-site argument types (precision-additive; an RBS-declared parameter always wins). Empty unless a
     # collection pass seeded it.
     def param_inferred_types = @discovery.param_inferred_types
+    # ADR-84 WD2 — the per-run identity token the user-method return memo buckets on (nil outside runner-seeded
+    # scopes; the memo then falls back to the per-file `discovered_def_nodes` identity).
+    def run_generation = @discovery.run_generation
 
     # Narrowing key for an indexed read `receiver[key]` where both the receiver and the key are stable enough to
     # address. The value of the map at this key is the narrowed type the next read at the same address MUST

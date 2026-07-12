@@ -27,7 +27,8 @@ module Rigor
       :discovered_class_sources,
       :data_member_layouts,
       :struct_member_layouts,
-      :param_inferred_types
+      :param_inferred_types,
+      :run_generation
     )
 
     class DiscoveryIndex
@@ -60,7 +61,14 @@ module Rigor
         # `{param_name(Symbol) => Rigor::Type}` map of the union of resolved call-site argument types. Empty on
         # every normal run; only the `coverage --protection` collection pass populates it today, so a `check` run
         # leaves it empty and seeds nothing (byte-identical).
-        param_inferred_types: EMPTY_TABLE
+        param_inferred_types: EMPTY_TABLE,
+        # ADR-84 WD2 — the run-scope identity token `Analysis::Runner#run_analysis` mints per run (a frozen
+        # bare Object) and seeds through `project_scope_seed_tables`. The user-method return memo keys its
+        # bucket on this token's identity so hits cross consumer-file boundaries within one run but never
+        # cross a run boundary (LSP / ADR-62 warm-loop re-runs land in a fresh bucket). Nil on scopes that
+        # never see the runner seed (single-file probes, `run_source` before the seed applies): the memo
+        # falls back to today's per-file `discovered_def_nodes` identity for those.
+        run_generation: nil
       )
     end
   end

@@ -22,27 +22,17 @@ module Rigor
       # predicate is injected (it keys on `@workers` / `@buffer`, owned by the Runner) so this collaborator
       # never calls back into it.
       class ProjectPrePasses
-        # Frozen bundle of the project-wide state the pre-passes produce. Mirrors the ivars
-        # `run_project_pre_passes` / `adopt_prebuilt` set on the {Runner}, in the same order they were
-        # assigned.
+        # Frozen bundle of the EAGER (env-input) project-wide state the pre-passes produce — the slots whose
+        # products feed the RBS environment build. Mirrors the env-input ivars `apply_pre_passes_result`
+        # sets on the {Runner}. The cross-file discovery tables live in the separate {Discovery} bundle
+        # ({#discover}), deferred to the analysis path.
         Result = Data.define(
           :plugin_registry,
           :dependency_source_index,
           :cached_plugin_prepare_diagnostics,
           :synthetic_method_index,
           :project_patched_methods,
-          :pre_eval_diagnostics_from_scanner,
-          :discovered_classes,
-          :discovered_def_nodes,
-          :discovered_singleton_def_nodes,
-          :discovered_def_sources,
-          :discovered_superclasses,
-          :discovered_includes,
-          :discovered_class_sources,
-          :discovered_method_visibilities,
-          :discovered_methods,
-          :data_member_layouts,
-          :struct_member_layouts
+          :pre_eval_diagnostics_from_scanner
         )
 
         # @param configuration [Rigor::Configuration]
@@ -58,10 +48,31 @@ module Rigor
           @pool_mode_reader = pool_mode
         end
 
-        # Internal: drives every project-wide pre-pass and returns the results bundled in {Result} in the
-        # order the downstream `#run` body expects. Extracted so `#prepare_project_scan` and the
-        # prebuilt-less `#run` path share one implementation.
-        def run(expansion:) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+        # Frozen bundle of the cross-file discovery tables the two whole-project parse passes produce. Split
+        # out of {Result} so the {Runner} can defer these to the analysis (miss) path — a warm cache HIT never
+        # consumes them and so never pays the double parse (see {#discover} + `Runner#ensure_project_discovery`).
+        # The slot names mirror the discovery half of {Result} exactly.
+        Discovery = Data.define(
+          :discovered_classes,
+          :discovered_def_nodes,
+          :discovered_singleton_def_nodes,
+          :discovered_def_sources,
+          :discovered_superclasses,
+          :discovered_includes,
+          :discovered_class_sources,
+          :discovered_method_visibilities,
+          :discovered_methods,
+          :data_member_layouts,
+          :struct_member_layouts
+        )
+
+        # Internal: drives every EAGER project-wide pre-pass — the ones whose products feed the RBS
+        # environment build (and therefore the cache key): plugin load + `#prepare`, the ADR-10
+        # dependency-source index, the ADR-16 synthetic-method scanner, and the ADR-17 project-patched
+        # scanner. The cross-file discovery tables are NOT built here (they are consumed only on the analysis
+        # path, so they defer to {#discover}); the {Result} carries `nil` for them, matching {#adopt_prebuilt}.
+        # Extracted so `#prepare_project_scan` and the prebuilt-less `#run` path share one implementation.
+        def run(expansion:)
           plugin_registry = load_plugins
           dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
           # ADR-18 slice 3 — plugin prepare MUST run before the synthetic-method scanner so cross-plugin
@@ -91,27 +102,29 @@ module Rigor
           pre_eval_outcome = Inference::ProjectPatchedScanner.scan(existing_pre_eval, buffer: @buffer)
           project_patched_methods = pre_eval_outcome.registry
           pre_eval_diagnostics_from_scanner = pre_eval_outcome.diagnostics
-          # Cross-file class discovery — walks every project file for `class Foo` / `module Bar`
-          # declarations so a `Foo.method_call` receiver in one file resolves a `class Foo` declared in a
-          # sibling file. Without this pre-pass each file's `discovered_classes` was per-file only, and
-          # lexical lookup fell back to stdlib `::Foo` for any user class shadowing a stdlib name (e.g.
-          # `Google::Cloud::Storage::File`). Cost is one extra parse pass over the project; small projects
-          # pay tens of ms, larger projects ~1s. Future optimisation can share parses with the existing
-          # scanner passes.
-          discovered_classes =
-            Inference::ScopeIndexer.discovered_classes_for_paths(expansion.fetch(:files), buffer: @buffer)
-          # ADR-24 slice 2 — cross-file def-node + class->superclass index so an implicit-self call inside a
-          # subclass resolves a superclass `def` declared in a sibling file. One extra parse pass over the
-          # project; shares the cost profile of the class-discovery pass above.
-          def_index =
-            Inference::ScopeIndexer.discovered_def_index_for_paths(expansion.fetch(:files), buffer: @buffer)
           Result.new(
             plugin_registry: plugin_registry,
             dependency_source_index: dependency_source_index,
             cached_plugin_prepare_diagnostics: cached_plugin_prepare_diagnostics,
             synthetic_method_index: synthetic_method_index,
             project_patched_methods: project_patched_methods,
-            pre_eval_diagnostics_from_scanner: pre_eval_diagnostics_from_scanner,
+            pre_eval_diagnostics_from_scanner: pre_eval_diagnostics_from_scanner
+          )
+        end
+
+        # Internal: the DEFERRED cross-file discovery pre-pass, run lazily on the analysis (miss) path only —
+        # a warm cache HIT skips it entirely. Two whole-project passes today:
+        # - Class discovery: walks every project file for `class Foo` / `module Bar` so a `Foo.method_call`
+        #   receiver in one file resolves a `class Foo` declared in a sibling file (without it, lexical
+        #   lookup fell back to stdlib `::Foo` for any user class shadowing a stdlib name).
+        # - ADR-24 slice 2 def-node / superclass / include index so an implicit-self call inside a subclass
+        #   resolves a superclass `def` declared in a sibling file.
+        # Returns a frozen {Discovery} bundle; the {Runner} adopts it onto its discovery ivars.
+        def discover(expansion:)
+          files = expansion.fetch(:files)
+          discovered_classes = Inference::ScopeIndexer.discovered_classes_for_paths(files, buffer: @buffer)
+          def_index = Inference::ScopeIndexer.discovered_def_index_for_paths(files, buffer: @buffer)
+          Discovery.new(
             discovered_classes: discovered_classes,
             discovered_def_nodes: def_index.fetch(:def_nodes),
             discovered_singleton_def_nodes: def_index.fetch(:singleton_def_nodes),
@@ -142,8 +155,8 @@ module Rigor
 
         # Translates a prebuilt {ProjectScan} snapshot supplied to `Runner.new(prebuilt: ...)` into a
         # {Result} the runner adopts the same way it adopts a fresh pre-pass run. The discovery tables are
-        # not part of the snapshot (the LSP path seeds an empty project scope), so they stay at their
-        # frozen-empty constructor defaults.
+        # not part of the snapshot (the LSP path seeds an empty project scope), and `Runner#ensure_project_discovery`
+        # is a no-op under `prebuilt`, so they stay at their frozen-empty constructor defaults.
         def adopt_prebuilt(scan)
           Result.new(
             plugin_registry: scan.plugin_registry,
@@ -151,18 +164,7 @@ module Rigor
             cached_plugin_prepare_diagnostics: scan.plugin_prepare_diagnostics,
             synthetic_method_index: scan.synthetic_method_index,
             project_patched_methods: scan.project_patched_methods,
-            pre_eval_diagnostics_from_scanner: scan.pre_eval_diagnostics,
-            discovered_classes: nil,
-            discovered_def_nodes: nil,
-            discovered_singleton_def_nodes: nil,
-            discovered_def_sources: nil,
-            discovered_superclasses: nil,
-            discovered_includes: nil,
-            discovered_class_sources: nil,
-            discovered_method_visibilities: nil,
-            discovered_methods: nil,
-            data_member_layouts: nil,
-            struct_member_layouts: nil
+            pre_eval_diagnostics_from_scanner: scan.pre_eval_diagnostics
           )
         end
 

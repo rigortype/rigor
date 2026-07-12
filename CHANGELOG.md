@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Changed
+
+- **[rigor-dry-types]** The dry-types alias scan is now cached across runs, so a warm `rigor check` re-validates file digests instead of re-parsing the whole project ([ADR-60](docs/adr/60-pre-freeze-plugin-contract-consolidation.md) WD3).
+  - The plugin's `#prepare` used to Prism-parse every `.rb` file under the project's `paths:` on every invocation — cold and warm alike — to find `include Dry.Types()` declarations, which dominated warm-run wall time on large Rails apps (measured at roughly a third of GitLab `app/models` warm time). The scan now rides a cached `producer` with a `watch:` glob covering the same tree: a warm run re-globs and re-digests the watched files (a cheap SHA over file bytes, no AST build) and reuses the cached alias table, recomputing only when a source file under those paths is edited, added, or removed. The empty result for a project that ships no dry-types module is cached too. `--no-cache` recomputes fresh, exactly as before.
+
 ## [0.2.9] - 2026-07-11
 
 v0.2.9 sharpens Rigor on large Rails applications, with GitLab-scale projects as the proving ground: PostgreSQL `db/structure.sql` is accepted as a schema source, the strong-parameters chain stays typed, several route-helper and ActiveSupport coverage gaps close, and module facades now resolve across files. Protection-coverage tooling gets faster with a fork-parallel scan and more actionable — it now names when a missing-RBS gem is the cause of a hole ([ADR-82](docs/adr/82-dynamic-provenance-wiring.md)). Other fixes strengthen control-flow narrowing around `present?` / `blank?` guards and in-body mutation, and make the persistent cache robust across upgrades.

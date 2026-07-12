@@ -229,6 +229,41 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
     end
   end
 
+  # ADR-57 return-memo recording-soundness pin — the recorder must capture a callee's TRANSITIVE (deep) reads
+  # for EVERY consumer, not just the shallow consumer→callee edge. `infer_user_method_return` records the deep
+  # edge only as a side effect of evaluating the callee body, and the return memo serves prior results without
+  # re-running it. Soundness rests on the memo's per-file bucket scope (hits never cross a consumer-file
+  # boundary — see the INVARIANT comment at the memo): each consumer file recomputes `Mid#relay` itself and so
+  # records `deep.rb` (which `relay`'s body reads through `Deep.new.leaf`). If the memo's caching scope ever
+  # widens without cache-and-replay of the callee's read-set, this example breaks — c2.rb would inherit
+  # c1.rb's computed return and never see deep.rb.
+  it "records a callee's transitive deep-read file for every consumer under recording" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "deep.rb"), "class Deep\n  def leaf\n    1\n  end\nend\n")
+      File.write(File.join(dir, "mid.rb"), <<~RUBY)
+        class Mid
+          def relay
+            Deep.new.leaf
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "c1.rb"), "Mid.new.relay\n")
+      File.write(File.join(dir, "c2.rb"), "Mid.new.relay\n")
+
+      runner = run_recording(dir)
+
+      deep = File.join(dir, "deep.rb")
+      %w[c1.rb c2.rb].each do |consumer|
+        record = runner.file_dependencies[File.join(dir, consumer)]
+        # The consumer transitively reads Deep#leaf through Mid#relay's body — deep.rb is a recorded source
+        # even for the second consumer, whose Mid#relay return the memo could otherwise serve from a hit.
+        expect(record.sources).to include(deep), "#{consumer} should depend on deep.rb (transitive deep edge)"
+      end
+      # And it inverts: an edit to deep.rb must re-check both consumers.
+      expect(runner.file_dependents[deep]).to include(File.join(dir, "c1.rb"), File.join(dir, "c2.rb"))
+    end
+  end
+
   it "records nothing when dependency recording is off (the default)" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "model.rb"), "class Widget\n  def price\n    1\n  end\nend\n")

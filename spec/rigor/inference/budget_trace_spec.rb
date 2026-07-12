@@ -64,6 +64,18 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       expect(described_class.snapshot.keys).to match_array(described_class::CATEGORIES)
     end
 
+    it "counts the ADR-57 memo-profile categories" do
+      described_class.hit(described_class::MEMO_ENTRIES)
+      described_class.hit(described_class::MEMO_HITS)
+      described_class.hit(described_class::MEMO_REFUSE_CONSULT_TAINTED)
+
+      snap = described_class.snapshot
+      expect(snap[described_class::MEMO_ENTRIES]).to eq(1)
+      expect(snap[described_class::MEMO_HITS]).to eq(1)
+      expect(snap[described_class::MEMO_MISSES]).to eq(0)
+      expect(snap[described_class::MEMO_REFUSE_CONSULT_TAINTED]).to eq(1)
+    end
+
     it "returns a frozen snapshot" do
       expect(described_class.snapshot).to be_frozen
     end
@@ -113,6 +125,31 @@ RSpec.describe Rigor::Inference::BudgetTrace do
       described_class.observe(described_class::UNION_ARITY, 7)
       described_class.reset
       expect(described_class.distribution(described_class::UNION_ARITY)).to be_empty
+    end
+
+    describe "observe_distinct (ADR-57 WD0 distinct-memo-key distribution)" do
+      it "counts distinct members per bucket, not observations" do
+        # Same (bucket, member) three times counts once; a new member increments.
+        3.times { described_class.observe_distinct(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE, "Foo#bar", [1]) }
+        described_class.observe_distinct(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE, "Foo#bar", [2])
+        described_class.observe_distinct(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE, "Baz#qux", [1])
+
+        dist = described_class.distribution(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE)
+        expect(dist).to eq({ "Foo#bar" => 2, "Baz#qux" => 1 })
+      end
+
+      it "is a no-op when disabled" do
+        described_class.disable!
+        described_class.observe_distinct(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE, "Foo#bar", [1])
+        expect(described_class.distribution(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE)).to be_empty
+      end
+
+      it "reset clears the de-duplication state so a member counts fresh afterwards" do
+        described_class.observe_distinct(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE, "Foo#bar", [1])
+        described_class.reset
+        described_class.observe_distinct(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE, "Foo#bar", [1])
+        expect(described_class.distribution(described_class::MEMO_DISTINCT_KEY_BY_SIGNATURE)).to eq({ "Foo#bar" => 1 })
+      end
     end
 
     it "is fed by Combinator.union with the produced union's arity" do

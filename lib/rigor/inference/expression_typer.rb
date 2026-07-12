@@ -1648,7 +1648,7 @@ module Rigor
       RECURSION_VALUE_SIZE_CAP = 64
       private_constant :RECURSION_VALUE_SIZE_CAP
 
-      def infer_user_method_return(def_node, receiver, arg_types) # rubocop:disable Metrics/AbcSize
+      def infer_user_method_return(def_node, receiver, arg_types)
         return nil if def_node.body.nil?
 
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types)
@@ -1665,6 +1665,9 @@ module Rigor
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
         summaries = (Thread.current[INFERENCE_SUMMARY_KEY] ||= {})
 
+        # WD0 (RIGOR_BUDGET_TRACE) — one entry into user-method return inference. No-op when disabled.
+        BudgetTrace.hit(BudgetTrace::MEMO_ENTRIES)
+
         # ADR-57 follow-up — return memo. The inferred return is a pure function of `(def_node, receiver,
         # arg_types)` and the frozen discovery index whenever the computation does NOT depend on a transient
         # ADR-55 Kleene assumption (an in-flight fixpoint summary). Two structural preconditions decide
@@ -1680,24 +1683,57 @@ module Rigor
         # call, re-walking the shared sub-readers combinatorially (~932k body evaluations for ~20 tiny
         # methods). The computation itself lives in `compute_user_method_return`.
         unless memo_candidate?(stack, plain_signature)
+          trace_memo_refusal(stack, plain_signature)
           return compute_user_method_return(def_node, body_scope, stack, summaries,
                                             receiver, arg_types, plain_signature)
         end
 
+        # INVARIANT (ADR-46 recording soundness) — the deep cross-file dependency edges (the reads a callee
+        # body's dispatches perform through the instrumented `Scope` accessors) are recorded, per consumer,
+        # only as a side effect of evaluating that body, and a memo hit serves the return WITHOUT
+        # re-evaluating it. Recording soundness currently rests on the memo's PER-FILE bucket scope: the
+        # bucket key is the per-file merged def-table identity (`ScopeIndexer#merge_project_method_indexes`
+        # rebuilds `discovered_def_nodes` for every file), so a hit never crosses a consumer-file boundary,
+        # and within one consumer the first infer of a signature is a miss whose body eval records the deep
+        # edges — a later hit is edge-idempotent for that same consumer. Any change that makes hits
+        # CROSS-FILE (e.g. promoting the bucket to run scope, which the RETURN_MEMO_KEY generation framing
+        # anticipates) MUST pair with cache-and-replay of the callee's recorded read-set onto the current
+        # consumer — a naive bypass-the-memo-while-recording alternative measured >200x wall on
+        # analyzer-shaped files (ActiveStorage video_analyzer.rb's subtree, 0.43s -> >90s; PR #79). Pinned by
+        # spec/rigor/inference/return_memo_recording_spec.rb and dependency_recorder_spec.rb's transitive
+        # deep-edge example.
+        consult_and_store_return_memo(def_node, body_scope, stack, summaries,
+                                      receiver, arg_types, plain_signature)
+      end
+
+      # The candidate-frame memo path: consult the current discovery generation's bucket, and on a miss
+      # compute and store a FINAL result. Reached only when `memo_candidate?` held (see
+      # `infer_user_method_return`). A result is stored only if no ADR-55 fixpoint summary was *consulted*
+      # during the compute (the post-hoc consult-counter check) — otherwise `result` embeds a transient Kleene
+      # iterate whose value depends on the iteration in flight and must not be shared across call sites (the
+      # WD0 `MEMO_REFUSE_CONSULT_TAINTED` non-store).
+      def consult_and_store_return_memo(def_node, body_scope, stack, summaries,
+                                        receiver, arg_types, plain_signature)
         memo = return_memo_bucket
         memo_key = [def_node.object_id, receiver.describe(:short),
                     arg_types.map { |type| type.describe(:short) }]
-        return memo[memo_key] if memo.key?(memo_key)
+        if memo.key?(memo_key)
+          BudgetTrace.hit(BudgetTrace::MEMO_HITS)
+          return memo[memo_key]
+        end
+        BudgetTrace.hit(BudgetTrace::MEMO_MISSES)
+        trace_distinct_memo_key(plain_signature, memo_key)
 
         consults_before = Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
         result = compute_user_method_return(def_node, body_scope, stack, summaries,
                                             receiver, arg_types, plain_signature)
         consults_after = Thread.current[SUMMARY_CONSULT_COUNTER_KEY] || 0
 
-        # Store only a FINAL result. If a fixpoint summary was consulted during the computation, `result`
-        # embeds a transient Kleene iterate whose value depends on the iteration in flight, so it must not
-        # be shared across call sites.
-        memo[memo_key] = result if consults_after == consults_before
+        if consults_after == consults_before
+          memo[memo_key] = result
+        else
+          BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_CONSULT_TAINTED)
+        end
         result
       end
 
@@ -1706,6 +1742,7 @@ module Rigor
       # unchanged from pre-memo behaviour).
       def compute_user_method_return(def_node, body_scope, stack, summaries,
                                      receiver, arg_types, plain_signature)
+        trace_body_eval(plain_signature)
         # ADR-55 slice 1: when every bound argument is value-pinned, extend the guard key with a stable
         # descriptor of the argument *values* so distinct constant frames may recurse (e.g. `factorial(5)`
         # folds to `Constant[120]`). Distinct constant frames are bounded by `RECURSION_UNROLL_FUEL` per
@@ -1767,6 +1804,42 @@ module Rigor
       def return_memo_bucket
         store = (Thread.current[RETURN_MEMO_KEY] ||= {}.compare_by_identity)
         store[scope.discovered_def_nodes] ||= {}
+      end
+
+      # WD0 (RIGOR_BUDGET_TRACE) trace helpers. Each guards on `BudgetTrace.enabled?` before doing any work
+      # beyond a single boolean check, so a normal run pays nothing (no signature-label string built, no
+      # stack scan). Attributes a non-candidate frame's non-store to on-stack vs unroll-in-flight, mirroring
+      # `memo_candidate?`: on-stack takes precedence (a genuine in-cycle frame would be refused even without
+      # an unroll); the only other way to fail candidacy is an unroll in flight.
+      def trace_memo_refusal(stack, plain_signature)
+        return unless BudgetTrace.enabled?
+
+        if stack.any? { |frame| plain_part(frame) == plain_signature }
+          BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_ON_STACK)
+        else
+          BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_UNROLL)
+        end
+      end
+
+      def trace_distinct_memo_key(plain_signature, memo_key)
+        return unless BudgetTrace.enabled?
+
+        BudgetTrace.observe_distinct(
+          BudgetTrace::MEMO_DISTINCT_KEY_BY_SIGNATURE, signature_label(plain_signature), memo_key
+        )
+      end
+
+      def trace_body_eval(plain_signature)
+        return unless BudgetTrace.enabled?
+
+        BudgetTrace.hit(BudgetTrace::MEMO_BODY_EVALS)
+        BudgetTrace.observe(BudgetTrace::MEMO_BODY_EVAL_BY_SIGNATURE, signature_label(plain_signature))
+      end
+
+      # `"Receiver#method"` label for a `[receiver_descriptor, method_name]` plain signature — the bucket key
+      # for the WD0 per-signature distributions. Built only under `BudgetTrace.enabled?`.
+      def signature_label(plain_signature)
+        "#{plain_signature[0]}##{plain_signature[1]}"
       end
 
       # Pushes the recursion-guard frame, evaluates the body (the outermost frame for a plain signature runs

@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[perf]** `rigor check` and `rigor coverage` now enable YJIT once a run outlasts a short amortization deadline, cutting wall time on large projects with no penalty to quick runs.
+  - Ruby ships YJIT but leaves it off, and enabling it up front is a net loss on short runs because the JIT compile cost never amortizes (measured: a ~4s run regressed ~20%). Rigor now arms a background thread at the start of a check / coverage run that enables YJIT only after 5s, so a run that finishes first never pays the compile cost while a long run JITs its dominant tail. Measured cold on Mastodon `app`+`lib`: 25.4s → 15.1s (1.7×), matching always-on YJIT; the short-run cases (kramdown, Mastodon `app/models`, mail) stay at parity. The long-lived `rigor lsp` / `rigor mcp` servers enable YJIT at boot. Set `RIGOR_DISABLE_YJIT=1` to opt out, or `RIGOR_YJIT_DEADLINE=<seconds>` to tune the deadline. Diagnostics and allocations are unchanged.
+
 ### Changed
 
 - **[rigor-dry-types]** The dry-types alias scan is now cached across runs, so a warm `rigor check` re-validates file digests instead of re-parsing the whole project ([ADR-60](docs/adr/60-pre-freeze-plugin-contract-consolidation.md) WD3).

@@ -20,6 +20,7 @@ module SourceRequireHygiene
   HELPERS = {
     NodeWalker: "node_walker",
     NodeLocator: "node_locator",
+    NodeChildren: "node_children",
     Literals: "literals",
     ConstantPath: "constant_path"
   }.freeze

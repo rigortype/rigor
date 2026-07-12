@@ -100,7 +100,7 @@ module Rigor
           if n.is_a?(Prism::CallNode) && n.arguments && offset_in?(n.arguments.location, cursor_offset)
             result = n # Innermost-wins because we keep walking children.
           end
-          Source::NodeChildren.each_child(n, &walk)
+          n.rigor_each_child(&walk)
         end
         walk.call(root)
         result

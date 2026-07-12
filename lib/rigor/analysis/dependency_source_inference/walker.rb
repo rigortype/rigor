@@ -126,7 +126,7 @@ module Rigor
         end
 
         def walk_children(node, qualified_prefix, in_singleton_class, accumulator, budget)
-          Source::NodeChildren.each_child(node) do |child|
+          node.rigor_each_child do |child|
             break if accumulator.size >= budget
 
             walk_node(child, qualified_prefix, in_singleton_class, accumulator, budget)

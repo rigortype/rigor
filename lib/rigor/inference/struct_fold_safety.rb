@@ -157,7 +157,7 @@ module Rigor
       # Yields each child to recurse into, skipping the subtree of a nested local-variable-scope boundary (a `def` /
       # `class` / `module`).
       def each_local_scope_child(node)
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           next if scope_boundary?(child)
 
           yield child

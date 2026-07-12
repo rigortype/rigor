@@ -30,7 +30,7 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         yield node
-        NodeChildren.each_child(node) { |child| walk(child, &) }
+        node.rigor_each_child { |child| walk(child, &) }
       end
 
       # Like {.each}, but also yields the node's lexical ancestor chain (outermost first, EXCLUDING the node
@@ -53,7 +53,7 @@ module Rigor
 
         block.call(node, ancestors)
         ancestors.push(node)
-        NodeChildren.each_child(node) { |child| walk_with_ancestors(child, ancestors, &block) }
+        node.rigor_each_child { |child| walk_with_ancestors(child, ancestors, &block) }
         ancestors.pop
       end
     end

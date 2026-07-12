@@ -142,7 +142,7 @@ module Rigor
       private_class_method :walk_node
 
       def walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_node(child, qualified_prefix, in_singleton_class, source_path, entries)
         end
       end

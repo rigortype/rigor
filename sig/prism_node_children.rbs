@@ -1,0 +1,9 @@
+# Declares the reopening `Rigor::Source::NodeChildren` performs at load: a compiled `#rigor_each_child` is defined on
+# every concrete `Prism::*Node` class (allocation-free equivalent of `compact_child_nodes.each`). Declared on the
+# abstract base so every subclass resolves; the runtime definition is per-concrete-class, generated from
+# `Prism::Reflection` in lib/rigor/source/node_children.rb.
+module Prism
+  class Node
+    def rigor_each_child: () { (Prism::Node) -> void } -> void
+  end
+end

@@ -79,7 +79,7 @@ module Rigor
             return
           end
 
-          Source::NodeChildren.each_child(node) { |child| walk(child, qualified_prefix) }
+          node.rigor_each_child { |child| walk(child, qualified_prefix) }
         end
 
         def collect_def_writes(def_node, qualified_prefix)
@@ -96,7 +96,7 @@ module Rigor
           record_write(node, class_name) if node.is_a?(Prism::InstanceVariableWriteNode)
           return if BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
-          Source::NodeChildren.each_child(node) { |child| gather_writes(child, class_name) }
+          node.rigor_each_child { |child| gather_writes(child, class_name) }
         end
 
         def record_write(node, class_name)

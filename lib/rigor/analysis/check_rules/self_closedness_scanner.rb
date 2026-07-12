@@ -53,7 +53,7 @@ module Rigor
             names << child_prefix.join("::") if name && class_surface_open?(node)
             walk(node.body, child_prefix, names) if node.body
           else
-            Source::NodeChildren.each_child(node) { |child| walk(child, prefix, names) }
+            node.rigor_each_child { |child| walk(child, prefix, names) }
           end
         end
 

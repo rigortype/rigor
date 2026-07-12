@@ -63,7 +63,7 @@ module Rigor
         return if RETURN_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
         type_return_node(node, scope_index, out) if node.is_a?(Prism::ReturnNode)
-        Source::NodeChildren.each_child(node) { |c| collect_return_types(c, scope_index, out) }
+        node.rigor_each_child { |c| collect_return_types(c, scope_index, out) }
       end
 
       def type_return_node(return_node, scope_index, out)

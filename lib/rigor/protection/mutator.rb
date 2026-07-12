@@ -112,7 +112,7 @@ module Rigor
         return if node.nil?
 
         blk.call(node)
-        Source::NodeChildren.each_child(node) { |child| walk(child, &blk) }
+        node.rigor_each_child { |child| walk(child, &blk) }
       end
 
       def collect(node, out)
@@ -137,7 +137,7 @@ module Rigor
             @anchor_for[arg] = [node.receiver, node.name.to_s] if literal?(arg)
           end
         end
-        Source::NodeChildren.each_child(node) { |child| index_literal_anchors(child) }
+        node.rigor_each_child { |child| index_literal_anchors(child) }
       end
 
       def literal?(node)

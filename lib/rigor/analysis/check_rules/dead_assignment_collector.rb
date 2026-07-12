@@ -67,7 +67,7 @@ module Rigor
           return unless node.is_a?(Prism::Node)
 
           collect_def_assignments(node) if node.is_a?(Prism::DefNode)
-          Source::NodeChildren.each_child(node) { |child| walk_for_def_nodes(child) }
+          node.rigor_each_child { |child| walk_for_def_nodes(child) }
         end
 
         def collect_def_assignments(def_node)
@@ -94,7 +94,7 @@ module Rigor
           # / similar shapes don't trip the rule.
           accumulator << node.name if reading_assignment?(node)
 
-          Source::NodeChildren.each_child(node) { |child| gather_read_names(child, accumulator) }
+          node.rigor_each_child { |child| gather_read_names(child, accumulator) }
           accumulator
         end
 
@@ -112,7 +112,7 @@ module Rigor
           # outer walker visits them separately.
           return accumulator if node.is_a?(Prism::DefNode) && !accumulator.last.equal?(node)
 
-          Source::NodeChildren.each_child(node) { |child| gather_write_nodes(child, accumulator) }
+          node.rigor_each_child { |child| gather_write_nodes(child, accumulator) }
           accumulator
         end
 

@@ -83,7 +83,7 @@ module Rigor
       # The single converged DFS pre-order traversal. Threads both the live `ancestors` stack (for plugin
       # {NodeContext}) and the immutable built-in {RuleWalk::Context} (for the collectors), derived together
       # as the walk descends — the cheap-ancestors option from the ADR-53 B4 design note. Identical pre-order
-      # over each node's children (`Source::NodeChildren.each_child`, which yields `compact_child_nodes` order) to
+      # over each node's children (`#rigor_each_child`, which yields `compact_child_nodes` order) to
       # both the legacy `Source::NodeWalker.each_with_ancestors` and `RuleWalk.walk`, so every node is visited in
       # the same order each side saw before.
       def walk_node(node, ancestors, context, path, scope, states, collector_driver)
@@ -94,7 +94,7 @@ module Rigor
 
         child_context = collector_driver&.descend(node, context)
         ancestors.push(node)
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_node(child, ancestors, child_context, path, scope, states, collector_driver)
         end
         ancestors.pop

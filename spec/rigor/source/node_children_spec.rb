@@ -78,13 +78,21 @@ RSpec.describe Rigor::Source::NodeChildren do
     out
   end
 
-  # each_child MUST be element-for-element identical (object identity + order) to compact_child_nodes for this node,
-  # and a leaf class MUST have no children.
+  # The compiled instance method's output — the form the walkers call directly.
+  def collect_children_via_method(node)
+    out = []
+    node.rigor_each_child { |child| out << child }
+    out
+  end
+
+  # Both the compiled `#rigor_each_child` and the `each_child` wrapper MUST be element-for-element identical (object
+  # identity + order) to compact_child_nodes for this node, and a leaf class MUST have no children.
   def verify_node(node, label)
     expected = node.compact_child_nodes
-    actual = collect_children(node)
-    expect(actual.length).to eq(expected.length), -> { "#{label}: #{node.class} arity — #{actual} vs #{expected}" }
-    actual.each_index { |i| expect(actual[i]).to be(expected[i]) }
+    [collect_children(node), collect_children_via_method(node)].each do |actual|
+      expect(actual.length).to eq(expected.length), -> { "#{label}: #{node.class} arity — #{actual} vs #{expected}" }
+      actual.each_index { |i| expect(actual[i]).to be(expected[i]) }
+    end
     expect(expected).to be_empty if described_class::LEAF_CLASSES.include?(node.class)
   end
 
@@ -114,7 +122,7 @@ RSpec.describe Rigor::Source::NodeChildren do
           expect(readers).not_to be_empty
           readers.each do |reader, kind|
             expect(reader).to be_a(Symbol)
-            expect(kind).to(satisfy { |k| %i[node list].include?(k) })
+            expect(kind).to(satisfy { |k| %i[node node_optional list].include?(k) })
           end
         end
       end
@@ -125,9 +133,16 @@ RSpec.describe Rigor::Source::NodeChildren do
       # contract (ADR-79 — Rigor tracks the installed prism).
       expect(described_class::LEAF_CLASSES.size).to be_between(30, 60)
     end
+
+    it "compiles #rigor_each_child onto every concrete node class" do
+      described_class::NODE_CLASSES.each do |klass|
+        expect(klass.method_defined?(:rigor_each_child)).to be(true), "#{klass} lacks #rigor_each_child"
+        expect(klass.instance_method(:rigor_each_child).owner).to eq(klass)
+      end
+    end
   end
 
-  describe ".each_child" do
+  describe "#rigor_each_child / .each_child" do
     it "is object-identical to compact_child_nodes for every node in the analyzer corpus" do
       total = corpus_files.sum { |path| assert_equivalent(File.read(path), File.basename(path)) }
       expect(total).to be > 10_000 # the corpus really is large — guards against a silently-empty walk
@@ -158,6 +173,7 @@ RSpec.describe Rigor::Source::NodeChildren do
       leaf = Prism.parse("42").value.statements.body.first
       expect(leaf).to be_a(Prism::IntegerNode)
       expect(collect_children(leaf)).to be_empty
+      expect(collect_children_via_method(leaf)).to be_empty
     end
 
     it "yields nothing for non-node input (defensive nil child slot)" do
@@ -168,11 +184,11 @@ RSpec.describe Rigor::Source::NodeChildren do
       array = Prism.parse("[10, 20, 30]").value.statements.body.first
       expect(array.compact_child_nodes.length).to eq(3)
       seen = []
-      described_class.each_child(array) do |child|
+      array.rigor_each_child do |child|
         seen << child
         break if seen.size == 2
       end
-      expect(seen.size).to eq(2) # broke at the 2nd of 3 children — break unwound out of each_child
+      expect(seen.size).to eq(2) # broke at the 2nd of 3 children — break unwound out of rigor_each_child
     end
   end
 end

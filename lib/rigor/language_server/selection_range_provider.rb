@@ -49,7 +49,7 @@ module Rigor
         return chain unless node.location && offset_in?(node.location, offset)
 
         chain << node
-        Source::NodeChildren.each_child(node) { |child| ancestor_chain(child, offset, chain) }
+        node.rigor_each_child { |child| ancestor_chain(child, offset, chain) }
         chain
       end
 

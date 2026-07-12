@@ -248,7 +248,7 @@ module Rigor
             block.call(stmt)
           end
         else
-          Source::NodeChildren.each_child(node) { |child| each_statement(child, &block) }
+          node.rigor_each_child { |child| each_statement(child, &block) }
         end
       end
 
@@ -299,7 +299,7 @@ module Rigor
         return if node.nil?
 
         block.call(node)
-        Source::NodeChildren.each_child(node) { |child| walk(child, &block) }
+        node.rigor_each_child { |child| walk(child, &block) }
       end
 
       # Types the node through the flow evaluator (not the bare expression typer) under its recorded entry scope, so
@@ -332,7 +332,7 @@ module Rigor
         return if node.nil?
 
         block.call(node) if node.is_a?(Prism::DefNode)
-        Source::NodeChildren.each_child(node) { |child| each_def_node(child, &block) }
+        node.rigor_each_child { |child| each_def_node(child, &block) }
       end
     end
   end

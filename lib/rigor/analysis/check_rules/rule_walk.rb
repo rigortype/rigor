@@ -146,7 +146,7 @@ module Rigor
 
             dispatch(node, hooks, context)
             child_context = descend(node, context)
-            Source::NodeChildren.each_child(node) { |child| walk(child, hooks, child_context) }
+            node.rigor_each_child { |child| walk(child, hooks, child_context) }
           end
 
           def dispatch(node, hooks, context)

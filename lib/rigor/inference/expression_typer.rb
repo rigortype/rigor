@@ -1964,7 +1964,7 @@ module Rigor
         return true if node.is_a?(Prism::ReturnNode)
 
         found = false
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           next unless body_has_explicit_return?(child)
 
           found = true

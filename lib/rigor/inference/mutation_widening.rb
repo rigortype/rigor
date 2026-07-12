@@ -161,7 +161,7 @@ module Rigor
         # scope's locals) trigger widening, so descending into nested blocks is safe and
         # necessary for the hkt_registry-shape case (an outer collection mutated inside an
         # iterator block whose body is itself inside another block).
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           scope = walk_for_outer_mutations(child, scope)
         end
         scope

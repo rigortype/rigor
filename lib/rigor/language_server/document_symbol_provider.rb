@@ -68,7 +68,7 @@ module Rigor
         when Prism::DefNode
           block.call(def_symbol(node, in_namespace: in_namespace))
         else
-          Source::NodeChildren.each_child(node) do |child|
+          node.rigor_each_child do |child|
             each_decl(child, in_namespace: in_namespace, &block)
           end
         end

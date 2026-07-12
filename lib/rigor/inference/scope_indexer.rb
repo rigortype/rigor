@@ -347,7 +347,7 @@ module Rigor
           end
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_class_ivars(child, qualified_prefix, default_scope, accumulator,
                            mutated_ivars, read_before_write, init_writes, method_assign_effects)
         end
@@ -512,7 +512,7 @@ module Rigor
           (init_writes[class_name] ||= Set.new) << node.name
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           collect_class_body_ivar_writes(child, class_name, init_writes)
         end
       end
@@ -526,7 +526,7 @@ module Rigor
         # Descend BEFORE recording a write — `@x = @x + 1`'s RHS is an `InstanceVariableReadNode` that runs before the
         # write is committed; the read is therefore read-before-write semantically. `each_child` yields the value
         # child before the lvalue target (`compact_child_nodes` field order), matching this order.
-        Source::NodeChildren.each_child(node) do |c|
+        node.rigor_each_child do |c|
           detect_read_before_write(c, seen_writes, read_first)
         end
 
@@ -569,7 +569,7 @@ module Rigor
           return
         end
 
-        Source::NodeChildren.each_child(node) do |c|
+        node.rigor_each_child do |c|
           gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars, dead_writes)
         end
       end
@@ -743,7 +743,7 @@ module Rigor
           return acc
         end
 
-        Source::NodeChildren.each_child(root) { |c| collect_class_method_defs(c, prefix, acc) }
+        root.rigor_each_child { |c| collect_class_method_defs(c, prefix, acc) }
         acc
       end
 
@@ -774,7 +774,7 @@ module Rigor
         return acc unless node.is_a?(Prism::Node)
 
         acc << node.name if node.is_a?(Prism::InstanceVariableWriteNode) && !nil_literal_value?(node.value)
-        Source::NodeChildren.each_child(node) { |c| ivar_write_targets(c, acc) }
+        node.rigor_each_child { |c| ivar_write_targets(c, acc) }
         acc
       end
 
@@ -1107,7 +1107,7 @@ module Rigor
           return
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_class_cvars(child, qualified_prefix, default_scope, accumulator)
         end
       end
@@ -1126,7 +1126,7 @@ module Rigor
         record_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::ClassVariableWriteNode)
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
-        Source::NodeChildren.each_child(node) { |c| gather_cvar_writes(c, scope, class_name, accumulator) }
+        node.rigor_each_child { |c| gather_cvar_writes(c, scope, class_name, accumulator) }
       end
 
       def record_cvar_write(node, scope, class_name, accumulator)
@@ -1150,7 +1150,7 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         record_global_write(node, scope, accumulator) if node.is_a?(Prism::GlobalVariableWriteNode)
-        Source::NodeChildren.each_child(node) { |c| gather_global_writes(c, scope, accumulator) }
+        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator) }
       end
 
       def record_global_write(node, scope, accumulator)
@@ -1190,7 +1190,7 @@ module Rigor
           return
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_constant_writes(child, qualified_prefix, default_scope, accumulator)
         end
       end
@@ -1296,7 +1296,7 @@ module Rigor
           end
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_methods_and_def_nodes(child, qualified_prefix, in_singleton_class, methods_acc, def_nodes_acc)
         end
       end
@@ -1475,7 +1475,7 @@ module Rigor
           return
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_singleton_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
         end
       end
@@ -1587,7 +1587,7 @@ module Rigor
           end
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_class_superclasses(child, qualified_prefix, accumulator)
         end
       end
@@ -1624,7 +1624,7 @@ module Rigor
           record_data_member_layout(accumulator, qualified_prefix + [node.name.to_s], node.value)
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_data_member_layouts(child, qualified_prefix, accumulator)
         end
       end
@@ -1671,7 +1671,7 @@ module Rigor
           record_struct_member_layout(accumulator, qualified_prefix + [node.name.to_s], node.value)
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_struct_member_layouts(child, qualified_prefix, accumulator)
         end
       end
@@ -1732,7 +1732,7 @@ module Rigor
           record_mixin_call(node, current_class, accumulator)
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_class_includes(child, qualified_prefix, current_class, accumulator)
         end
       end
@@ -1811,12 +1811,12 @@ module Rigor
         # entry visibility unchanged.
         if node.is_a?(Prism::StatementsNode)
           local_visibility = current_visibility
-          Source::NodeChildren.each_child(node) do |child|
+          node.rigor_each_child do |child|
             local_visibility = walk_method_visibilities(child, qualified_prefix, in_singleton_class,
                                                         local_visibility, accumulator)
           end
         else
-          Source::NodeChildren.each_child(node) do |child|
+          node.rigor_each_child do |child|
             walk_method_visibilities(child, qualified_prefix, in_singleton_class, current_visibility, accumulator)
           end
         end
@@ -1923,7 +1923,7 @@ module Rigor
           return accumulator
         end
 
-        Source::NodeChildren.each_child(node) { |child| collect_class_alias_map(child, qualified_prefix, accumulator) }
+        node.rigor_each_child { |child| collect_class_alias_map(child, qualified_prefix, accumulator) }
         accumulator
       end
 
@@ -2153,7 +2153,7 @@ module Rigor
           record_class_new_constant_decl(node, qualified_prefix, accumulator)
         end
 
-        Source::NodeChildren.each_child(node) { |child| collect_class_decls(child, qualified_prefix, accumulator) }
+        node.rigor_each_child { |child| collect_class_decls(child, qualified_prefix, accumulator) }
       end
 
       # T1 (template-corpora survey) — record a `Const = Class.new(Super)` (and the bare `Class.new` / `Module.new`)
@@ -2220,7 +2220,7 @@ module Rigor
           return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           record_declarations(child, qualified_prefix, identity_table, discovered)
         end
       end
@@ -2346,7 +2346,7 @@ module Rigor
         when Prism::UnlessNode
           propagate_unless_branches(node, table, current_scope)
         else
-          Source::NodeChildren.each_child(node) { |child| propagate(child, table, current_scope) }
+          node.rigor_each_child { |child| propagate(child, table, current_scope) }
         end
       end
 

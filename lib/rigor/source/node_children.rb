@@ -10,25 +10,29 @@ module Rigor
     # (`IntegerNode`, `LocalVariableReadNode`, `NilNode`, …) it is literally `def compact_child_nodes; []; end`.
     # Rigor's tree walkers call it unconditionally on every node of every walk, so one full-tree walk allocates one
     # Array per node visited. On leaf-heavy sources (a Ragel-generated parser has hundreds of thousands of
-    # integer-literal leaves) these throwaway arrays are the single largest allocation source in a run — over half of
-    # all allocations on mail's `lib`.
+    # integer-literal leaves) these throwaway arrays are the single largest allocation source in a run — over half
+    # of all allocations on mail's `lib`.
     #
-    # {each_child} yields the same child nodes, in the same order, without materialising the intermediate array. It
-    # reads each child-bearing field directly and iterates a `NodeListField`'s already-materialised array in place
-    # (the reader returns the stored array, not a copy). Nil optional children and nil list elements are skipped,
-    # mirroring `compact_child_nodes`'s "compact" semantics.
+    # Loading this file compiles a `#rigor_each_child` method onto every `Prism::*Node` class (additive reopening of
+    # a dependency's class, the `Cache::RbsEnvironmentMarshalPatch` precedent; the `rigor_` prefix keeps it
+    # collision-free). It yields the same child nodes, in the same order, without materialising the intermediate
+    # array: each child-bearing field is read directly in field declaration order — exactly the order
+    # `compact_child_nodes` emits — and a `NodeListField`'s already-materialised array is iterated in place (the
+    # reader returns the stored array, not a copy). Nil optional children and nil list elements are skipped,
+    # mirroring `compact_child_nodes`'s "compact" semantics. Leaf classes compile to an empty method.
     #
-    # Field access is compiled, not reflective: a per-class method with the field readers inlined as direct calls
-    # (`node.receiver`, `node.arguments`, …) is generated once at load and dispatched by node class, so iteration
-    # costs one method dispatch per node rather than one per field. A `public_send(reader)`-per-field loop was
-    # measured ~45 % slower than `compact_child_nodes` on a full-tree walk — the dynamic-dispatch-per-field cost
-    # swamps the allocation win; the compiled form stays within a few percent while dropping the allocations.
+    # A method compiled onto the node class is the fastest dispatch available for this shape — one virtual send on
+    # the receiver, the same mechanism `compact_child_nodes` itself uses, with zero allocation. The reflective
+    # alternatives were measured and rejected: a `public_send`-per-field loop is ~45 % *slower* than
+    # `compact_child_nodes` on a full-tree walk (dynamic dispatch per field swamps the allocation win), and a
+    # central generated-method table dispatched via `Module#send` + a per-class Hash lookup still regressed
+    # Rails-corpus wall ~5 % under YJIT. Walkers therefore call `node.rigor_each_child { … }` directly.
     #
     # The field map is derived once at load from `Prism::Reflection`, so it tracks whatever `prism` version resolves
     # at runtime (ADR-79) instead of a hand-maintained table. `spec/rigor/source/node_children_spec.rb` is the
-    # binding contract: over a corpus of real source it asserts {each_child}'s output is element-for-element
-    # identical (object identity and order) to `compact_child_nodes` for every node reached — the equivalence this
-    # optimisation rests on.
+    # binding contract: over a corpus of real source it asserts — for every node reached — that both
+    # `#rigor_each_child` and {each_child} yield output element-for-element identical (object identity and order) to
+    # `compact_child_nodes`.
     module NodeChildren
       module_function
 
@@ -39,18 +43,20 @@ module Rigor
           const if const.is_a?(Class) && const < Prism::Node
         end.freeze
 
-      # Shared frozen empty entry for leaf classes, so a single hash lookup covers them with no per-leaf array.
-      # Identity (`equal?`) distinguishes a leaf entry from a childless-in-practice non-leaf.
+      # Shared frozen empty entry for leaf classes. Identity (`equal?`) distinguishes a leaf entry from a
+      # childless-in-practice non-leaf.
       EMPTY = [].freeze
 
-      # node class => frozen Array of `[reader_symbol, :node | :list]` pairs, in field declaration order (the order
-      # `compact_child_nodes` emits its children). Leaf classes map to {EMPTY}. This is the source of truth the
-      # dispatch methods are generated from, and is exposed for introspection / the equivalence spec.
+      # node class => frozen Array of `[reader_symbol, :node | :node_optional | :list]` pairs, in field declaration
+      # order (the order `compact_child_nodes` emits its children). Leaf classes map to {EMPTY}. This is the source
+      # of truth the per-class methods are compiled from, exposed for introspection and the equivalence spec.
       CHILD_READERS =
         NODE_CLASSES.each_with_object({}) do |klass, map|
           pairs = Prism::Reflection.fields_for(klass).filter_map do |field|
             case field
-            when Prism::Reflection::NodeField, Prism::Reflection::OptionalNodeField
+            when Prism::Reflection::OptionalNodeField
+              [field.name, :node_optional].freeze
+            when Prism::Reflection::NodeField
               [field.name, :node].freeze
             when Prism::Reflection::NodeListField
               [field.name, :list].freeze
@@ -59,55 +65,51 @@ module Rigor
           map[klass] = pairs.empty? ? EMPTY : pairs.freeze
         end.freeze
 
-      # The leaf classes — no child-bearing field, so `compact_child_nodes` is always `[]`. Exposed for the
-      # equivalence spec and introspection; a leaf has no dispatch entry, so {each_child} no-ops on it.
+      # The leaf classes — no child-bearing field, so `compact_child_nodes` is always `[]` and `#rigor_each_child`
+      # compiles to an empty method. Exposed for the equivalence spec and introspection.
       LEAF_CLASSES = NODE_CLASSES.select { |klass| CHILD_READERS[klass].equal?(EMPTY) }.to_set.freeze
 
-      # Holds the generated per-class child-yielding methods, one per non-leaf node class, so their names can never
-      # collide with anything. Each reads its class's child fields directly and `yield`s each non-nil child.
-      module Dispatch
+      # Codegen (not per-call reflection) so iteration reads fields directly at hand-written speed — see the module
+      # comment for the measurements ruling out the reflective forms. Each statement mirrors `compact_child_nodes`'s
+      # own form for that field kind exactly: a required `NodeField` is yielded unconditionally (`compact <<
+      # predicate`), an `OptionalNodeField` behind a truthiness guard (`compact << receiver if receiver`), and a
+      # `NodeListField`'s stored array is iterated unfiltered (`compact.concat(requireds)`) — no extra nil checks
+      # beyond what Prism itself performs. The explicit `self.` receiver keeps a hypothetical future field named
+      # `child` from parsing as the just-assigned local. For a `CallNode` (three optional-node fields) the emitted
+      # source is:
+      #
+      #   def rigor_each_child
+      #     child = self.receiver
+      #     yield child if child
+      #     child = self.arguments
+      #     yield child if child
+      #     child = self.block
+      #     yield child if child
+      #   end
+      NODE_CLASSES.each do |klass|
+        statements = CHILD_READERS[klass].map do |reader, kind|
+          case kind
+          when :list          then "self.#{reader}.each { |child| yield child }"
+          when :node_optional then "child = self.#{reader}\n  yield child if child"
+          else                     "yield self.#{reader}"
+          end
+        end
+        klass.class_eval(<<~RUBY, __FILE__, __LINE__ + 1) # rubocop:disable Style/DocumentDynamicEvalDefinition
+          def rigor_each_child
+            #{statements.join("\n  ")}
+          end
+        RUBY
       end
 
-      # node class => Symbol naming the {Dispatch} method that yields that class's children. Absent for leaf classes
-      # and for non-node keys (e.g. `NilClass`), so {each_child} is a no-op on both.
-      DISPATCH =
-        NODE_CLASSES.each_with_object({}) do |klass, map|
-          readers = CHILD_READERS[klass]
-          next if readers.equal?(EMPTY)
-
-          method_name = :"yield_children_#{klass.name.gsub('::', '__')}"
-          statements = readers.map do |reader, kind|
-            if kind == :list
-              "node.#{reader}.each { |child| yield child unless child.nil? }"
-            else
-              "child = node.#{reader}; yield child unless child.nil?"
-            end
-          end
-          # Codegen (not per-call reflection) so iteration reads fields directly — see the class comment on why this
-          # beats a `public_send`-per-field loop. For a `CallNode` (one optional-node field per non-nil child) the
-          # emitted source is:
-          #
-          #   def self.yield_children_Prism__CallNode(node)
-          #     child = node.receiver; yield child unless child.nil?
-          #     child = node.arguments; yield child unless child.nil?
-          #     child = node.block; yield child unless child.nil?
-          #   end
-          Dispatch.module_eval(<<~RUBY, __FILE__, __LINE__ + 1) # rubocop:disable Style/DocumentDynamicEvalDefinition
-            def self.#{method_name}(node)
-              #{statements.join("\n  ")}
-            end
-          RUBY
-          map[klass] = method_name
-        end.freeze
-
       # Yield each direct child `Prism::Node` of `node` in `compact_child_nodes` order, without allocating an
-      # intermediate array. Leaf nodes and non-node input yield nothing. Pure and re-entrant; `break` / `next` /
-      # `return` in the block behave exactly as they would with `compact_child_nodes.each`.
+      # intermediate array. Nil / non-node input yields nothing (an optional field can be nil, so a caller may pass
+      # e.g. `node.body`). Pure and re-entrant; `break` / `next` / `return` in the block behave exactly as they
+      # would with `compact_child_nodes.each`. Walkers holding a known `Prism::Node` call `#rigor_each_child`
+      # directly; this wrapper is the nil-tolerant entry.
       #
       # @yieldparam child [Prism::Node]
       def each_child(node, &)
-        method_name = DISPATCH[node.class]
-        Dispatch.send(method_name, node, &) if method_name
+        node.rigor_each_child(&) if node.is_a?(Prism::Node)
       end
     end
   end

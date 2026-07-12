@@ -49,7 +49,7 @@ module Rigor
              Prism::BlockNode
           add_range(node, ranges)
         end
-        Source::NodeChildren.each_child(node) { |child| walk(child, ranges) }
+        node.rigor_each_child { |child| walk(child, ranges) }
       end
 
       def add_range(node, ranges)

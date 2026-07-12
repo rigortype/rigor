@@ -87,7 +87,7 @@ module Rigor
           visit(node) if case_like?(node) && !in_loop_or_block
 
           child_in_loop_or_block = in_loop_or_block || enters_loop_or_block?(node)
-          Source::NodeChildren.each_child(node) { |child| walk(child, in_loop_or_block: child_in_loop_or_block) }
+          node.rigor_each_child { |child| walk(child, in_loop_or_block: child_in_loop_or_block) }
         end
 
         # `case/when` is a `CaseNode`; `case/in` is a `CaseMatchNode`. Both carry `predicate` + `conditions`

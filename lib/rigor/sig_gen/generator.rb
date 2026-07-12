@@ -160,7 +160,7 @@ module Rigor
           return
         end
 
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           walk_defs(child, prefix, in_singleton_class, module_function_active, out)
         end
       end
@@ -797,7 +797,7 @@ module Rigor
           collect_attr_call(node, prefix, in_singleton_class, ctx)
         end
 
-        Source::NodeChildren.each_child(node) { |child| walk_attr_calls(child, prefix, in_singleton_class, ctx) }
+        node.rigor_each_child { |child| walk_attr_calls(child, prefix, in_singleton_class, ctx) }
       end
 
       def collect_attr_call(call_node, prefix, in_singleton_class, ctx)
@@ -873,7 +873,7 @@ module Rigor
           return
         end
 
-        Source::NodeChildren.each_child(node) { |c| collect_init_ivar_obs(c, prefix, result) }
+        node.rigor_each_child { |c| collect_init_ivar_obs(c, prefix, result) }
       end
 
       # Derive { attr_name_sym => Type } for a single `def initialize` by matching `@ivar = param_name`
@@ -951,7 +951,7 @@ module Rigor
                   node.is_a?(Prism::ClassNode) ||
                   node.is_a?(Prism::ModuleNode)
 
-        Source::NodeChildren.each_child(node) { |c| scan_ivar_param_assignments(c, param_names, result) }
+        node.rigor_each_child { |c| scan_ivar_param_assignments(c, param_names, result) }
       end
 
       def build_attr_candidates(call_name, class_name, attr_name, ivar_type, ctx)

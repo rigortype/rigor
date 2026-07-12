@@ -85,7 +85,7 @@ module Rigor
         return nil unless node.is_a?(Prism::Node)
         return nil unless contains?(node, offset)
 
-        NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           deeper = descend(child, offset)
           return deeper if deeper
         end

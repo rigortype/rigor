@@ -188,7 +188,7 @@ module Rigor
              n.location.start_offset <= symbol_offset && symbol_offset <= n.location.end_offset
             result = n
           end
-          Source::NodeChildren.each_child(n, &walk)
+          n.rigor_each_child(&walk)
         end
         walk.call(root)
         result

@@ -750,7 +750,7 @@ module Rigor
                         node.is_a?(Prism::BlockNode)
 
         found = false
-        Source::NodeChildren.each_child(node) do |c|
+        node.rigor_each_child do |c|
           next unless arm_contains_retry?(c)
 
           found = true
@@ -944,7 +944,7 @@ module Rigor
         return if node.nil?
 
         found[node] = true if node.is_a?(Prism::BreakNode)
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           next if BREAK_BOUNDARY_NODES.any? { |klass| child.is_a?(klass) }
 
           collect_direct_breaks(child, found)
@@ -1918,7 +1918,7 @@ module Rigor
         return if node.nil?
 
         yield node
-        Source::NodeChildren.each_child(node) do |child|
+        node.rigor_each_child do |child|
           next if child.is_a?(Prism::BlockNode) || child.is_a?(Prism::DefNode) || child.is_a?(Prism::LambdaNode)
 
           each_node_outside_nested_scopes(child, &)

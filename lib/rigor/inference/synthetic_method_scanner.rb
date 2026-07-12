@@ -167,12 +167,12 @@ module Rigor
           name = class_name_from(node, scope_stack)
           yield name, node if name
           new_stack = scope_stack + [node]
-          Source::NodeChildren.each_child(node.body) { |child| walk_classes(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_classes(child, new_stack, &) }
         when Prism::ModuleNode
           new_stack = scope_stack + [node]
-          Source::NodeChildren.each_child(node.body) { |child| walk_classes(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_classes(child, new_stack, &) }
         else
-          Source::NodeChildren.each_child(node) { |child| walk_classes(child, scope_stack, &) }
+          node.rigor_each_child { |child| walk_classes(child, scope_stack, &) }
         end
       end
 
@@ -304,12 +304,12 @@ module Rigor
           name = class_name_from(node, scope_stack)
           yield name, node.body
           new_stack = scope_stack + [node]
-          Source::NodeChildren.each_child(node.body) { |child| walk_module_decls(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_module_decls(child, new_stack, &) }
         when Prism::ClassNode
           new_stack = scope_stack + [node]
-          Source::NodeChildren.each_child(node.body) { |child| walk_module_decls(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_module_decls(child, new_stack, &) }
         else
-          Source::NodeChildren.each_child(node) { |child| walk_module_decls(child, scope_stack, &) }
+          node.rigor_each_child { |child| walk_module_decls(child, scope_stack, &) }
         end
       end
 
@@ -381,12 +381,12 @@ module Rigor
           parent = parent_name_from(node, scope_stack)
           yield name, parent if name
           new_stack = scope_stack + [node]
-          Source::NodeChildren.each_child(node.body) { |child| walk_class_decls(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_class_decls(child, new_stack, &) }
         elsif node.is_a?(Prism::ModuleNode)
           new_stack = scope_stack + [node]
-          Source::NodeChildren.each_child(node.body) { |child| walk_class_decls(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_class_decls(child, new_stack, &) }
         else
-          Source::NodeChildren.each_child(node) { |child| walk_class_decls(child, scope_stack, &) }
+          node.rigor_each_child { |child| walk_class_decls(child, scope_stack, &) }
         end
       end
 
@@ -404,12 +404,12 @@ module Rigor
               yield name, stmt if stmt.is_a?(Prism::CallNode) && stmt.receiver.nil?
             end
           end
-          Source::NodeChildren.each_child(node.body) { |child| walk_class_bodies(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_class_bodies(child, new_stack, &) }
         elsif node.is_a?(Prism::ModuleNode)
           new_stack = scope_stack + [node]
-          Source::NodeChildren.each_child(node.body) { |child| walk_class_bodies(child, new_stack, &) }
+          node.body&.rigor_each_child { |child| walk_class_bodies(child, new_stack, &) }
         else
-          Source::NodeChildren.each_child(node) { |child| walk_class_bodies(child, scope_stack, &) }
+          node.rigor_each_child { |child| walk_class_bodies(child, scope_stack, &) }
         end
       end
 

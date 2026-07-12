@@ -9,6 +9,7 @@ require_relative "../configuration"
 require_relative "options"
 require_relative "../environment"
 require_relative "../scope"
+require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/statement_evaluator"
@@ -247,7 +248,7 @@ module Rigor
             block.call(stmt)
           end
         else
-          node.compact_child_nodes.each { |child| each_statement(child, &block) }
+          Source::NodeChildren.each_child(node) { |child| each_statement(child, &block) }
         end
       end
 
@@ -298,7 +299,7 @@ module Rigor
         return if node.nil?
 
         block.call(node)
-        node.compact_child_nodes.each { |child| walk(child, &block) }
+        Source::NodeChildren.each_child(node) { |child| walk(child, &block) }
       end
 
       # Types the node through the flow evaluator (not the bare expression typer) under its recorded entry scope, so
@@ -331,7 +332,7 @@ module Rigor
         return if node.nil?
 
         block.call(node) if node.is_a?(Prism::DefNode)
-        node.compact_child_nodes.each { |child| each_def_node(child, &block) }
+        Source::NodeChildren.each_child(node) { |child| each_def_node(child, &block) }
       end
     end
   end

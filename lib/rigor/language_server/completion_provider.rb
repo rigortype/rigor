@@ -8,6 +8,7 @@ require_relative "../environment"
 require_relative "../reflection"
 require_relative "../scope"
 require_relative "../source/node_locator"
+require_relative "../source/node_children"
 require_relative "../inference/scope_indexer"
 require_relative "../type/nominal"
 require_relative "../type/singleton"
@@ -187,7 +188,7 @@ module Rigor
              n.location.start_offset <= symbol_offset && symbol_offset <= n.location.end_offset
             result = n
           end
-          n.compact_child_nodes.each(&walk)
+          Source::NodeChildren.each_child(n, &walk)
         end
         walk.call(root)
         result

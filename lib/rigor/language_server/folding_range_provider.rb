@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "uri"
 require_relative "buffer_resolution"
+require_relative "../source/node_children"
 
 module Rigor
   module LanguageServer
@@ -48,7 +49,7 @@ module Rigor
              Prism::BlockNode
           add_range(node, ranges)
         end
-        node.compact_child_nodes.each { |child| walk(child, ranges) }
+        Source::NodeChildren.each_child(node) { |child| walk(child, ranges) }
       end
 
       def add_range(node, ranges)

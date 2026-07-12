@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "node_children"
+
 module Rigor
   module Source
     # Locates the deepest Prism AST node enclosing a given source position.
@@ -83,7 +85,7 @@ module Rigor
         return nil unless node.is_a?(Prism::Node)
         return nil unless contains?(node, offset)
 
-        node.compact_child_nodes.each do |child|
+        NodeChildren.each_child(node) do |child|
           deeper = descend(child, offset)
           return deeper if deeper
         end

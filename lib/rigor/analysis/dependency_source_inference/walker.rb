@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "return_type_heuristic"
 require_relative "../../source/constant_path"
+require_relative "../../source/node_children"
 
 module Rigor
   module Analysis
@@ -125,7 +126,7 @@ module Rigor
         end
 
         def walk_children(node, qualified_prefix, in_singleton_class, accumulator, budget)
-          node.compact_child_nodes.each do |child|
+          Source::NodeChildren.each_child(node) do |child|
             break if accumulator.size >= budget
 
             walk_node(child, qualified_prefix, in_singleton_class, accumulator, budget)

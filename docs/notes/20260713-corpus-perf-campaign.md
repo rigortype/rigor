@@ -170,3 +170,53 @@ cross-lever interaction regressions; PR #77 stacks its warm wins on top.
   gitlab gate had to stash-swap the plugin dir).
 - YJIT does not change allocations (≤ +0.007% = the deadline thread), so the
   deterministic gates survive PR #75; wall baselines recalibrate at the next cut.
+
+## Closing re-profile (2026-07-14) — the cycle's measured total and the ③/④ verdicts
+
+Swept on master `3424840b` (all nine PRs #74–#82 merged), same harness, caches
+cleared per target, diagnostics **10/10 exact** vs the reference (zero drift).
+Allocations — the deterministic metric — improved on **all 22 cold+warm cells**:
+
+| aggregate | cold | warm |
+|---|---|---|
+| allocations | mean −27.0% / median −20.6% (11/11 ↓) | mean −68.2% / median −75.4% (11/11 ↓) |
+| wall | mean −5.2% (noisy host; see below) | gitlab −73%, mail −81%; 4 noise-suspect ↑ flagged |
+
+Headlines: mastodon app+lib cold 25.2s/55.3M → 15.0s/32.8M (−40%/−41%);
+mail warm allocs −96.5%; rigor-lib warm −91.4%; gitlab-models warm −90.9%
+(and warm-incremental 16.7M → 2.06M, 8.1×, from ADR-85). Wall on this shared
+host is noise-dominated — the PROFILED gitlab cold run (StackProf overhead
+added) measured 21% faster than the plain run nine minutes earlier; the four
+flagged warm-wall upticks (mastodon-models +0.59s, kramdown +0.11s,
+redmine-models +0.22s, applib +0.31s) all pair with large allocation DROPS, so
+they are noise-suspect — re-verify with N≥3 on a quiet host before treating as
+real.
+
+**③ Carrier interning / hash-consing — REJECTED for this cycle, now on closing
+evidence.** Type-equality/union-normalization frames are **5.0% (kramdown) /
+2.0% (mastodon-models) of residual allocation samples** — a real but minor
+cost, far below the campaign's landed levers. The residual cold allocation
+profile is dominated by parse-class work that the warm path already
+cache-covers (RBS signature parse 26.6% of kramdown's cold samples; Prism 12%
++ rigor-rails-i18n's Psych/YAML 11.5% on mastodon-models — all first-run/CI
+costs, absent on producer-cached warm runs). Equality churn does remain
+kramdown's top *CPU* self-cost (15.8% wall self), so interning stays what the
+6/20 note called it — a large, identity-risky change for one regime's CPU —
+with the triple-negative probe history (6/20 ×2, P9) still standing.
+
+**④ Daemon / watch mode — deferred as a product decision, with the measured
+shape recorded.** The warm floor is TWO different bottlenecks by scale:
+small/medium projects spend **~61–73% of the floor in `require`**
+(process-bootstrap — the textbook daemon win, mail 0.17s floor), while
+monorepo-scale spends **~55% in glob + digest cache revalidation**
+(`Cache::FileDigest` / `GlobEntry` re-validating watched trees, gitlab 1.48s
+floor) — a daemon only flattens that half with FS-event invalidation, its
+genuinely hard part. `rigor lsp` already serves the editor loop with prebuilt
+state; a CLI daemon/watch surface is demand-gated product work (ADR-27
+territory), not an engine lever.
+
+Cycle verdict: the profile-driven levers are spent — the residual is
+parse-once costs, the sound cache-validation floor, flat dispatch, and a 2–5%
+equality tail. The next perf movement at this maturity is either the daemon
+product decision or workload-level (parallel-by-default), both decisions, not
+profiles.

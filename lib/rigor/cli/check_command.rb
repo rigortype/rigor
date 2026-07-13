@@ -75,10 +75,21 @@ module Rigor
       # ADR-46 — the two incremental-analysis check modes both fully handle the run and return an exit code (so `run`
       # short-circuits); returns nil for an ordinary check.
       def dispatch_special_check_mode(configuration, options, cache_root)
-        return run_verify_incremental(configuration) if options.fetch(:verify_incremental)
+        return run_verify_incremental(configuration, options, cache_root) if options.fetch(:verify_incremental)
         return run_incremental_check(configuration, options, cache_root) if options.fetch(:incremental)
 
         nil
+      end
+
+      # ADR-85 WD1 — the persistent cache the incremental session threads into each internal Runner so plugin
+      # `#prepare` producers (the ADR-9/#74/ADR-60 WD3 record-and-validate caches) and the RBS environment serve
+      # from disk across processes / rechecks rather than recomputing every invocation. Honors `--no-cache` (nil
+      # = no store), mirroring {CheckRunnerFactory}. The whole-run ADR-45 result cache stays inert on these runs
+      # — `Runner#run_result_cacheable?` excludes `record_dependencies` / `analyze_only`.
+      def incremental_cache_store(configuration, options, cache_root)
+        return nil if options.fetch(:no_cache)
+
+        Cache::Store.new(root: cache_root, max_bytes: configuration.cache_max_bytes)
       end
 
       # ADR-46 — the incremental-analysis acceptance gate. Runs a baseline analysis (recording cross-file dependencies),
@@ -86,9 +97,14 @@ module Rigor
       # and asserts the merged diagnostics are byte-identical to a full `--no-cache` analysis. A mismatch means the
       # incremental machinery would serve a stale — manufactured — diagnostic, the soundness failure this gate exists to
       # catch. Prints a one-line PASS (exit 0) or the differing diagnostics (exit 1).
-      def run_verify_incremental(configuration)
+      def run_verify_incremental(configuration, options, cache_root)
         paths = @argv.empty? ? nil : @argv
-        session = Analysis::IncrementalSession.new(configuration: configuration, paths: paths)
+        # ADR-85 WD1 — thread the store so the gate also asserts the cache-served producer path stays
+        # byte-identical to the uncached full run (`verify_full_diagnostics` builds a nil-store runner).
+        session = Analysis::IncrementalSession.new(
+          configuration: configuration, paths: paths,
+          cache_store: incremental_cache_store(configuration, options, cache_root)
+        )
         session.baseline
         analyzed = session.analyzed_files
 
@@ -114,7 +130,10 @@ module Rigor
           configuration: configuration, roots: paths || configuration.paths
         )
         snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
-        session = Analysis::IncrementalSession.new(configuration: configuration, paths: paths)
+        session = Analysis::IncrementalSession.new(
+          configuration: configuration, paths: paths,
+          cache_store: incremental_cache_store(configuration, options, cache_root)
+        )
 
         diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)
         @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \

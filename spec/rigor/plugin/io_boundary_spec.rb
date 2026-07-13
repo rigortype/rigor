@@ -26,7 +26,7 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       end
     end
 
-    it "records a digest-keyed cache descriptor entry per read" do
+    it "records a stat-then-digest (:stat) cache descriptor entry per read" do
       path = File.join(tmpdir, "data.txt")
       File.write(path, "hello")
       boundary.read_file(path)
@@ -35,8 +35,10 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       expect(descriptor.files.size).to eq(1)
       entry = descriptor.files.first
       expect(entry.path).to eq(File.expand_path(path))
-      expect(entry.comparator).to eq(:digest)
-      expect(entry.value).to eq(Digest::SHA256.hexdigest("hello"))
+      # ADR-87 WD1 — the validation-only boundary descriptor rides the stat-then-digest `:stat` tier; the
+      # content digest is the first field of the packed value.
+      expect(entry.comparator).to eq(:stat)
+      expect(entry.value.split.first).to eq(Digest::SHA256.hexdigest("hello"))
     end
 
     it "deduplicates repeat reads of the same path" do
@@ -56,7 +58,7 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       boundary.read_file(path)
 
       entry = boundary.cache_descriptor.files.first
-      expect(entry.value).to eq(Digest::SHA256.hexdigest("v2"))
+      expect(entry.value.split.first).to eq(Digest::SHA256.hexdigest("v2"))
     end
   end
 

@@ -9,12 +9,13 @@ require_relative "../config_audit"
 require_relative "../analysis/result"
 require_relative "../analysis/rule_catalog"
 require_relative "../runtime/jit"
-require_relative "coverage_scan"
 require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
 require_relative "ci_detector"
-require_relative "check_runner_factory"
+# ADR-87 WD4 — `coverage_scan` and `check_runner_factory` both pull the inference engine, so they are required
+# lazily (in `compute_coverage` / `build_check_runner`) rather than at load time: an ordinary check whose
+# result the run-cache probe serves must reach the hit verdict without `rigor/inference` in $LOADED_FEATURES.
 
 module Rigor
   class CLI
@@ -36,7 +37,8 @@ module Rigor
         # short check finishes before it ever pays JIT compile cost while a
         # long run JITs its dominant tail (Runtime::Jit).
         Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
-        load_check_dependencies
+        # ADR-87 WD4 — parse options + resolve config WITHOUT the inference engine, so the run-cache hit probe
+        # can run first. The heavy engine (`load_check_dependencies`) loads only on a miss / non-cacheable run.
         options = parse_check_options
         buffer = Options.resolve_buffer_binding(options, err: @err)
         return CLI::EXIT_USAGE if buffer == :usage_error
@@ -47,6 +49,13 @@ module Rigor
         cache_root = configuration.cache_path
         handle_clear_cache(cache_root) if options.fetch(:clear_cache)
 
+        # ADR-87 WD4 — try to serve the whole run from the ADR-45 cache before booting the engine. A hit boots
+        # only CLI + config + cache + digest code (no `rigor/inference`), skipping the plugin prepass + env
+        # build entirely.
+        probed = try_run_cache_hit(configuration, options, buffer, cache_root)
+        return finalize_cache_hit(probed, configuration, options, config_warnings) unless probed.nil?
+
+        load_check_dependencies
         special = dispatch_special_check_mode(configuration, options, cache_root)
         return special unless special.nil?
 
@@ -71,6 +80,61 @@ module Rigor
       end
 
       private
+
+      # ADR-87 WD4 — attempt the boot-slimming run-cache hit. Returns the cached {Analysis::Result} (severity
+      # profile applied, no stats — matching a cache-served `Runner#run`) on a hit, or nil to fall through to
+      # the full engine path. Only an ordinary sequential check whose result IS cache-served the same way is
+      # eligible; every other mode (below) declines so the full path handles it unchanged.
+      def try_run_cache_hit(configuration, options, buffer, cache_root)
+        return nil unless run_cache_hit_eligible?(configuration, options, buffer)
+
+        require_relative "../analysis/run_cache_probe"
+        Analysis::RunCacheProbe.new(
+          configuration: configuration, cache_root: cache_root, explain: options.fetch(:explain)
+        ).serve(@argv.empty? ? configuration.paths : @argv)
+      end
+
+      # The probe is eligible only for a run the ADR-45 result cache actually serves: a writable cache (not
+      # `--no-cache`), no editor buffer, sequential (pool runs are not result-cacheable), and no mode needing
+      # the engine (`--coverage` / `--incremental` / `--verify-incremental`) or the runner's own reporting
+      # (`--cache-stats`, the `RIGOR_*_TRACE` dev probes). A wrongly-permitted run still MISSES (the entry was
+      # never written its way) and falls through — the gate is an optimisation, never a soundness boundary.
+      def run_cache_hit_eligible?(configuration, options, buffer)
+        buffer.nil? &&
+          !options.fetch(:no_cache) && !options.fetch(:coverage) && !options.fetch(:cache_stats) &&
+          !options.fetch(:incremental) && !options.fetch(:verify_incremental) &&
+          !pool_workers_configured?(options, configuration) &&
+          ENV["RIGOR_BUDGET_TRACE"].to_s.empty? && ENV["RIGOR_HEAP_TRACE"].to_s.empty?
+      end
+
+      # Any signal that per-file analysis would run in a worker pool (CLI `--workers`, the env override, or the
+      # config default). Deliberately over-declines (a false positive only forgoes the fast lane); mirrors
+      # {CheckRunnerFactory.resolve_workers} without requiring it (that pulls in the engine).
+      def pool_workers_configured?(options, configuration)
+        cli = options[:workers]
+        return Integer(cli).positive? if cli
+
+        env = ENV.fetch("RIGOR_RACTOR_WORKERS", nil)
+        return Integer(env).positive? if env && !env.empty?
+
+        configuration.parallel_workers.positive?
+      rescue ArgumentError
+        false
+      end
+
+      # ADR-87 WD4 — the engine-free tail for a cache-served hit: baseline filter + output + exit code,
+      # mirroring the full path's tail but without stats (a hit collected none), trace appendices (they read
+      # engine counters), or eviction (deferred to the next miss). `raw_result` is pre-baseline so the strict
+      # gate reads the same diagnostics the full path would.
+      def finalize_cache_hit(raw_result, configuration, options, config_warnings)
+        result = apply_baseline_filter(raw_result, configuration, options)
+        write_result(result, options.fetch(:format), config_warnings: config_warnings)
+        emit_ci_detected_output(result, options)
+
+        exit_code = result.success? ? 0 : 1
+        exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
+        exit_code
+      end
 
       # ADR-46 — the two incremental-analysis check modes both fully handle the run and return an exit code (so `run`
       # short-circuits); returns nil for an ordinary check.
@@ -252,6 +316,7 @@ module Rigor
       end
 
       def build_check_runner(configuration:, options:, buffer:, cache_root:)
+        require_relative "check_runner_factory"
         CheckRunnerFactory.build(
           configuration: configuration, options: options,
           buffer: buffer, cache_root: cache_root
@@ -686,6 +751,7 @@ module Rigor
       def compute_coverage(runner, configuration, options)
         return nil unless options.fetch(:coverage)
 
+        require_relative "coverage_scan"
         files = @argv.empty? ? runner.analysis_file_set : runner.analysis_file_set(@argv)
         CoverageScan.precision_report(files: files, configuration: configuration)
       end

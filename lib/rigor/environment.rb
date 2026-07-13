@@ -2,6 +2,7 @@
 
 require "digest"
 
+require_relative "environment/default_libraries"
 require_relative "environment/class_registry"
 require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
@@ -32,31 +33,8 @@ module Rigor
     DEFAULT_PROJECT_SIG_DIR = "sig"
     private_constant :DEFAULT_PROJECT_SIG_DIR
 
-    # Slice A stdlib expansion. Stdlib libraries that `Environment.for_project` loads on top of RBS core
-    # unless the caller passes an explicit `libraries:` array. Each entry MUST be a stdlib library name
-    # accepted by `RBS::EnvironmentLoader#has_library?`; unknown libraries MUST fail-soft
-    # (`RbsLoader#build_env` already filters through `has_library?`). The default set covers the common
-    # stdlib surface a Ruby program is likely to import (`pathname`, `optparse`, `json`, `yaml`, `fileutils`,
-    # `tempfile`, `uri`, `logger`, `date`) plus the analyzer-adjacent gems shipping their own RBS in this
-    # bundle (`prism`, `rbs`). On hosts where one of these libraries is not installed, the loader silently
-    # drops it.
-    #
-    # Callers MAY add to the default by passing `libraries: %w[csv ...]`; the explicit list is appended to
-    # `DEFAULT_LIBRARIES` and de-duplicated. Callers that need a strictly RBS-core view MUST construct an
-    # `RbsLoader` directly instead of going through `for_project`.
-    DEFAULT_LIBRARIES = %w[
-      pathname optparse json yaml fileutils tempfile tmpdir
-      stringio forwardable digest securerandom
-      uri logger date
-      pp delegate observable abbrev find tsort singleton
-      shellwords benchmark base64 did_you_mean
-      monitor mutex_m timeout
-      open3 erb etc ipaddr bigdecimal bigdecimal-math
-      prettyprint random-formatter time open-uri resolv
-      csv pstore objspace io-console cgi cgi-escape
-      strscan
-      prism rbs
-    ].freeze
+    # `DEFAULT_LIBRARIES` is defined in the light `environment/default_libraries.rb` (required below) so the
+    # ADR-87 WD4 boot-slimming probe can read it without loading the inference engine.
 
     # ADR-72 — a Gemfile.lock gem name mapped to the opt-in plugin id that ships the SAME core-ext RBS. When
     # that plugin is loaded the auto-overlay for the gem stands down, so the two never both declare the

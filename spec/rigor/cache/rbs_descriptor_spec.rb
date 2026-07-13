@@ -28,7 +28,10 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
       entries = run.files
       expect(described_class).to have_received(:file_entries).once
       expect(entries).not_to be_empty
-      expect(entries).to eq(described_class.build(loader).files)
+      # ADR-87 WD1 — the validation-only run descriptor rides the stat-then-digest `:stat` tier, while the
+      # env-cache KEY descriptor (`.build`) keeps deterministic `:digest` entries over the same paths.
+      expect(entries.map(&:comparator).uniq).to eq([:stat])
+      expect(entries.map(&:path).sort).to eq(described_class.build(loader).files.map(&:path).sort)
     end
 
     it "memoises #files (a second read does not re-walk the tree)" do

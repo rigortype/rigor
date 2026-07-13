@@ -97,8 +97,12 @@ module Rigor
       private
 
       def record_file_entry(path, contents)
+        # ADR-87 WD1 — the boundary descriptor is validation-only (it never keys a cache), so a plugin-read
+        # file rides the stat-then-digest `:stat` tier: a warm run stat-checks the (on a Rails monorepo,
+        # 30k+ file) plugin-read set instead of re-hashing it. The digest is taken from the in-memory content
+        # we just read; `FileEntry.stat` stats the same path to pack the tuple.
         digest = Digest::SHA256.hexdigest(contents)
-        entry = Cache::Descriptor::FileEntry.new(path: path, comparator: :digest, value: digest)
+        entry = Cache::Descriptor::FileEntry.stat(path: path, digest: digest)
         @mutex.synchronize { @file_entries[path] = entry }
       end
 

@@ -482,7 +482,7 @@ RSpec.describe Rigor::Cache::Descriptor do
     it "ignores non-matching and non-file paths" do
       File.write(File.join(dir, "a.txt"), "not matched")
       FileUtils.mkdir_p(File.join(dir, "sub.rb")) # a directory matching the glob
-      empty = described_class::GlobEntry.digest_for(root: dir, pattern: "**/*.rb")
+      empty = described_class::GlobEntry.signature_for(root: dir, pattern: "**/*.rb")
       expect(compute.value).to eq(empty)
     end
 

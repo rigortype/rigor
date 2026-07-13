@@ -26,8 +26,16 @@ module Rigor
     # seed bundles), clearer read together than split across micro-classes that would all share the same ivars.
     class IncrementalSession # rubocop:disable Metrics/ClassLength
       # The outcome of a {#recheck}: the merged diagnostics plus the file sets, so a caller (or the verify
-      # gate) can report what was re-analyzed versus served from cache.
-      Recheck = Data.define(:diagnostics, :changed, :affected, :reused)
+      # gate) can report what was re-analyzed versus served from cache. `added` / `removed` carry the
+      # structural delta so {#run_incremental} (ADR-87 WD3) can recognise a zero-change recheck and skip the
+      # unconditional snapshot rewrite.
+      Recheck = Data.define(:diagnostics, :changed, :added, :removed, :affected, :reused) do
+        # A recheck that changed, added, and removed nothing — the session state is byte-equivalent to the
+        # snapshot that was restored, so persisting it again would only rewrite identical bytes.
+        def no_change?
+          changed.empty? && added.empty? && removed.empty?
+        end
+      end
 
       # @param paths [Array<String>, nil] explicit analysis roots; nil (the default) uses the configuration's
       #   `paths:`.
@@ -108,7 +116,8 @@ module Rigor
         reused = (current & previous) - affected.to_a
         merged = fresh + reused.flat_map { |path| @cache[path] || [] }
         absorb(runner, fresh, current, analyze_set, removed)
-        Recheck.new(diagnostics: merged, changed: changed.to_set, affected: affected, reused: reused.to_set)
+        Recheck.new(diagnostics: merged, changed: changed.to_set, added: added.to_set,
+                    removed: removed.to_set, affected: affected, reused: reused.to_set)
       end
 
       # The frozen set of files a #recheck must re-analyse: the symbol/ancestry-granularity closure of the
@@ -161,13 +170,19 @@ module Rigor
         restored = fingerprint && snapshot.load(fingerprint: fingerprint)
         if restored
           restore(restored)
-          diagnostics = recheck.diagnostics
+          result = recheck
+          diagnostics = result.diagnostics
           warm = true
+          # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
+          # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
+          # A cold baseline always persists — there was no valid snapshot to reuse.
+          skip_save = result.no_change?
         else
           diagnostics = baseline
           warm = false
+          skip_save = false
         end
-        snapshot.save(fingerprint: fingerprint, payload: to_payload) if fingerprint
+        snapshot.save(fingerprint: fingerprint, payload: to_payload) if fingerprint && !skip_save
         [diagnostics, warm]
       end
 

@@ -1,0 +1,68 @@
+# frozen_string_literal: true
+
+require "digest"
+# ADR-87 WD4 — the `rbs` gem's version feeds the cache key's `gems` slot (`RbsDescriptor.rbs_gem_entry`).
+# Load only its version constant (not the full RBS parser / env) so the boot-slimming probe can build the key
+# without paying for — or `$LOADED_FEATURES`-touching — the RBS machinery. Falls back to the full gem only if
+# this build of `rbs` has no standalone version file.
+begin
+  require "rbs/version"
+rescue LoadError
+  require "rbs"
+end
+
+require_relative "../version"
+require_relative "../cache/descriptor"
+require_relative "../cache/rbs_descriptor"
+require_relative "../environment/default_libraries"
+
+module Rigor
+  module Analysis
+    # ADR-45 / ADR-87 WD4 — the stable run-result cache KEY, built in ONE place so the miss path (the
+    # {Analysis::Runner}) and the boot-slimming hit path (the {RunCacheProbe}) can never drift out of key
+    # agreement. The key reads the stable inputs known before analysis: the `rbs` gem version, the resolved
+    # RBS library list, a digest of the whole resolved configuration, the engine + schema + `--explain`
+    # triple, and the analyzed-path SET.
+    #
+    # The ONLY difference between the two callers is the `rbs_config_entries` slot: the Runner passes the
+    # loader's `RbsDescriptor.config_entries` (which include a `rbs.virtual_rbs` entry when a plugin's
+    # `source_rbs_synthesizer` contributed one), while the probe passes {#libraries_config_entries} —
+    # reconstructed from config alone, WITHOUT building the RBS environment or loading any plugin. A project
+    # whose plugins DO synthesise virtual RBS therefore produces a probe key that omits that entry, so the
+    # probe simply misses and the full path takes over (sound: never a wrong hit, only a forgone fast lane).
+    # Slot order is irrelevant — {Cache::Descriptor#to_canonical_hash} sorts configs by key.
+    module RunCacheKey
+      module_function
+
+      RUN_DIAGNOSTICS_PRODUCER_ID = "analysis.run-diagnostics"
+
+      # @param rbs_config_entries [Array<Cache::Descriptor::ConfigEntry>] the RBS-derived config slots
+      #   (`rbs.libraries` [+ `rbs.virtual_rbs`]). nil on any failure so a malformed key disables the cache.
+      def descriptor(configuration:, files:, explain:, rbs_config_entries:)
+        Cache::Descriptor.new(
+          gems: [Cache::RbsDescriptor.rbs_gem_entry],
+          configs: rbs_config_entries + [
+            config_entry("configuration", Marshal.dump(configuration.to_h)),
+            config_entry("engine",
+                         "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),
+            config_entry("paths", files.sort.join("\n"))
+          ]
+        )
+      rescue StandardError
+        nil
+      end
+
+      def config_entry(key, payload)
+        Cache::Descriptor::ConfigEntry.new(key: key, value_hash: Digest::SHA256.hexdigest(payload))
+      end
+
+      # The `rbs.libraries` config slot reconstructed from configuration alone — byte-identical to the
+      # loader's `RbsDescriptor.libraries_entry(loader.libraries)` because `Environment.for_project` merges
+      # exactly `DEFAULT_LIBRARIES + config.libraries` (uniq) into `loader.libraries`.
+      def libraries_config_entries(configuration)
+        merged = (Environment::DEFAULT_LIBRARIES + configuration.libraries.map(&:to_s)).uniq
+        [Cache::RbsDescriptor.libraries_entry(merged)]
+      end
+    end
+  end
+end

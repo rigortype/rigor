@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative "check_rules"
+require_relative "check_rules/rule_ids"
 
 module Rigor
   module Analysis

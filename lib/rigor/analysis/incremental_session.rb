@@ -31,10 +31,22 @@ module Rigor
       # @param environment [Rigor::Environment, nil] optional shared environment to thread into each internal
       #   Runner. Long-lived callers and specs can use this to avoid rebuilding the same RBS universe for
       #   every baseline / recheck / oracle run.
-      def initialize(configuration:, paths: nil, environment: nil)
+      # @param cache_store [Rigor::Cache::Store, nil] ADR-85 WD1 — the persistent cache each internal Runner
+      #   exposes to the RBS-env and plugin-producer tiers. A cross-process `--incremental` recheck otherwise
+      #   rebuilt a fresh runner with no store, so every plugin `#prepare` producer (the ADR-9/#74/ADR-60 WD3
+      #   record-and-validate caches) recomputed per invocation — 86% of a Rails warm incremental. Threading
+      #   the store lets those producers serve from disk. `nil` (the default) preserves the pre-#85 behaviour
+      #   the specs assert; the whole-run ADR-45 result cache stays disabled on these runs
+      #   (`Runner#run_result_cacheable?` excludes `record_dependencies` / `analyze_only`).
+      # @param plugin_requirer [#call, nil] optional gem-require hook threaded into each internal Runner
+      #   (mirrors {Runner}'s parameter). nil (the default, and what the CLI passes) uses `Kernel.require`;
+      #   embedders and specs inject a fake so a test plugin registers without touching the real load path.
+      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil)
         @configuration = configuration
         @paths = paths
         @environment = environment
+        @cache_store = cache_store
+        @plugin_requirer = plugin_requirer
         @cache = {}              # analyzed path => [Diagnostic]
         @sources = {}            # analyzed path => Set<source path it read from>
         @digests = {}            # analyzed path => content digest at last analysis
@@ -292,7 +304,10 @@ module Rigor
       end
 
       def build_runner(**)
-        Runner.new(configuration: @configuration, cache_store: nil, environment: @environment, **)
+        Runner.new(
+          configuration: @configuration, cache_store: @cache_store, environment: @environment,
+          plugin_requirer: @plugin_requirer, **
+        )
       end
 
       # Run the runner over the session's explicit paths (or, when none were given, the configuration's

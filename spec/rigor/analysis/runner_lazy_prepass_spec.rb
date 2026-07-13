@@ -76,20 +76,24 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
-  it "forces discovery eagerly under record_dependencies even when the run is cache-hittable" do
+  it "runs discovery eagerly and exactly once under record_dependencies (a non-cacheable run)" do
     Dir.mktmpdir("rigor-lazy-prepass-record-") do |dir|
       write_project(dir)
       cache_root = File.join(dir, ".rigor", "cache")
 
-      # Prime the run-diagnostics cache so a second run WOULD hit.
+      # Prime a plain run so the run-diagnostics entry exists on disk.
       Dir.chdir(dir) { build_runner(dir, cache_root).run }
 
       allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
       recording = build_runner(dir, cache_root, record_dependencies: true)
       Dir.chdir(dir) { recording.run }
 
-      # Eager force (the recording mode reads the discovery tables via `symbol_fingerprints` /
-      # `class_declarations` OUTSIDE the analysis assembly), so discovery ran even on the hittable run.
+      # ADR-85 WD1 — a `record_dependencies` run is deliberately NOT run-result-cacheable: a cache-served
+      # run performs no per-file analysis and so would capture an empty dependency graph, leaving the next
+      # incremental recheck's dependents empty. It therefore always runs the real analysis. The eager force
+      # (the recording mode reads the discovery tables via `symbol_fingerprints` / `class_declarations`
+      # OUTSIDE the analysis assembly) plus the memoized miss-path build keep discovery to exactly one parse.
+      expect(recording.send(:run_result_cacheable?)).to be(false)
       expect(Rigor::Inference::ScopeIndexer).to have_received(:discovered_project_index_for_paths).once
       expect(recording.symbol_fingerprints).not_to be_empty
       expect(recording.class_declarations).not_to be_empty

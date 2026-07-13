@@ -338,9 +338,18 @@ module Rigor
       # Cacheable only for a full sequential project run with a writable cache and no per-buffer /
       # prebuilt override — every other mode has a different result identity (pool workers read in
       # separate processes; editor mode is per-buffer; prebuilt is the LSP path).
+      #
+      # The ADR-46 incremental modes are excluded too, now that they carry a real cache store (ADR-85
+      # WD1): a `record_dependencies` run MUST perform per-file analysis to capture the dependency
+      # graph (a cache-served run records nothing, leaving the next recheck's dependents empty —
+      # unsound), and an `analyze_only` subset run produces intentionally partial diagnostics that
+      # share the full run's result key (`run_key_descriptor` keys on the whole expansion, not the
+      # subset), so serving one as the other would manufacture a wrong result. Both instead use the
+      # store for the RBS-env + plugin-producer tiers, where the incremental win actually lives.
       def run_result_cacheable?
         !@cache_store.nil? && !@cache_store.read_only? &&
-          @buffer.nil? && @prebuilt.nil? && !pool_mode?
+          @buffer.nil? && @prebuilt.nil? && !pool_mode? &&
+          !@record_dependencies && @analyze_only.nil?
       end
 
       # Stable cache key inputs — known before the run: a digest of the resolved configuration, the engine

@@ -2,6 +2,36 @@
 
 require "spec_helper"
 require "tmpdir"
+require "rigor/plugin/base"
+
+# ADR-85 WD1 fixture — a synthetic producer-bearing plugin. Its `:probe` producer bumps a class-level
+# scan counter and reads nothing (empty dependency descriptor → always fresh after the first write),
+# and `#prepare` consults it on every run. So a warm recheck that serves the producer from the disk
+# cache never re-runs the block; `.scans` is the scan-count seam the WD1 spec asserts on. Guarded so a
+# re-load of this spec file does not redeclare the manifest/producer.
+module Rigor
+  module Plugin
+    unless defined?(Wd1CacheProbe)
+      class Wd1CacheProbe < Base
+        @scans = 0
+        class << self
+          attr_accessor :scans
+        end
+
+        manifest(id: "wd1-cache-probe", version: "0.1.0")
+
+        producer :probe do |_params|
+          Wd1CacheProbe.scans += 1
+          "probe-value"
+        end
+
+        def prepare(_services)
+          producer_value(:probe)
+        end
+      end
+    end
+  end
+end
 
 # ADR-46 slice 2 — the in-memory incremental orchestrator. The acceptance property (the `--verify-incremental` gate,
 # here without disk persistence or CLI wiring): after a real on-disk edit, `#recheck` re-analyzes only the affected
@@ -330,6 +360,83 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         _diags, warm = session_for(config, paths: [dir])
                        .run_incremental(snapshot: snapshot, fingerprint: "fp-changed")
         expect(warm).to be(false)
+      end
+    end
+  end
+
+  # ADR-85 WD1 — the cross-process win: a warm `--incremental` recheck must serve plugin `#prepare`
+  # producers from the disk cache instead of recomputing (the fresh-runner-with-nil-store bug that made a
+  # Rails warm incremental ~86% plugin `#prepare`). Two fresh sessions share a cache root + snapshot — the
+  # faithful simulation of two `rigor check --incremental` processes, the established pundit /
+  # cache-producer cross-process pattern: a fresh `Store` has an empty in-memory memo, so a hit is a real
+  # disk read.
+  describe "#run_incremental plugin-producer cache reuse (WD1)" do
+    let(:probe_producer_id) { "plugin.wd1-cache-probe.probe" }
+
+    def probe_requirer
+      lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::Wd1CacheProbe)
+        true
+      end
+    end
+
+    def probe_config(dir)
+      Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [dir], "plugins" => ["wd1-cache-probe"])
+      )
+    end
+
+    def run_probe_incremental(config, dir, snapshot, fingerprint_hex, cache_store)
+      # Each "process" unregisters first so the loader's newly-registered diff sees a fresh registration.
+      Rigor::Plugin.unregister!
+      described_class.new(
+        configuration: config, paths: [dir], cache_store: cache_store, plugin_requirer: probe_requirer
+      ).run_incremental(snapshot: snapshot, fingerprint: fingerprint_hex)
+    end
+
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    it "serves the producer from cache on the second process's recheck (no recompute)" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "x = 1\nputs x\n")
+        config = probe_config(dir)
+        cache_root = File.join(dir, ".rigor", "cache")
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: cache_root)
+        fp = fingerprint(config, dir)
+        Rigor::Plugin::Wd1CacheProbe.scans = 0
+
+        # Process 1 — cold baseline: the producer misses and computes once, warming the disk cache.
+        store1 = Rigor::Cache::Store.new(root: cache_root)
+        _d1, warm1 = run_probe_incremental(config, dir, snapshot, fp, store1)
+        expect(warm1).to be(false)
+        expect(Rigor::Plugin::Wd1CacheProbe.scans).to eq(1)
+        expect(store1.stats[:by_producer][probe_producer_id]).to include(misses: 1, writes: 1)
+
+        # Process 2 — warm recheck (fresh session, fresh Store, same disk root): `#prepare` consults the
+        # producer, which now serves from disk. The block never re-runs (scans stays 1) and the store
+        # records a hit with no miss.
+        store2 = Rigor::Cache::Store.new(root: cache_root)
+        _d2, warm2 = run_probe_incremental(config, dir, snapshot, fp, store2)
+        expect(warm2).to be(true)
+        expect(Rigor::Plugin::Wd1CacheProbe.scans).to eq(1)
+        expect(store2.stats[:by_producer][probe_producer_id]).to include(hits: 1, misses: 0)
+      end
+    end
+
+    it "recomputes the producer every process when no store is threaded (the pre-WD1 behaviour)" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "x = 1\nputs x\n")
+        config = probe_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".rigor", "cache"))
+        fp = fingerprint(config, dir)
+        Rigor::Plugin::Wd1CacheProbe.scans = 0
+
+        run_probe_incremental(config, dir, snapshot, fp, nil)
+        run_probe_incremental(config, dir, snapshot, fp, nil)
+
+        # With no store, each process re-runs `#prepare`'s producer block — the regression WD1 fixes.
+        expect(Rigor::Plugin::Wd1CacheProbe.scans).to eq(2)
       end
     end
   end

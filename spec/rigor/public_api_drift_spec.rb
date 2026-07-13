@@ -75,6 +75,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     param_inferred_types()
     program_globals()
     record_dynamic_origin(req:node,req:cause)
+    run_generation()
     seed_declaration_sourced_ivar(req:name,req:type)
     self_type()
     singleton_def_for(req:class_name,req:method_name)

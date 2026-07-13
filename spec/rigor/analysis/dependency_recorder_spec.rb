@@ -229,14 +229,15 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
     end
   end
 
-  # ADR-57 return-memo recording-soundness pin — the recorder must capture a callee's TRANSITIVE (deep) reads
-  # for EVERY consumer, not just the shallow consumer→callee edge. `infer_user_method_return` records the deep
-  # edge only as a side effect of evaluating the callee body, and the return memo serves prior results without
-  # re-running it. Soundness rests on the memo's per-file bucket scope (hits never cross a consumer-file
-  # boundary — see the INVARIANT comment at the memo): each consumer file recomputes `Mid#relay` itself and so
-  # records `deep.rb` (which `relay`'s body reads through `Deep.new.leaf`). If the memo's caching scope ever
-  # widens without cache-and-replay of the callee's read-set, this example breaks — c2.rb would inherit
-  # c1.rb's computed return and never see deep.rb.
+  # ADR-57 / ADR-84 return-memo recording-soundness pin — the recorder must capture a callee's TRANSITIVE
+  # (deep) reads for EVERY consumer, not just the shallow consumer→callee edge. `infer_user_method_return`
+  # records the deep edge only as a side effect of evaluating the callee body, and the return memo serves
+  # prior results without re-running it. Since ADR-84 WD2 made the bucket run-scoped, c2.rb's infer of
+  # `Mid#relay` HITS the entry c1.rb's analysis stored, and soundness rests on cache-and-replay: the entry
+  # carries the read-set captured during c1.rb's body walk, and the hit replays it into c2.rb's accumulator
+  # — so deep.rb (which `relay`'s body reads through `Deep.new.leaf`) is recorded for both consumers. If a
+  # cross-file hit ever stops replaying, this example breaks — c2.rb would inherit c1.rb's computed return
+  # and never see deep.rb.
   it "records a callee's transitive deep-read file for every consumer under recording" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "deep.rb"), "class Deep\n  def leaf\n    1\n  end\nend\n")
@@ -274,6 +275,88 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
       runner.run
 
       expect(runner.file_dependencies).to be_empty
+    end
+  end
+
+  # ADR-84 WD2 — the observe-and-forward capture / replay seam the return memo's cache-and-replay uses.
+  describe ".capture / .replay" do
+    let(:recorder) { described_class }
+
+    it "captures reads without disturbing the active consumer's record (observe-and-forward)" do
+      read_set = nil
+      record = recorder.record_for("/app/consumer.rb") do
+        recorder.read_site("/app/other.rb:3", "Other#used_before")
+        _, read_set = recorder.capture do
+          recorder.read_site("/app/dep.rb:10", "Dep#leaf")
+          recorder.read_missing(:method, "Ghost#gone")
+          :computed
+        end
+        recorder.read_site("/app/late.rb:1", "Late#after")
+      end
+
+      # Forwarding: everything (before / during / after the window) landed on the consumer's record.
+      expect(record.sources).to include("/app/other.rb", "/app/dep.rb", "/app/late.rb")
+      expect(record.missing).to include("method:Ghost#gone")
+      # Observing: the capture holds exactly the window's events.
+      expect(read_set.reads).to eq(Set[["/app/dep.rb", "Dep#leaf"]])
+      expect(read_set.missing).to eq(Set["method:Ghost#gone"])
+    end
+
+    it "captures the capturing consumer's own self-reads (they are cross-file for a replay target)" do
+      read_set = nil
+      record = recorder.record_for("/app/mid.rb") do
+        _, read_set = recorder.capture do
+          recorder.read_site("/app/mid.rb:5", "Mid#sibling")
+        end
+      end
+
+      # The self-read is filtered from mid.rb's own record, per read_site's contract...
+      expect(record.sources).not_to include("/app/mid.rb")
+      # ...but the capture keeps it: replayed under another consumer it is a genuine cross-file edge.
+      expect(read_set.reads).to eq(Set[["/app/mid.rb", "Mid#sibling"]])
+    end
+
+    it "replays a read-set into another consumer with the self-read filter re-applied" do
+      read_set = nil
+      recorder.record_for("/app/mid.rb") do
+        _, read_set = recorder.capture do
+          recorder.read_site("/app/mid.rb:5", "Mid#sibling")
+          recorder.read_site("/app/deep.rb:2", "Deep#leaf")
+          recorder.read_site("/app/other.rb:8")
+          recorder.read_missing(:class, "Ghost")
+        end
+      end
+
+      record = recorder.record_for("/app/consumer.rb") { recorder.replay(read_set) }
+      expect(record.sources).to contain_exactly("/app/mid.rb", "/app/deep.rb", "/app/other.rb")
+      expect(record.symbol_sources["/app/deep.rb"]).to include("Deep#leaf")
+      expect(record.symbol_sources["/app/mid.rb"]).to include("Mid#sibling")
+      expect(record.ancestry_sources).to include("/app/other.rb")
+      expect(record.missing).to include("class:Ghost")
+
+      # Replaying into the read-set's ORIGIN consumer re-applies the self-read filter.
+      own = recorder.record_for("/app/mid.rb") { recorder.replay(read_set) }
+      expect(own.sources).to contain_exactly("/app/deep.rb", "/app/other.rb")
+    end
+
+    it "keeps nested captures transitive: the outer window sees inner events and replayed sets" do
+      inner_set = nil
+      outer_set = nil
+      recorder.record_for("/app/consumer.rb") do
+        _, outer_set = recorder.capture do
+          _, inner_set = recorder.capture do
+            recorder.read_site("/app/deep.rb:2", "Deep#leaf")
+          end
+          # A memo hit inside the outer window replays a stored set — the outer capture must absorb it,
+          # or the outer entry's read-set would drop the nested callee's edges.
+          recorder.replay(recorder::ReadSet.new(reads: Set[["/app/stored.rb", "Stored#edge"]].freeze,
+                                                missing: Set["method:Stored#missing"].freeze))
+        end
+      end
+
+      expect(inner_set.reads).to eq(Set[["/app/deep.rb", "Deep#leaf"]])
+      expect(outer_set.reads).to include(["/app/deep.rb", "Deep#leaf"], ["/app/stored.rb", "Stored#edge"])
+      expect(outer_set.missing).to include("method:Stored#missing")
     end
   end
 end

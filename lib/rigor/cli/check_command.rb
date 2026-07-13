@@ -476,7 +476,8 @@ module Rigor
         @err.puts("  body evals:      #{counts[bt::MEMO_BODY_EVALS]}")
         @err.puts("  non-stored:      on-stack #{counts[bt::MEMO_REFUSE_ON_STACK]}  " \
                   "unroll-in-flight #{counts[bt::MEMO_REFUSE_UNROLL]}  " \
-                  "consult-tainted #{counts[bt::MEMO_REFUSE_CONSULT_TAINTED]}")
+                  "consult-tainted #{counts[bt::MEMO_REFUSE_CONSULT_TAINTED]}  " \
+                  "transient-tainted #{counts[bt::MEMO_REFUSE_TRANSIENT]}")
         write_memo_signature_table
       end
 

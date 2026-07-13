@@ -55,16 +55,24 @@ module Rigor
       # ADR-57 return-memo profile counters (not cutoffs — see the module doc). All bumped by
       # `ExpressionTyper#infer_user_method_return` / `#compute_user_method_return`.
       # - {MEMO_ENTRIES} — every `infer_user_method_return` entry (a user-method return inference).
-      # - {MEMO_HITS} / {MEMO_MISSES} — the memo was consulted (candidate frame, no recording) and the key was
-      #   present / absent. Consults = hits + misses.
+      # - {MEMO_HITS} / {MEMO_MISSES} — the memo was consulted (candidate frame) and the key was present /
+      #   absent. Consults = hits + misses.
       # - {MEMO_BODY_EVALS} — every `compute_user_method_return` entry (a body-evaluation compute; some are
       #   in-cycle re-entries that consult an ADR-55 summary rather than walk the body — those coincide with a
-      #   `RECURSION_GUARD` hit). Body evals = misses + on-stack refusals + unroll refusals.
-      # - {MEMO_REFUSE_ON_STACK} / {MEMO_REFUSE_UNROLL} — the frame was not a memo candidate (bypassed the memo
-      #   and computed): its plain `(receiver, method)` signature was already on the recursion guard stack, or
-      #   a constant-arg unroll was in flight.
+      #   `RECURSION_GUARD` hit). Body evals = misses + on-stack refusals (ADR-84 WD3 reduced candidacy to the
+      #   on-stack check, so unroll-in-flight refusals are structurally gone).
+      # - {MEMO_REFUSE_ON_STACK} — the frame was not a memo candidate (bypassed the memo and computed): its
+      #   plain `(receiver, method)` signature was already on the recursion guard stack.
+      # - {MEMO_REFUSE_UNROLL} — pre-ADR-84 blanket refusal (constant-arg unroll in flight). Kept in the table
+      #   as the ADR-84 WD3 gate pin: structurally unreachable, must read ~0.
       # - {MEMO_REFUSE_CONSULT_TAINTED} — a candidate frame computed a result but an ADR-55 fixpoint summary
       #   was *consulted* during the compute, so the result is a transient Kleene iterate and was NOT stored.
+      # - {MEMO_REFUSE_TRANSIENT} — ADR-84 WD3: a candidate frame's compute bracket saw a
+      #   transient-machinery event (recursion-guard hit / unroll-fuel exhaustion / ADR-55 WD1 clamp /
+      #   fixpoint-cap collapse — `ExpressionTyper#note_transient_fallback`) that referenced a stack frame
+      #   BELOW the bracket's entry depth, so the ancestor context influenced the result and it was NOT
+      #   stored. Own-machinery events (a recursive method's own fixpoint) do not refuse; top-of-stack
+      #   computes are standalone by construction. Replaces the blanket unroll-in-flight exclusion.
       MEMO_ENTRIES = :memo_entries
       MEMO_HITS = :memo_hits
       MEMO_MISSES = :memo_misses
@@ -72,12 +80,14 @@ module Rigor
       MEMO_REFUSE_ON_STACK = :memo_refuse_on_stack
       MEMO_REFUSE_UNROLL = :memo_refuse_unroll
       MEMO_REFUSE_CONSULT_TAINTED = :memo_refuse_consult_tainted
+      MEMO_REFUSE_TRANSIENT = :memo_refuse_transient
 
       CATEGORIES = [
         RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL,
         RECURSION_FIXPOINT_CAP, BLOCK_WRITEBACK_CAP,
         MEMO_ENTRIES, MEMO_HITS, MEMO_MISSES, MEMO_BODY_EVALS,
-        MEMO_REFUSE_ON_STACK, MEMO_REFUSE_UNROLL, MEMO_REFUSE_CONSULT_TAINTED
+        MEMO_REFUSE_ON_STACK, MEMO_REFUSE_UNROLL, MEMO_REFUSE_CONSULT_TAINTED,
+        MEMO_REFUSE_TRANSIENT
       ].freeze
 
       # Distribution (histogram) categories — read-only observations of a value's size at a site, used to

@@ -138,6 +138,11 @@ module Rigor
         @project_discovered_methods = {}.freeze
         @project_data_member_layouts = {}.freeze
         @project_struct_member_layouts = {}.freeze
+        # ADR-84 WD2 — per-run identity token for the user-method return memo's bucket (see
+        # Scope::DiscoveryIndex#run_generation). Minted fresh in `run_analysis` so the memo never serves an
+        # entry across a run boundary (LSP re-check, ADR-62 warm loop); nil until the first run so
+        # runner-less probes keep the per-file fallback.
+        @run_generation = nil
         build_collaborators
       end
 
@@ -170,6 +175,10 @@ module Rigor
         @snapshots.reset_for_run
         # Per-run reset of the deferred-discovery memo (see `#ensure_project_discovery`).
         @project_discovery_done = false
+        # ADR-84 WD2 — roll the return-memo bucket: a fresh frozen token per run makes every per-file scope
+        # of THIS run share one memo bucket while entries from any earlier run in this process (stale after
+        # an edit) become unreachable.
+        @run_generation = Object.new.freeze
 
         if @prebuilt
           adopt_prebuilt_project_scan(@prebuilt)
@@ -820,6 +829,9 @@ module Rigor
       # cross-file def — ADR-15 sequential-equivalence contract).
       def project_scope_seed_tables
         tables = {}
+        # ADR-84 WD2 — the run-scope token rides the same seed so the fork/Ractor `WorkerSession` scopes
+        # bucket identically to the sequential path.
+        tables[:run_generation] = @run_generation if @run_generation
         tables[:discovered_classes] = @project_discovered_classes unless @project_discovered_classes.empty?
         tables[:discovered_def_nodes] = @project_discovered_def_nodes unless @project_discovered_def_nodes.empty?
         unless @project_discovered_singleton_def_nodes.empty?

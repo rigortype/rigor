@@ -10,7 +10,8 @@ description: >-
   or needs primary-source backing for a talk, blog post, ADR, or README claim
   — especially comparisons against other tools (Steep, Sorbet, TypeProf,
   rbs_rails, Tapioca, PHPStan, …). Also use before publishing any comparative
-  claim about Rigor, to check what the corpus actually supports.
+  claim about Rigor, to check what the corpus actually supports. NOT for a
+  single fact in a file you already know (just rg/Read it directly).
 ---
 
 # rigor-prior-art — corpus archaeology with citation-grade output
@@ -43,7 +44,7 @@ repo (talks, comparisons, READMEs).
 | `docs/CHANGELOG-0.1.x.md` + `CHANGELOG.md` | Per-feature landing narratives with spec/corpus evidence. | **Comparative evidence often lives ONLY here** — e.g. the `rbs_rails` coverage comparison and the ~20-methods-per-column contrast are in the 0.1.x archive, indexed nowhere else. Always include both files in a sweep. |
 | `docs/design/*.md` | Design plans that preceded ADRs. | Pre-decision context, roadmaps. |
 | `docs/handbook/`, `docs/manual/` | User-facing claims. | What Rigor *promises publicly* — the bar a new claim must clear. |
-| `docs/notes/deep-research/` | **External** LLM deep-research reports stored for reference. | Community/competitor landscape only — never a first-party claim (see taxonomy). |
+| `docs/notes/deep-research/` | **External** LLM deep-research reports stored for reference. | Community/competitor landscape only — never a first-party claim (register rules in [its README](../../../docs/notes/deep-research/README.md)). |
 | `references/` submodules | Vendored upstream source (read-only). | Verifying a claim about *another* tool's code. |
 | `git log -S"term"` | When a claim or feature landed. | Dating evidence; finding the landing commit. |
 
@@ -105,9 +106,11 @@ carry downstream — do not collapse the three into one list.
 
 ## Pitfalls
 
-- **`docs/CHANGELOG-0.1.x.md` is the unindexed trove.** It is the archived
-  0.1.x changelog, listed in no index, yet holds the densest per-feature
-  comparative evidence. A sweep that skips it will miss decisive material.
+- **Archived CHANGELOGs are the evidence trove.** Landing narratives hold
+  the densest per-feature comparative evidence, and an archived changelog
+  drops out of casual view (current instance: `docs/CHANGELOG-0.1.x.md`;
+  each future `CHANGELOG-0.x` archive joins it). A sweep that skips them
+  misses decisive material.
 - **ADR supersedes note.** An ADR's status line is updated in place; the
   note that spawned it is frozen. For "what is true now" prefer the ADR
   status; for "what was measured then" cite the note.

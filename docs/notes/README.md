@@ -13,6 +13,15 @@ the note. Verify any named file / method / flag still exists before acting on it
 
 Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 
+Two adjacent evidence stores are easy to miss when sweeping for prior art:
+[`deep-research/`](deep-research/README.md) holds **imported external**
+research reports (LLM deep-research output — never citable as first-party;
+register rules in its README), and the CHANGELOGs
+([`CHANGELOG.md`](../../CHANGELOG.md), archived
+[`docs/CHANGELOG-0.1.x.md`](../CHANGELOG-0.1.x.md)) hold per-feature landing
+narratives whose comparative evidence (e.g. the `rbs_rails` coverage
+comparison) appears nowhere else in this index.
+
 ## Library & ecosystem surveys
 
 | Date | Note |

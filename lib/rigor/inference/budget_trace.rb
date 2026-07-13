@@ -8,6 +8,14 @@ module Rigor
     # docs/type-specification/inference-budgets.md is not yet wired); counting how often each fires on a real
     # project is the only way to see where inference actually stops.
     #
+    # A second family of counters (the `MEMO_*` categories) profiles the ADR-57 user-method return memo
+    # (`ExpressionTyper#infer_user_method_return`) rather than a cutoff — inference entries, memo hits/misses,
+    # the split of non-stored results by reason, and body-evaluation (compute) entries — plus two
+    # per-signature distributions (body-eval count and distinct-memo-key count). This is the evidence for the
+    # next return-memo design slice: a finalization-aware taint gate (recover the `consult-tainted`
+    # non-stores) vs memo-key normalization (collapse arg-granularity thrash — a signature whose distinct-key
+    # count far exceeds its body-eval savings).
+    #
     # Three categories, one per guard site:
     #
     # - {RECURSION_GUARD} — `ExpressionTyper#infer_user_method_return` detected a `(receiver, method)` cycle
@@ -44,9 +52,32 @@ module Rigor
       # `Dynamic[top]` (the escaping-block floor). Shared by slice B's loop-body fixpoint.
       BLOCK_WRITEBACK_CAP = :block_writeback_cap
 
+      # ADR-57 return-memo profile counters (not cutoffs — see the module doc). All bumped by
+      # `ExpressionTyper#infer_user_method_return` / `#compute_user_method_return`.
+      # - {MEMO_ENTRIES} — every `infer_user_method_return` entry (a user-method return inference).
+      # - {MEMO_HITS} / {MEMO_MISSES} — the memo was consulted (candidate frame, no recording) and the key was
+      #   present / absent. Consults = hits + misses.
+      # - {MEMO_BODY_EVALS} — every `compute_user_method_return` entry (a body-evaluation compute; some are
+      #   in-cycle re-entries that consult an ADR-55 summary rather than walk the body — those coincide with a
+      #   `RECURSION_GUARD` hit). Body evals = misses + on-stack refusals + unroll refusals.
+      # - {MEMO_REFUSE_ON_STACK} / {MEMO_REFUSE_UNROLL} — the frame was not a memo candidate (bypassed the memo
+      #   and computed): its plain `(receiver, method)` signature was already on the recursion guard stack, or
+      #   a constant-arg unroll was in flight.
+      # - {MEMO_REFUSE_CONSULT_TAINTED} — a candidate frame computed a result but an ADR-55 fixpoint summary
+      #   was *consulted* during the compute, so the result is a transient Kleene iterate and was NOT stored.
+      MEMO_ENTRIES = :memo_entries
+      MEMO_HITS = :memo_hits
+      MEMO_MISSES = :memo_misses
+      MEMO_BODY_EVALS = :memo_body_evals
+      MEMO_REFUSE_ON_STACK = :memo_refuse_on_stack
+      MEMO_REFUSE_UNROLL = :memo_refuse_unroll
+      MEMO_REFUSE_CONSULT_TAINTED = :memo_refuse_consult_tainted
+
       CATEGORIES = [
         RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED, RECURSION_UNROLL_FUEL,
-        RECURSION_FIXPOINT_CAP, BLOCK_WRITEBACK_CAP
+        RECURSION_FIXPOINT_CAP, BLOCK_WRITEBACK_CAP,
+        MEMO_ENTRIES, MEMO_HITS, MEMO_MISSES, MEMO_BODY_EVALS,
+        MEMO_REFUSE_ON_STACK, MEMO_REFUSE_UNROLL, MEMO_REFUSE_CONSULT_TAINTED
       ].freeze
 
       # Distribution (histogram) categories — read-only observations of a value's size at a site, used to
@@ -55,12 +86,28 @@ module Rigor
       # `Combinator.union` produces — the distribution the `union_size` budget default should be set from.
       UNION_ARITY = :union_arity
 
-      DISTRIBUTION_CATEGORIES = [UNION_ARITY].freeze
+      # ADR-57 return-memo per-signature distributions — `{signature => count}` maps, NOT integer-size
+      # histograms, so `summarize` (percentiles over integer values) does not apply; read them with
+      # {distribution}. Both keyed by the `"Receiver#method"` plain signature.
+      # - {MEMO_BODY_EVAL_BY_SIGNATURE} — body-eval (compute) count per signature (via {observe}).
+      # - {MEMO_DISTINCT_KEY_BY_SIGNATURE} — distinct memo keys per signature (via {observe_distinct}), i.e.
+      #   how many `(receiver, arg-type)` variants a signature was memoised under. A count far above the
+      #   signature's body-eval savings is arg-granularity thrash — the key-normalization candidate.
+      MEMO_BODY_EVAL_BY_SIGNATURE = :memo_body_eval_by_signature
+      MEMO_DISTINCT_KEY_BY_SIGNATURE = :memo_distinct_key_by_signature
+
+      DISTRIBUTION_CATEGORIES = [
+        UNION_ARITY, MEMO_BODY_EVAL_BY_SIGNATURE, MEMO_DISTINCT_KEY_BY_SIGNATURE
+      ].freeze
 
       @enabled = !ENV["RIGOR_BUDGET_TRACE"].to_s.empty?
       @mutex = Mutex.new
       @counts = Hash.new(0)
       @distributions = Hash.new { |h, k| h[k] = Hash.new(0) }
+      # Auxiliary de-duplication state for {observe_distinct}: category → Set of the `[bucket, member]`
+      # pairs already counted, so a repeated `(signature, memo-key)` observation is counted once. Only ever
+      # written when tracing is enabled; not part of the reported surface.
+      @distinct_seen = Hash.new { |h, k| h[k] = Set.new }
 
       module_function
 
@@ -101,6 +148,23 @@ module Rigor
         @mutex.synchronize { @distributions[category][value] += 1 }
       end
 
+      # Records one observation of `member` into `category`'s `{bucket => count}` map, but only the FIRST time
+      # a given `(bucket, member)` pair is seen — so the resulting count per bucket is the number of DISTINCT
+      # members, not the number of observations. Used for the distinct-memo-key-per-signature distribution.
+      # No-op (one boolean check) when disabled.
+      def observe_distinct(category, bucket, member)
+        return unless @enabled
+
+        @mutex.synchronize do
+          seen = @distinct_seen[category]
+          pair = [bucket, member]
+          unless seen.include?(pair)
+            seen << pair
+            @distributions[category][bucket] += 1
+          end
+        end
+      end
+
       # Frozen `{value => count}` histogram for a distribution category.
       def distribution(category)
         @mutex.synchronize { @distributions[category].dup.freeze }
@@ -137,6 +201,7 @@ module Rigor
         @mutex.synchronize do
           @counts.clear
           @distributions.clear
+          @distinct_seen.clear
         end
       end
     end

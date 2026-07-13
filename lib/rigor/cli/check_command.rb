@@ -457,6 +457,41 @@ module Rigor
         @err.puts("  recursion-fixpoint-cap hits: #{counts[Inference::BudgetTrace::RECURSION_FIXPOINT_CAP]}")
         @err.puts("  block-writeback-cap hits:  #{counts[Inference::BudgetTrace::BLOCK_WRITEBACK_CAP]}")
         write_budget_distributions
+        write_memo_profile(counts)
+      end
+
+      # Dumps the ADR-57 return-memo profile (WD0). Entries / hit rate / body evals / the non-store split, then
+      # the top signatures by body-eval count with their distinct-memo-key counts — the evidence for choosing
+      # between a finalization-aware taint gate and memo-key normalization. `--workers 0` for exact counts.
+      def write_memo_profile(counts)
+        bt = Inference::BudgetTrace
+        hits = counts[bt::MEMO_HITS]
+        misses = counts[bt::MEMO_MISSES]
+        consults = hits + misses
+        rate = consults.positive? ? format("%.1f%%", 100.0 * hits / consults) : "n/a"
+        @err.puts("")
+        @err.puts("Return-memo profile (RIGOR_BUDGET_TRACE; --workers 0 for an exact count)")
+        @err.puts("  infer entries:   #{counts[bt::MEMO_ENTRIES]}")
+        @err.puts("  memo consults:   #{consults}  (hits #{hits} / misses #{misses}; hit rate #{rate})")
+        @err.puts("  body evals:      #{counts[bt::MEMO_BODY_EVALS]}")
+        @err.puts("  non-stored:      on-stack #{counts[bt::MEMO_REFUSE_ON_STACK]}  " \
+                  "unroll-in-flight #{counts[bt::MEMO_REFUSE_UNROLL]}  " \
+                  "consult-tainted #{counts[bt::MEMO_REFUSE_CONSULT_TAINTED]}")
+        write_memo_signature_table
+      end
+
+      # Top 15 signatures by body-eval (compute) count, each with its distinct-memo-key count — a signature
+      # whose distinct-key count dwarfs its evals is arg-granularity thrash (the key-normalization candidate).
+      def write_memo_signature_table
+        bt = Inference::BudgetTrace
+        evals = bt.distribution(bt::MEMO_BODY_EVAL_BY_SIGNATURE)
+        return if evals.empty?
+
+        keys = bt.distribution(bt::MEMO_DISTINCT_KEY_BY_SIGNATURE)
+        @err.puts("  top signatures by body-eval count (evals / distinct-keys / signature):")
+        evals.sort_by { |sig, n| [-n, sig] }.first(15).each do |sig, n|
+          @err.puts("    #{n.to_s.rjust(8)}  #{keys.fetch(sig, 0).to_s.rjust(6)}  #{sig}")
+        end
       end
 
       # Dumps the read-only size distributions (ADR-41 Slice 2a). These observe how large unions actually get, with no

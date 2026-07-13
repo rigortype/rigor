@@ -362,6 +362,35 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         expect(warm).to be(false)
       end
     end
+
+    # ADR-87 WD3 — a warm recheck with NO file change leaves the session state byte-equivalent to the
+    # snapshot it restored, so `run_incremental` must NOT rewrite it (the 209 ms + 2 MB gitlab null tax). A
+    # real edit still persists, and a cold baseline always writes the first snapshot.
+    it "skips the snapshot save on a zero-change warm recheck, but writes on cold and on an edit" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        write_unit(a, prefix: "A")
+        config = configuration(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, dir)
+
+        allow(snapshot).to receive(:save).and_call_original
+
+        # Cold baseline: no prior snapshot → MUST save.
+        session_for(config, paths: [dir]).run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(snapshot).to have_received(:save).once
+
+        # Warm, zero changes → MUST NOT save (byte-equivalent snapshot already on disk); the call count stays 1.
+        _diags, warm = session_for(config, paths: [dir]).run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(warm).to be(true)
+        expect(snapshot).to have_received(:save).once
+
+        # A real edit → MUST save again so the new state persists (count advances to 2).
+        write_unit(a, prefix: "A", reduced: false)
+        session_for(config, paths: [dir]).run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(snapshot).to have_received(:save).twice
+      end
+    end
   end
 
   # ADR-85 WD1 — the cross-process win: a warm `--incremental` recheck must serve plugin `#prepare`

@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
 require_relative "signature_path_audit"
-require_relative "analysis/check_rules"
+# ADR-87 WD4 — only the pure rule-id table (`ALL_RULES` / `RULE_FAMILIES`) is needed, so require the light
+# `rule_ids.rb` rather than the engine-pulling `check_rules.rb`; keeps `config_audit` (loaded by every check)
+# off the inference engine so the boot-slimming hit path stays engine-free.
+require_relative "analysis/check_rules/rule_ids"
 
 module Rigor
   # Audits a loaded {Configuration} for the class of mistake where a configured value

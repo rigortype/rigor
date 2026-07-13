@@ -27,7 +27,13 @@ module Rigor
       # v4: ADR-60 WD3 added the `globs` slot ({GlobEntry}) for the record-and-validate plugin-producer cache;
       # the new slot changes `#to_canonical_hash` (and is Marshal-dumped inside `fetch_or_validate` entry
       # pairs), so entries written by an older Rigor must read as misses.
-      SCHEMA_VERSION = 4
+      # v5: ADR-87 WD1/WD2 changed the dependency-side freshness format — {FileEntry} gains the `:stat`
+      # comparator (a packed `digest + size + mtime_ns + ctime_ns + inode + recording_instant` tuple) and
+      # {GlobEntry}'s aggregate signature is now a SHA-256 over per-file STAT tuples rather than per-file
+      # content digests. Old entries must read as misses so the first writable run rebuilds them in the new
+      # format for a clean one-shot migration (the #57 marker discipline: the bump clears the root and
+      # reclaims the unreadable bytes).
+      SCHEMA_VERSION = 5
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.
@@ -35,7 +41,13 @@ module Rigor
       class FileEntry
         include Rigor::ValueSemantics
 
-        VALID_COMPARATORS = %i[digest mtime exists].freeze
+        # `:stat` (ADR-87 WD1) is the stat-then-digest comparator for the validation-only dependency
+        # descriptor; its `value` packs the content digest PLUS a `(size, mtime_ns, ctime_ns, inode)` stat
+        # tuple and the run's recording instant, so validation can skip the SHA-256 when the stat is unmoved.
+        # It MUST NOT be placed in a descriptor used as a cache KEY (its value carries machine-local,
+        # per-run-nondeterministic stat data); {RbsDescriptor.build}'s env-cache `files` therefore stay
+        # `:digest`, while the {Runner} run-dependency descriptor and plugin {IoBoundary} reads use `:stat`.
+        VALID_COMPARATORS = %i[digest stat mtime exists].freeze
 
         attr_reader :path, :comparator, :value
 
@@ -51,6 +63,16 @@ module Rigor
           @comparator = comparator
           @value = value.to_s.dup.freeze
           freeze
+        end
+
+        # ADR-87 WD1 — builds a `:stat` entry, packing the supplied content `digest` with the file's live stat
+        # tuple. Falls back to a plain `:digest` entry when the file cannot be stat-ed (a race between the
+        # digest and the stat), so the resulting entry is always valid to re-validate.
+        def self.stat(path:, digest:)
+          packed = FileDigest.pack_stat(path, digest)
+          return new(path: path, comparator: :digest, value: digest) if packed.nil?
+
+          new(path: path, comparator: :stat, value: packed)
         end
 
         def to_h
@@ -148,13 +170,26 @@ module Rigor
         end
       end
 
-      # ADR-60 WD3 — one glob's-worth of watched files, digested as a single value so the entry covers content
-      # change, addition, AND removal in one row: the digest is the SHA-256 over the sorted
-      # `"<path>\0<sha256-of-content>\n"` rows of every file matching `File.join(root, pattern)`. A new file
-      # adds a row, a deleted file drops one, an edit changes one — all three move the digest.
-      # {Descriptor#fresh?} re-runs the same computation and compares.
+      # ADR-60 WD3 / ADR-87 WD2 — one glob's-worth of watched files, covering content change, addition, AND
+      # removal in a single aggregate `value`. Pre-ADR-87 the value was a SHA-256 over sorted
+      # `"<path>\0<content-sha256>\n"` rows — sound but it re-READ + re-hashed every file's CONTENT on every
+      # validation (the ~40 MB gitlab plugin-prepass tax). ADR-87 WD2 keeps the identical one-hash shape (small
+      # to Marshal, deterministic, composition-safe) but hashes STAT TUPLES instead of content: the value is a
+      # SHA-256 over sorted `"<path>\0<size>\0<mtime_ns>\0<ctime_ns>\0<inode>\n"` rows. {.fresh?} re-globs +
+      # re-stats and compares — reading ZERO file-content bytes on an unchanged tree — while any content edit
+      # (which moves mtime + ctime) still moves the signature. `RIGOR_STRICT_VALIDATION` / `cache.validation:
+      # digest` restores the content-hash signature for a filesystem whose stat cannot be trusted. A single
+      # aggregate hash is the right granularity here: a watched dependency is all-or-nothing (one changed file
+      # invalidates the producer's cache regardless), so per-file partial re-hashing bought nothing but a heavy
+      # per-file table to Marshal. The trade vs the old content signature is that a bare `touch` (moved stat,
+      # identical content) now invalidates the glob — rare, and only forces the same recompute the old form
+      # paid on EVERY run.
       class GlobEntry
         include Rigor::ValueSemantics
+
+        ROW_SEPARATOR = "\n"
+        FIELD_SEPARATOR = "\0"
+        private_constant :ROW_SEPARATOR, :FIELD_SEPARATOR
 
         attr_reader :root, :pattern, :value
 
@@ -169,27 +204,45 @@ module Rigor
 
         # Builds the entry for the glob's CURRENT filesystem state.
         def self.compute(root:, pattern:)
-          new(root: root, pattern: pattern, value: digest_for(root: root, pattern: pattern))
+          new(root: root, pattern: pattern, value: signature_for(root: root, pattern: pattern))
         end
 
-        # The digest the entry's `value` carries. Per-file read failures (a file vanishing between the glob and
-        # the digest) are treated as the file being absent — same race posture as
-        # {Descriptor#file_entry_fresh?}.
-        def self.digest_for(root:, pattern:)
-          # Dir.glob returns sorted entries by default (sort: true), so the row order — and therefore the
-          # digest — is stable.
+        # The aggregate signature the entry's `value` carries: SHA-256 over the sorted per-file rows. In the
+        # default (`:stat`) mode a row is the file's `(path, size, mtime_ns, ctime_ns, inode)` tuple — NO
+        # content read; in strict mode a row is `(path, content-sha256)`, restoring the pre-ADR-87 authority.
+        # Per-file stat failures (a file vanishing between the glob and the stat) drop the row — same race
+        # posture as {Descriptor#file_entry_fresh?}. `Dir.glob` returns sorted entries by default so the row
+        # order — and therefore the signature — is stable.
+        def self.signature_for(root:, pattern:)
+          strict = FileDigest.strict_validation?
           rows = Dir.glob(File.join(root, pattern)).filter_map do |path|
-            next nil unless File.file?(path)
+            st = File.stat(path)
+            next nil unless st.file?
 
-            "#{path}\0#{FileDigest.hexdigest(path)}\n"
+            if strict
+              "#{path}#{FIELD_SEPARATOR}#{FileDigest.hexdigest(path)}#{ROW_SEPARATOR}"
+            else
+              "#{path}#{FIELD_SEPARATOR}#{st.size}#{FIELD_SEPARATOR}#{FileDigest.ns_of(st.mtime)}" \
+                "#{FIELD_SEPARATOR}#{FileDigest.ns_of(st.ctime)}#{FIELD_SEPARATOR}#{st.ino}#{ROW_SEPARATOR}"
+            end
           rescue StandardError
             nil
           end
           Digest::SHA256.hexdigest(rows.join)
         end
 
+        # ADR-87 WD2 — fresh iff re-globbing + re-stat-ing reproduces the recorded signature. Zero file-content
+        # bytes are read in the default mode. Any failure reads as stale (recompute), never a crash. A stored
+        # signature recorded under the opposite validation mode simply mismatches and recomputes.
+        def self.fresh?(entry)
+          signature_for(root: entry.root, pattern: entry.pattern) == entry.value
+        rescue StandardError
+          false
+        end
+
         # Composition key — {.compose} unions per (root, pattern) slot; two contributions for the same slot
-        # must agree on the digest or {Conflict} is raised.
+        # must agree on the value or {Conflict} is raised. Within one run the same glob stat-reads identically,
+        # so contributions never conflict.
         def slot_key
           "#{root}\0#{pattern}"
         end
@@ -230,10 +283,12 @@ module Rigor
           globs.all? { |entry| glob_entry_fresh?(entry) }
       end
 
-      # File-comparator strictness ordering. `:digest` is strictest (deterministic across machines); `:mtime`
-      # is cheaper but local; `:exists` is the weakest signal. When two contributors disagree on the
-      # comparator for the same `path`, the stricter one wins.
-      COMPARATOR_STRICTNESS = { digest: 2, mtime: 1, exists: 0 }.freeze
+      # File-comparator strictness ordering. `:stat` is strictest (it carries the content digest AND a stat
+      # tuple, so it validates content-authoritatively while short-circuiting on an unmoved stat); `:digest` is
+      # deterministic across machines; `:mtime` is cheaper but local; `:exists` is the weakest signal. Ranking
+      # `:stat` and `:digest` apart guarantees a path contributed under both never raises a value {Conflict}
+      # (their `value` strings differ by construction) — the stricter one wins and its value is used.
+      COMPARATOR_STRICTNESS = { stat: 3, digest: 2, mtime: 1, exists: 0 }.freeze
       private_constant :COMPARATOR_STRICTNESS
 
       # Composes any number of descriptors into a single descriptor whose slots are the union of the inputs'
@@ -317,6 +372,10 @@ module Rigor
           # `FileDigest` serves a per-run memo when a run is active (validation digests overlap the
           # dependency descriptor's), and falls back to a direct digest otherwise — same value either way.
           File.file?(entry.path) && FileDigest.hexdigest(entry.path) == entry.value
+        when :stat
+          # ADR-87 WD1 — stat-then-digest: stat first, re-hash only when the tuple moved (or the racy window
+          # fires, or strict mode forces it). A stat failure raises and the outer rescue reads it as stale.
+          FileDigest.stat_fresh?(entry.path, entry.value)
         when :mtime
           File.exist?(entry.path) && File.mtime(entry.path).to_i.to_s == entry.value
         when :exists
@@ -328,12 +387,10 @@ module Rigor
         false
       end
 
-      # ADR-60 WD3 — re-runs the entry's glob + digest and compares against the recorded value. Any failure
-      # reads as stale (recompute), never a crash.
+      # ADR-60 WD3 / ADR-87 WD2 — stat-validates the entry's per-file table against the live tree, re-hashing
+      # only stat-moved files. Any failure reads as stale (recompute), never a crash.
       def glob_entry_fresh?(entry)
-        GlobEntry.digest_for(root: entry.root, pattern: entry.pattern) == entry.value
-      rescue StandardError
-        false
+        GlobEntry.fresh?(entry)
       end
 
       def sort_entries(entries, key)

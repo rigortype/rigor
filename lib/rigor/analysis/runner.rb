@@ -9,6 +9,8 @@ require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../cache/rbs_descriptor"
 require_relative "../cache/file_digest"
+require_relative "run_cache_key"
+require_relative "path_expansion"
 require_relative "../plugin"
 require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
@@ -41,7 +43,6 @@ require_relative "runner/diagnostic_aggregator"
 module Rigor
   module Analysis
     class Runner # rubocop:disable Metrics/ClassLength
-      RUBY_GLOB = "**/*.rb"
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
@@ -169,7 +170,12 @@ module Rigor
         # plugin producer's watched-glob validation (they overlap heavily on the warm path). The nested ADR-85
         # WD3 memo yields one stable `Prism::DefNode` per resolved bundle handle for the run (both are no-ops
         # outside their respective consumers — an empty thread-local table).
-        Cache::FileDigest.with_run { Inference::DefNodeResolver.with_run { run_analysis(paths) } }
+        # ADR-87 WD1 — `cache.validation: digest` (or the RIGOR_STRICT_VALIDATION env, which wins) forces the
+        # digest-always freshness path for this run; the default `:stat` tier validates by stat first.
+        strict = @configuration.cache_validation == "digest"
+        Cache::FileDigest.with_run(strict: strict) do
+          Inference::DefNodeResolver.with_run { run_analysis(paths) }
+        end
       end
 
       def run_analysis(paths)
@@ -305,7 +311,7 @@ module Rigor
 
         computed = false
         diagnostics = @cache_store.fetch_or_validate(
-          producer_id: "analysis.run-diagnostics", key_descriptor: key_descriptor
+          producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID, key_descriptor: key_descriptor
         ) do
           computed = true
           diags = assemble_run_diagnostics(expansion, environment: environment)
@@ -371,16 +377,13 @@ module Rigor
       # editing one is caught by dependency validation). nil disables the cache for this run rather than
       # risking a malformed key.
       def run_key_descriptor(expansion, rbs_descriptor)
-        Cache::Descriptor.new(
-          gems: rbs_descriptor.gems,
-          configs: rbs_descriptor.configs + [
-            config_hash_entry("configuration", Marshal.dump(@configuration.to_h)),
-            config_hash_entry("engine", "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{@explain}"),
-            config_hash_entry("paths", expansion.fetch(:files).sort.join("\n"))
-          ]
+        # ADR-87 WD4 — the key is built through the shared {RunCacheKey} builder the boot-slimming probe also
+        # uses, so the miss path (here, passing the loader's `rbs_descriptor.configs`) and the hit path (which
+        # reconstructs `rbs.libraries` from config) can never drift out of key agreement.
+        RunCacheKey.descriptor(
+          configuration: @configuration, files: expansion.fetch(:files),
+          explain: @explain, rbs_config_entries: rbs_descriptor.configs
         )
-      rescue StandardError
-        nil
       end
 
       # Files the run actually depended on, collected AFTER it ran: every analyzed file, every RBS `sig`
@@ -401,14 +404,10 @@ module Rigor
       def analyzed_file_entries(expansion)
         expansion.fetch(:files).map do |path|
           physical = @buffer ? @buffer.resolve(path) : path
-          Cache::Descriptor::FileEntry.new(
-            path: physical, comparator: :digest, value: Cache::FileDigest.hexdigest(physical)
-          )
+          # ADR-87 WD1 — validation-only dependency descriptor, so the stat-then-digest `:stat` comparator
+          # applies (the env-cache KEY files stay `:digest`).
+          Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
         end
-      end
-
-      def config_hash_entry(key, payload)
-        Cache::Descriptor::ConfigEntry.new(key: key, value_hash: Digest::SHA256.hexdigest(payload))
       end
 
       # Runs every project-wide pre-pass (`load_plugins` +
@@ -773,7 +772,7 @@ module Rigor
         bad = []
         Array(paths).each do |path|
           if File.directory?(path)
-            files.concat(reject_excluded(Dir.glob(File.join(path, RUBY_GLOB))))
+            files.concat(PathExpansion.directory_files(path, @configuration.exclude_patterns))
           # Editor-mode bypass: the buffer's logical path is treated as a real `.rb` file regardless of
           # on-disk presence — `parse_source` reads bytes from the buffer's physical path. Common case: LSP
           # client editing a brand-new file.
@@ -803,22 +802,6 @@ module Rigor
         (File.file?(path) && path.end_with?(".rb")) ||
           (@buffer && path == @buffer.logical_path) ||
           @in_memory_sources&.key?(path)
-      end
-
-      # `Configuration#exclude_patterns` is a list of glob patterns checked against each globbed path via
-      # `File.fnmatch?` (without `FNM_PATHNAME`, so `**` and `*` both span path separators — the patterns
-      # behave like substring globs). Built-in defaults exclude `vendor/bundle`, `.bundle`, `node_modules`,
-      # and `tmp` so the analyser never walks into vendored deps or build artefacts. User-supplied entries
-      # (`.rigor.yml` `exclude:`) layer on top. Explicit file arguments to the CLI bypass this filter — only
-      # the directory-glob expansion is filtered.
-      def reject_excluded(file_list)
-        return file_list if @configuration.exclude_patterns.empty?
-
-        file_list.reject { |path| excluded?(path) }
-      end
-
-      def excluded?(path)
-        @configuration.exclude_patterns.any? { |pattern| File.fnmatch?(pattern, path) }
       end
 
       def path_error(path, message, severity: :error)

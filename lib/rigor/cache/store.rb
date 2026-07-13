@@ -224,10 +224,9 @@ module Rigor
         key = key_descriptor.cache_key_for(producer_id: producer_id, params: params)
         path = disk ? entry_path(producer_id, key) : nil
         cached = path && read_entry(path, deserialize: deserialize)
-        if cached && (pair = cached.value).is_a?(Array) && pair.size == 2 &&
-           pair[1].is_a?(Descriptor) && pair[1].fresh?
+        if (validated = fresh_pair_value(cached))
           @monitor.synchronize { record(:hits, producer_id) }
-          return pair[0]
+          return validated[0]
         end
 
         value, dependency_descriptor = block_given? ? yield : [nil, Descriptor.new]
@@ -237,6 +236,24 @@ module Rigor
           record(:writes, producer_id) if wrote
         end
         value
+      end
+
+      # ADR-87 WD4 — the READ half of {#fetch_or_validate} with no compute and no write: returns the cached
+      # value on a fresh hit, nil on a miss / stale / unavailable-disk. The boot-slimming hit probe calls this
+      # to serve a run's diagnostics WITHOUT loading the inference engine — it never runs a producer block, so
+      # there is nothing to write. Records a hit (for `--cache-stats` parity) but never a miss (a probe miss
+      # hands off to the full path, which records its own).
+      def peek_validated(producer_id:, key_descriptor:, params: {}, deserialize: nil)
+        validate_producer_id!(producer_id)
+        return nil unless ensure_schema_version!
+
+        key = key_descriptor.cache_key_for(producer_id: producer_id, params: params)
+        cached = read_entry(entry_path(producer_id, key), deserialize: deserialize)
+        validated = fresh_pair_value(cached)
+        return nil if validated.nil?
+
+        @monitor.synchronize { record(:hits, producer_id) }
+        validated[0]
       end
 
       # ADR-6 § "Eviction" — compaction pass over the on-disk cache. No-op when the store is read-only. Stale
@@ -273,6 +290,19 @@ module Rigor
 
       Entry = Data.define(:descriptor_bytes, :value)
       private_constant :Entry
+
+      # A record-and-validate entry is a fresh hit iff it deserialised to a `[value, dependency_descriptor]`
+      # pair whose descriptor still validates against the filesystem. Returns the pair on a fresh hit, nil
+      # otherwise. Shared by {#fetch_or_validate} and {#peek_validated} so both apply identical hit criteria.
+      def fresh_pair_value(cached)
+        return nil if cached.nil?
+
+        pair = cached.value
+        return nil unless pair.is_a?(Array) && pair.size == 2 &&
+                          pair[1].is_a?(Descriptor) && pair[1].fresh?
+
+        pair
+      end
 
       def record(counter, producer_id)
         case counter

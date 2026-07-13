@@ -63,7 +63,13 @@ module Rigor
         # would otherwise ever delete; a full active per-project set is ~2 MB, so the cap never touches live
         # entries. Set explicitly to `null` to disable eviction (pre-WD3 behaviour: the cache grows until
         # `--clear-cache`).
-        "max_bytes" => 268_435_456
+        "max_bytes" => 268_435_456,
+        # ADR-87 WD1 — file-freshness validation strategy. `"stat"` (default) validates a recorded file
+        # dependency by stat-ing it first and re-hashing only when the `(size, mtime_ns, ctime_ns, inode)`
+        # tuple moved (or the racy window fires), so an unchanged monorepo hashes ~0 bytes on a warm run.
+        # `"digest"` restores the pre-ADR-87 behaviour of SHA-256'ing every recorded file on every run — the
+        # per-run escape hatch is the `RIGOR_STRICT_VALIDATION=1` env var, which wins over this setting.
+        "validation" => "stat"
       },
       "plugins_io" => {
         "network" => "disabled",
@@ -144,7 +150,7 @@ module Rigor
     private_constant :PATH_KEYS
 
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
-                :disabled_rules,
+                :cache_validation, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
@@ -304,6 +310,7 @@ module Rigor
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
+      @cache_validation = coerce_cache_validation(cache.fetch("validation", "stat"))
       @plugins_io_network = coerce_network_policy(plugins_io.fetch("network"))
       @plugins_io_allowed_paths = Array(plugins_io.fetch("allowed_paths")).map(&:to_s).freeze
       @plugins_io_allowed_url_hosts = Array(plugins_io.fetch("allowed_url_hosts")).map(&:to_s).freeze
@@ -353,7 +360,8 @@ module Rigor
         "fold_platform_specific_paths" => fold_platform_specific_paths,
         "cache" => {
           "path" => cache_path,
-          "max_bytes" => cache_max_bytes
+          "max_bytes" => cache_max_bytes,
+          "validation" => cache_validation
         },
         "plugins_io" => {
           "network" => plugins_io_network.to_s,
@@ -481,6 +489,18 @@ module Rigor
       return nil if value.nil? || value == false
 
       value.to_s
+    end
+
+    # ADR-87 WD1 — `cache.validation` is `"stat"` (default) or `"digest"`. An unrecognised value fails soft to
+    # the default rather than aborting a check over a typo — the strict `"digest"` behaviour is the safe
+    # fallback either way, and the always-available `RIGOR_STRICT_VALIDATION=1` env escape hatch does not
+    # depend on this value being valid.
+    VALID_CACHE_VALIDATIONS = %w[stat digest].freeze
+    private_constant :VALID_CACHE_VALIDATIONS
+
+    def coerce_cache_validation(value)
+      str = value.to_s
+      VALID_CACHE_VALIDATIONS.include?(str) ? str : "stat"
     end
 
     def coerce_network_policy(value)

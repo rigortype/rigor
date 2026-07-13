@@ -35,14 +35,19 @@ module Rigor
       # The `gems` + `configs` slots the run cache key reads. Cheap — no RBS env load, no file digesting
       # (only the configured library names + any plugin-synthesised virtual RBS are hashed).
       def self.config_entries(loader)
-        [libraries_entry(loader), virtual_rbs_entry(loader)].compact
+        [libraries_entry(loader.libraries), virtual_rbs_entry(loader)].compact
       end
 
+      # Public (ADR-87 WD4) so the boot-slimming run-cache probe reconstructs the identical `gems` +
+      # `rbs.libraries` key slots the runner writes, from the config-derived library list, without a loader.
       def self.rbs_gem_entry
         Descriptor::GemEntry.new(name: "rbs", requirement: ">= 0", locked: ::RBS::VERSION.to_s)
       end
 
-      def self.file_entries(loader)
+      # @param comparator [Symbol] `:digest` (default) for the env-cache KEY descriptor ({.build}), where the
+      #   value must be deterministic; `:stat` (ADR-87 WD1) for the validation-only run-dependency descriptor
+      #   ({RunDescriptor#files}), where the stat tier short-circuits the SHA-256 on an unmoved file.
+      def self.file_entries(loader, comparator: :digest)
         roots = loader.signature_paths +
                 Rigor::Environment::RbsLoader.vendored_gem_sig_paths +
                 Rigor::Environment::RbsLoader.core_overlay_sig_paths
@@ -50,17 +55,20 @@ module Rigor
           next [] unless root.directory?
 
           Dir.glob(root.join("**", "*.rbs")).map do |path|
-            Descriptor::FileEntry.new(
-              path: path,
-              comparator: :digest,
-              value: FileDigest.hexdigest(path)
-            )
+            digest = FileDigest.hexdigest(path)
+            if comparator == :stat
+              Descriptor::FileEntry.stat(path: path, digest: digest)
+            else
+              Descriptor::FileEntry.new(path: path, comparator: :digest, value: digest)
+            end
           end
         end
       end
 
-      def self.libraries_entry(loader)
-        sorted = loader.libraries.map(&:to_s).sort
+      # @param library_names [Array<String, Symbol>] the loader's merged library list (or, on the WD4 probe
+      #   path, `Environment::DEFAULT_LIBRARIES + config.libraries` reconstructed without a loader).
+      def self.libraries_entry(library_names)
+        sorted = library_names.map(&:to_s).sort
         Descriptor::ConfigEntry.new(
           key: "rbs.libraries",
           value_hash: Digest::SHA256.hexdigest(sorted.join("\n"))
@@ -83,7 +91,7 @@ module Rigor
         )
       end
 
-      private_class_method :rbs_gem_entry, :libraries_entry, :virtual_rbs_entry
+      private_class_method :virtual_rbs_entry
 
       # The lazy-files run descriptor {RbsDescriptor.build_run} returns. Exposes the three readers the
       # run-diagnostics cache consults — `gems` + `configs` are supplied eagerly (they feed the cache KEY,
@@ -99,7 +107,10 @@ module Rigor
         end
 
         def files
-          @files ||= RbsDescriptor.file_entries(@loader)
+          # ADR-87 WD1 — this descriptor is validated (never a cache key), so the RBS signature tree rides the
+          # stat-then-digest `:stat` tier: a warm run stat-checks the (large, vendored) tree instead of
+          # re-hashing it.
+          @files ||= RbsDescriptor.file_entries(@loader, comparator: :stat)
         end
       end
     end

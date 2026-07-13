@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../diagnostic"
+require_relative "../severity_stamp"
 
 module Rigor
   module Analysis
@@ -457,34 +458,10 @@ module Rigor
         end
 
         # ADR-8 § "Severity profile" — re-stamps each diagnostic's severity from the configured profile +
-        # per-rule overrides. Rules emit with their authored severity; the profile is the final filter.
-        # Diagnostics whose resolved severity is `:off` are dropped from the run result.
+        # per-rule overrides, dropping any that resolve to `:off`. Delegates to the shared {SeverityStamp} so
+        # the ADR-87 WD4 boot-slimming hit path applies the identical final filter.
         def apply_severity_profile(diagnostics)
-          diagnostics.filter_map { |diagnostic| stamp_severity(diagnostic) }
-        end
-
-        def stamp_severity(diagnostic)
-          return diagnostic if diagnostic.rule.nil?
-
-          resolved = Configuration::SeverityProfile.resolve(
-            rule: diagnostic.rule,
-            authored_severity: diagnostic.severity,
-            profile: @configuration.severity_profile,
-            overrides: @configuration.severity_overrides,
-            bleeding_edge_overrides: @configuration.bleeding_edge_severity_overrides
-          )
-          return nil if resolved == :off
-          return diagnostic if resolved == diagnostic.severity
-
-          Diagnostic.new(
-            path: diagnostic.path,
-            line: diagnostic.line,
-            column: diagnostic.column,
-            message: diagnostic.message,
-            severity: resolved,
-            rule: diagnostic.rule,
-            source_family: diagnostic.source_family
-          )
+          SeverityStamp.apply(diagnostics, @configuration)
         end
 
         private

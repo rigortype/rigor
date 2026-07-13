@@ -137,17 +137,61 @@ module Rigor
       # provided). An added file has no before-state, so all its symbols / classes appear.
       def affected_closure(changed, added, removed)
         scan = changed + added
-        new_fps = symbol_fingerprints_for(scan)
-        new_class_decls = class_declarations_for(scan)
+        # Parse the changed / added set ONCE for the per-symbol fingerprints, the class declarations, AND the
+        # B1 comment-stripped code fingerprints. They were separate `discovered_def_index_for_paths` passes
+        # over the same `scan` set — a duplicate re-parse of every changed file each recheck (recon §2 / the
+        # P6 recheck-floor audit).
+        summary = scan.empty? ? nil : Inference::ScopeIndexer.scan_summary_for_paths(scan)
+        scan_index = summary && summary[:def_index]
+        code_fingerprints = (summary && summary[:code_fingerprints]) || {}
+        new_fps = symbol_fingerprints_from_index(scan_index)
+        new_class_decls = class_declarations_from_index(scan_index)
         changed_pairs = Incremental.changed_symbol_pairs(changed, @symbol_fingerprints, new_fps)
-        base = if changed_pairs.any? || changed.any? { |f| @ancestry_dependents[f] }
-                 Incremental.affected_with_symbols(changed, changed_pairs, @symbol_dependents, @ancestry_dependents)
+        # B1 — a changed file whose CODE (comments stripped) is byte-identical to the snapshot is
+        # declaration-stable: every cross-file fact its ancestry / file-level dependents consume is
+        # code-derived and therefore unchanged, so those dependents are skipped. Only the code-UNSTABLE
+        # changed files contribute their ancestry / file-level dependents; the changed files themselves are
+        # always re-analysed (`changed.to_set`) to learn their own diagnostics.
+        unstable = declaration_unstable(changed, code_fingerprints)
+        base = if changed_pairs.any? || unstable.any? { |f| @ancestry_dependents[f] }
+                 Incremental.affected_with_symbols(unstable, changed_pairs, @symbol_dependents, @ancestry_dependents)
                else
-                 Incremental.affected(changed, @dependents)
+                 Incremental.affected(unstable, @dependents)
                end
-        closure = base | added.to_set | negative_affected(scan, new_fps, new_class_decls)
+        closure = base | changed.to_set | added.to_set | negative_affected(scan, new_fps, new_class_decls)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
+      end
+
+      # B1 — the changed files whose ancestry / file-level dependents must STILL be re-checked: those not
+      # provably comment-only-edited. A changed file is declaration-STABLE (its dependents skippable) when its
+      # current comment-stripped {ScopeIndexer.code_fingerprint} matches the one stored in the snapshot's seed
+      # bundle. Falls back to treating EVERY changed file as unstable (today's full closure) when a
+      # comment-ingesting plugin is loaded — such a plugin reads the very comments the fingerprint ignores, so
+      # a comment edit it treats as a no-op could change a cross-file type. Sorbet sigs / dry-types includes
+      # are CODE, so the fingerprint already proves them unchanged; only comment-as-input plugins escape it.
+      def declaration_unstable(changed, code_fingerprints)
+        return changed if comment_ingesting_plugin_loaded?
+
+        changed.reject { |path| declaration_stable?(path, code_fingerprints[path]) }
+      end
+
+      def declaration_stable?(path, current_code_fingerprint)
+        return false if current_code_fingerprint.nil?
+
+        bundle = @seed_bundles[path]
+        return false if bundle.nil?
+
+        bundle[:code_fingerprint] == current_code_fingerprint
+      end
+
+      def comment_ingesting_plugin_loaded?
+        # Mirrors the plugin loader's gem-name resolution (`ProjectPrePasses#trusted_gem_name`): a String
+        # entry IS the gem name; a Hash entry names it under `"gem"` (or the manifest `"id"`).
+        @configuration.plugins.any? do |entry|
+          name = entry.is_a?(Hash) ? (entry["gem"] || entry["id"]) : entry
+          COMMENT_INGESTING_PLUGIN_IDS.include?(name.to_s)
+        end
       end
 
       # The current project file set (cheap directory expansion, no analysis), used to detect files added /
@@ -291,14 +335,13 @@ module Rigor
         @class_decls = runner.class_declarations
       end
 
-      # Compute per-symbol body fingerprints for `paths` via a quick indexing re-pass (Prism parse + def
-      # extraction, no type inference). Returns a hash of the form `{ path => { "ClassName#method" =>
-      # sha256_hex } }`. Used by {#recheck} to detect which symbols in a changed file actually changed, so
-      # only their callers are added to the affected closure.
-      def symbol_fingerprints_for(paths)
-        return {} if paths.empty?
+      # Per-symbol body fingerprints from the pre-parsed `index` (the shared scan-summary def-index — Prism
+      # parse + def extraction, no type inference). Returns `{ path => { "ClassName#method" => sha256_hex } }`
+      # with singleton methods under `"Class.method"` keys. Used by {#recheck} to detect which symbols in a
+      # changed file actually changed, so only their callers are added to the affected closure.
+      def symbol_fingerprints_from_index(index)
+        return {} if index.nil?
 
-        index = Inference::ScopeIndexer.discovered_def_index_for_paths(paths)
         result = Hash.new { |h, k| h[k] = {} }
         fold_symbol_fingerprints(result, index[:def_sources], index[:def_nodes], "#")
         # ADR-46 slice 4 (singleton) — mirror the instance fold over the singleton tables so a `def self.x`
@@ -336,13 +379,11 @@ module Rigor
         Incremental.negative_closure(keys, @negative_dependents)
       end
 
-      # The qualified class/module names declared in `paths`, via the same quick indexing re-pass
-      # {#symbol_fingerprints_for} uses (Prism parse + declaration extraction, no inference). `{ path =>
-      # Set<class name> }`.
-      def class_declarations_for(paths)
-        return {} if paths.empty?
+      # The qualified class/module names declared in the pre-parsed `index` (shared with
+      # {#symbol_fingerprints_from_index}, so the changed set is parsed once). `{ path => Set<class name> }`.
+      def class_declarations_from_index(index)
+        return {} if index.nil?
 
-        index = Inference::ScopeIndexer.discovered_def_index_for_paths(paths)
         result = Hash.new { |hash, key| hash[key] = Set.new }
         index[:class_sources].each do |class_name, files|
           files.each { |file| result[file] << class_name }
@@ -352,6 +393,12 @@ module Rigor
 
       TOP_LEVEL_KEY = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
       private_constant :TOP_LEVEL_KEY
+
+      # B1 — plugin require-names that ingest COMMENT content as semantic input (inline-RBS reads `# @rbs` /
+      # `#:` annotations). B1's code fingerprint ignores comments, so a project configuring one of these opts
+      # OUT of the bundle-equality skip (a comment edit could change a cross-file type it contributes).
+      COMMENT_INGESTING_PLUGIN_IDS = %w[rigor-rbs-inline].freeze
+      private_constant :COMMENT_INGESTING_PLUGIN_IDS
 
       def negative_key_for(symbol)
         class_name, method = symbol.split("#", 2)

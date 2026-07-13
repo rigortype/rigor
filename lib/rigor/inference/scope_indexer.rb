@@ -2046,6 +2046,48 @@ module Rigor
         finalize_def_index(acc)
       end
 
+      # B1 (incremental bundle-equality gate) — parses `paths` ONCE and returns both the merged def-index (as
+      # {#discovered_def_index_for_paths}) and each file's comment-stripped {#code_fingerprint}. The incremental
+      # session drives the fingerprint / class-declaration change detection off `def_index` and the B1 skip
+      # decision off `code_fingerprints`, so a changed file is parsed once for all three (recon §2 dedup).
+      # @return [Hash{Symbol => Object}] `{ def_index:, code_fingerprints: }`.
+      def scan_summary_for_paths(paths, buffer: nil)
+        acc = new_def_index_accumulator
+        code_fingerprints = {}
+        paths.each do |path|
+          physical = buffer ? buffer.resolve(path) : path
+          source = File.read(physical)
+          parsed = Prism.parse(source, filepath: path)
+          accumulate_project_index(acc, path, parsed.value)
+          code_fingerprints[path] = code_fingerprint(source, parsed.comments)
+        rescue StandardError
+          next
+        end
+        { def_index: finalize_def_index(acc), code_fingerprints: code_fingerprints }
+      end
+
+      # B1 — the SHA-256 of `source` with every comment's byte range excised (a line comment ends before its
+      # newline, so the newline is KEPT: stripping it preserves the line count, hence every def's start line
+      # and the whole engine bundle). Two revisions of a file that differ ONLY in comment text therefore share
+      # a code fingerprint — the signal the bundle-equality gate uses to prove a changed file's *code* (and so
+      # every code-derived cross-file fact the engine and code-reading plugins produce from it) is unchanged.
+      # A comment that adds or removes a LINE shifts subsequent code, so the fingerprint changes (the gate then
+      # conservatively keeps the file's dependents — a line shift can move a def the ADR-17 diagnostic names).
+      def code_fingerprint(source, comments)
+        bytes = source.b
+        return Digest::SHA256.hexdigest(bytes) if comments.empty?
+
+        result = +"".b
+        cursor = 0
+        comments.sort_by { |comment| comment.location.start_offset }.each do |comment|
+          loc = comment.location
+          result << bytes.byteslice(cursor, loc.start_offset - cursor) if loc.start_offset > cursor
+          cursor = loc.end_offset if loc.end_offset > cursor
+        end
+        result << bytes.byteslice(cursor, bytes.bytesize - cursor)
+        Digest::SHA256.hexdigest(result)
+      end
+
       # Combined single-parse cross-file pre-pass used by the project-wide runner pre-pass
       # ({Analysis::Runner::ProjectPrePasses#discover}). {#discovered_classes_for_paths} and
       # {#discovered_def_index_for_paths} each `Prism.parse` every project file independently; this walks the
@@ -2106,11 +2148,14 @@ module Rigor
             classes.merge!(cached[:classes])
             fold_file_index(acc, bundle_to_file_index(cached, path))
           else
-            root = Prism.parse(File.read(physical), filepath: path).value
+            source = File.read(physical)
+            parsed = Prism.parse(source, filepath: path)
+            root = parsed.value
             file_index = build_file_index(path, root)
             file_classes = {}
             collect_class_decls(root, [], file_classes)
-            bundles[path] = build_seed_bundle(file_index, file_classes, digest)
+            bundles[path] = build_seed_bundle(file_index, file_classes, digest,
+                                              code_fingerprint(source, parsed.comments))
             classes.merge!(file_classes)
             fold_file_index(acc, file_index)
           end
@@ -2173,9 +2218,12 @@ module Rigor
       # bundle: the plain-data tables verbatim, the def-node tables re-expressed as `[node_id, name,
       # fingerprint]` triples (the path is the bundle key), the class-source names (path implicit), and the
       # content digest that gates the bundle's reuse.
-      def build_seed_bundle(file_index, file_classes, digest)
+      def build_seed_bundle(file_index, file_classes, digest, code_fingerprint)
         {
           digest: digest,
+          # B1 — the comment-stripped code fingerprint, so a recheck can prove this file's edit was
+          # comment-only and skip its dependents.
+          code_fingerprint: code_fingerprint,
           classes: file_classes,
           def_nodes: live_defs_to_bundle(file_index[:def_nodes]),
           singleton_def_nodes: live_defs_to_bundle(file_index[:singleton_def_nodes]),

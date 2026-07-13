@@ -189,8 +189,6 @@ module Rigor
       def run_incremental_check(configuration, options, cache_root)
         require_relative "check_runner_factory"
         paths = @argv.empty? ? nil : @argv
-        probe = Analysis::Runner.new(configuration: configuration, cache_store: nil)
-        files = paths ? probe.analysis_file_set(paths) : probe.analysis_file_set
         fingerprint = Cache::IncrementalSnapshot.fingerprint(
           configuration: configuration, roots: paths || configuration.paths
         )
@@ -205,8 +203,11 @@ module Rigor
         )
 
         diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)
+        # The banner's file count comes from the session's analyzed set (cold analyses all; a warm recheck's
+        # `@analyzed` advances to the current file set), so a dedicated probe Runner + `Dir.glob` is no longer
+        # built just to size the banner (recon §3 — the analysis tree was expanded three times per recheck).
         @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
-                  "(#{files.size} files)")
+                  "(#{session.analyzed_files.size} files)")
 
         result = apply_baseline_filter(Analysis::Result.new(diagnostics: diagnostics, stats: nil), configuration,
                                        options)

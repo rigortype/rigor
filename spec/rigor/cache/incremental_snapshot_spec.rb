@@ -63,6 +63,23 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
     end
   end
 
+  it "ignores a schema-7 snapshot (pre-B1: bundles carry no code_fingerprint), loading nil for a cold rebuild" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      # A schema-7 blob (written by a #87-era build) has seed bundles WITHOUT the B1 `code_fingerprint`
+      # field. Mis-reading it would make `declaration_stable?` compare against nil forever (gate inert) —
+      # the SCHEMA gate must instead discard it for a clean cold rebuild.
+      old = Marshal.dump(
+        schema: 7, fingerprint: "fp1", cache: {}, sources: {}, digests: {}, analyzed: [],
+        symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {}, missing: {}, class_decls: {},
+        seed_bundles: { "a.rb" => { digest: "sha-a" } }
+      )
+      FileUtils.mkdir_p(File.dirname(snapshot.path))
+      File.binwrite(snapshot.path, Zlib::Deflate.deflate(old))
+      expect(snapshot.load(fingerprint: "fp1")).to be_nil
+    end
+  end
+
   it "returns nil when the fingerprint does not match (config / gem / version drift)" do
     Dir.mktmpdir do |dir|
       snapshot = described_class.new(root: dir)

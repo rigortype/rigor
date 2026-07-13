@@ -46,7 +46,7 @@ module Rigor
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
                   :rbs_extended_reporter, :boundary_cross_reporter, :file_dependencies,
-                  :analyzed_files, :unresolved_self_calls
+                  :analyzed_files, :unresolved_self_calls, :seed_bundles
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events as `:info` diagnostics.
@@ -80,7 +80,8 @@ module Rigor
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
-                     record_dependencies: false, record_self_calls: false, analyze_only: nil)
+                     record_dependencies: false, record_self_calls: false, analyze_only: nil,
+                     seed_bundles: nil, collect_seed_bundles: false)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -113,6 +114,13 @@ module Rigor
         # set are analyzed for diagnostics — the body tier re-analyses the affected closure and serves the
         # rest from the per-file cache. `nil` (the default) analyzes everything.
         @analyze_only = analyze_only && Set.new(analyze_only)
+        # ADR-85 WD2 — seed-bundle discovery. When `collect_seed_bundles`, the cross-file discovery pre-pass
+        # rebuilds from the prior run's per-file bundles (`@restored_seed_bundles`, re-walking only changed
+        # files) instead of parsing every file, and exposes the refreshed set via `#seed_bundles` for the
+        # session to persist. Off by default — a plain `rigor check` keeps today's parse+walk.
+        @collect_seed_bundles = collect_seed_bundles
+        @restored_seed_bundles = seed_bundles || {}
+        @seed_bundles = {}.freeze
         @file_dependencies = {}
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
@@ -158,8 +166,10 @@ module Rigor
       def run(paths = @configuration.paths)
         # One per-run file-digest memo spans the whole run, so a path is SHA-256'd at most once across the
         # run-diagnostics dependency descriptor, its `fresh?` validation, the RBS signature tree, and every
-        # plugin producer's watched-glob validation (they overlap heavily on the warm path).
-        Cache::FileDigest.with_run { run_analysis(paths) }
+        # plugin producer's watched-glob validation (they overlap heavily on the warm path). The nested ADR-85
+        # WD3 memo yields one stable `Prism::DefNode` per resolved bundle handle for the run (both are no-ops
+        # outside their respective consumers — an empty thread-local table).
+        Cache::FileDigest.with_run { Inference::DefNodeResolver.with_run { run_analysis(paths) } }
       end
 
       def run_analysis(paths)
@@ -249,8 +259,12 @@ module Rigor
             node = @project_discovered_def_nodes.dig(class_name, method_sym)
             next unless node
 
+            # ADR-85 WD3 — on the incremental warm path an unchanged file's def is a `DefHandle` carrying the
+            # slice fingerprint captured when its bundle was built (no re-parse); a live node (cold / re-walked
+            # file) is sliced as before. This is the only value-deref consumer of the def-node table besides the
+            # three accessor choke points.
             result[path]["#{class_name}##{method_sym}"] =
-              Digest::SHA256.hexdigest(node.location.slice)
+              node.is_a?(Inference::DefHandle) ? node.fingerprint : Digest::SHA256.hexdigest(node.location.slice)
           end
         end
         result.transform_values(&:freeze).freeze
@@ -486,7 +500,16 @@ module Rigor
         return if @project_discovery_done
 
         @project_discovery_done = true
-        apply_discovery_result(@pre_passes.discover(expansion: expansion))
+        if @collect_seed_bundles
+          # ADR-85 WD2 — rebuild discovery from the prior run's bundles (re-walking only changed files) and
+          # capture the refreshed bundle set for the session to persist.
+          discovery, @seed_bundles = @pre_passes.discover_from_bundles(
+            expansion: expansion, seed_bundles: @restored_seed_bundles
+          )
+          apply_discovery_result(discovery)
+        else
+          apply_discovery_result(@pre_passes.discover(expansion: expansion))
+        end
       end
 
       # ADR-46 — the dependency-recording and subset-analysis modes read the discovery tables OUTSIDE the

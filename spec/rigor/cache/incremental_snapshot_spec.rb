@@ -19,7 +19,8 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       ancestry_sources: { "a.rb" => Set.new },
       symbol_fingerprints: { "b.rb" => { "Foo#bar" => "abc123" } },
       missing: { "a.rb" => Set["toplevel:helper"] },
-      class_decls: { "b.rb" => Set["Foo"] }
+      class_decls: { "b.rb" => Set["Foo"] },
+      seed_bundles: { "b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} } }
     )
   end
 
@@ -35,6 +36,30 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       # Diagnostics survive Marshal round-trip structurally.
       expect(loaded.cache["a.rb"].map(&:to_h)).to eq([diagnostic("a.rb").to_h])
       expect(loaded.cache["b.rb"]).to eq([])
+    end
+  end
+
+  it "round-trips the ADR-85 WD2 seed_bundles section" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      snapshot.save(fingerprint: "fp1", payload: sample_payload)
+      loaded = snapshot.load(fingerprint: "fp1")
+      expect(loaded.seed_bundles).to eq("b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} })
+    end
+  end
+
+  it "ignores a snapshot written under an older schema, loading nil for a clean cold rebuild (ADR-85 SCHEMA bump)" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      # A pre-#85 (schema 5) blob has no seed_bundles section. It must load as nil — a clean cold rebuild —
+      # not be mis-folded as a #85 payload with the field defaulted.
+      old = Marshal.dump(
+        schema: 5, fingerprint: "fp1", cache: {}, sources: {}, digests: {}, analyzed: [],
+        symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {}, missing: {}, class_decls: {}
+      )
+      FileUtils.mkdir_p(File.dirname(snapshot.path))
+      File.binwrite(snapshot.path, Zlib::Deflate.deflate(old))
+      expect(snapshot.load(fingerprint: "fp1")).to be_nil
     end
   end
 

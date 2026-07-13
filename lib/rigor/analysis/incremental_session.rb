@@ -21,7 +21,10 @@ module Rigor
     # `--verify-incremental` acceptance gate, here without disk persistence or CLI wiring (the cache is
     # in-process). It models the body tier only: an edit that adds / removes / moves a *file* is outside
     # the analyzed set it maintains and falls to a fresh {#baseline} (the structural tier is a later slice).
-    class IncrementalSession
+    # The class-length budget is relaxed: this is one cohesive orchestrator of the incremental state
+    # (per-file diagnostics cache, the file-level / symbol-level / negative dependency graphs, and the ADR-85
+    # seed bundles), clearer read together than split across micro-classes that would all share the same ivars.
+    class IncrementalSession # rubocop:disable Metrics/ClassLength
       # The outcome of a {#recheck}: the merged diagnostics plus the file sets, so a caller (or the verify
       # gate) can report what was re-analyzed versus served from cache.
       Recheck = Data.define(:diagnostics, :changed, :affected, :reused)
@@ -47,6 +50,9 @@ module Rigor
         @environment = environment
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
+        # ADR-85 WD2 — per-file discovery seed bundles keyed by logical path. A cold baseline builds them; a
+        # warm recheck folds them (re-walking only changed files) and refreshes the set. Ride the snapshot.
+        @seed_bundles = {}
         @cache = {}              # analyzed path => [Diagnostic]
         @sources = {}            # analyzed path => Set<source path it read from>
         @digests = {}            # analyzed path => content digest at last analysis
@@ -79,6 +85,7 @@ module Rigor
         runner = build_runner(record_dependencies: true)
         diagnostics = run_runner(runner).diagnostics
         @analyzed = runner.analyzed_files
+        @seed_bundles = runner.seed_bundles # ADR-85 WD2 — the freshly built bundle set for the next run.
         absorb_dependency_graph(runner)
         @cache = per_file(diagnostics)
         @digests = @analyzed.to_h { |path| [path, digest(path)] }
@@ -172,6 +179,10 @@ module Rigor
         @cache = payload.cache
         @sources = payload.sources
         @digests = payload.digests
+        # ADR-85 WD2 — restore the per-file discovery bundles if present (absent in a pre-#85 snapshot → empty,
+        # so the recheck's discovery re-walks every file: a cold-quality index, always sound). The SCHEMA bump
+        # makes a genuinely stale-shaped bundle unreadable rather than mis-folded.
+        @seed_bundles = payload.seed_bundles || {}
         @dependents = Incremental.invert(@sources)
         # ADR-46 slice 4 — restore symbol-granularity state if present in the payload (absent in snapshots
         # written before slice 4 → fall back to file-level dependents, which is always sound).
@@ -194,7 +205,7 @@ module Rigor
           cache: @cache, sources: @sources, digests: @digests, analyzed: @analyzed,
           symbol_sources: @symbol_sources, ancestry_sources: @ancestry_sources,
           symbol_fingerprints: @symbol_fingerprints, missing: @missing,
-          class_decls: @class_decls
+          class_decls: @class_decls, seed_bundles: @seed_bundles
         )
       end
 
@@ -204,6 +215,9 @@ module Rigor
       def absorb(runner, fresh, current, analyze_set, removed)
         removed.each { |path| forget(path) }
         @analyzed = current
+        # ADR-85 WD2 — the recheck's discovery folded the restored bundles and refreshed them (changed files
+        # re-walked, removed files dropped, added files built), so adopt the runner's current set wholesale.
+        @seed_bundles = runner.seed_bundles
         fresh_by_file = per_file(fresh)
         analyze_set.each do |path|
           @cache[path] = fresh_by_file[path] || []
@@ -306,7 +320,7 @@ module Rigor
       def build_runner(**)
         Runner.new(
           configuration: @configuration, cache_store: @cache_store, environment: @environment,
-          plugin_requirer: @plugin_requirer, **
+          plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true, **
         )
       end
 

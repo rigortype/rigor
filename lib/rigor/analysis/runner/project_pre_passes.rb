@@ -123,9 +123,25 @@ module Rigor
         # share ONE parse per file via `discovered_project_index_for_paths` — the file is parsed, both
         # collectors walk the tree, and the AST is dropped before the next file (peak RSS stays flat).
         def discover(expansion:)
-          index = Inference::ScopeIndexer.discovered_project_index_for_paths(
-            expansion.fetch(:files), buffer: @buffer
+          build_discovery(
+            Inference::ScopeIndexer.discovered_project_index_for_paths(expansion.fetch(:files), buffer: @buffer)
           )
+        end
+
+        # ADR-85 WD2 — the seed-bundle twin of {#discover}. Rebuilds the discovery tables by folding the prior
+        # run's per-file bundles (re-walking only changed files) and returns `[Discovery, refreshed_bundles]`;
+        # the runner adopts the Discovery and exposes the bundles for the session to persist. On a cold run
+        # (`seed_bundles` empty) this is `#discover` plus a fresh bundle set — the discovery index is identical.
+        def discover_from_bundles(expansion:, seed_bundles:)
+          index = Inference::ScopeIndexer.discovered_project_index_incremental(
+            expansion.fetch(:files), seed_bundles: seed_bundles, buffer: @buffer
+          )
+          [build_discovery(index), index.fetch(:bundles)]
+        end
+
+        # Builds the {Discovery} bundle from a `{ classes:, def_index: }` index hash (shared by the plain and
+        # seed-bundle discovery paths).
+        def build_discovery(index)
           def_index = index.fetch(:def_index)
           Discovery.new(
             discovered_classes: index.fetch(:classes),

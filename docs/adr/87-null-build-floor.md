@@ -1,6 +1,6 @@
 # ADR-87 — The null-build floor: stat-then-digest validation, zero-change snapshot skip, hit-path boot slimming
 
-Status: **Accepted — WD1–WD5 implemented ([PR #FILL]).** Frames Rigor's warm paths
+Status: **Accepted — WD1–WD5 implemented ([PR #85](https://github.com/rigortype/rigor/pull/85)).** Frames Rigor's warm paths
 in build-system terms — the NULL build (zero files changed) and the single-edit
 build — and removes the three measured floor components that are not intrinsic:
 digest-everything validation, an unconditional snapshot rewrite, and a hit path

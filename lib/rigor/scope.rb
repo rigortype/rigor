@@ -8,6 +8,7 @@ require_relative "analysis/dependency_recorder"
 require_relative "inference/expression_typer"
 require_relative "inference/flow_tracer"
 require_relative "inference/statement_evaluator"
+require_relative "inference/def_node_resolver"
 
 module Rigor
   # Immutable analyzer scope: holds local-variable bindings and a reference to the surrounding Environment. State
@@ -369,9 +370,12 @@ module Rigor
     # inter-procedural return-type inference when the receiver class is user-defined and has no RBS sig.
     def user_def_for(class_name, method_name)
       table = @discovery.discovered_def_nodes[class_name.to_s]
-      node = table && table[method_name.to_sym]
-      record_cross_file_method(class_name, method_name, node) if Analysis::DependencyRecorder.active?
-      node
+      # ADR-85 WD3 — the value is either a live `Prism::DefNode` (cold / re-walked file) or a `DefHandle`
+      # (unchanged file, bundle-rebuilt index). Dependency recording keys on the table's PRESENCE (both are
+      # truthy), so it is sound regardless of resolution; only the returned node is resolved lazily.
+      entry = table && table[method_name.to_sym]
+      record_cross_file_method(class_name, method_name, entry) if Analysis::DependencyRecorder.active?
+      Inference::DefNodeResolver.resolve(entry)
     end
 
     # Module-singleton call resolution (ADR-57 follow-up) — companion of {#user_def_for} for SINGLETON-side defs
@@ -382,9 +386,9 @@ module Rigor
     # the same cross-file dependency edge as the instance path (ADR-46).
     def singleton_def_for(class_name, method_name)
       table = @discovery.discovered_singleton_def_nodes[class_name.to_s]
-      node = table && table[method_name.to_sym]
-      record_cross_file_method(class_name, method_name, node) if Analysis::DependencyRecorder.active?
-      node
+      entry = table && table[method_name.to_sym] # live node or DefHandle (ADR-85 WD3)
+      record_cross_file_method(class_name, method_name, entry) if Analysis::DependencyRecorder.active?
+      Inference::DefNodeResolver.resolve(entry)
     end
 
     # ADR-46 slice 1 — note the cross-file dependency this resolution creates: the file defining
@@ -411,9 +415,9 @@ module Rigor
     # implementation detail and go through this accessor.
     def top_level_def_for(method_name)
       table = @discovery.discovered_def_nodes[Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY]
-      node = table && table[method_name.to_sym]
-      record_cross_file_toplevel(method_name, node) if Analysis::DependencyRecorder.active?
-      node
+      entry = table && table[method_name.to_sym] # live node or DefHandle (ADR-85 WD3)
+      record_cross_file_toplevel(method_name, entry) if Analysis::DependencyRecorder.active?
+      Inference::DefNodeResolver.resolve(entry)
     end
 
     # ADR-46 slice 3 — a top-level (`def helper` outside any class) call has NO class ancestry to walk, so unlike

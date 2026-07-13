@@ -6,6 +6,8 @@ require_relative "../scope"
 require_relative "../type"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
+require_relative "../cache/file_digest"
+require_relative "def_handle"
 require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "statement_evaluator"
@@ -2071,6 +2073,155 @@ module Rigor
           next
         end
         { classes: classes.freeze, def_index: finalize_def_index(acc) }
+      end
+
+      # ADR-85 WD2 — the incremental cross-file discovery pass. The bundle-driven twin of
+      # {#discovered_project_index_for_paths}: instead of parsing + walking every file, it folds each file's
+      # cached per-file *seed bundle* (plain-data tables + `(node_id, name, fingerprint)` def-node handles),
+      # re-walking ONLY the files whose current digest does not match their cached bundle (changed / added).
+      # Rebuilds in canonical file order — the sound reconstruction (the merged tables are Set-union / later-wins
+      # / whole-project-finalize, so a changed file cannot be delta-patched, only re-folded in place; recon Q2).
+      #
+      # Returns `{ classes:, def_index:, bundles: }` — `bundles` is the CURRENT per-file bundle set (cached ones
+      # reused, changed ones refreshed, removed ones absent) so the caller persists the up-to-date snapshot.
+      # A re-walked file's methods stay LIVE `Prism::DefNode`s in the returned index (no on-demand re-parse for
+      # a file we just walked); an unchanged file's methods are {DefHandle}s the accessor choke points resolve
+      # lazily. On a cold run (`seed_bundles` empty) every file is re-walked, so the index is entirely live —
+      # identical to {#discovered_project_index_for_paths} — while the bundles are built for the next run.
+      #
+      # @param paths [Array<String>] project file paths, in canonical order.
+      # @param seed_bundles [Hash{String => Hash}] the prior run's per-file bundles, keyed by logical path.
+      # @param buffer [Rigor::Analysis::BufferBinding, nil]
+      # @return [Hash{Symbol => Object}] `{ classes:, def_index:, bundles: }`.
+      def discovered_project_index_incremental(paths, seed_bundles:, buffer: nil)
+        classes = {}
+        acc = new_def_index_accumulator
+        bundles = {}
+        paths.each do |path|
+          physical = buffer ? buffer.resolve(path) : path
+          digest = Cache::FileDigest.hexdigest(physical)
+          cached = seed_bundles[path]
+          if cached && cached[:digest] == digest
+            bundles[path] = cached
+            classes.merge!(cached[:classes])
+            fold_file_index(acc, bundle_to_file_index(cached, path))
+          else
+            root = Prism.parse(File.read(physical), filepath: path).value
+            file_index = build_file_index(path, root)
+            file_classes = {}
+            collect_class_decls(root, [], file_classes)
+            bundles[path] = build_seed_bundle(file_index, file_classes, digest)
+            classes.merge!(file_classes)
+            fold_file_index(acc, file_index)
+          end
+        rescue StandardError
+          # Skip files that fail to parse / read; the per-file analyzer surfaces the parse error separately.
+          next
+        end
+        { classes: classes.freeze, def_index: finalize_def_index(acc), bundles: bundles }
+      end
+
+      # Builds ONE file's isolated def-index contribution (live `Prism::DefNode`s) by folding it into a fresh
+      # accumulator — recon Q2(a)'s "constructible in isolation" property. Shared by the cold-baseline bundle
+      # build and the incremental changed-file re-walk.
+      def build_file_index(path, root)
+        file_acc = new_def_index_accumulator
+        accumulate_project_index(file_acc, path, root)
+        file_acc
+      end
+
+      # ADR-85 WD2 — folds a single file's isolated def-index contribution into the cross-file accumulator,
+      # applying EXACTLY the merge semantics {#accumulate_project_index} applies incrementally (def_nodes
+      # later-wins, def_sources first-wins, includes / class_sources accumulate, everything else later-wins).
+      # Polymorphic over the def-node value: a re-walked file's `file_index` carries live nodes; a cached
+      # bundle's carries {DefHandle}s. The merges never deref the value, so both fold identically.
+      def fold_file_index(acc, file_index)
+        fold_def_tables(acc, file_index)
+        fold_ancestry_tables(acc, file_index)
+      end
+
+      # def_nodes / singleton_def_nodes / method_visibilities / methods fold class-nested later-wins;
+      # def_sources folds first-wins ({#fold_def_sources}).
+      def fold_def_tables(acc, file_index)
+        file_index[:def_nodes].each { |cn, methods| (acc[:def_nodes][cn] ||= {}).merge!(methods) }
+        file_index[:singleton_def_nodes].each { |cn, methods| (acc[:singleton_def_nodes][cn] ||= {}).merge!(methods) }
+        file_index[:method_visibilities].each { |cn, table| (acc[:method_visibilities][cn] ||= {}).merge!(table) }
+        file_index[:methods].each { |cn, table| (acc[:methods][cn] ||= {}).merge!(table) }
+        fold_def_sources(acc, file_index[:def_sources])
+      end
+
+      # def_sources is first-file-wins per `(class, method)` (`||=`), matching `merge_discovered_defs`.
+      def fold_def_sources(acc, file_sources)
+        file_sources.each do |cn, methods|
+          target = (acc[:def_sources][cn] ||= {})
+          methods.each { |method_name, source| target[method_name] ||= source }
+        end
+      end
+
+      # superclasses later-wins; includes / class_sources accumulate; member layouts later-wins.
+      def fold_ancestry_tables(acc, file_index)
+        acc[:superclasses].merge!(file_index[:superclasses])
+        file_index[:includes].each { |cn, mods| acc[:includes][cn] = ((acc[:includes][cn] || []) + mods).uniq }
+        file_index[:class_sources].each { |cn, files| (acc[:class_sources][cn] ||= Set.new).merge(files) }
+        acc[:data_member_layouts].merge!(file_index[:data_member_layouts])
+        acc[:struct_member_layouts].merge!(file_index[:struct_member_layouts])
+      end
+
+      # ADR-85 WD2 — converts a file's live single-file index + its class table into a Marshal-clean seed
+      # bundle: the plain-data tables verbatim, the def-node tables re-expressed as `[node_id, name,
+      # fingerprint]` triples (the path is the bundle key), the class-source names (path implicit), and the
+      # content digest that gates the bundle's reuse.
+      def build_seed_bundle(file_index, file_classes, digest)
+        {
+          digest: digest,
+          classes: file_classes,
+          def_nodes: live_defs_to_bundle(file_index[:def_nodes]),
+          singleton_def_nodes: live_defs_to_bundle(file_index[:singleton_def_nodes]),
+          def_sources: file_index[:def_sources],
+          superclasses: file_index[:superclasses],
+          includes: file_index[:includes],
+          method_visibilities: file_index[:method_visibilities],
+          methods: file_index[:methods],
+          class_source_names: file_index[:class_sources].keys,
+          data_member_layouts: file_index[:data_member_layouts],
+          struct_member_layouts: file_index[:struct_member_layouts]
+        }
+      end
+
+      # ADR-85 WD2 — reconstitutes a cached bundle into a single-file index {#fold_file_index} folds: the
+      # def-node triples become {DefHandle}s bound to this file's `path`, and the class-source names become a
+      # `{name => Set[path]}` table (the shape `accumulate_project_index` produces).
+      def bundle_to_file_index(bundle, path)
+        {
+          def_nodes: bundle_defs_to_handles(bundle[:def_nodes], path),
+          singleton_def_nodes: bundle_defs_to_handles(bundle[:singleton_def_nodes], path),
+          def_sources: bundle[:def_sources],
+          superclasses: bundle[:superclasses],
+          includes: bundle[:includes],
+          method_visibilities: bundle[:method_visibilities],
+          methods: bundle[:methods],
+          class_sources: bundle[:class_source_names].to_h { |name| [name, Set[path]] },
+          data_member_layouts: bundle[:data_member_layouts],
+          struct_member_layouts: bundle[:struct_member_layouts]
+        }
+      end
+
+      # `{class => {method => Prism::DefNode}}` → `{class => {method => [node_id, name, fingerprint]}}`.
+      def live_defs_to_bundle(defs)
+        defs.transform_values do |methods|
+          methods.transform_values do |node|
+            [node.node_id, node.name.to_s, Digest::SHA256.hexdigest(node.location.slice)]
+          end
+        end
+      end
+
+      # `{class => {method => [node_id, name, fingerprint]}}` → `{class => {method => DefHandle}}` for `path`.
+      def bundle_defs_to_handles(defs, path)
+        defs.transform_values do |methods|
+          methods.transform_values do |(node_id, name, fingerprint)|
+            DefHandle.new(path: path, node_id: node_id, name: name, fingerprint: fingerprint)
+          end
+        end
       end
 
       # The empty per-run accumulator the def-index passes fold each file into.

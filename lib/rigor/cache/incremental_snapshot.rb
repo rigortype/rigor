@@ -24,8 +24,10 @@ module Rigor
       # Bump when the on-disk shape changes so stale snapshots are ignored rather than mis-deserialized. 5:
       # the blob is zlib-deflated (ADR-54 WD2 parity with `Store` entries — the snapshot is the one cache
       # artefact that does not go through `Store`); a raw pre-5 blob fails the inflate and loads as nil, the
-      # usual fault-tolerant cold-run path.
-      SCHEMA = 5
+      # usual fault-tolerant cold-run path. 6: adds the ADR-85 WD2 `seed_bundles` section (per-file discovery
+      # contributions with `(node_id, name, fingerprint)` def-node handles); a pre-6 blob mismatches the
+      # SCHEMA gate and loads as nil (a clean cold rebuild — no migration).
+      SCHEMA = 6
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -39,9 +41,13 @@ module Rigor
       # ADR-46 slice 3:
       # `missing` maps a consumer to Set<"kind:name"> it looked up and missed.
       # `class_decls` maps a path to Set<qualified class name> it declares.
+      # ADR-85 WD2:
+      # `seed_bundles` maps an analyzed path to its per-file discovery contribution (plain-data tables +
+      # `(node_id, name, fingerprint)` def-node handles + content digest), so a warm recheck rebuilds the
+      # cross-file index by folding bundles instead of parsing every file.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
-                            :missing, :class_decls)
+                            :missing, :class_decls, :seed_bundles)
 
       # The global fingerprint that gates a snapshot load: a digest of the inputs whose change requires a full
       # rebuild — the engine version + schema, the resolved configuration, the analysis **roots** (the path
@@ -104,7 +110,8 @@ module Rigor
           ancestry_sources: data[:ancestry_sources] || {},
           symbol_fingerprints: data[:symbol_fingerprints] || {},
           missing: data[:missing] || {},
-          class_decls: data[:class_decls] || {}
+          class_decls: data[:class_decls] || {},
+          seed_bundles: data[:seed_bundles] || {}
         )
       rescue StandardError
         nil
@@ -122,7 +129,8 @@ module Rigor
           ancestry_sources: payload.ancestry_sources,
           symbol_fingerprints: payload.symbol_fingerprints,
           missing: payload.missing,
-          class_decls: payload.class_decls
+          class_decls: payload.class_decls,
+          seed_bundles: payload.seed_bundles
         )
         blob = Zlib::Deflate.deflate(raw)
         tmp = "#{@path}.#{Process.pid}.tmp"

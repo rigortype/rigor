@@ -2,6 +2,7 @@
 
 require "digest"
 require_relative "incremental"
+require_relative "../cache/file_digest"
 require_relative "../cache/incremental_snapshot"
 require_relative "../inference/scope_indexer"
 
@@ -52,18 +53,27 @@ module Rigor
       # @param plugin_requirer [#call, nil] optional gem-require hook threaded into each internal Runner
       #   (mirrors {Runner}'s parameter). nil (the default, and what the CLI passes) uses `Kernel.require`;
       #   embedders and specs inject a fake so a test plugin registers without touching the real load path.
-      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil)
+      # @param workers [Integer] ADR-46 — the resolved fork-pool worker count threaded into every internal
+      #   analyzer, so a `--incremental` recheck's closure re-analysis parallelises exactly like the standard
+      #   `check` path (the recon's audit: `--workers` / `RIGOR_RACTOR_WORKERS` / `parallel.workers:` were
+      #   silently ignored because `build_runner` passed no `workers:`). 0 (the default, and what the specs and
+      #   `--verify-incremental` gate use) keeps the sequential recording path bit-for-bit unchanged. The fork
+      #   pool records each worker's cross-file reads and marshals them back (PoolCoordinator), so the
+      #   dependency graph a pooled recheck rebuilds equals the sequential one.
+      def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil,
+                     workers: 0)
         @configuration = configuration
         @paths = paths
         @environment = environment
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
+        @workers = workers
         # ADR-85 WD2 — per-file discovery seed bundles keyed by logical path. A cold baseline builds them; a
         # warm recheck folds them (re-walking only changed files) and refreshes the set. Ride the snapshot.
         @seed_bundles = {}
         @cache = {}              # analyzed path => [Diagnostic]
         @sources = {}            # analyzed path => Set<source path it read from>
-        @digests = {}            # analyzed path => content digest at last analysis
+        @digests = {}            # analyzed path => ADR-87 packed stat-digest entry at last analysis
         @analyzed = []           # the project files analyzed last round
         @dependents = {}         # inverted @sources (file-level)
         # ADR-46 slice 4 — symbol-granularity tracking.
@@ -96,7 +106,7 @@ module Rigor
         @seed_bundles = runner.seed_bundles # ADR-85 WD2 — the freshly built bundle set for the next run.
         absorb_dependency_graph(runner)
         @cache = per_file(diagnostics)
-        @digests = @analyzed.to_h { |path| [path, digest(path)] }
+        @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
         diagnostics
       end
 
@@ -108,7 +118,7 @@ module Rigor
         current = current_files
         added = current - previous
         removed = previous - current
-        changed = (current & previous).reject { |path| digest(path) == @digests[path] }
+        changed = changed_paths(current & previous)
         affected = affected_closure(changed, added, removed)
         analyze_set = affected & current
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true)
@@ -167,23 +177,30 @@ module Rigor
       # when a snapshot was restored. A nil `fingerprint` (uncomputable inputs) disables persistence: a
       # plain full run.
       def run_incremental(snapshot:, fingerprint:)
-        restored = fingerprint && snapshot.load(fingerprint: fingerprint)
-        if restored
-          restore(restored)
-          result = recheck
-          diagnostics = result.diagnostics
-          warm = true
-          # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
-          # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
-          # A cold baseline always persists — there was no valid snapshot to reuse.
-          skip_save = result.no_change?
-        else
-          diagnostics = baseline
-          warm = false
-          skip_save = false
+        # ADR-87 WD1 — install the per-run digest table + recording instant + strict flag for the whole
+        # invocation so change-detection's stat-then-digest freshness (`#pack_digest` / `#stat_fresh?`) honours
+        # `cache.validation: digest` (and `RIGOR_STRICT_VALIDATION`, which the env-only path already sees) and
+        # shares one digest memo across change detection and the baseline/absorb re-pack. The inner
+        # `Runner#run` nests its own `with_run` for the analysis descriptors; nesting is safe (each restores).
+        Cache::FileDigest.with_run(strict: @configuration.cache_validation == "digest") do
+          restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+          if restored
+            restore(restored)
+            result = recheck
+            diagnostics = result.diagnostics
+            warm = true
+            # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
+            # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
+            # A cold baseline always persists — there was no valid snapshot to reuse.
+            skip_save = result.no_change?
+          else
+            diagnostics = baseline
+            warm = false
+            skip_save = false
+          end
+          snapshot.save(fingerprint: fingerprint, payload: to_payload) if fingerprint && !skip_save
+          [diagnostics, warm]
         end
-        snapshot.save(fingerprint: fingerprint, payload: to_payload) if fingerprint && !skip_save
-        [diagnostics, warm]
       end
 
       private
@@ -236,7 +253,7 @@ module Rigor
         fresh_by_file = per_file(fresh)
         analyze_set.each do |path|
           @cache[path] = fresh_by_file[path] || []
-          @digests[path] = digest(path)
+          @digests[path] = pack_digest(path)
         end
         absorb_dependency_graph(runner)
       end
@@ -282,20 +299,29 @@ module Rigor
         return {} if paths.empty?
 
         index = Inference::ScopeIndexer.discovered_def_index_for_paths(paths)
-        def_nodes   = index[:def_nodes]
-        def_sources = index[:def_sources]
         result = Hash.new { |h, k| h[k] = {} }
-        def_sources.each do |class_name, methods|
+        fold_symbol_fingerprints(result, index[:def_sources], index[:def_nodes], "#")
+        # ADR-46 slice 4 (singleton) — mirror the instance fold over the singleton tables so a `def self.x`
+        # body edit yields a changed `"Class.method"` pair, matching the `Runner#symbol_fingerprints` key that
+        # the recorded singleton symbol edges (`singleton_def_for`) invert against.
+        fold_symbol_fingerprints(result, index[:singleton_def_sources], index[:singleton_def_nodes], ".")
+        result.transform_values(&:freeze).freeze
+      end
+
+      # Folds one `(sources, nodes)` table pair from the re-parse index into `result` under `separator`
+      # (`#` instance / `.` singleton). Nodes here are always LIVE (a fresh parse of the changed paths), so
+      # the fingerprint is the def's source slice; `sources` supplies the `"path:line"` a `Prism::Location`
+      # hides.
+      def fold_symbol_fingerprints(result, sources, nodes, separator)
+        sources.each do |class_name, methods|
           methods.each do |method_sym, path_line|
             path = path_line.split(":", 2).first
-            node = def_nodes.dig(class_name, method_sym)
+            node = nodes.dig(class_name, method_sym)
             next unless node
 
-            result[path]["#{class_name}##{method_sym}"] =
-              Digest::SHA256.hexdigest(node.location.slice)
+            result[path]["#{class_name}#{separator}#{method_sym}"] = Digest::SHA256.hexdigest(node.location.slice)
           end
         end
-        result.transform_values(&:freeze).freeze
       end
 
       # ADR-46 slice 3 — the consumers to re-check because a symbol that appeared in a changed file resolves
@@ -335,7 +361,8 @@ module Rigor
       def build_runner(**)
         Runner.new(
           configuration: @configuration, cache_store: @cache_store, environment: @environment,
-          plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true, **
+          plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true,
+          workers: @workers, **
         )
       end
 
@@ -352,8 +379,35 @@ module Rigor
         diagnostics.group_by(&:path).slice(*@analyzed)
       end
 
-      def digest(path)
-        Digest::SHA256.hexdigest(File.read(path))
+      # ADR-87 WD1 — change detection over the candidate paths (files present in both the prior and current
+      # analyzed set). A candidate is UNCHANGED when its recorded stat entry ({#pack_digest}) validates via
+      # {Cache::FileDigest.stat_fresh?}: the file is stat-ed first and re-hashed ONLY when its
+      # `(size, mtime, ctime, inode)` tuple moved or the entry is racy — so an unchanged file hashes zero
+      # content bytes (the recon anomaly this closes: the old path SHA-256'd every file every recheck). A
+      # touch (moved stat, identical content) re-hashes once and validates fresh. Returns the changed subset.
+      def changed_paths(candidates)
+        candidates.reject { |path| stat_fresh?(path) }
+      end
+
+      # True when `path`'s recorded stat entry proves it unchanged since the last analysis. Any stat / parse
+      # failure (missing entry, unreadable / vanished file) reads as NOT fresh (→ re-analyse), preserving the
+      # prior `digest(path) != recorded` "changed" semantics for a file that cannot be validated.
+      def stat_fresh?(path)
+        entry = @digests[path]
+        return false if entry.nil?
+
+        Cache::FileDigest.stat_fresh?(path, entry)
+      rescue StandardError
+        false
+      end
+
+      # ADR-87 WD1 — the recorded freshness entry for `path`: its SHA-256 content digest packed with the stat
+      # tuple `(size, mtime_ns, ctime_ns, inode)` and the run's recording instant, so the NEXT recheck can
+      # validate it by a single `File::Stat` when the tuple has not moved. The SHA-256 digest stays the sole
+      # change authority — the stat tuple only decides whether it must be recomputed. "missing" when the file
+      # cannot be read / stat-ed (its prior sentinel, so a vanished file still compares unequal and re-analyses).
+      def pack_digest(path)
+        Cache::FileDigest.pack_stat(path, Cache::FileDigest.hexdigest(path)) || "missing"
       rescue StandardError
         "missing"
       end

@@ -153,4 +153,34 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
       end
     end
   end
+
+  # ADR-46 — the fork pool must MARSHAL each worker's cross-file dependency records back, or a pooled
+  # `--incremental` recheck would leave the dependency graph un-refreshed and serve stale diagnostics on the
+  # next round. Runs `record_dependencies: true` sequentially and pooled and asserts the recorded edges match.
+  describe "dependency recording through the fork pool" do
+    def recording_runner(dir, paths, config, **runner_kwargs)
+      configuration = Rigor::Configuration.new({ "paths" => paths }.merge(config))
+      Dir.chdir(dir) do
+        runner = Rigor::Analysis::Runner.new(
+          configuration: configuration, record_dependencies: true, **runner_kwargs
+        )
+        runner.run
+        runner
+      end
+    end
+
+    it "captures the same cross-file dependency edges as the sequential path" do
+      Dir.mktmpdir do |dir|
+        defn, caller_path, config = write_cross_file_fixture(dir)
+        paths = [defn, caller_path]
+        sequential = recording_runner(dir, paths, config).file_dependencies
+        pool = recording_runner(dir, paths, config, workers: 2).file_dependencies
+
+        # The pool run must record — not silently drop — the caller's read of the definition file.
+        expect(pool).not_to be_empty
+        expect(pool[caller_path]&.sources).to include(defn)
+        expect(pool.transform_values(&:sources)).to eq(sequential.transform_values(&:sources))
+      end
+    end
+  end
 end

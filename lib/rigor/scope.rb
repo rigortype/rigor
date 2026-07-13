@@ -42,6 +42,7 @@ module Rigor
     def discovered_def_nodes = @discovery.discovered_def_nodes
     def discovered_singleton_def_nodes = @discovery.discovered_singleton_def_nodes
     def discovered_def_sources = @discovery.discovered_def_sources
+    def discovered_singleton_def_sources = @discovery.discovered_singleton_def_sources
     def discovered_method_visibilities = @discovery.discovered_method_visibilities
     def discovered_superclasses = @discovery.discovered_superclasses
     def discovered_includes = @discovery.discovered_includes
@@ -387,24 +388,27 @@ module Rigor
     def singleton_def_for(class_name, method_name)
       table = @discovery.discovered_singleton_def_nodes[class_name.to_s]
       entry = table && table[method_name.to_sym] # live node or DefHandle (ADR-85 WD3)
-      record_cross_file_method(class_name, method_name, entry) if Analysis::DependencyRecorder.active?
+      record_cross_file_method(class_name, method_name, entry, singleton: true) if Analysis::DependencyRecorder.active?
       Inference::DefNodeResolver.resolve(entry)
     end
 
     # ADR-46 slice 1 — note the cross-file dependency this resolution creates: the file defining
     # `class_name#method_name` (the consumer's analysis reads its body via `infer_user_method_return`), or, when
     # unresolved, a negative edge so a later definition re-checks the consumer. Gated on the recorder being
-    # active — no-op on a normal run.
-    def record_cross_file_method(class_name, method_name, node)
+    # active — no-op on a normal run. `singleton:` selects the singleton-side source table + a `"Class.method"`
+    # symbol key (vs the instance `"Class#method"`), so a class/singleton-method body edit produces a changed
+    # symbol pair and scopes to the method's call sites the same way an instance-method edit does — the source
+    # site is read from `discovered_singleton_def_sources`, the mirror the ScopeIndexer now records (ADR-46
+    # slice 4 singleton extension). Both keys share the format `Runner#symbol_fingerprints` emits.
+    def record_cross_file_method(class_name, method_name, node, singleton: false)
+      symbol = "#{class_name}#{singleton ? '.' : '#'}#{method_name}"
       if node
         # ADR-46 slice 4 — pass the symbol so the recorder tracks this as a method-call (symbol-granularity) edge
         # rather than a file-level edge.
-        Analysis::DependencyRecorder.read_site(
-          @discovery.discovered_def_sources.dig(class_name.to_s, method_name.to_sym),
-          "#{class_name}##{method_name}"
-        )
+        source_table = singleton ? @discovery.discovered_singleton_def_sources : @discovery.discovered_def_sources
+        Analysis::DependencyRecorder.read_site(source_table.dig(class_name.to_s, method_name.to_sym), symbol)
       else
-        Analysis::DependencyRecorder.read_missing(:method, "#{class_name}##{method_name}")
+        Analysis::DependencyRecorder.read_missing(:method, symbol)
       end
     end
     private :record_cross_file_method

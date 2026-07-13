@@ -187,6 +187,7 @@ module Rigor
       # updated snapshot for the next invocation. Diagnostics are identical to a full run (the `--verify-incremental`
       # gate enforces this); the win is skipping per-file inference for unchanged files.
       def run_incremental_check(configuration, options, cache_root)
+        require_relative "check_runner_factory"
         paths = @argv.empty? ? nil : @argv
         probe = Analysis::Runner.new(configuration: configuration, cache_store: nil)
         files = paths ? probe.analysis_file_set(paths) : probe.analysis_file_set
@@ -196,7 +197,11 @@ module Rigor
         snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
         session = Analysis::IncrementalSession.new(
           configuration: configuration, paths: paths,
-          cache_store: incremental_cache_store(configuration, options, cache_root)
+          cache_store: incremental_cache_store(configuration, options, cache_root),
+          # ADR-46 — thread the same worker-count precedence the standard `check` path uses
+          # (CLI `--workers` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > 0) so the recheck's closure
+          # re-analysis parallelises; the fork pool marshals dependency records back so the graph is sound.
+          workers: CheckRunnerFactory.resolve_workers(options, configuration)
         )
 
         diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)

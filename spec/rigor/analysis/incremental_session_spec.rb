@@ -469,4 +469,153 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       end
     end
   end
+
+  # ADR-87 WD1 (PR item 1) — change detection stats rather than SHA-256s unchanged files.
+  describe "stat-tier change detection" do
+    it "detects no change for an unchanged recheck without hashing any content bytes" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        write_unit(a, prefix: "A")
+        write_unit(b, prefix: "B")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # `Digest::SHA256.file` is the sole content-hashing call; the stat tier must not reach it for an
+        # unchanged file (the recon anomaly: the old path SHA-256'd every file every recheck).
+        allow(Digest::SHA256).to receive(:file).and_call_original
+        changed = session.send(:changed_paths, session.analyzed_files)
+
+        expect(changed).to be_empty
+        expect(Digest::SHA256).not_to have_received(:file)
+      end
+    end
+
+    it "detects a touched-but-identical file as fresh (moved stat tuple, unchanged content)" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        write_unit(a, prefix: "A")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # Move mtime/ctime without changing content (a `git checkout` / `touch`); the digest is the authority.
+        future = Time.now + 5
+        File.utime(future, future, a)
+
+        expect(session.send(:changed_paths, [a])).to be_empty
+      end
+    end
+
+    it "detects an edited file" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        write_unit(a, prefix: "A")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        write_unit(a, prefix: "A", reduced: false)
+
+        expect(session.send(:changed_paths, [a])).to eq([a])
+      end
+    end
+  end
+
+  # ADR-46 (PR item 2) — the `--incremental` closure re-analysis is wired to the fork pool.
+  describe "fork-pool wiring" do
+    def write_greeter(dir, body:)
+      base = File.join(dir, "greeter_base.rb")
+      File.write(base, "class GreeterBase\n  def greet\n    #{body}\n  end\nend\n")
+      base
+    end
+
+    it "matches a full re-analysis with workers > 0 across successive edits" do
+      skip "fork is unavailable on this platform" unless Process.respond_to?(:fork)
+      Dir.mktmpdir do |dir|
+        write_greeter(dir, body: '"hi"')
+        # A subclass whose implicit-self call resolves `greet` cross-file (records an edge to greeter_base.rb)
+        # plus filler files so the pool distributes real slices.
+        File.write(File.join(dir, "greeter_sub.rb"), <<~RUBY)
+          class GreeterSub < GreeterBase
+            def announce
+              greet
+            end
+          end
+        RUBY
+        3.times { |i| write_unit(File.join(dir, "u#{i}.rb"), prefix: "U#{i}") }
+
+        session = described_class.new(configuration: configuration(dir), environment: shared_environment, workers: 3)
+        session.baseline
+
+        write_greeter(dir, body: '"edited"')
+        recheck = session.recheck
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+
+        # A second edit exercises the graph the FIRST pooled recheck rebuilt from the marshalled records.
+        write_greeter(dir, body: '"again"')
+        recheck2 = session.recheck
+        expect(sorted(recheck2.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+  end
+
+  # ADR-46 slice 4 singleton extension (PR item 3) — a class/singleton-method body edit gets symbol
+  # granularity: its closure scopes to the method's call sites, not the file's coarse dependents.
+  describe "singleton-method symbol granularity" do
+    def write_util(dir, unused_body:)
+      util = File.join(dir, "util.rb")
+      File.write(util, <<~RUBY)
+        class Util
+          def self.used
+            "u"
+          end
+
+          def self.unused
+            #{unused_body}
+          end
+        end
+      RUBY
+      util
+    end
+
+    it "scopes a class-method body edit to that method's callers (not the file's dependents)" do
+      Dir.mktmpdir do |dir|
+        util = write_util(dir, unused_body: '"n"')
+        ca = File.join(dir, "caller_a.rb")
+        cb = File.join(dir, "caller_b.rb")
+        File.write(ca, "class CallerA\n  def go\n    Util.used\n  end\nend\n")
+        File.write(cb, "class CallerB\n  def go\n    Util.used\n  end\nend\n")
+
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # Edit the UNUSED class method's body — nobody calls it, so no caller is affected.
+        write_util(dir, unused_body: '"CHANGED"')
+        recheck = session.recheck
+
+        expect(recheck.changed).to eq(Set[util])
+        expect(recheck.affected).to eq(Set[util])
+        expect(recheck.reused).to include(ca, cb)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "re-checks the callers of an edited class method" do
+      Dir.mktmpdir do |dir|
+        util = File.join(dir, "util.rb")
+        File.write(util, "class Util\n  def self.used\n    \"u\"\n  end\nend\n")
+        ca = File.join(dir, "caller_a.rb")
+        File.write(ca, "class CallerA\n  def go\n    Util.used\n  end\nend\n")
+
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # Edit the CALLED class method's body — its caller must be re-analysed.
+        File.write(util, "class Util\n  def self.used\n    \"CHANGED\"\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(util, ca)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+  end
 end

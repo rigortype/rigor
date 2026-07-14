@@ -165,6 +165,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   PLUGIN_SINGLETON = %w[
+    ids_for_gem(req:gem_name)
+    record_gem_registration(req:gem_name,req:ids)
     register(req:plugin_class)
     registered()
     registered_for(req:id)

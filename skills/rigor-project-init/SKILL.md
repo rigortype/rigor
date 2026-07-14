@@ -126,6 +126,7 @@ committed `sig/` directory.
 | 2 | [`references/02-configure.md`](references/02-configure.md) | **Phase 4.** Severity-profile choice tied to the mode. The `.rigor.dist.yml` template and every key it uses. The `.rigor.dist.yml` vs `.rigor.yml` convention. |
 | 3 | [`references/04-sig-uplift.md`](references/04-sig-uplift.md) | **Phase 5.** `rigor sig-gen --write` baseline. `rigor sig-gen --params=observed --write` attr_reader precision uplift. Handling residual `untyped` methods. Committing `sig/`. |
 | 4 | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) | **Phases 6–8.** `rigor triage` as the diagnosis layer. Phase 6a pre-baseline cleanup loop (`pre_eval:` for monkey-patch hints, `rbs collection install`). `rigor baseline generate` + wiring `baseline:`. Surfacing likely real bugs; sig quality FP recognition (Struct `call.wrong-arity`, `-> bot` return-type-mismatch, regex-capture `$1` FPs). The two escalation paths — write a project plugin, or open a Rigor issue. |
+| — (optional) | [`references/05-jit-performance.md`](references/05-jit-performance.md) | **Operational, not a phase.** Run speed via a Ruby JIT: Rigor auto-enables YJIT for long runs (~5 s break-even), how to detect JIT support in your install, the override env vars, and why YJIT beats ZJIT for Rigor on Ruby 4.0. Read only when a large project's `rigor check` wall time matters. |
 
 ## Escalation paths (Phase 7 preview)
 

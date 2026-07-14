@@ -87,9 +87,11 @@ Every Rails model/controller edit would defeat incremental.
 
 Digesting the producer VALUE instead moves the fingerprint only when the contributed
 value moves. Verified: with `--no-cache` (deterministic recompute) a value-preserving
-controller edit leaves the fact-surface digest identical. This makes WD2's glob-sort
-determinism load-bearing (a non-deterministic value would false-invalidate every
-recompute) — all bundled producers were checked deterministic on recompute.
+controller edit leaves the fact-surface digest identical. Producer-value determinism
+across recomputes is therefore load-bearing (a non-deterministic value would
+false-invalidate every recompute); all bundled producers were checked deterministic
+on recompute (`Dir.glob` sorts by default on Ruby 3.0+, so the sorbet catalog's
+last-sig-wins fold is already stable — WD2 documents this rather than re-sorting).
 
 The apparent "producer nondeterminism" seen while diagnosing this was an ADR-87
 racy-window artifact of rapid test edits (edit + immediately re-run within the mtime

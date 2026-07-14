@@ -1,6 +1,6 @@
 # ADR-88 — Incremental plugin-fact soundness
 
-Status: **Accepted — WD1–WD4 implemented ([PR #FILL](https://github.com/rigortype/rigor/pull/FILL)); WD5 (per-consumer
+Status: **Accepted — WD1–WD4 implemented ([PR #89](https://github.com/rigortype/rigor/pull/89)); WD5 (per-consumer
 plugin-read tracking) deferred.** The `--incremental` snapshot's global fingerprint
 (config / gems / RBS env / `signature_paths:`) does NOT capture the values a plugin
 computes from files OUTSIDE those inputs — a Sorbet catalog built from an `.rbi`
@@ -119,10 +119,12 @@ digested by WD1(b) for free (closing the `.rbi` gap). The producer returns a
 Marshal-clean bundle `{ catalog:, sigil_by_path:, parse_errors_by_path: }` (a cache
 HIT does not run the block, so the sigil map + parse errors are captured in the
 value, not written as side-effects; parse errors become `{kind:, line:, column:}`
-tuples, no live Prism node). While there, the documented `Dir.glob`-order
-last-sig-wins nondeterminism is canonicalised (globs sorted before folding) — a
-non-deterministic catalog value would false-invalidate the WD1 fingerprint on every
-recompute.
+tuples, no live Prism node). The catalog VALUE must be deterministic across
+recomputes — a non-deterministic value would false-invalidate the WD1 fingerprint —
+so the last-sig-wins fold order must be stable; `Dir.glob` already sorts by default
+on Ruby 3.0+ (the slice-1 "filesystem order" caveat predates that default), so the
+walk relies on that rather than re-sorting. All bundled producers were verified
+deterministic on recompute.
 
 ### WD3 — `user_def_site_for` records its edge
 

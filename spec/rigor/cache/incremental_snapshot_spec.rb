@@ -20,7 +20,8 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       symbol_fingerprints: { "b.rb" => { "Foo#bar" => "abc123" } },
       missing: { "a.rb" => Set["toplevel:helper"] },
       class_decls: { "b.rb" => Set["Foo"] },
-      seed_bundles: { "b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} } }
+      seed_bundles: { "b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} } },
+      plugin_fact_digest: "fact-digest-abc"
     )
   end
 
@@ -45,6 +46,32 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       snapshot.save(fingerprint: "fp1", payload: sample_payload)
       loaded = snapshot.load(fingerprint: "fp1")
       expect(loaded.seed_bundles).to eq("b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} })
+    end
+  end
+
+  it "round-trips the ADR-88 WD1 plugin_fact_digest" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      snapshot.save(fingerprint: "fp1", payload: sample_payload)
+      loaded = snapshot.load(fingerprint: "fp1")
+      expect(loaded.plugin_fact_digest).to eq("fact-digest-abc")
+    end
+  end
+
+  it "ignores a schema-8 snapshot (pre-ADR-88: no plugin_fact_digest), loading nil for a cold rebuild" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      # A schema-8 blob (a pre-ADR-88 build) carries no `plugin_fact_digest`. Mis-reading it as a schema-9
+      # payload would leave the field nil, which reads as "no fact surface" and could reuse a snapshot across a
+      # plugin sig/catalog edit. The SCHEMA gate must discard it for a clean cold rebuild instead.
+      old = Marshal.dump(
+        schema: 8, fingerprint: "fp1", cache: {}, sources: {}, digests: {}, analyzed: [],
+        symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {}, missing: {}, class_decls: {},
+        seed_bundles: { "a.rb" => { digest: "sha-a", code_fingerprint: "cf" } }
+      )
+      FileUtils.mkdir_p(File.dirname(snapshot.path))
+      File.binwrite(snapshot.path, Zlib::Deflate.deflate(old))
+      expect(snapshot.load(fingerprint: "fp1")).to be_nil
     end
   end
 

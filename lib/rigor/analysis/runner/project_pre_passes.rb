@@ -189,6 +189,20 @@ module Rigor
           )
         end
 
+        # ADR-88 WD1 — load the project's plugins and run every `#prepare` hook, returning the prepared
+        # {Rigor::Plugin::Registry} WITHOUT the synthetic-method / dependency-source / pre-eval scanners. The
+        # incremental fact-surface fingerprint probe ({Analysis::PluginFactFingerprint}) uses this to read the
+        # ADR-9 fact store + drive the ADR-60 producers without paying for the full pre-pass or building the RBS
+        # environment. `prepare` runs unconditionally here — the probe is always sequential (its `pool_mode?`
+        # reader returns false), so the pool-mode skip in {#run} does not apply. Prepare diagnostics are
+        # discarded: a plugin that raises in `#prepare` publishes no facts, so its surface is simply absent from
+        # the fingerprint, exactly as it would be absent from analysis.
+        def prepared_registry
+          registry = load_plugins
+          plugin_prepare_diagnostics(registry) unless registry.empty?
+          registry
+        end
+
         # Returns the per-run shared `Plugin::FactStore` instance. All loaded plugins share this store
         # through their respective `Plugin::Services` (the same instance is threaded by
         # `Plugin::Loader.load`). Returns `nil` when no plugins are loaded.

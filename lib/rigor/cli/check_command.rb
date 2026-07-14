@@ -193,9 +193,10 @@ module Rigor
           configuration: configuration, roots: paths || configuration.paths
         )
         snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
+        store = incremental_cache_store(configuration, options, cache_root)
         session = Analysis::IncrementalSession.new(
           configuration: configuration, paths: paths,
-          cache_store: incremental_cache_store(configuration, options, cache_root),
+          cache_store: store,
           # ADR-46 — thread the same worker-count precedence the standard `check` path uses
           # (CLI `--workers` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > 0) so the recheck's closure
           # re-analysis parallelises; the fork pool marshals dependency records back so the graph is sound.
@@ -208,11 +209,47 @@ module Rigor
         # built just to size the banner (recon §3 — the analysis tree was expanded three times per recheck).
         @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
                   "(#{session.analyzed_files.size} files)")
+        emit_incremental_fact_surface_notes(session)
+        write_incremental_cache_stats(session, cache_root, store) if options.fetch(:cache_stats)
 
         result = apply_baseline_filter(Analysis::Result.new(diagnostics: diagnostics, stats: nil), configuration,
                                        options)
         write_result(result, options.fetch(:format))
         result.success? ? 0 : 1
+      end
+
+      # ADR-88 WD1 — a one-line stderr note when the plugin fact surface (an ADR-9 fact, an ADR-60 producer
+      # value, or an `incremental_state_fingerprint` hook) forced a full run: either it CHANGED since the
+      # snapshot (a Sorbet sig edit, a schema change) or a contributing plugin declares NO fingerprint surface
+      # (opaque — a full run every invocation). Both are the sound direction; the note explains why a recheck
+      # was not warm.
+      def emit_incremental_fact_surface_notes(session)
+        opaque = session.opaque_plugin_ids
+        unless opaque.empty?
+          @err.puts("rigor: --incremental plugin#{'s' unless opaque.size == 1} #{opaque.sort.join(', ')} " \
+                    "contribute call-site types with no incremental fingerprint surface; the snapshot cannot " \
+                    "be reused (full analysis every run).")
+        end
+        return unless session.fact_surface_invalidated? && opaque.empty?
+
+        @err.puts("rigor: --incremental plugin fact surface changed since the snapshot; ran a full analysis.")
+      end
+
+      # ADR-88 WD1 — `--incremental --cache-stats` surfaces the on-disk cache inventory (as a plain `check`
+      # does) plus the fact-surface status line, so an operator can see whether a full run was fact-surface
+      # driven. The plain `check` cache-stats path is bypassed by the incremental short-circuit, so it is
+      # emitted here.
+      def write_incremental_cache_stats(session, cache_root, store)
+        write_cache_stats(cache_root, store)
+        status =
+          if !session.opaque_plugin_ids.empty?
+            "opaque (#{session.opaque_plugin_ids.sort.join(', ')})"
+          elsif session.fact_surface_invalidated?
+            "changed — snapshot invalidated"
+          else
+            "unchanged"
+          end
+        @out.puts("  plugin fact surface: #{status}")
       end
 
       def verify_full_diagnostics(configuration, paths)

@@ -29,6 +29,34 @@ module Rigor
           producer_value(:probe)
         end
       end
+
+      # ADR-88 WD1 fixture — a plugin whose producer value is a class-level toggle standing in for a Sorbet
+      # catalog built from sig files OUTSIDE `signature_paths:`. Flipping `.state` between two "processes"
+      # (with no store, so the block recomputes and reflects the toggle) simulates a sig edit that moves the
+      # fact surface without touching any analyzed file — the case the global snapshot fingerprint misses.
+      class Wd1FactSurfaceProbe < Base
+        @state = "s1"
+        class << self
+          attr_accessor :state
+        end
+        manifest(id: "wd1-fact-surface", version: "0.1.0")
+        producer :catalog do |_params|
+          Wd1FactSurfaceProbe.state
+        end
+
+        def prepare(_services)
+          producer_value(:catalog)
+        end
+      end
+
+      # ADR-88 WD1 fixture — CONTRIBUTES a per-call type (`dynamic_return`) but declares no fact / producer /
+      # hook. The fingerprint cannot see its stale-able state, so it is OPAQUE: the snapshot is never reused.
+      class Wd1OpaqueProbe < Base
+        manifest(id: "wd1-opaque", version: "0.1.0")
+        dynamic_return methods: [:thing] do |_call_node, _scope|
+          nil
+        end
+      end
     end
   end
 end
@@ -216,6 +244,42 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
 
         expect(recheck.affected).not_to include(a)
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+  end
+
+  # ADR-88 WD3 — `Scope#user_def_site_for` now records the cross-file method edge the sibling `#user_def_for`
+  # records, so a caller whose `call.undefined-method` names a project monkey-patch's definition site
+  # (`project_definition_site`, a `"path:line"` embedded in the message) re-checks when that site MOVES. A
+  # line-shift edit above the def (its body — and so its symbol fingerprint — unchanged) previously left the
+  # caller served from cache with the stale line; the file-level edge the recorded read establishes now pulls
+  # it back in.
+  describe "definition-site line shift (WD3)" do
+    it "re-checks the call.undefined-method consumer when the definition site moves" do
+      Dir.mktmpdir do |dir|
+        patch = File.join(dir, "patch.rb")
+        caller = File.join(dir, "caller.rb")
+        # patch.rb reopens a core class with a method Rigor will not apply cross-file; the def is at line 2.
+        File.write(patch, "class String\n  def shout\n    upcase\n  end\nend\n")
+        File.write(caller, "x = \"hi\"\nputs x.shout\n")
+
+        session = session_for(configuration(dir))
+        baseline = session.baseline
+        caller_diag = baseline.find { |d| d.path == caller && d.rule == "call.undefined-method" }
+        expect(caller_diag).not_to be_nil
+        expect(caller_diag.project_definition_site).to eq("#{patch}:2")
+
+        # Move the def down one line by inserting a blank line above `class String` — the def BODY (its symbol
+        # fingerprint) is unchanged, only its `path:line` moves to line 3.
+        File.write(patch, "\nclass String\n  def shout\n    upcase\n  end\nend\n")
+        recheck = session.recheck
+
+        # The caller must be re-analysed (via the WD3 edge) so its cached site line is refreshed; the merged
+        # result is byte-identical to a full re-analysis, which now names `patch.rb:3`.
+        expect(recheck.affected).to include(caller)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        moved = recheck.diagnostics.find { |d| d.path == caller && d.rule == "call.undefined-method" }
+        expect(moved.project_definition_site).to eq("#{patch}:3")
       end
     end
   end
@@ -443,8 +507,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         expect(store1.stats[:by_producer][probe_producer_id]).to include(misses: 1, writes: 1)
 
         # Process 2 — warm recheck (fresh session, fresh Store, same disk root): `#prepare` consults the
-        # producer, which now serves from disk. The block never re-runs (scans stays 1) and the store
-        # records a hit with no miss.
+        # producer, which now serves from disk. The block never re-runs (scans stays 1) and the store records a
+        # hit with no miss. The ADR-88 WD1 fact-surface fingerprint reads this producer POST-HOC from the
+        # recheck runner (its `producer_value` already memoised by `#prepare`), so it adds no extra `#prepare`
+        # and no extra recompute.
         store2 = Rigor::Cache::Store.new(root: cache_root)
         _d2, warm2 = run_probe_incremental(config, dir, snapshot, fp, store2)
         expect(warm2).to be(true)
@@ -464,8 +530,144 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
         run_probe_incremental(config, dir, snapshot, fp, nil)
         run_probe_incremental(config, dir, snapshot, fp, nil)
 
-        # With no store, each process re-runs `#prepare`'s producer block — the regression WD1 fixes.
+        # With no store, each process re-runs `#prepare`'s producer block — the regression ADR-85 WD1 fixes.
+        # The ADR-88 WD1 fact-surface fingerprint adds no extra scan: it reads the producer POST-HOC from the
+        # analysis runner (whose `#prepare` already ran the block), so the count stays at one per process.
         expect(Rigor::Plugin::Wd1CacheProbe.scans).to eq(2)
+      end
+    end
+  end
+
+  # ADR-88 WD1 — the fact-surface fingerprint gates snapshot reuse: a plugin sig/catalog edit that moves the
+  # fact surface without touching an analyzed file (a Sorbet `.rbi` outside `signature_paths:`) invalidates the
+  # snapshot even though the global fingerprint stays fresh. Opaque plugins (types with no surface) make the
+  # snapshot permanently un-reusable.
+  describe "#run_incremental fact-surface fingerprint (WD1)" do
+    def surface_requirer
+      lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::Wd1FactSurfaceProbe)
+        true
+      end
+    end
+
+    def opaque_requirer
+      lambda do |_name|
+        Rigor::Plugin.register(Rigor::Plugin::Wd1OpaqueProbe)
+        true
+      end
+    end
+
+    def surface_config(dir)
+      Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("paths" => [dir], "plugins" => ["wd1-fact-surface"])
+      )
+    end
+
+    def run_surface(config, dir, snapshot, fingerprint_hex, requirer)
+      Rigor::Plugin.unregister!
+      described_class.new(
+        configuration: config, paths: [dir], cache_store: nil, plugin_requirer: requirer
+      ).run_incremental(snapshot: snapshot, fingerprint: fingerprint_hex)
+    end
+
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    it "warm-reuses the snapshot when the plugin fact surface is unchanged" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "x = 1\nputs x\n")
+        config = surface_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".rigor", "cache"))
+        fp = fingerprint(config, dir)
+        Rigor::Plugin::Wd1FactSurfaceProbe.state = "s1"
+
+        _d1, warm1 = run_surface(config, dir, snapshot, fp, surface_requirer)
+        expect(warm1).to be(false) # cold baseline
+
+        _d2, warm2 = run_surface(config, dir, snapshot, fp, surface_requirer)
+        expect(warm2).to be(true) # unchanged fact surface + unchanged files → warm
+      ensure
+        Rigor::Plugin::Wd1FactSurfaceProbe.state = "s1"
+      end
+    end
+
+    it "runs a full analysis (not warm) when the fact surface changed but no analyzed file did" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "x = 1\nputs x\n")
+        config = surface_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".rigor", "cache"))
+        fp = fingerprint(config, dir)
+
+        Rigor::Plugin::Wd1FactSurfaceProbe.state = "s1"
+        run_surface(config, dir, snapshot, fp, surface_requirer) # cold baseline, stores digest(s1)
+
+        # Flip the fact surface — as a Sorbet `.rbi` edit outside `signature_paths:` would — WITHOUT touching
+        # a.rb. The global fingerprint is unchanged, but the fact digest now differs.
+        Rigor::Plugin::Wd1FactSurfaceProbe.state = "s2"
+        session = described_class.new(
+          configuration: config, paths: [dir], cache_store: nil, plugin_requirer: surface_requirer
+        )
+        Rigor::Plugin.unregister!
+        _diags, warm = session.run_incremental(snapshot: snapshot, fingerprint: fp)
+
+        expect(warm).to be(false) # snapshot invalidated → full analysis
+        expect(session.fact_surface_invalidated?).to be(true)
+        expect(session.opaque_plugin_ids).to be_empty
+      ensure
+        Rigor::Plugin::Wd1FactSurfaceProbe.state = "s1"
+      end
+    end
+
+    it "never warm-reuses (and names the plugin) when a contributing plugin declares no fingerprint surface" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "x = 1\nputs x\n")
+        config = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge("paths" => [dir], "plugins" => ["wd1-opaque"])
+        )
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".rigor", "cache"))
+        fp = fingerprint(config, dir)
+
+        run_surface(config, dir, snapshot, fp, opaque_requirer) # baseline
+
+        session = described_class.new(
+          configuration: config, paths: [dir], cache_store: nil, plugin_requirer: opaque_requirer
+        )
+        Rigor::Plugin.unregister!
+        _diags, warm = session.run_incremental(snapshot: snapshot, fingerprint: fp)
+
+        expect(warm).to be(false) # opaque → never warm, even with unchanged files
+        expect(session.opaque_plugin_ids).to eq(["wd1-opaque"])
+      end
+    end
+
+    it "makes the invalidation decision independent of the session's worker count (pooled/sequential parity)" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.rb"), "x = 1\nputs x\n")
+        config = surface_config(dir)
+        Rigor::Plugin::Wd1FactSurfaceProbe.state = "s1"
+
+        # A SEQUENTIAL session reads the fingerprint POST-HOC from its analysis runner (`from_registry`); a
+        # POOLED session (whose main process SKIPS `#prepare`) falls back to the always-sequential probe. Both
+        # must reach the SAME fact-surface digest and the SAME opacity verdict — the reuse decision cannot
+        # diverge by pool mode. The sequential path here is exercised after a `baseline` seeds `@last_runner`;
+        # the pooled path via a fresh session (no run yet → probe fallback).
+        sequential = described_class.new(
+          configuration: config, paths: [dir], cache_store: nil, plugin_requirer: surface_requirer, workers: 0
+        )
+        Rigor::Plugin.unregister!
+        sequential.baseline # seeds @last_runner so `compute_plugin_fact_fingerprint` takes the post-hoc path
+        d_seq = sequential.send(:compute_plugin_fact_fingerprint)
+
+        pooled = described_class.new(
+          configuration: config, paths: [dir], cache_store: nil, plugin_requirer: surface_requirer, workers: 4
+        )
+        Rigor::Plugin.unregister!
+        d_pool = pooled.send(:compute_plugin_fact_fingerprint) # no run → probe fallback (the pooled path)
+
+        expect(d_pool.digest).to eq(d_seq.digest)
+        expect(d_pool.opaque_plugin_ids).to eq(d_seq.opaque_plugin_ids)
+      ensure
+        Rigor::Plugin::Wd1FactSurfaceProbe.state = "s1"
       end
     end
   end

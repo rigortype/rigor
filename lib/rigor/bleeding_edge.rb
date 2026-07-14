@@ -9,11 +9,10 @@ module Rigor
   # *today's* rules are) and is versioned with the gem, NOT a user-supplied file: the
   # inspectable counterpart to PHPStan's `bleedingEdge` include.
   #
-  # The overlay is **empty today** — no discipline has yet been queued for the next major.
-  # This module is the WD2 *foundation* (the v0.1.19 slice): the surface (`bleeding_edge:`
-  # config, the `rigor show-bleedingedge` command, the severity-composition hook in
-  # {Configuration::SeverityProfile.resolve}) exists and is wired end-to-end, so the first
-  # real feature lands as a single {FEATURES} entry with no engine plumbing.
+  # The WD2 foundation slice wired the surface end-to-end (`bleeding_edge:` config, the
+  # `rigor show-bleedingedge` command, the severity-composition hook in
+  # {Configuration::SeverityProfile.resolve}), so a discipline lands as a single {FEATURES}
+  # entry with no engine plumbing — as the first one, `reject-unparseable-signatures`, does.
   #
   # Each feature carries a **stable feature id** — part of the ADR-50 WD1 contract
   # vocabulary: the config, the `show` command, and the eventual CHANGELOG migration note all
@@ -40,9 +39,22 @@ module Rigor
       end
     end
 
-    # The overlay. Empty until the first next-major discipline is queued; add a {Feature}
-    # here (with a stable id) when one is.
-    FEATURES = [].freeze
+    # The overlay.
+    #
+    # Feature ids are **kebab-case, and name the discipline rather than the rule** it happens to
+    # promote (`reject-unparseable-signatures`, not `rbs-quarantine-error`): a discipline may grow
+    # to cover more rules without its id going stale, and the id is contract vocabulary that
+    # outlives the rule set it started with.
+    FEATURES = [
+      Feature.new(
+        id: "reject-unparseable-signatures",
+        summary: "An unparseable `.rbs` under `signature_paths:` fails the run instead of being " \
+                 "skipped with a warning. A quarantined signature file silently removes the types " \
+                 "it declares, so the run gets quieter rather than cleaner — this treats a broken " \
+                 "sig set as a build error, the way a broken source file already is.",
+        severity_overrides: { "rbs.coverage.quarantined-signature" => :error }.freeze
+      )
+    ].freeze
 
     module_function
 

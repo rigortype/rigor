@@ -185,9 +185,23 @@ into a fourth `severity_profile` value — still stands: it would conflate
 loudness with the discipline-set and lose both the granularity and the
 explicit diff.)
 
-**Foundation landed (v0.1.19).** The WD2 *surface* is wired end-to-end
-while the overlay is intentionally empty (no discipline is yet queued for
-a major): `Rigor::BleedingEdge` is the maintained `Feature` registry
+**First feature queued (v0.3.0): `reject-unparseable-signatures`.** An
+unparseable `.rbs` under `signature_paths:` is quarantined so the rest of
+the env survives, which makes the run *quieter* rather than cleaner — the
+types that file declared are simply gone. It is reported by default as the
+`:warning` `rbs.coverage.quarantined-signature`; the feature promotes it to
+`:error`, and that is the intended default at the next major. It is the
+worked example of the WD3 rule: **rejecting a previously-accepted input is
+a new required discipline, so it ships off-by-default behind the overlay
+rather than turning a green build red on upgrade** — the more so because
+ADR-79 keeps Rigor faithful to the project's own `rbs` gem, whose parser
+can newly reject a file across versions. Its id also sets the style:
+kebab-case, naming the *discipline* rather than the rule it happens to
+promote, so a discipline can grow to cover more rules without its
+contract-vocabulary id going stale.
+
+**Foundation landed (v0.1.19).** The WD2 *surface* was wired end-to-end
+before any discipline was queued: `Rigor::BleedingEdge` is the maintained `Feature` registry
 (stable id + summary + a `severity_overrides` map); `.rigor.yml`
 `bleeding_edge:` accepts `true` / a feature-id list / `{ all:, except: }`,
 normalised and exposed on `Configuration`; `rigor show-bleedingedge`

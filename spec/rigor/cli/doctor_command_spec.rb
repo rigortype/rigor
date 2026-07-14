@@ -45,6 +45,24 @@ RSpec.describe Rigor::CLI::DoctorCommand do
       expect(err).to be_empty
     end
 
+    # A quarantined `.rbs` keeps the env NON-empty (that is the point of quarantining it), so the class count
+    # alone reads as healthy — doctor used to say exactly that while the project's own types were silently gone.
+    it "reports a degraded RBS environment when a signature file was quarantined" do
+      File.write("clean.rb", "x = 1\n")
+      FileUtils.mkdir_p("sig")
+      File.write(File.join("sig", "broken.rbs"),
+                 "module Acme\n  class Broken\n    def h: () -> { data-contrast: Integer }\n  end\nend\n")
+      File.write(".rigor.yml", "paths:\n  - clean.rb\nsignature_paths:\n  - sig\n")
+
+      _status, out, = run([])
+      expect(out).to include("[WARN] rbs_environment")
+      expect(out).to include("RBS environment degraded")
+      expect(out).to include("reject-unparseable-signatures")
+      expect(out).not_to include("all checks passed")
+      # A warn-only run must not headline "0 issue(s) found" above the finding it is reporting.
+      expect(out).to include("1 warning(s) found")
+    end
+
     it "reports clean JSON" do
       File.write("clean.rb", "x = 1\n")
       File.write(".rigor.yml", "paths:\n  - .\n")

@@ -478,6 +478,7 @@ module Rigor
         targets = target_files(expansion)
         @analyzed_files = targets
         diagnostics += @pool_coordinator.analyze_files(targets, environment: environment)
+        diagnostics += @diagnostic_aggregator.rbs_quarantined_signature_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_synthesized_namespace_diagnostics
         diagnostics += @diagnostic_aggregator.conforms_to_diagnostics
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
@@ -776,6 +777,7 @@ module Rigor
           cached_plugin_prepare_diagnostics: -> { @cached_plugin_prepare_diagnostics },
           pre_eval_diagnostics_from_scanner: -> { @pre_eval_diagnostics_from_scanner },
           synthesized_namespaces_snapshot: -> { @snapshots.synthesized_namespaces },
+          quarantined_signatures_snapshot: -> { @snapshots.quarantined_signatures },
           conformance_results_snapshot: -> { @snapshots.conformance_results }
         )
       end

@@ -32,12 +32,14 @@ module Rigor
         # @param cached_plugin_prepare_diagnostics [#call] reader returning the prepare-diagnostic snapshot.
         # @param pre_eval_diagnostics_from_scanner [#call] reader returning the pre-eval scanner diagnostics.
         # @param synthesized_namespaces_snapshot [#call] reader.
+        # @param quarantined_signatures_snapshot [#call] reader returning the `signature_paths:` files skipped
+        #   because they do not parse (`[path, first_error_line]` pairs).
         # @param conformance_results_snapshot [#call] reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
                        pool_mode:, cached_plugin_prepare_diagnostics:,
                        pre_eval_diagnostics_from_scanner:, synthesized_namespaces_snapshot:,
-                       conformance_results_snapshot:)
+                       quarantined_signatures_snapshot:, conformance_results_snapshot:)
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -48,6 +50,7 @@ module Rigor
           @cached_plugin_prepare_diagnostics_reader = cached_plugin_prepare_diagnostics
           @pre_eval_diagnostics_from_scanner_reader = pre_eval_diagnostics_from_scanner
           @synthesized_namespaces_snapshot_reader = synthesized_namespaces_snapshot
+          @quarantined_signatures_snapshot_reader = quarantined_signatures_snapshot
           @conformance_results_snapshot_reader = conformance_results_snapshot
         end
 
@@ -231,6 +234,25 @@ module Rigor
         # user knows their sig set is malformed (`rbs validate` rejects it) and can fix it at the source.
         # Authored `:info`: the analysis already succeeded; this is advisory, never a gate. Empty for a
         # well-formed sig set.
+        # An unparseable `.rbs` under `signature_paths:` is QUARANTINED so the rest of the env survives
+        # (PR #50), which means the types it declares are silently absent — calls into them read
+        # `Dynamic[top]`, and the run gets *quieter*, not louder. The stderr banner alone never reached CI:
+        # it is not a diagnostic, so it is absent from `--format json` / SARIF / GitHub annotations / the LSP
+        # and cannot move the exit code. This puts it in the diagnostic stream where every channel sees it.
+        #
+        # Authored `:warning`, not `:error`: an existing green build must not turn red on upgrade, and the
+        # `rbs` gem's own parser moves across versions (ADR-79 keeps Rigor faithful to the project's `rbs`,
+        # so a version bump CAN newly reject a file that used to parse). Rejecting a broken sig set outright
+        # is a *new required discipline* — ADR-50 WD3 routes those through the bleeding-edge overlay, where
+        # the `reject-unparseable-signatures` feature promotes this rule to `:error` for anyone who opts in
+        # (and by default at the next major).
+        def rbs_quarantined_signature_diagnostics
+          quarantined = quarantined_signatures_snapshot
+          return [] if quarantined.empty?
+
+          [build_rbs_quarantined_signature_diagnostic(quarantined)]
+        end
+
         def rbs_synthesized_namespace_diagnostics
           synthesized = synthesized_namespaces_snapshot
           return [] if synthesized.nil? || synthesized.empty?
@@ -298,6 +320,31 @@ module Rigor
 
         def pluralize_methods(methods)
           methods.size == 1 ? "required method" : "#{methods.size} required methods"
+        end
+
+        def build_rbs_quarantined_signature_diagnostic(quarantined)
+          sample_size = 5
+          sample = quarantined.first(sample_size).map { |path, _first_line| relative_signature_path(path) }
+          suffix = quarantined.size > sample_size ? ", and #{quarantined.size - sample_size} more" : ""
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "#{quarantined.size} RBS file(s) under `signature_paths:` do not parse and were " \
+                     "SKIPPED: #{sample.join(', ')}#{suffix}. The rest of your RBS environment still " \
+                     "loaded, but the types those files declare are absent — calls into them read " \
+                     "`Dynamic[top]`, so this run is quieter than it should be, not cleaner. Fix the " \
+                     "parse error(s) (`rbs validate`) to restore that coverage.",
+            severity: :warning,
+            rule: "rbs.coverage.quarantined-signature",
+            source_family: :builtin
+          )
+        end
+
+        # The absolute path is what the loader records; the user thinks in project-relative terms.
+        def relative_signature_path(path)
+          root = "#{Dir.pwd}#{File::SEPARATOR}"
+          path.start_with?(root) ? path.delete_prefix(root) : path
         end
 
         def build_rbs_synthesized_namespace_diagnostic(synthesized)
@@ -488,6 +535,10 @@ module Rigor
 
         def synthesized_namespaces_snapshot
           @synthesized_namespaces_snapshot_reader.call
+        end
+
+        def quarantined_signatures_snapshot
+          @quarantined_signatures_snapshot_reader.call
         end
 
         def conformance_results_snapshot

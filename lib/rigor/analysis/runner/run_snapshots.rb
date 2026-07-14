@@ -15,7 +15,7 @@ module Rigor
       # back-reference cycle.
       class RunSnapshots
         attr_accessor :class_decl_paths, :signature_paths,
-                      :synthesized_namespaces, :conformance_results
+                      :synthesized_namespaces, :quarantined_signatures, :conformance_results
 
         # Constructor defaults match the {Runner} constructor: the pre-seed values `build_run_stats` /
         # `pre_file_diagnostics` read before the first analysis path runs are frozen empties.
@@ -23,6 +23,7 @@ module Rigor
           @class_decl_paths = {}.freeze
           @signature_paths = [].freeze
           @synthesized_namespaces = [].freeze
+          @quarantined_signatures = [].freeze
           @conformance_results = [].freeze
         end
 
@@ -32,6 +33,7 @@ module Rigor
           @class_decl_paths = {}.freeze
           @signature_paths = []
           @synthesized_namespaces = []
+          @quarantined_signatures = []
           @conformance_results = []
         end
       end

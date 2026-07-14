@@ -111,17 +111,7 @@ module Rigor
         end
 
         def analyze_files_sequentially(files, environment)
-          # Snapshot the small synthesized-namespace name list (NOT the env — see the method comment) so
-          # #run can surface the malformed-RBS `:info` diagnostic without rebuilding the env. Gated on the
-          # project actually declaring `signature_paths:`: synthesis only matters for the project's own
-          # RBS, and `#synthesized_namespaces` forces the (otherwise-lazy) RBS env to build — doing so when
-          # there is no project sig set would warm `.rigor/cache` on a bare `--no-stats` run.
-          @snapshots.synthesized_namespaces =
-            project_signature_paths? ? (environment.rbs_loader&.synthesized_namespaces || []) : []
-          # `rigor:v1:conforms-to` lives only in the project's own `signature_paths:` RBS, so gate the scan
-          # the same way and reuse the already-built env (no extra RBS load).
-          @snapshots.conformance_results =
-            project_signature_paths? ? RbsExtended::ConformanceChecker.scan(environment.rbs_loader) : []
+          snapshot_project_signature_state(environment)
           result = files.flat_map { |path| @analyze_file.call(path, environment) }
           if @collect_stats
             loader = environment.rbs_loader
@@ -129,6 +119,28 @@ module Rigor
             @snapshots.signature_paths = loader&.signature_paths || [].freeze
           end
           result
+        end
+
+        # The whole-run findings about the project's OWN `signature_paths:` RBS — the namespaces the loader had
+        # to synthesize, the files it had to quarantine, and the `rigor:v1:conforms-to` results. Snapshotted as
+        # small plain data (NOT the env) so `#run` can surface them as diagnostics without rebuilding it.
+        #
+        # All three are gated on the project actually declaring `signature_paths:`, for one reason: each forces
+        # the (otherwise lazy) RBS env to build, and doing that when there is no project sig set would warm
+        # `.rigor/cache` on a bare `--no-stats` run. The loader has already memoised each answer, so reading
+        # them here is free.
+        def snapshot_project_signature_state(environment)
+          unless project_signature_paths?
+            @snapshots.synthesized_namespaces = []
+            @snapshots.quarantined_signatures = []
+            @snapshots.conformance_results = []
+            return
+          end
+
+          loader = environment.rbs_loader
+          @snapshots.synthesized_namespaces = loader&.synthesized_namespaces || []
+          @snapshots.quarantined_signatures = loader&.quarantined_signatures || []
+          @snapshots.conformance_results = RbsExtended::ConformanceChecker.scan(loader)
         end
 
         # Sequential-mode environment resolver. Returns the supplied `environment:` override (with the
@@ -388,6 +400,11 @@ module Rigor
           loader = session.environment.rbs_loader
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
+          # The workers each quarantine the same broken file, but they report no diagnostics for it — the row is
+          # a whole-run one. Read it off the parent session's loader so a pooled run says exactly what a
+          # sequential one says.
+          @snapshots.quarantined_signatures =
+            project_signature_paths? ? (loader&.quarantined_signatures || []) : []
         end
 
         # Waits for every forked child, merges each successful payload into `results_by_path`, and returns
@@ -457,6 +474,8 @@ module Rigor
           loader = environment.rbs_loader
           @snapshots.class_decl_paths = loader&.class_decl_paths || {}.freeze
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
+          @snapshots.quarantined_signatures =
+            project_signature_paths? ? (loader&.quarantined_signatures || []) : []
           diagnostics.unshift(
             Diagnostic.new(
               path: ".rigor.yml", line: 1, column: 1,

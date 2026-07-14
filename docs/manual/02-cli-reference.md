@@ -46,7 +46,7 @@ the `paths:` list from the configuration file.
 | `--no-baseline` | Ignore any configured baseline. |
 | `--baseline-strict` | Fail the run on any baseline drift — a CI gate. |
 | `--treat-all-as-inline-rbs` | Force-load `rigor-rbs-inline` with `require_magic_comment: false`, so every analysed file is treated as inline-RBS without the `# rbs_inline: enabled` comment (ADR-32). |
-| `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. The overlay is empty in this release, so this is currently a no-op. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
+| `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
 | `--no-bleeding-edge` | Ignore any configured `bleeding_edge:` selection for this run (adopt none). |
 | `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. |
 
@@ -545,12 +545,16 @@ rigor show-bleedingedge [--config PATH] [--format text|json]
 | `--config PATH` | Use this `.rigor.yml` instead of auto-discovery. |
 | `--format text\|json` | Output format. Default `text`. |
 
-The overlay is **empty in this release** — the mechanism is wired and
-ready, but no discipline has been queued for a major yet, so the command
-currently reports an empty set. When a feature is queued it appears here
-with its stable id, the severity it would impose, and whether your config
-adopts it. See [`docs/compatibility.md`](../compatibility.md) for how
-bleeding-edge fits the stability model.
+Each queued feature appears with its stable id, the severity it imposes,
+and whether your configuration adopts it. See
+[`docs/compatibility.md`](../compatibility.md) for how bleeding-edge fits
+the stability model.
+
+Queued today:
+
+| Feature id | What it changes |
+| --- | --- |
+| `reject-unparseable-signatures` | An unparseable `.rbs` under `signature_paths:` **fails the run** (`rbs.coverage.quarantined-signature` → `error`) instead of being skipped with a warning. |
 
 ## `rigor doctor`
 

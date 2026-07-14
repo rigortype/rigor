@@ -184,6 +184,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     init(req:services)
     io_boundary()
     manifest()
+    narrowing_facts_for(keyreq:call_node,keyreq:scope)
     node_rule_diagnostics(keyreq:path,keyreq:scope,keyreq:root)
     plugin_entry()
     prepare(req:services)
@@ -193,7 +194,6 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     read_fact(keyreq:plugin_id,keyreq:name)
     services()
     signature_paths()
-    type_specifier_facts(keyreq:call_node,keyreq:scope)
   ].freeze
 
   PLUGIN_BASE_SINGLETON = %w[
@@ -201,6 +201,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     dynamic_returns()
     manifest(keyrest:fields)
     narrowing_facts(keyreq:methods,block:block)
+    narrowing_facts_rules()
     node_file_context(block:block)
     node_file_context_block()
     node_rule(req:node_type,block:block)
@@ -208,8 +209,6 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     producer(req:id,key:watch,key:serialize,key:deserialize,block:block)
     producers()
     suggest(req:name,req:candidates)
-    type_specifier(keyreq:methods,block:&)
-    type_specifiers()
   ].freeze
 
   PLUGIN_MANIFEST_INSTANCE = %w[

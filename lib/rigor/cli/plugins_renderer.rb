@@ -84,7 +84,7 @@ module Rigor
         [
           ["node_rule", row[:node_rule_types]],
           ["dynamic_return receivers", row[:dynamic_return_receivers]],
-          ["type_specifier methods", row[:type_specifier_methods]],
+          ["narrowing_facts methods", row[:narrowing_facts_methods]],
           ["produces", row[:produces]],
           ["consumes", row[:consumes]]
         ].filter_map { |label, values| "#{label}: #{values.join(', ')}" if values.any? }
@@ -97,7 +97,7 @@ module Rigor
           "version" => row[:version],
           "node_rule_types" => row[:node_rule_types],
           "dynamic_return_receivers" => row[:dynamic_return_receivers],
-          "type_specifier_methods" => row[:type_specifier_methods],
+          "narrowing_facts_methods" => row[:narrowing_facts_methods],
           "produces" => row[:produces],
           "consumes" => row[:consumes]
         }
@@ -170,8 +170,8 @@ module Rigor
         if row[:dynamic_return_receivers].any?
           lines << "        dynamic_return receivers: #{row[:dynamic_return_receivers].join(', ')}"
         end
-        if row[:type_specifier_methods].any?
-          lines << "        type_specifier methods: #{row[:type_specifier_methods].join(', ')}"
+        if row[:narrowing_facts_methods].any?
+          lines << "        narrowing_facts methods: #{row[:narrowing_facts_methods].join(', ')}"
         end
         lines
       end
@@ -231,7 +231,7 @@ module Rigor
           "source_rbs_synthesizer" => row[:source_rbs_synthesizer],
           "node_rule_types" => row[:node_rule_types],
           "dynamic_return_receivers" => row[:dynamic_return_receivers],
-          "type_specifier_methods" => row[:type_specifier_methods],
+          "narrowing_facts_methods" => row[:narrowing_facts_methods],
           "load_error" => row[:load_error]
         }
       end

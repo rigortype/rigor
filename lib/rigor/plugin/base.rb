@@ -390,8 +390,8 @@ module Rigor
         # the fact slot.
         #
         # Renamed from `type_specifier` (ADR-80): the old name read as a parallel to `dynamic_return` (a
-        # type) when it actually returns facts. {.type_specifier} survives as a deprecating alias through
-        # 0.2.x and is removed in 0.3.0.
+        # type) when it actually returns facts. The old verb was a deprecating alias through 0.2.x and is
+        # gone in 0.3.0 — `narrowing_facts` is the only spelling.
         def narrowing_facts(methods:, &block)
           raise ArgumentError, "Plugin::Base.narrowing_facts requires a block body" if block.nil?
           unless methods.is_a?(Array) && !methods.empty? &&
@@ -401,30 +401,17 @@ module Rigor
                   "got #{methods.inspect}"
           end
 
-          @type_specifiers ||= []
-          @type_specifiers << { methods: methods.map(&:to_sym).freeze, block: block }.freeze
+          @narrowing_facts_rules ||= []
+          @narrowing_facts_rules << { methods: methods.map(&:to_sym).freeze, block: block }.freeze
           nil
         end
 
-        # DEPRECATED (ADR-80) — renamed to {.narrowing_facts}. This hook supplies post-return narrowing
-        # *facts*, not a type; the old name misleads by parallel with {.dynamic_return}. Retained as a
-        # warning-emitting alias through 0.2.x; REMOVED in 0.3.0. Migrate `type_specifier methods: …` →
-        # `narrowing_facts methods: …`.
-        def type_specifier(methods:, &)
-          unless @type_specifier_deprecation_warned
-            @type_specifier_deprecation_warned = true
-            warn("[rigor] Plugin::Base.type_specifier is deprecated (ADR-80) and will be " \
-                 "removed in Rigor 0.3.0; rename it to `narrowing_facts`. (#{name})")
-          end
-          narrowing_facts(methods:, &)
-        end
-
-        # Frozen snapshot of the declared type-specifier rules. Memoised for the same reason as
+        # Frozen snapshot of the declared narrowing-facts rules. Memoised for the same reason as
         # {dynamic_returns} — consulted per plugin per dispatch, over an array fixed at class-definition
         # time.
         # rubocop:disable Naming/MemoizedInstanceVariableName -- see dynamic_returns
-        def type_specifiers
-          @type_specifiers_snapshot ||= (@type_specifiers || []).dup.freeze
+        def narrowing_facts_rules
+          @narrowing_facts_rules_snapshot ||= (@narrowing_facts_rules || []).dup.freeze
         end
         # rubocop:enable Naming/MemoizedInstanceVariableName
       end
@@ -558,8 +545,8 @@ module Rigor
       # ADR-37 slice 2 — the post-return narrowing facts contributed by this plugin's {.narrowing_facts}
       # rules for a call. The engine calls this from `StatementEvaluator`; a rule fires only when
       # `call_node.name` is one of its declared `methods:`. Failures isolate to [].
-      def type_specifier_facts(call_node:, scope:)
-        rules = self.class.type_specifiers
+      def narrowing_facts_for(call_node:, scope:)
+        rules = self.class.narrowing_facts_rules
         return [] if rules.empty? || !call_node.respond_to?(:name)
 
         name = call_node.name

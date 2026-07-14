@@ -173,7 +173,7 @@ module Rigor
 
       def contributes_types?(plugin)
         klass = plugin.class
-        klass.dynamic_returns.any? || klass.type_specifiers.any?
+        klass.dynamic_returns.any? || klass.narrowing_facts_rules.any?
       rescue StandardError
         false
       end

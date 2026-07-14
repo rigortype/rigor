@@ -1642,9 +1642,9 @@ module Rigor
       def collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
         result = nil
         relevant.each do |plugin|
-          next unless index.type_specifier_candidate_for?(plugin, name)
+          next unless index.narrowing_facts_candidate_for?(plugin, name)
 
-          facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
+          facts = plugin.narrowing_facts_for(call_node: call_node, scope: current_scope)
           (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
         rescue StandardError
           next

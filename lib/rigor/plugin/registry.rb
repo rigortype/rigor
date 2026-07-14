@@ -37,7 +37,7 @@ module Rigor
       end
 
       def dynamic?(plugin) = @dynamic.include?(plugin)
-      def type_specifier?(plugin) = @type_specifier.include?(plugin)
+      def narrowing_facts?(plugin) = @narrowing_facts.include?(plugin)
 
       # O(1) "could any plugin contribute a return type for a call named `method_name`?" — false only when
       # every `dynamic_return` rule is `methods:`-gated on other names, in which case the ungated walk would
@@ -48,12 +48,12 @@ module Rigor
         @dynamic_global_gate.include?(method_name)
       end
 
-      # O(1) statement-path sibling of {#dispatch_candidate?} over the `type_specifier` rules (which are
+      # O(1) statement-path sibling of {#dispatch_candidate?} over the `narrowing_facts` rules (which are
       # always `methods:`-gated).
       def statement_candidate?(method_name)
-        return true if @type_specifier_global_gate.nil?
+        return true if @narrowing_facts_global_gate.nil?
 
-        @type_specifier_global_gate.include?(method_name)
+        @narrowing_facts_global_gate.include?(method_name)
       end
 
       # Per-plugin gate: false when the plugin declares no `dynamic_return` rules at all, or when every rule
@@ -67,11 +67,11 @@ module Rigor
         gate.nil? || gate.include?(method_name)
       end
 
-      # Per-plugin gate over `type_specifier` rules; same contract as {#dynamic_candidate_for?}.
-      def type_specifier_candidate_for?(plugin, method_name)
-        return false unless @type_specifier.include?(plugin)
+      # Per-plugin gate over `narrowing_facts` rules; same contract as {#dynamic_candidate_for?}.
+      def narrowing_facts_candidate_for?(plugin, method_name)
+        return false unless @narrowing_facts.include?(plugin)
 
-        gate = @type_specifier_gates[plugin]
+        gate = @narrowing_facts_gates[plugin]
         gate.nil? || gate.include?(method_name)
       end
 
@@ -101,13 +101,13 @@ module Rigor
       def compile_memberships(plugins)
         plugins.each { |p| reject_legacy_flow_hook!(p) }
         @dynamic = plugins.reject { |p| p.class.dynamic_returns.empty? }.to_set
-        @type_specifier = plugins.reject { |p| p.class.type_specifiers.empty? }.to_set
+        @narrowing_facts = plugins.reject { |p| p.class.narrowing_facts_rules.empty? }.to_set
         compile_collector_subsets(plugins)
       end
 
       def compile_collector_subsets(plugins)
         @for_method_dispatch = plugins.select { |p| @dynamic.include?(p) }.freeze
-        @for_statement = plugins.select { |p| @type_specifier.include?(p) }.freeze
+        @for_statement = plugins.select { |p| @narrowing_facts.include?(p) }.freeze
         @for_file_diagnostics =
           plugins.select { |p| file_diagnostics_overridden?(p) || !p.class.node_rules.empty? }.freeze
       end
@@ -115,9 +115,9 @@ module Rigor
       # The per-plugin and registry-global method-name gates.
       def compile_gates
         @dynamic_gates = build_name_gates(@dynamic) { |p| p.class.dynamic_returns }
-        @type_specifier_gates = build_name_gates(@type_specifier) { |p| p.class.type_specifiers }
+        @narrowing_facts_gates = build_name_gates(@narrowing_facts) { |p| p.class.narrowing_facts_rules }
         @dynamic_global_gate = union_gate(@dynamic_gates)
-        @type_specifier_global_gate = union_gate(@type_specifier_gates)
+        @narrowing_facts_global_gate = union_gate(@narrowing_facts_gates)
       end
 
       # ADR-52 WD3 — the legacy ungated `flow_contribution_for` hook was deleted pre-1.0. A plugin still

@@ -185,7 +185,7 @@ module Rigor
         {
           node_rule_types: klass.node_rules.map { |r| r[:node_type].name }.uniq,
           dynamic_return_receivers: klass.dynamic_returns.flat_map { |r| r[:receivers] }.uniq,
-          type_specifier_methods: klass.type_specifiers.flat_map { |r| r[:methods] }.map(&:to_s).uniq
+          narrowing_facts_methods: klass.narrowing_facts_rules.flat_map { |r| r[:methods] }.map(&:to_s).uniq
         }
       end
 
@@ -246,7 +246,7 @@ module Rigor
           source_rbs_synthesizer: false,
           node_rule_types: [],
           dynamic_return_receivers: [],
-          type_specifier_methods: [],
+          narrowing_facts_methods: [],
           load_error: error&.message || "plugin did not register or could not be matched to a registered class"
         }
       end
@@ -317,7 +317,7 @@ module Rigor
             type_node_resolvers: 0,
             hkt_registrations: 0, hkt_definitions: 0,
             protocol_contracts: 0, source_rbs_synthesizer: false,
-            node_rule_types: [], dynamic_return_receivers: [], type_specifier_methods: [],
+            node_rule_types: [], dynamic_return_receivers: [], narrowing_facts_methods: [],
             load_error: error.message
           }
         end

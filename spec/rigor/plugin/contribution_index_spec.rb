@@ -36,7 +36,7 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
       end
     end
   end
-  let(:type_specifier_class) do
+  let(:narrowing_facts_class) do
     Class.new(Rigor::Plugin::Base) do
       manifest(id: "specifier", version: "0.0.1")
 
@@ -97,15 +97,15 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
         .to raise_error(ArgumentError, /removed \(ADR-52\)/)
     end
 
-    it "gates the statement path on type_specifier method names" do
-      plugin = build_plugin(type_specifier_class)
+    it "gates the statement path on narrowing_facts method names" do
+      plugin = build_plugin(narrowing_facts_class)
       index = described_class.new([plugin])
 
       expect(index.statement_candidate?(:assert_kind_of)).to be(true)
       expect(index.statement_candidate?(:each)).to be(false)
       expect(index.statement_candidate?(nil)).to be(false)
-      expect(index.type_specifier_candidate_for?(plugin, :assert_kind_of)).to be(true)
-      expect(index.type_specifier_candidate_for?(plugin, :each)).to be(false)
+      expect(index.narrowing_facts_candidate_for?(plugin, :assert_kind_of)).to be(true)
+      expect(index.narrowing_facts_candidate_for?(plugin, :each)).to be(false)
     end
 
     it "treats a run-time (callable) methods: rule as ungated by name (ADR-52 slice 4)" do

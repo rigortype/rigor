@@ -28,8 +28,7 @@ class Rigor::Plugin::Base
 
   def self.narrowing_facts: (methods: Array[untyped]) { (untyped call_node, untyped scope) -> untyped } -> nil
   # Deprecating alias for `narrowing_facts` (ADR-80); removed in 0.3.0.
-  def self.type_specifier: (methods: Array[untyped]) { (untyped call_node, untyped scope) -> untyped } -> nil
-  def self.type_specifiers: () -> Array[untyped]
+  def self.narrowing_facts_rules: () -> Array[untyped]
 
   def self.suggest: (untyped name, untyped candidates) -> String?
 
@@ -48,7 +47,7 @@ class Rigor::Plugin::Base
   # Engine-executed dispatch over the declared DSLs.
   def node_rule_diagnostics: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
   def dynamic_return_type: (call_node: untyped, scope: untyped, receiver_type: untyped) -> untyped
-  def type_specifier_facts: (call_node: untyped, scope: untyped) -> Array[untyped]
+  def narrowing_facts_for: (call_node: untyped, scope: untyped) -> Array[untyped]
 
   # Authoring helpers.
   def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> untyped

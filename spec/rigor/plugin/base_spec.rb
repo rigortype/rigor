@@ -820,7 +820,7 @@ RSpec.describe Rigor::Plugin::Base do
     end
   end
 
-  describe ".narrowing_facts / #type_specifier_facts (ADR-37 slice 2, ADR-80)" do
+  describe ".narrowing_facts / #narrowing_facts_for (ADR-37 slice 2, ADR-80)" do
     let(:plugin) do
       Class.new(described_class) do
         manifest(id: "ts", version: "0.1.0")
@@ -833,12 +833,12 @@ RSpec.describe Rigor::Plugin::Base do
     def call(source) = Prism.parse(source).value.statements.body.first
 
     it "returns facts for a matching method name" do
-      facts = plugin.type_specifier_facts(call_node: call("assert_thing(x)"), scope: Rigor::Scope.empty)
+      facts = plugin.narrowing_facts_for(call_node: call("assert_thing(x)"), scope: Rigor::Scope.empty)
       expect(facts).to eq(%i[fact_a fact_b])
     end
 
     it "returns [] for a non-matching method name" do
-      expect(plugin.type_specifier_facts(call_node: call("other(x)"), scope: Rigor::Scope.empty)).to eq([])
+      expect(plugin.narrowing_facts_for(call_node: call("other(x)"), scope: Rigor::Scope.empty)).to eq([])
     end
 
     it "rejects an empty methods: list" do
@@ -850,20 +850,18 @@ RSpec.describe Rigor::Plugin::Base do
       end.to raise_error(ArgumentError, /non-empty Array/)
     end
 
-    # ADR-80 — `type_specifier` is the deprecating alias, removed in 0.3.0.
-    describe ".type_specifier (deprecating alias)" do
-      it "registers the rule identically to narrowing_facts" do
-        aliased = nil
+    # ADR-80 — the `type_specifier` alias was removed in 0.3.0; a plugin still using it fails loudly at class
+    # definition rather than silently contributing no facts.
+    describe ".type_specifier (removed alias)" do
+      it "raises NoMethodError" do
         expect do
-          aliased = Class.new(described_class) do
+          Class.new(described_class) do
             manifest(id: "ts-alias", version: "0.1.0")
             type_specifier methods: [:assert_thing] do |_call_node, _scope|
               %i[fact_a fact_b]
             end
-          end.new(services: services)
-        end.to output(/type_specifier is deprecated.*narrowing_facts/m).to_stderr
-        facts = aliased.type_specifier_facts(call_node: call("assert_thing(x)"), scope: Rigor::Scope.empty)
-        expect(facts).to eq(%i[fact_a fact_b])
+          end
+        end.to raise_error(NoMethodError, /type_specifier/)
       end
     end
   end

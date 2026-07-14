@@ -201,7 +201,7 @@ RSpec.describe Rigor::CLI::PluginsCommand do
       plugin = parsed["capabilities"].first
       expect(plugin.keys).to contain_exactly(
         "id", "gem", "version", "node_rule_types",
-        "dynamic_return_receivers", "type_specifier_methods", "produces", "consumes"
+        "dynamic_return_receivers", "narrowing_facts_methods", "produces", "consumes"
       )
       expect(plugin["node_rule_types"]).to eq(["Prism::CallNode"])
     end

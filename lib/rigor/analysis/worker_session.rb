@@ -13,6 +13,7 @@ require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
+require_relative "dependency_recorder"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "erb_template_detector"
@@ -78,7 +79,7 @@ module Rigor
       def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength,Metrics/ParameterLists
                      plugin_blueprints: [], explain: false, buffer: nil,
                      synthetic_method_index: nil, project_patched_methods: nil,
-                     project_scope_seed: {}, source_files: [])
+                     project_scope_seed: {}, source_files: [], record_dependencies: false)
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
@@ -86,6 +87,12 @@ module Rigor
         @synthetic_method_index = synthetic_method_index
         @project_patched_methods = project_patched_methods
         @project_scope_seed = project_scope_seed || {}
+        # ADR-46 — when set (the `--incremental` pool path), each `#analyze` is wrapped in a
+        # `DependencyRecorder.record_for` so the worker captures the file's cross-file reads, and the records
+        # are marshalled back to the coordinator ({#drain_dependencies}). Mirrors `Runner#analyze_file`. A
+        # normal `--workers N` run leaves it false and pays nothing (the recorder's disabled fast path).
+        @record_dependencies = record_dependencies
+        @file_dependencies = {}
         # ADR-32 WD4 — full project file list (frozen Array<String>) for env-build-time invocation of any
         # loaded plugin's `source_rbs_synthesizer` callable.
         @source_files = source_files
@@ -132,8 +139,20 @@ module Rigor
 
       # Equivalent of {Rigor::Analysis::Runner#analyze_file} + `plugin_emitted_diagnostics` +
       # `explain_diagnostics`. Returns a flat `Array<Diagnostic>` for the file. Severity profile re-stamping
-      # is intentionally NOT applied — that is a per-run aggregate concern handled by the caller.
+      # is intentionally NOT applied — that is a per-run aggregate concern handled by the caller. When
+      # `record_dependencies:` was set, wraps the analysis in a {DependencyRecorder} window (ADR-46) so the
+      # worker captures the file's cross-file reads for {#drain_dependencies}; the recorder's own disabled
+      # fast path makes the unwrapped case free.
       def analyze(path)
+        return analyze_body(path) unless @record_dependencies
+
+        diagnostics = nil
+        record = DependencyRecorder.record_for(path) { diagnostics = analyze_body(path) }
+        @file_dependencies[path] = record
+        diagnostics
+      end
+
+      def analyze_body(path)
         parse_result = parse_source(path)
         unless parse_result.errors.empty?
           return [] if ErbTemplateDetector.template?(parse_result)
@@ -161,6 +180,7 @@ module Rigor
       rescue StandardError => e
         [analyzer_error(path, "internal analyzer error: #{e.class}: #{e.message}")]
       end
+      private :analyze_body
 
       # Read-once snapshot of the per-worker reporters so the caller (or the eventual Phase 4b pool
       # aggregator) can merge into a single coordinator-side reporter. Both reporters dedupe at write time,
@@ -174,6 +194,14 @@ module Rigor
           boundary_cross: @boundary_cross_reporter.entries,
           source_rbs_synthesis: @source_rbs_synthesis_reporter.entries
         }
+      end
+
+      # ADR-46 — the per-file {DependencyRecorder::Record}s captured by this session's `#analyze` calls (empty
+      # unless `record_dependencies:` was set). Marshal-clean (Data of frozen Sets / String Hashes), so the
+      # fork pool ships them back to the coordinator, which folds them into the runner's `file_dependencies`
+      # exactly as the sequential recording path would.
+      def drain_dependencies
+        @file_dependencies
       end
 
       private

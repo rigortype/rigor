@@ -46,8 +46,18 @@ module Rigor
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
-                  :rbs_extended_reporter, :boundary_cross_reporter, :file_dependencies,
+                  :rbs_extended_reporter, :boundary_cross_reporter,
                   :analyzed_files, :unresolved_self_calls, :seed_bundles
+
+      # ADR-46 — the per-file cross-file read records this run captured (empty unless
+      # `record_dependencies: true`). Sequential analysis records into `@file_dependencies` via
+      # {#analyze_file}; the fork pool records per-worker and marshals the records into the coordinator, so a
+      # pooled `--incremental` recheck refreshes the same dependency graph a sequential recheck would. A run
+      # is either sequential OR pooled for a given file set, so the two maps never carry the same key.
+      def file_dependencies
+        pooled = @pool_coordinator.collected_dependencies
+        pooled.empty? ? @file_dependencies : @file_dependencies.merge(pooled)
+      end
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events as `:info` diagnostics.
@@ -140,6 +150,7 @@ module Rigor
         @project_discovered_def_nodes = {}.freeze
         @project_discovered_singleton_def_nodes = {}.freeze
         @project_discovered_def_sources = {}.freeze
+        @project_discovered_singleton_def_sources = {}.freeze
         @project_discovered_superclasses = {}.freeze
         @project_discovered_includes = {}.freeze
         @project_discovered_class_sources = {}.freeze
@@ -247,7 +258,7 @@ module Rigor
       # edges are NOT inverted here: they feed the structural tier (slice 3), which re-checks a consumer
       # when a name it looked up and did not resolve later appears.
       def file_dependents
-        Incremental.invert(@file_dependencies.transform_values(&:sources))
+        Incremental.invert(file_dependencies.transform_values(&:sources))
       end
 
       # ADR-46 slice 4 — per-symbol body fingerprints, computed from the project pre-pass def index. Returns
@@ -259,22 +270,35 @@ module Rigor
       # frozen hash before the first run.
       def symbol_fingerprints
         result = Hash.new { |h, k| h[k] = {} }
-        @project_discovered_def_sources.each do |class_name, methods|
+        collect_symbol_fingerprints(result, @project_discovered_def_sources, @project_discovered_def_nodes, "#")
+        # ADR-46 slice 4 (singleton) — class/singleton-method bodies live in the parallel singleton tables the
+        # instance loop never read (recon S5). Fingerprint them under a `"Class.method"` key (the format the
+        # `singleton_def_for` dependency edge uses) so a `def self.x` body edit produces a changed pair.
+        collect_symbol_fingerprints(result, @project_discovered_singleton_def_sources,
+                                    @project_discovered_singleton_def_nodes, ".")
+        result.transform_values(&:freeze).freeze
+      end
+
+      # Folds one def-source/def-node table pair into the per-file fingerprint map under `separator` (`#`
+      # instance, `.` singleton). `sources` supplies the `"path:line"` (a `Prism::Location` hides its file);
+      # the node supplies the body fingerprint.
+      def collect_symbol_fingerprints(result, sources, nodes, separator)
+        sources.each do |class_name, methods|
           methods.each do |method_sym, path_line|
             path = path_line.split(":", 2).first
-            node = @project_discovered_def_nodes.dig(class_name, method_sym)
+            node = nodes.dig(class_name, method_sym)
             next unless node
 
             # ADR-85 WD3 — on the incremental warm path an unchanged file's def is a `DefHandle` carrying the
             # slice fingerprint captured when its bundle was built (no re-parse); a live node (cold / re-walked
             # file) is sliced as before. This is the only value-deref consumer of the def-node table besides the
             # three accessor choke points.
-            result[path]["#{class_name}##{method_sym}"] =
+            result[path]["#{class_name}#{separator}#{method_sym}"] =
               node.is_a?(Inference::DefHandle) ? node.fingerprint : Digest::SHA256.hexdigest(node.location.slice)
           end
         end
-        result.transform_values(&:freeze).freeze
       end
+      private :collect_symbol_fingerprints
 
       # ADR-46 slice 3 — per-file set of the qualified class/module names declared in that file. Used to
       # detect a class that *appeared* in an edit so a subclass whose ancestor was previously undefined
@@ -479,6 +503,7 @@ module Rigor
         @project_discovered_def_nodes = discovery.discovered_def_nodes
         @project_discovered_singleton_def_nodes = discovery.discovered_singleton_def_nodes
         @project_discovered_def_sources = discovery.discovered_def_sources
+        @project_discovered_singleton_def_sources = discovery.discovered_singleton_def_sources
         @project_discovered_superclasses = discovery.discovered_superclasses
         @project_discovered_includes = discovery.discovered_includes
         @project_discovered_class_sources = discovery.discovered_class_sources
@@ -612,6 +637,7 @@ module Rigor
         @pool_coordinator = PoolCoordinator.new(
           configuration: @configuration, cache_store: @cache_store, explain: @explain,
           workers: @workers, collect_stats: @collect_stats, buffer: @buffer,
+          record_dependencies: @record_dependencies,
           environment_override: @environment_override,
           rbs_extended_reporter: @rbs_extended_reporter,
           boundary_cross_reporter: @boundary_cross_reporter,
@@ -852,7 +878,7 @@ module Rigor
         unless @project_discovered_singleton_def_nodes.empty?
           tables[:discovered_singleton_def_nodes] = @project_discovered_singleton_def_nodes
         end
-        tables[:discovered_def_sources] = @project_discovered_def_sources unless @project_discovered_def_sources.empty?
+        seed_def_source_tables(tables)
         unless @project_discovered_superclasses.empty?
           tables[:discovered_superclasses] = @project_discovered_superclasses
         end
@@ -868,6 +894,16 @@ module Rigor
           tables[:discovered_class_sources] = @project_discovered_class_sources
         end
         tables
+      end
+
+      # ADR-46 — seed the instance + singleton `"path:line"` def-source tables (each only when non-empty).
+      # Extracted to keep {#project_scope_seed_tables} under the complexity budget. The singleton table (slice 4
+      # extension) rides the same seed so a pooled `WorkerSession` records singleton symbol edges identically.
+      def seed_def_source_tables(tables)
+        tables[:discovered_def_sources] = @project_discovered_def_sources unless @project_discovered_def_sources.empty?
+        return if @project_discovered_singleton_def_sources.empty?
+
+        tables[:discovered_singleton_def_sources] = @project_discovered_singleton_def_sources
       end
 
       # ADR-48 — seed the Data + Struct member-layout tables (each only when non-empty). Extracted to keep

@@ -50,11 +50,16 @@ module Rigor
                        boundary_cross_reporter:, source_rbs_synthesis_reporter:,
                        snapshots:, plugin_registry:, dependency_source_index:,
                        synthetic_method_index:, project_patched_methods:,
-                       analyze_file:, project_scope_seed: -> { {} })
+                       analyze_file:, project_scope_seed: -> { {} }, record_dependencies: false)
           @configuration = configuration
           @cache_store = cache_store
           @explain = explain
           @workers = workers
+          # ADR-46 — the `--incremental` pool path. When true, pool-mode analysis is routed to the fork
+          # backend (the Ractor path lacks the cross-file seed and is off-default) and each worker records its
+          # slice's cross-file reads, marshalled back into `#collected_dependencies` for the runner's graph.
+          @record_dependencies = record_dependencies
+          @collected_dependencies = {}
           @collect_stats = collect_stats
           @buffer = buffer
           @environment_override = environment_override
@@ -69,6 +74,11 @@ module Rigor
           @project_scope_seed_reader = project_scope_seed
           @analyze_file = analyze_file
         end
+
+        # ADR-46 — the per-file cross-file read records the fork pool captured this run (empty unless
+        # `record_dependencies:` and a pool run occurred). The runner folds these into its `file_dependencies`
+        # so the incremental session's dependency graph is refreshed whether analysis ran sequential or pooled.
+        attr_reader :collected_dependencies
 
         # ADR-15 Phase 4b — pool mode is enabled when `@workers > 0`. Editor mode (`buffer:` non-nil)
         # silently overrides pool mode to sequential: per design § "Ractor pool mode", the pool's warm-up
@@ -148,8 +158,19 @@ module Rigor
           :sequential
         end
 
-        # Routes pool-mode analysis to the selected backend.
+        # Routes pool-mode analysis to the selected backend. A `record_dependencies` (ADR-46 `--incremental`)
+        # run is pinned to the fork backend when `fork` is available: only the fork path marshals the
+        # per-worker dependency records back, and the Ractor path additionally lacks the cross-file
+        # `project_scope_seed` its worker would need to record complete edges. Without `fork` (Windows) a
+        # recording run degrades to sequential, which records correctly through `@analyze_file`.
         def dispatch_pool(files)
+          if @record_dependencies
+            return analyze_files_in_fork_pool(files) if Process.respond_to?(:fork)
+
+            return analyze_files_sequentially_fallback(
+              files, reason: "incremental parallelism requires fork; recording sequentially"
+            )
+          end
           case pool_backend
           when :ractor then analyze_files_in_pool(files)
           when :fork   then analyze_files_in_fork_pool(files)
@@ -314,7 +335,8 @@ module Rigor
             synthetic_method_index: synthetic_method_index,
             project_patched_methods: project_patched_methods,
             project_scope_seed: project_scope_seed,
-            source_files: files
+            source_files: files,
+            record_dependencies: @record_dependencies
           )
           # Force the full RBS load on the parent so children copy-on-write inherit a warm Environment
           # rather than each rebuilding it after the fork.
@@ -337,6 +359,9 @@ module Rigor
           unless degraded.empty?
             degraded.each { |path| results_by_path[path] = session.analyze(path) }
             merge_worker_reporters(session.drain_reporters)
+            # The degraded slice was re-analysed on the parent session, so its dependency records live there,
+            # not in a child payload — fold them in alongside the successful children's.
+            @collected_dependencies.merge!(session.drain_dependencies) if @record_dependencies
           end
 
           diagnostics = Array(session.prepare_diagnostics) +
@@ -349,7 +374,8 @@ module Rigor
         # `at_exit` / stdio flush — the payload is already durable on disk by then.
         def run_fork_worker(session, slice, out_path)
           results = slice.to_h { |path| [path, session.analyze(path)] }
-          payload = { results: results, reporters: session.drain_reporters }
+          payload = { results: results, reporters: session.drain_reporters,
+                      dependencies: session.drain_dependencies }
           File.binwrite(out_path, Marshal.dump(payload))
           exit!(0)
         rescue StandardError
@@ -374,6 +400,7 @@ module Rigor
             if payload
               results_by_path.merge!(payload.fetch(:results))
               merge_worker_reporters(payload.fetch(:reporters))
+              @collected_dependencies.merge!(payload.fetch(:dependencies, {})) if @record_dependencies
             else
               degraded.concat(child[:slice])
             end

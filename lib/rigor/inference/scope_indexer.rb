@@ -2141,19 +2141,21 @@ module Rigor
       end
 
       # def_nodes / singleton_def_nodes / method_visibilities / methods fold class-nested later-wins;
-      # def_sources folds first-wins ({#fold_def_sources}).
+      # def_sources / singleton_def_sources fold first-wins ({#fold_def_sources}).
       def fold_def_tables(acc, file_index)
         file_index[:def_nodes].each { |cn, methods| (acc[:def_nodes][cn] ||= {}).merge!(methods) }
         file_index[:singleton_def_nodes].each { |cn, methods| (acc[:singleton_def_nodes][cn] ||= {}).merge!(methods) }
         file_index[:method_visibilities].each { |cn, table| (acc[:method_visibilities][cn] ||= {}).merge!(table) }
         file_index[:methods].each { |cn, table| (acc[:methods][cn] ||= {}).merge!(table) }
-        fold_def_sources(acc, file_index[:def_sources])
+        fold_def_sources(acc, :def_sources, file_index[:def_sources])
+        fold_def_sources(acc, :singleton_def_sources, file_index[:singleton_def_sources])
       end
 
-      # def_sources is first-file-wins per `(class, method)` (`||=`), matching `merge_discovered_defs`.
-      def fold_def_sources(acc, file_sources)
+      # A `"path:line"` source table (instance or singleton) is first-file-wins per `(class, method)` (`||=`),
+      # matching `merge_discovered_defs`.
+      def fold_def_sources(acc, key, file_sources)
         file_sources.each do |cn, methods|
-          target = (acc[:def_sources][cn] ||= {})
+          target = (acc[key][cn] ||= {})
           methods.each { |method_name, source| target[method_name] ||= source }
         end
       end
@@ -2178,6 +2180,7 @@ module Rigor
           def_nodes: live_defs_to_bundle(file_index[:def_nodes]),
           singleton_def_nodes: live_defs_to_bundle(file_index[:singleton_def_nodes]),
           def_sources: file_index[:def_sources],
+          singleton_def_sources: file_index[:singleton_def_sources],
           superclasses: file_index[:superclasses],
           includes: file_index[:includes],
           method_visibilities: file_index[:method_visibilities],
@@ -2196,6 +2199,9 @@ module Rigor
           def_nodes: bundle_defs_to_handles(bundle[:def_nodes], path),
           singleton_def_nodes: bundle_defs_to_handles(bundle[:singleton_def_nodes], path),
           def_sources: bundle[:def_sources],
+          # ADR-85 schema 7 — a pre-7 bundle lacks this key; the SCHEMA bump loads it as a clean cold rebuild,
+          # but default to `{}` so any in-flight fold stays total.
+          singleton_def_sources: bundle[:singleton_def_sources] || {},
           superclasses: bundle[:superclasses],
           includes: bundle[:includes],
           method_visibilities: bundle[:method_visibilities],
@@ -2226,9 +2232,9 @@ module Rigor
 
       # The empty per-run accumulator the def-index passes fold each file into.
       def new_def_index_accumulator
-        { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, superclasses: {}, includes: {},
-          method_visibilities: {}, methods: {}, class_sources: {}, data_member_layouts: {},
-          struct_member_layouts: {} }
+        { def_nodes: {}, singleton_def_nodes: {}, def_sources: {}, singleton_def_sources: {},
+          superclasses: {}, includes: {}, method_visibilities: {}, methods: {}, class_sources: {},
+          data_member_layouts: {}, struct_member_layouts: {} }
       end
 
       # Post-processes and freezes a fully-folded def-index accumulator.
@@ -2239,7 +2245,8 @@ module Rigor
         # keeps that contract intact while still letting `attr_reader :x` in one file suppress a false undefined-method
         # for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
-        %i[def_nodes singleton_def_nodes def_sources includes method_visibilities methods class_sources].each do |key|
+        %i[def_nodes singleton_def_nodes def_sources singleton_def_sources includes method_visibilities
+           methods class_sources].each do |key|
           acc[key].each_value(&:freeze)
         end
         acc.transform_values(&:freeze)
@@ -2264,9 +2271,12 @@ module Rigor
         # def-nodes ×2). See {#build_methods_and_def_nodes}.
         file_methods, file_def_nodes = build_methods_and_def_nodes(root)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, file_def_nodes)
-        build_discovered_singleton_def_nodes(root).each do |class_name, methods|
-          (acc[:singleton_def_nodes][class_name] ||= {}).merge!(methods)
-        end
+        # ADR-46 slice 4 (singleton) — record the singleton-side `"path:line"` sources alongside the nodes,
+        # the exact mirror of the instance-side `merge_discovered_defs`, so a class/singleton-method body edit
+        # produces a changed `"Class.method"` fingerprint pair (and its call sites a symbol edge) instead of
+        # silently degrading to the file's full ancestry closure.
+        merge_discovered_defs(acc[:singleton_def_nodes], acc[:singleton_def_sources], path,
+                              build_discovered_singleton_def_nodes(root))
         superclasses = build_discovered_superclasses(root)
         includes = build_discovered_includes(root)
         acc[:superclasses].merge!(superclasses)

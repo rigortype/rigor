@@ -26,8 +26,11 @@ module Rigor
       # artefact that does not go through `Store`); a raw pre-5 blob fails the inflate and loads as nil, the
       # usual fault-tolerant cold-run path. 6: adds the ADR-85 WD2 `seed_bundles` section (per-file discovery
       # contributions with `(node_id, name, fingerprint)` def-node handles); a pre-6 blob mismatches the
-      # SCHEMA gate and loads as nil (a clean cold rebuild — no migration).
-      SCHEMA = 6
+      # SCHEMA gate and loads as nil (a clean cold rebuild — no migration). 7: the seed bundle gains a
+      # `singleton_def_sources` table (ADR-46 slice 4 extended to class/singleton methods) AND `digests`
+      # switches to ADR-87 packed stat entries; a pre-7 blob mismatches the gate and loads as nil (clean cold
+      # rebuild).
+      SCHEMA = 7
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

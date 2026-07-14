@@ -94,6 +94,15 @@ module Rigor
         value_type
       end
 
+      # ADR-88 WD1 — the contribution reads the call's own arguments against the configured `@patterns` /
+      # `@method_name` (both derived purely from `config` in `#init`); config is already captured by the
+      # incremental snapshot's global fingerprint, so there is no cross-file scanned state beyond it. A stable
+      # sentinel declares "no cross-file fact surface", keeping a project using this example plugin
+      # incremental-capable; `--verify-incremental` backstops the claim.
+      def incremental_state_fingerprint
+        "config-patterns"
+      end
+
       private
 
       def validate_call?(call_node)

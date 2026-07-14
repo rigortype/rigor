@@ -97,6 +97,17 @@ module Rigor
         let_binding_return_type(call_node, scope)
       end
 
+      # ADR-88 WD1 — both contributions are per-file: the matcher narrowing facts come from the call's own AST,
+      # and the `let`-binding return types come from each spec file's OWN `describe`/`let` structure (`let` is
+      # file-scoped). A spec file's edit changes its own content (re-analysed already). The one cross-file input
+      # — the optional factorybot `:factory_index` fact this plugin consumes — is itself an ADR-9 publication
+      # captured in the incremental fact-surface digest via factorybot's own channel, so it need not appear
+      # here. A stable sentinel declares "no OWN cross-file fact surface", keeping the plugin
+      # incremental-capable; `--verify-incremental` backstops the claim.
+      def incremental_state_fingerprint
+        "per-file-lets"
+      end
+
       private
 
       # The `file_methods:` gate set — every `let` / `subject` name the file declares anywhere. A safe

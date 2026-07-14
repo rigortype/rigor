@@ -30,8 +30,12 @@ module Rigor
       # `singleton_def_sources` table (ADR-46 slice 4 extended to class/singleton methods) AND `digests`
       # switches to ADR-87 packed stat entries; a pre-7 blob mismatches the gate and loads as nil (clean cold
       # rebuild). 8: each seed bundle additionally gains a comment-stripped `code_fingerprint` for the B1
-      # bundle-equality gate; a pre-8 blob mismatches and loads as nil (clean cold rebuild).
-      SCHEMA = 8
+      # bundle-equality gate; a pre-8 blob mismatches and loads as nil (clean cold rebuild). 9: adds the ADR-88
+      # WD1 `plugin_fact_digest` (a fingerprint of the plugin fact SURFACE — ADR-9 facts, ADR-60 producer
+      # values, and `incremental_state_fingerprint` hooks — that a cached diagnostic can depend on but the
+      # global fingerprint does not capture); a pre-9 blob mismatches the SCHEMA gate and loads as nil (a clean
+      # cold rebuild — no migration).
+      SCHEMA = 9
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -49,9 +53,14 @@ module Rigor
       # `seed_bundles` maps an analyzed path to its per-file discovery contribution (plain-data tables +
       # `(node_id, name, fingerprint)` def-node handles + content digest), so a warm recheck rebuilds the
       # cross-file index by folding bundles instead of parsing every file.
+      # ADR-88 WD1:
+      # `plugin_fact_digest` is a SHA-256 hex fingerprint of the plugin fact surface at the run that wrote the
+      # snapshot (or nil for a plugin-free project). A warm recheck recomputes it and, on a mismatch, discards
+      # the snapshot and runs a full analysis — the guard for a plugin sig/catalog edit that the global
+      # fingerprint cannot see.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
-                            :missing, :class_decls, :seed_bundles)
+                            :missing, :class_decls, :seed_bundles, :plugin_fact_digest)
 
       # The global fingerprint that gates a snapshot load: a digest of the inputs whose change requires a full
       # rebuild — the engine version + schema, the resolved configuration, the analysis **roots** (the path
@@ -115,7 +124,8 @@ module Rigor
           symbol_fingerprints: data[:symbol_fingerprints] || {},
           missing: data[:missing] || {},
           class_decls: data[:class_decls] || {},
-          seed_bundles: data[:seed_bundles] || {}
+          seed_bundles: data[:seed_bundles] || {},
+          plugin_fact_digest: data[:plugin_fact_digest]
         )
       rescue StandardError
         nil
@@ -134,7 +144,8 @@ module Rigor
           symbol_fingerprints: payload.symbol_fingerprints,
           missing: payload.missing,
           class_decls: payload.class_decls,
-          seed_bundles: payload.seed_bundles
+          seed_bundles: payload.seed_bundles,
+          plugin_fact_digest: payload.plugin_fact_digest
         )
         blob = Zlib::Deflate.deflate(raw)
         tmp = "#{@path}.#{Process.pid}.tmp"

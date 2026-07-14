@@ -82,6 +82,14 @@ module Rigor
         return_type
       end
 
+      # ADR-88 WD1 — the contribution evaluates the literal S-expression in the call's OWN argument AST through
+      # a stateless interpreter gated on the configured `@method_name`; it reads no project files and holds no
+      # cross-file catalog. A stable sentinel declares "no cross-file fact surface", keeping a project using
+      # this example plugin incremental-capable; `--verify-incremental` backstops the claim.
+      def incremental_state_fingerprint
+        "per-call-eval"
+      end
+
       private
 
       def analyse_call(path, call_node)

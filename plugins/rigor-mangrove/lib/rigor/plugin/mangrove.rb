@@ -122,6 +122,16 @@ module Rigor
         carried_type(receiver_type, call_node.name)
       end
 
+      # ADR-88 WD1 — the `dynamic_return` contribution is a PURE STRUCTURAL projection of the receiver's own
+      # carrier type args (`Result[T, E]#unwrap → T`), computed per call from the receiver type the engine
+      # already resolved; it reads no cross-file catalog. (The `Enum` nested-class emission rides the ADR-16
+      # macro substrate / synthetic-method scanner, a separate pre-pass, not this `dynamic_return`.) A stable
+      # sentinel declares "no cross-file fact surface", keeping the plugin incremental-capable; the
+      # `--verify-incremental` gate backstops the claim.
+      def incremental_state_fingerprint
+        "structural-carriers"
+      end
+
       private
 
       # @return [Rigor::Type, nil] the receiver's inferred type, or nil when the engine raises on a synthetic

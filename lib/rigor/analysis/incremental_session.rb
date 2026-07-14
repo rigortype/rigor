@@ -2,6 +2,7 @@
 
 require "digest"
 require_relative "incremental"
+require_relative "plugin_fact_fingerprint"
 require_relative "../cache/file_digest"
 require_relative "../cache/incremental_snapshot"
 require_relative "../inference/scope_indexer"
@@ -89,6 +90,15 @@ module Rigor
         @missing = {}              # consumer => Set<"kind:name"> it looked up and missed
         @negative_dependents = {}  # "kind:name" => Set<consumer> (inverted @missing)
         @class_decls = {}          # path => Set<qualified class name declared in the file>
+        # ADR-88 WD1 — the plugin fact-surface digest computed for THIS invocation (nil until a
+        # `#run_incremental` pass runs / a plugin-free project) and the reporting flags a caller (the CLI
+        # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
+        # post-hoc fingerprint reads from; `@plugin_fact_reusable` is the computed decision object.
+        @plugin_fact_digest = nil
+        @opaque_plugin_ids = [].freeze
+        @fact_surface_invalidated = false
+        @last_runner = nil
+        @plugin_fact_reusable = nil
       end
 
       # The project files analyzed at the last baseline / recheck — the set a verify pass partitions and the
@@ -102,6 +112,7 @@ module Rigor
       def baseline
         runner = build_runner(record_dependencies: true)
         diagnostics = run_runner(runner).diagnostics
+        @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
         @analyzed = runner.analyzed_files
         @seed_bundles = runner.seed_bundles # ADR-85 WD2 — the freshly built bundle set for the next run.
         absorb_dependency_graph(runner)
@@ -123,6 +134,7 @@ module Rigor
         analyze_set = affected & current
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true)
         fresh = run_runner(runner).diagnostics
+        @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
         reused = (current & previous) - affected.to_a
         merged = fresh + reused.flat_map { |path| @cache[path] || [] }
         absorb(runner, fresh, current, analyze_set, removed)
@@ -228,17 +240,37 @@ module Rigor
         # `Runner#run` nests its own `with_run` for the analysis descriptors; nesting is safe (each restores).
         Cache::FileDigest.with_run(strict: @configuration.cache_validation == "digest") do
           restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+          # ADR-88 WD1 — the plugin fact-surface fingerprint gates snapshot reuse the same way the global
+          # fingerprint gates the load: a plugin sig/catalog edit outside `signature_paths:` (a Sorbet `.rbi`)
+          # changes the types unchanged call sites resolve, without moving any analyzed file, so the global
+          # fingerprint stays fresh and the recheck would serve stale diagnostics. The fingerprint is computed
+          # POST-HOC from the analysis runner (which already ran `#prepare` and validated its producers) so the
+          # warm path pays no second `#prepare`; the decision is applied after the recheck. Opaque plugins
+          # (types with no fingerprint surface) make the snapshot un-reusable.
           if restored
             restore(restored)
             result = recheck
-            diagnostics = result.diagnostics
-            warm = true
-            # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
-            # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
-            # A cold baseline always persists — there was no valid snapshot to reuse.
-            skip_save = result.no_change?
+            adopt_plugin_fact_fingerprint
+            reuse = @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
+            if reuse
+              diagnostics = result.diagnostics
+              warm = true
+              # ADR-87 WD3 — a warm recheck that changed nothing leaves the session state byte-equivalent to the
+              # snapshot it restored, so skip the unconditional rewrite (209ms + 2 MB on gitlab per null recheck).
+              # A cold baseline always persists — there was no valid snapshot to reuse.
+              skip_save = result.no_change?
+            else
+              # The fact surface moved (a plugin sig/catalog edit) or a plugin is opaque: the cached-served
+              # files the recheck merged may be stale, so re-analyze the whole tree. The current fact-surface
+              # digest (from the recheck runner) is unchanged by the re-analysis, so it is kept for the save.
+              @fact_surface_invalidated = true
+              diagnostics = baseline
+              warm = false
+              skip_save = false
+            end
           else
             diagnostics = baseline
+            adopt_plugin_fact_fingerprint
             warm = false
             skip_save = false
           end
@@ -247,7 +279,43 @@ module Rigor
         end
       end
 
+      # ADR-88 WD1 — reporting hooks the CLI reads after {#run_incremental}. `fact_surface_invalidated?` is true
+      # when a valid snapshot was dropped for a fact-surface reason (a plugin sig/catalog edit, or an opaque
+      # plugin) rather than a cold miss. `opaque_plugin_ids` names the contributing-but-surfaceless plugins that
+      # force a full run every invocation.
+      attr_reader :opaque_plugin_ids
+
+      def fact_surface_invalidated?
+        @fact_surface_invalidated
+      end
+
       private
+
+      # ADR-88 WD1 — capture this invocation's fact-surface fingerprint (from the last analysis runner) onto the
+      # reporting ivars + the `@plugin_fact_reusable` decision object.
+      def adopt_plugin_fact_fingerprint
+        fact = compute_plugin_fact_fingerprint
+        @plugin_fact_digest = fact.digest
+        @opaque_plugin_ids = fact.opaque_plugin_ids
+        @plugin_fact_reusable = fact
+      end
+
+      # ADR-88 WD1 — the plugin fact-surface fingerprint for this invocation. For a SEQUENTIAL run it is read
+      # post-hoc from the analysis runner's already-prepared registry (no second `#prepare`, producers already
+      # validated during analysis). A POOLED run's main process skips `#prepare`, so its registry carries no
+      # published facts — there it falls back to the always-sequential probe. Both paths compute the identical
+      # digest for a given fact surface, so the reuse decision is worker-count-independent (the parity spec
+      # asserts this).
+      def compute_plugin_fact_fingerprint
+        registry = @last_runner&.plugin_registry
+        if @workers.zero? && registry && !registry.empty?
+          PluginFactFingerprint.from_registry(registry)
+        else
+          PluginFactFingerprint.compute(
+            configuration: @configuration, cache_store: @cache_store, plugin_requirer: @plugin_requirer
+          )
+        end
+      end
 
       # Adopt a persisted snapshot's per-file state as this session's baseline (the warm-start path).
       def restore(payload)
@@ -281,7 +349,8 @@ module Rigor
           cache: @cache, sources: @sources, digests: @digests, analyzed: @analyzed,
           symbol_sources: @symbol_sources, ancestry_sources: @ancestry_sources,
           symbol_fingerprints: @symbol_fingerprints, missing: @missing,
-          class_decls: @class_decls, seed_bundles: @seed_bundles
+          class_decls: @class_decls, seed_bundles: @seed_bundles,
+          plugin_fact_digest: @plugin_fact_digest
         )
       end
 

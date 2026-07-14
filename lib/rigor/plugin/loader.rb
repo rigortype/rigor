@@ -102,6 +102,18 @@ module Rigor
         after = Plugin.registered.keys.to_set
         newly_registered = (after - before).to_a
 
+        # ADR-88 WD4b — `require` runs a gem's body (and its `Rigor::Plugin.register` calls) at most ONCE per
+        # process. A first load captures the gem's ids in `newly_registered` and memoises the gem→ids mapping;
+        # a SECOND in-process load (the `--verify-incremental` full-run oracle, the incremental session's
+        # subset re-analysis, LSP re-loads) sees `require` no-op and an empty delta, so a bare-string
+        # (`id:`-less) entry recovers the gem's ids from the memo instead of raising "did not register any
+        # plugin". An explicit `id:` entry never needs this — it resolves by id directly in `lookup_plugin_class!`.
+        if newly_registered.any?
+          Plugin.record_gem_registration(entry[:gem], newly_registered)
+        elsif entry[:id].nil?
+          newly_registered = Plugin.ids_for_gem(entry[:gem])
+        end
+
         plugin_class = lookup_plugin_class!(entry, newly_registered)
         manifest = plugin_class.manifest
 

@@ -123,6 +123,15 @@ module Rigor
         type_for_dimension(result.dimension)
       end
 
+      # ADR-88 WD1 — the dimensional return type is a static function of the call's receiver/argument
+      # dimensions (`Distance / Speed → …`) computed per call from the built-in {MethodTable}; there is no
+      # project-file scan or cross-file catalog behind it. A stable sentinel declares "no cross-file fact
+      # surface", so a project using this example plugin stays incremental-capable (a contributing plugin with
+      # no fact / producer / hook makes the snapshot un-reusable every run); `--verify-incremental` backstops it.
+      def incremental_state_fingerprint
+        "static-dimensions"
+      end
+
       private
 
       def dimension_for_type(type)

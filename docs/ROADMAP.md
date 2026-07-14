@@ -129,20 +129,26 @@ and the `check`-walk wiring's value is murky.
 
 **v0.3.0 — the deprecation-clearance + performance minor (the first cut that may
 break).** Semver `0.x` permits a minor to break, and every hard deprecation was
-scheduled with an alias/warning window through `0.2.x` for removal here:
+scheduled with an alias/warning window through `0.2.x` for removal here. **All
+three are DONE** (the deprecation-clearance batch, landed on master):
 
 1. **CLI verb subcommands removed** — `rigor docs list` / `path` and `rigor skill
    list` / `print` / `path` (the flags `--list` / `--path` / `--print` are
-   canonical). `LEGACY_VERB_REMOVAL = "v0.3.0"` in `cli/docs_command.rb` +
-   `cli/skill_command.rb`; see § "Scheduled CLI deprecations" below.
-2. **`type_specifier` plugin hook removed** — the deprecated alias drops; the
-   `narrowing_facts` verb is the only spelling ([ADR-80](adr/80-narrowing-facts-rename.md),
-   `plugin/base.rb`). The alias removal is also when ADR-80's carry-over — the
-   internal reader `type_specifiers` and the `rigor plugins --capabilities` JSON
-   `type_specifier_methods` key — is revisited (a distinct rename decision).
-3. **`parallel_tests` dependency dropped** — `binpacker` is the primary test
-   runner (PR #27); remove the gem dep + the `test-parallel` / `spec_parallel`
-   target.
+   canonical). A removed verb now resolves as an unknown doc / skill name; see
+   § "CLI deprecations" below.
+2. **`type_specifier` plugin hook removed** — the deprecated alias is gone (it
+   now raises `NoMethodError` at class-definition time) and `narrowing_facts` is
+   the only spelling ([ADR-80](adr/80-narrowing-facts-rename.md)). ADR-80's
+   carry-over was **decided at the removal, in favour of full consistency**: the
+   reader `type_specifiers` → `narrowing_facts_rules`, the engine consumer
+   `#type_specifier_facts` → `#narrowing_facts_for`, and the
+   `rigor plugins --capabilities` JSON key `type_specifier_methods` →
+   `narrowing_facts_methods`. The key is public vocabulary that freezes at v1.0
+   ([ADR-50](adr/50-release-engineering-and-stability-strategy.md) WD1), so a
+   breaking minor was the last window to correct the misname.
+3. **`parallel_tests` dependency dropped** — `binpacker` is the test runner
+   (PR #27); the gem dep, `make test-parallel`, and the `rake spec_parallel` task
+   are gone.
 
 Alongside the removals, **as much performance optimization as ships cleanly**:
 

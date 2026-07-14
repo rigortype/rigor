@@ -1,10 +1,10 @@
 # ADR-80 — Rename the `type_specifier` plugin hook to `narrowing_facts`
 
-Status: **Accepted, 2026-06-26.** The plugin-author DSL verb `type_specifier` is renamed to
-`narrowing_facts`. `type_specifier` survives as a warning-emitting alias through 0.2.x and is
-**removed in 0.3.0**. The bundled minitest / sorbet / rspec plugins are migrated. Engine-facing
-internals (`type_specifiers`, `#type_specifier_facts`) and the `rigor plugins --capabilities`
-JSON field `type_specifier_methods` are left unchanged in this slice (see Decision).
+Status: **Accepted, 2026-06-26; completed in 0.3.0.** The plugin-author DSL verb `type_specifier`
+was renamed to `narrowing_facts`, survived as a warning-emitting alias through 0.2.x, and is
+**removed in 0.3.0** (it now raises `NoMethodError` at class-definition time). The bundled
+minitest / sorbet / rspec plugins are migrated. The **carry-over this ADR deferred was decided at
+that removal, in favour of full consistency** — see the 0.3.0 addendum below.
 
 Grounding: the 2026-06-26 rigor-rs port feedback (item 5 — the name misleads), cross-checked
 against the contract freeze in [ADR-60](60-pre-freeze-plugin-contract-consolidation.md) and the
@@ -62,7 +62,32 @@ Rename the hook to **`narrowing_facts`**. Criterion — the reusable rule:
 - **Negative:** a one-minor deprecation window with a live alias + warning; a second internal
   rename is left pending for 0.3.0 (tracked here).
 - **Carry-over:** 0.3.0 removes the alias and revisits the internal reader / capability-JSON
-  names for consistency.
+  names for consistency — resolved below.
+
+## Addendum (0.3.0) — the carry-over, decided
+
+The alias removal landed with the deprecation-clearance batch, and the deferred names were
+renamed **in full** rather than left behind:
+
+| Surface | Was | Now |
+| --- | --- | --- |
+| Class-level reader | `type_specifiers` | `narrowing_facts_rules` |
+| Engine-invoked consumer | `#type_specifier_facts(call_node:, scope:)` | `#narrowing_facts_for(call_node:, scope:)` |
+| `rigor plugins --capabilities` JSON key | `type_specifier_methods` | `narrowing_facts_methods` |
+
+The Decision's scope limit rested on two claims. The first — the internals are API a plugin
+author never writes — is true but does not argue for *keeping* a name the ADR calls misleading;
+the drift-pinned reader is read by anyone extending the engine, and leaving it on the old name
+preserves the wrong mental model at the place the contract is implemented. The second — the JSON
+key is a separately-frozen surface whose rename is a distinct decision — is exactly why it had
+to be settled *here*: the key freezes as public vocabulary at v1.0 ([ADR-50](50-release-engineering-and-stability-strategy.md)
+WD1), and 0.3.0 is a minor that may break, so this was the last window in which the correction
+was free. Deferring again would have frozen the misname in the one surface an outside consumer
+actually reads.
+
+Cost: a consumer of `rigor plugins --capabilities` must read the new key (the value's shape is
+unchanged). That cost is paid once, by a small, enumerable audience, before 1.0 — the same
+trade this ADR made for the verb itself.
 
 ## Relationship to other ADRs
 

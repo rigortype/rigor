@@ -451,9 +451,16 @@ module Rigor
     # can point at `pre_eval:` (ADR-17) instead of reading as a bare unresolved call.
     def user_def_site_for(class_name, method_name)
       table = @discovery.discovered_def_sources[class_name.to_s]
-      return nil unless table
-
-      table[method_name.to_sym]
+      site = table && table[method_name.to_sym]
+      # ADR-88 WD3 — record the SAME instance-side cross-file method edge {#user_def_for} records at :378, so a
+      # move / body-edit of `class_name#method_name`'s definition re-checks the consumer that named the
+      # defining file. `CheckRules#undefined_method_diagnostic` reads this to set `project_definition_site`
+      # (`"path:line"`) on a `call.undefined-method` for a project monkey-patch; without the edge, a line-shift
+      # in the defining file left the cached diagnostic pointing at a stale line (the ADR-46 symbol-granularity
+      # closure never re-checked the caller). Recording keys on the source-entry PRESENCE (truthy `site`),
+      # sound whether or not the caller also went through {#user_def_for}.
+      record_cross_file_method(class_name, method_name, site) if Analysis::DependencyRecorder.active?
+      site
     end
 
     # ADR-24 slice 2 — per-class table mapping a fully qualified user-class name to its superclass name AS WRITTEN

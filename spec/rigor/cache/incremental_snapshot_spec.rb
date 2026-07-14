@@ -21,7 +21,8 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       missing: { "a.rb" => Set["toplevel:helper"] },
       class_decls: { "b.rb" => Set["Foo"] },
       seed_bundles: { "b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} } },
-      plugin_fact_digest: "fact-digest-abc"
+      plugin_fact_digest: "fact-digest-abc",
+      return_summaries: { ["b.rb", "Foo#bar"] => { keys: [], returns: ["Integer"], effects: [0] } }
     )
   end
 
@@ -55,6 +56,29 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       snapshot.save(fingerprint: "fp1", payload: sample_payload)
       loaded = snapshot.load(fingerprint: "fp1")
       expect(loaded.plugin_fact_digest).to eq("fact-digest-abc")
+    end
+  end
+
+  it "round-trips the ADR-89 WD2 return_summaries" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      snapshot.save(fingerprint: "fp1", payload: sample_payload)
+      loaded = snapshot.load(fingerprint: "fp1")
+      expect(loaded.return_summaries).to eq(["b.rb", "Foo#bar"] => { keys: [], returns: ["Integer"], effects: [0] })
+    end
+  end
+
+  it "ignores a schema-9 snapshot (pre-ADR-89: no declaration_signature / return_summaries), loading nil" do
+    Dir.mktmpdir do |dir|
+      snapshot = described_class.new(root: dir)
+      old = Marshal.dump(
+        schema: 9, fingerprint: "fp1", cache: {}, sources: {}, digests: {}, analyzed: [],
+        symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {}, missing: {}, class_decls: {},
+        seed_bundles: { "a.rb" => { digest: "sha-a", code_fingerprint: "cf" } }, plugin_fact_digest: "d"
+      )
+      FileUtils.mkdir_p(File.dirname(snapshot.path))
+      File.binwrite(snapshot.path, Zlib::Deflate.deflate(old))
+      expect(snapshot.load(fingerprint: "fp1")).to be_nil
     end
   end
 

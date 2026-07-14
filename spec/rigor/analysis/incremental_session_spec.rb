@@ -89,6 +89,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     diagnostics.map(&:to_h).sort_by { |hash| [hash["path"], hash["line"], hash["column"], hash["rule"]] }
   end
 
+  def write_once(path, content)
+    File.write(path, content) unless File.exist?(path)
+  end
+
   def fingerprint(config, dir)
     Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, roots: [dir])
   end
@@ -945,11 +949,255 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       expect(described_class.new(configuration: inline).send(:comment_ingesting_plugin_loaded?)).to be(true)
       expect(described_class.new(configuration: ordinary).send(:comment_ingesting_plugin_loaded?)).to be(false)
 
-      # With the gate disabled, EVERY changed file is unstable (dependents never skipped), even one whose code
-      # fingerprint matched.
+      # With the gate disabled, EVERY changed file is unstable (dependents never skipped), even one whose
+      # declaration signature matched.
       session = described_class.new(configuration: inline)
-      session.instance_variable_set(:@seed_bundles, { "a.rb" => { code_fingerprint: "fp" } })
-      expect(session.send(:declaration_unstable, ["a.rb"], { "a.rb" => "fp" })).to eq(["a.rb"])
+      session.instance_variable_set(:@seed_bundles, { "a.rb" => { declaration_signature: "sig" } })
+      expect(session.send(:declaration_unstable, ["a.rb"], { "a.rb" => "sig" })).to eq(["a.rb"])
+    end
+  end
+
+  # ADR-89 WD1 — the declaration-shape gate. It generalises B1 (comment-only) to BODY edits: a changed file
+  # whose per-def SIGNATURE shape (parameter structure / visibility / ancestry / member layout / def line,
+  # bodies excluded) is unchanged is declaration-stable, so its ancestry / file-level dependents are skipped
+  # even when the code changed. Symbol dependents of a changed method body are still re-checked (the ADR-46
+  # symbol tier). Every case asserts byte-identical-to-full — the `--verify-incremental` soundness property.
+  describe "declaration-shape propagation gate (WD1)" do
+    # A base class carrying an inherited instance method `common` and a utility singleton method `build`, an
+    # ANCESTRY dependent that subclasses it and calls the INHERITED `common` (so it reads App's ancestry — a
+    # real ancestry edge — but does NOT call `build`), and a SYMBOL dependent that calls `build`. The S5a
+    # gitlab shape at unit scale: a `build` body edit should re-check the `build` caller but skip the model
+    # (which depends only on App's declaration + `common`, both unchanged).
+    def write_wd1_tree(dir, body:, arity: "(value)", extra_method: false)
+      added = extra_method ? "def self.added; 1; end" : "# no extra"
+      File.write(File.join(dir, "app.rb"), <<~RUBY)
+        class App
+          def common
+            "c"
+          end
+          def self.build#{arity}
+            #{body}
+          end
+          #{added}
+        end
+      RUBY
+      # Ancestry dependent: reads App's ancestry to resolve the inherited `common`; never touches `build`.
+      write_once(File.join(dir, "model.rb"), "class Model < App\n  def name\n    common\n  end\nend\n")
+      write_once(File.join(dir, "caller.rb"), "class Caller\n  def go\n    App.build(1)\n  end\nend\n")
+    end
+
+    it "collapses a same-line body edit to the edited file + its symbol callers, skipping ancestry dependents" do
+      Dir.mktmpdir do |dir|
+        app = File.join(dir, "app.rb")
+        model = File.join(dir, "model.rb")
+        write_wd1_tree(dir, body: 'prefix = "p"; prefix + value.to_s')
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # model.rb IS a recorded ancestry dependent of app.rb (it reads App's ancestry to resolve `common`) —
+        # under B1 (code fingerprint) a body edit would re-check it. WD1 must skip it.
+        expect(session.instance_variable_get(:@ancestry_dependents)[app]).to include(model)
+
+        # Same-line body edit: rename the local. No signature, line, or ancestry change → App is
+        # declaration-stable → the ancestry dependent (model.rb) is skipped.
+        write_wd1_tree(dir, body: 'pre = "p"; pre + value.to_s')
+        recheck = session.recheck
+
+        expect(recheck.changed).to eq(Set[app])
+        expect(recheck.affected).not_to include(model) # ancestry dependent skipped — the WD1 collapse
+        expect(recheck.reused).to include(model)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "propagates an arity change to ancestry dependents (declaration signature moves, not swallowed)" do
+      Dir.mktmpdir do |dir|
+        app = File.join(dir, "app.rb")
+        model = File.join(dir, "model.rb")
+        write_wd1_tree(dir, body: "value", arity: "(value)")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # An arity change moves App.build's declaration signature (its parameter shape), so app is NOT
+        # declaration-stable — its ancestry dependents re-check (WD1 must not swallow a signature change),
+        # unlike the same-line body edit above which skips them.
+        write_wd1_tree(dir, body: "value", arity: "(value, extra)")
+        # Directly assert the arity edit is NOT declaration-stable — before the recheck refreshes the bundle.
+        sigs = Rigor::Inference::ScopeIndexer.scan_summary_for_paths([app])[:declaration_signatures]
+        expect(session.send(:declaration_unstable, [app], sigs)).to eq([app])
+
+        recheck = session.recheck
+        expect(recheck.affected).to include(model) # ancestry dependent re-checks on a declaration change
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "propagates a visibility change to ancestry dependents (declaration signature moves)" do
+      Dir.mktmpdir do |dir|
+        base = File.join(dir, "base.rb")
+        File.write(base, "class Base\n  def tag\n    \"x\"\n  end\nend\n")
+        sub = File.join(dir, "sub.rb")
+        File.write(sub, "class Sub < Base\n  def relay\n    tag\n  end\nend\n")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # Add `private` — Base#tag's body is byte-identical, only its visibility (a declaration surface the
+        # ADR-35 override rule and private-call diagnostics consume) changes.
+        File.write(base, "class Base\n  private\n  def tag\n    \"x\"\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(sub)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "propagates an added method to negative (appeared-symbol) dependents" do
+      Dir.mktmpdir do |dir|
+        write_wd1_tree(dir, body: "value")
+        # A consumer that calls a method not yet defined on App — records a negative edge.
+        consumer = File.join(dir, "consumer.rb")
+        File.write(consumer, "class Consumer\n  def use\n    App.added\n  end\nend\n")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # Define `added` — it APPEARS, so the negative-dependent consumer must re-check.
+        write_wd1_tree(dir, body: "value", extra_method: true)
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(consumer)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "propagates a return-visible body edit to symbol dependents (changed fingerprint)" do
+      Dir.mktmpdir do |dir|
+        caller = File.join(dir, "caller.rb")
+        write_wd1_tree(dir, body: '"a"')
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # A same-line literal change moves App.build's return (Constant["a"] → Constant["b"]) — its symbol
+        # fingerprint changes, so the symbol dependent (caller.rb) re-checks even though the declaration is
+        # stable (ancestry deps still collapse).
+        write_wd1_tree(dir, body: '"b"')
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(caller)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+  end
+
+  # ADR-89 WD2 — the observed-key return-summary gate. A declaration-stable changed def whose return type is
+  # unchanged at every previously-observed call key AND whose content-mutation effects are unchanged is
+  # behaviourally stable, so its symbol dependents are skipped. The gate is restricted to defs whose only
+  # cross-file body surfaces are return + content-mutation (no ivar/cvar write, no yield, no self-call), so
+  # the two-surface comparison is complete. Every case asserts byte-identical-to-full (soundness).
+  describe "observed-key return-summary gate (WD2)" do
+    # A gate-ELIGIBLE leaf helper (no self-call / ivar write / yield) and a caller that dispatches to it.
+    # `body` is the helper's return expression; `probe` toggles a same-line, return-PRESERVING refactor.
+    def write_wd2_tree(dir, body:)
+      File.write(File.join(dir, "fmt.rb"), <<~RUBY)
+        class Fmt
+          def self.label(value)
+            #{body}
+          end
+        end
+      RUBY
+      write_once(File.join(dir, "user.rb"), "class User\n  def show\n    Fmt.label(\"x\")\n  end\nend\n")
+    end
+
+    it "skips symbol dependents on a return-preserving refactor (returns unchanged at observed keys)" do
+      Dir.mktmpdir do |dir|
+        fmt = File.join(dir, "fmt.rb")
+        user = File.join(dir, "user.rb")
+        write_wd2_tree(dir, body: 'prefix = "tag-"; prefix + value')
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # user.rb IS a symbol dependent of Fmt.label (it calls it) — a naive body-fingerprint gate re-checks it.
+        expect(session.instance_variable_get(:@symbol_dependents).keys).to include([fmt, "Fmt.label"])
+        # The baseline observed Fmt.label at User's call key and persisted its return summary.
+        expect(session.instance_variable_get(:@return_summaries)).to have_key([fmt, "Fmt.label"])
+
+        # A same-line, return-preserving refactor: rename the local. The return at every observed key is
+        # unchanged, so WD2 skips the symbol dependent user.rb.
+        write_wd2_tree(dir, body: 'pre = "tag-"; pre + value')
+        recheck = session.recheck
+
+        expect(recheck.changed).to eq(Set[fmt])
+        expect(recheck.affected).not_to include(user) # symbol dependent skipped — the WD2 collapse
+        expect(recheck.reused).to include(user)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "propagates a return-visible body edit to symbol dependents (return moved at observed key)" do
+      Dir.mktmpdir do |dir|
+        user = File.join(dir, "user.rb")
+        write_wd2_tree(dir, body: '"a-" + value')
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # The return literal moves ("a-…" → "b-…"), so the re-evaluation at the observed key mismatches and
+        # WD2 keeps the symbol dependent.
+        write_wd2_tree(dir, body: '"b-" + value')
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(user)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "propagates a mutation-effect change (a param the callee starts mutating) to symbol dependents" do
+      Dir.mktmpdir do |dir|
+        # An eligible def that mutates its array argument's content, and a caller that reads the argument
+        # after the call — its post-call type depends on the callee's arg-flooring effect.
+        acc = File.join(dir, "acc.rb")
+        File.write(acc, "class Acc\n  def self.fill(items)\n    items\n  end\nend\n")
+        caller = File.join(dir, "caller.rb")
+        File.write(caller, "class Reader\n  def run\n    a = [1]\n    Acc.fill(a)\n    a.first\n  end\nend\n")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # The callee STARTS mutating its argument's content — a caller-visible arg-flooring effect change,
+        # even though the return (`items`) is nominally unchanged. WD2's effect channel keeps the dependent.
+        File.write(acc, "class Acc\n  def self.fill(items)\n    items << 2\n    items\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(caller)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "keeps dependents for an INELIGIBLE def (ivar write) even when returns match" do
+      Dir.mktmpdir do |dir|
+        st = File.join(dir, "st.rb")
+        # A def that writes an ivar is ineligible: a same-class caller could consume its definite-assignment,
+        # a surface WD2 does not compare — so its dependents always re-check (the conservative direction).
+        File.write(st, "class St\n  def self.tag(value)\n    @seen = value\n    \"t-\" + value\n  end\nend\n")
+        user = File.join(dir, "user.rb")
+        File.write(user, "class User\n  def show\n    St.tag(\"x\")\n  end\nend\n")
+        session = session_for(configuration(dir))
+        session.baseline
+        # The summary IS harvested (harvest is unconditional); the GATE rejects it because the def is
+        # ineligible (an ivar write), so the dependent is never dropped.
+        expect(session.instance_variable_get(:@return_summaries)).to have_key([st, "St.tag"])
+
+        # A same-line return-preserving refactor: WD2 must still keep the dependent (ineligible def).
+        File.write(st, <<~RUBY)
+          class St
+            def self.tag(value)
+              @seen = value
+              prefix = "t-"; prefix + value
+            end
+          end
+        RUBY
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(user)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
     end
   end
 end

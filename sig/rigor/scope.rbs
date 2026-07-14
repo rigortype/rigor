@@ -129,6 +129,7 @@ module Rigor
     def local_facts: (String | Symbol name, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
     def type_of: (untyped node, ?tracer: Inference::FallbackTracer?) -> Type::t
     def evaluate: (untyped node, ?tracer: Inference::FallbackTracer?) -> [Type::t, Scope]
+    def user_method_return: (untyped def_node, Type::t receiver, Array[Type::t] arg_types) -> Type::t?
     def join: (Scope other) -> Scope
     def ==: (untyped other) -> bool
     alias eql? ==

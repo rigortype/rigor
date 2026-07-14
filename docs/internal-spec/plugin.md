@@ -267,11 +267,14 @@ the block carries logic and runs through `instance_exec`:
 - `narrowing_facts(methods:) { |call_node, scope| facts | nil }` —
   **post-return narrowing facts**, gated on `call_node.name` being in
   the declared `methods:`. The engine invokes it through
-  `#type_specifier_facts(call_node:, scope:)`. `rigor-minitest`
+  `#narrowing_facts_for(call_node:, scope:)`. `rigor-minitest`
   (assertion narrowing) and `rigor-rspec`'s matcher narrowing are the
   worked consumers. Renamed from `type_specifier`
-  ([ADR-80](../adr/80-narrowing-facts-rename.md)); `type_specifier`
-  remains as a deprecating alias, removed in 0.3.0.
+  ([ADR-80](../adr/80-narrowing-facts-rename.md)); the old verb was a
+  deprecating alias through `0.2.x` and is gone in 0.3.0, together with
+  the reader (`narrowing_facts_rules`), the engine consumer
+  (`#narrowing_facts_for`), and the capability key
+  (`narrowing_facts_methods`) it left behind.
 
 `receivers:` / `methods:` are the greppable, indexable gates the
 `rigor plugins --capabilities` catalogue (ADR-37 § "Machine-readable
@@ -302,7 +305,7 @@ capabilities). With `--format json` the output is:
       "version": "<plugin version>",
       "node_rule_types": ["<Prism node class name>", "..."],
       "dynamic_return_receivers": ["<receiver class name>", "..."],
-      "type_specifier_methods": ["<method name>", "..."],
+      "narrowing_facts_methods": ["<method name>", "..."],
       "produces": ["<fact id>", "..."],
       "consumes": ["<plugin_id/fact_name>", "..."]
     }
@@ -313,7 +316,7 @@ capabilities). With `--format json` the output is:
 The five capability arrays are exactly the declarative gates of the
 narrow protocols above: `node_rule_types` from each `node_rule` node
 type, `dynamic_return_receivers` from `dynamic_return(receivers:)`,
-`type_specifier_methods` from `narrowing_facts(methods:)`, and
+`narrowing_facts_methods` from `narrowing_facts(methods:)`, and
 `produces` / `consumes` from the ADR-9 manifest fields. An array is
 empty when the plugin declares nothing for that surface; the text view
 omits empty surfaces entirely. This is the contract that keeps the
@@ -665,7 +668,7 @@ following are now in place and are documented in their own specs:
     consumers fully migrated before deletion.
   - *Slice 3* — the `FactProvider` naming + the machine-readable
     `rigor plugins --capabilities` catalogue (per plugin: node_rule node
-    types, dynamic_return receivers, type_specifier methods,
+    types, dynamic_return receivers, narrowing_facts methods,
     produced/consumed facts).
 - **Read-before-write nil gate.** `additional_initializers:`
   ([ADR-38](../adr/38-additional-initializers.md)) lets a plugin

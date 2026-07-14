@@ -144,7 +144,7 @@ RSpec.describe "plugins/rigor-rspec" do
     context "when matcher is be_a(Class)" do
       it "emits a :local post_return_fact narrowing to Nominal[Class]" do
         call_node = parse_call_node("expect(x).to be_a(String)")
-        facts = plugin.type_specifier_facts(call_node: call_node, scope: nil)
+        facts = plugin.narrowing_facts_for(call_node: call_node, scope: nil)
         fact = facts.first
 
         expect(facts).not_to be_empty
@@ -157,7 +157,7 @@ RSpec.describe "plugins/rigor-rspec" do
     context "when matcher is be_kind_of(Class)" do
       it "emits the same shape as be_a" do
         call_node = parse_call_node("expect(x).to be_kind_of(Integer)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.target_name).to eq(:x)
         expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
@@ -167,7 +167,7 @@ RSpec.describe "plugins/rigor-rspec" do
     context "when matcher is be_instance_of(Class)" do
       it "emits a :local fact for the named class" do
         call_node = parse_call_node("expect(x).to be_instance_of(Float)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.target_name).to eq(:x)
         expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("Float"))
@@ -177,7 +177,7 @@ RSpec.describe "plugins/rigor-rspec" do
     context "when matcher is be_nil" do
       it "emits a :local fact narrowing to Constant<nil>" do
         call_node = parse_call_node("expect(x).to be_nil")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.target_name).to eq(:x)
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(nil))
@@ -187,28 +187,28 @@ RSpec.describe "plugins/rigor-rspec" do
     context "when matcher is eq(literal)" do
       it "narrows to Constant<integer> for an integer literal" do
         call_node = parse_call_node("expect(x).to eq(42)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(42))
       end
 
       it "narrows to Constant<string> for a string literal" do
         call_node = parse_call_node('expect(x).to eq("hi")')
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of("hi"))
       end
 
       it "narrows to Constant<symbol> for a symbol literal" do
         call_node = parse_call_node("expect(x).to eq(:foo)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(:foo))
       end
 
       it "narrows to Constant<true> for a true literal" do
         call_node = parse_call_node("expect(x).to eq(true)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(true))
       end
@@ -216,14 +216,14 @@ RSpec.describe "plugins/rigor-rspec" do
       it "is silent for a non-literal argument" do
         call_node = parse_call_node("expect(x).to eq(some_method)")
 
-        expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
     end
 
     context "when matcher is eql(literal)" do
       it "shares the eq path" do
         call_node = parse_call_node("expect(x).to eql(0)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(0))
       end
@@ -232,21 +232,21 @@ RSpec.describe "plugins/rigor-rspec" do
     context "when matcher is match(/regex/)" do
       it "narrows x to String for a regex literal arg" do
         call_node = parse_call_node("expect(x).to match(/\\Afoo\\z/)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("String"))
       end
 
       it "is silent for a non-regex argument" do
         call_node = parse_call_node('expect(x).to match("foo")')
-        expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
     end
 
     context "when assertion verb is not_to" do
       it "emits a negative fact for not_to be_nil" do
         call_node = parse_call_node("expect(x).not_to be_nil")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.target_name).to eq(:x)
         expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(nil))
@@ -255,7 +255,7 @@ RSpec.describe "plugins/rigor-rspec" do
 
       it "emits a negative fact for not_to be_a(T)" do
         call_node = parse_call_node("expect(x).not_to be_a(String)")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("String"))
         expect(fact.negative).to be(true)
@@ -265,7 +265,7 @@ RSpec.describe "plugins/rigor-rspec" do
     context "when assertion verb is to_not (older spelling)" do
       it "behaves like not_to" do
         call_node = parse_call_node("expect(x).to_not be_nil")
-        fact = plugin.type_specifier_facts(call_node: call_node, scope: nil).first
+        fact = plugin.narrowing_facts_for(call_node: call_node, scope: nil).first
 
         expect(fact.negative).to be(true)
       end
@@ -275,24 +275,24 @@ RSpec.describe "plugins/rigor-rspec" do
       it "is silent for expect(non_local).to MATCHER" do
         # expect(foo.bar) — the arg isn't a LocalVariableReadNode, so the analyzer cannot name a narrowing target.
         call_node = parse_call_node("expect(foo.bar).to be_a(String)")
-        expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
 
       it "is silent for expect { block }.to raise_error(...)" do
         # Block form doesn't match the call shape; future slices might add support, but for now the analyzer
         # drops out.
         call_node = parse_call_node("expect { foo }.to raise_error(StandardError)")
-        expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
 
       it "is silent for an unrecognised matcher (be_truthy queued for follow-up)" do
         call_node = parse_call_node("expect(x).to be_truthy")
-        expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
 
       it "is silent for a bare method call that isn't `.to`" do
         call_node = parse_call_node("foo(x)")
-        expect(plugin.type_specifier_facts(call_node: call_node, scope: nil)).to be_empty
+        expect(plugin.narrowing_facts_for(call_node: call_node, scope: nil)).to be_empty
       end
     end
 

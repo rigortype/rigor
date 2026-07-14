@@ -203,8 +203,8 @@ end
 ```
 
 > **`narrowing_facts` was renamed from `type_specifier` in ADR-80.**
-> `type_specifier` remains as a deprecating alias, removed in 0.3.0 — use
-> `narrowing_facts` in new plugins.
+> The old verb was removed in 0.3.0 — `narrowing_facts` is the only
+> spelling a plugin can declare.
 
 Build return types with `Rigor::Type::Combinator`:
 

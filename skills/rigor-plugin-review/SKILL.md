@@ -1,7 +1,7 @@
 ---
 name: rigor-plugin-review
 description: |
-  Review an existing Rigor plugin's source against the current authoring contract and produce a prioritized upgrade path — the modernization counterpart to rigor-plugin-author. Audits config-default declaration (ADR-40), the AST-walk model (node_rule vs a hand-rolled traversal), return-type / narrowing hooks (dynamic_return / narrowing_facts, not the removed flow_contribution_for or deprecated type_specifier), the ADR-60 WD4 authoring helpers (diagnostic / diagnostics_for / suggest / producer_value / read_fact), engine-collaboration vs reimplementation, cache-producer soundness, manifest-field hygiene, and doc freshness. Triggers: "review this Rigor plugin", "does my plugin follow best practices", "upgrade our rigor-prefixed plugin to the latest contract", "modernize this plugin", "is this plugin using the current API". NOT for authoring a new plugin (use rigor-plugin-author), enabling bundled plugins on a project (use rigor-plugin-tune), or tuning plugin config.
+  Review an existing Rigor plugin's source against the current authoring contract and produce a prioritized upgrade path — the modernization counterpart to rigor-plugin-author. Audits config-default declaration (ADR-40), the AST-walk model (node_rule vs a hand-rolled traversal), return-type / narrowing hooks (dynamic_return / narrowing_facts, not the removed flow_contribution_for or type_specifier), the ADR-60 WD4 authoring helpers (diagnostic / diagnostics_for / suggest / producer_value / read_fact), engine-collaboration vs reimplementation, cache-producer soundness, manifest-field hygiene, and doc freshness. Triggers: "review this Rigor plugin", "does my plugin follow best practices", "upgrade our rigor-prefixed plugin to the latest contract", "modernize this plugin", "is this plugin using the current API". NOT for authoring a new plugin (use rigor-plugin-author), enabling bundled plugins on a project (use rigor-plugin-tune), or tuning plugin config.
 license: MPL-2.0
 metadata:
   version: 0.1.0
@@ -30,7 +30,7 @@ appears:
 3. **A hand-rolled AST walk** where the engine-owned `node_rule` now
    fits (ADR-37 / ADR-52).
 4. **Removed / renamed hooks** still named — `flow_contribution_for`
-   (deleted, ADR-52 WD3) or `type_specifier` (deprecated alias for
+   (deleted, ADR-52 WD3) or `type_specifier` (removed in 0.3.0; renamed to
    `narrowing_facts`, ADR-80).
 5. **Stale docs** — archaeology about deleted hooks, pinned version
    references that no longer mean anything.

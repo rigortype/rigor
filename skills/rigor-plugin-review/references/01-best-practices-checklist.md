@@ -78,12 +78,13 @@ can.
 ## 3. Return-type & narrowing hooks (ADR-37 / ADR-52 / ADR-80) — `M`/`D`
 
 **Smell:** `flow_contribution_for` (deleted in ADR-52 WD3 — *defining it
-now raises `ArgumentError`*), or `type_specifier` (the pre-ADR-80 name).
+now raises `ArgumentError`*), or `type_specifier` (the pre-ADR-80 name,
+removed in 0.3.0 — it now raises `NoMethodError`).
 
 **Modern:** `dynamic_return(receivers:/methods:/file_methods:)` to
 *supply* a return type, `narrowing_facts(methods:)` to supply
-post-return narrowing facts. `type_specifier` survives as a
-deprecating alias removed in 0.3.0 — rename to `narrowing_facts`.
+post-return narrowing facts. Rename any surviving `type_specifier` to
+`narrowing_facts`.
 
 The gate resolves after `#init` when passed a callable
 (`methods: -> { [@method_name] }`), so config-derived method names work.
@@ -207,7 +208,7 @@ and put that in a CHANGELOG / migration note, not the class docstring.
   misuse. MUST be clean; fix the cause, never disable the rule.
 - `rigor plugins --strict` — the plugin still activates.
 - `rigor plugins --capabilities` — `node_rule_types` /
-  `dynamic_return_receivers` / `type_specifier_methods` reflect the
+  `dynamic_return_receivers` / `narrowing_facts_methods` reflect the
   declarations.
 - The integration / unit spec — green, and byte-identical across every
   mechanical step.

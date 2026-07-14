@@ -115,8 +115,8 @@ AST walk per file — hands every matching node to the block along with a
 Optionally the plugin also declares `dynamic_return(receivers:)` /
 `narrowing_facts(methods:)` to *supply* a return type or narrowing facts
 for call sites the core analyzer types as `Dynamic`. (`narrowing_facts`
-was renamed from `type_specifier` in ADR-80; `type_specifier` remains as a
-deprecating alias removed in 0.3.0 — use `narrowing_facts` in new plugins.)
+was renamed from `type_specifier` in ADR-80; the old verb was removed in
+0.3.0, so `narrowing_facts` is the only spelling.)
 `#diagnostics_for_file`
 is the file-rule surface for whole-file diagnostics a per-node walk can't
 express. (`flow_contribution_for` was removed pre-1.0 in ADR-52 WD3 —
@@ -136,5 +136,5 @@ defining it now raises `ArgumentError`; use `dynamic_return` /
 | Module | Read | Covers |
 | --- | --- | --- |
 | 1 | [`references/01-plan-and-scaffold.md`](references/01-plan-and-scaffold.md) | **Phase 1.** The gem vs project-private packaging split, directory trees for both, gemspec template, project-private path-gem / `RUBYLIB` activation, the `Rigor::Plugin::Base` skeleton, `.rigor.yml` `plugins:` wiring. |
-| 2 | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) | **Phase 2.** The `node_rule` engine-owned AST walk over Prism nodes, the `Base#diagnostic` helper, asking the analyzer for inferred types via `scope.type_of`, two-pass / lexical context (`node_file_context` / `NodeContext`), the optional `dynamic_return` / `narrowing_facts` return-type hooks (`narrowing_facts` was renamed from `type_specifier` in ADR-80, alias removed in 0.3.0; `flow_contribution_for` was removed pre-1.0 in ADR-52 WD3), calling the target library's pure methods directly rather than reimplementing them (ADR-39: `Plugin::Inflector` over the real `ActiveSupport::Inflector`; `Base.suggest` for did-you-mean), and shipping `sig/*.rbs` so the DSL's types are visible. |
+| 2 | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) | **Phase 2.** The `node_rule` engine-owned AST walk over Prism nodes, the `Base#diagnostic` helper, asking the analyzer for inferred types via `scope.type_of`, two-pass / lexical context (`node_file_context` / `NodeContext`), the optional `dynamic_return` / `narrowing_facts` return-type hooks (`narrowing_facts` was renamed from `type_specifier` in ADR-80, the alias removed in 0.3.0; `flow_contribution_for` was removed pre-1.0 in ADR-52 WD3), calling the target library's pure methods directly rather than reimplementing them (ADR-39: `Plugin::Inflector` over the real `ActiveSupport::Inflector`; `Base.suggest` for did-you-mean), and shipping `sig/*.rbs` so the DSL's types are visible. |
 | 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phase 3.** Testing a plugin from outside the monorepo — fixture projects driven through `rigor check --format json`, plus pure unit tests of dispatch tables — with RSpec or Minitest. Version pinning against the pre-1.0 contract. README. Publishing to RubyGems or keeping the plugin private. |

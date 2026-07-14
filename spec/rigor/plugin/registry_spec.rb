@@ -273,7 +273,7 @@ RSpec.describe Rigor::Plugin::Registry do
         end
       end
     end
-    let(:type_specifier_plugin_class) do
+    let(:narrowing_facts_plugin_class) do
       Class.new(Rigor::Plugin::Base) do
         manifest(id: "specifier", version: "0.0.1")
 
@@ -283,9 +283,9 @@ RSpec.describe Rigor::Plugin::Registry do
       end
     end
 
-    it "compiles per-plugin dynamic_return/type_specifier method-name gates keyed by plugin (.class grouping)" do
+    it "compiles per-plugin dynamic_return/narrowing_facts method-name gates keyed by plugin (.class grouping)" do
       dynamic_plugin = gated_plugin_class.new(services: services)
-      specifier_plugin = type_specifier_plugin_class.new(services: services)
+      specifier_plugin = narrowing_facts_plugin_class.new(services: services)
       registry = described_class.new(plugins: [dynamic_plugin, specifier_plugin])
       index = registry.contribution_index
 
@@ -296,10 +296,10 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(index.dynamic_candidate_for?(dynamic_plugin, :assert_kind_of)).to be(false)
       expect(index.dynamic_candidate_for?(specifier_plugin, :unwrap)).to be(false)
 
-      # type_specifier_gates: same per-plugin isolation, on the other rule table.
-      expect(index.type_specifier_candidate_for?(specifier_plugin, :assert_kind_of)).to be(true)
-      expect(index.type_specifier_candidate_for?(specifier_plugin, :unwrap)).to be(false)
-      expect(index.type_specifier_candidate_for?(dynamic_plugin, :assert_kind_of)).to be(false)
+      # narrowing_facts_gates: same per-plugin isolation, on the other rule table.
+      expect(index.narrowing_facts_candidate_for?(specifier_plugin, :assert_kind_of)).to be(true)
+      expect(index.narrowing_facts_candidate_for?(specifier_plugin, :unwrap)).to be(false)
+      expect(index.narrowing_facts_candidate_for?(dynamic_plugin, :assert_kind_of)).to be(false)
     end
 
     it "unions per-plugin gates into a global dispatch/statement gate (Set#merge across plugins)" do

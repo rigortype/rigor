@@ -163,14 +163,14 @@ work shifts allocations. The [ADR-50](adr/50-release-engineering-and-stability-s
 v1.0 hard freeze is still ahead — `0.3.0` is a normal `0.x` minor that clears the
 deprecation backlog and banks perf, not the freeze.
 
-### Scheduled CLI deprecations — `docs` / `skill` verb subcommands → flags (removal v0.3.0)
+### CLI deprecations — `docs` / `skill` verb subcommands → flags (REMOVED in v0.3.0)
 
 `rigor docs` and `rigor skill` moved their discovery subcommands to
 flags so the positional slot is unambiguously a doc / skill *name* (the
 old `list` / `path` / `print` verbs shared that slot, able to shadow a
 same-named page). Canonical forms now:
 
-| Action | Canonical | Deprecated (still works, warns) |
+| Action | Canonical | Removed spelling (v0.3.0) |
 | --- | --- | --- |
 | docs index / list | `rigor docs` · `rigor docs --list [category]` | `rigor docs list` |
 | docs path | `rigor docs --path <name>` | `rigor docs path <name>` |
@@ -184,11 +184,11 @@ manual. `rigor skill describe` / `--describe` (and the top-level
 `rigor describe`) are unchanged — `describe` is a no-argument action,
 not a name-slot verb, so it is not deprecated.
 
-The deprecated verb spellings emit a one-line stderr notice and are
-**removed in v0.3.0** (the next minor after the current `0.2.x`
-evaluation line); until then both spellings work. The bundled
-generators and docs already emit only the canonical forms, so the
-SKILL-driven UX never triggers the notice. The flag vocabulary freezes
+The deprecated verb spellings warned on stderr through `0.2.x` and are
+**removed in v0.3.0**: the positional slot is a name, so a removed verb
+now resolves as an unknown doc / skill. The bundled generators and docs
+only ever emitted the canonical forms, so the SKILL-driven UX is
+unaffected by the removal. The flag vocabulary freezes
 at v1.0 under [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
 WD1. Amends [ADR-74](adr/74-offline-doc-access-and-llms-txt.md) (docs
 grammar + handbook bundling) and [ADR-73](adr/73-skill-driven-user-experience.md)

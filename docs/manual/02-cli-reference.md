@@ -474,8 +474,9 @@ rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]
 | `--describe` | Probe the project's state (config / baseline / `sig/` / CI — presence only, never runs `rigor check`) and recommend the next skill to run. Also spelled `describe`; surfaced top-level as [`rigor describe`](#rigor-describe) below. |
 
 The verb spellings `rigor skill list` / `print <name>` / `path <name>`
-are **deprecated** (a one-line stderr notice; removed in v0.3.0) — use
-the forms above. `describe` / `--describe` stay first-class.
+were **removed in v0.3.0** — the positional slot is a skill name, so
+they now read as an unknown skill. Use the forms above.
+`describe` / `--describe` stay first-class.
 
 ## `rigor describe`
 
@@ -518,8 +519,9 @@ rigor docs [<name>] [--path <name>] [--list [<category>]]
 | `--path <name>` | Print the single-line absolute path of a doc, suitable as input to a file-reading tool. |
 | `--list [<category>]` | Table of every bundled doc (name + absolute path); pass `manual` or `handbook` to filter. |
 
-The verb spellings `rigor docs list` / `path <name>` are **deprecated**
-(a one-line stderr notice; removed in v0.3.0) — use `--list` / `--path`.
+The verb spellings `rigor docs list` / `path <name>` were **removed in
+v0.3.0** — the positional slot is a doc name, so they now read as an
+unknown doc. Use `--list` / `--path`.
 
 The canonical web copy of the index is
 <https://rigor.typedduck.fail/llms.txt>; `rigor docs` serves the same

@@ -118,22 +118,18 @@ RSpec.describe Rigor::CLI::DocsCommand do
     end
   end
 
-  describe "deprecated verb forms (removed in v0.3.0)" do
-    it "still lists via `list` but warns on stderr" do
-      status, out, err = run(["list"])
-      expect(status).to eq(0)
-      expect(out).to include("install")
-      expect(err).to include("`list` is deprecated")
-      expect(err).to include("v0.3.0")
-      expect(err).to include("rigor docs --list")
+  describe "removed verb forms (dropped in v0.3.0)" do
+    # The positional slot is a doc NAME, so a removed verb is now just an unknown name — no rewrite, no warning.
+    it "treats `list` as a doc name" do
+      status, _out, err = run(["list"])
+      expect(status).to eq(1)
+      expect(err).to include("Unknown doc: list")
     end
 
-    it "still resolves a path via `path <name>` but warns on stderr" do
-      status, out, err = run(%w[path editor-integration])
-      expect(status).to eq(0)
-      expect(out.strip).to end_with("docs/manual/09-editor-integration.md")
-      expect(err).to include("`path <name>` is deprecated")
-      expect(err).to include("rigor docs --path <name>")
+    it "treats `path` as a doc name" do
+      status, _out, err = run(%w[path editor-integration])
+      expect(status).to eq(1)
+      expect(err).to include("Unknown doc: path")
     end
   end
 

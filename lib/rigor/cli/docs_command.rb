@@ -20,9 +20,6 @@ module Rigor
     #
     # `<name>` resolves a category-qualified path (`handbook/03-narrowing`), a prefixed basename (`03-narrowing`), or a
     # short name (`narrowing`, when it is unique across categories).
-    #
-    # The pre-v0.3.0 verb spellings `rigor docs list` / `rigor docs path <name>` still work but emit a stderr
-    # deprecation notice; they are removed in v0.3.0 (see docs/ROADMAP.md § "Scheduled CLI deprecations").
     class DocsCommand < Command
       USAGE = <<~USAGE
         Usage: rigor docs [<name>] [--path <name>] [--list [<category>]]
@@ -46,10 +43,6 @@ module Rigor
           rigor docs editor-integration
           rigor docs --path 17-driving-improvement
           rigor docs --list handbook
-
-        Deprecated (removed in v0.3.0) — use the flags above:
-          rigor docs list           ->  rigor docs --list
-          rigor docs path <name>    ->  rigor docs --path <name>
       USAGE
 
       # The bundled docs live at `<gem_root>/docs/`. From `lib/rigor/cli/docs_command.rb` that is three directories up.
@@ -58,18 +51,8 @@ module Rigor
       HANDBOOK_ROOT = File.join(DOCS_ROOT, "handbook")
       LLMS_INDEX = File.join(DOCS_ROOT, "llms.txt")
 
-      # The verb subcommands the flags superseded keep working with a stderr deprecation notice until this version drops
-      # them. Each maps to the canonical advice printed and the flag it rewrites to.
-      LEGACY_VERB_REMOVAL = "v0.3.0"
-      LEGACY_VERBS = {
-        "list" => { old: "list",        advice: "--list",        flag: "--list" },
-        "path" => { old: "path <name>", advice: "--path <name>", flag: "--path" }
-      }.freeze
-
       # @return [Integer] CLI exit status.
       def run
-        rewrite_legacy_verb!
-
         case @argv.first
         when nil
           run_index
@@ -91,19 +74,6 @@ module Rigor
       end
 
       private
-
-      # Translate a deprecated verb spelling into its flag form, warning once on stderr, so the dispatch above only
-      # handles canonical forms.
-      def rewrite_legacy_verb!
-        spec = LEGACY_VERBS[@argv.first]
-        return unless spec
-
-        @err.puts(
-          "rigor docs: `#{spec.fetch(:old)}` is deprecated and will be removed in " \
-          "#{LEGACY_VERB_REMOVAL}; use `rigor docs #{spec.fetch(:advice)}` instead."
-        )
-        @argv[0] = spec.fetch(:flag)
-      end
 
       def run_index
         if File.file?(LLMS_INDEX)

@@ -343,30 +343,24 @@ RSpec.describe Rigor::CLI::SkillCommand do
     end
   end
 
-  describe "deprecated verb forms (removed in v0.3.0)" do
-    it "still lists via `list` but warns on stderr" do
-      status, out, err = run(["list"])
-      expect(status).to eq(0)
-      expect(out).to include("rigor-project-init")
-      expect(err).to include("`list` is deprecated")
-      expect(err).to include("v0.3.0")
-      expect(err).to include("rigor skill --list")
+  describe "removed verb forms (dropped in v0.3.0)" do
+    # The positional slot is a skill NAME, so a removed verb is now just an unknown name — no rewrite, no warning.
+    it "treats `list` as a skill name" do
+      status, _out, err = run(["list"])
+      expect(status).to eq(1)
+      expect(err).to include("Unknown skill: list")
     end
 
-    it "still prints via `print <name>` but warns on stderr" do
-      status, out, err = run(%w[print rigor-project-init])
-      expect(status).to eq(0)
-      expect(out).to start_with("# Rigor skill: rigor-project-init\n")
-      expect(err).to include("`print <name>` is deprecated")
-      expect(err).to include("rigor skill <name>")
+    it "treats `print` as a skill name" do
+      status, _out, err = run(%w[print rigor-project-init])
+      expect(status).to eq(1)
+      expect(err).to include("Unknown skill: print")
     end
 
-    it "still resolves a path via `path <name>` but warns on stderr" do
-      status, out, err = run(%w[path rigor-baseline-reduce])
-      expect(status).to eq(0)
-      expect(out.strip).to end_with("rigor-baseline-reduce/SKILL.md")
-      expect(err).to include("`path <name>` is deprecated")
-      expect(err).to include("rigor skill --path <name>")
+    it "treats `path` as a skill name" do
+      status, _out, err = run(%w[path rigor-baseline-reduce])
+      expect(status).to eq(1)
+      expect(err).to include("Unknown skill: path")
     end
   end
 

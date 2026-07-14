@@ -610,6 +610,14 @@ module Rigor
       Inference::ExpressionTyper.new(scope: self, tracer: tracer).type_of(node)
     end
 
+    # ADR-89 WD2 — the inferred return type of `def_node` called with `receiver` / `arg_types`, computed
+    # against THIS scope's discovery index (so cross-file dispatches in the body resolve). The incremental
+    # session re-drives a declaration-stable changed callee at each previously-observed call key to prove its
+    # return is unchanged before skipping its symbol dependents.
+    def user_method_return(def_node, receiver, arg_types)
+      Inference::ExpressionTyper.new(scope: self).return_type_for(def_node, receiver, arg_types)
+    end
+
     # Statement-level evaluation: returns the pair `[type, scope']` where `type` is what the node produces and
     # `scope'` is the scope observable after the node has run. The receiver scope is never mutated. See
     # {Rigor::Inference::StatementEvaluator} for the catalogue of nodes that thread scope; everything else defers

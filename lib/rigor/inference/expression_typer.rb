@@ -245,6 +245,29 @@ module Rigor
         fallback_for(node, family: :prism)
       end
 
+      # ADR-89 WD2 — the return type of `def_node` called with `receiver` / `arg_types`, computed exactly as a
+      # resolved in-body dispatch does (through the ADR-84 memo, so it is cheap and yields FINAL values only).
+      # Public entry point for the incremental session's return-summary re-evaluation: it re-drives a
+      # declaration-stable changed callee at each previously-observed call key to prove its return is
+      # unchanged before skipping the callee's symbol dependents. nil for an abstract / bodyless def, or when
+      # the memo refuses a transient result — the caller treats either as "not provably stable" (keeps the
+      # dependents), the conservative direction.
+      def return_type_for(def_node, receiver, arg_types)
+        infer_user_method_return(def_node, receiver, arg_types)
+      end
+
+      # ADR-89 WD2 — the current run's return memo bucket as `{ def_node => [MemoEntry, …] }` (only entries
+      # that carry a call descriptor, i.e. every stored entry). Read by the incremental session right after a
+      # recording run to harvest each analyzed callee's observed call keys → return descriptors. Returns an
+      # empty hash when no bucket exists (a run that memoised nothing). Class method: the bucket lives on
+      # `Thread.current`, independent of any one `ExpressionTyper` instance.
+      def self.harvest_return_memo
+        slot = Thread.current[RETURN_MEMO_KEY]
+        return {} if slot.nil?
+
+        slot[1].transform_values(&:values)
+      end
+
       private
 
       attr_reader :scope, :tracer
@@ -1645,8 +1668,13 @@ module Rigor
       # ADR-46 dependency recording, the frozen `Analysis::DependencyRecorder::ReadSet` its body walk
       # produced (nil on non-recording runs — recording is decided per run and the bucket never outlives a
       # run, so a recording run only ever hits entries that carry a read-set; pinned by
-      # return_memo_recording_spec's rollover example).
-      MemoEntry = Data.define(:result, :read_set)
+      # return_memo_recording_spec's rollover example). ADR-89 WD2 additionally carries the CALL DESCRIPTOR
+      # (`receiver` + `arg_types`) so the incremental session can harvest each observed call key and persist
+      # it as a return-summary — a recheck re-evaluates the (declaration-stable) callee at those keys and,
+      # when every return is unchanged, skips its symbol dependents. Carrying two frozen type refs is
+      # negligible on the memo-store path (already in scope) and never enters memo equality (entries are
+      # keyed by `memo_key`, retrieved by `.result` / `.read_set`).
+      MemoEntry = Data.define(:result, :read_set, :receiver, :arg_types)
       private_constant :MemoEntry
 
       # ADR-84 WD3 — thread-local transient-machinery event log, appended by `note_transient_fallback` at
@@ -1825,7 +1853,8 @@ module Rigor
         elsif context_tainted?(event_mark, entry_depth)
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
         else
-          per_def[memo_key] = MemoEntry.new(result: result, read_set: read_set)
+          per_def[memo_key] = MemoEntry.new(result: result, read_set: read_set,
+                                            receiver: receiver, arg_types: arg_types)
         end
         result
       end

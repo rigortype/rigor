@@ -90,6 +90,9 @@ module Rigor
         @missing = {}              # consumer => Set<"kind:name"> it looked up and missed
         @negative_dependents = {}  # "kind:name" => Set<consumer> (inverted @missing)
         @class_decls = {}          # path => Set<qualified class name declared in the file>
+        # ADR-89 WD2 — per-def observed-key return summaries: [path, symbol] => { keys:, returns:, effects: }.
+        # Harvested from the ADR-84 return memo after each run; drives the behavioural-stability gate.
+        @return_summaries = {}
         # ADR-88 WD1 — the plugin fact-surface digest computed for THIS invocation (nil until a
         # `#run_incremental` pass runs / a plugin-free project) and the reporting flags a caller (the CLI
         # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
@@ -116,6 +119,7 @@ module Rigor
         @analyzed = runner.analyzed_files
         @seed_bundles = runner.seed_bundles # ADR-85 WD2 — the freshly built bundle set for the next run.
         absorb_dependency_graph(runner)
+        @return_summaries = runner.return_summaries # ADR-89 WD2 — the full-run behavioural surface.
         @cache = per_file(diagnostics)
         @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
         diagnostics
@@ -150,51 +154,93 @@ module Rigor
       def affected_closure(changed, added, removed)
         scan = changed + added
         # Parse the changed / added set ONCE for the per-symbol fingerprints, the class declarations, AND the
-        # B1 comment-stripped code fingerprints. They were separate `discovered_def_index_for_paths` passes
-        # over the same `scan` set — a duplicate re-parse of every changed file each recheck (recon §2 / the
-        # P6 recheck-floor audit).
+        # ADR-89 WD1 declaration signatures. They were separate `discovered_def_index_for_paths` passes over
+        # the same `scan` set — a duplicate re-parse of every changed file each recheck (recon §2 / the P6
+        # recheck-floor audit).
         summary = scan.empty? ? nil : Inference::ScopeIndexer.scan_summary_for_paths(scan)
         scan_index = summary && summary[:def_index]
-        code_fingerprints = (summary && summary[:code_fingerprints]) || {}
+        declaration_signatures = (summary && summary[:declaration_signatures]) || {}
         new_fps = symbol_fingerprints_from_index(scan_index)
         new_class_decls = class_declarations_from_index(scan_index)
         changed_pairs = Incremental.changed_symbol_pairs(changed, @symbol_fingerprints, new_fps)
-        # B1 — a changed file whose CODE (comments stripped) is byte-identical to the snapshot is
+        # ADR-89 WD1 — a changed file whose DECLARATION signature (per-def parameter shape / visibility /
+        # ancestry / member layout / def line, bodies excluded) is byte-identical to the snapshot is
         # declaration-stable: every cross-file fact its ancestry / file-level dependents consume is
-        # code-derived and therefore unchanged, so those dependents are skipped. Only the code-UNSTABLE
+        # declaration-derived and therefore unchanged (a body edit is consumed only by SYMBOL dependents,
+        # governed below by `changed_pairs`), so those dependents are skipped. Only the declaration-UNSTABLE
         # changed files contribute their ancestry / file-level dependents; the changed files themselves are
-        # always re-analysed (`changed.to_set`) to learn their own diagnostics.
-        unstable = declaration_unstable(changed, code_fingerprints)
-        base = if changed_pairs.any? || unstable.any? { |f| @ancestry_dependents[f] }
-                 Incremental.affected_with_symbols(unstable, changed_pairs, @symbol_dependents, @ancestry_dependents)
-               else
-                 Incremental.affected(unstable, @dependents)
-               end
+        # always re-analysed (`changed.to_set`) to learn their own diagnostics. This generalises the B1
+        # comment-only gate (code-stable ⟹ declaration-stable) to same-line body edits.
+        unstable = declaration_unstable(changed, declaration_signatures)
+        # ADR-89 WD2 — a declaration-stable changed def whose behavioural surface (return type at every
+        # previously-observed call key + content-mutation effects) is unchanged is behaviourally stable: its
+        # symbol dependents' cached diagnostics stay valid, so drop them. `symbol_pairs` is `changed_pairs`
+        # minus those stable pairs, and only it (not `changed_pairs`) drives the symbol-dependent fan-out.
+        symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index)
+        base = dependents_base(unstable, symbol_pairs)
         closure = base | changed.to_set | added.to_set | negative_affected(scan, new_fps, new_class_decls)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
       end
 
-      # B1 — the changed files whose ancestry / file-level dependents must STILL be re-checked: those not
-      # provably comment-only-edited. A changed file is declaration-STABLE (its dependents skippable) when its
-      # current comment-stripped {ScopeIndexer.code_fingerprint} matches the one stored in the snapshot's seed
-      # bundle. Falls back to treating EVERY changed file as unstable (today's full closure) when a
-      # comment-ingesting plugin is loaded — such a plugin reads the very comments the fingerprint ignores, so
-      # a comment edit it treats as a no-op could change a cross-file type. Sorbet sigs / dry-types includes
-      # are CODE, so the fingerprint already proves them unchanged; only comment-as-input plugins escape it.
-      def declaration_unstable(changed, code_fingerprints)
-        return changed if comment_ingesting_plugin_loaded?
-
-        changed.reject { |path| declaration_stable?(path, code_fingerprints[path]) }
+      # The dependents contributed by the declaration-unstable changed files and the behaviourally-unstable
+      # symbol pairs: the ADR-46 slice-4 symbol-granular fan-out when either is present (ancestry deps of the
+      # unstable files + symbol deps of the changed pairs), else the coarse file-level fan-out.
+      def dependents_base(unstable, symbol_pairs)
+        if symbol_pairs.any? || unstable.any? { |f| @ancestry_dependents[f] }
+          Incremental.affected_with_symbols(unstable, symbol_pairs, @symbol_dependents, @ancestry_dependents)
+        else
+          Incremental.affected(unstable, @dependents)
+        end
       end
 
-      def declaration_stable?(path, current_code_fingerprint)
-        return false if current_code_fingerprint.nil?
+      # ADR-89 WD2 — `changed_pairs` minus the behaviourally-STABLE pairs whose symbol dependents may be
+      # skipped. A pair `[path, "Class#method"]` is a candidate when its file is declaration-stable (WD1), it
+      # carries a persisted return summary, and the (edited) def is GATE-ELIGIBLE — its only cross-file body
+      # surfaces are its return type and its content-mutation effects (no instance/class variable write, no
+      # `yield`, no implicit-self call whose transitive effect a caller could observe). For a candidate the
+      # session compares its content-mutation effects (pure AST) then re-evaluates its return at every
+      # persisted key (a runner probe); a pair passes only when BOTH are unchanged. Any missing summary,
+      # ineligible def, changed effect, changed return, or uncomputable key keeps the pair — the conservative
+      # direction the `--verify-incremental` and byte-identical recheck specs backstop.
+      def behaviourally_unstable_pairs(changed_pairs, unstable, scan_index)
+        return changed_pairs if @return_summaries.empty? || scan_index.nil?
+
+        candidates = changed_pairs.select do |pair|
+          !unstable.include?(pair.first) && @return_summaries.key?(pair) &&
+            gate_eligible_def?(scan_def_node(pair.last, scan_index))
+        end
+        return changed_pairs if candidates.empty?
+
+        effect_stable = candidates.select { |pair| effects_unchanged?(pair, scan_index) }
+        return changed_pairs if effect_stable.empty?
+
+        stable = return_stable_pairs(effect_stable, scan_index)
+        stable.empty? ? changed_pairs : (changed_pairs - stable)
+      end
+
+      # ADR-89 WD1 — the changed files whose ancestry / file-level dependents must STILL be re-checked: those
+      # not provably declaration-stable. A changed file is declaration-STABLE (its ancestry / file-level
+      # dependents skippable) when its current {ScopeIndexer.declaration_signature} matches the one stored in
+      # the snapshot's seed bundle — i.e. its edit changed no method signature, visibility, ancestry, member
+      # layout, def line, or method existence, so every cross-file DECLARATION fact its dependents consume is
+      # unchanged. Falls back to treating EVERY changed file as unstable (today's full closure) when a
+      # comment-ingesting plugin is loaded — such a plugin reads the very comments the signature ignores, so a
+      # comment edit it treats as a no-op could change a cross-file type. Sorbet sigs / dry-types includes are
+      # CODE, captured by ADR-88's plugin-fact fingerprint (WD3), so only comment-as-input plugins escape here.
+      def declaration_unstable(changed, declaration_signatures)
+        return changed if comment_ingesting_plugin_loaded?
+
+        changed.reject { |path| declaration_stable?(path, declaration_signatures[path]) }
+      end
+
+      def declaration_stable?(path, current_declaration_signature)
+        return false if current_declaration_signature.nil?
 
         bundle = @seed_bundles[path]
         return false if bundle.nil?
 
-        bundle[:code_fingerprint] == current_code_fingerprint
+        bundle[:declaration_signature] == current_declaration_signature
       end
 
       def comment_ingesting_plugin_loaded?
@@ -339,6 +385,7 @@ module Rigor
         # `--verify-incremental` backstops any residual under-capture, so it is never unsound).
         @missing           = payload.missing || {}
         @class_decls       = payload.class_decls || {}
+        @return_summaries  = payload.return_summaries || {}
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
         @negative_dependents = Incremental.invert(@missing)
@@ -350,8 +397,23 @@ module Rigor
           symbol_sources: @symbol_sources, ancestry_sources: @ancestry_sources,
           symbol_fingerprints: @symbol_fingerprints, missing: @missing,
           class_decls: @class_decls, seed_bundles: @seed_bundles,
-          plugin_fact_digest: @plugin_fact_digest
+          plugin_fact_digest: @plugin_fact_digest,
+          return_summaries: marshal_safe_return_summaries
         )
+      end
+
+      # ADR-89 WD2 — the return summaries filtered to Marshal-clean entries. A summary's `keys` hold live
+      # `Type` objects; the common carriers (Nominal, Constant, Union, shapes, Dynamic) Marshal, but a type
+      # holding a live AST node would raise and abort the WHOLE snapshot save (a cache must never break a
+      # run). Drop any entry that does not round-trip, so the snapshot always writes; a dropped entry just
+      # means that callee's dependents always re-check (the conservative direction).
+      def marshal_safe_return_summaries
+        @return_summaries.each_with_object({}) do |(key, summary), safe|
+          Marshal.dump(summary)
+          safe[key] = summary
+        rescue StandardError
+          next
+        end
       end
 
       # Fold a #recheck's fresh results back into the cache + graph so the session is correct across
@@ -369,6 +431,24 @@ module Rigor
           @digests[path] = pack_digest(path)
         end
         absorb_dependency_graph(runner)
+        refresh_return_summaries(runner, analyze_set)
+      end
+
+      # ADR-89 WD2 — replace the behavioural summaries of every re-analyzed file with THIS run's harvest: drop
+      # the analyzed files' old summaries first, then fold the fresh ones. Dropping first is the soundness
+      # invariant — a summary for a file is valid only if it came from a run that analyzed that file. On the
+      # sequential path (the default + `--verify-incremental`) the harvest is complete, so a re-analyzed def's
+      # summary is simply refreshed. On a pooled recheck the callee bodies are evaluated in worker processes,
+      # so the main-process memo harvest is sparse; dropping first means a re-analyzed file with no fresh
+      # summary loses its stale one (WD2 then conservatively re-checks its dependents) rather than comparing a
+      # later edit against a pre-edit summary. Files NOT re-analyzed keep their (unchanged, valid) summaries.
+      # A def whose symbol dependents WD2 skipped is observed under fewer keys, so its refreshed summary may
+      # shrink — sound (fewer keys = more conservative) and self-correcting (an empty summary stops the gate
+      # firing, so the callers re-analyse and repopulate).
+      def refresh_return_summaries(runner, analyze_set)
+        analyzed = analyze_set.to_set
+        @return_summaries.reject! { |(path, _symbol), _| analyzed.include?(path) }
+        @return_summaries.merge!(runner.return_summaries)
       end
 
       # Evict a removed file from every per-file map so its stale diagnostics are never served and it drops
@@ -381,6 +461,8 @@ module Rigor
         @ancestry_sources.delete(path)
         @missing.delete(path)
         @symbol_fingerprints.delete(path)
+        # ADR-89 WD2 — drop every behavioural summary a removed file provided (keys are `[path, symbol]`).
+        @return_summaries.reject! { |(summary_path, _symbol), _| summary_path == path }
         # @class_decls is wholesale-replaced from the (removed-excluding)
         # pre-pass in absorb_dependency_graph, and is frozen, so no delete.
       end
@@ -458,6 +540,115 @@ module Rigor
           files.each { |file| result[file] << class_name }
         end
         result.transform_values(&:freeze).freeze
+      end
+
+      # ADR-89 WD2 — the (live, freshly parsed) def node for a `"Class#method"` / `"Class.method"` symbol in
+      # the changed-set scan index, or nil. Instance methods live under `def_nodes`, singleton under
+      # `singleton_def_nodes`, both keyed by class name then method Symbol.
+      def scan_def_node(symbol, scan_index)
+        singleton = !symbol.include?("#")
+        class_name, method_name = symbol.split(singleton ? "." : "#", 2)
+        return nil if method_name.nil?
+
+        table = singleton ? scan_index[:singleton_def_nodes] : scan_index[:def_nodes]
+        table.dig(class_name, method_name.to_sym)
+      end
+
+      # ADR-89 WD2 — true when the ONLY cross-file body surfaces of `node` a symbol dependent can consume are
+      # its return type and its content-mutation effects — so comparing exactly those two is a COMPLETE
+      # behavioural check. A def qualifies when its body writes no instance / class variable (an ivar
+      # definite-assignment a same-class caller consumes), does not `yield` (a block-parameter surface a
+      # caller passing a block consumes), and makes no implicit-self call (which could carry a transitive
+      # shared-state write). Deliberately conservative + purely syntactic: a def with a self-call or a
+      # shared-state write keeps its dependents (the general all-surfaces gate is deferred). Excludes nested
+      # `def`s (a different self) but walks blocks / lambdas (same self).
+      def gate_eligible_def?(node)
+        return false if node.nil? || !node.respond_to?(:body) || node.body.nil?
+
+        !body_has_ineligible_node?(node.body)
+      end
+
+      def body_has_ineligible_node?(node)
+        return false if node.nil? || node.is_a?(Prism::DefNode)
+
+        return true if INELIGIBLE_GATE_NODES.any? { |kind| node.is_a?(kind) }
+        return true if self_dispatch_call?(node)
+
+        node.rigor_each_child { |child| return true if body_has_ineligible_node?(child) }
+        false
+      end
+
+      def self_dispatch_call?(node)
+        node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+      end
+
+      # ADR-89 WD2 — node kinds whose presence in a def body means a caller may consume a body surface beyond
+      # return + content-mutation: any instance/class-variable write (ivar definite-assignment) and `yield`
+      # (block-parameter typing). Class variables are per-file (never seeded cross-file) but are included for
+      # a conservative margin; global writes are likewise per-file so are not listed.
+      INELIGIBLE_GATE_NODES = [
+        Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode,
+        Prism::ClassVariableWriteNode, Prism::ClassVariableOrWriteNode,
+        Prism::ClassVariableAndWriteNode, Prism::ClassVariableOperatorWriteNode,
+        Prism::YieldNode
+      ].freeze
+      private_constant :INELIGIBLE_GATE_NODES
+
+      # ADR-89 WD2 — true when the current content-mutation effect set of `pair`'s (edited) def equals the one
+      # persisted in its return summary. Computed session-side from the fresh node (pure AST — no scope), so a
+      # caller's arg flooring is proven unchanged before the return re-evaluation. A nil / raised computation
+      # reads as CHANGED (keeps the pair).
+      def effects_unchanged?(pair, scan_index)
+        node = scan_def_node(pair.last, scan_index)
+        return false if node.nil?
+
+        current = content_effects_for(node)
+        !current.nil? && current == (@return_summaries[pair][:effects] || [])
+      end
+
+      def content_effects_for(node)
+        (@effects_evaluator ||= Inference::StatementEvaluator.new(scope: Scope.empty))
+          .content_mutated_parameter_positions(node)
+      rescue StandardError
+        nil
+      end
+
+      # ADR-89 WD2 — the subset of `pairs` whose (edited) def re-evaluates to the SAME return descriptor at
+      # every persisted key. Runs one runner probe (`evaluate_return_types` — builds the discovery + env once,
+      # no file analysis) over all candidate defs, then keeps a pair only when every key's re-evaluated
+      # descriptor is present (not a memo refusal) and equal to the persisted one. A probe failure yields an
+      # empty set (keep everything).
+      def return_stable_pairs(pairs, scan_index)
+        specs = pairs.filter_map { |pair| return_spec_for(pair, scan_index) }
+        return Set.new if specs.empty?
+
+        results = probe_return_types(specs)
+        specs.each_with_object(Set.new) do |spec, stable|
+          descriptors = results[[spec[:class_name], spec[:method_name], spec[:singleton]]]
+          expected = @return_summaries[spec[:pair]][:returns]
+          next if descriptors.nil? || descriptors.length != expected.length
+          next unless descriptors.each_with_index.all? { |d, i| !d.nil? && d == expected[i] }
+
+          stable << spec[:pair]
+        end
+      end
+
+      def return_spec_for(pair, scan_index)
+        path, symbol = pair
+        node = scan_def_node(symbol, scan_index)
+        return nil if node.nil?
+
+        singleton = !symbol.include?("#")
+        class_name, method_name = symbol.split(singleton ? "." : "#", 2)
+        { pair: pair, path: path, class_name: class_name, method_name: method_name.to_sym,
+          singleton: singleton, keys: @return_summaries[pair][:keys] }
+      end
+
+      def probe_return_types(specs)
+        build_runner.evaluate_return_types(@paths, specs)
+      rescue StandardError
+        {}
       end
 
       TOP_LEVEL_KEY = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY

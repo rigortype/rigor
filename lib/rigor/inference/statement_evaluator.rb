@@ -188,6 +188,16 @@ module Rigor
         [@scope.type_of(node, tracer: @tracer), @scope]
       end
 
+      # ADR-89 WD2 — the sorted positions of the positional parameters whose CONTENT `def_node` mutates
+      # (`callee_content_mutated_parameters`, the ADR-56 arg-flooring surface a caller consumes). A per-def
+      # static property of the AST — this is a pure exposure of the existing private computation (it never
+      # reads the scope), so the incremental session can compute it on any `StatementEvaluator` (an empty
+      # scope suffices), persist it in a return summary, and re-check a callee's symbol dependents when it
+      # moves (a caller's arg flooring changes even if the callee's return does not).
+      def content_mutated_parameter_positions(def_node)
+        callee_content_mutated_parameters(def_node).values.uniq.sort
+      end
+
       private
 
       attr_reader :scope, :tracer

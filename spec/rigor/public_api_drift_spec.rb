@@ -91,6 +91,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     type_of(req:node,key:tracer)
     user_def_for(req:class_name,req:method_name)
     user_def_site_for(req:class_name,req:method_name)
+    user_method_return(req:def_node,req:receiver,req:arg_types)
     with_cvar(req:name,req:type)
     with_declaration_sourced_local(req:name,req:type)
     with_discovery(req:index)

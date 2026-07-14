@@ -3,8 +3,10 @@ module Rigor
     type closure_classification = :non_escaping | :escaping | :unknown
 
     class ExpressionTyper
+      def self.harvest_return_memo: () -> Hash[untyped, Array[untyped]]
       def initialize: (scope: Scope, ?tracer: FallbackTracer?) -> void
       def type_of: (untyped node) -> Type::t
+      def return_type_for: (untyped def_node, Type::t receiver, Array[Type::t] arg_types) -> Type::t?
       def scope: () -> Scope
       def tracer: () -> FallbackTracer?
       def dynamic_top: () -> Type::Dynamic
@@ -27,6 +29,7 @@ module Rigor
 
       def initialize: (scope: Scope, ?tracer: FallbackTracer?, ?on_enter: (^(untyped, Scope) -> void)?, ?class_context: Array[ClassFrame]) -> void
       def evaluate: (untyped node) -> [Type::t, Scope]
+      def content_mutated_parameter_positions: (untyped def_node) -> Array[Integer]
       def scope: () -> Scope
       def tracer: () -> FallbackTracer?
       def sub_eval: (untyped node, Scope with_scope, ?class_context: Array[ClassFrame]) -> [Type::t, Scope]

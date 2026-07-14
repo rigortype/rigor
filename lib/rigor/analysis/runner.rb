@@ -45,6 +45,13 @@ module Rigor
     class Runner # rubocop:disable Metrics/ClassLength
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
+      # ADR-89 WD2 — bounds on the persisted return summaries (per-def observed call keys, and total defs
+      # summarised) so the incremental snapshot stays small. A def observed under more keys than the per-def
+      # cap keeps only the first; a def past the total cap is dropped (its symbol dependents then always
+      # re-check — the conservative direction).
+      RETURN_SUMMARY_KEYS_PER_DEF = 8
+      RETURN_SUMMARY_TOTAL_CAP = 4000
+
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
                   :rbs_extended_reporter, :boundary_cross_reporter,
                   :analyzed_files, :unresolved_self_calls, :seed_bundles
@@ -310,6 +317,114 @@ module Rigor
           files.each { |file| result[file] << class_name }
         end
         result.transform_values(&:freeze).freeze
+      end
+
+      # ADR-89 WD2 — the per-method observed-key return summaries the run's ADR-84 return memo just captured.
+      # For each project method with live memo entries, a bounded `{ keys:, returns:, effects: }` summary the
+      # incremental session persists: `keys` the observed `[receiver, arg_types]` type tuples, `returns` their
+      # `describe(:short)` descriptors, `effects` the content-mutated parameter positions (a caller-visible
+      # arg-flooring surface). Only meaningful right after a run populated the memo (baseline / recheck),
+      # before the bucket rolls. Keys are held live here; the session Marshals them for the snapshot.
+      #
+      # @return [Hash] `{ [path, "Class#method" | "Class.method"] => { keys:, returns:, effects: } }`.
+      def return_summaries
+        memo = Inference::ExpressionTyper.harvest_return_memo
+        return {} if memo.empty?
+
+        result = {}
+        effects_evaluator = Inference::StatementEvaluator.new(scope: Scope.empty)
+        collect_return_summaries(result, @project_discovered_def_nodes, @project_discovered_def_sources,
+                                 "#", memo, effects_evaluator)
+        collect_return_summaries(result, @project_discovered_singleton_def_nodes,
+                                 @project_discovered_singleton_def_sources, ".", memo, effects_evaluator)
+        result
+      end
+
+      # Folds one def-node/def-source table pair's memo entries into the return-summary result under
+      # `separator`. A live def node (a cold / re-walked file) is the identity every cross-file caller
+      # resolved through, so `memo[node]` holds those callers' observed keys; a {DefHandle} (an unchanged
+      # file on the warm path) never keyed a memo entry, so it is skipped (its summary is carried over from
+      # the snapshot). Bounded per def and in total so the snapshot stays small.
+      def collect_return_summaries(result, nodes, sources, separator, memo, effects_evaluator)
+        nodes.each do |class_name, methods|
+          methods.each do |method_name, node|
+            next if node.is_a?(Inference::DefHandle)
+
+            entries = memo[node]
+            next if entries.nil? || entries.empty?
+
+            path_line = sources.dig(class_name, method_name)
+            next if path_line.nil?
+
+            break if result.size >= RETURN_SUMMARY_TOTAL_CAP
+
+            capped = entries.first(RETURN_SUMMARY_KEYS_PER_DEF)
+            result[[path_line.split(":", 2).first, "#{class_name}#{separator}#{method_name}"]] = {
+              keys: capped.map { |entry| [entry.receiver, entry.arg_types] },
+              returns: capped.map { |entry| entry.result.describe(:short) },
+              effects: content_effects(effects_evaluator, node)
+            }
+          end
+        end
+      end
+
+      # The content-mutated parameter positions of `node`, or `[]` if the computation raises (defensive: the
+      # effects surface only routes attention, never soundness — a missing set reads as "no floor").
+      def content_effects(effects_evaluator, node)
+        effects_evaluator.content_mutated_parameter_positions(node)
+      rescue StandardError
+        []
+      end
+
+      # ADR-89 WD2 — re-evaluate the return type of specific project methods at previously-observed call keys,
+      # WITHOUT analyzing any file. The incremental session calls this session-side (before dispatching the
+      # recheck) to prove a declaration-stable, changed callee returns the same type at every key its baseline
+      # callers used, so those callers' re-analysis can be skipped. Builds the cross-file discovery index (the
+      # ADR-85 seed-bundle fold, re-walking only edited files) and the RBS environment (served from the cache
+      # store) exactly as a real run's setup does, then re-drives each spec's def through the ADR-84 return
+      # memo. Off any hot path — invoked only when declaration-stable changed pairs carry a persisted summary.
+      #
+      # @param paths [Array<String>, nil] analysis roots (nil → the configuration's `paths:`).
+      # @param specs [Array<Hash>] each `{ class_name:, method_name:, singleton:, keys: [[receiver, args], …] }`.
+      # @return [Hash] `{ [class_name, method_name, singleton] => [return_descriptor_or_nil, …] }`.
+      def evaluate_return_types(paths, specs)
+        return {} if specs.empty?
+
+        strict = @configuration.cache_validation == "digest"
+        Cache::FileDigest.with_run(strict: strict) do
+          Inference::DefNodeResolver.with_run { evaluate_return_types_setup(paths, specs) }
+        end
+      end
+
+      # Builds the discovery index + environment (a real run's prologue, minus per-file analysis) and
+      # re-evaluates each spec's def. Extracted so {#evaluate_return_types}'s `with_run` wrappers stay thin.
+      def evaluate_return_types_setup(paths, specs)
+        expansion = expand_paths(paths || @configuration.paths)
+        @project_discovery_done = false
+        @run_generation = Object.new.freeze
+        run_project_pre_passes(expansion: expansion)
+        ensure_project_discovery(expansion)
+        environment = @pool_coordinator.resolve_sequential_environment(source_files: target_files(expansion))
+        specs.to_h do |spec|
+          [[spec[:class_name], spec[:method_name], spec[:singleton]], evaluate_spec_returns(spec, environment)]
+        end
+      end
+
+      # Re-evaluates one spec's def at each of its observed keys. Locates the (live) def node in the discovery
+      # index, builds a project-seeded scope, and returns one return descriptor per key (nil when the def is
+      # missing / bodyless or the memo refuses a transient result — the caller reads either as "not provably
+      # stable" and keeps the dependents).
+      def evaluate_spec_returns(spec, environment)
+        table = spec[:singleton] ? @project_discovered_singleton_def_nodes : @project_discovered_def_nodes
+        node = table.dig(spec[:class_name], spec[:method_name])
+        node = Inference::DefNodeResolver.resolve(node) if node.is_a?(Inference::DefHandle)
+        return spec[:keys].map { nil } if node.nil?
+
+        scope = seed_project_scope(Scope.empty(environment: environment, source_path: spec[:path]))
+        spec[:keys].map do |(receiver, arg_types)|
+          result = scope.user_method_return(node, receiver, arg_types)
+          result&.describe(:short)
+        end
       end
 
       # ADR-45 — unchanged-project fast path. Serves the whole run's (pre-severity-profile) diagnostics

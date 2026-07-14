@@ -5,49 +5,6 @@ require "rspec/core/rake_task"
 
 RSpec::Core::RakeTask.new(:spec)
 
-# Run the spec suite across `PARALLEL_TEST_PROCESSORS` (or
-# CPU-count) worker processes via `parallel_tests`. Each
-# worker runs RSpec on a balanced slice of the spec files
-# so the wall-clock time scales with available cores.
-# Plugin registry is process-global; the parallel runner
-# uses separate processes, so registry state stays isolated.
-#
-# `--group-by default` uses measured per-file runtimes from a
-# previous run (written by ParallelTests::RSpec::RuntimeLogger to
-# tmp/parallel_runtime.log) and falls back to filesize when no log
-# exists. This is self-correcting: a spec that grows in file size but
-# shrinks in runtime (e.g. after shared-setup work) is re-balanced
-# automatically on the following run rather than staying mis-weighted
-# permanently. The log is written by every worker under a file lock
-# so concurrent writes are safe.
-desc "Run the spec suite in parallel across processes"
-task :spec_parallel do
-  require "fileutils"
-  FileUtils.mkdir_p "tmp"
-  runtime_log = "tmp/parallel_runtime.log"
-  count = ENV.fetch("PARALLEL_TEST_PROCESSORS", "")
-  # Omitting --group-by triggers the `when nil` path in
-  # ParallelTests::Test::Runner#tests_with_size: runtime sorting when
-  # the log has enough entries (size * 1.5 > file count), filesize
-  # otherwise. --group-by default raises ArgumentError in 5.7.0.
-  args = ["bundle", "exec", "parallel_rspec",
-          "--runtime-log", runtime_log]
-  args.push("-n", count) unless count.empty?
-  # ADR-15 Phase 4b — `runner_pool_spec.rb` is excluded by the
-  # sequential `make test` path via `RSpec.config.exclude_pattern`
-  # (spec_helper.rb). parallel_rspec splits files BEFORE workers
-  # load spec_helper, so the exclude_pattern there doesn't apply
-  # — we have to pass `--exclude-pattern` natively here.
-  # `RIGOR_INCLUDE_RACTOR_POOL=1` opts the pool spec back in,
-  # mirroring the sequential exclusion's opt-out shape.
-  args.push("--exclude-pattern", "spec/rigor/analysis/runner_pool_spec.rb") unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
-  # Record per-file runtimes so the next run can distribute by actual
-  # measured time rather than filesize.
-  args.push("-o", "--format ParallelTests::RSpec::RuntimeLogger --out #{runtime_log}")
-  args.push("spec")
-  exec(*args)
-end
-
 task default: :spec
 
 # ---------------------------------------------------------------

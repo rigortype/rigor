@@ -66,7 +66,6 @@ Gem::Specification.new do |spec|
   # plugin gem (rspec-rails apps already pull rack via actionpack).
   spec.add_development_dependency "rack", ">= 2.0", "< 4.0"
   spec.add_development_dependency "binpacker", ">= 0.1.0", "< 1.0"
-  spec.add_development_dependency "parallel_tests", ">= 4.0", "< 6.0"
   spec.add_development_dependency "rake", ">= 13.0", "< 15.0"
   # ADR-32 — the `rigor-rbs-inline` plugin under `plugins/`
   # depends on the upstream `rbs-inline` gem at runtime. The

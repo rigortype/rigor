@@ -40,8 +40,6 @@ GEM
       drb (~> 2.0)
       prism (~> 1.5)
     parallel (2.1.0)
-    parallel_tests (5.7.0)
-      parallel
     parser (3.3.11.1)
       ast (~> 2.4.1)
       racc
@@ -110,7 +108,6 @@ PLATFORMS
 DEPENDENCIES
   activesupport (>= 7.0, < 9.0)
   binpacker (>= 0.1.0, < 1.0)
-  parallel_tests (>= 4.0, < 6.0)
   rack (>= 2.0, < 4.0)
   rake (>= 13.0, < 15.0)
   rbs-inline (>= 0.5, < 1.0)
@@ -138,7 +135,6 @@ CHECKSUMS
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   parallel (2.1.0) sha256=b35258865c2e31134c5ecb708beaaf6772adf9d5efae28e93e99260877b09356
-  parallel_tests (5.7.0) sha256=3f1762c46ca2c223b8af8ef877217f9d76974e191bfa934f2580b58bcf1d005c
   parser (3.3.11.1) sha256=d17ace7aabe3e72c3cc94043714be27cc6f852f104d81aa284c2281aecc65d54
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f

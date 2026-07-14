@@ -37,9 +37,7 @@ module Rigor
     #                                the SKILL. Also spelled `describe`, and
     #                                surfaced top-level as `rigor describe`.
     #
-    # The pre-v0.3.0 verb spellings `rigor skill list` / `print <name>` / `path <name>` still work but emit a stderr
-    # deprecation notice; they are removed in v0.3.0 (see docs/ROADMAP.md § "Scheduled CLI deprecations"). `describe` is
-    # a no-argument action, not a name-slot verb, so it stays first-class alongside `--describe`.
+    # `describe` is a no-argument action, not a name-slot verb, so it stays first-class alongside `--describe`.
     class SkillCommand < Command
       USAGE = <<~USAGE
         Usage: rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]
@@ -60,30 +58,14 @@ module Rigor
           rigor skill --full rigor-baseline-reduce
           rigor skill --path rigor-baseline-reduce
           rigor skill --describe        (also: rigor describe)
-
-        Deprecated (removed in v0.3.0) — use the forms above:
-          rigor skill list           ->  rigor skill --list
-          rigor skill print <name>   ->  rigor skill <name>
-          rigor skill path <name>    ->  rigor skill --path <name>
       USAGE
 
       # The bundled skills live at `<gem_root>/skills/`. From `lib/rigor/cli/skill_command.rb` that is three directories
       # up.
       SKILLS_ROOT = File.expand_path("../../../skills", __dir__)
 
-      # The verb subcommands the flags superseded keep working with a stderr deprecation notice until this version drops
-      # them. Each maps to the canonical advice printed and the flag it rewrites to.
-      LEGACY_VERB_REMOVAL = "v0.3.0"
-      LEGACY_VERBS = {
-        "list" => { old: "list",         advice: "--list", flag: "--list" },
-        "print" => { old: "print <name>", advice: "<name>", flag: "--print" },
-        "path" => { old: "path <name>", advice: "--path <name>", flag: "--path" }
-      }.freeze
-
       # @return [Integer] CLI exit status.
       def run
-        rewrite_legacy_verb!
-
         case @argv.first
         when nil
           run_list
@@ -111,19 +93,6 @@ module Rigor
       end
 
       private
-
-      # Translate a deprecated verb spelling into its flag form, warning once on stderr, so the dispatch above only
-      # handles canonical forms.
-      def rewrite_legacy_verb!
-        spec = LEGACY_VERBS[@argv.first]
-        return unless spec
-
-        @err.puts(
-          "rigor skill: `#{spec.fetch(:old)}` is deprecated and will be removed in " \
-          "#{LEGACY_VERB_REMOVAL}; use `rigor skill #{spec.fetch(:advice)}` instead."
-        )
-        @argv[0] = spec.fetch(:flag)
-      end
 
       def run_list
         skills = discover_skills

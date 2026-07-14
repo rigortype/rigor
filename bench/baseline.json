@@ -1,13 +1,13 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-07-11T00:00:00Z",
-  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.2.9 @ run 29152992231",
-  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated for the v0.2.9 cut: allocations grew ~+5.6% since the v0.2.8 baseline (27.78M -> 29.33M) — individually-reviewed feature cost from this cycle's engine additions (the ADR-57 WD3 module-singleton discovery seed widens the seed pass, plus the ADR-82 external-gem provenance and the structure.sql schema-source paths), each measured perf-neutral A/B against the prior state, with the OSS-corpus (Mastodon) sweep staying green (no new false positives) — so the increase is blessed feature cost, not a regression. peak_rss_kb and wall_s refreshed to the same run's values. The allocations_pct band stays tight at 5%.",
+  "calibrated_at": "2026-07-14T00:00:00Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), master @ run 29358704822",
+  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated after the v0.3.0 performance arc (PRs #74-#82: deadline-armed YJIT, rigor_each_child, plugin-prepare cache, lazy pre-pass, run-scoped return memo, seed bundles). Allocations fell ~24% (29.33M -> 22.24M) and wall ~35% (21.2s -> 13.8s); the allocation target is tightened to the new value so the 5% band keeps its teeth. peak_rss_kb ROSE ~15% (260.2 MB -> 299.4 MB), which is YJIT: it arms after the 5s deadline and this run lasts ~13.8s, so the JIT's code + metadata are resident for most of it. A/B measured on the dev host, same in-process check: 336 MB with YJIT vs 292 MB with RIGOR_DISABLE_YJIT=1 (+14.9%), matching the CI delta almost exactly — so the increase is the memory price of the 1.7x wall win in PR #75, not a leak. The OSS-corpus (Mastodon) sweep stayed green on the same run (no new false positives).",
   "targets": {
     "lib": {
-      "wall_s": 21.243,
-      "allocations": 29330383,
-      "peak_rss_kb": 260228,
+      "wall_s": 13.808,
+      "allocations": 22239139,
+      "peak_rss_kb": 299364,
       "diagnostics": 1
     }
   }

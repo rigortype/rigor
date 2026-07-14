@@ -38,6 +38,34 @@ The cache is also schema-versioned: after a Rigor upgrade that
 changes the cache format, the stale cache is purged on the
 first writable run.
 
+## How a file is checked for changes
+
+To decide whether a cached entry is still valid, Rigor needs to
+know which of your files changed since the entry was written. By
+default it checks each file's **stat metadata** first — size,
+nanosecond modification and change timestamps, and inode — and
+only re-hashes a file's content when that metadata moved. On a
+large project an unchanged run then reads *zero* content bytes to
+validate the cache, instead of re-hashing every file.
+
+The content hash stays the sole authority on whether a file
+actually changed: the stat check only decides whether the hash
+needs recomputing. A file that was merely `touch`ed (new
+timestamp, identical content) is re-hashed once and correctly
+found unchanged. Editing a file always moves its timestamps, so
+an edit is never missed.
+
+If you work on a filesystem whose timestamps or inode numbers
+cannot be trusted, switch to hashing every file every run:
+
+```yaml
+cache:
+  validation: digest    # default is "stat"
+```
+
+or, for a single run, set `RIGOR_STRICT_VALIDATION=1` (which
+wins over the config key).
+
 ## Controlling the cache
 
 | Flag | Effect |
@@ -89,6 +117,28 @@ exactly which files an edit can affect. A continuous-integration
 gate, `rigor check --verify-incremental`, asserts this on every
 build: it runs the incremental analyzer and a full analysis and
 fails if they disagree on a single diagnostic.
+
+Rigor is also precise about *what* an edit changed. Re-checking a
+file that many others depend on — a base class, a widely-used
+concern, a shared utility — used to re-check every dependent.
+Now, if your edit did not change the file's declaration shape
+(the signatures of its methods, its superclass and includes) or
+the types its methods return, the files that only depend on those
+things are left untouched: a comment, a formatting change, or an
+internal refactor that preserves every method's return type stops
+at the edited file. An edit that *does* change a return type or a
+signature still propagates to the dependents that consume it, so
+the result stays identical to a full run.
+
+Types contributed by plugins (a Sorbet signature, an
+ActiveRecord column type, a dry-types alias) are validated too:
+if a plugin's cross-file contributions change between runs, the
+snapshot is dropped and the next run is a full one, so a plugin
+edit can never leave a dependent stale.
+
+An `--incremental` re-check honours `--workers=N` (and
+`RIGOR_RACTOR_WORKERS` / `parallel.workers:`), analysing the
+affected files in parallel just as a full run does.
 
 The snapshot lives under the cache directory (`.rigor/cache`)
 and is keyed by a fingerprint of your configuration, your locked

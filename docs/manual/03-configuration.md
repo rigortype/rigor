@@ -128,7 +128,8 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 | --- | --- | --- | --- |
 | `cache.path` | String | `.rigor/cache` | Persistent cache directory. See [Caching](12-caching.md). |
 | `cache.max_bytes` | Integer or `null` | `268435456` (256 MB) | LRU eviction cap for the cache directory; `null` disables eviction. See [Caching § Size and eviction](12-caching.md#size-and-eviction). |
-| `parallel.workers` | Integer | `0` | Parallel worker processes for per-file analysis (fork-based pool today; ADR-15); `0` is sequential. CLI `--workers` and `RIGOR_RACTOR_WORKERS` take precedence. |
+| `cache.validation` | String | `"stat"` | How the cache checks whether a file is unchanged: `stat` compares size + nanosecond timestamps + inode and only re-hashes a file whose stat moved; `digest` re-hashes every file's content every run. Both keep the content hash as the sole change authority — `stat` just skips the hash when the stat proves a file untouched. See [Caching § How a file is checked for changes](12-caching.md#how-a-file-is-checked-for-changes). The `RIGOR_STRICT_VALIDATION=1` environment variable forces `digest` for one run and wins over this key. |
+| `parallel.workers` | Integer | `0` | Parallel worker processes for per-file analysis (fork-based pool today; ADR-15); `0` is sequential. CLI `--workers` and `RIGOR_RACTOR_WORKERS` take precedence. Applies to `--incremental` re-checks as well as full runs. |
 | `plugins_io.network` | String | `"disabled"` | Plugin network policy — `disabled` or `allowlist`. |
 | `plugins_io.allowed_paths` | Array | `[]` | Filesystem paths plugins may read. |
 | `plugins_io.allowed_url_hosts` | Array | `[]` | URL hosts plugins may fetch from when `network: allowlist`. |

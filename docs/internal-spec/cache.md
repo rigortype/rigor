@@ -1,15 +1,17 @@
 # Cache Layer — `Rigor::Cache`
 
-Status: **Stable (introduced v0.0.8; current descriptor schema v4).**
+Status: **Stable (introduced v0.0.8; current descriptor schema v5).**
 This document tracks the cache layer's public read shape. The
 slices below all landed and are stable across v0.1.x; the descriptor
 `SCHEMA_VERSION` was bumped to `2` for the ADR-10 per-gem-version
 `dependencies` slot, to `3` when `RbsLoader.build_env_for` began
 synthesizing missing `signature_paths:` namespaces (so an RBS env
 marshalled by an older Rigor — which would leave those signatures
-inert — is rebuilt), and to `4` when [ADR-60](../adr/60-pre-freeze-plugin-contract-consolidation.md)
+inert — is rebuilt), to `4` when [ADR-60](../adr/60-pre-freeze-plugin-contract-consolidation.md)
 WD3 added the `globs` slot (`GlobEntry`) for the record-and-validate
-plugin-producer cache. Slices 1–2 are in place:
+plugin-producer cache, and to `5` when [ADR-87](../adr/87-null-build-floor.md)
+WD1 added the `:stat` `FileEntry` comparator (stat-then-digest
+validation). Slices 1–2 are in place:
 `Rigor::Cache::Descriptor` (the substrate every cached value
 attaches to) and `Rigor::Cache::Store` (the filesystem-backed
 storage that consumes a descriptor + producer + params and
@@ -30,7 +32,7 @@ slots, every slot an array of typed entries.
 ### Slot entries
 
 ```
-FileEntry       :: { path: String, comparator: :digest|:mtime|:exists, value: String }
+FileEntry       :: { path: String, comparator: :digest|:stat|:mtime|:exists, value: String }
 GemEntry        :: { name: String, requirement: String, locked: String? }
 PluginEntry     :: { id: String, version: String, config_hash: String? }
 ConfigEntry     :: { key: String, value_hash: String }
@@ -50,7 +52,28 @@ dependency-source-inference cache slice so a `Gemfile.lock` bump or a
 `GlobEntry` is the ADR-60 WD3 record-and-validate slot: its `value`
 is a digest of every file matching `root`/`pattern` (built via
 `GlobEntry.compute`), re-validated by re-globbing so a plugin producer's
-`watch:` glob coverage stays fresh across edits.
+`watch:` glob coverage stays fresh across edits. Post-[ADR-87](../adr/87-null-build-floor.md)
+WD2 that per-glob digest is a SHA-256 over sorted **stat tuples**
+(`"<path>\0<size>\0<mtime_ns>\0<ctime_ns>\0<inode>\n"` rows), not file
+content — re-validation re-globs and re-stats, reading zero content bytes
+on an unchanged tree while any edit (which moves mtime + ctime) still moves
+the signature.
+
+The `:stat` comparator is the ADR-87 WD1 stat-then-digest tier for
+individual `FileEntry` slots. Its `value` packs `"<digest> <size>
+<mtime_ns> <ctime_ns> <inode> <recording_instant_ns>"`: validation
+(`FileDigest.stat_fresh?`) stats the file first and only falls back to a
+full content hash (`FileDigest.hexdigest`) when the tuple moved, or when a
+racy-window guard fires (the file's mtime is not strictly older than the
+entry's recording instant). The SHA-256 digest packed in the value remains
+the sole change **authority** — an unmoved stat only lets validation skip
+recomputing it; a `:stat` entry whose stat moved but whose content is
+identical (a bare `touch`) is re-hashed and correctly found fresh. The
+`:stat` tier rides validation-only descriptors (the ADR-45 dependency
+descriptor, plugin `watch:` globs); cache-KEY descriptors keep the
+deterministic `:digest` comparator. `cache.validation: digest` (or the
+`RIGOR_STRICT_VALIDATION=1` env, which wins) forces every entry back to
+`:digest` for a filesystem whose stat cannot be trusted.
 
 ### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [], globs: [])`
 
@@ -89,12 +112,14 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `4` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `5` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
    synthesizing missing `signature_paths:` namespaces; v4 added the
    `globs` slot for the ADR-60 WD3 record-and-validate plugin-producer
-   cache). Bumping this constant invalidates every cached value.
+   cache; v5 added the `:stat` `FileEntry` comparator for ADR-87 WD1
+   stat-then-digest validation). Bumping this constant invalidates every
+   cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
 3. `params` (the producer's input hash). Recursively
@@ -126,8 +151,13 @@ with `==` so descriptors are usable as Hash keys.
 The constructor signatures and composition semantics are stable
 as a v0.0.x public read shape. Adding new slot kinds (e.g.
 `env_vars`) is a schema-version bump per the taxonomy doc and
-ADR-6. Adding new comparators to `FileEntry::VALID_COMPARATORS`
-is additive and does not require a bump.
+ADR-6. Adding a comparator to `FileEntry::VALID_COMPARATORS`
+(currently `%i[digest stat mtime exists]`) is behaviourally additive,
+but because the comparator is folded into the cache key via
+`cache_key_for`, the ADR-87 `:stat` addition took a
+`SCHEMA_VERSION` bump (4 → 5) so pre-`:stat` entries read as clean
+misses rather than being trusted under a comparator the old writer
+never used.
 
 The persistence layer ([`Rigor::Cache::Store`](#cache-store-v008-slice-2),
 v0.0.8 slice 2) and the cached-producer integrations follow.
@@ -389,6 +419,94 @@ enforcing a size budget, so an explicitly unbounded store
 (`max_bytes: nil`) still benefits from them. Only pass 3 is gated on
 `max_bytes:` being set. Any filesystem error during any pass is
 swallowed — `evict!` must never break a run.
+
+## `Rigor::Cache::IncrementalSnapshot` (ADR-46)
+
+The persistent artefact behind `rigor check --incremental`. Distinct from
+the entry store above: a single per-project blob (zlib-deflated `Marshal`,
+under the cache root) that records enough of the previous run to re-derive
+only the affected files' diagnostics on the next run. Every operation is
+fault-tolerant — a missing, unreadable, schema-mismatched,
+fingerprint-mismatched, or corrupt snapshot loads as `nil` and forces a
+full run, so the snapshot can never wedge or stale an analysis.
+
+### Two-level gating
+
+1. **Global fingerprint (gates the load).** `IncrementalSnapshot.fingerprint(configuration:, roots:)`
+   is a SHA-256 over the engine version + `SCHEMA`, the configuration hash,
+   the analysis **roots** (not the expanded file list — so adding/removing a
+   file under a root does not drop the snapshot), `Gemfile.lock`,
+   `rbs_collection.lock.yaml`, and the project's `signature_paths` RBS —
+   but **not** the analyzed source contents. A mismatch drops the snapshot.
+2. **Per-file digests (drive the decision).** When the fingerprint matches,
+   the `Payload` is loaded unconditionally and its per-file content digests
+   determine the changed set `ΔF`; the affected closure `ΔF ∪ dependents[ΔF]`
+   is re-analysed and the rest served from `Payload#cache`.
+
+### `Payload` (current `SCHEMA = 10`)
+
+```
+Payload :: Data[
+  cache, sources, digests, analyzed,          # per-file diagnostics, read-sets, content digests, analyzed set
+  symbol_sources, ancestry_sources,           # the ADR-46 dependency edges (method-symbol and class-ancestry)
+  symbol_fingerprints,                        # path -> { "Class#method" => sha256 } — per-method source fingerprints
+  missing, class_decls,                       # negative (unresolved) edges + per-file declared-class sets
+  seed_bundles,                               # ADR-85 per-file pre-pass contribution (plain data + def-node handles)
+  plugin_fact_digest,                         # ADR-88 plugin-fact surface fingerprint (see below)
+  return_summaries                            # ADR-89 observed-key return summaries (see below)
+]
+```
+
+Schema history worth pinning: `6` stored the seed bundles as
+`(node_id, name, fingerprint)` def-node handles (ADR-85); `8` added each
+bundle's comment-stripped `code_fingerprint` for the B1 comment-only gate;
+`9` added `plugin_fact_digest` (ADR-88); `10` added `return_summaries`
+(ADR-89). A blob from an older schema mismatches the `SCHEMA` gate and loads
+as `nil` — a clean cold rebuild, never a migration.
+
+### `plugin_fact_digest` — plugin-fact soundness ([ADR-88](../adr/88-incremental-plugin-fact-soundness.md))
+
+Plugin-contributed types (a Sorbet catalog signature, a dry-types alias, an
+ActiveRecord column type) are consumed through the ADR-52 compiled-dispatch
+path, which never crosses the `DependencyRecorder` choke points that build
+the `symbol_sources` / `ancestry_sources` edges — so a plugin fact records
+no cross-file edge, and an edit that changes one could otherwise leave a
+consumer stale. `plugin_fact_digest` closes this: it fingerprints the plugin
+fact **surface** the global fingerprint cannot see — (a) every ADR-9
+fact-store publication, (b) every ADR-60 producer's computed **value** (the
+value, deliberately, not its watched inputs — a whole-tree `watch:` glob
+would otherwise invalidate on every edit), and (c) each plugin's optional
+`Plugin::Base#incremental_state_fingerprint` hook (see
+[`plugin-cache-producers.md`](plugin-cache-producers.md)). A change to the
+digest drops the snapshot (a conservative full re-analysis). A plugin that
+contributes types but exposes none of (a)/(b)/(c) makes the snapshot
+un-reusable and is named — a forcing function to declare its surface rather
+than a silent stale reuse.
+
+### `return_summaries` — semantic propagation gates ([ADR-89](../adr/89-semantic-propagation-gates.md))
+
+Generalises the B1 comment-only gate to body edits: a dependent of a changed
+file is re-analysed only when something it can consume actually changed.
+Two persisted summaries prove "nothing changed":
+
+- **Declaration shape** (consumed by ancestry / file-level dependents) — the
+  ADR-85 seed bundle carries per-def signature shape (name, kind,
+  parameter structure, visibility) plus superclass / include / layout. A
+  body edit leaves it equal; an arity, visibility, or added/removed-method
+  edit does not. A declaration-stable changed file drops its ancestry /
+  file-level dependents from the closure.
+- **Observed-key return summaries** — per-def `(receiver, args) → return`
+  descriptors harvested from the ADR-84 memo, plus the ADR-56 content-mutation
+  effect set (the callee-visible surface beyond the return). On a recheck a
+  declaration-stable changed def is re-evaluated at each stored key through
+  the memo; all-equal returns **and** equal effects drop the def's symbol
+  dependents. Any mismatch, a changed signature, a missing def, an
+  ineligible def (one that also exposes ivar/cvar writes or `yield` values),
+  or a cap overflow keeps the dependents — the conservative direction.
+
+Both gates are premised on a `plugin_fact_digest` match for the run (asserted
+in code, not assumed); `--verify-incremental` is the standing byte-identity
+backstop for the whole mechanism.
 
 ## Bundled RBS producer contract
 

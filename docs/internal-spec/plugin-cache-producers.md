@@ -193,6 +193,48 @@ Identity inputs (gem versions, sibling-plugin config, external
 state the boundary can't read) compose into the **key** via the
 `descriptor:` kwarg; a key change is a cache miss.
 
+### `Rigor::Plugin::Base#incremental_state_fingerprint` — the `--incremental` fact surface ([ADR-88](../adr/88-incremental-plugin-fact-soundness.md))
+
+The `--incremental` snapshot's `plugin_fact_digest` (see
+[`cache.md` § IncrementalSnapshot](cache.md#plugin_fact_digest--plugin-fact-soundness-adr-88))
+must cover every cross-file value a cached diagnostic can depend on, or a
+plugin edit could leave a consumer stale. Two channels are automatic — every
+ADR-9 fact-store publication and every `producer` value are digested without
+plugin cooperation. This **optional** hook is the third channel, for a
+plugin whose `dynamic_return` / `narrowing_facts` contributions read from an
+internal catalog that is neither a fact-store publication nor a `producer`
+value:
+
+```ruby
+class MyPlugin < Rigor::Plugin::Base
+  # Return a stable, Marshal-clean value that CHANGES exactly when this
+  # plugin's cross-file contribution surface changes, and is STABLE across
+  # runs when it does not.
+  def incremental_state_fingerprint
+    catalog_digest   # e.g. a SHA-256 over the plugin's parsed sig catalog
+  end
+end
+```
+
+Contract:
+
+- The hook is **optional** — a plugin that defines it is consulted (via
+  `respond_to?`), one that does not is not. There is no default on
+  `Plugin::Base`.
+- A plugin whose contributions derive **only** from each analysed file's own
+  content (already re-analysed when that file changes) has no *own* cross-file
+  surface. It should still define the hook returning a **stable sentinel
+  string** (e.g. `"per-file-lets"`) — this positively declares "no cross-file
+  fact surface", keeping the plugin incremental-capable. Bundled `rigor-rspec`,
+  `rigor-minitest`, and `rigor-mangrove` do exactly this.
+- A plugin that registers `dynamic_return` / `narrowing_facts` contributions
+  and provides **none** of the three channels makes the snapshot un-reusable
+  for the run and is named in the run output — incremental degrades to a full
+  analysis rather than risk a stale reuse.
+- `--verify-incremental` is the standing backstop: a hook that fails to move
+  when the plugin's real contribution moved surfaces there as a byte
+  mismatch.
+
 ## Cache-id sandbox (6-C)
 
 `Plugin::Base#cache_for` rewrites the producer id to

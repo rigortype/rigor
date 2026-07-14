@@ -8,8 +8,8 @@ require "rigor/cli"
 require "rigor/cli/show_bleedingedge_command"
 
 # ADR-50 § WD2 — `rigor show-bleedingedge` prints the bleeding-edge overlay and what the project's `bleeding_edge:`
-# config adopts. The overlay is empty in this release, so the default run reports an empty set; a stubbed feature
-# exercises the populated rendering.
+# config adopts. The shipped overlay carries the queued next-major disciplines; a stubbed feature exercises the
+# selector rendering independently of what ships.
 RSpec.describe Rigor::CLI::ShowBleedingedgeCommand do
   def run(argv)
     out = StringIO.new
@@ -18,22 +18,22 @@ RSpec.describe Rigor::CLI::ShowBleedingedgeCommand do
     [status, out.string, err.string]
   end
 
-  describe "the empty overlay" do
-    it "reports an empty overlay in text and exits 0" do
+  describe "the shipped overlay" do
+    it "lists the queued features in text, adopting none by default" do
       status, out, = run([])
       expect(status).to eq(0)
       expect(out).to include("Bleeding-edge overlay")
-      expect(out).to include("empty in this release")
+      expect(out).to include("reject-unparseable-signatures")
       expect(out).to include("Your configuration adopts: (none)")
     end
 
-    it "emits an empty overlay as JSON" do
+    it "emits the overlay as JSON with nothing active by default" do
       status, out, = run(["--format", "json"])
       expect(status).to eq(0)
       payload = JSON.parse(out)
-      expect(payload).to eq(
-        "overlay" => [], "selector" => false, "active" => [], "unknown_selected" => []
-      )
+      expect(payload["overlay"].map { |f| f["id"] }).to include("reject-unparseable-signatures")
+      expect(payload["active"]).to eq([])
+      expect(payload["unknown_selected"]).to eq([])
     end
   end
 

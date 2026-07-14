@@ -122,27 +122,54 @@ module Rigor
         stats = result.stats
         return [] unless stats
 
+        quarantined = quarantined_signature_diagnostics(result)
         if stats.rbs_classes_total.zero?
-          [
-            {
-              check: CHECK_RBS,
-              status: :fail,
-              message: "RBS environment is empty (#{stats.rbs_classes_total} classes available)",
-              hint: "The RBS environment failed to build or loaded no signatures. " \
-                    "Check `signature_paths:` for duplicate declarations, or run " \
-                    "`rbs collection install` for gem signatures."
-            }
-          ]
+          [empty_rbs_env_finding(stats)]
+        elsif quarantined.any?
+          [degraded_rbs_env_finding(stats, quarantined)]
         else
-          [
-            {
-              check: CHECK_RBS,
-              status: :pass,
-              message: "RBS environment healthy (#{stats.rbs_classes_total} classes available)",
-              hint: nil
-            }
-          ]
+          [healthy_rbs_env_finding(stats)]
         end
+      end
+
+      def empty_rbs_env_finding(stats)
+        {
+          check: CHECK_RBS,
+          status: :fail,
+          message: "RBS environment is empty (#{stats.rbs_classes_total} classes available)",
+          hint: "The RBS environment failed to build or loaded no signatures. " \
+                "Check `signature_paths:` for duplicate declarations, or run " \
+                "`rbs collection install` for gem signatures."
+        }
+      end
+
+      # The env is non-empty precisely BECAUSE the broken file was quarantined, so the class count alone reads
+      # as healthy — this is the case doctor used to pass. Classify the diagnostic the run already produced
+      # (ADR-77: route existing evidence) rather than re-probing the sig tree.
+      def degraded_rbs_env_finding(stats, quarantined)
+        {
+          check: CHECK_RBS,
+          status: :warn,
+          message: "RBS environment degraded — #{quarantined.size} `signature_paths:` file(s) " \
+                   "skipped, #{stats.rbs_classes_total} classes available",
+          hint: "An unparseable `.rbs` is skipped so the rest of the env survives, which makes the " \
+                "run quieter, not cleaner: the types it declares are gone. Run `rbs validate` on your " \
+                "`sig/` set and fix the parse error. To make this fail the build, opt into the " \
+                "`reject-unparseable-signatures` bleeding-edge feature."
+        }
+      end
+
+      def healthy_rbs_env_finding(stats)
+        {
+          check: CHECK_RBS,
+          status: :pass,
+          message: "RBS environment healthy (#{stats.rbs_classes_total} classes available)",
+          hint: nil
+        }
+      end
+
+      def quarantined_signature_diagnostics(result)
+        result.diagnostics.select { |diagnostic| diagnostic.rule == "rbs.coverage.quarantined-signature" }
       end
 
       def check_plugins(configuration)
@@ -272,12 +299,21 @@ module Rigor
         if failures.empty? && warnings.empty?
           @out.puts("rigor doctor: all checks passed — no setup problems detected.")
         else
-          @out.puts("rigor doctor: #{failures.size} issue(s) found")
+          # Count warnings too: a warn-only run (a degraded RBS env, a malformed baseline) used to headline
+          # "0 issue(s) found" above the very finding it was reporting.
+          @out.puts("rigor doctor: #{summary_counts(failures, warnings)}")
           failures.each { |f| print_finding(f) }
           warnings.each { |f| print_finding(f) } unless warnings.empty?
         end
 
         passes.each { |f| print_finding(f) } unless passes.empty?
+      end
+
+      def summary_counts(failures, warnings)
+        parts = []
+        parts << "#{failures.size} issue(s)" unless failures.empty?
+        parts << "#{warnings.size} warning(s)" unless warnings.empty?
+        "#{parts.join(', ')} found"
       end
 
       def print_finding(finding)

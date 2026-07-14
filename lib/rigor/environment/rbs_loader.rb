@@ -478,6 +478,18 @@ module Rigor
         names_synthesized_in(SYNTHETIC_NAMESPACE_BUFFER)
       end
 
+      # The project `signature_paths:` files that were QUARANTINED this run (they do not parse, so
+      # {RbsLoader.add_project_signatures} skipped them to keep the rest of the env alive), as
+      # `[absolute_path, first_error_line]` pairs. Memoised per loader: the detection re-parses only the user's
+      # own `sig/` set, but every consumer (the `rbs.coverage.quarantined-signature` diagnostic, `rigor doctor`,
+      # the stderr banner) reads it, and a cache HIT reaches it too — the env was built with the file already
+      # quarantined, so the condition is invisible in the cached env itself.
+      #
+      # @return [Array<Array(String, String)>] empty when every `signature_paths:` file parses.
+      def quarantined_signatures
+        @state[:quarantined] ||= self.class.quarantined_project_signatures(@signature_paths).freeze
+      end
+
       # The referenced-but-undeclared types {.stub_missing_referenced_types} stubbed so the project classes
       # that mention them could build (e.g. an unavailable `DRb::DRbServer`, or a stale
       # `Textbringer::EditorError`). Recovered off the built env like {#synthesized_namespaces}, so it
@@ -982,10 +994,15 @@ module Rigor
       # is the visibility half of the fix: a shrinking diagnostic count must never be mistaken for a clean run
       # when it actually means "your sig/ stopped loading". No-op when `signature_paths:` is empty (the cost is
       # then a single empty-set check) or every file parses.
+      #
+      # `rigor check` ALSO reports this as the `rbs.coverage.quarantined-signature` diagnostic, which is what
+      # reaches JSON / SARIF / CI annotations / the LSP. The banner is kept because the commands that build an
+      # env WITHOUT producing a diagnostic stream (`coverage`, `sig-gen`) have no other channel, and a silently
+      # degraded env is exactly what misleads there too.
       def warn_about_quarantined_signatures
         return if @state[:quarantine_warned]
 
-        quarantined = self.class.quarantined_project_signatures(@signature_paths)
+        quarantined = quarantined_signatures
         return if quarantined.empty?
 
         @state[:quarantine_warned] = true

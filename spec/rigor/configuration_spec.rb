@@ -324,9 +324,12 @@ RSpec.describe Rigor::Configuration do
         end
 
         it "recomputes bleeding_edge_severity_overrides from the new selector" do
-          # The overlay is empty in this release, so every selection still maps to an empty severity overlay — the
-          # wiring, not a populated result, is what this pins.
-          expect(base.with_bleeding_edge(true).bleeding_edge_severity_overrides).to eq({})
+          # The wiring, not the shipped overlay's content, is what this pins: adopting everything must yield the
+          # overlay's severity map, and adopting nothing must yield an empty one.
+          expect(base.bleeding_edge_severity_overrides).to eq({})
+          expect(base.with_bleeding_edge(true).bleeding_edge_severity_overrides)
+            .to eq(Rigor::BleedingEdge.severity_overrides_for("mode" => "all"))
+          expect(base.with_bleeding_edge(false).bleeding_edge_severity_overrides).to eq({})
         end
 
         it "leaves the receiver untouched and returns a frozen, shareable config" do

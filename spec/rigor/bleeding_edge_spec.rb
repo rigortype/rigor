@@ -2,20 +2,23 @@
 
 require "rigor/bleeding_edge"
 
-# ADR-50 § WD2 — the bleeding-edge overlay. The shipped overlay is empty (the foundation slice); the non-empty behaviour
-# is exercised by stubbing FEATURES so the resolution logic the first real feature will rely on is covered now.
+# ADR-50 § WD2 — the bleeding-edge overlay. The shipped overlay carries the queued next-major disciplines; the general
+# resolution logic is exercised against a stubbed FEATURES so it stays covered independently of what ships.
 RSpec.describe Rigor::BleedingEdge do
-  describe "the shipped (empty) overlay" do
-    it "carries no features yet" do
-      expect(described_class.features).to be_empty
-      expect(described_class.feature_ids).to eq([])
+  describe "the shipped overlay" do
+    it "queues `reject-unparseable-signatures`" do
+      expect(described_class.feature_ids).to include("reject-unparseable-signatures")
     end
 
-    it "resolves every selector to an empty severity map" do
-      %w[none all list].each do |mode|
-        selector = { "mode" => mode, "ids" => ["x"], "except" => ["x"] }
-        expect(described_class.severity_overrides_for(selector)).to eq({})
-      end
+    it "promotes the quarantined-signature rule to :error only for a selector that adopts it" do
+      feature = described_class.feature("reject-unparseable-signatures")
+      expect(feature.severity_overrides).to eq({ "rbs.coverage.quarantined-signature" => :error })
+
+      adopted = described_class.severity_overrides_for({ "mode" => "all" })
+      expect(adopted["rbs.coverage.quarantined-signature"]).to eq(:error)
+
+      # Off by default — an existing green build must not turn red on upgrade.
+      expect(described_class.severity_overrides_for({ "mode" => "none" })).to eq({})
     end
   end
 

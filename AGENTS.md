@@ -64,7 +64,7 @@ make lint
 make check
 ```
 
-- `make verify` runs `test-parallel` (the spec suite across `PARALLEL_TEST_PROCESSORS` workers — defaults to CPU count via `parallel_tests`), `lint`, `check`, and `check-plugins`. Total wall time on a 12-core laptop ≈ 60s vs ≈ 220s for the sequential variant. Use `make verify-sequential` when chasing parallel-only flakes; `make verify-parallel` is a backward-compatible alias for the default.
+- `make verify` runs `test-binpacker` (the spec suite across `binpacker`'s worker pool — `workers: auto` in `binpacker.yml`, defaulting to the CPU count), `lint`, `check`, and `check-plugins`. Total wall time on a 12-core laptop ≈ 60s vs ≈ 220s for the sequential variant. Use `make verify-sequential` when chasing parallel-only flakes; `make verify-parallel` is a backward-compatible alias for the default.
 - `make check-json` runs `rigor check --format=json lib` (machine-readable diagnostics).
 - `make check-plugins` runs `rigor check plugins/*/lib examples/*/lib` — the plugin-contract self-check ([ADR-43](docs/adr/43-rbs-complete-ancestor-resolution.md)). A bundled plugin that misuses the `Plugin::Base` contract surface (e.g. calls a method the contract's RBS does not declare) fails here with `call.undefined-method`. Lib dirs only — the `demo/` trees deliberately exercise un-modelled framework DSLs. MUST stay clean.
 - Submodule maintenance: `make init-submodules`, `make pull-submodules`.

@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel test-binpacker test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-binpacker test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -90,21 +90,14 @@ test:
 test-ractor-pool:
 	RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec spec/rigor/analysis/runner_pool_spec.rb
 
-# Spec suite via `parallel_tests`, splitting files across
-# multiple worker processes. `PARALLEL_TEST_PROCESSORS=N`
-# pins the worker count; default is the CPU count.
-test-parallel:
-	bundle exec rake spec_parallel
-
 # Spec suite via `binpacker`, distributing files across worker
 # processes using LPT scheduling driven by measured per-file
 # runtimes (tmp/binpacker.timings). On a cold start (no timings
 # file) binpacker falls back to filesize weighting automatically.
 # The ci profile additionally enables work stealing (dynamic
 # rebalancing between workers) to absorb shared-runner noise.
-# `PARALLEL_TEST_PROCESSORS=N` is honoured by parallel_tests;
-# binpacker uses `workers: auto` from binpacker.yml (CPU count)
-# or override via the config profile.
+# Worker count comes from `workers: auto` in binpacker.yml (CPU
+# count); override it via the config profile.
 test-binpacker:
 	bundle exec binpacker run
 
@@ -145,7 +138,7 @@ check-incremental:
 # Verify that docs/handbook/ executable snippets are accurate and that
 # docs/handbook/ + docs/manual/ relative links and doc↔code references are
 # consistent.  Runs spec/docs/ in isolation so failures are attributed
-# clearly.  Already included in the `test`/`test-parallel` suite; this
+# clearly.  Already included in the `test` / `test-binpacker` suite; this
 # target is the named gate for a focused docs-only run.
 docs-check:
 	bundle exec rspec spec/docs/

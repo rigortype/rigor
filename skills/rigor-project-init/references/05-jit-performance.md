@@ -52,8 +52,15 @@ ruby --yjit -e 'require "rbconfig"; puts "YJIT: #{RbConfig::CONFIG["YJIT_SUPPORT
 ```
 
 - Most prebuilt CRuby 3.3+ (mise / rbenv / asdf, the recommended install
-  channels) ship with YJIT built in.
-- The Nix flake package of Rigor bundles a Ruby with **both** YJIT and ZJIT.
+  channels) ship with YJIT built in but **not** ZJIT — a prebuilt
+  mise Ruby 4.0, for example, reports `YJIT: yes` / `ZJIT: no`, because
+  ZJIT needs `rustc` at build time and the prebuilt binary omits it. That
+  is exactly the configuration Rigor wants: YJIT is the faster JIT for
+  Rigor (see the YJIT-vs-ZJIT section below), so a missing ZJIT costs you
+  nothing.
+- The Nix flake package of Rigor bundles a Ruby with **both** JITs; that
+  is the only common install where `ZJIT: yes` — and Rigor still uses
+  YJIT there.
 - A YJIT-less Ruby is not an error — Rigor just runs interpreted, correctly.
 
 ## Overriding the default

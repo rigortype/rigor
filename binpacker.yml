@@ -7,8 +7,16 @@ profiles:
     test_exclude:
       - spec/rigor/analysis/runner_pool_spec.rb
     scheduler:
-      strategy: static
       algorithm: lpt
 
+  # CI runs are noisier than local ones (shared runners, per-file
+  # run-to-run CV ~0.13 measured on our own timing history), which
+  # puts a ~6% max-deviation floor under any static schedule. Work
+  # stealing absorbs that: workers that finish their LPT queue pull
+  # batches from the heaviest remaining queue. Costs a few extra
+  # rspec boots per worker; a clear net win on GitHub Actions where
+  # the 4-worker deviation reached 15% (65s) statically.
   ci:
     extends: default
+    scheduler:
+      steal_enabled: true

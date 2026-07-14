@@ -100,6 +100,8 @@ test-parallel:
 # processes using LPT scheduling driven by measured per-file
 # runtimes (tmp/binpacker.timings). On a cold start (no timings
 # file) binpacker falls back to filesize weighting automatically.
+# The ci profile additionally enables work stealing (dynamic
+# rebalancing between workers) to absorb shared-runner noise.
 # `PARALLEL_TEST_PROCESSORS=N` is honoured by parallel_tests;
 # binpacker uses `workers: auto` from binpacker.yml (CPU count)
 # or override via the config profile.

@@ -163,6 +163,8 @@ module Rigor
       def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] identity_table, Hash[String, Type::t] discovered) -> void
       def self?.discovered_classes_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[String, Type::t]
       def self?.discovered_def_index_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
+      def self?.scan_summary_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
+      def self?.code_fingerprint: (String source, untyped comments) -> String
       def self?.discovered_project_index_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
       def self?.discovered_project_index_incremental: (Array[String] paths, seed_bundles: Hash[String, untyped], ?buffer: untyped) -> Hash[Symbol, untyped]
       def self?.collect_class_decls: (untyped node, Array[String] qualified_prefix, Hash[String, Type::t] accumulator) -> void

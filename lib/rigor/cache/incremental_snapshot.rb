@@ -29,8 +29,9 @@ module Rigor
       # SCHEMA gate and loads as nil (a clean cold rebuild — no migration). 7: the seed bundle gains a
       # `singleton_def_sources` table (ADR-46 slice 4 extended to class/singleton methods) AND `digests`
       # switches to ADR-87 packed stat entries; a pre-7 blob mismatches the gate and loads as nil (clean cold
-      # rebuild).
-      SCHEMA = 7
+      # rebuild). 8: each seed bundle additionally gains a comment-stripped `code_fingerprint` for the B1
+      # bundle-equality gate; a pre-8 blob mismatches and loads as nil (clean cold rebuild).
+      SCHEMA = 8
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

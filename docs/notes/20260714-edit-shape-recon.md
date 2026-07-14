@@ -269,3 +269,76 @@ floor survives summary-gating entirely.
 Levers 1 is the headline: on this corpus a single real edit costs ~9–15s wall of which ~7s is a
 fixed, closure-independent floor that neither the shipped symbol granularity (ADR-46) nor a future
 summary-gating tier addresses.
+
+## Recheck floor + bundle gate (follow-up, `perf/recheck-floor-and-bundle-gate`)
+
+Findings + fixes from the follow-up PR. Same GitLab corpus (`app/models app/controllers`,
+re-primed cold baseline 19.0s on a fresh-schema snapshot). All figures host-measured,
+`/usr/bin/time` wall + env-gated phase trace, one run each.
+
+### The ~7 s `closure_analysis` floor is intrinsic
+
+Re-measuring **S1** (in-place comment on `health_controller.rb`, closure = 1): change_detect
+0.035 s · closure_compute 0.001 s · **closure_analysis 6.27 s** · wall 8.03 s. The floor barely
+moved from the recon's 7.23 s (the engine fixes below sit OUTSIDE `closure_analysis`; the residual
+difference is machine-state / YJIT-warmup noise). It is closure-INDEPENDENT — every comment-edit
+recheck (S1–S4, next section) lands at `closure_analysis` 6.3–6.6 s regardless of the original
+closure size. Decomposition (recon §2 stackprof + a source audit):
+
+- **Plugin whole-tree re-scans (1a) — intrinsic.** DryTypes `AliasScanner` and Sorbet
+  `CatalogWalker` re-parse every project file every recheck. DryTypes IS cache-gated (ADR-85 WD1)
+  but its `producer watch:` glob covers the whole `paths:` tree, so ANY edit moves the aggregate
+  stat signature → a cache MISS → a full re-scan (the producer cache serves only the 0-change null
+  recheck; ADR-87 WD2 already tried + reverted a per-file watch table on Marshal-cost grounds).
+  Sorbet has NO producer — its catalog is an instance-lifetime memo the fresh-per-recheck Runner
+  discards. Both are "bug-shaped" only in granularity; the real fix is per-plugin incremental
+  scanning (the ADR-85 seed-bundle pattern applied to plugin scans), a larger follow-up. The
+  whole-project `Prism.parse` these drive is the recon's fixed ~2.3 s.
+- **Demanded-AST parse (1b) — intrinsic, one dedup fixed.** DefHandle resolution (ADR-85 WD3) is
+  correctly demand-driven (0–6 files/recheck, per-run memoised; `symbol_fingerprints` reads the
+  handle fingerprint without parsing). The one redundancy — `affected_closure` parsed the changed
+  set TWICE (`symbol_fingerprints_for` + `class_declarations_for` each called
+  `discovered_def_index_for_paths`) — is FIXED: one `ScopeIndexer.scan_summary_for_paths` parse now
+  yields the fingerprints, class declarations, AND the B1 code fingerprint. It lives in
+  `closure_compute` (0.001 s), not `closure_analysis`.
+- **Dir.glob (1c) — one of three removed.** The analysis tree was `Dir.glob`'d three times per
+  recheck across three Runner instances (a banner probe, `current_files`, the recheck runner). The
+  banner probe is REMOVED (the count now comes from the session's analyzed set). The remaining two
+  span separate Runner instances — deduping needs threading the expanded set across them, deferred.
+
+### B1 — the bundle-equality propagation gate
+
+A changed file whose CODE (comments stripped, `ScopeIndexer.code_fingerprint`) is byte-identical to
+the snapshot is declaration-stable: every cross-file fact its ancestry / file-level dependents
+consume is code-derived and unchanged, so they are skipped. Gated OFF when a comment-ingesting
+plugin (inline-RBS) is configured — Sorbet sigs / dry-types includes are CODE, covered by the
+fingerprint; only comment-as-input plugins escape it.
+
+Measured (in-place comment edits — the code fingerprint keeps comment newlines, preserving every
+def's start line so ADR-17 def-site diagnostics stay sound):
+
+| exemplar | recon comment closure | with B1 | wall |
+|---|---|---|---|
+| S2 `label.rb` | 19 | **1** | 8.14 s |
+| S4 `cache_markdown_field.rb` (25 includers) | 66 | **1** | 8.07 s |
+| S3 `application_record.rb` | 341 | **1** | 7.94 s |
+| control: `application_record.rb` BODY edit | 341 | **341** (gate declines a code edit) | 12.30 s |
+
+A comment edit anywhere collapses to the fixed floor (~8 s); a body edit keeps the full closure
+(S3 12.3 s = floor + 340 marginal). B1 removes the marginal per-file cost; the fixed floor survives
+it. **Boundary (sound):** B1 fires only on comment edits that don't shift def line numbers (in-place
+text). A line-ADDING comment shifts subsequent defs → the code fingerprint changes (an added `\n`) →
+the gate conservatively keeps the dependents. The fuller collapse (declaration-summary equality
+through body edits with unchanged signatures) is the deferred B2 tier (ADR-88).
+
+**Soundness.** Audited: every ADR-46 / DiscoveryIndex cross-file read surface a dependent consumes
+from a file is captured by its seed bundle; the four recon suspects (`in_source_constants`,
+`class_ivars`/`class_cvars`/`program_globals`) are per-file-only and never seeded cross-file, so a
+constant / class-state edit needs no dependent re-check (the engine walks an inherited body under
+the CONSUMER's discovery). The one uncovered surface is the plugin fact channel — handled by the
+code fingerprint (covers code-reading plugins: Sorbet, dry-types) plus the inline-RBS gate (the one
+comment-reader). Backstopped by the fabricated-edit battery (constant / ivar / cvar / global edits
+stay byte-identical to a full run), the comment-collapse byte-identical specs, and
+`make check-incremental` (lib + plugin trees). The GitLab `--verify-incremental` is pre-existing-red
+(master fails identically — Rails plugin `:info` recognition-trace diagnostics differ between subset
+and full analysis, unrelated to this change), so per the plan the fabricated-edit specs stand.

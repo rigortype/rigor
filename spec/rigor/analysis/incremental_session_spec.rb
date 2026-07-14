@@ -618,4 +618,136 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       end
     end
   end
+
+  # B1 — the bundle-equality propagation gate: a changed file whose CODE (comments stripped) is unchanged is
+  # declaration-stable, so its ancestry / file-level dependents are skipped. Every case also asserts the
+  # merged diagnostics equal a full re-analysis (the `--verify-incremental` soundness property).
+  describe "bundle-equality propagation gate" do
+    # A base class (with a leading comment) and a subclass that reads its ancestry (an ancestry edge to the
+    # base), so an edit to the base normally re-checks the subclass.
+    def write_pair(dir, base_comment:)
+      base = File.join(dir, "base.rb")
+      File.write(base, <<~RUBY)
+        # #{base_comment}
+        class Base
+          def greet
+            "hi"
+          end
+        end
+      RUBY
+      sub = File.join(dir, "sub.rb")
+      File.write(sub, "class Sub < Base\n  def announce\n    greet\n  end\nend\n") unless File.exist?(sub)
+      [base, sub]
+    end
+
+    it "collapses an in-place comment edit to the edited file, skipping its dependents" do
+      Dir.mktmpdir do |dir|
+        base, sub = write_pair(dir, base_comment: "the original comment")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # Reword the comment — same line count, so the code (and every def's start line) is byte-identical.
+        write_pair(dir, base_comment: "a completely different but single-line comment")
+        recheck = session.recheck
+
+        expect(recheck.changed).to eq(Set[base])
+        expect(recheck.affected).to eq(Set[base]) # sub is skipped despite its ancestry edge to base.rb
+        expect(recheck.reused).to include(sub)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "still re-checks dependents on a body edit (the gate must not fire on a code change)" do
+      Dir.mktmpdir do |dir|
+        base, sub = write_pair(dir, base_comment: "c")
+        session = session_for(configuration(dir))
+        session.baseline
+
+        # A body edit changes the code fingerprint — the gate must NOT skip the dependent.
+        File.write(base, "# c\nclass Base\n  def greet\n    \"HELLO\"\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(base, sub)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "takes the same skip decision on a pooled (workers > 0) recheck as on a sequential one" do
+      skip "fork is unavailable on this platform" unless Process.respond_to?(:fork)
+      Dir.mktmpdir do |dir|
+        base, sub = write_pair(dir, base_comment: "the original comment")
+        session = described_class.new(configuration: configuration(dir), environment: shared_environment,
+                                      workers: 2)
+        session.baseline
+
+        # The gate decision (`affected_closure` → `analyze_set`) happens session-side BEFORE worker
+        # dispatch, so a pooled recheck must skip exactly the same dependents a sequential one does.
+        write_pair(dir, base_comment: "a different comment, same line count")
+        recheck = session.recheck
+
+        expect(recheck.affected).to eq(Set[base])
+        expect(recheck.reused).to include(sub)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    # Fabricated-edit soundness battery — one per surface the audit flagged as a suspect (constant, class
+    # ivar, class cvar, global). Each is a CODE edit, so the gate does not fire and the dependent is
+    # re-checked; every case asserts byte-identical-to-full, the soundness backstop.
+    def write_state_holder(dir, assignment)
+      reader = assignment.split(" = ").first
+      base = File.join(dir, "base.rb")
+      File.write(base, <<~RUBY)
+        # note
+        class Base
+          #{assignment}
+          def read
+            #{reader}
+          end
+        end
+      RUBY
+      unless File.exist?(File.join(dir, "consumer.rb"))
+        File.write(File.join(dir, "consumer.rb"), "class Consumer < Base\n  def use\n    read\n  end\nend\n")
+      end
+      base
+    end
+
+    {
+      "a cross-file constant value" => ["CONST = 1", "CONST = 2"],
+      "a class ivar write" => ["@field = 1", "@field = 2"],
+      "a class cvar write" => ["@@shared = 1", "@@shared = 2"],
+      "a program global write" => ["$g = 1", "$g = 2"]
+    }.each do |desc, (before, after)|
+      it "stays byte-identical to a full run when #{desc} changes (gate declines a code edit)" do
+        Dir.mktmpdir do |dir|
+          write_state_holder(dir, before)
+          session = session_for(configuration(dir))
+          session.baseline
+
+          write_state_holder(dir, after)
+          recheck = session.recheck
+
+          # A code edit → the gate declines → the merged result still equals a full re-analysis.
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+    end
+
+    it "disables the gate when a comment-ingesting plugin (inline-RBS) is configured" do
+      # inline-RBS reads comments as types, so a comment edit could change a cross-file signature the code
+      # fingerprint ignores — the gate must fall back to today's full closure. Tested at the gate logic so it
+      # does not depend on the plugin gem being on the load path.
+      inline = Rigor::Configuration.new("paths" => ["x"], "plugins" => [{ "gem" => "rigor-rbs-inline" }])
+      ordinary = Rigor::Configuration.new("paths" => ["x"], "plugins" => ["rigor-sorbet"])
+
+      expect(described_class.new(configuration: inline).send(:comment_ingesting_plugin_loaded?)).to be(true)
+      expect(described_class.new(configuration: ordinary).send(:comment_ingesting_plugin_loaded?)).to be(false)
+
+      # With the gate disabled, EVERY changed file is unstable (dependents never skipped), even one whose code
+      # fingerprint matched.
+      session = described_class.new(configuration: inline)
+      session.instance_variable_set(:@seed_bundles, { "a.rb" => { code_fingerprint: "fp" } })
+      expect(session.send(:declaration_unstable, ["a.rb"], { "a.rb" => "fp" })).to eq(["a.rb"])
+    end
+  end
 end

@@ -400,6 +400,20 @@ and `file:line` grounding in the note):
 - ~~**In-memory `Analysis::Runner.run_source` entry point (public + test-only).**~~ LANDED — see (b) above.
 
 ### Sig-gen (ADR-14)
+- **QUEUED — sig-gen must not be able to emit unparseable RBS (an output-validity guard).** Two separate
+  bugs have shipped RBS that `rbs` itself rejects: a non-identifier record key (`{ :"data-contrast" => T }`,
+  fixed in the ADR-82 arc) and a `&block` constructor param rendered before the parens (`(**untyped, ?{ (?) ->
+  void })`, [PR #51](https://github.com/rigortype/rigor/pull/51)). Both were found *downstream*, as a poisoned
+  `sig/` tree — and the consequence is now sharper than when they landed: a file Rigor cannot parse is
+  quarantined (its types vanish, so the project gets quieter) and, for a project adopting
+  `reject-unparseable-signatures`, **fails the build**. A generator that can poison its own consumer's build is
+  the thing to fix at the source. Shape: parse every rendered declaration through `RBS::Parser` before it is
+  written (and before `--print` / `--diff` emit it) — a round-trip guard that turns this whole bug *class* from
+  a silent bad artifact into a caught error naming the method it could not render. Cheap (the sig set is small
+  and already in memory) and it makes each future rendering bug fail loudly in the generator instead of
+  quietly in the consumer. Open question worth deciding when implementing: whether an unrenderable method is
+  *skipped with a warning* (partial sig, run still succeeds) or *fails the command* — skipping keeps sig-gen
+  useful on a project with one pathological method, so it is the likely default, with the count surfaced.
 - **`--params=observed` attr_reader / attr_writer / attr_accessor inference from `initialize` observations — LANDED** (commit `f2aa8de`, v0.1.9 cycle). `rigor sig-gen --params=observed --write` now propagates observed call-site argument types through `@ivar = param` assignments in `def initialize`, so `attr_reader` / `attr_accessor` methods receive a concrete unioned return type instead of being skipped as `:untyped_return`. Implementation: `build_observed_ivar_map` → `collect_init_ivar_obs` → `ivar_obs_from_initialize` (+ `build_ivar_obs_type_map` / `collect_param_obs_types`). All new logic stays in `Generator`; `ScopeIndexer` is not touched. TypeProf compatibility spec added (`spec/rigor/sig_gen/typeprof_compat_spec.rb`) asserting Rigor covers ≥ all methods TypeProf recognises and returns a more specific type. The `rigor-project-init` SKILL Phase 5 (`skills/rigor-project-init/references/04-sig-uplift.md`) documents the end-user workflow.
 - **`update_existing` does not yet collapse sibling parent / child class blocks.** Gap (c)'s tree-builder fix lives in `Writer#render_new_file` (the create-new path). When updating an existing target file, `merge_class` resolves each candidate's `class_name` independently — flat-sibling layouts stay flat. Re-flowing an existing file into the nested layout would require parsing the existing decl tree and rewriting it, which is out of scope for a follow-up fix. Users who want the canonical nested layout regenerate from scratch (delete the target sig file and rerun).
 - **Remaining gaps after `--params=observed`** (demand-driven follow-ups): `attr_reader` with ivars set from non-`initialize` sources (DB reads, config, side effects) still fall through to `:untyped_return`; fix requires a hand-written sig or an RBS annotation. Deep chains on untyped receivers need `rbs collection install` / ADR-10. Dynamic methods (`define_method`, DSL macros) need a project plugin. Bootstrap convergence finding: iterative `sig-gen --write` alone does NOT improve untyped returns — `@name: untyped` written → second pass sees `equivalent` → type stays untyped; `--params=observed` is the correct lever.

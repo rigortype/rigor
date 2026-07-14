@@ -93,7 +93,7 @@ states:
 | `equivalent` | The inferred return is not a strict subtype of the declared one — identical, wider, or unrelated — so there is nothing to tighten. Silently skipped. |
 | `skipped` | Disqualified for one of the reasons below. |
 
-The three `sig.skipped.*` reasons are:
+The `sig.skipped.*` reasons are:
 
 - `sig.skipped.complex-shape` — the method has optional, rest,
   keyword, block, or forwarding parameters. The MVP's
@@ -105,6 +105,16 @@ The three `sig.skipped.*` reasons are:
 - `sig.skipped.user-authored` — `--overwrite` was not set
   and the method's existing RBS declaration would have to
   be replaced.
+- `sig.skipped.unrenderable-rbs` — the signature Rigor
+  rendered for this method does not parse as RBS. This one
+  is a **bug in Rigor**, not a property of your code: every
+  generated line is parsed before it is emitted, and a line
+  `rbs` rejects is dropped rather than written, because an
+  unparseable `.rbs` is quarantined *whole* by `rigor check`
+  — one bad line would take every other type in the file
+  down with it. The rest of the signatures are unaffected;
+  the skipped method is reported on stderr, and it is worth
+  reporting to us.
 
 The three `sig.generated.*` identifiers
 (`sig.generated.new-file` / `new-method` / `tighter-return`)

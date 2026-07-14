@@ -183,6 +183,17 @@ rigor sig-gen [paths]
 | `--new-files` / `--new-methods` / `--tighter-returns` | Emit only that classification. |
 | `--format=text\|json` | Output format. |
 
+Every signature is parsed before it is emitted. A method whose
+generated RBS does not parse is **skipped** (`sig.skipped.unrenderable-rbs`)
+and reported on stderr rather than written — an unparseable
+`.rbs` is quarantined *whole* by `rigor check`, so one bad line
+would take every other type in the file down with it. Under
+`--write`, a file whose assembled content does not parse is
+**refused** (the existing file is left untouched) and the command
+exits `1`: you asked for a write and did not get one. Such a skip
+is a bug in Rigor's RBS rendering, not in your code — please
+report it.
+
 ## `rigor lsp`
 
 Run the Language Server over stdio. See

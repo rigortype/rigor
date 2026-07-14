@@ -42,20 +42,42 @@ module Rigor
         paths = @argv.empty? ? configuration.paths : @argv
 
         observations = collect_observations(configuration, options)
-        candidates = SigGen::Generator.new(configuration: configuration, paths: paths,
-                                           observations: observations,
-                                           include_private: options.fetch(:include_private)).run
+        generator = SigGen::Generator.new(configuration: configuration, paths: paths,
+                                          observations: observations,
+                                          include_private: options.fetch(:include_private))
+        candidates = generator.run
         mode = options.fetch(:mode).to_sym
 
-        if mode == :write
-          dispatch_write(candidates, configuration, options)
-        else
-          dispatch_print_or_diff(candidates, mode, options)
-        end
-        0
+        status = if mode == :write
+                   dispatch_write(candidates, configuration, options)
+                 else
+                   dispatch_print_or_diff(candidates, mode, options)
+                   0
+                 end
+        report_unrenderable(generator.unrenderable)
+        status
       end
 
       private
+
+      # A method whose rendered RBS does not parse is a Rigor rendering defect, not a fact about the user's
+      # code — the generator skipped it (so the rest of the signatures are still usable and still valid), but
+      # staying silent would leave the user with a quietly incomplete `sig/` and us with an unreported bug.
+      # Reported on stderr so it never contaminates `--print` output being piped into a file.
+      def report_unrenderable(unrenderable)
+        return if unrenderable.empty?
+
+        @err.puts(
+          "rigor sig-gen: skipped #{unrenderable.size} method(s) whose generated RBS does not parse. " \
+          "This is a bug in Rigor's RBS rendering, not in your code — please report it. " \
+          "The remaining signatures are unaffected."
+        )
+        unrenderable.each do |method|
+          @err.puts("  #{method.path}: #{method.class_name}##{method.method_name}")
+          @err.puts("    rendered: #{method.rbs}")
+          @err.puts("    #{method.error}")
+        end
+      end
 
       def dispatch_print_or_diff(candidates, mode, options)
         SigGen::Renderer.new(out: @out).render(
@@ -66,6 +88,7 @@ module Rigor
         )
       end
 
+      # @return [Integer] exit status — non-zero when a file the user asked to write could not be written.
       def dispatch_write(candidates, configuration, options)
         layout_index = SigGen::LayoutIndex.new(signature_paths: configuration.signature_paths)
         path_mapper = SigGen::PathMapper.new(configuration: configuration, layout_index: layout_index)
@@ -74,6 +97,10 @@ module Rigor
         results = writer.write_all(candidates)
 
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
+        # An assembled file that does not parse is refused rather than written. The user asked for a write and
+        # did not get one, so the command must not report success — a green `sig-gen --write` in CI would
+        # otherwise mean nothing.
+        results.any? { |result| result.action == :skipped_invalid_rbs } ? 1 : 0
       end
 
       # Slice 3 — collect call-site argument observations when `--params=observed` is set. When `--observe=PATH` is not

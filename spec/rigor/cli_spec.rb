@@ -1058,6 +1058,38 @@ RSpec.describe Rigor::CLI do
       path
     end
 
+    # The output-validity guard, end to end. A method whose rendered RBS does not parse is skipped rather than
+    # emitted, and the defect is reported on STDERR — never on stdout, which may be piped straight into a
+    # `.rbs` file. Exit stays 0: the remaining signatures are valid and useful, so a single pathological method
+    # must not deny the user everything else.
+    it "reports an unrenderable method on stderr, keeps stdout clean, and still emits the rest" do
+      path = write_fixture("lib/widget.rb", <<~RUBY)
+        class Widget
+          def n
+            42
+          end
+
+          def s
+            "x"
+          end
+        end
+      RUBY
+      allow_any_instance_of(Rigor::SigGen::Generator) # rubocop:disable RSpec/AnyInstance
+        .to receive(:render_rbs_line).and_wrap_original do |original, *args|
+          args.first.name == :n ? "def n: () -> { data-contrast: Integer }" : original.call(*args)
+        end
+
+      status, out, err = run_cli("sig-gen", path)
+
+      expect(status).to eq(0)
+      expect(err).to include("skipped 1 method(s) whose generated RBS does not parse")
+      expect(err).to include("bug in Rigor's RBS rendering")
+      expect(err).to include("Widget#n")
+      # stdout stays a valid, usable sig — the other method is still there, the broken one is simply absent.
+      expect(out).to include("def s:")
+      expect(out).not_to include("data-contrast")
+    end
+
     it "prints RBS skeletons for instance defs that have no existing RBS" do
       path = write_fixture("lib/widget.rb", <<~RUBY)
         class Widget

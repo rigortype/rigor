@@ -108,8 +108,15 @@ module Rigor
       end
 
       def create_new(source_path, target, candidates)
+        content = render_new_file(candidates)
+        error = RbsValidity.source_error(content)
+        if error
+          return WriteResult.new(source_path: source_path, target_path: target,
+                                 action: :skipped_invalid_rbs, error: error)
+        end
+
         FileUtils.mkdir_p(target.dirname)
-        target.write(render_new_file(candidates))
+        target.write(content)
         WriteResult.new(source_path: source_path, target_path: target,
                         action: :created, applied: candidates)
       end
@@ -277,7 +284,22 @@ module Rigor
         merge_class_shells(state, collect_class_shells(candidates), merged_namespace_kinds(candidates))
 
         action = state.applied.empty? ? :noop : :updated
-        target.write(state.source) if action == :updated
+        unless action == :updated
+          return WriteResult.new(source_path: source_path, target_path: target, action: action,
+                                 applied: state.applied, skipped: state.skipped)
+        end
+
+        # The merge splices text into an existing file by byte offset, so a bug here can produce a file neither
+        # the generator nor the target was responsible for. Parse the assembled result and refuse to write it if
+        # it is broken: a `.rbs` the consumer cannot parse is quarantined whole, so a bad splice would delete
+        # every type in the file — including the user's own, which were fine before we touched them.
+        error = RbsValidity.source_error(state.source)
+        if error
+          return WriteResult.new(source_path: source_path, target_path: target,
+                                 action: :skipped_invalid_rbs, error: error)
+        end
+
+        target.write(state.source)
         WriteResult.new(source_path: source_path, target_path: target,
                         action: action, applied: state.applied, skipped: state.skipped)
       end

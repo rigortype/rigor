@@ -41,7 +41,7 @@ the `paths:` list from the configuration file.
 | `--cache-stats` | Print the on-disk cache inventory when finished. |
 | `--[no-]stats` | Print a run summary (files, classes, memory, wall time) to stderr. Default on. |
 | `--coverage` | Add a type-precision coverage block to the output (`coverage` object under `--format json`; a one-line summary in text mode). Off by default — it is a second precision pass over the analyzed files, the same scan [`rigor coverage`](#rigor-coverage) runs, so it is opt-in. |
-| `--workers=N` | Dispatch analysis across `N` parallel worker processes (fork-based pool today; ADR-15). Default `0` (sequential). |
+| `--workers=N` | Dispatch analysis across `N` parallel worker processes (fork-based pool today; ADR-15). Default `0` (sequential). Applies to `--incremental` re-checks as well as full runs. |
 | `--baseline=PATH` | Load a baseline file, overriding config. |
 | `--no-baseline` | Ignore any configured baseline. |
 | `--baseline-strict` | Fail the run on any baseline drift — a CI gate. |
@@ -618,6 +618,9 @@ operational knobs read the environment instead.
 | `RIGOR_RACTOR_WORKERS=N` | Worker count for parallel analysis. Sits between the CLI flag and the config key in precedence: `--workers=N` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > `0` (sequential). |
 | `RIGOR_POOL_BACKEND=ractor` | Opt back into the (off-by-default) Ractor worker pool instead of the active fork-based pool ([ADR-15](../adr/15-ractor-concurrency.md)). Only relevant with a non-zero worker count; the fork pool is the supported backend. |
 | `RIGOR_PLUGIN_ISOLATION=none\|process\|ruby_box` | How a plugin's direct calls into its target library are isolated. Default `process`. See [Using plugins § Isolation strategy](07-plugins.md). `RIGOR_BOX` is a legacy alias for `ruby_box`. |
+| `RIGOR_STRICT_VALIDATION=1` | Force full-content cache validation for one run (the same as `cache.validation: digest`, and winning over it) — re-hash every file's content instead of trusting its stat metadata. Use it if a filesystem's timestamps or inode numbers cannot be trusted. See [Caching § How a file is checked for changes](12-caching.md#how-a-file-is-checked-for-changes). |
+| `RIGOR_DISABLE_YJIT=1` | Opt out of Rigor's deferred YJIT enablement. Rigor turns YJIT on partway through a long `check` / `coverage` run so short runs never pay the JIT warm-up; this variable leaves it off entirely. Diagnostics and allocations are identical either way — the effect is wall-time only. |
+| `RIGOR_YJIT_DEADLINE=<seconds>` | Advanced: tune how long a run must last before deferred YJIT enables (default `5.0`). Lower it if your runs are long and you want the JIT sooner; raise it to protect short runs. Ignored when `RIGOR_DISABLE_YJIT=1` is set or YJIT is unavailable. |
 
 Three further variables (`RIGOR_BUDGET_TRACE`,
 `RIGOR_HEAP_PROFILE`, `RIGOR_HEAP_TRACE`) enable developer-facing

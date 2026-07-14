@@ -116,6 +116,18 @@ module Rigor
         errors.map { |error| parse_error_diagnostic(path, error) }
       end
 
+      # ADR-88 WD2 — the per-run catalog is an ADR-60 record-and-validate producer. Before this it was rebuilt
+      # unconditionally on every `--incremental` recheck (parse + walk every `.rb` / `.rbi` sig tree); as a
+      # producer it is cached to disk keyed on the plugin config, with `watch:` covering the scanned trees so an
+      # added / removed / edited sig file recomputes it. The producer VALUE (a Marshal-clean bundle of the
+      # catalog + the sigil map + the parse-error tuples) is what ADR-88 WD1 digests into the incremental
+      # fact-surface fingerprint, so a sig edit OUTSIDE `signature_paths:` invalidates the snapshot for free.
+      # The bundle is returned (not written to ivars) because a cache HIT does not run the block — the sigil map
+      # and parse errors would otherwise be lost on the warm path.
+      producer :catalog, watch: -> { catalog_watch_globs } do |_params|
+        build_catalog_bundle
+      end
+
       # ADR-52 slice 4 — per-call return-type path via the method-name-gated `dynamic_return` DSL. The
       # recognised name set is only known at run time (the catalog's `def` names come from the lazy
       # catalog build), so it is declared as a callable: the engine `instance_exec`s it once per run on
@@ -389,35 +401,69 @@ module Rigor
         end
       end
 
+      # ADR-88 WD2 — resolve the catalog from the `:catalog` producer (disk-cached) and unpack its Marshal-clean
+      # bundle into the ivars the return-type / sigil-gate / parse-error paths read. `producer_value` memoises
+      # per instance and rescues a producer failure to nil, hence the empty-bundle fallback.
       def ensure_catalog
         return @catalog if @catalog_built
 
-        catalog = Catalog.new
-        # Project source — `.rb` only.
-        @configured_paths.each { |root| harvest_path(root, catalog, extensions: %w[.rb]) }
-        # Sorbet RBI tree — `.rbi` only. Slice 4 of ADR-11.
-        @rbi_paths.each { |root| harvest_path(root, catalog, extensions: %w[.rbi]) }
-        catalog.freeze!
-        @catalog = catalog
+        bundle = producer_value(:catalog) || EMPTY_CATALOG_BUNDLE
+        @catalog = bundle[:catalog]
+        @sigil_by_path = bundle[:sigil_by_path]
+        @parse_errors_by_path = bundle[:parse_errors_by_path]
         @catalog_built = true
-        catalog
+        @catalog
       end
+
+      # ADR-88 WD2 — the `watch:` coverage for the `:catalog` producer: the `.rb` sig trees + the `.rbi` trees.
+      # An added / removed file under either invalidates the cached bundle even though the block globbed the
+      # tree itself. Evaluated at `cache_for` time (after `#init`), so `@configured_paths` / `@rbi_paths` are set.
+      def catalog_watch_globs
+        [[@configured_paths, "**/*.rb"], [@rbi_paths, "**/*.rbi"]]
+      end
+
+      # ADR-88 WD2 — build the Marshal-clean catalog bundle the `:catalog` producer caches. Harvests the `.rb`
+      # sig trees then the `.rbi` trees (last-wins ordering preserved from the ivar-mutating original) and
+      # returns `{ catalog:, sigil_by_path:, parse_errors_by_path: }`.
+      def build_catalog_bundle
+        catalog = Catalog.new
+        sigil_by_path = {}
+        parse_errors_by_path = {}
+        # Project source — `.rb` only.
+        @configured_paths.each { |root| harvest_path(root, catalog, sigil_by_path, parse_errors_by_path, %w[.rb]) }
+        # Sorbet RBI tree — `.rbi` only. Slice 4 of ADR-11.
+        @rbi_paths.each { |root| harvest_path(root, catalog, sigil_by_path, parse_errors_by_path, %w[.rbi]) }
+        catalog.freeze!
+        { catalog: catalog, sigil_by_path: sigil_by_path, parse_errors_by_path: parse_errors_by_path }
+      end
+
+      # Frozen empty bundle used when the `:catalog` producer failed (e.g. a project I/O error) so downstream
+      # reads see a well-formed shape rather than nil.
+      EMPTY_CATALOG_BUNDLE = { catalog: Catalog.new.freeze!, sigil_by_path: {}, parse_errors_by_path: {} }.freeze
+      private_constant :EMPTY_CATALOG_BUNDLE
 
       # @param root [String] directory or single file.
       # @param catalog [Catalog]
+      # @param sigil_by_path [Hash{String=>Symbol}] accumulator: harvested file → detected sigil level.
+      # @param parse_errors_by_path [Hash{String=>Array<Hash>}] accumulator: file → `{kind:,line:,column:}` tuples.
       # @param extensions [Array<String>] file extensions to accept (e.g. `[".rb"]` for project source,
       #   `[".rbi"]` for Sorbet RBI tree).
-      def harvest_path(root, catalog, extensions:)
+      def harvest_path(root, catalog, sigil_by_path, parse_errors_by_path, extensions)
         absolute = canonicalize(root)
         if File.directory?(absolute)
           extensions.each do |ext|
+            # ADR-88 WD2 — deterministic fold order matters now that the catalog VALUE is digested into the
+            # incremental fact-surface fingerprint: a duplicate `(class, method, kind)` sig's last-wins winner
+            # must not vary by machine / run. `Dir.glob` sorts its results by default on Ruby 3.0+, so the fold
+            # order is already stable (the slice-1 comment's "filesystem order" caveat predates that default);
+            # this walk relies on it rather than re-sorting.
             Dir.glob(File.join(absolute, "**", "*#{ext}")).each do |path|
-              harvest_file(canonicalize(path), catalog)
+              harvest_file(canonicalize(path), catalog, sigil_by_path, parse_errors_by_path)
             end
           end
         elsif File.file?(absolute) && extensions.any? { |ext| absolute.end_with?(ext) }
           # `paths:` may list individual files (the demos do this); walk them directly rather than skipping.
-          harvest_file(absolute, catalog)
+          harvest_file(absolute, catalog, sigil_by_path, parse_errors_by_path)
         end
       end
 
@@ -432,7 +478,7 @@ module Rigor
         expanded
       end
 
-      def harvest_file(path, catalog)
+      def harvest_file(path, catalog, sigil_by_path, parse_errors_by_path)
         contents = io_boundary.read_file(path)
         return if contents.nil?
 
@@ -441,7 +487,7 @@ module Rigor
         # Per-call-site assertion gating consults this map at recognition time. Recorded BEFORE the
         # ignored short-circuit so a `# typed: ignore` file still reports its level to the gate (the gate
         # then chooses to suppress assertions there too — `ignore` is stricter than `false`).
-        @sigil_by_path[path] = level
+        sigil_by_path[path] = level
         return if SigilDetector.ignored?(level)
 
         result = Prism.parse(contents)
@@ -460,11 +506,21 @@ module Rigor
                       end
 
         errors = CatalogWalker.walk(root: result.value, catalog: sig_catalog, path: path)
-        @parse_errors_by_path[path] = errors unless errors.empty?
+        # ADR-88 WD2 — store Marshal-clean `{kind:, line:, column:}` tuples, not the `ParseError` (it holds a
+        # live Prism node the producer bundle could not serialise). `diagnostics_for_file` rebuilds the
+        # diagnostic from the tuple, at the same 1-based line / `start_column + 1` position `from_node` gave.
+        parse_errors_by_path[path] = errors.map { |error| parse_error_tuple(error) } unless errors.empty?
       rescue Plugin::AccessDeniedError, Errno::ENOENT
         # Skip files outside the trusted read scope or that vanished between glob and read; the plugin
         # produces no output for them.
         nil
+      end
+
+      # ADR-88 WD2 — the Marshal-clean position tuple for a `CatalogWalker::ParseError`, capturing the node's
+      # location at harvest time so the producer bundle carries no live Prism node.
+      def parse_error_tuple(error)
+        location = error.node.location
+        { kind: error.kind, line: location.start_line, column: location.start_column + 1 }
       end
 
       # Emits a `plugin.sorbet.absurd-reachable` warning for the `T.absurd(x)` call recorded in
@@ -535,11 +591,15 @@ module Rigor
         )
       end
 
+      # ADR-88 WD2 — `error` is a Marshal-clean `{kind:, line:, column:}` tuple (the pre-computed node
+      # location), not a Prism-node-bearing `ParseError`; build the diagnostic directly at that position (the
+      # `line` / `column` `from_node` would have derived).
       def parse_error_diagnostic(path, error)
-        Rigor::Analysis::Diagnostic.from_node(
-          error.node,
+        Rigor::Analysis::Diagnostic.new(
           path: path,
-          message: parse_error_message(error.kind),
+          line: error[:line],
+          column: error[:column],
+          message: parse_error_message(error[:kind]),
           severity: :warning,
           rule: "parse-error"
         )

@@ -37,8 +37,11 @@ automatically and emit the message described:
 
 ## Severity profile — follows the mode
 
-The `severity_profile:` key re-stamps every rule's severity. Set it
-from the Phase 2 mode:
+The `severity_profile:` key sets every rule's severity — and for some
+rules, whether they fire at all: a rule can be *off* under `lenient`
+and surface under `balanced` / `strict` (e.g. the toplevel
+unresolved-call rule). Switching profiles can therefore **change the
+diagnostic count**, not just the labels. Set it from the Phase 2 mode:
 
 | Mode | `severity_profile` | Why |
 | --- | --- | --- |
@@ -47,6 +50,14 @@ from the Phase 2 mode:
 | Strict | `strict` | Promotes borderline rules to errors. Paired with no baseline, every diagnostic is a live gate. |
 
 `balanced` is the built-in default — omit the key to get it.
+
+**The Phase 4 choice is provisional.** The ">100 errors" condition is
+measured by Phase 6's triage, which has not run yet — so write the
+best guess now and **revisit it when the triage counts land**: if the
+measured `error` count is small, prefer `balanced` even for a large
+acknowledge-mode app. Make any profile change **before** generating
+the baseline (Phase 7), and re-run `rigor triage` after changing it —
+the count the baseline snapshots must come from the final profile.
 
 ## No separate installation needed
 
@@ -190,6 +201,28 @@ shape):
 ```sh
 rigor plugins --strict
 ```
+
+### `rigor plugins` verifies activation, not analysis-time health
+
+A plugin that activates cleanly can still degrade **during
+analysis** — e.g. its model-index / routes-parsing stage fails on
+this machine — and that failure surfaces only as a
+`plugin.<id>.load-error` **warning inside the diagnostic stream**,
+easy to miss among hundreds of lines. After the first full
+`rigor check` / `rigor triage` run (Phase 6), check for it
+explicitly:
+
+```sh
+rigor check --format json | jq '[.diagnostics[] | select(.rule | endswith("load-error"))]'
+```
+
+Any hit means that plugin contributed **no diagnostics and no
+types** for the capability that failed — reduced coverage, silently.
+Surface it to the user rather than letting it slide into the
+baseline: a `load-error` bucket in `.rigor-baseline.yml` would hide
+the degradation permanently. If the error reproduces across runs,
+report it upstream (<https://github.com/rigortype/rigor/issues>)
+with the message text.
 
 ## Output of this module
 

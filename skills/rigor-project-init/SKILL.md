@@ -98,6 +98,29 @@ If the project's first `rigor check` reports more than ~100 errors,
 recommend acknowledge mode as the default and let the user override.
 Below that, either mode is reasonable — ask.
 
+Note the ordering: the error count that feeds this recommendation (and
+the `severity_profile` choice in Phase 4) is only *measured* in
+Phase 6's triage run. Any profile written in Phase 4 is therefore
+**provisional** — Phase 6 revisits it against the measured count (see
+[`references/02-configure.md`](references/02-configure.md)
+§ "Severity profile").
+
+## Non-interactive / agent-driven runs
+
+This skill has several ask-the-user points (the mode choice, the RBS
+collection install, the final gitignore-and-commit confirmation). When
+the user delegated the onboarding up front — including the adoption
+mode — those points resolve without blocking:
+
+- The **mode** the user pre-declared is settled; record it and skip the
+  Phase 2 presentation.
+- Low-risk, reversible, in-repo confirmations (`rbs collection
+  install`, the `.gitignore` addition) are covered by the delegation —
+  act, and note each self-answer in your report.
+- **Never commit or push under a general delegation.** Run the Final
+  step's file inventory as a *report* (what was created, what to
+  commit) instead of a question, and leave the commits to the user.
+
 ## Phase outline
 
 | Phase | What | Reference |
@@ -202,6 +225,7 @@ only in acknowledge mode). For each, give the commit recommendation:
 | `sig/` | RBS skeletons from `rigor sig-gen` (Phase 5), if that phase ran. A first-class project artefact — it sharpens inference for everyone. | **Yes** — commit it (see [`references/04-sig-uplift.md`](references/04-sig-uplift.md) § "Commit the sig/ directory"). |
 | `.rigor/` (contains `cache/`) | The per-file analysis cache `rigor check` writes to speed up re-runs. Regenerable and machine-local. | **No** — add `.rigor/` to `.gitignore`. |
 | `.rigor.yml` | Optional per-developer local override (not written by this skill). Takes precedence over `.rigor.dist.yml`; used to opt out locally (e.g. run without the baseline). | **No** — gitignore it if a developer creates one. |
+| `rbs_collection.lock.yaml` | Not a Rigor artefact — but if Phase 1 ran `rbs collection install`, the install may have regenerated this pre-existing project file (e.g. the stdlib gem list for the resolved Ruby). | **Yes**, but flag it separately: it is a change to an existing project file, not part of the Rigor file set. |
 
 Recommend the two concrete actions and **ask before doing them**
 (both touch the user's repo): (1) add `.rigor/` — and `.rigor.yml`

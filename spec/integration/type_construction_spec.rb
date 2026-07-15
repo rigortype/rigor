@@ -207,6 +207,30 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/hash_scalar_keys.rb — scalar-literal hash keys + duplicate-key last-wins" do
+    let(:harness) { harness_for("hash_scalar_keys") }
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "keeps 1 and 1.0 as distinct last-wins entries" do
+      h = harness.local(:h)
+      expect(h).to be_a(Rigor::Type::HashShape)
+      expect(h.pairs.keys).to eq([1, 1.0])
+      expect(harness.local(:int_hit)).to eq(constant(2))
+      expect(harness.local(:float_hit)).to eq(constant(4))
+      expect(harness.local(:miss)).to eq(constant(nil))
+    end
+
+    it "applies last-wins to duplicate symbol keys instead of degrading to Hash[K, V]" do
+      s = harness.local(:s)
+      expect(s).to be_a(Rigor::Type::HashShape)
+      expect(s.pairs).to eq({ a: constant(2) })
+    end
+  end
+
   describe "fixtures/tuple_map.rb — per-element block fold for :map / :collect on Tuple" do
     let(:harness) { harness_for("tuple_map") }
 
@@ -863,6 +887,15 @@ RSpec.describe "Rigor type construction (integration)" do
     let(:harness) { harness_for("rational_catalog") }
 
     it "self-asserts the new Rational catalog coverage" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  describe "fixtures/kernel_functions.rb — Kernel module-function precision (p/pp identity + folds)" do
+    let(:harness) { harness_for("kernel_functions") }
+
+    it "self-asserts the p/pp identity typing, the format/String constant folds, and the FP guards" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end

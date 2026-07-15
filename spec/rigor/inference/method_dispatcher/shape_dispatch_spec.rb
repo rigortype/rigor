@@ -506,6 +506,60 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: string_shape, method_name: :[], args: [constant("k")])).to eq(constant(42))
     end
 
+    context "with non-(Symbol|String) scalar keys" do
+      let(:numeric_shape) { hash_shape(1 => constant(2), 1.0 => constant(4)) }
+
+      it "resolves `shape[k]` per Hash eql? semantics — 1 and 1.0 are distinct keys" do
+        expect(dispatch(receiver: numeric_shape, method_name: :[], args: [constant(1)])).to eq(constant(2))
+        expect(dispatch(receiver: numeric_shape, method_name: :[], args: [constant(1.0)])).to eq(constant(4))
+      end
+
+      it "returns Constant[nil] for a missing numeric key, mirroring the symbol path" do
+        expect(dispatch(receiver: numeric_shape, method_name: :[], args: [constant(9)])).to eq(constant(nil))
+      end
+
+      it "resolves fetch on a present numeric key and defers on a miss" do
+        expect(dispatch(receiver: numeric_shape, method_name: :fetch, args: [constant(1.0)])).to eq(constant(4))
+        expect(dispatch(receiver: numeric_shape, method_name: :fetch, args: [constant(9)])).to be_nil
+      end
+
+      it "folds key? / has_key? with eql? identity (1.00 hits the 1.0 entry)" do
+        expect(dispatch(receiver: numeric_shape, method_name: :key?, args: [constant(1.00)])).to eq(constant(true))
+        expect(dispatch(receiver: numeric_shape, method_name: :key?, args: [constant(2)])).to eq(constant(false))
+      end
+
+      it "folds keys / values / to_a over numeric-keyed shapes" do
+        keys = dispatch(receiver: numeric_shape, method_name: :keys)
+        expect(keys).to eq(Rigor::Type::Combinator.tuple_of(constant(1), constant(1.0)))
+        values = dispatch(receiver: numeric_shape, method_name: :values)
+        expect(values).to eq(Rigor::Type::Combinator.tuple_of(constant(2), constant(4)))
+        to_a = dispatch(receiver: numeric_shape, method_name: :to_a)
+        expect(to_a).to eq(
+          Rigor::Type::Combinator.tuple_of(
+            Rigor::Type::Combinator.tuple_of(constant(1), constant(2)),
+            Rigor::Type::Combinator.tuple_of(constant(1.0), constant(4))
+          )
+        )
+      end
+
+      it "folds slice / except / assoc / values_at with true/false/nil keys" do
+        bool_shape = hash_shape(true => constant(1), nil => constant(2))
+        sliced = dispatch(receiver: bool_shape, method_name: :slice, args: [constant(true)])
+        expect(sliced).to eq(hash_shape(true => constant(1)))
+        excepted = dispatch(receiver: bool_shape, method_name: :except, args: [constant(true)])
+        expect(excepted).to eq(hash_shape(nil => constant(2)))
+        assoc = dispatch(receiver: bool_shape, method_name: :assoc, args: [constant(nil)])
+        expect(assoc).to eq(Rigor::Type::Combinator.tuple_of(constant(nil), constant(2)))
+        at = dispatch(receiver: bool_shape, method_name: :values_at, args: [constant(nil), constant(false)])
+        expect(at).to eq(Rigor::Type::Combinator.tuple_of(constant(2), constant(nil)))
+      end
+
+      it "inverts shapes whose values are scalar-key constants" do
+        inverted = dispatch(receiver: numeric_shape, method_name: :invert)
+        expect(inverted).to eq(hash_shape(2 => constant(1), 4 => constant(1.0)))
+      end
+    end
+
     it "returns size/length as a Constant" do
       expect(dispatch(receiver: shape, method_name: :size)).to eq(constant(2))
       expect(dispatch(receiver: shape, method_name: :length)).to eq(constant(2))
@@ -533,8 +587,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: shape, method_name: :[], args: [dyn])).to be_nil
     end
 
-    it "falls through for non-Symbol/String keys" do
-      expect(dispatch(receiver: shape, method_name: :[], args: [constant(1)])).to be_nil
+    it "resolves a scalar key absent from the shape to Constant[nil]" do
+      expect(dispatch(receiver: shape, method_name: :[], args: [constant(1)])).to eq(constant(nil))
     end
 
     it "falls through for multi-arg dig when the intermediate is a non-shape Constant" do
@@ -612,8 +666,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(result).to eq(hash_shape(one: constant(:a), two: constant(:b)))
     end
 
-    it "declines invert when values are Integers (HashShape keys must be Symbol or String)" do
-      expect(dispatch(receiver: shape, method_name: :invert)).to be_nil
+    it "folds invert when values are Integers (a valid scalar key kind)" do
+      expect(dispatch(receiver: shape, method_name: :invert))
+        .to eq(hash_shape(1 => constant(:a), "two" => constant(:b)))
+    end
+
+    it "declines invert when a value is not a scalar key kind" do
+      range_valued = hash_shape(a: constant(1..2))
+      expect(dispatch(receiver: range_valued, method_name: :invert)).to be_nil
     end
 
     it "declines invert on duplicate values" do
@@ -890,8 +950,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: shape, method_name: :has_key?, args: [dyn])).to be_nil
     end
 
-    it "falls through when the argument is not a Symbol or String" do
-      expect(dispatch(receiver: shape, method_name: :has_key?, args: [constant(1)])).to be_nil
+    it "folds a scalar-key argument absent from the shape to Constant[false]" do
+      expect(dispatch(receiver: shape, method_name: :has_key?, args: [constant(1)])).to eq(constant(false))
     end
   end
 

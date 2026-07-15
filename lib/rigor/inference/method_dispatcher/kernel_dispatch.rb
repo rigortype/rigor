@@ -49,6 +49,20 @@ module Rigor
         INTEGER_REFINEMENT_PREDICATES = Set[:decimal_int].freeze
         private_constant :INTEGER_REFINEMENT_PREDICATES
 
+        # `Kernel#p` / `Kernel#pp` return their argument: one argument comes back verbatim, several come
+        # back as an Array of them, zero returns nil. The zero-arg form declines here (the RBS `nil` is
+        # already exact); the 1-arg form is a precision-PRESERVING identity (the argument type passes
+        # through unchanged — shapes, constants, and `Dynamic` alike); the n-arg form is a `Tuple`.
+        IDENTITY_PRINTERS = Set[:p, :pp].freeze
+        private_constant :IDENTITY_PRINTERS
+
+        # Value classes `Kernel#String` folds over. Each is a literal-carrier class whose `to_s` is a
+        # deterministic pure function of the value, so running the real `String()` at fold time is sound.
+        STRING_SAFE_CLASSES = [
+          String, Symbol, Integer, Float, Rational, Complex, NilClass, TrueClass, FalseClass
+        ].freeze
+        private_constant :STRING_SAFE_CLASSES
+
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name
@@ -58,8 +72,108 @@ module Rigor
           return try_numeric_constructor(method_name, args) if NUMERIC_CONSTRUCTORS.key?(method_name)
           return try_integer(args) if method_name == :Integer
           return try_float(args) if method_name == :Float
+          return try_identity_printer(context) if IDENTITY_PRINTERS.include?(method_name)
+          return try_string(context) if method_name == :String
+          return try_hash(context) if method_name == :Hash
 
           nil
+        end
+
+        # `Kernel#p(x)` / `Kernel#pp(x)` identity typing. Runtime contract: `p x` returns `x`, `p a, b`
+        # returns `[a, b]`, bare `p` returns nil. The 1-arg path returns the argument's type object
+        # UNCHANGED — never widened, never concretized (a `Dynamic` argument stays `Dynamic`) — so a
+        # `p`-wrapped expression is transparent to downstream inference. The n-arg path materialises the
+        # positional types as a `Tuple`. The 0-arg path declines (RBS `nil` is already exact).
+        #
+        # FP envelope (shared guards): declines on a splat / forwarding argument (the runtime arity — and
+        # hence 1-arg-identity vs n-arg-Array — is not statically known), and on any call
+        # {#kernel_owned_call?} cannot attribute to Kernel itself.
+        def try_identity_printer(context)
+          args = context.args
+          return nil if args.empty?
+          return nil unless kernel_owned_call?(context)
+          return nil if unresolved_argument_arity?(context.call_node)
+          return args.first if args.size == 1
+
+          Type::Combinator.tuple_of(*args)
+        end
+
+        # `Kernel#String(v)` — folds a value-pinned scalar `Constant` to `Constant[String]`
+        # (`String(42)` → `"42"`, `String(nil)` → `""`). Restricted to {STRING_SAFE_CLASSES} so the fold
+        # never models a user-defined `to_s` / `to_str`; anything else declines to the RBS `String`.
+        def try_string(context)
+          args = context.args
+          return nil unless args.size == 1
+          return nil unless kernel_owned_call?(context)
+          return nil if unresolved_argument_arity?(context.call_node)
+
+          arg = args.first
+          return nil unless arg.is_a?(Type::Constant)
+          return nil unless STRING_SAFE_CLASSES.any? { |klass| arg.value.instance_of?(klass) }
+
+          Type::Combinator.constant_of(String(arg.value))
+        rescue StandardError
+          nil
+        end
+
+        # `Kernel#Hash(v)` — the trivially-sound slice only. A `HashShape` argument passes through
+        # unchanged (`Hash(h)` returns `h` for a real Hash); `Hash(nil)` and `Hash([])` (an empty Tuple)
+        # collapse to the empty `HashShape`. Arguments relying on the `to_hash` protocol are not decidable
+        # from types alone and decline to the RBS envelope.
+        def try_hash(context)
+          args = context.args
+          return nil unless args.size == 1
+          return nil unless kernel_owned_call?(context)
+          return nil if unresolved_argument_arity?(context.call_node)
+
+          case (arg = args.first)
+          when Type::HashShape then arg
+          when Type::Constant then arg.value.nil? ? Type::Combinator.hash_shape_of({}) : nil
+          when Type::Tuple then arg.elements.empty? ? Type::Combinator.hash_shape_of({}) : nil
+          end
+        end
+
+        # True when the call can be attributed to Kernel's own module function. Kernel's surface is
+        # PRIVATE, so a call with an explicit non-`self` receiver is necessarily a user-defined method —
+        # decline. Likewise decline when the receiver class (or the toplevel) carries a discovered user
+        # redefinition of the name (`def p(node)` in a printer class must not be hijacked by the fold;
+        # the precise tiers run ahead of user-method inference). With no call_node / scope (internal
+        # dispatcher callers, unit probes) the guards pass — the caller vouches for the shape.
+        def kernel_owned_call?(context)
+          !explicit_foreign_receiver?(context.call_node) && !user_redefined?(context)
+        end
+
+        def explicit_foreign_receiver?(call_node)
+          return false if call_node.nil?
+
+          receiver = call_node.receiver
+          !(receiver.nil? || receiver.is_a?(Prism::SelfNode))
+        end
+
+        def user_redefined?(context)
+          scope = context.scope
+          return false if scope.nil?
+
+          name = context.method_name
+          return true if scope.top_level_def_for(name)
+
+          case (receiver = context.receiver)
+          when Type::Nominal then scope.discovered_method?(receiver.class_name, name, :instance)
+          when Type::Singleton then scope.discovered_method?(receiver.class_name, name, :singleton)
+          else false
+          end
+        end
+
+        # True when the argument list carries a splat or an argument-forwarding node — the positional
+        # arity (and therefore which fold shape applies) is not statically known. `nil` call_node
+        # (internal callers) reads as resolved: the args array is authoritative there.
+        def unresolved_argument_arity?(call_node)
+          arguments = call_node&.arguments
+          return false if arguments.nil?
+
+          arguments.arguments.any? do |argument|
+            argument.is_a?(Prism::SplatNode) || argument.is_a?(Prism::ForwardingArgumentsNode)
+          end
         end
 
         # `Kernel#Integer(arg)` / `Integer(arg, base)`. Two folding paths, tried in order:

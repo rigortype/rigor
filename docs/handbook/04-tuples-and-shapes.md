@@ -221,9 +221,13 @@ arr = [1, ARGV.first]
 # Array[Constant<1> | String?]
 ```
 
-The same goes for hashes whose keys are not provably symbol /
-string literals — Rigor produces `Hash[K, V]` rather than
-`HashShape`.
+The same goes for hashes whose keys are not provably scalar
+literals (symbols, plain strings, integers, floats, `true` /
+`false` / `nil`) — Rigor produces `Hash[K, V]` rather than
+`HashShape`. Within a shape, key identity follows `Hash#eql?`:
+`1` and `1.0` are distinct keys, and a repeated literal key
+keeps the last entry, exactly like the runtime. Non-symbol,
+non-string keys display in hashrocket form (`{ 1 => 2 }`).
 
 ## Deriving new shapes — `pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of`
 

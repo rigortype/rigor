@@ -836,6 +836,39 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.pairs[:b]).to eq(Rigor::Type::Combinator.constant_of(2))
     end
 
+    it "Hash literal with numeric keys carries a HashShape with eql?-distinct 1 and 1.0" do
+      type = scope.type_of(parse_expression("{ 1 => 1, 1 => 2, 1.0 => 3, 1.00 => 4 }"))
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs.keys).to eq([1, 1.0])
+      expect(type.pairs[1]).to eq(Rigor::Type::Combinator.constant_of(2))
+      expect(type.pairs[1.0]).to eq(Rigor::Type::Combinator.constant_of(4))
+    end
+
+    it "Hash literal with true/false/nil keys carries a HashShape" do
+      type = scope.type_of(parse_expression("{ true => 1, false => 2, nil => 3 }"))
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs.keys).to eq([true, false, nil])
+      expect(type.pairs[nil]).to eq(Rigor::Type::Combinator.constant_of(3))
+    end
+
+    it "duplicate symbol keys are last-wins, matching the runtime" do
+      type = scope.type_of(parse_expression("{ a: 1, a: 2 }"))
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs).to eq({ a: Rigor::Type::Combinator.constant_of(2) })
+    end
+
+    it "a computed key still degrades the whole literal to Hash[K, V]" do
+      type = scope.type_of(parse_expression("{ [1].size => 1, a: 2 }"))
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+    end
+
+    it "a splatted entry still degrades the whole literal to Hash[K, V]" do
+      type = scope.type_of(parse_expression("{ a: 1, **{ b: 2 } }"))
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+    end
+
     it "Hash#fetch returns the precise value for a static key (Slice 5 phase 2)" do
       type = scope.type_of(parse_expression("{ a: 1, b: 2 }.fetch(:a)"))
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))

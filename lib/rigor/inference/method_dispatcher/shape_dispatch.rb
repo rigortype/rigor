@@ -27,13 +27,14 @@ module Rigor
       #   the chain collapses to `Constant[nil]` so the carrier surfaces through downstream narrowing. A
       #   non-shape intermediate falls through to the projection answer.
       # - HashShape#`size`/`length`: no-arg.
-      # - HashShape#`[]`, HashShape#`fetch`, HashShape#`dig` with a single `Constant[Symbol|String]`
-      #   argument matching one of the declared keys. `[]` and `dig` resolve missing keys to
+      # - HashShape#`[]`, HashShape#`fetch`, HashShape#`dig` with a single `Constant` scalar-key
+      #   argument (Symbol / String / Integer / Float / true / false / nil) matching one of the declared
+      #   keys. `[]` and `dig` resolve missing keys to
       #   `Constant[nil]`; `fetch` (no default, no block) falls through on a miss because Ruby would raise
       #   `KeyError` and the analyzer prefers the conservative projection answer.
       # - HashShape#`dig` with multi-arg chains (Slice 5 phase 2 sub-phase 2). Same chaining semantics as
       #   Tuple#`dig`.
-      # - HashShape#`values_at` with a list of `Constant[Symbol|String]` arguments (Slice 5 phase 2
+      # - HashShape#`values_at` with a list of `Constant` scalar-key arguments (Slice 5 phase 2
       #   sub-phase 2). The result is a `Tuple` whose elements are the per-key values (`Constant[nil]` for
       #   missing keys, mirroring Ruby's runtime behaviour).
       #
@@ -242,6 +243,14 @@ module Rigor
           # signature would otherwise drop.
           def shape_self(carrier, _method_name, _args)
             carrier
+          end
+
+          # True when `key` is a value the `HashShape` carrier can hold as a key (the value-pinned scalar
+          # set — Symbol, String, Integer, Float, true, false, nil). Key identity in every handler below
+          # is Ruby's own `eql?` via the shape's native `pairs` Hash, so `1` and `1.0` are distinct keys
+          # while `1.0` and `1.00` collide — exactly the runtime's `Hash` semantics.
+          def static_shape_key?(key)
+            Type::HashShape::ALLOWED_KEY_CLASSES.any? { |klass| key.is_a?(klass) }
           end
 
           def dispatch_nominal_size(nominal, method_name, args)
@@ -1308,7 +1317,7 @@ module Rigor
               return nil unless arg.is_a?(Type::Constant)
 
               key = arg.value
-              return nil unless key.is_a?(Symbol) || key.is_a?(String)
+              return nil unless static_shape_key?(key)
               return nil unless shape.pairs.key?(key)
 
               values << shape.pairs[key]
@@ -1327,7 +1336,7 @@ module Rigor
             return nil unless arg.is_a?(Type::Constant)
 
             key = arg.value
-            return nil unless key.is_a?(Symbol) || key.is_a?(String)
+            return nil unless static_shape_key?(key)
             return Type::Combinator.constant_of(nil) unless shape.pairs.key?(key)
 
             Type::Combinator.tuple_of(Type::Combinator.constant_of(key), shape.pairs[key])
@@ -1436,7 +1445,7 @@ module Rigor
           end
 
           # `shape.has_key?(k)` / `key?(k)` / `member?(k)` / `include?(k)` — folds to `Constant[true/false]`
-          # when the argument is a `Constant[Symbol|String]` and the shape is closed with no optional
+          # when the argument is a `Constant` scalar key and the shape is closed with no optional
           # keys.
           def hash_has_key?(shape, _method_name, args)
             return nil unless args.size == 1
@@ -1447,7 +1456,7 @@ module Rigor
             return nil unless arg.is_a?(Type::Constant)
 
             key = arg.value
-            return nil unless key.is_a?(Symbol) || key.is_a?(String)
+            return nil unless static_shape_key?(key)
 
             Type::Combinator.constant_of(shape.pairs.key?(key))
           end
@@ -1496,7 +1505,8 @@ module Rigor
           end
 
           # `shape.invert` — swaps keys and values. Folds when every value is a `Constant` whose value is a
-          # Symbol or String (the only hashable types that `HashShape` accepts as keys). Duplicate values
+          # scalar the carrier accepts as a key (Symbol / String / Integer / Float / true / false / nil;
+          # see {#static_shape_key?}). Duplicate values
           # would alias under inversion, so Rigor declines on collisions rather than silently dropping
           # entries.
           def hash_invert(shape, _method_name, args)
@@ -1504,7 +1514,7 @@ module Rigor
             return nil unless shape.closed?
             return nil unless shape.optional_keys.empty?
             return nil unless shape.pairs.values.all?(Type::Constant)
-            return nil unless shape.pairs.values.all? { |v| v.value.is_a?(Symbol) || v.value.is_a?(String) }
+            return nil unless shape.pairs.values.all? { |v| static_shape_key?(v.value) }
 
             inverted = shape.pairs.each_with_object({}) do |(k, v), acc|
               return nil if acc.key?(v.value)
@@ -1565,7 +1575,7 @@ module Rigor
             Type::Combinator.hash_shape_of(shape.pairs.merge(other.pairs))
           end
 
-          # `shape[k]` and `shape.fetch(k)` for a static symbol/string key. Missing-key resolution depends
+          # `shape[k]` and `shape.fetch(k)` for a value-pinned scalar key. Missing-key resolution depends
           # on the method:
           #
           # - `[]` returns `nil` at runtime; we surface `Constant[nil]` so the carrier is visible to
@@ -1599,13 +1609,13 @@ module Rigor
           end
 
           # Returns the per-step value type for a HashShape lookup (or `Constant[nil]` for a known-missing
-          # key). Returns `nil` when the argument is not a static symbol/string so the caller can fall
+          # key). Returns `nil` when the argument is not a value-pinned scalar key so the caller can fall
           # through to the projection answer.
           def hash_dig_step(shape, arg)
             return nil unless arg.is_a?(Type::Constant)
 
             key = arg.value
-            return nil unless key.is_a?(Symbol) || key.is_a?(String)
+            return nil unless static_shape_key?(key)
 
             if shape.pairs.key?(key)
               value = shape.pairs[key]
@@ -1631,7 +1641,7 @@ module Rigor
 
           # `shape.values_at(:a, :b, ...)` with a list of static keys. Returns a `Tuple` whose per-position
           # values are the per-key value types (`Constant[nil]` for missing keys, mirroring Ruby's runtime
-          # behaviour). Falls through when any argument is not a static symbol/string.
+          # behaviour). Falls through when any argument is not a value-pinned scalar key.
           def hash_values_at(shape, _method_name, args)
             return nil if args.empty?
 
@@ -1647,7 +1657,7 @@ module Rigor
           end
 
           # `shape.slice(:a, :b, ...)` — returns a sub-HashShape containing only the specified keys. All
-          # arguments must be `Constant[Symbol|String]`. Keys not present in the shape are silently
+          # arguments must be `Constant` scalar keys. Keys not present in the shape are silently
           # omitted (matching Ruby's runtime semantics — no nil padding). Declines on open shapes or when
           # any argument is not a static key.
           def hash_slice(shape, _method_name, args)
@@ -1660,7 +1670,7 @@ module Rigor
               return nil unless arg.is_a?(Type::Constant)
 
               key = arg.value
-              return nil unless key.is_a?(Symbol) || key.is_a?(String)
+              return nil unless static_shape_key?(key)
 
               requested << key
             end
@@ -1669,7 +1679,7 @@ module Rigor
           end
 
           # `shape.except(:a, :b, ...)` — returns a sub-HashShape with the specified keys removed. All
-          # arguments must be `Constant[Symbol|String]`. Keys not present in the shape are silently
+          # arguments must be `Constant` scalar keys. Keys not present in the shape are silently
           # ignored. Declines on open shapes or when any argument is not a static key.
           def hash_except(shape, _method_name, args)
             return nil if args.empty?
@@ -1681,7 +1691,7 @@ module Rigor
               return nil unless arg.is_a?(Type::Constant)
 
               key = arg.value
-              return nil unless key.is_a?(Symbol) || key.is_a?(String)
+              return nil unless static_shape_key?(key)
 
               excluded[key] = true
             end

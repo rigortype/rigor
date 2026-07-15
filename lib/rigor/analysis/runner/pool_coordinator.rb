@@ -7,6 +7,7 @@ require_relative "../diagnostic"
 require_relative "../worker_session"
 require_relative "../run_stats"
 require_relative "../../rbs_extended/conformance_checker"
+require_relative "../../runtime/jit"
 
 module Rigor
   module Analysis
@@ -385,6 +386,16 @@ module Rigor
         # copy-on-write-inherited session and writes the Marshal'd payload to `out_path`. `exit!` skips
         # `at_exit` / stdio flush — the payload is already durable on disk by then.
         def run_fork_worker(session, slice, out_path)
+          # Re-arm deferred YJIT in the child. The parent (`check` / `coverage`) armed `enable_after` on a
+          # background thread, but `fork` copies only the calling thread — the sleeping deadline thread does not
+          # survive into the child, so a worker forked before the deadline fires would otherwise run its whole
+          # (dominant) analysis slice un-JITted no matter how long it takes. If the parent already enabled YJIT
+          # before forking (a slow env build pushed the fork past the deadline), the child inherited the enabled
+          # state and this is a no-op; otherwise the child times its own slice and JITs the tail once it proves
+          # long enough — the same amortization contract, per worker. Parallel mode is opted into for large
+          # projects, so a worker slice reliably outlasts the deadline; a small-project worker finishes first and
+          # stays at no-YJIT parity, exactly as the sequential path would.
+          Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
           results = slice.to_h { |path| [path, session.analyze(path)] }
           payload = { results: results, reporters: session.drain_reporters,
                       dependencies: session.drain_dependencies }

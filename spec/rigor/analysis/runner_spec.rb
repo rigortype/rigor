@@ -3497,6 +3497,140 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    describe "return-in-ensure rule (v0.3.0)" do
+      def ensure_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.return-in-ensure" }
+      end
+
+      it "flags a `return` in the ensure clause of a def body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            return 1
+          end
+        RUBY
+        diag = ensure_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("`return' inside `ensure'")
+        expect(diag.message).to include("swallows")
+        expect(diag.line).to eq(4)
+      end
+
+      it "flags a `return` in the ensure clause of a begin block" do
+        result = analyze(<<~RUBY)
+          def example
+            begin
+              compute
+            ensure
+              return 1
+            end
+          end
+        RUBY
+        expect(ensure_diags(result).size).to eq(1)
+      end
+
+      it "flags a `return` inside a plain block inside the ensure body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            [1, 2].each do |i|
+              return i
+            end
+          end
+        RUBY
+        expect(ensure_diags(result).size).to eq(1)
+      end
+
+      it "does not flag a `return` inside a nested def within the ensure body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            def helper
+              return 1
+            end
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag a `return` inside a lambda within the ensure body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            arrow = -> { return 1 }
+            keyword = lambda { return 2 }
+            arrow.call + keyword.call
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag a `return` inside a define_method block within the ensure body" do
+        result = analyze(<<~RUBY)
+          class Host
+            def example
+              compute
+            ensure
+              define_method(:regenerated) { return 2 } if $rebuild
+            end
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag an ensure clause without an explicit return" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            cleanup
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag a `return` outside the ensure clause of the same begin" do
+        result = analyze(<<~RUBY)
+          def example
+            return compute
+          ensure
+            cleanup
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "collects a `return` in a nested begin/ensure inside an ensure body exactly once" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            begin
+              cleanup
+            ensure
+              return 1
+            end
+          end
+        RUBY
+        expect(ensure_diags(result).size).to eq(1)
+      end
+
+      it "is suppressible via `# rigor:disable flow.return-in-ensure`" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            return 1 # rigor:disable flow.return-in-ensure
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+    end
+
     describe "ivar-write-mismatch rule (v0.1.2)" do
       def ivar_diags(result)
         result.diagnostics.select { |d| d.rule == "def.ivar-write-mismatch" }

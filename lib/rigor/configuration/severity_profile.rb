@@ -43,6 +43,7 @@ module Rigor
           "flow.always-truthy-condition" => :info,
           "flow.unreachable-clause" => :info,
           "flow.duplicate-hash-key" => :info,
+          "flow.return-in-ensure" => :info,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -73,6 +74,7 @@ module Rigor
           # to zero net false positives.
           "flow.unreachable-clause" => :info,
           "flow.duplicate-hash-key" => :warning,
+          "flow.return-in-ensure" => :warning,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -99,6 +101,7 @@ module Rigor
           # balanced-profile note above.
           "flow.unreachable-clause" => :warning,
           "flow.duplicate-hash-key" => :error,
+          "flow.return-in-ensure" => :error,
           "assert.type-mismatch" => :error,
           "dump.type" => :error,
           "def.return-type-mismatch" => :error,

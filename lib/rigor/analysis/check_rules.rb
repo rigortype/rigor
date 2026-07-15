@@ -14,6 +14,7 @@ require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
 require_relative "check_rules/duplicate_hash_key_collector"
+require_relative "check_rules/return_in_ensure_collector"
 require_relative "check_rules/ivar_write_collector"
 require_relative "check_rules/main_pass_collector"
 require_relative "check_rules/self_closedness_scanner"
@@ -98,6 +99,7 @@ module Rigor
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
         diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
         diagnostics.concat(duplicate_hash_key_diagnostics(path, collectors[:duplicate_hash_keys].results))
+        diagnostics.concat(return_in_ensure_diagnostics(path, collectors[:return_in_ensure].results))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
@@ -137,7 +139,8 @@ module Rigor
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
           ivar_writes: IvarWriteCollector.new(scope_index),
           dead_assignments: DeadAssignmentCollector.new(scope_index),
-          duplicate_hash_keys: DuplicateHashKeyCollector.new(scope_index)
+          duplicate_hash_keys: DuplicateHashKeyCollector.new(scope_index),
+          return_in_ensure: ReturnInEnsureCollector.new(scope_index)
         }
       end
 
@@ -290,6 +293,19 @@ module Rigor
       def duplicate_hash_key_diagnostics(path, duplicate_keys)
         duplicate_keys.map do |result|
           build_duplicate_hash_key_diagnostic(path, result)
+        end
+      end
+
+      # v0.3.0 — `flow.return-in-ensure`. One diagnostic per explicit
+      # `return` lexically inside an `ensure` clause body: it silently
+      # discards the method's in-flight return value and swallows any
+      # in-flight exception. Purely syntactic; the
+      # `Analysis::CheckRules::ReturnInEnsureCollector` describes the
+      # frame-aware envelope (nested def / lambda / `define_method`
+      # blocks are excluded, plain blocks are not).
+      def return_in_ensure_diagnostics(path, results)
+        results.map do |result|
+          build_return_in_ensure_diagnostic(path, result[:return_node])
         end
       end
 
@@ -1504,6 +1520,17 @@ module Rigor
             path: path,
             message: "duplicate hash key `#{result[:key_label]}' in the same literal; this entry " \
                      "overwrites the value first set at line #{first_line}",
+            severity: :warning
+          )
+        end
+
+        def build_return_in_ensure_diagnostic(path, return_node)
+          Diagnostic.from_location(
+            return_node.keyword_loc,
+            rule: RULE_RETURN_IN_ENSURE,
+            path: path,
+            message: "`return' inside `ensure' discards the method's in-flight return value " \
+                     "and swallows any in-flight exception",
             severity: :warning
           )
         end

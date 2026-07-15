@@ -68,9 +68,10 @@ the gem's own load path. No Gemfile entry, no `bundle install`,
 no separate gem channel.
 
 **The `rigortype` gem itself stays out of the project's
-`Gemfile`** — install it standalone per the manual's
-[Installing Rigor](../../docs/manual/01-installation.md) chapter
-(`mise use gem:rigortype` is the recommended channel). The
+`Gemfile`** — install it standalone per the manual's Installing
+Rigor chapter (`rigor docs manual/01-installation`, or pre-install
+<https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md>;
+`mise use gem:rigortype` is the recommended channel). The
 project's Gemfile is untouched by this workflow.
 
 ## The template

@@ -17,9 +17,10 @@ and — if the project chooses it — a `.rigor-baseline.yml` snapshot.
 This skill is for **users adopting Rigor on their own project**. It
 uses the published `rigor` executable, installed standalone — Rigor
 is a tool, not a library, so it does **not** go in the project's
-`Gemfile`. See the manual's
-[Installing Rigor](../../docs/manual/01-installation.md)
-chapter for the install channels (`mise` recommended). This skill
+`Gemfile`. For the install channels (`mise` recommended) see the
+manual's Installing Rigor chapter — `rigor docs manual/01-installation`
+once any `rigor` is on `PATH`, or (pre-install)
+<https://github.com/rigortype/rigor/blob/master/docs/manual/01-installation.md>. This skill
 references only public CLI flags and config keys — the same surface
 `rigor --help` documents.
 

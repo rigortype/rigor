@@ -1,0 +1,13 @@
+---
+locals:
+  absent: 'false'
+  b: "{ true => :yes, false => :no, nil => :none }"
+  float_hit: '4'
+  h: "{ 1 => 2, 1.0 => 4 }"
+  int_hit: '2'
+  ks: "[1, 1.0]"
+  miss: nil
+  none: ":none"
+  present: 'true'
+  s: "{ a: 2 }"
+  truthy: ":yes"

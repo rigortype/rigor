@@ -27,9 +27,21 @@ RSpec.describe Rigor::Type::HashShape do
         .to raise_error(ArgumentError, /pairs must be a Hash/)
     end
 
-    it "rejects keys that are not Symbol or String" do
-      expect { described_class.new(1 => int_nominal) }
-        .to raise_error(ArgumentError, /HashShape keys must be Symbol or String/)
+    it "accepts value-pinned scalar keys (Integer, Float, true, false, nil)" do
+      shape = described_class.new(1 => int_nominal, 1.0 => str_nominal,
+                                  true => int_nominal, false => int_nominal, nil => str_nominal)
+      expect(shape.pairs.keys).to eq([1, 1.0, true, false, nil])
+    end
+
+    it "keeps Integer and Float keys distinct under Hash eql? semantics" do
+      shape = described_class.new(1 => int_nominal, 1.0 => str_nominal)
+      expect(shape.pairs[1]).to equal(int_nominal)
+      expect(shape.pairs[1.0]).to equal(str_nominal)
+    end
+
+    it "rejects keys outside the scalar-literal set" do
+      expect { described_class.new([1] => int_nominal) }
+        .to raise_error(ArgumentError, /HashShape keys must be one of/)
     end
 
     it "classifies optional and read-only keys" do
@@ -131,6 +143,25 @@ RSpec.describe Rigor::Type::HashShape do
     it "erases string-keyed shapes to generic Hash bounds" do
       string_keyed = described_class.new("a" => int_nominal)
       expect(string_keyed.erase_to_rbs).to eq("Hash[String, Integer]")
+    end
+
+    it "renders non-(Symbol|String) scalar keys in hashrocket form" do
+      shape = described_class.new(1 => int_nominal, 1.0 => str_nominal, nil => int_nominal)
+      expect(shape.describe).to eq("{ 1 => Integer, 1.0 => String, nil => Integer }")
+    end
+
+    it "erases numeric-keyed shapes to generic Hash bounds, never an invalid record" do
+      shape = described_class.new(1 => int_nominal, 1.0 => str_nominal)
+      rbs = shape.erase_to_rbs
+      expect(rbs).to eq("Hash[Float | Integer, Integer | String]")
+      expect { RBS::Parser.parse_type(rbs) }.not_to raise_error
+    end
+
+    it "erases true/false/nil-keyed shapes with the literal key bound" do
+      shape = described_class.new(true => int_nominal, nil => str_nominal)
+      rbs = shape.erase_to_rbs
+      expect(rbs).to eq("Hash[nil | true, Integer | String]")
+      expect { RBS::Parser.parse_type(rbs) }.not_to raise_error
     end
 
     it "erases a non-identifier Symbol key with the quoted fat-arrow form so RBS parses it" do

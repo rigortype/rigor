@@ -510,5 +510,19 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(widened.type_args[0]).to eq(Rigor::Type::Combinator.nominal_of("Symbol"))
       expect(widened.type_args[1]).to eq(Rigor::Type::Combinator.union(int_type, str_type))
     end
+
+    it "widens numeric keys to their class nominal and singleton keys to their constant" do
+      int_type = Rigor::Type::Combinator.nominal_of("Integer")
+      shape = Rigor::Type::HashShape.new(1 => int_type, 1.0 => int_type, nil => int_type)
+      widened = described_class.widen_hash_shape(shape)
+      expect(widened.class_name).to eq("Hash")
+      expect(widened.type_args[0]).to eq(
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of("Integer"),
+          Rigor::Type::Combinator.nominal_of("Float"),
+          Rigor::Type::Combinator.constant_of(nil)
+        )
+      )
+    end
   end
 end

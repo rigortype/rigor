@@ -210,6 +210,11 @@ module Rigor
       }.freeze
       private_constant :PRISM_DISPATCH
 
+      # Sentinel distinguishing "the key is not a value-pinned literal" from the legitimate literal hash
+      # keys `nil` and `false` (see {#static_hash_key}).
+      NO_STATIC_HASH_KEY = Object.new.freeze
+      private_constant :NO_STATIC_HASH_KEY
+
       def initialize(scope:, tracer: nil)
         @scope = scope
         @tracer = tracer
@@ -492,10 +497,11 @@ module Rigor
       end
 
       # Slice 5 phase 1 upgrades hash literals to `HashShape{...}` when every entry is a static `AssocNode`
-      # whose key is a `SymbolNode` or `StringNode` with a known value (covering the `{ a: 1, "b" => 2 }`
-      # pattern and falling back to the generic `Hash[K, V]` form otherwise). Splatted entries (`{ **other }`)
-      # and dynamic keys widen to the underlying `Hash[K, V]` form by unioning the types each entry exposes;
-      # when no concrete pair survives we fall back to the raw `Hash` so callers stay backward compatible.
+      # whose key is a value-pinned scalar literal — Symbol, plain String, Integer, Float, `true`, `false`,
+      # or `nil` (covering `{ a: 1, "b" => 2 }` and `{ 1 => 2, 1.0 => 4 }` alike) — falling back to the
+      # generic `Hash[K, V]` form otherwise. Splatted entries (`{ **other }`) and dynamic keys widen to the
+      # underlying `Hash[K, V]` form by unioning the types each entry exposes; when no concrete pair
+      # survives we fall back to the raw `Hash` so callers stay backward compatible.
       def type_of_hash(node)
         elements = node.respond_to?(:elements) ? node.elements : []
         # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier rather than `Nominal[Hash]`, mirroring the
@@ -515,16 +521,22 @@ module Rigor
         )
       end
 
-      # Builds `HashShape{...}` when every entry is an `AssocNode` whose key is a static Symbol or String
-      # literal. Returns nil otherwise so the caller falls back to the generic shape.
+      # Builds `HashShape{...}` when every entry is an `AssocNode` whose key is a value-pinned scalar
+      # literal (Symbol, plain String, Integer, Float, true, false, nil). Returns nil otherwise so the
+      # caller falls back to the generic shape.
+      #
+      # Duplicate keys are LAST-WINS, matching the runtime (`{ a: 1, a: 2 }` keeps `a: 2`; Ruby itself
+      # only warns under `-w`). Key identity is Ruby `Hash` `eql?` identity because `pairs` is a native
+      # Hash — `1` and `1.0` stay distinct entries, `1.0` and `1.00` collide. The plain re-assignment
+      # also reproduces the runtime's ordering: the key keeps its FIRST insertion position while the
+      # value comes from the LAST occurrence.
       def static_hash_shape_for(elements)
         pairs = {}
         elements.each do |entry|
           return nil unless entry.is_a?(Prism::AssocNode)
 
           key = static_hash_key(entry.key)
-          return nil if key.nil?
-          return nil if pairs.key?(key)
+          return nil if key.equal?(NO_STATIC_HASH_KEY)
 
           pairs[key] = type_of(entry.value)
         end
@@ -533,16 +545,22 @@ module Rigor
         Type::Combinator.hash_shape_of(pairs)
       end
 
-      # Returns the static (Symbol|String) literal carried by a hash key node, or nil when the key is
-      # dynamic. We only treat SymbolNode#value and StringNode#unescaped as static when they are non-nil
-      # (interpolation produces a nil unescaped).
+      # Returns the value-pinned scalar literal carried by a hash key node, or {NO_STATIC_HASH_KEY} when
+      # the key is dynamic (a computed expression, an interpolated string — SymbolNode#value /
+      # StringNode#unescaped are nil under interpolation — a constant, a local, …). `nil` / `false` are
+      # real key values here, hence the sentinel rather than a nil return.
       def static_hash_key(node)
         case node
         when Prism::SymbolNode
           raw = node.value
-          raw&.to_sym
+          raw.nil? ? NO_STATIC_HASH_KEY : raw.to_sym
         when Prism::StringNode
-          node.unescaped
+          node.unescaped || NO_STATIC_HASH_KEY
+        when Prism::IntegerNode, Prism::FloatNode then node.value
+        when Prism::TrueNode then true
+        when Prism::FalseNode then false
+        when Prism::NilNode then nil
+        else NO_STATIC_HASH_KEY
         end
       end
 

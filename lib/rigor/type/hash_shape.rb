@@ -11,9 +11,12 @@ module Rigor
     # inhabit the corresponding value types. RBS records correspond to the exact closed subset; Rigor
     # extends that carrier with optional keys, read-only entry views, and an open/closed extra-key policy.
     #
-    # Keys are restricted to Symbol and String values. Exact closed symbol-keyed shapes erase to the RBS
-    # record syntax `{ a: Integer, ?b: String }`; all other shapes degrade to `Hash[K, V]` or raw `Hash`
-    # when no useful bounds are available.
+    # Keys are restricted to value-pinned scalar literals: Symbol, String, Integer, Float, and the
+    # `true` / `false` / `nil` singletons. Exact closed symbol-keyed shapes erase to the RBS record
+    # syntax `{ a: Integer, ?b: String }`; all other shapes degrade to `Hash[K, V]` or raw `Hash` when
+    # no useful bounds are available. Key identity follows Ruby's own `Hash` `eql?` semantics because
+    # the pairs are stored in a native Ruby Hash — `1` and `1.0` are DISTINCT keys (`1.eql?(1.0)` is
+    # false), while `1.0` and `1.00` are the same key.
     #
     # Equality and hashing are structural over the (key -> Rigor::Type) pair set and policy fields. Hash
     # insertion order is preserved by the underlying storage but does NOT affect equality (matching
@@ -22,7 +25,7 @@ module Rigor
     # See docs/type-specification/rbs-compatible-types.md (records) and
     # docs/type-specification/rigor-extensions.md (hash shape).
     class HashShape
-      ALLOWED_KEY_CLASSES = [Symbol, String].freeze
+      ALLOWED_KEY_CLASSES = [Symbol, String, Integer, Float, TrueClass, FalseClass, NilClass].freeze
       EXTRA_KEY_POLICIES = %i[open closed].freeze
       POLICY_KEYWORDS = %i[required_keys optional_keys read_only_keys extra_keys].freeze
       # A Symbol whose text matches renders as a bare RBS record key (`lang:`) in {#erase_to_rbs};
@@ -128,7 +131,8 @@ module Rigor
         pairs.each_key do |key|
           next if ALLOWED_KEY_CLASSES.any? { |klass| key.is_a?(klass) }
 
-          raise ArgumentError, "HashShape keys must be Symbol or String, got #{key.class}"
+          raise ArgumentError,
+                "HashShape keys must be one of #{ALLOWED_KEY_CLASSES.join(', ')}, got #{key.class}"
         end
       end
 
@@ -190,17 +194,28 @@ module Rigor
         prefix = []
         prefix << "readonly" if read_only_key?(key)
         rendered_key = optional_key?(key) ? "?#{render_key(key)}" : render_key(key)
-        prefix << "#{rendered_key}:"
+        prefix << "#{rendered_key}#{key_separator(key)}"
         "#{prefix.join(' ')} #{value.describe(verbosity)}"
       end
 
       # `describe` is a human-facing display contract (it feeds diagnostic messages, never a parser),
-      # so it keeps the compact `"a":` form for a quoted key. The RBS-erasure path uses
-      # {#erase_key_prefix} instead, which must emit a parseable key.
+      # so it keeps the compact `"a":` form for a quoted key. Non-(Symbol|String) scalar keys render in
+      # the natural hashrocket spelling (`1 => 2`, `1.0 => 4`, `nil => 0`) via {#key_separator}; their
+      # `inspect` is the canonical Ruby literal, so describe stays deterministic. The RBS-erasure path
+      # uses {#erase_key_prefix} instead, which must emit a parseable key.
       def render_key(key)
         case key
         when Symbol then key.to_s
-        when String then key.inspect
+        else key.inspect
+        end
+      end
+
+      # Symbol / String keys keep the compact colon form (`a: 1`, `"k": 2`); every other scalar key uses
+      # the hashrocket (`1 => 2`) — the form the user would have to write in source.
+      def key_separator(key)
+        case key
+        when Symbol, String then ":"
+        else " =>"
         end
       end
 
@@ -230,8 +245,17 @@ module Rigor
         "Hash[#{key_type.erase_to_rbs}, #{value_type.erase_to_rbs}]"
       end
 
+      # Conservative per-key-class bound for the `Hash[K, V]` degradation. Symbol / String / Integer /
+      # Float keys widen to their class nominal; the `true` / `false` / `nil` singletons keep their
+      # literal carrier (the constant IS the class's whole value set, and RBS spells the literal — `nil`
+      # reads better than `NilClass`).
       def hash_erasure_key_type
-        key_types = pairs.keys.map { |key| Type::Combinator.nominal_of(key.class) }
+        key_types = pairs.keys.map do |key|
+          case key
+          when true, false, nil then Type::Combinator.constant_of(key)
+          else Type::Combinator.nominal_of(key.class)
+          end
+        end
         Type::Combinator.union(*key_types)
       end
     end

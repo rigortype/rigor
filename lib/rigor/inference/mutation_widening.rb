@@ -249,14 +249,22 @@ module Rigor
         Type::Combinator.nominal_of("Hash", type_args: [key_type, value_type])
       end
 
-      # Maps the literal Ruby key set (`Symbol` / `String`) to a union of the corresponding type
-      # carriers. We deliberately do NOT fold to a `Constant<:k1> | Constant<:k2>` union — that
-      # would be a precision improvement that complicates the widening contract; the goal here
-      # is to LOSE precision, not to record a new fact set.
+      # Maps the literal Ruby key set to a union of the corresponding type carriers. Symbol / String /
+      # Integer / Float keys widen to their class nominal; the `true` / `false` / `nil` singleton keys
+      # keep their constant carrier (the constant IS the class's whole value set, and `nil` reads better
+      # than `NilClass` in a widened `Hash[K, V]`). We deliberately do NOT fold the widenable kinds to a
+      # `Constant<:k1> | Constant<:k2>` union — that would be a precision improvement that complicates
+      # the widening contract; the goal here is to LOSE precision, not to record a new fact set.
       def key_union_for(keys)
-        kinds = keys.map { |k| k.is_a?(Symbol) ? "Symbol" : "String" }.uniq
-        carriers = kinds.map { |name| Type::Combinator.nominal_of(name) }
+        carriers = keys.map { |k| key_widening_carrier(k) }.uniq
         carriers.size == 1 ? carriers.first : Type::Combinator.union(*carriers)
+      end
+
+      def key_widening_carrier(key)
+        case key
+        when true, false, nil then Type::Combinator.constant_of(key)
+        else Type::Combinator.nominal_of(key.class.name)
+        end
       end
 
       # ----------------------------------------------------------------

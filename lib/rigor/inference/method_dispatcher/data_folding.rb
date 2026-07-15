@@ -126,6 +126,9 @@ module Rigor
           shape = args.first
           return nil unless shape.is_a?(Type::HashShape) && shape.closed?
           return nil unless shape.optional_keys.empty?
+          # Non-Symbol keys (a HashShape may carry String / numeric / bool / nil scalar keys) can never
+          # match the Symbol member list — and mixed-class keys would make the `.sort` below raise.
+          return nil unless shape.pairs.keys.all?(Symbol)
           return nil unless shape.pairs.keys.sort == members.sort
 
           members.to_h { |name| [name, shape.pairs.fetch(name)] }

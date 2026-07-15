@@ -173,6 +173,12 @@
     .tr-buttons #tr-play { background: var(--accent); border-color: var(--accent); color: var(--sev-fg); }
     .tr-step { margin-left: auto; font-family: var(--rigor-font-mono); font-size: 12px; color: var(--muted); }
     #tr-scrub { width: 100%; accent-color: var(--accent); }
+    /* gdb-style stepping over the expression-evaluation tree */
+    .tr-steprow { display: flex; align-items: center; gap: 6px; }
+    .tr-steplabel { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    .tr-steprow button { flex: 1; height: 28px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); border-radius: 4px; cursor: pointer; font: 500 12px var(--rigor-font-sans); display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+    .tr-steprow button:hover { background: var(--hover); }
+    .tr-steprow button i { font-size: 10px; opacity: 0.85; }
     .tr-options { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); gap: 8px; }
     .tr-options select { font: inherit; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 3px; padding: 2px 4px; }
     .tr-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
@@ -250,6 +256,12 @@
             <span class="tr-step" id="tr-step">1 / 1</span>
           </div>
           <input type="range" id="tr-scrub" min="0" max="0" value="0" step="1" aria-label="Trace step">
+          <div class="tr-steprow">
+            <span class="tr-steplabel">Step</span>
+            <button id="tr-in" title="Step in — into the next sub-expression"><i class="fa-solid fa-arrow-down-long" aria-hidden="true"></i>In</button>
+            <button id="tr-over" title="Step over — evaluate this expression, skip its internals"><i class="fa-solid fa-arrow-right-long" aria-hidden="true"></i>Over</button>
+            <button id="tr-out" title="Step out — finish the enclosing expression"><i class="fa-solid fa-arrow-up-long" aria-hidden="true"></i>Out</button>
+          </div>
           <div class="tr-options">
             <label>Speed
               <select id="tr-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
@@ -578,6 +590,24 @@ AscDesc.new.ascdesc(:bad)
       b.title = tracePlaying ? "Pause" : "Play"
     }
     function traceStepTo(i) { traceIndex = Math.max(0, Math.min(i, traceEvents.length - 1)); renderTrace() }
+    // gdb-style stepping over the expression-evaluation tree. Events carry
+    // `depth`; a verbose `enter`(d) … children(>d) … `result`(d) brackets each
+    // frame, so step-over/out are depth transitions (step-in is a plain +1).
+    function traceStepIn()   { tracePause(); traceStepTo(traceIndex + 1) }
+    function traceStepOver() {
+      tracePause()
+      const d = traceEvents[traceIndex] ? traceEvents[traceIndex].depth : 0
+      let j = traceIndex + 1
+      while (j < traceEvents.length && traceEvents[j].depth > d) j++   // skip this node's subtree
+      traceStepTo(j)
+    }
+    function traceStepOut() {
+      tracePause()
+      const d = traceEvents[traceIndex] ? traceEvents[traceIndex].depth : 0
+      let j = traceIndex + 1
+      while (j < traceEvents.length && traceEvents[j].depth >= d) j++  // rise past the enclosing frame
+      traceStepTo(j)
+    }
     function traceSchedule() {
       clearTimeout(traceTimer)
       traceTimer = setTimeout(() => {
@@ -825,6 +855,9 @@ AscDesc.new.ascdesc(:bad)
     document.getElementById("tr-next").addEventListener("click", () => { tracePause(); traceStepTo(traceIndex + 1) })
     document.getElementById("tr-last").addEventListener("click", () => { tracePause(); traceStepTo(traceEvents.length - 1) })
     document.getElementById("tr-play").addEventListener("click", traceToggle)
+    document.getElementById("tr-in").addEventListener("click", traceStepIn)
+    document.getElementById("tr-over").addEventListener("click", traceStepOver)
+    document.getElementById("tr-out").addEventListener("click", traceStepOut)
     document.getElementById("tr-scrub").addEventListener("input", e => { tracePause(); traceStepTo(parseInt(e.target.value, 10)) })
     document.getElementById("tr-speed").addEventListener("change", e => { traceSpeed = parseFloat(e.target.value); if (tracePlaying) traceSchedule() })
     document.getElementById("tr-detail").addEventListener("change", async () => {

@@ -87,8 +87,11 @@ module Rigor
           "match-mode: #{options.fetch(:match_mode)})"
         )
         if configuration.baseline_path.nil?
+          # Name the config file that actually governs this project (`.rigor.dist.yml` when no local override
+          # exists), so the hint points at the file the user must edit.
+          config_name = options.fetch(:config) || Configuration.discover || ".rigor.yml"
           @err.puts(
-            "rigor: note — `.rigor.yml` does not declare `baseline:`; " \
+            "rigor: note — `#{config_name}` does not declare `baseline:`; " \
             "add `baseline: #{path}` to activate the suppression."
           )
         end

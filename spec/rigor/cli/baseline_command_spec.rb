@@ -69,6 +69,12 @@ RSpec.describe Rigor::CLI::BaselineCommand do
       expect(err).to include("note — `.rigor.yml` does not declare `baseline:`")
     end
 
+    it "names `.rigor.dist.yml` in the hint when that is the governing config file" do
+      FileUtils.mv(File.join(tmpdir, ".rigor.yml"), File.join(tmpdir, ".rigor.dist.yml"))
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("note — `.rigor.dist.yml` does not declare `baseline:`")
+    end
+
     it "refuses to overwrite an existing baseline without --force" do
       File.write(File.join(tmpdir, ".rigor-baseline.yml"), "version: 1\nignored: []\n")
       status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)

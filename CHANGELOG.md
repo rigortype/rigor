@@ -11,6 +11,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[cli]** `rigor check` no longer crashes with `uninitialized constant Rigor::Analysis::Baseline` when a run-cache **hit** is served with a `baseline:` configured. The boot-slimmed cache-hit fast path skipped the lazy engine require bundle that carried the baseline filter's own dependency, so the *second* ordinary `check` after wiring a baseline — the exact next step of every acknowledge-mode onboarding — failed outright (workaround was `--no-cache`). The baseline filter is now a load-time dependency of the check command (it pulls only YAML, never the engine), and the hit path stays engine-free.
+- **[cli]** The `rigor baseline generate` hint for a config without `baseline:` now names the config file that actually governs the project (e.g. `.rigor.dist.yml`) instead of always saying `.rigor.yml`.
+
 ### Added
 
 - **[engine]** Hash literals with Integer, Float, `true` / `false` / `nil` keys now type as a value-pinned `HashShape` instead of degrading to a `Hash[K, V]` union, and a duplicate literal key is resolved **last-wins** exactly like the runtime — `{ 1 => 1, 1 => 2, 1.0 => 3, 1.00 => 4 }` types as `{ 1 => 2, 1.0 => 4 }` (previously `Hash[1 | 1.0, 1 | 2 | 3 | 4]`, with the overwritten values polluting the union), and `{ a: 1, a: 2 }` as `{ a: 2 }`.

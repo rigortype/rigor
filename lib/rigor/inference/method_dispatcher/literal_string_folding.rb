@@ -149,12 +149,36 @@ module Rigor
         # value (Constants are always provably literal). The template arg specifically must be
         # literal-bearing — a Constant<Integer> first arg would not be a valid format template, so the
         # `Type::Constant` allowance applies only to subsequent value args.
+        #
+        # When the template AND every value argument are value-pinned `Constant`s, the fold sharpens to
+        # the exact `Constant[String]` (`format("%d", 1)` → `"1"`) — the module-function sibling of
+        # `ConstantFolding#try_fold_string_format`'s `String#%` fold. This is a strict refinement inside
+        # the same firing envelope: every exact-foldable input was already lifted to `literal-string`.
         def fold_format(args)
           return nil if args.empty?
+
+          exact = fold_format_constant(args)
+          return exact if exact
           return nil unless Type::Combinator.literal_string_compatible?(args.first)
           return nil unless args.drop(1).all? { |arg| literal_or_constant?(arg) }
 
           Type::Combinator.literal_string
+        end
+
+        # Runs the real `Kernel#format` when everything is value-pinned. A malformed directive or an
+        # argument-count mismatch raises at fold time; the handler declines so the literal-string lift
+        # (or the RBS `String` envelope) answers instead. Results larger than the shared
+        # `ConstantFolding::STRING_FOLD_BYTE_LIMIT` decline too, keeping the carrier-size convention.
+        def fold_format_constant(args)
+          return nil unless args.all?(Type::Constant)
+          return nil unless args.first.value.is_a?(String)
+
+          result = format(args.first.value, *args.drop(1).map(&:value))
+          return nil if result.bytesize > ConstantFolding::STRING_FOLD_BYTE_LIMIT
+
+          Type::Combinator.constant_of(result)
+        rescue StandardError
+          nil
         end
 
         # `"foo %s" % "x"` / `"foo %s" % ["x", "y"]` — receiver is the template (already verified
@@ -217,7 +241,7 @@ module Rigor
         end
 
         private_class_method :fold_no_arg, :fold_concat, :fold_repeat, :fold_array_join,
-                             :fold_format, :fold_string_percent, :fold_width_pad,
+                             :fold_format, :fold_format_constant, :fold_string_percent, :fold_width_pad,
                              :non_empty_literal_result, :literal_or_constant?,
                              :integer_typed?, :known_negative_integer?,
                              :known_zero_integer?, :known_positive_integer?

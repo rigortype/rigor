@@ -43,8 +43,8 @@ table (`Rigor::Builtins::StaticReturnRefinements`), `MutationWidening::PURE_SELF
 |--------|--------|------|------|
 | `p` | 🔲→✅ | KernelDispatch (this session) | Identity typing: 1 arg → the arg type verbatim (precision-preserving, Dynamic in → Dynamic out); 2+ args → `Tuple` of the arg types; 0 args → decline (RBS `nil` already exact). Declines on splat/forwarded args, explicit foreign receivers, and user redefinitions. |
 | `pp` | 🔲→✅ | KernelDispatch (this session) | Same identity typing as `p`. |
-| `format` | 🔲→✅ | KernelDispatch (this session) | All-args-value-pinned fold: `format("%d", 1)→Constant["1"]`, rescue-guarded (bad directive ⇒ decline to RBS `String`). The `String#%` fold only covered the binary-operator spelling. |
-| `sprintf` | 🔲→✅ | KernelDispatch (this session) | Alias of `format`; same fold. |
+| `format` | 🔲→✅ | LiteralStringFolding (this session) | All-args-value-pinned exact fold layered into the existing `fold_format` lift (that tier runs ahead of KernelDispatch and already owned the call): `format("%d", 1)→Constant["1"]`, rescue-guarded (bad directive ⇒ decline back to the `literal-string` lift), `STRING_FOLD_BYTE_LIMIT`-capped. The `String#%` fold only covered the binary-operator spelling. |
+| `sprintf` | 🔲→✅ | LiteralStringFolding (this session) | Alias of `format`; same fold. |
 | `puts` | 🔷 | RBS | `-> nil` already exact. |
 | `print` | 🔷 | RBS | `-> nil` already exact. |
 | `printf` | 🔷 | RBS | `-> nil` (IO write is the point; return exact). |
@@ -108,10 +108,11 @@ Handled by existing engine surfaces; listed by group rather than per-row where u
 
 ## 3. Implementation checklist
 
-- 🔴 High (this session): `p` / `pp` identity typing; `format` / `sprintf` value-pinned fold;
-  `String()` constant fold. All land in `KernelDispatch` (the existing Kernel precise tier —
-  no new tier file needed; the module already gates on method-name and is consulted for every
-  receiver).
+- 🔴 High (this session): `p` / `pp` identity typing and the `String()` constant fold land in
+  `KernelDispatch` (the existing Kernel precise tier — no new tier file needed); the `format` /
+  `sprintf` exact fold lands in `LiteralStringFolding#fold_format` (that tier sits ahead of
+  KernelDispatch and already owned the format spelling — the exact fold is a strict refinement
+  inside its existing firing envelope).
 - 🟡 Medium (this session, trivially-sound slice): `Hash()` HashShape passthrough +
   empty-collapse. Deferred: `to_hash`-protocol arguments.
 - 🟢 Low / deferred: `__method__` per-body constant; `catch` value-channel typing (flow
@@ -125,7 +126,11 @@ contains a splat / forwarding node (arity not statically known).
 
 ## 4. Implementation file reference
 
-- `lib/rigor/inference/method_dispatcher/kernel_dispatch.rb` — all new folds.
-- Unit spec: `spec/rigor/inference/method_dispatcher/kernel_dispatch_spec.rb`.
+- `lib/rigor/inference/method_dispatcher/kernel_dispatch.rb` — `p` / `pp` identity, `String()`,
+  `Hash()` (+ the shared `kernel_owned_call?` / splat-arity guards).
+- `lib/rigor/inference/method_dispatcher/literal_string_folding.rb` — the `format` / `sprintf`
+  exact constant fold (`fold_format_constant`).
+- Unit specs: `spec/rigor/inference/method_dispatcher/kernel_dispatch_spec.rb`,
+  `spec/rigor/inference/method_dispatcher/literal_string_folding_spec.rb`.
 - Integration fixture: `spec/integration/fixtures/kernel_functions.rb` (flat — Kernel is RBS
   core; no stdlib library load needed).

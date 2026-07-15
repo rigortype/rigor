@@ -56,6 +56,8 @@ carries no `documentation_url`.
 | <a id="rule-def-override-visibility-reduced"></a>`def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor. | high |
 | <a id="rule-def-override-return-widened"></a>`def.override-return-widened` | An override's declared return type widens the inherited return (covariance). | high |
 | <a id="rule-def-override-param-narrowed"></a>`def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). | high |
+| <a id="rule-suppression-unknown-rule"></a>`suppression.unknown-rule` | A `# rigor:disable[-file]` comment names a rule that does not exist (typically a typo), so the suppression silently does nothing. `plugin.`-prefixed tokens are never flagged. | high |
+| <a id="rule-suppression-empty"></a>`suppression.empty` | A `# rigor:disable[-file]` comment lists no rules, so it suppresses nothing. | high |
 | <a id="rule-rbs_extended-unsatisfied-conformance"></a>`rbs_extended.unsatisfied-conformance` | A class declares `%a{rigor:v1:conforms-to _Interface}` in its RBS but is missing a method the interface requires. Presence-based: only definitively-absent required methods fire. | — |
 | <a id="rule-assert-type-mismatch"></a>`assert.type-mismatch` | An `assert_type` expectation does not match the inferred type. | high |
 | <a id="rule-dump-type"></a>`dump.type` | A `dump_type` call — informational, prints the inferred type. | — |
@@ -194,6 +196,17 @@ config.merge(extra)  # rigor:disable call.undefined-method
 
 It accepts qualified IDs, family wildcards (`call`), a
 comma- or space-separated list, or `all`.
+
+A marker that cannot work is flagged rather than silently
+ignored: a token that names no known rule (a typo like
+`call.undefined-metod`) fires
+[`suppression.unknown-rule`](#rule-suppression-unknown-rule),
+and a bare marker with no rules at all fires
+[`suppression.empty`](#rule-suppression-empty) — both
+`:warning` in every profile. Tokens under the `plugin.`
+prefix are never flagged (plugin rule vocabularies load
+dynamically), and both diagnostics are themselves
+suppressible like any other rule.
 
 **In-source, whole file.** `# rigor:disable-file <rules>`
 anywhere in a file suppresses those rules for every line;

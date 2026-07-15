@@ -101,4 +101,4 @@ Recognizing other ecosystems' markers — Steep's line-scoped `# steep:ignore`, 
 
 ### Validity rules
 
-- An unknown or empty marker is currently treated as an ordinary comment (silently ignored) rather than flagged. Warning on dead (unknown-rule) suppressions so they surface during refactoring is a planned refinement.
+- An unknown or empty marker keeps its documented matching behaviour (an unrecognised token is kept verbatim; a token-less marker suppresses nothing), but it is no longer silent: a marker token that resolves to no known identifier — not a canonical rule id, legacy alias, `all`, family wildcard, known non-catalogue engine id, or a dotted id under a known non-check family (including any `plugin.`-prefixed token, which is never flagged) — fires `suppression.unknown-rule`, and a marker listing no rules at all fires `suppression.empty` (both `:warning` in every profile). Validation happens before suppression filtering, so both diagnostics are themselves suppressible like any other rule; a comment that merely mentions the marker followed by non-token text remains an ordinary comment.

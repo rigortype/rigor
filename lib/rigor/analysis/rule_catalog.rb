@@ -610,6 +610,55 @@ module Rigor
           # escapes are excluded.
           evidence_tier: :high,
           since: "0.1.2"
+        ),
+
+        CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE => Entry.new(
+          id: CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE,
+          summary: "A `# rigor:disable[-file]` comment names a rule that does not exist.",
+          fires_when: [
+            "A `# rigor:disable` / `# rigor:disable-file` marker carries a token that is not a canonical " \
+            "rule id, a legacy alias, `all`, or a family wildcard (`call` / `flow` / ...).",
+            "The token is also not a known non-catalogue engine diagnostic (`rbs_extended.*`, `dynamic.*`, " \
+            "`rbs.*`, `pre-eval.*`, or a bare engine id such as `load-error`).",
+            "Typically a typo — `call.undefined-metod` — leaving the suppression silently ineffective."
+          ],
+          does_not_fire_when: [
+            "The token resolves (canonical id, legacy alias, `all`, family wildcard, known engine id).",
+            "The token starts with `plugin.` — plugins load dynamically, so their rule vocabulary cannot " \
+            "be enumerated statically and under-warning is the FP-safe direction.",
+            "The comment merely mentions the marker followed by non-token text (documentation prose " \
+            "like \"`# rigor:disable <rule>` comments\") — that is not parsed as a suppression either."
+          ],
+          suppression: "Fix or remove the dead token; `# rigor:disable suppression.unknown-rule` on the " \
+                       "same line, or `disable: [\"suppression.unknown-rule\"]` in `.rigor.yml`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :warning },
+          # Pure token-table membership over the same tables the suppression matcher uses — no inference
+          # uncertainty; the plugin/prose escapes above are excluded before firing.
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
+        CheckRules::RULE_SUPPRESSION_EMPTY => Entry.new(
+          id: CheckRules::RULE_SUPPRESSION_EMPTY,
+          summary: "A `# rigor:disable[-file]` comment lists no rules.",
+          fires_when: [
+            "A comment is exactly the bare marker (`# rigor:disable` / `# rigor:disable-file`) with " \
+            "nothing but whitespace or commas after it.",
+            "Such a marker suppresses nothing — the author almost certainly meant to name rules or `all`."
+          ],
+          does_not_fire_when: [
+            "At least one token follows the marker (each token is then checked by " \
+            "`suppression.unknown-rule` instead).",
+            "Non-token text follows the marker (documentation prose mentioning the syntax)."
+          ],
+          suppression: "Complete the marker (`# rigor:disable <rule>` / `all`) or delete it; " \
+                       "`disable: [\"suppression.empty\"]` in `.rigor.yml`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :warning },
+          # Syntactic: the marker word is present and the token list is provably empty.
+          evidence_tier: :high,
+          since: "0.3.0"
         )
       }.freeze
 

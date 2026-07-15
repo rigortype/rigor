@@ -95,19 +95,30 @@ module Rigor
         collectors = node_collectors || run_node_collectors(path, root, scope_index)
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
-        diagnostics.concat(always_truthy_condition_diagnostics(path, collectors[:always_truthy].results))
-        diagnostics.concat(unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results))
-        diagnostics.concat(shadowed_rescue_diagnostics(path, collectors[:shadowed_rescues].results))
-        diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
-        diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
-        diagnostics.concat(duplicate_hash_key_diagnostics(path, collectors[:duplicate_hash_keys].results))
-        diagnostics.concat(return_in_ensure_diagnostics(path, collectors[:return_in_ensure].results))
+        COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
+          diagnostics.concat(send(builder, path, collectors[role].results))
+        end
         # Suppression-marker validation (`suppression.*`) runs BEFORE the filter so its own diagnostics are
         # suppressible like any other rule — `# rigor:disable suppression.unknown-rule` on the offending
         # comment's line works, with no regress (the token itself is known, so it never re-fires).
         diagnostics.concat(suppression_marker_diagnostics(path, comments))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
+
+      # The per-collector diagnostic builders {.diagnose} folds over, in the historical emission order
+      # (always-truthy → unreachable-clause → shadowed-rescue → ivar-write → dead-assignment →
+      # duplicate-hash-key → return-in-ensure). Keys match {.build_node_collectors}' roles; each value is a
+      # `(path, results)` module_function on this module.
+      COLLECTOR_DIAGNOSTIC_BUILDERS = {
+        always_truthy: :always_truthy_condition_diagnostics,
+        unreachable_clauses: :unreachable_clause_diagnostics,
+        shadowed_rescues: :shadowed_rescue_diagnostics,
+        ivar_writes: :ivar_write_mismatch_diagnostics,
+        dead_assignments: :dead_assignment_diagnostics,
+        duplicate_hash_keys: :duplicate_hash_key_diagnostics,
+        return_in_ensure: :return_in_ensure_diagnostics
+      }.freeze
+      private_constant :COLLECTOR_DIAGNOSTIC_BUILDERS
 
       # The verbatim per-node dispatch of the former inline main pass
       # (`diagnose`'s `Source::NodeWalker.each` `case`), now invoked by

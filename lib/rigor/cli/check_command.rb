@@ -8,6 +8,9 @@ require_relative "../configuration"
 require_relative "../config_audit"
 require_relative "../analysis/result"
 require_relative "../analysis/rule_catalog"
+# The baseline filter runs on EVERY exit path — including the ADR-87 WD4 cache-HIT fast path, which skips
+# `load_check_dependencies` — so it must be a load-time require. It pulls only YAML, never the engine.
+require_relative "../analysis/baseline"
 require_relative "../runtime/jit"
 require_relative "command"
 require_relative "options"
@@ -657,7 +660,6 @@ module Rigor
       def load_check_dependencies
         require_relative "../analysis/runner"
         require_relative "../analysis/buffer_binding"
-        require_relative "../analysis/baseline"
         require_relative "../cache/store"
         start_heap_trace_if_requested
       end

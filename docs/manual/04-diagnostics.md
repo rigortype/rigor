@@ -41,6 +41,7 @@ carries no `documentation_url`.
 | <a id="rule-call-wrong-arity"></a>`call.wrong-arity` | The positional-argument count matches no signature. | high |
 | <a id="rule-call-argument-type-mismatch"></a>`call.argument-type-mismatch` | An argument's type provably violates the parameter contract. | high |
 | <a id="rule-call-possible-nil-receiver"></a>`call.possible-nil-receiver` | The receiver is `T \| nil` and the method is not defined on `NilClass`. | high |
+| <a id="rule-call-raise-non-exception"></a>`call.raise-non-exception` | A `raise` / `fail` argument's concrete type is provably not an Exception class, an Exception instance, a String, or an object defining `#exception` — a runtime `TypeError`. | high |
 | <a id="rule-call-unresolved-toplevel"></a>`call.unresolved-toplevel` | A top-level implicit-self call resolves against no same-file `def`, `pre_eval:` patch, or `Kernel` / `Object` method. | low |
 | <a id="rule-flow-always-raises"></a>`flow.always-raises` | The expression provably raises on every reachable path. | high |
 | <a id="rule-flow-unreachable-branch"></a>`flow.unreachable-branch` | An `if` / `unless` / ternary branch is statically dead. | high |

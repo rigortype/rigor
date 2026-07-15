@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 require_relative "channel_index"
@@ -76,7 +78,7 @@ module Rigor
           when Prism::ClassNode then visit_class(node, lexical_path, &)
           when Prism::ModuleNode then visit_module(node, lexical_path, &)
           else
-            node.compact_child_nodes.each { |child| walk_for_channels(child, lexical_path, &) }
+            node.rigor_each_child { |child| walk_for_channels(child, lexical_path, &) }
           end
         end
 
@@ -138,7 +140,7 @@ module Rigor
             end
           end
 
-          node.compact_child_nodes.each do |child|
+          node.rigor_each_child do |child|
             names, dynamic = collect_stream_registrations(child, names: names, dynamic: dynamic)
           end
           [names, dynamic]

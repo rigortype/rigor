@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 require "rigor/source/literals"
 
@@ -140,7 +142,7 @@ module Rigor
           when Prism::ModuleNode
             visit_module(node, lexical_path, &)
           else
-            node.compact_child_nodes.each { |child| walk_for_classes(child, lexical_path, &) }
+            node.rigor_each_child { |child| walk_for_classes(child, lexical_path, &) }
           end
         end
 
@@ -256,7 +258,7 @@ module Rigor
         def lookup_table_name_override(body)
           return nil if body.nil?
 
-          body.compact_child_nodes.each do |node|
+          body.rigor_each_child do |node|
             next unless node.is_a?(Prism::CallNode) && node.name == :table_name=
             next unless node.receiver.is_a?(Prism::SelfNode)
 

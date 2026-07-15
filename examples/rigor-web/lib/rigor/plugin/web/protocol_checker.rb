@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 module Rigor
@@ -76,7 +78,7 @@ module Rigor
           case node
           when Prism::DefNode then defs << node
           when Prism::ClassNode, Prism::ModuleNode then nil # a nested scope owns its own defs
-          else node.compact_child_nodes.each { |child| collect_direct_defs(child, defs) }
+          else node.rigor_each_child { |child| collect_direct_defs(child, defs) }
           end
         end
 

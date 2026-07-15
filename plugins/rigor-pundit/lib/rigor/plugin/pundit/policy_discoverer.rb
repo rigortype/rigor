@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 require_relative "policy_index"
@@ -69,7 +71,7 @@ module Rigor
           when Prism::ClassNode then visit_class(node, lexical_path, &)
           when Prism::ModuleNode then visit_module(node, lexical_path, &)
           else
-            node.compact_child_nodes.each { |child| walk_for_policies(child, lexical_path, &) }
+            node.rigor_each_child { |child| walk_for_policies(child, lexical_path, &) }
           end
         end
 

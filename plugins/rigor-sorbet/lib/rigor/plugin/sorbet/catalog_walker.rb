@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 require_relative "method_signature"
@@ -58,7 +60,7 @@ module Rigor
             # A `def` not preceded by a `sig` is fine; we just don't record anything for it. The
             # interesting case is in `walk_statements`, which pairs sig+def.
           else
-            node.compact_child_nodes.each do |child|
+            node.rigor_each_child do |child|
               walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
             end
           end

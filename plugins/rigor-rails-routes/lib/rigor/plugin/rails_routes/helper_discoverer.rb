@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 module Rigor
@@ -87,7 +89,7 @@ module Rigor
           def visit_program_children(node)
             return unless node.respond_to?(:compact_child_nodes)
 
-            node.compact_child_nodes.each do |child|
+            node.rigor_each_child do |child|
               case child
               when Prism::ModuleNode, Prism::ClassNode
                 visit_module_or_class(child)

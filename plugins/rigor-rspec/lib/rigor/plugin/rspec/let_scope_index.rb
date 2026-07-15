@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 require "rigor/source/literals"
 
@@ -89,7 +91,7 @@ module Rigor
             return
           end
 
-          node.compact_child_nodes.each do |child|
+          node.rigor_each_child do |child|
             collect(child, anchor: anchor, accumulator: accumulator)
           end
         end

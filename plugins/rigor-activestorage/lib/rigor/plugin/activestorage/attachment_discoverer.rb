@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 require "rigor/source/literals"
 
@@ -77,7 +79,7 @@ module Rigor
           when Prism::ModuleNode
             visit_module(node, lexical_path, &)
           else
-            node.compact_child_nodes.each { |child| walk(child, lexical_path, &) }
+            node.rigor_each_child { |child| walk(child, lexical_path, &) }
           end
         end
 
@@ -105,7 +107,7 @@ module Rigor
           return [] if body.nil?
 
           rows = []
-          body.compact_child_nodes.each do |node|
+          body.rigor_each_child do |node|
             next unless node.is_a?(Prism::CallNode)
 
             kind = ATTACHMENT_METHODS[node.name]

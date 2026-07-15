@@ -50,6 +50,11 @@ module Rigor
           "def.override-return-widened" => :off,
           "def.override-param-narrowed" => :off,
           "def.ivar-write-mismatch" => :warning,
+          # ADR-8 companion (PHPStan IgnoreParseErrorRule-modelled): a broken suppression comment is
+          # equally bad in every profile — it silently fails to do what the author believes it does — so
+          # both rules stay :warning across all three profiles (including strict).
+          "suppression.unknown-rule" => :warning,
+          "suppression.empty" => :warning,
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
           # lenient — it is never unsolicited noise.
@@ -79,6 +84,8 @@ module Rigor
           "def.override-return-widened" => :warning,
           "def.override-param-narrowed" => :warning,
           "def.ivar-write-mismatch" => :warning,
+          "suppression.unknown-rule" => :warning,
+          "suppression.empty" => :warning,
           "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         strict: {
@@ -104,6 +111,8 @@ module Rigor
           "def.override-return-widened" => :error,
           "def.override-param-narrowed" => :error,
           "def.ivar-write-mismatch" => :error,
+          "suppression.unknown-rule" => :warning,
+          "suppression.empty" => :warning,
           "rbs_extended.unsatisfied-conformance" => :error
         }.freeze
       }.freeze

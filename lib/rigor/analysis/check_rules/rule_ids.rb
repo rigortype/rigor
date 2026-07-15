@@ -33,6 +33,8 @@ module Rigor
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
       RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
       RULE_UNREACHABLE_CLAUSE = "flow.unreachable-clause"
+      RULE_SUPPRESSION_UNKNOWN_RULE = "suppression.unknown-rule"
+      RULE_SUPPRESSION_EMPTY = "suppression.empty"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -53,7 +55,9 @@ module Rigor
         RULE_OVERRIDE_VISIBILITY_REDUCED,
         RULE_OVERRIDE_RETURN_WIDENED,
         RULE_OVERRIDE_PARAM_NARROWED,
-        RULE_IVAR_WRITE_MISMATCH
+        RULE_IVAR_WRITE_MISMATCH,
+        RULE_SUPPRESSION_UNKNOWN_RULE,
+        RULE_SUPPRESSION_EMPTY
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with
@@ -79,7 +83,24 @@ module Rigor
 
       # Family wildcard — a `<family>` token in a suppression comment or `disable:` list disables every rule
       # whose canonical id starts with `<family>.`. Per ADR-8 § "1".
-      RULE_FAMILIES = %w[call flow assert dump def].freeze
+      RULE_FAMILIES = %w[call flow assert dump def suppression].freeze
+
+      # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
+      # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,
+      # `dynamic.dependency-source.*`, `rbs.coverage.*`, `pre-eval.parse-error`), plus the `plugin.` prefix
+      # reserved for plugin-produced identifiers. `suppression.unknown-rule` treats a dotted token whose
+      # first segment appears here as KNOWN and stays silent: these ids are legitimate suppression /
+      # `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load dynamically;
+      # aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
+      NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin].freeze
+
+      # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in
+      # `Analysis::Runner` / `Runner::DiagnosticAggregator`). A token equal to one of these is treated as
+      # known by `suppression.unknown-rule` even though it carries no family prefix; extend the list when
+      # the runner grows a new bare id.
+      NON_CHECK_DIAGNOSTIC_IDS = %w[
+        configuration-error load-error pool-degraded runtime-error source-rbs-synthesis-failed
+      ].freeze
     end
   end
 end

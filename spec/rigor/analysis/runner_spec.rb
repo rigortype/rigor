@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rigor/analysis/runner"
+require "rigor/analysis/baseline"
 
 # Path-error / parse-error specs intentionally bypass `analyze` because they exercise paths that do not exist or contain
 # non-Ruby content; the helper assumes a writable tmpdir of `.rb` files. Everything else uses `analyze`.
@@ -1300,6 +1301,125 @@ RSpec.describe Rigor::Analysis::Runner do
           RUBY
           undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
           expect(undefined).to be_empty
+        end
+      end
+
+      # PHPStan-IgnoreParseErrorRule-modelled suppression-marker validation: a broken suppression comment
+      # must not silently no-op. Matching semantics stay untouched (unknown tokens are still kept verbatim);
+      # these specs cover only the additive surveillance diagnostics.
+      describe "suppression marker validation (suppression.*)" do
+        def suppression_diagnostics(result)
+          result.diagnostics.select { |d| d.rule&.start_with?("suppression.") }
+        end
+
+        it "warns on an unknown rule token, carrying the token verbatim at the comment's line" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule\n))
+
+          warning = suppression_diagnostics(result)
+          expect(warning.size).to eq(1)
+          expect(warning.first.rule).to eq("suppression.unknown-rule")
+          expect(warning.first.severity).to eq(:warning)
+          expect(warning.first.message).to include("`no-such-rule`")
+          expect(warning.first.line).to eq(1)
+        end
+
+        it "warns on a typo'd canonical id (`call.undefined-metod`)" do
+          result = analyze(%("x".no_method # rigor:disable call.undefined-metod\n))
+
+          warning = suppression_diagnostics(result)
+          expect(warning.map(&:rule)).to eq(["suppression.unknown-rule"])
+          expect(warning.first.message).to include("`call.undefined-metod`")
+          # The typo'd token suppresses nothing, so the original diagnostic still fires.
+          expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
+        end
+
+        it "does not warn on canonical ids, legacy aliases, `all`, family wildcards, plugin ids, or engine ids" do
+          result = analyze(<<~RUBY)
+            a = "x".no_method # rigor:disable call.undefined-method
+            b = "x".no_method # rigor:disable undefined-method
+            c = "x".no_method # rigor:disable all
+            d = "x".no_method # rigor:disable call
+            e = 1 # rigor:disable plugin.anything.goes
+            f = 2 # rigor:disable rbs_extended.unsatisfied-conformance
+            g = 3 # rigor:disable dynamic.rbs-extended.unresolved, load-error
+            [a, b, c, d, e, f, g]
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "warns on an empty `# rigor:disable` marker" do
+          result = analyze("x = 1 # rigor:disable\n")
+
+          warning = suppression_diagnostics(result)
+          expect(warning.map(&:rule)).to eq(["suppression.empty"])
+          expect(warning.first.severity).to eq(:warning)
+        end
+
+        it "warns on an empty `# rigor:disable-file` marker and on unknown disable-file tokens" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file
+            # rigor:disable-file call.undefined-metod
+            x = 1
+          RUBY
+
+          rules = suppression_diagnostics(result).map(&:rule).sort
+          expect(rules).to eq(["suppression.empty", "suppression.unknown-rule"])
+        end
+
+        it "treats prose mentioning the marker followed by non-token text as an ordinary comment" do
+          result = analyze(<<~RUBY)
+            # Use `# rigor:disable <rule1>, <rule2>` on the offending line.
+            # The file-wide form is `# rigor:disable-file <rules>`.
+            x = 1
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "is itself suppressible on the same line without regress" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule, suppression.unknown-rule\n))
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "is suppressible file-wide via `# rigor:disable-file suppression`" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file suppression
+            x = 1 # rigor:disable no-such-rule
+            y = 2 # rigor:disable
+            [x, y]
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "is disable-able via the configuration `disable:` list" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule\n),
+                           config: { "disable" => ["suppression.unknown-rule"] })
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "honours a `severity_overrides:` entry (`off` drops it, `error` promotes it)" do
+          off = analyze(%(x = 1 # rigor:disable no-such-rule\n),
+                        config: { "severity_overrides" => { "suppression.unknown-rule" => "off" } })
+          expect(suppression_diagnostics(off)).to be_empty
+
+          promoted = analyze(%(x = 1 # rigor:disable no-such-rule\n),
+                             config: { "severity_overrides" => { "suppression.unknown-rule" => "error" } })
+          expect(suppression_diagnostics(promoted).map(&:severity)).to eq([:error])
+        end
+
+        it "is absorbed by a baseline like any other rule" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule\n))
+          warnings = suppression_diagnostics(result)
+          expect(warnings).not_to be_empty
+
+          baseline = Rigor::Analysis::Baseline.from_diagnostics(warnings)
+          surfaced, silenced_count = baseline.filter(warnings)
+          expect(surfaced).to be_empty
+          expect(silenced_count).to eq(warnings.size)
         end
       end
 

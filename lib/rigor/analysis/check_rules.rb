@@ -96,6 +96,10 @@ module Rigor
         diagnostics.concat(unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
         diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
+        # Suppression-marker validation (`suppression.*`) runs BEFORE the filter so its own diagnostics are
+        # suppressible like any other rule — `# rigor:disable suppression.unknown-rule` on the offending
+        # comment's line works, with no regress (the token itself is known, so it never re-fires).
+        diagnostics.concat(suppression_marker_diagnostics(path, comments))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
@@ -375,6 +379,13 @@ module Rigor
       FILE_SUPPRESSION_PATTERN = /#\s*rigor:disable-file\s+(?<rules>[\w.,\s-]+)/
       private_constant :FILE_SUPPRESSION_PATTERN
 
+      # A `rigor:disable[-file]` marker word regardless of whether any rule tokens follow. Used only by the
+      # `suppression.empty` detection — the two suppression patterns above require at least one token
+      # character, so a bare `# rigor:disable` never reaches them. The lookahead keeps
+      # `rigor:disable-something-else` from counting as a marker.
+      BARE_SUPPRESSION_MARKER = /#\s*rigor:disable(?<file>-file)?(?![\w-])(?<rest>.*)/
+      private_constant :BARE_SUPPRESSION_MARKER
+
       # @return [Array<(Hash{Integer => Set}, Set)>] pair of
       #   `(line_suppressions, file_suppressions)`. Line
       #   suppressions are keyed by source line number; file
@@ -397,6 +408,95 @@ module Rigor
         raw.to_s.split(/[\s,]+/).reject(&:empty?).each do |token|
           target.merge(expand_token(token))
         end
+      end
+
+      # PHPStan-`IgnoreParseErrorRule`-modelled surveillance over the suppression markers themselves: a
+      # malformed or ineffective `# rigor:disable` / `# rigor:disable-file` comment must not silently no-op
+      # (the typo'd `# rigor:disable call.undefined-metod` suppresses nothing and the user never learns).
+      # Emits `suppression.unknown-rule` for every marker token that resolves to no known identifier, and
+      # `suppression.empty` for a marker that lists no rules at all. The MATCHING semantics are deliberately
+      # unchanged — an unknown token is still kept verbatim per the diagnostic-policy spec — so this is
+      # additive surveillance only. Both diagnostics run before {.filter_suppressed} and flow through it,
+      # so they are themselves suppressible (`# rigor:disable suppression.unknown-rule`) with no regress:
+      # that token is known, so acknowledging it never re-fires the rule.
+      def suppression_marker_diagnostics(path, comments)
+        comments.each_with_object([]) do |comment, diagnostics|
+          source = comment.location.slice
+          if (match = FILE_SUPPRESSION_PATTERN.match(source))
+            validate_suppression_tokens(match[:rules], "rigor:disable-file", path, comment, diagnostics)
+          elsif (match = LINE_SUPPRESSION_PATTERN.match(source))
+            validate_suppression_tokens(match[:rules], "rigor:disable", path, comment, diagnostics)
+          else
+            diagnose_bare_suppression_marker(path, comment, source, diagnostics)
+          end
+        end
+      end
+
+      def validate_suppression_tokens(raw, marker, path, comment, diagnostics)
+        tokens = raw.to_s.split(/[\s,]+/).reject(&:empty?)
+        if tokens.empty?
+          diagnostics << empty_suppression_diagnostic(path, comment, marker)
+          return
+        end
+
+        tokens.each do |token|
+          next if known_suppression_token?(token)
+
+          diagnostics << unknown_suppression_rule_diagnostic(path, comment, marker, token)
+        end
+      end
+
+      # A comment carrying the marker word but not the token-bearing suppression grammar. A remainder of
+      # nothing but whitespace / commas is a genuinely empty marker (`# rigor:disable`); anything else
+      # (documentation prose like "`# rigor:disable <rule>` comments") is left alone as an ordinary
+      # comment, matching the parse path, which never treats it as a suppression either.
+      def diagnose_bare_suppression_marker(path, comment, source, diagnostics)
+        bare = BARE_SUPPRESSION_MARKER.match(source)
+        return if bare.nil? || !bare[:rest].match?(/\A[\s,]*\z/)
+
+        marker = bare[:file] ? "rigor:disable-file" : "rigor:disable"
+        diagnostics << empty_suppression_diagnostic(path, comment, marker)
+      end
+
+      # True when a suppression token resolves to a diagnostic identifier some producer can emit: a
+      # canonical CheckRules id, a legacy alias, the `all` wildcard, a family wildcard, a bare
+      # non-catalogue engine id, or a dotted id under a known non-check family (`rbs_extended.*`,
+      # `dynamic.*`, `rbs.*`, `pre-eval.*`, and any `plugin.`-prefixed id — plugins load dynamically, so
+      # their rule vocabulary cannot be enumerated here and under-warning is the FP-safe direction).
+      def known_suppression_token?(token)
+        return true if token == "all"
+        return true if ALL_RULES.include?(token) || LEGACY_RULE_ALIASES.key?(token) ||
+                       RULE_FAMILIES.include?(token) || NON_CHECK_DIAGNOSTIC_IDS.include?(token)
+
+        family, rest = token.split(".", 2)
+        !rest.nil? && NON_CHECK_DIAGNOSTIC_FAMILIES.include?(family)
+      end
+
+      def unknown_suppression_rule_diagnostic(path, comment, marker, token)
+        Diagnostic.new(
+          path: path,
+          line: comment.location.start_line,
+          column: comment.location.start_column + 1,
+          message: "unknown rule `#{token}` in `# #{marker}` — the token matches no known rule, alias, " \
+                   "or family, so this suppression has no effect. Likely a typo; `rigor explain <rule>` " \
+                   "lists the canonical ids.",
+          severity: :warning,
+          rule: RULE_SUPPRESSION_UNKNOWN_RULE,
+          source_family: :builtin
+        )
+      end
+
+      def empty_suppression_diagnostic(path, comment, marker)
+        Diagnostic.new(
+          path: path,
+          line: comment.location.start_line,
+          column: comment.location.start_column + 1,
+          message: "`# #{marker}` lists no rules, so this suppression has no effect. Name the rules to " \
+                   "suppress (`# #{marker} call.undefined-method`) or use `# #{marker} all`.",
+          severity: :warning,
+          rule: RULE_SUPPRESSION_EMPTY,
+          source_family: :builtin
+        )
       end
 
       # Expands a list of user-supplied rule tokens into the

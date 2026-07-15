@@ -125,18 +125,32 @@ Summarised from ADR-50 (the authority for all of these):
 - **v0.2.0** ships the release-engineering machinery and pledges
   minor-non-break on the surface above as a trial discipline.
 - **v1.0.0** freezes the surface; breaking it becomes major-version-only.
-- **Support line** (ADR-50 § WD5): pre-1.0, the latest minor + the
-  immediately-preceding minor get security + regression backports; a
-  backport keeps its line's Ruby pin. Post-1.0, the `1.x` branch becomes
-  the default development line (PHPStan's model).
+- **Versioning model** (ADR-50 § WD5): post-1.0 Rigor follows an
+  edition-style cadence, not strict semver. A **patch** is fixes only; a
+  **minor** may add features and diagnostics, but they arrive off-by-default
+  behind `bleeding_edge:` or are absorbed by your baseline, so a minor
+  upgrade is always possible (at most a baseline refresh) — a *soft* break;
+  a **major** is the *hard* break, where the frozen surface may change,
+  bleeding-edge disciplines turn on by default, and deprecated forms are
+  removed. (PHP's `8.4`/`8.5` vs `8.0`/`9.0`; PHPStan's `bleedingEdge`.)
+- **Support** (ADR-50 § WD5) is two separate things. Answering questions and
+  troubleshooting is always-on, whatever version you run. A *maintenance
+  line* — security and correctness backports, never features or new
+  diagnostics, keeping the line's own Ruby pin — exists only for the release
+  behind the most recent *hard* break: pre-1.0 the previous minor
+  (`0.y-1`), post-1.0 the previous major (`(N).x` after `(N+1).0`). There is
+  no per-minor maintenance within a major, because a minor upgrade is soft.
+  Backports are **on demand and not guaranteed** — an older line is patched
+  when a user who cannot cross the break needs a fix, and tapers once the
+  next line is the default; no fixed support window is promised.
 - **New disciplines** (a rule that demands an authoring change of
   previously-idiomatic code) land off-by-default behind the
   `bleeding_edge:` opt-in and turn on only at a major (ADR-50 § WD2/WD3/WD7).
   The opt-in foundation is shipped — `bleeding_edge:` config (`true` /
   feature-id list / `{ all:, except: }`) + the `rigor show-bleedingedge`
   inspector, composed into severity resolution below your own
-  `severity_overrides:`. The overlay it draws from is empty today; the
-  first queued discipline lands as a single feature entry.
+  `severity_overrides:`. The first discipline,
+  `reject-unparseable-signatures`, is queued in the overlay.
 
 ## See also
 

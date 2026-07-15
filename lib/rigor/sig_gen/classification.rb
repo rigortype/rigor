@@ -25,7 +25,11 @@ module Rigor
       SKIP_DIAGNOSTIC_IDS = {
         complex_shape: "sig.skipped.complex-shape",
         user_authored: "sig.skipped.user-authored",
-        untyped_return: "sig.skipped.untyped-return"
+        untyped_return: "sig.skipped.untyped-return",
+        # The generator rendered a line `rbs` itself rejects. Skipping the method keeps sig-gen useful on a
+        # project with one pathological def, where failing the command outright would deny the user every other
+        # signature; the count is reported so the defect is not silent. See {SigGen::RbsValidity}.
+        unrenderable_rbs: "sig.skipped.unrenderable-rbs"
       }.freeze
     end
   end

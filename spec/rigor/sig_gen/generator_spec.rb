@@ -683,4 +683,34 @@ RSpec.describe Rigor::SigGen::Generator do
       )
     end
   end
+
+  # The output-validity guard. Both bugs that motivated it are fixed, so the trigger is stubbed at the render
+  # step: what is pinned is the POLICY — an unparseable line never leaves the generator, it is demoted to a
+  # skip and recorded as a Rigor defect. Emitting it would poison the consumer's whole file.
+  describe "unparseable rendered RBS (SigGen::RbsValidity guard)" do
+    it "demotes the method to :skipped and records it instead of emitting it" do
+      path = write_fixture("lib/widget.rb", "class Widget\n  def n\n    42\n  end\nend\n")
+      gen = generator(paths: [path])
+      allow(gen).to receive(:render_rbs_line).and_return("def n: () -> { data-contrast: Integer }")
+
+      candidate = gen.run.find { |c| c.method_name == :n }
+
+      expect(candidate.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(candidate.skip_reason).to eq(:unrenderable_rbs)
+      expect(candidate.rbs).to be_nil
+
+      expect(gen.unrenderable.size).to eq(1)
+      recorded = gen.unrenderable.first
+      expect(recorded.method_name).to eq(:n)
+      expect(recorded.class_name).to eq("Widget")
+      expect(recorded.error).to include("record key")
+    end
+
+    it "leaves a healthy run's record empty" do
+      path = write_fixture("lib/widget.rb", "class Widget\n  def n\n    42\n  end\nend\n")
+      gen = generator(paths: [path])
+      expect(gen.run.map(&:method_name)).to include(:n)
+      expect(gen.unrenderable).to be_empty
+    end
+  end
 end

@@ -126,6 +126,7 @@ module Rigor
           when :created then render_write_created(result)
           when :updated then render_write_updated(result)
           when :skipped_outside_sig_root then render_write_skipped(result)
+          when :skipped_invalid_rbs then render_write_invalid(result)
           end
         end
       end
@@ -141,6 +142,15 @@ module Rigor
 
       def render_write_skipped(result)
         @out.puts("skipped #{result.source_path} -> #{result.target_path} (outside sig root)")
+      end
+
+      # The assembled file does not parse, so it was NOT written. Writing it would poison the sig tree — the
+      # consumer quarantines an unparseable `.rbs` whole, taking every other type in that file down with it,
+      # including the user's own hand-written ones.
+      def render_write_invalid(result)
+        @out.puts("REFUSED #{result.target_path} — the generated RBS does not parse, so it was not written")
+        @out.puts("  #{result.error}")
+        @out.puts("  This is a bug in Rigor's RBS rendering, not in your code — please report it.")
       end
 
       def render_write_json(results)

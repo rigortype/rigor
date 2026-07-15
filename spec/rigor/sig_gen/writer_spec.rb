@@ -42,6 +42,31 @@ RSpec.describe Rigor::SigGen::Writer do
     target
   end
 
+  # The generator refuses to render an unparseable line in the first place, so reaching the writer with one
+  # means a bug in the writer's own assembly (a bad splice, a broken tree render). The file is refused rather
+  # than written: `rigor check` quarantines an unparseable `.rbs` WHOLE, so writing it would delete every type
+  # in that file — including the user's own hand-written ones, which were valid before we touched it.
+  describe "output-validity guard" do
+    it "refuses to create a file whose rendered RBS does not parse" do
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> { data-contrast: Integer }")])
+
+      expect(result.action).to eq(:skipped_invalid_rbs)
+      expect(result.error).to include("record key")
+      expect(File.exist?(File.join(tmpdir, "sig/foo.rbs"))).to be(false)
+    end
+
+    it "refuses to update an existing file when the merged result does not parse, leaving it untouched" do
+      original = "class Foo\n  def existing: () -> String\nend\n"
+      target = write_target(original)
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> { data-contrast: Integer }")])
+
+      expect(result.action).to eq(:skipped_invalid_rbs)
+      # The user's own signature survives intact — the whole point of refusing.
+      expect(File.read(target)).to eq(original)
+    end
+  end
+
   describe "create new sig file" do
     it "writes a class declaration with the candidate methods when no target exists" do
       result = writer.write("lib/foo.rb", [candidate(method_name: :n, rbs: "def n: () -> Integer")])

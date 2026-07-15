@@ -12,6 +12,7 @@ require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/rbs_type_translator"
+require_relative "rbs_validity"
 
 module Rigor
   module SigGen
@@ -34,6 +35,13 @@ module Rigor
     #   strictly accepts the inferred one (acceptance check under the engine's current `:gradual` mode; ADR-14
     #   reserves the eventual `:strict` mode).
     class Generator # rubocop:disable Metrics/ClassLength
+      # Methods the generator rendered into RBS that `rbs` itself rejects. Populated by {#build_candidate}; each
+      # one is a Rigor rendering DEFECT, not a property of the user's code, so the CLI reports them as such.
+      UnrenderableMethod = Data.define(:path, :class_name, :method_name, :rbs, :error)
+
+      # @return [Array<UnrenderableMethod>] empty on a healthy run; read after {#run}.
+      attr_reader :unrenderable
+
       # @param configuration [Rigor::Configuration]
       # @param paths [Array<String>] files / directories to scan.
       # @param observations [Hash{[String, Symbol] => Array<Array<Rigor::Type>>}]
@@ -53,6 +61,8 @@ module Rigor
         @module_function_methods = Set.new
         @class_shells = Set.new
         @class_superclasses = {}
+        # Whole-run, NOT per-file: a rendering defect is reported once at the end of the run.
+        @unrenderable = []
       end
 
       # Lifts legacy plain-`Array[Type]` observation entries into {ObservedCall} carriers. Specs from the
@@ -265,12 +275,33 @@ module Rigor
       # Wraps `MethodCandidate.new` so every candidate carries the per-file `@namespace_kinds` map AND the
       # `@class_shells` set — the Writer's nested-syntax emission consults both to pick `module` vs `class` for
       # each segment and to emit empty `Const = Data.define(...)` declarations.
-      def build_candidate(**)
+      #
+      # It is also where every rendered line is PARSED before it can leave the generator (see
+      # {SigGen::RbsValidity}). This is the one construction point all candidates pass through, so guarding it
+      # covers every mode — `--print`, `--diff`, `--write`, and the MCP surface — rather than each emit site
+      # separately. A line `rbs` rejects demotes the candidate to `:skipped` instead of being emitted: a
+      # signature we cannot parse is worse than no signature, because it takes the whole FILE down with it
+      # (the consumer quarantines it, so every other type in that file vanishes too).
+      def build_candidate(**fields)
+        fields = demote_unrenderable(fields)
         MethodCandidate.new(
           namespace_kinds: @namespace_kinds,
           class_shells: @class_shells.to_a,
           class_superclasses: @class_superclasses,
-          **
+          **fields
+        )
+      end
+
+      def demote_unrenderable(fields)
+        error = RbsValidity.method_line_error(fields[:rbs])
+        return fields if error.nil?
+
+        @unrenderable << UnrenderableMethod.new(
+          path: fields[:path], class_name: fields[:class_name],
+          method_name: fields[:method_name], rbs: fields[:rbs], error: error
+        )
+        fields.merge(
+          classification: Classification::SKIPPED, skip_reason: :unrenderable_rbs, rbs: nil
         )
       end
 

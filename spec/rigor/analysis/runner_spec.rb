@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rigor/analysis/runner"
+require "rigor/analysis/baseline"
 
 # Path-error / parse-error specs intentionally bypass `analyze` because they exercise paths that do not exist or contain
 # non-Ruby content; the helper assumes a writable tmpdir of `.rb` files. Everything else uses `analyze`.
@@ -1303,6 +1304,125 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # PHPStan-IgnoreParseErrorRule-modelled suppression-marker validation: a broken suppression comment
+      # must not silently no-op. Matching semantics stay untouched (unknown tokens are still kept verbatim);
+      # these specs cover only the additive surveillance diagnostics.
+      describe "suppression marker validation (suppression.*)" do
+        def suppression_diagnostics(result)
+          result.diagnostics.select { |d| d.rule&.start_with?("suppression.") }
+        end
+
+        it "warns on an unknown rule token, carrying the token verbatim at the comment's line" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule\n))
+
+          warning = suppression_diagnostics(result)
+          expect(warning.size).to eq(1)
+          expect(warning.first.rule).to eq("suppression.unknown-rule")
+          expect(warning.first.severity).to eq(:warning)
+          expect(warning.first.message).to include("`no-such-rule`")
+          expect(warning.first.line).to eq(1)
+        end
+
+        it "warns on a typo'd canonical id (`call.undefined-metod`)" do
+          result = analyze(%("x".no_method # rigor:disable call.undefined-metod\n))
+
+          warning = suppression_diagnostics(result)
+          expect(warning.map(&:rule)).to eq(["suppression.unknown-rule"])
+          expect(warning.first.message).to include("`call.undefined-metod`")
+          # The typo'd token suppresses nothing, so the original diagnostic still fires.
+          expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
+        end
+
+        it "does not warn on canonical ids, legacy aliases, `all`, family wildcards, plugin ids, or engine ids" do
+          result = analyze(<<~RUBY)
+            a = "x".no_method # rigor:disable call.undefined-method
+            b = "x".no_method # rigor:disable undefined-method
+            c = "x".no_method # rigor:disable all
+            d = "x".no_method # rigor:disable call
+            e = 1 # rigor:disable plugin.anything.goes
+            f = 2 # rigor:disable rbs_extended.unsatisfied-conformance
+            g = 3 # rigor:disable dynamic.rbs-extended.unresolved, load-error
+            [a, b, c, d, e, f, g]
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "warns on an empty `# rigor:disable` marker" do
+          result = analyze("x = 1 # rigor:disable\n")
+
+          warning = suppression_diagnostics(result)
+          expect(warning.map(&:rule)).to eq(["suppression.empty"])
+          expect(warning.first.severity).to eq(:warning)
+        end
+
+        it "warns on an empty `# rigor:disable-file` marker and on unknown disable-file tokens" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file
+            # rigor:disable-file call.undefined-metod
+            x = 1
+          RUBY
+
+          rules = suppression_diagnostics(result).map(&:rule).sort
+          expect(rules).to eq(["suppression.empty", "suppression.unknown-rule"])
+        end
+
+        it "treats prose mentioning the marker followed by non-token text as an ordinary comment" do
+          result = analyze(<<~RUBY)
+            # Use `# rigor:disable <rule1>, <rule2>` on the offending line.
+            # The file-wide form is `# rigor:disable-file <rules>`.
+            x = 1
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "is itself suppressible on the same line without regress" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule, suppression.unknown-rule\n))
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "is suppressible file-wide via `# rigor:disable-file suppression`" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file suppression
+            x = 1 # rigor:disable no-such-rule
+            y = 2 # rigor:disable
+            [x, y]
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "is disable-able via the configuration `disable:` list" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule\n),
+                           config: { "disable" => ["suppression.unknown-rule"] })
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "honours a `severity_overrides:` entry (`off` drops it, `error` promotes it)" do
+          off = analyze(%(x = 1 # rigor:disable no-such-rule\n),
+                        config: { "severity_overrides" => { "suppression.unknown-rule" => "off" } })
+          expect(suppression_diagnostics(off)).to be_empty
+
+          promoted = analyze(%(x = 1 # rigor:disable no-such-rule\n),
+                             config: { "severity_overrides" => { "suppression.unknown-rule" => "error" } })
+          expect(suppression_diagnostics(promoted).map(&:severity)).to eq([:error])
+        end
+
+        it "is absorbed by a baseline like any other rule" do
+          result = analyze(%(x = 1 # rigor:disable no-such-rule\n))
+          warnings = suppression_diagnostics(result)
+          expect(warnings).not_to be_empty
+
+          baseline = Rigor::Analysis::Baseline.from_diagnostics(warnings)
+          surfaced, silenced_count = baseline.filter(warnings)
+          expect(surfaced).to be_empty
+          expect(silenced_count).to eq(warnings.size)
+        end
+      end
+
       # ADR-8 § "`def.return-type-mismatch` rule"
       describe "def.return-type-mismatch rule" do
         let(:demo_sig) do
@@ -2237,6 +2357,225 @@ RSpec.describe Rigor::Analysis::Runner do
           RUBY
           expect(truthy_diags(result)).not_to be_empty
         end
+      end
+    end
+
+    # `flow.shadowed-rescue-clause` — a later rescue arm dead under an earlier superclass arm.
+    describe "shadowed-rescue-clause rule" do
+      def shadow_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.shadowed-rescue-clause" }
+      end
+
+      it "flags a narrower rescue after `rescue StandardError`" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError => e
+            e
+          rescue ArgumentError => e
+            e
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue ArgumentError")
+        expect(diag.message).to include("rescue StandardError")
+        expect(shadow_diags(result).size).to eq(1)
+      end
+
+      it "flags a rescue after a bare `rescue` (implicit StandardError)" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue => e
+            e
+          rescue ArgumentError => e
+            e
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue ArgumentError")
+      end
+
+      it "flags an exact duplicate exception class" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result).size).to eq(1)
+      end
+
+      it "flags a multi-class arm whose every class is covered" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            1
+          rescue ArgumentError, TypeError
+            2
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue ArgumentError, TypeError")
+      end
+
+      it "flags a project-defined exception subclass after its rescued superclass" do
+        result = analyze(<<~RUBY)
+          class CustomError < StandardError
+          end
+
+          begin
+            work
+          rescue StandardError
+            1
+          rescue CustomError
+            2
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue CustomError")
+      end
+
+      it "does not fire on the normal narrow-to-wide order" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue StandardError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire on a multi-class arm only partially covered" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue ArgumentError, IOError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire when the earlier clause names an unresolved constant" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue TotallyUnknownError
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire when the later clause names an unresolved constant" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            1
+          rescue TotallyUnknownError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire when a clause names a module (custom `===` semantics)" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue Kernel
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire around a splat clause" do
+        result = analyze(<<~RUBY)
+          ERRORS = [StandardError].freeze
+          begin
+            work
+          rescue *ERRORS
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire around a dynamic exception expression" do
+        result = analyze(<<~RUBY)
+          klass = StandardError
+          begin
+            work
+          rescue klass
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire on unrelated sibling classes" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue TypeError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not compare clauses across nested begin nodes" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            begin
+              other
+            rescue ArgumentError
+              1
+            end
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable shadowed-rescue-clause`" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            1
+          rescue ArgumentError # rigor:disable shadowed-rescue-clause
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
       end
     end
 
@@ -3344,6 +3683,290 @@ RSpec.describe Rigor::Analysis::Runner do
           end
         RUBY
         expect(dead_diags(result)).to be_empty
+      end
+    end
+
+    describe "duplicate-hash-key rule" do
+      def dup_key_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.duplicate-hash-key" }
+      end
+
+      it "flags a duplicate symbol key, pointing at the later occurrence and naming the first line" do
+        result = analyze(<<~RUBY)
+          h = {
+            a: 1,
+            b: 2,
+            a: 3
+          }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("duplicate hash key `:a'")
+        expect(diag.message).to include("first set at line 2")
+        expect(diag.line).to eq(4)
+      end
+
+      it "flags a duplicate plain-string key" do
+        result = analyze(<<~RUBY)
+          h = { "x" => 1, "x" => 2 }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include(%(duplicate hash key `"x"'))
+      end
+
+      it "flags a duplicate integer key" do
+        result = analyze(<<~RUBY)
+          h = { 1 => :a, 2 => :b, 1 => :c }
+          h
+        RUBY
+        expect(dup_key_diags(result).size).to eq(1)
+      end
+
+      it "flags the same symbol spelled as shorthand and hashrocket" do
+        result = analyze(<<~RUBY)
+          h = { a: 1, :a => 2 }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("duplicate hash key `:a'")
+      end
+
+      it "flags duplicate bare keyword arguments in a call (KeywordHashNode)" do
+        result = analyze(<<~RUBY)
+          def m(**opts)
+            opts
+          end
+          m(a: 1, a: 2)
+        RUBY
+        expect(dup_key_diags(result).size).to eq(1)
+      end
+
+      it "flags a literal pair straddling a `**splat` (the splat does not rescue the collision)" do
+        result = analyze(<<~RUBY)
+          extra = { b: 2 }
+          h = { a: 1, **extra, a: 3 }
+          h
+        RUBY
+        expect(dup_key_diags(result).size).to eq(1)
+      end
+
+      it "does not flag distinct keys" do
+        result = analyze(<<~RUBY)
+          h = { a: 1, b: 2, "a" => 3 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag repeated interpolated-string keys (not value-pinned)" do
+        result = analyze(<<~'RUBY')
+          x = "k"
+          h = { "a#{x}" => 1, "a#{x}" => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not cross-compare a symbol and a string with the same text" do
+        result = analyze(<<~RUBY)
+          h = { a: 1, "a" => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not cross-compare Integer and Float keys (1.eql?(1.0) is false)" do
+        result = analyze(<<~RUBY)
+          h = { 1 => :int, 1.0 => :float }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag repeated constant keys" do
+        result = analyze(<<~RUBY)
+          KEY = :a
+          h = { KEY => 1, KEY => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag repeated method-call keys" do
+        result = analyze(<<~RUBY)
+          def key
+            :a
+          end
+          h = { key => 1, key => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag a `**splat` alongside distinct literal keys" do
+        result = analyze(<<~RUBY)
+          extra = { c: 3 }
+          h = { a: 1, **extra, b: 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "scopes each Hash literal independently (nested literals do not collide with the outer one)" do
+        result = analyze(<<~RUBY)
+          h = { a: { a: 1 }, b: 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable duplicate-hash-key`" do
+        result = analyze(<<~RUBY)
+          h = {
+            a: 1,
+            a: 2 # rigor:disable duplicate-hash-key
+          }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+    end
+
+    describe "return-in-ensure rule (v0.3.0)" do
+      def ensure_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.return-in-ensure" }
+      end
+
+      it "flags a `return` in the ensure clause of a def body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            return 1
+          end
+        RUBY
+        diag = ensure_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("`return' inside `ensure'")
+        expect(diag.message).to include("swallows")
+        expect(diag.line).to eq(4)
+      end
+
+      it "flags a `return` in the ensure clause of a begin block" do
+        result = analyze(<<~RUBY)
+          def example
+            begin
+              compute
+            ensure
+              return 1
+            end
+          end
+        RUBY
+        expect(ensure_diags(result).size).to eq(1)
+      end
+
+      it "flags a `return` inside a plain block inside the ensure body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            [1, 2].each do |i|
+              return i
+            end
+          end
+        RUBY
+        expect(ensure_diags(result).size).to eq(1)
+      end
+
+      it "does not flag a `return` inside a nested def within the ensure body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            def helper
+              return 1
+            end
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag a `return` inside a lambda within the ensure body" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            arrow = -> { return 1 }
+            keyword = lambda { return 2 }
+            arrow.call + keyword.call
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag a `return` inside a define_method block within the ensure body" do
+        result = analyze(<<~RUBY)
+          class Host
+            def example
+              compute
+            ensure
+              define_method(:regenerated) { return 2 } if $rebuild
+            end
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag an ensure clause without an explicit return" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            cleanup
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "does not flag a `return` outside the ensure clause of the same begin" do
+        result = analyze(<<~RUBY)
+          def example
+            return compute
+          ensure
+            cleanup
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
+      end
+
+      it "collects a `return` in a nested begin/ensure inside an ensure body exactly once" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            begin
+              cleanup
+            ensure
+              return 1
+            end
+          end
+        RUBY
+        expect(ensure_diags(result).size).to eq(1)
+      end
+
+      it "is suppressible via `# rigor:disable flow.return-in-ensure`" do
+        result = analyze(<<~RUBY)
+          def example
+            compute
+          ensure
+            return 1 # rigor:disable flow.return-in-ensure
+          end
+        RUBY
+        expect(ensure_diags(result)).to be_empty
       end
     end
 

@@ -41,18 +41,24 @@ carries no `documentation_url`.
 | <a id="rule-call-wrong-arity"></a>`call.wrong-arity` | The positional-argument count matches no signature. | high |
 | <a id="rule-call-argument-type-mismatch"></a>`call.argument-type-mismatch` | An argument's type provably violates the parameter contract. | high |
 | <a id="rule-call-possible-nil-receiver"></a>`call.possible-nil-receiver` | The receiver is `T \| nil` and the method is not defined on `NilClass`. | high |
+| <a id="rule-call-raise-non-exception"></a>`call.raise-non-exception` | A `raise` / `fail` argument's concrete type is provably not an Exception class, an Exception instance, a String, or an object defining `#exception` — a runtime `TypeError`. | high |
 | <a id="rule-call-unresolved-toplevel"></a>`call.unresolved-toplevel` | A top-level implicit-self call resolves against no same-file `def`, `pre_eval:` patch, or `Kernel` / `Object` method. | low |
 | <a id="rule-flow-always-raises"></a>`flow.always-raises` | The expression provably raises on every reachable path. | high |
 | <a id="rule-flow-unreachable-branch"></a>`flow.unreachable-branch` | An `if` / `unless` / ternary branch is statically dead. | high |
 | <a id="rule-flow-always-truthy-condition"></a>`flow.always-truthy-condition` | A condition is provably always truthy or always falsey. | medium |
 | <a id="rule-flow-dead-assignment"></a>`flow.dead-assignment` | A local is written but never read in the same method. | medium |
 | <a id="rule-flow-unreachable-clause"></a>`flow.unreachable-clause` | A `case`/`when` or `case`/`in` clause is statically dead — its subject type is disjoint with the pattern, or a prior clause already exhausted the subject. | medium |
+| <a id="rule-flow-duplicate-hash-key"></a>`flow.duplicate-hash-key` | A Hash literal repeats a literal key (symbol, plain string, integer, float, `true`/`false`/`nil`) — the last entry silently overwrites the earlier one at runtime. Literal keys only; symbol vs string and `1` vs `1.0` never collide, and interpolated / constant / computed keys are never compared. A `**splat` between two identical literal keys does not rescue the pair. | high |
+| <a id="rule-flow-return-in-ensure"></a>`flow.return-in-ensure` | An explicit `return` inside an `ensure` clause — it overrides the method's in-flight return value and silently swallows any in-flight exception. A `return` in a nested `def`, lambda, or `define_method` block inside the `ensure` does not fire (it exits that inner frame). | high |
+| <a id="rule-flow-shadowed-rescue-clause"></a>`flow.shadowed-rescue-clause` | A `rescue` clause can never run because an earlier clause of the same chain already catches a superclass (or the same class) of every exception class it names. | high |
 | <a id="rule-def-return-type-mismatch"></a>`def.return-type-mismatch` | The method body's result violates its declared RBS return type. | medium |
 | <a id="rule-def-ivar-write-mismatch"></a>`def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write. | high |
 | <a id="rule-def-method-visibility-mismatch"></a>`def.method-visibility-mismatch` | An explicit-receiver call reaches a private method. | high |
 | <a id="rule-def-override-visibility-reduced"></a>`def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor. | high |
 | <a id="rule-def-override-return-widened"></a>`def.override-return-widened` | An override's declared return type widens the inherited return (covariance). | high |
 | <a id="rule-def-override-param-narrowed"></a>`def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). | high |
+| <a id="rule-suppression-unknown-rule"></a>`suppression.unknown-rule` | A `# rigor:disable[-file]` comment names a rule that does not exist (typically a typo), so the suppression silently does nothing. `plugin.`-prefixed tokens are never flagged. | high |
+| <a id="rule-suppression-empty"></a>`suppression.empty` | A `# rigor:disable[-file]` comment lists no rules, so it suppresses nothing. | high |
 | <a id="rule-rbs_extended-unsatisfied-conformance"></a>`rbs_extended.unsatisfied-conformance` | A class declares `%a{rigor:v1:conforms-to _Interface}` in its RBS but is missing a method the interface requires. Presence-based: only definitively-absent required methods fire. | — |
 | <a id="rule-assert-type-mismatch"></a>`assert.type-mismatch` | An `assert_type` expectation does not match the inferred type. | high |
 | <a id="rule-dump-type"></a>`dump.type` | A `dump_type` call — informational, prints the inferred type. | — |
@@ -191,6 +197,17 @@ config.merge(extra)  # rigor:disable call.undefined-method
 
 It accepts qualified IDs, family wildcards (`call`), a
 comma- or space-separated list, or `all`.
+
+A marker that cannot work is flagged rather than silently
+ignored: a token that names no known rule (a typo like
+`call.undefined-metod`) fires
+[`suppression.unknown-rule`](#rule-suppression-unknown-rule),
+and a bare marker with no rules at all fires
+[`suppression.empty`](#rule-suppression-empty) — both
+`:warning` in every profile. Tokens under the `plugin.`
+prefix are never flagged (plugin rule vocabularies load
+dynamically), and both diagnostics are themselves
+suppressible like any other rule.
 
 **In-source, whole file.** `# rigor:disable-file <rules>`
 anywhere in a file suppresses those rules for every line;

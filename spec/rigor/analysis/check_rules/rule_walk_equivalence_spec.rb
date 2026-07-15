@@ -8,7 +8,7 @@ require "spec_helper"
 # fixture corpus, and requires identical per-collector results. A collector may only migrate onto the walk while this
 # oracle comparison holds; the corpus-scale companion is the `RIGOR_SHADOW_RULE_WALK=1` mode in
 # `CheckRules.run_node_collectors`.
-module RuleWalkEquivalenceCases
+module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curated source-shape data, not logic
   # Curated shapes: each exercises a distinct part of the traversal contract. Firing shapes are present for BOTH
   # collectors so the harness can never pass vacuously (asserted in the spec).
   CURATED = {
@@ -189,13 +189,67 @@ module RuleWalkEquivalenceCases
         b
       end
     RUBY
-    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY
+    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY,
       def or_write_reads
         x = 1
         x ||= 2
         captured = 5
         [1].each { captured }
         x
+      end
+    RUBY
+    "duplicate hash keys: braced, kwargs, nested, splat-straddled, non-firing forms" => <<~RUBY,
+      h = { a: 1, b: 2, a: 3 }
+      m(a: 1, a: 2)
+      nested = { outer: { x: 1, x: 2 }, x: 3 }
+      straddle = { k: 1, **h, k: 2 }
+      clean = { a: 1, "a" => 2, 1 => :i, 1.0 => :f, CONST => 3, CONST => 4 }
+      [1].each { |i| puts({ i => 1, i => 2 }.merge(h, nested, straddle, clean)) }
+    RUBY
+    "return in ensure: def / begin / block firing, nested frames skipped, nested ensure once" => <<~RUBY,
+      def in_def
+        compute
+      ensure
+        return 1
+      end
+
+      def in_begin_and_block
+        begin
+          compute
+        ensure
+          [1].each { return 2 }
+        end
+      end
+
+      def frames_do_not_fire
+        compute
+      ensure
+        callback = -> { return :lambda }
+        other = lambda { return :lambda_kw }
+        define_method(:generated) { return :defined }
+        def helper = (return :nested_def)
+        callback.call
+        other.call
+      end
+
+      def nested_ensure_collected_once
+        compute
+      ensure
+        begin
+          cleanup
+        ensure
+          return 3
+        end
+      end
+    RUBY
+    "shadowed rescue chain via a namespaced project subclass (prefix-dependent)" => <<~RUBY
+      module M
+        class E < StandardError; end
+        def self.go
+          work
+        rescue StandardError
+        rescue E
+        end
       end
     RUBY
   }.freeze
@@ -207,8 +261,11 @@ module RuleWalkEquivalenceCases
   HOSTED_COLLECTOR_CLASSES = [
     Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
     Rigor::Analysis::CheckRules::UnreachableClauseCollector,
+    Rigor::Analysis::CheckRules::ShadowedRescueCollector,
     Rigor::Analysis::CheckRules::IvarWriteCollector,
-    Rigor::Analysis::CheckRules::DeadAssignmentCollector
+    Rigor::Analysis::CheckRules::DeadAssignmentCollector,
+    Rigor::Analysis::CheckRules::DuplicateHashKeyCollector,
+    Rigor::Analysis::CheckRules::ReturnInEnsureCollector
   ].freeze
 end
 

@@ -20,6 +20,7 @@ module Rigor
       RULE_WRONG_ARITY = "call.wrong-arity"
       RULE_ARGUMENT_TYPE = "call.argument-type-mismatch"
       RULE_NIL_RECEIVER = "call.possible-nil-receiver"
+      RULE_RAISE_NON_EXCEPTION = "call.raise-non-exception"
       RULE_DUMP_TYPE = "dump.type"
       RULE_ASSERT_TYPE = "assert.type-mismatch"
       RULE_ALWAYS_RAISES = "flow.always-raises"
@@ -33,6 +34,11 @@ module Rigor
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
       RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
       RULE_UNREACHABLE_CLAUSE = "flow.unreachable-clause"
+      RULE_DUPLICATE_HASH_KEY = "flow.duplicate-hash-key"
+      RULE_RETURN_IN_ENSURE = "flow.return-in-ensure"
+      RULE_SHADOWED_RESCUE_CLAUSE = "flow.shadowed-rescue-clause"
+      RULE_SUPPRESSION_UNKNOWN_RULE = "suppression.unknown-rule"
+      RULE_SUPPRESSION_EMPTY = "suppression.empty"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -41,6 +47,7 @@ module Rigor
         RULE_WRONG_ARITY,
         RULE_ARGUMENT_TYPE,
         RULE_NIL_RECEIVER,
+        RULE_RAISE_NON_EXCEPTION,
         RULE_DUMP_TYPE,
         RULE_ASSERT_TYPE,
         RULE_ALWAYS_RAISES,
@@ -48,12 +55,17 @@ module Rigor
         RULE_DEAD_ASSIGNMENT,
         RULE_ALWAYS_TRUTHY_CONDITION,
         RULE_UNREACHABLE_CLAUSE,
+        RULE_DUPLICATE_HASH_KEY,
+        RULE_RETURN_IN_ENSURE,
+        RULE_SHADOWED_RESCUE_CLAUSE,
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
         RULE_OVERRIDE_VISIBILITY_REDUCED,
         RULE_OVERRIDE_RETURN_WIDENED,
         RULE_OVERRIDE_PARAM_NARROWED,
-        RULE_IVAR_WRITE_MISMATCH
+        RULE_IVAR_WRITE_MISMATCH,
+        RULE_SUPPRESSION_UNKNOWN_RULE,
+        RULE_SUPPRESSION_EMPTY
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with
@@ -66,6 +78,7 @@ module Rigor
         "wrong-arity" => RULE_WRONG_ARITY,
         "argument-type-mismatch" => RULE_ARGUMENT_TYPE,
         "possible-nil-receiver" => RULE_NIL_RECEIVER,
+        "raise-non-exception" => RULE_RAISE_NON_EXCEPTION,
         "dump-type" => RULE_DUMP_TYPE,
         "assert-type" => RULE_ASSERT_TYPE,
         "always-raises" => RULE_ALWAYS_RAISES,
@@ -74,12 +87,32 @@ module Rigor
         "ivar-write-mismatch" => RULE_IVAR_WRITE_MISMATCH,
         "dead-assignment" => RULE_DEAD_ASSIGNMENT,
         "always-truthy-condition" => RULE_ALWAYS_TRUTHY_CONDITION,
-        "unreachable-clause" => RULE_UNREACHABLE_CLAUSE
+        "unreachable-clause" => RULE_UNREACHABLE_CLAUSE,
+        "duplicate-hash-key" => RULE_DUPLICATE_HASH_KEY,
+        "return-in-ensure" => RULE_RETURN_IN_ENSURE,
+        "shadowed-rescue-clause" => RULE_SHADOWED_RESCUE_CLAUSE
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression comment or `disable:` list disables every rule
       # whose canonical id starts with `<family>.`. Per ADR-8 § "1".
-      RULE_FAMILIES = %w[call flow assert dump def].freeze
+      RULE_FAMILIES = %w[call flow assert dump def suppression].freeze
+
+      # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
+      # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,
+      # `dynamic.dependency-source.*`, `rbs.coverage.*`, `pre-eval.parse-error`), plus the `plugin.` prefix
+      # reserved for plugin-produced identifiers. `suppression.unknown-rule` treats a dotted token whose
+      # first segment appears here as KNOWN and stays silent: these ids are legitimate suppression /
+      # `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load dynamically;
+      # aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
+      NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin].freeze
+
+      # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in
+      # `Analysis::Runner` / `Runner::DiagnosticAggregator`). A token equal to one of these is treated as
+      # known by `suppression.unknown-rule` even though it carries no family prefix; extend the list when
+      # the runner grows a new bare id.
+      NON_CHECK_DIAGNOSTIC_IDS = %w[
+        configuration-error load-error pool-degraded runtime-error source-rbs-synthesis-failed
+      ].freeze
     end
   end
 end

@@ -87,6 +87,7 @@ Fire when the control flow itself is unsound.
 | `flow.always-truthy-condition` | The predicate of an `if` / `unless` / ternary is provably truthy (or falsey) by inferred type, with surgical skips inside loop bodies and on defensive predicate calls. | warning |
 | `flow.unreachable-clause` | A `case <local>; when <Class>` (or bare-class `case`/`in`) clause whose subject narrowing proves it can never match — disjoint from the subject's type, or already exhausted by an earlier clause. | info under `balanced`, warning under `strict`, info under `lenient` |
 | `flow.dead-assignment` | A plain local-variable write whose target name is never read in the same `def` body. | warning |
+| `flow.duplicate-hash-key` | Two entries of one Hash literal carry the same literal key (`{ a: 1, a: 2 }`, `m("x" => 1, "x" => 2)`) — the last entry wins silently at runtime. Literal keys only; `:a` vs `"a"` and `1` vs `1.0` are distinct keys and never compared. | warning |
 
 `flow.unreachable-branch`, `flow.always-truthy-condition`, and
 `flow.unreachable-clause` are the **reachability family** — each

@@ -215,6 +215,40 @@ module Rigor
           since: "0.0.2"
         ),
 
+        CheckRules::RULE_RAISE_NON_EXCEPTION => Entry.new(
+          id: CheckRules::RULE_RAISE_NON_EXCEPTION,
+          summary: "`raise` / `fail` operand provably cannot be raised (TypeError at runtime).",
+          fires_when: [
+            "The call is an implicit-self `raise x` / `fail x` (Kernel#raise) with a plain first " \
+            "positional argument.",
+            "The argument's inferred type is concrete and provably NOT a legal raise operand: not an " \
+            "Exception class, not an Exception instance, not a String, and its class defines no " \
+            "`#exception` (e.g. `raise 42`, `raise :sym`, `raise [1, 2]`, `raise nil` — an explicit " \
+            "nil argument is a TypeError, unlike bare `raise`).",
+            "A Class-object operand fires only when the class is RBS-known and its ancestry provably " \
+            "excludes Exception (including a concretely-resolved bare Module).",
+            "A union argument fires only when EVERY arm is independently illegal."
+          ],
+          does_not_fire_when: [
+            "The argument is `Dynamic[T]` / untyped / unresolved, or a union with any legal or unknown arm.",
+            "The call has an explicit receiver (`obj.raise(...)` is a user method, not Kernel#raise).",
+            "The project redefines `raise` / `fail` anywhere the call could resolve (toplevel def, " \
+            "Object/Kernel monkey-patch, or a def on the enclosing class — in source or `pre_eval:`).",
+            "The argument's class defines `#exception` (RBS-declared or project-defined) — the duck " \
+            "protocol `raise` consults at runtime.",
+            "The instance operand's nominal class subsumes exceptions (`Object`, `Class`, `Module`, a " \
+            "module type) — the runtime value may still be a legal operand.",
+            "The operand's class is declared in the analyzed source — a project `sig/` that omits the " \
+            "superclass would misread the ancestry as non-Exception, so source-declared classes stay silent.",
+            "Bare `raise` (re-raises `$!`), or a splat / keyword / forwarded first argument."
+          ],
+          suppression: "`# rigor:disable call.raise-non-exception`.",
+          severity_authored: :error,
+          severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
         CheckRules::RULE_DUMP_TYPE => Entry.new(
           id: CheckRules::RULE_DUMP_TYPE,
           summary: "`dump_type(expr)` from Rigor::Testing — informational type print.",
@@ -346,6 +380,63 @@ module Rigor
           since: "0.1.17"
         ),
 
+        CheckRules::RULE_RETURN_IN_ENSURE => Entry.new(
+          id: CheckRules::RULE_RETURN_IN_ENSURE,
+          summary: "Explicit `return` inside an `ensure` clause swallows in-flight exceptions.",
+          fires_when: [
+            "An explicit `return` sits lexically inside the `ensure` clause of a `begin` / `def` / class " \
+            "body (`ensure` always runs, so its `return` overrides the method's in-flight return value " \
+            "AND silently discards any exception being raised).",
+            "The `return` is inside a plain block (`each do ... return ... end`) within the ensure body — " \
+            "a `return` there still exits the enclosing method."
+          ],
+          does_not_fire_when: [
+            "The `return` is inside a nested `def`, a lambda (`->` / `lambda`), or a `define_method` " \
+            "block within the ensure body — it exits that inner frame, not the one the `ensure` guards.",
+            "The `ensure` body contains no explicit `return` (implicit last-expression values in `ensure` " \
+            "are discarded harmlessly and do not swallow exceptions)."
+          ],
+          suppression: "`# rigor:disable flow.return-in-ensure` on the `return` line.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Purely syntactic proof with a frame-aware envelope — Ruby's `ensure` semantics make every
+          # firing a real control-flow hazard (RuboCop `Lint/EnsureReturn` precedent, low-FP).
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
+        CheckRules::RULE_SHADOWED_RESCUE_CLAUSE => Entry.new(
+          id: CheckRules::RULE_SHADOWED_RESCUE_CLAUSE,
+          summary: "A `rescue` clause an earlier clause of the same chain already fully catches.",
+          fires_when: [
+            "An earlier `rescue` clause in the same `begin` / `def` rescue chain names a superclass (or " \
+            "the same class) of EVERY exception class the later clause names — `rescue StandardError` " \
+            "followed by `rescue ArgumentError` leaves the ArgumentError arm dead.",
+            "A bare `rescue` / `rescue => e` counts as the implicit `StandardError` on either side.",
+            "Every exception reference in both clauses is a constant path resolving (against its lexical " \
+            "namespace) to a CLASS with known ancestry — RBS / registry core classes, or a project class " \
+            "whose `class Foo < Bar` superclass chain is discovered.",
+            "A multi-class arm (`rescue A, B`) fires only when every class it names is covered by earlier " \
+            "clauses."
+          ],
+          does_not_fire_when: [
+            "Any exception reference in either clause is an unresolved constant, a dynamic expression " \
+            "(`rescue klass_var`), or a splat (`rescue *ERRORS`) — the comparisons involving that clause " \
+            "stay silent.",
+            "A resolved constant is a MODULE (the `rescue MyGem::Error` module-tag mixin pattern — module " \
+            "`===` semantics are custom), or a project constant the discovery cannot certify as a class.",
+            "The later clause names a SUPERCLASS of an earlier one — the normal narrow-to-wide rescue order.",
+            "The clauses belong to different (nested) `begin` nodes — only clauses of the same chain compare."
+          ],
+          suppression: "`# rigor:disable shadowed-rescue-clause` on the shadowed `rescue` line.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Purely syntactic + class-ancestry proof: both sides must resolve to concrete classes with known
+          # ancestry before a comparison happens, so a firing has no flow / mutation FP envelope.
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
         CheckRules::RULE_DEAD_ASSIGNMENT => Entry.new(
           id: CheckRules::RULE_DEAD_ASSIGNMENT,
           summary: "Local variable assigned in a method body but never read.",
@@ -368,6 +459,33 @@ module Rigor
           # the syntactic write classification has narrow corners (the `does_not_fire_when` exclusions).
           evidence_tier: :medium,
           since: "0.1.2"
+        ),
+
+        CheckRules::RULE_DUPLICATE_HASH_KEY => Entry.new(
+          id: CheckRules::RULE_DUPLICATE_HASH_KEY,
+          summary: "Duplicate literal key within a single Hash literal (the last entry wins silently at runtime).",
+          fires_when: [
+            "Two entries of one Hash literal — braced (`{ a: 1, a: 2 }`) or bare keyword arguments " \
+            "(`m(a: 1, a: 2)`) — carry the same value-pinned literal key: a symbol (the `key:` shorthand " \
+            "and `:key =>` spell the same symbol), a plain non-interpolated string, an integer, a float, " \
+            "or `true` / `false` / `nil`.",
+            "A `**splat` between two identical literal keys does not rescue the pair — the later literal " \
+            "entry still overwrites the earlier one regardless of what the splat contributes."
+          ],
+          does_not_fire_when: [
+            "Either key is not value-pinned at parse time: interpolated strings / symbols, constants, " \
+            "method calls, locals, and `**splat` entries are never compared.",
+            "The keys live in different literal kinds — `:a` vs `\"a\"`, and `1` vs `1.0` (`1.eql?(1.0)` " \
+            "is false, so Hash treats them as distinct keys) never collide.",
+            "The repeated keys sit in different Hash literals (nested literals are each their own scope)."
+          ],
+          suppression: "`# rigor:disable duplicate-hash-key` on the later occurrence's line.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Purely syntactic value-pinned comparison with no metaprogramming escape: when it fires, the
+          # runtime overwrite is certain (Ruby itself warns under `-w`).
+          evidence_tier: :high,
+          since: "0.3.0"
         ),
 
         CheckRules::RULE_RETURN_TYPE => Entry.new(
@@ -526,6 +644,55 @@ module Rigor
           # escapes are excluded.
           evidence_tier: :high,
           since: "0.1.2"
+        ),
+
+        CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE => Entry.new(
+          id: CheckRules::RULE_SUPPRESSION_UNKNOWN_RULE,
+          summary: "A `# rigor:disable[-file]` comment names a rule that does not exist.",
+          fires_when: [
+            "A `# rigor:disable` / `# rigor:disable-file` marker carries a token that is not a canonical " \
+            "rule id, a legacy alias, `all`, or a family wildcard (`call` / `flow` / ...).",
+            "The token is also not a known non-catalogue engine diagnostic (`rbs_extended.*`, `dynamic.*`, " \
+            "`rbs.*`, `pre-eval.*`, or a bare engine id such as `load-error`).",
+            "Typically a typo — `call.undefined-metod` — leaving the suppression silently ineffective."
+          ],
+          does_not_fire_when: [
+            "The token resolves (canonical id, legacy alias, `all`, family wildcard, known engine id).",
+            "The token starts with `plugin.` — plugins load dynamically, so their rule vocabulary cannot " \
+            "be enumerated statically and under-warning is the FP-safe direction.",
+            "The comment merely mentions the marker followed by non-token text (documentation prose " \
+            "like \"`# rigor:disable <rule>` comments\") — that is not parsed as a suppression either."
+          ],
+          suppression: "Fix or remove the dead token; `# rigor:disable suppression.unknown-rule` on the " \
+                       "same line, or `disable: [\"suppression.unknown-rule\"]` in `.rigor.yml`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :warning },
+          # Pure token-table membership over the same tables the suppression matcher uses — no inference
+          # uncertainty; the plugin/prose escapes above are excluded before firing.
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
+        CheckRules::RULE_SUPPRESSION_EMPTY => Entry.new(
+          id: CheckRules::RULE_SUPPRESSION_EMPTY,
+          summary: "A `# rigor:disable[-file]` comment lists no rules.",
+          fires_when: [
+            "A comment is exactly the bare marker (`# rigor:disable` / `# rigor:disable-file`) with " \
+            "nothing but whitespace or commas after it.",
+            "Such a marker suppresses nothing — the author almost certainly meant to name rules or `all`."
+          ],
+          does_not_fire_when: [
+            "At least one token follows the marker (each token is then checked by " \
+            "`suppression.unknown-rule` instead).",
+            "Non-token text follows the marker (documentation prose mentioning the syntax)."
+          ],
+          suppression: "Complete the marker (`# rigor:disable <rule>` / `all`) or delete it; " \
+                       "`disable: [\"suppression.empty\"]` in `.rigor.yml`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :warning },
+          # Syntactic: the marker word is present and the token list is provably empty.
+          evidence_tier: :high,
+          since: "0.3.0"
         )
       }.freeze
 

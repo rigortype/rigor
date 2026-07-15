@@ -12,7 +12,10 @@ require_relative "check_rules/rule_ids"
 require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
+require_relative "check_rules/shadowed_rescue_collector"
 require_relative "check_rules/dead_assignment_collector"
+require_relative "check_rules/duplicate_hash_key_collector"
+require_relative "check_rules/return_in_ensure_collector"
 require_relative "check_rules/ivar_write_collector"
 require_relative "check_rules/main_pass_collector"
 require_relative "check_rules/self_closedness_scanner"
@@ -92,12 +95,30 @@ module Rigor
         collectors = node_collectors || run_node_collectors(path, root, scope_index)
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
-        diagnostics.concat(always_truthy_condition_diagnostics(path, collectors[:always_truthy].results))
-        diagnostics.concat(unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results))
-        diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
-        diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
+        COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
+          diagnostics.concat(send(builder, path, collectors[role].results))
+        end
+        # Suppression-marker validation (`suppression.*`) runs BEFORE the filter so its own diagnostics are
+        # suppressible like any other rule — `# rigor:disable suppression.unknown-rule` on the offending
+        # comment's line works, with no regress (the token itself is known, so it never re-fires).
+        diagnostics.concat(suppression_marker_diagnostics(path, comments))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
+
+      # The per-collector diagnostic builders {.diagnose} folds over, in the historical emission order
+      # (always-truthy → unreachable-clause → shadowed-rescue → ivar-write → dead-assignment →
+      # duplicate-hash-key → return-in-ensure). Keys match {.build_node_collectors}' roles; each value is a
+      # `(path, results)` module_function on this module.
+      COLLECTOR_DIAGNOSTIC_BUILDERS = {
+        always_truthy: :always_truthy_condition_diagnostics,
+        unreachable_clauses: :unreachable_clause_diagnostics,
+        shadowed_rescues: :shadowed_rescue_diagnostics,
+        ivar_writes: :ivar_write_mismatch_diagnostics,
+        dead_assignments: :dead_assignment_diagnostics,
+        duplicate_hash_keys: :duplicate_hash_key_diagnostics,
+        return_in_ensure: :return_in_ensure_diagnostics
+      }.freeze
+      private_constant :COLLECTOR_DIAGNOSTIC_BUILDERS
 
       # The verbatim per-node dispatch of the former inline main pass
       # (`diagnose`'s `Source::NodeWalker.each` `case`), now invoked by
@@ -133,8 +154,11 @@ module Rigor
           main_pass: MainPassCollector.new(->(node) { main_pass_node_diagnostics(path, node, scope_index) }),
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
+          shadowed_rescues: ShadowedRescueCollector.new(scope_index),
           ivar_writes: IvarWriteCollector.new(scope_index),
-          dead_assignments: DeadAssignmentCollector.new(scope_index)
+          dead_assignments: DeadAssignmentCollector.new(scope_index),
+          duplicate_hash_keys: DuplicateHashKeyCollector.new(scope_index),
+          return_in_ensure: ReturnInEnsureCollector.new(scope_index)
         }
       end
 
@@ -234,6 +258,7 @@ module Rigor
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
           always_raises_diagnostic(path, node, scope_index),
+          raise_non_exception_diagnostic(path, node, scope_index),
           visibility_mismatch_diagnostic(path, node, scope_index)
         ].compact
       end
@@ -278,6 +303,31 @@ module Rigor
         end
       end
 
+      # v0.3.0 — `flow.duplicate-hash-key`. Emits a diagnostic for each LATER occurrence of a repeated
+      # LITERAL key within one Hash literal (braced or bare-kwargs) — Ruby keeps the last entry silently
+      # at runtime, so the earlier value is dead. The
+      # `Analysis::CheckRules::DuplicateHashKeyCollector` describes the value-pinned-literal-only
+      # envelope (symbols / plain strings / integers / floats / true / false / nil; never
+      # cross-kind, never interpolation / constants / calls / splats).
+      def duplicate_hash_key_diagnostics(path, duplicate_keys)
+        duplicate_keys.map do |result|
+          build_duplicate_hash_key_diagnostic(path, result)
+        end
+      end
+
+      # v0.3.0 — `flow.return-in-ensure`. One diagnostic per explicit
+      # `return` lexically inside an `ensure` clause body: it silently
+      # discards the method's in-flight return value and swallows any
+      # in-flight exception. Purely syntactic; the
+      # `Analysis::CheckRules::ReturnInEnsureCollector` describes the
+      # frame-aware envelope (nested def / lambda / `define_method`
+      # blocks are excluded, plain blocks are not).
+      def return_in_ensure_diagnostics(path, results)
+        results.map do |result|
+          build_return_in_ensure_diagnostic(path, result[:return_node])
+        end
+      end
+
       # v0.1.2 — `flow.always-truthy-condition`. Fires on
       # `if` / `unless` / ternary predicates whose inferred
       # type is a `Type::Constant` AND that don't fall in
@@ -298,6 +348,15 @@ module Rigor
       def unreachable_clause_diagnostics(path, results)
         results.map do |result|
           build_unreachable_clause_diagnostic(path, result)
+        end
+      end
+
+      # `flow.shadowed-rescue-clause` — one diagnostic per rescue clause every earlier-comparable class of
+      # which is already caught by an earlier clause of the same chain (see {ShadowedRescueCollector} for
+      # the ancestry-certainty envelope).
+      def shadowed_rescue_diagnostics(path, results)
+        results.map do |result|
+          build_shadowed_rescue_diagnostic(path, result)
         end
       end
 
@@ -375,6 +434,13 @@ module Rigor
       FILE_SUPPRESSION_PATTERN = /#\s*rigor:disable-file\s+(?<rules>[\w.,\s-]+)/
       private_constant :FILE_SUPPRESSION_PATTERN
 
+      # A `rigor:disable[-file]` marker word regardless of whether any rule tokens follow. Used only by the
+      # `suppression.empty` detection — the two suppression patterns above require at least one token
+      # character, so a bare `# rigor:disable` never reaches them. The lookahead keeps
+      # `rigor:disable-something-else` from counting as a marker.
+      BARE_SUPPRESSION_MARKER = /#\s*rigor:disable(?<file>-file)?(?![\w-])(?<rest>.*)/
+      private_constant :BARE_SUPPRESSION_MARKER
+
       # @return [Array<(Hash{Integer => Set}, Set)>] pair of
       #   `(line_suppressions, file_suppressions)`. Line
       #   suppressions are keyed by source line number; file
@@ -397,6 +463,95 @@ module Rigor
         raw.to_s.split(/[\s,]+/).reject(&:empty?).each do |token|
           target.merge(expand_token(token))
         end
+      end
+
+      # PHPStan-`IgnoreParseErrorRule`-modelled surveillance over the suppression markers themselves: a
+      # malformed or ineffective `# rigor:disable` / `# rigor:disable-file` comment must not silently no-op
+      # (the typo'd `# rigor:disable call.undefined-metod` suppresses nothing and the user never learns).
+      # Emits `suppression.unknown-rule` for every marker token that resolves to no known identifier, and
+      # `suppression.empty` for a marker that lists no rules at all. The MATCHING semantics are deliberately
+      # unchanged — an unknown token is still kept verbatim per the diagnostic-policy spec — so this is
+      # additive surveillance only. Both diagnostics run before {.filter_suppressed} and flow through it,
+      # so they are themselves suppressible (`# rigor:disable suppression.unknown-rule`) with no regress:
+      # that token is known, so acknowledging it never re-fires the rule.
+      def suppression_marker_diagnostics(path, comments)
+        comments.each_with_object([]) do |comment, diagnostics|
+          source = comment.location.slice
+          if (match = FILE_SUPPRESSION_PATTERN.match(source))
+            validate_suppression_tokens(match[:rules], "rigor:disable-file", path, comment, diagnostics)
+          elsif (match = LINE_SUPPRESSION_PATTERN.match(source))
+            validate_suppression_tokens(match[:rules], "rigor:disable", path, comment, diagnostics)
+          else
+            diagnose_bare_suppression_marker(path, comment, source, diagnostics)
+          end
+        end
+      end
+
+      def validate_suppression_tokens(raw, marker, path, comment, diagnostics)
+        tokens = raw.to_s.split(/[\s,]+/).reject(&:empty?)
+        if tokens.empty?
+          diagnostics << empty_suppression_diagnostic(path, comment, marker)
+          return
+        end
+
+        tokens.each do |token|
+          next if known_suppression_token?(token)
+
+          diagnostics << unknown_suppression_rule_diagnostic(path, comment, marker, token)
+        end
+      end
+
+      # A comment carrying the marker word but not the token-bearing suppression grammar. A remainder of
+      # nothing but whitespace / commas is a genuinely empty marker (`# rigor:disable`); anything else
+      # (documentation prose like "`# rigor:disable <rule>` comments") is left alone as an ordinary
+      # comment, matching the parse path, which never treats it as a suppression either.
+      def diagnose_bare_suppression_marker(path, comment, source, diagnostics)
+        bare = BARE_SUPPRESSION_MARKER.match(source)
+        return if bare.nil? || !bare[:rest].match?(/\A[\s,]*\z/)
+
+        marker = bare[:file] ? "rigor:disable-file" : "rigor:disable"
+        diagnostics << empty_suppression_diagnostic(path, comment, marker)
+      end
+
+      # True when a suppression token resolves to a diagnostic identifier some producer can emit: a
+      # canonical CheckRules id, a legacy alias, the `all` wildcard, a family wildcard, a bare
+      # non-catalogue engine id, or a dotted id under a known non-check family (`rbs_extended.*`,
+      # `dynamic.*`, `rbs.*`, `pre-eval.*`, and any `plugin.`-prefixed id — plugins load dynamically, so
+      # their rule vocabulary cannot be enumerated here and under-warning is the FP-safe direction).
+      def known_suppression_token?(token)
+        return true if token == "all"
+        return true if ALL_RULES.include?(token) || LEGACY_RULE_ALIASES.key?(token) ||
+                       RULE_FAMILIES.include?(token) || NON_CHECK_DIAGNOSTIC_IDS.include?(token)
+
+        family, rest = token.split(".", 2)
+        !rest.nil? && NON_CHECK_DIAGNOSTIC_FAMILIES.include?(family)
+      end
+
+      def unknown_suppression_rule_diagnostic(path, comment, marker, token)
+        Diagnostic.new(
+          path: path,
+          line: comment.location.start_line,
+          column: comment.location.start_column + 1,
+          message: "unknown rule `#{token}` in `# #{marker}` — the token matches no known rule, alias, " \
+                   "or family, so this suppression has no effect. Likely a typo; `rigor explain <rule>` " \
+                   "lists the canonical ids.",
+          severity: :warning,
+          rule: RULE_SUPPRESSION_UNKNOWN_RULE,
+          source_family: :builtin
+        )
+      end
+
+      def empty_suppression_diagnostic(path, comment, marker)
+        Diagnostic.new(
+          path: path,
+          line: comment.location.start_line,
+          column: comment.location.start_column + 1,
+          message: "`# #{marker}` lists no rules, so this suppression has no effect. Name the rules to " \
+                   "suppress (`# #{marker} call.undefined-method`) or use `# #{marker} all`.",
+          severity: :warning,
+          rule: RULE_SUPPRESSION_EMPTY,
+          source_family: :builtin
+        )
       end
 
       # Expands a list of user-supplied rule tokens into the
@@ -1317,6 +1472,178 @@ module Rigor
           )
         end
 
+        # `call.raise-non-exception` — `raise x` / `fail x` where the first argument's statically-inferred
+        # type is provably NOT a legal raise operand (PHPStan ThrowExprTypeRule analogue). Legal operands:
+        # an Exception class object, an Exception instance, a String (raises RuntimeError), or any object
+        # whose class defines `#exception` (the duck protocol `raise` consults at runtime). Anything else
+        # (`raise 42`, `raise :sym`, `raise nil` — an explicit nil argument is a TypeError, unlike bare
+        # `raise` which re-raises `$!`) raises TypeError at runtime.
+        #
+        # Conservative envelope (FP discipline):
+        # - Implicit-self `raise` / `fail` only; an explicit-receiver call is a user method, not Kernel#raise.
+        # - Silent when the project redefines `raise` / `fail` anywhere the call could resolve (a same-file
+        #   toplevel def, an Object/Kernel monkey-patch, or a def on the enclosing class — in source or via
+        #   `pre_eval:`).
+        # - Only the first positional argument is checked; splat / kwargs / forwarded first args bail.
+        # - Fires only on a concrete verdict: Dynamic / Top / unknown / unresolved types are silent, and a
+        #   Union fires only when EVERY arm is independently illegal.
+        # - A Class operand (`Type::Singleton`) is exact, so both `:disjoint` and `:superclass` orderings
+        #   against Exception are provably illegal — but only when the class is RBS-known, not an ADR-26
+        #   open receiver / synthesized stub, and its singleton defines no `exception` method.
+        # - An instance operand's nominal class is NOT exact (a runtime subclass could define `#exception`
+        #   or be an Exception), so only `:disjoint` fires, and the generic carriers (`Class` / `Module` /
+        #   `Object` / `BasicObject`) plus module-typed values (any includer could be an Exception) bail.
+        RAISE_METHOD_NAMES = %i[raise fail].freeze
+        private_constant :RAISE_METHOD_NAMES
+
+        # Instance types whose nominal class subsumes exception values (or class objects), so a "disjoint
+        # from Exception" ordering proves nothing about the runtime value. `Object` / `BasicObject` order as
+        # `:superclass` (already silent) but are listed for explicitness.
+        RAISE_UNEXACT_INSTANCE_CLASSES = %w[Class Module Object BasicObject].freeze
+        private_constant :RAISE_UNEXACT_INSTANCE_CLASSES
+
+        def raise_non_exception_diagnostic(path, call_node, scope_index)
+          return nil unless call_node.receiver.nil?
+          return nil unless RAISE_METHOD_NAMES.include?(call_node.name)
+          return nil unless call_node.block.nil?
+
+          arg = first_positional_raise_operand(call_node)
+          return nil if arg.nil?
+
+          scope = scope_index[arg] || scope_index[call_node]
+          return nil if scope.nil?
+          return nil if raise_redefined_in_scope?(scope, call_node.name)
+
+          operand_type = scope.type_of(arg)
+          return nil unless raise_operand_verdict(operand_type, scope) == :illegal
+
+          build_raise_non_exception_diagnostic(path, call_node, operand_type)
+        end
+
+        def first_positional_raise_operand(call_node)
+          args = call_node.arguments&.arguments
+          return nil if args.nil? || args.empty?
+
+          first = args.first
+          return nil if first.is_a?(Prism::SplatNode) || first.is_a?(Prism::KeywordHashNode) ||
+                        first.is_a?(Prism::BlockArgumentNode) || first.is_a?(Prism::ForwardingArgumentsNode)
+
+          first
+        end
+
+        # True when a project-side definition of `raise` / `fail` could shadow Kernel's at this call site:
+        # a same-file toplevel def, a monkey-patch on Object / Kernel (in source or `pre_eval:`), or a def
+        # on the enclosing class (instance or singleton side — implicit self dispatches to either depending
+        # on context, and being silent for both is the cheap conservative answer).
+        def raise_redefined_in_scope?(scope, name)
+          return true if scope.top_level_def_for(name)
+          return true if source_declared_method?(scope, "Object", name, :instance)
+          return true if source_declared_method?(scope, "Kernel", name, :instance)
+
+          self_type = scope.self_type
+          return false unless self_type.respond_to?(:class_name)
+
+          class_name = self_type.class_name
+          return false if class_name.nil?
+
+          source_declared_method?(scope, class_name, name, :instance) ||
+            source_declared_method?(scope, class_name, name, :singleton)
+        end
+
+        # Trinary verdict — `:legal` / `:illegal` / `:unknown`. Only `:illegal` fires; anything the engine
+        # cannot prove stays `:unknown` (silent).
+        def raise_operand_verdict(type, scope)
+          case type
+          when Type::Union
+            verdicts = type.members.map { |member| raise_operand_verdict(member, scope) }
+            return :illegal if verdicts.all?(:illegal)
+
+            verdicts.all?(:legal) ? :legal : :unknown
+          when Type::Singleton
+            raise_class_operand_verdict(type.class_name, scope)
+          else
+            raise_instance_operand_verdict(type, scope)
+          end
+        end
+
+        # A `Type::Singleton` names ONE exact class / module object, so an ordering that places it outside
+        # Exception's ancestry (`:disjoint`, or `:superclass` — e.g. `raise Object`) is a proof, provided
+        # the singleton also lacks an `exception` method (`raise Klass` calls `Klass.exception`). A module
+        # constant orders `:disjoint` and fires unless its singleton defines `exception`.
+        def raise_class_operand_verdict(class_name, scope)
+          return :unknown if class_name.nil? || scope.environment.nil?
+          return :unknown if unbounded_receiver_surface?(class_name, scope)
+          return :unknown if Rigor::Reflection.discovered_class?(class_name, scope: scope)
+          return :unknown unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+
+          case Rigor::Reflection.class_ordering(class_name, "Exception", scope: scope)
+          when :equal, :subclass then :legal
+          when :superclass, :disjoint
+            raise_duck_exception?(class_name, :singleton, scope) ? :legal : :illegal
+          else
+            :unknown
+          end
+        end
+
+        # An instance operand: legal when its class is String-family (raises RuntimeError) or an Exception
+        # descendant; illegal only when the class is fully known, exact enough (not a generic metaclass /
+        # module carrier), provably disjoint from BOTH, and defines no `#exception`. `:superclass` stays
+        # silent — a value typed `Object` may well BE an Exception at runtime.
+        def raise_instance_operand_verdict(type, scope)
+          class_name = concrete_class_name(type)
+          return :unknown if class_name.nil? || scope.environment.nil?
+          return :unknown if RAISE_UNEXACT_INSTANCE_CLASSES.include?(class_name)
+          return :unknown if unbounded_receiver_surface?(class_name, scope)
+          # A project-declared class's ancestry must not be proven from RBS alone: a `sig/` declaration that
+          # omits the superclass (`class Conflict` for a source-side `class Conflict < StandardError`)
+          # defaults to Object in the RBS env, which would read as "disjoint from Exception" for a class
+          # that IS one at runtime (the rule's first self-check firing, `Plugin::FactStore::Conflict`).
+          # Source-discovered classes stay silent.
+          return :unknown if Rigor::Reflection.discovered_class?(class_name, scope: scope)
+          return :unknown unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+          return :unknown if scope.environment.rbs_module?(class_name)
+
+          string_ordering = Rigor::Reflection.class_ordering(class_name, "String", scope: scope)
+          return :legal if %i[equal subclass].include?(string_ordering)
+
+          case Rigor::Reflection.class_ordering(class_name, "Exception", scope: scope)
+          when :equal, :subclass then :legal
+          when :disjoint
+            raise_duck_exception?(class_name, :instance, scope) ? :legal : :illegal
+          else
+            :unknown
+          end
+        end
+
+        # Whether the class carries an `exception` method on the given side — from RBS, an in-source `def`,
+        # or a `pre_eval:` patch. An unbuildable definition returns true (assume the duck) so structural
+        # RBS gaps never manufacture a firing.
+        def raise_duck_exception?(class_name, kind, scope)
+          return true if source_declared_method?(scope, class_name, :exception, kind)
+
+          definition = if kind == :singleton
+                         Rigor::Reflection.singleton_definition(class_name, scope: scope)
+                       else
+                         Rigor::Reflection.instance_definition(class_name, scope: scope)
+                       end
+          return true if definition.nil?
+
+          !definition.methods[:exception].nil?
+        end
+
+        def build_raise_non_exception_diagnostic(path, call_node, operand_type)
+          Diagnostic.from_message_loc(
+            call_node,
+            rule: RULE_RAISE_NON_EXCEPTION,
+            path: path,
+            message: "`#{call_node.name}' operand types as #{operand_type.describe(:short)}, which is not " \
+                     "an Exception class, an Exception instance, a String, or an object defining " \
+                     "`#exception' — this raises TypeError at runtime",
+            severity: :error,
+            method_name: call_node.name.to_s
+          )
+        end
+
         # v0.1.2 — `flow.unreachable-branch`. Fires when an `IfNode` / `UnlessNode` whose predicate is a
         # literal `true` / `false` / `nil` (or a literal numeric / string / symbol whose Ruby truthiness is
         # known at-a-glance) has an observable dead branch. The diagnostic points at the dead branch (not
@@ -1468,12 +1795,56 @@ module Rigor
           end
         end
 
+        def build_shadowed_rescue_diagnostic(path, result)
+          Diagnostic.from_node(
+            result.clause,
+            rule: RULE_SHADOWED_RESCUE_CLAUSE,
+            path: path,
+            message: shadowed_rescue_message(result),
+            severity: :warning
+          )
+        end
+
+        def shadowed_rescue_message(result)
+          earlier = result.earlier_sources.each_with_index.map do |source, index|
+            "`#{source}' (line #{result.earlier_lines[index]})"
+          end
+          "shadowed `#{result.clause_source}': every exception class it names is already caught " \
+            "by the earlier #{earlier.join(' and ')} clause#{'s' if earlier.size > 1}, so this clause can never run"
+        end
+
         def build_dead_assignment_diagnostic(path, write_node, def_node)
           Diagnostic.from_name_loc(
             write_node,
             rule: RULE_DEAD_ASSIGNMENT,
             path: path,
             message: "local `#{write_node.name}' assigned in `#{def_node.name}' but never read",
+            severity: :warning
+          )
+        end
+
+        # The diagnostic points at the LATER occurrence (the entry that wins at runtime) and names the
+        # first occurrence's line, so the fix — delete or rename one of the two — is visible from the
+        # message alone.
+        def build_duplicate_hash_key_diagnostic(path, result)
+          first_line = result[:first_key_node].location.start_line
+          Diagnostic.from_node(
+            result[:key_node],
+            rule: RULE_DUPLICATE_HASH_KEY,
+            path: path,
+            message: "duplicate hash key `#{result[:key_label]}' in the same literal; this entry " \
+                     "overwrites the value first set at line #{first_line}",
+            severity: :warning
+          )
+        end
+
+        def build_return_in_ensure_diagnostic(path, return_node)
+          Diagnostic.from_location(
+            return_node.keyword_loc,
+            rule: RULE_RETURN_IN_ENSURE,
+            path: path,
+            message: "`return' inside `ensure' discards the method's in-flight return value " \
+                     "and swallows any in-flight exception",
             severity: :warning
           )
         end

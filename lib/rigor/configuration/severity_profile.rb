@@ -37,11 +37,15 @@ module Rigor
           "call.wrong-arity" => :error,
           "call.argument-type-mismatch" => :warning,
           "call.possible-nil-receiver" => :warning,
+          "call.raise-non-exception" => :warning,
           "flow.always-raises" => :warning,
           "flow.unreachable-branch" => :info,
           "flow.dead-assignment" => :info,
           "flow.always-truthy-condition" => :info,
           "flow.unreachable-clause" => :info,
+          "flow.duplicate-hash-key" => :info,
+          "flow.return-in-ensure" => :info,
+          "flow.shadowed-rescue-clause" => :info,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -50,6 +54,11 @@ module Rigor
           "def.override-return-widened" => :off,
           "def.override-param-narrowed" => :off,
           "def.ivar-write-mismatch" => :warning,
+          # ADR-8 companion (PHPStan IgnoreParseErrorRule-modelled): a broken suppression comment is
+          # equally bad in every profile — it silently fails to do what the author believes it does — so
+          # both rules stay :warning across all three profiles (including strict).
+          "suppression.unknown-rule" => :warning,
+          "suppression.empty" => :warning,
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
           # lenient — it is never unsolicited noise.
@@ -62,6 +71,7 @@ module Rigor
           "call.wrong-arity" => :error,
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,
+          "call.raise-non-exception" => :error,
           "flow.always-raises" => :error,
           "flow.unreachable-branch" => :warning,
           "flow.dead-assignment" => :warning,
@@ -71,6 +81,9 @@ module Rigor
           # green; promote to :warning once Mastodon/GitLab/Redmine triage
           # to zero net false positives.
           "flow.unreachable-clause" => :info,
+          "flow.duplicate-hash-key" => :warning,
+          "flow.return-in-ensure" => :warning,
+          "flow.shadowed-rescue-clause" => :warning,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -79,6 +92,8 @@ module Rigor
           "def.override-return-widened" => :warning,
           "def.override-param-narrowed" => :warning,
           "def.ivar-write-mismatch" => :warning,
+          "suppression.unknown-rule" => :warning,
+          "suppression.empty" => :warning,
           "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         strict: {
@@ -88,6 +103,7 @@ module Rigor
           "call.wrong-arity" => :error,
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,
+          "call.raise-non-exception" => :error,
           "flow.always-raises" => :error,
           "flow.unreachable-branch" => :error,
           "flow.dead-assignment" => :error,
@@ -96,6 +112,9 @@ module Rigor
           # below its :error siblings) while it proves out — see the
           # balanced-profile note above.
           "flow.unreachable-clause" => :warning,
+          "flow.duplicate-hash-key" => :error,
+          "flow.return-in-ensure" => :error,
+          "flow.shadowed-rescue-clause" => :error,
           "assert.type-mismatch" => :error,
           "dump.type" => :error,
           "def.return-type-mismatch" => :error,
@@ -104,6 +123,8 @@ module Rigor
           "def.override-return-widened" => :error,
           "def.override-param-narrowed" => :error,
           "def.ivar-write-mismatch" => :error,
+          "suppression.unknown-rule" => :warning,
+          "suppression.empty" => :warning,
           "rbs_extended.unsatisfied-conformance" => :error
         }.freeze
       }.freeze

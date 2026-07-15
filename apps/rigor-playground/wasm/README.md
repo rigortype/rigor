@@ -15,9 +15,9 @@ deployment until this build is verified green — see "Status" below.
 | --- | --- |
 | `Gemfile` | The exact gem set packed into the wasm: `rigortype` (which carries the `rigor-rbs-inline` plugin via `require_paths`) + `rbs-inline`, plus `ruby_wasm` (the `rbwasm` build tool). |
 | `Rakefile` | `rake build` / `serve` / `smoke` / `clean`. |
-| `vfs/boot.rb` | The in-VM adapter — the wasm analogue of the backend's `app.rb`. Exposes `check` / `annotate` / `annotate-lines` / `type-of` to JS, returning the same WD2 JSON. |
+| `vfs/boot.rb` | The in-VM adapter — the wasm analogue of the backend's `app.rb`. Exposes `check` / `annotate` / `annotate-lines` / `type-of` to JS (returning the same WD2 JSON), plus the wasm-only `trace` operation that feeds the in-browser type-inference animation (`rigor trace --format=json`). |
 | `vfs/.rigor.yml` | Playground config (loads `rigor-rbs-inline`, `severity_profile: strict`), packed to `/playground` so CLI cwd-discovery finds it. |
-| `index.html` | Static frontend. Boots the VM, reuses the CodeMirror UI + JSON contract, swaps `fetch()` for `vm.eval` (WD9). |
+| `index.html` | Static frontend. Boots the VM, reuses the CodeMirror UI + JSON contract, swaps `fetch()` for `vm.eval` (WD9). Also hosts the **Trace types** type-inference animation — a browser replay of `rigor trace` (source highlight + inline `⟶ Type` + a live scope table + playback), driven by the `trace` operation. |
 
 ## Prerequisites
 

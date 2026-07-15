@@ -51,12 +51,22 @@ const a = dispatch("annotate-lines", { source: SRC })
 const annoCount = Object.keys(a.annotations || {}).length
 console.log(`annotations: ${annoCount}`)
 
-// Expect exactly the two diagnostics the backend produces for this snippet,
-// and at least one type annotation.
+// "Trace types" — the animation's data source. `trace` must return the
+// FlowTracer event stream under { events: [...] }; the concise default carries
+// the bind/union/dispatch teachable moments (here at least the `x = nil` bind).
+const tr = dispatch("trace", { source: SRC })
+const traceCount = (tr.events || []).length
+const traceKinds = new Set((tr.events || []).map((e) => e.kind))
+console.log(`trace events: ${traceCount} (${[...traceKinds].sort().join(",")})`)
+
+// Expect exactly the two diagnostics the backend produces for this snippet, at
+// least one type annotation, and a trace stream that reached a `bind`.
 const rules = r.diagnostics.map((d) => d.rule).sort()
 const ok =
   r.error_count === 2 &&
   rules.join(",") === "call.argument-type-mismatch,call.undefined-method" &&
-  annoCount > 0
+  annoCount > 0 &&
+  traceCount > 0 &&
+  traceKinds.has("bind")
 console.log(ok ? "SMOKE OK" : "SMOKE FAILED")
 process.exit(ok ? 0 : 1)

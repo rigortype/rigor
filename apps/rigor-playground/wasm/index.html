@@ -60,6 +60,7 @@
       --selection: #D9C9C5; --gutter-fg: var(--rigor-ink-3); --gutter-bg: var(--rigor-paper-2);
       --anno: var(--rigor-ink-3);
       --c-error: #B5302B; --c-warning: #8A5F12; --c-info: #2D5C9E; --c-ok: #2E6F3F; --sev-fg: #fff;
+      --trace-hl: #EAD9B0; --trace-hl-border: #C79A3A;   /* type-inference animation highlight */
       /* Syntax highlight — light (deep, warm ink on parchment) */
       --syn-keyword: #8A2C6E; --syn-def: #9A5B12; --syn-type: #2E6F3F; --syn-string: #4A6E26;
       --syn-number: #9A3F1E; --syn-comment: #7C7568; --syn-meta: #2D5C9E;
@@ -71,6 +72,7 @@
       --active-line: #232830; --selection: #3D2F2E; --gutter-fg: #8A909B; --gutter-bg: #181B21;
       --anno: #8A909B;
       --c-error: #ED8B82; --c-warning: #E4B25A; --c-info: #8AB6E6; --c-ok: #86C28E; --sev-fg: #0E1116;
+      --trace-hl: #463A22; --trace-hl-border: #8A6A2A;   /* type-inference animation highlight */
       /* Syntax highlight — dark (warm parchment tones, no cold purple/blue) */
       --syn-keyword: #E0A0B4; --syn-def: #E6B860; --syn-type: #93C9A3; --syn-string: #B5C56E;
       --syn-number: #EC9A6E; --syn-comment: #8B8475; --syn-meta: #D7B6E0;
@@ -144,6 +146,63 @@
     .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionIcon { color: var(--sev-fg); }
     .cm-completionInfo { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 4px; }
 
+    /* ── Type-inference trace animation (wasm-only) ──────────────────────────
+       A browser port of `rigor trace`: the editor becomes the source panel
+       (the current event's range is highlighted + gets an inline `⟶ Type`),
+       while the sidebar swaps its diagnostics view for a scope table + a
+       step narration + playback controls, driven by the FlowTracer event
+       stream boot.rb returns from `trace`. */
+    .cm-trace-active { background: var(--trace-hl); border-radius: 2px; box-shadow: inset 0 -2px 0 var(--trace-hl-border); }
+    .cm-trace-type { color: var(--accent); font-style: italic; font-weight: 600; padding-left: 2px; pointer-events: none; user-select: none; white-space: pre; }
+
+    /* The sidebar shows EITHER the diagnostics view or the trace panel, never
+       both: an explicit data-view (rather than the `hidden` attribute, which
+       the panels' own `display` would override) toggles between them. */
+    #trace-panel { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+    #sidebar[data-view="trace"] #sidebar-header,
+    #sidebar[data-view="trace"] #diagnostics { display: none; }
+    #sidebar[data-view="trace"] #trace-panel { display: flex; }
+
+    .tr-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); background: var(--surface); border-bottom: 1px solid var(--border); }
+    .tr-close { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 3px; }
+    .tr-close:hover { background: var(--hover); color: var(--text); }
+    .tr-controls { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+    .tr-buttons { display: flex; align-items: center; gap: 4px; }
+    .tr-buttons button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); border-radius: 4px; cursor: pointer; font-size: 12px; }
+    .tr-buttons button:hover { background: var(--hover); }
+    .tr-buttons #tr-play { background: var(--accent); border-color: var(--accent); color: var(--sev-fg); }
+    .tr-step { margin-left: auto; font-family: var(--rigor-font-mono); font-size: 12px; color: var(--muted); }
+    #tr-scrub { width: 100%; accent-color: var(--accent); }
+    .tr-options { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); gap: 8px; }
+    .tr-options select { font: inherit; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 3px; padding: 2px 4px; }
+    .tr-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+    .tr-narration { padding: 14px 16px; border-bottom: 1px solid var(--border); font-family: var(--rigor-font-mono); font-size: 12.5px; line-height: 1.6; }
+    .tr-badge { display: inline-block; font-family: var(--rigor-font-sans); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 7px; border-radius: 2px; color: var(--sev-fg); margin-bottom: 8px; }
+    .tr-badge-bind { background: var(--c-info); }
+    .tr-badge-union { background: var(--c-warning); }
+    .tr-badge-dispatch { background: var(--c-ok); }
+    .tr-badge-dispatch-unresolved { background: var(--muted); }
+    .tr-badge-enter { background: var(--border-strong); color: var(--text); }
+    .tr-badge-result { background: var(--accent); }
+    .tr-narr-body { word-break: break-word; }
+    .tr-name { color: var(--syn-var); font-weight: 600; }
+    .tr-type { color: var(--syn-type); font-weight: 600; }
+    .tr-method { color: var(--syn-def); font-weight: 600; }
+    .tr-node { color: var(--syn-meta); }
+    .tr-arrow, .tr-op { color: var(--muted); }
+    .tr-muted { color: var(--muted); }
+    .tr-stack { margin-top: 8px; color: var(--muted); font-size: 11px; }
+    .tr-scope-header { padding: 8px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); background: var(--surface); }
+    .tr-scope { flex: 1; overflow-y: auto; padding: 6px 0; }
+    .tr-scope-empty { padding: 8px 16px; font-family: var(--rigor-font-mono); font-size: 12px; color: var(--muted); }
+    .tr-row { display: flex; gap: 8px; padding: 5px 16px; font-family: var(--rigor-font-mono); font-size: 12.5px; align-items: baseline; }
+    .tr-row-name { color: var(--syn-var); flex-shrink: 0; }
+    .tr-row-name::after { content: " :"; color: var(--muted); }
+    .tr-row-type { color: var(--syn-type); word-break: break-word; }
+    .tr-row-changed { animation: tr-flash 0.9s ease-out; }
+    @keyframes tr-flash { 0% { background: var(--trace-hl); } 100% { background: transparent; } }
+    @media (prefers-reduced-motion: reduce) { .tr-row-changed { animation: none; } }
+
     /* Engine-loading state — the editor renders and is editable immediately;
        the wasm VM download + first env build (several seconds) is surfaced
        NON-blockingly in the diagnostics panel + the header status, so the page
@@ -164,6 +223,7 @@
     <div class="toolbar">
       <button class="btn" id="theme-btn" title="Cycle theme">Dark</button>
       <button class="btn" id="type-btn" aria-pressed="false"><i class="fa-solid fa-eye" aria-hidden="true"></i><span>Show types</span></button>
+      <button class="btn" id="trace-btn" aria-pressed="false" title="Replay how the engine infers each type"><i class="fa-solid fa-film" aria-hidden="true"></i><span>Trace types</span></button>
     </div>
   </header>
 
@@ -177,6 +237,29 @@
           <div class="diag-loading-msg" id="engine-load-msg">Loading the Rigor engine…</div>
           <div class="diag-loading-note">Compiling Rigor into a Ruby&nbsp;4.0 WebAssembly VM. The first analysis builds the type environment and is slower; later edits reuse it.</div>
         </div>
+      </div>
+      <div id="trace-panel">
+        <div class="tr-header"><span>Type inference trace</span><button class="tr-close" id="trace-close" title="Exit trace" aria-label="Exit trace">✕</button></div>
+        <div class="tr-controls">
+          <div class="tr-buttons">
+            <button id="tr-first" title="First step" aria-label="First step"><i class="fa-solid fa-backward-step" aria-hidden="true"></i></button>
+            <button id="tr-prev" title="Previous step" aria-label="Previous step"><i class="fa-solid fa-backward" aria-hidden="true"></i></button>
+            <button id="tr-play" title="Play" aria-label="Play or pause"><i class="fa-solid fa-play" aria-hidden="true"></i></button>
+            <button id="tr-next" title="Next step" aria-label="Next step"><i class="fa-solid fa-forward" aria-hidden="true"></i></button>
+            <button id="tr-last" title="Last step" aria-label="Last step"><i class="fa-solid fa-forward-step" aria-hidden="true"></i></button>
+            <span class="tr-step" id="tr-step">1 / 1</span>
+          </div>
+          <input type="range" id="tr-scrub" min="0" max="0" value="0" step="1" aria-label="Trace step">
+          <div class="tr-options">
+            <label>Speed
+              <select id="tr-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+            </label>
+            <label title="Include every expression enter/result frame"><input type="checkbox" id="tr-detail"> Detailed</label>
+          </div>
+        </div>
+        <div class="tr-narration" id="tr-narration"></div>
+        <div class="tr-scope-header">scope</div>
+        <div class="tr-scope" id="tr-scope"></div>
       </div>
     </aside>
   </main>
@@ -350,6 +433,210 @@ AscDesc.new.ascdesc(:bad)
     }
     function clearAnnotations() { view.dispatch({ effects: setAnnoEffect.of(Decoration.none) }) }
 
+    // ── Type-inference trace player (wasm-only) ────────────────────────────
+    //
+    // Replays the FlowTracer event stream `boot.rb`'s `trace` operation
+    // returns. The editor is the source panel: the current event's range is
+    // highlighted and, when the step produced a concrete type, an inline
+    // `⟶ Type` widget reveals it. The sidebar's trace panel narrates the step,
+    // accumulates the bound locals (the scope table), and drives playback.
+
+    class TraceTypeWidget extends WidgetType {
+      constructor(label) { super(); this.label = label }
+      eq(o) { return o.label === this.label }
+      ignoreEvent() { return true }
+      toDOM() { const el = document.createElement("span"); el.className = "cm-trace-type"; el.textContent = " ⟶ " + this.label; return el }
+    }
+    const setTraceHl = StateEffect.define()
+    const traceHlField = StateField.define({
+      create: () => Decoration.none,
+      update(deco, tr) {
+        for (const e of tr.effects) {
+          if (!e.is(setTraceHl)) continue
+          if (!e.value) return Decoration.none
+          const { from, to, label } = e.value
+          const ranges = []
+          if (to > from) ranges.push(Decoration.mark({ class: "cm-trace-active" }).range(from, to))
+          if (label != null) ranges.push(Decoration.widget({ widget: new TraceTypeWidget(label), side: 1 }).range(to))
+          return ranges.length ? Decoration.set(ranges, true) : Decoration.none
+        }
+        return deco.map(tr.changes)
+      },
+      provide: f => EditorView.decorations.from(f)
+    })
+
+    const TRACE_BASE_DELAY = 1000   // ms per step at 1×
+    const TRACE_BADGE = { bind: "bind", union: "union", dispatch: "dispatch", "dispatch-unresolved": "dispatch", enter: "eval", result: "result" }
+    const prefersReducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches
+
+    let traceActive = false, traceEvents = [], traceLocals = [], traceIndex = 0
+    let tracePlaying = false, traceTimer = null, traceVerbose = false, traceSpeed = 1, traceLastRange = null
+
+    function utf8Len(cp) { return cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4 }
+    // Prism emits 1-based lines and 0-based BYTE columns; CM6 positions are
+    // UTF-16 code units — walk the line's chars to convert (exact for ASCII).
+    function bytePosToCM(lineNumber, byteColumn) {
+      const doc = view.state.doc
+      const n = Math.max(1, Math.min(lineNumber, doc.lines))
+      const line = doc.line(n)
+      if (byteColumn <= 0) return line.from
+      const text = line.text
+      let bytes = 0, i = 0
+      while (i < text.length && bytes < byteColumn) {
+        const cp = text.codePointAt(i)
+        bytes += utf8Len(cp)
+        i += cp > 0xffff ? 2 : 1
+      }
+      return line.from + i
+    }
+    function traceEventRange(ev) {
+      const loc = ev.location
+      if (!loc) return null
+      const from = bytePosToCM(loc.start_line, loc.start_column)
+      const to   = bytePosToCM(loc.end_line, loc.end_column)
+      return { from, to: Math.max(from, to) }
+    }
+    // The inline `⟶ Type` reveal only where the step produced a concrete type;
+    // an unresolved dispatch (fail-soft) gets no inline type, only narration.
+    function traceEventLabel(ev) {
+      const d = ev.data
+      if (ev.kind === "result") return d.type
+      if (ev.kind === "union")  return d.type
+      if (ev.kind === "dispatch" && d.resolved) return d.type
+      return null
+    }
+    function accumulateLocals(events) {
+      const out = [], locals = {}
+      for (const ev of events) {
+        if (ev.kind === "bind") locals[ev.data.name] = ev.data.type
+        out.push({ ...locals })
+      }
+      return out
+    }
+    function traceNarration(ev) {
+      const d = ev.data, esc = escHtml
+      switch (ev.kind) {
+        case "bind":
+          return { kind: "bind", html: `<span class="tr-name">${esc(d.name)}</span> <span class="tr-arrow">←</span> <span class="tr-type">${esc(d.type)}</span>` }
+        case "union":
+          return { kind: "union", html: `${d.members.map(m => `<span class="tr-type">${esc(m)}</span>`).join(' <span class="tr-op">|</span> ')} <span class="tr-arrow">→</span> <span class="tr-type">${esc(d.type)}</span>` }
+        case "dispatch": {
+          const call = `<span class="tr-type">${esc(d.receiver)}</span>.<span class="tr-method">${esc(d.method)}</span>(${d.args.map(a => `<span class="tr-type">${esc(a)}</span>`).join(', ')})`
+          return d.resolved
+            ? { kind: "dispatch", html: `${call} <span class="tr-arrow">→</span> <span class="tr-type">${esc(d.type)}</span>` }
+            : { kind: "dispatch-unresolved", html: `${call} <span class="tr-arrow">→</span> <span class="tr-muted">no rule matched · widens to <span class="tr-type">Dynamic[top]</span></span>` }
+        }
+        case "enter":
+          return { kind: "enter", html: `evaluating <span class="tr-node">${esc(d.node)}</span>` }
+        case "result":
+          return { kind: "result", html: `<span class="tr-node">${esc(d.node)}</span> <span class="tr-arrow">→</span> <span class="tr-type">${esc(d.type)}</span>` }
+        default:
+          return { kind: ev.kind, html: esc(JSON.stringify(d)) }
+      }
+    }
+    function renderTraceScope(index) {
+      const locals = traceLocals[index] || {}
+      const ev = traceEvents[index]
+      const changed = ev && ev.kind === "bind" ? ev.data.name : null
+      const names = Object.keys(locals)
+      if (!names.length) return `<div class="tr-scope-empty">(no locals bound yet)</div>`
+      return names.map(name =>
+        `<div class="tr-row${name === changed ? ' tr-row-changed' : ''}"><span class="tr-row-name">${escHtml(name)}</span><span class="tr-row-type">${escHtml(locals[name])}</span></div>`
+      ).join("")
+    }
+    function renderTracePanel(ev) {
+      document.getElementById("tr-step").textContent = `${traceIndex + 1} / ${traceEvents.length}`
+      document.getElementById("tr-scrub").value = String(traceIndex)
+      const n = traceNarration(ev)
+      const stack = ev.stack && ev.stack.length ? `<div class="tr-stack">stack: ${ev.stack.map(escHtml).join(" › ")}</div>` : ""
+      document.getElementById("tr-narration").innerHTML =
+        `<span class="tr-badge tr-badge-${n.kind}">${TRACE_BADGE[n.kind] || ev.kind}</span><div class="tr-narr-body">${n.html}</div>${stack}`
+      document.getElementById("tr-scope").innerHTML = renderTraceScope(traceIndex)
+    }
+    function renderTrace() {
+      const ev = traceEvents[traceIndex]
+      if (!ev) return
+      const range = traceEventRange(ev)
+      const effects = []
+      if (range) {
+        traceLastRange = range
+        effects.push(setTraceHl.of({ from: range.from, to: range.to, label: traceEventLabel(ev) }))
+        effects.push(EditorView.scrollIntoView(range.from, { y: "center" }))
+      } else if (traceLastRange) {
+        // Statement-level binds/unions carry no source range — keep the last
+        // located highlight for continuity, minus its (now stale) type label.
+        effects.push(setTraceHl.of({ from: traceLastRange.from, to: traceLastRange.to, label: null }))
+      } else {
+        effects.push(setTraceHl.of(null))
+      }
+      view.dispatch({ effects })
+      renderTracePanel(ev)
+    }
+    function updatePlayButton() {
+      const b = document.getElementById("tr-play")
+      b.innerHTML = tracePlaying ? '<i class="fa-solid fa-pause" aria-hidden="true"></i>' : '<i class="fa-solid fa-play" aria-hidden="true"></i>'
+      b.title = tracePlaying ? "Pause" : "Play"
+    }
+    function traceStepTo(i) { traceIndex = Math.max(0, Math.min(i, traceEvents.length - 1)); renderTrace() }
+    function traceSchedule() {
+      clearTimeout(traceTimer)
+      traceTimer = setTimeout(() => {
+        if (!tracePlaying) return
+        if (traceIndex >= traceEvents.length - 1) { tracePause(); return }
+        traceStepTo(traceIndex + 1)
+        traceSchedule()
+      }, TRACE_BASE_DELAY / traceSpeed)
+    }
+    function tracePlay() {
+      if (!traceEvents.length) return
+      if (traceIndex >= traceEvents.length - 1) traceStepTo(0)
+      tracePlaying = true; updatePlayButton(); traceSchedule()
+    }
+    function tracePause() { tracePlaying = false; clearTimeout(traceTimer); updatePlayButton() }
+    function traceToggle() { tracePlaying ? tracePause() : tracePlay() }
+
+    // Records the stream via the VM. The blocking `vm.eval` is deferred one
+    // frame so the "Tracing…" status paints first (mirrors runCheck).
+    function computeTrace() {
+      return new Promise(resolve => {
+        setStatus("checking", "Tracing…")
+        requestAnimationFrame(() => {
+          try {
+            const data = callVM("trace", { source: view.state.doc.toString(), verbose: traceVerbose })
+            traceEvents = data.events || []
+            traceLocals = accumulateLocals(traceEvents)
+            document.getElementById("tr-scrub").max = String(Math.max(0, traceEvents.length - 1))
+            setStatus("ok", `Traced ${traceEvents.length} step${traceEvents.length === 1 ? "" : "s"}`)
+          } catch (e) {
+            traceEvents = []; traceLocals = []
+            setStatus("error", `Trace error: ${e.message}`)
+          }
+          resolve()
+        })
+      })
+    }
+    async function enterTrace() {
+      if (!vm) { setStatus("checking", "Engine still loading…"); return }
+      if (typesVisible) setTypes(false)
+      traceVerbose = document.getElementById("tr-detail").checked
+      await computeTrace()
+      if (!traceEvents.length) { setStatus("ok", "No trace events for this source"); return }
+      traceActive = true
+      traceBtn.classList.add("active"); traceBtn.setAttribute("aria-pressed", "true")
+      document.getElementById("sidebar").dataset.view = "trace"
+      traceLastRange = null; traceIndex = 0; renderTrace()
+      if (!prefersReducedMotion) tracePlay()
+    }
+    function exitTrace() {
+      if (!traceActive) return
+      tracePause()
+      traceActive = false
+      traceBtn.classList.remove("active"); traceBtn.setAttribute("aria-pressed", "false")
+      traceLastRange = null
+      view.dispatch({ effects: setTraceHl.of(null) })
+      document.getElementById("sidebar").dataset.view = "diagnostics"
+    }
+
     // ── Editor ─────────────────────────────────────────────────────────────
 
     const MONO = `'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace`
@@ -390,12 +677,13 @@ AscDesc.new.ascdesc(:bad)
         extensions: [
           basicSetup, StreamLanguage.define(ruby),
           Prec.highest(syntaxHighlighting(rigorHighlight)),
-          lintGutter(), annoField,
+          lintGutter(), annoField, traceHlField,
           // Don't clear the type overlay on each keystroke. The existing
           // annotations stay on screen (mapped through the edit) and the
           // debounced background analysis refreshes them in place once it has a
           // new result — so the overlay updates without a per-keystroke flicker.
-          EditorView.updateListener.of(u => { if (!u.docChanged) return; scheduleCheck(); scheduleUrlSync() }),
+          // A trace is a snapshot of the pre-edit source, so any edit exits it.
+          EditorView.updateListener.of(u => { if (!u.docChanged) return; if (traceActive) exitTrace(); scheduleCheck(); scheduleUrlSync() }),
           EditorView.theme({
             "&": { backgroundColor: "var(--bg)", color: "var(--text)", height: "100%" },
             ".cm-content": { caretColor: "var(--accent)", fontFamily: MONO, padding: "8px 0" },
@@ -516,14 +804,33 @@ AscDesc.new.ascdesc(:bad)
     }
 
     const typeBtn = document.getElementById("type-btn")
-    typeBtn.addEventListener("click", () => {
-      typesVisible = !typesVisible
-      typeBtn.setAttribute("aria-pressed", String(typesVisible))
-      typeBtn.classList.toggle("active", typesVisible)
-      typeBtn.innerHTML = typesVisible
+    function setTypes(on) {
+      typesVisible = on
+      typeBtn.setAttribute("aria-pressed", String(on))
+      typeBtn.classList.toggle("active", on)
+      typeBtn.innerHTML = on
         ? '<i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>Hide types</span>'
         : '<i class="fa-solid fa-eye" aria-hidden="true"></i><span>Show types</span>'
-      if (typesVisible) runAnnotateLines(view.state.doc.toString()); else clearAnnotations()
+      if (on) runAnnotateLines(view.state.doc.toString()); else clearAnnotations()
+    }
+    // Types overlay and the trace player are mutually exclusive sidebar views.
+    typeBtn.addEventListener("click", () => { if (traceActive) exitTrace(); setTypes(!typesVisible) })
+
+    // ── Trace controls ─────────────────────────────────────────────────────
+    const traceBtn = document.getElementById("trace-btn")
+    traceBtn.addEventListener("click", () => traceActive ? exitTrace() : enterTrace())
+    document.getElementById("trace-close").addEventListener("click", exitTrace)
+    document.getElementById("tr-first").addEventListener("click", () => { tracePause(); traceStepTo(0) })
+    document.getElementById("tr-prev").addEventListener("click", () => { tracePause(); traceStepTo(traceIndex - 1) })
+    document.getElementById("tr-next").addEventListener("click", () => { tracePause(); traceStepTo(traceIndex + 1) })
+    document.getElementById("tr-last").addEventListener("click", () => { tracePause(); traceStepTo(traceEvents.length - 1) })
+    document.getElementById("tr-play").addEventListener("click", traceToggle)
+    document.getElementById("tr-scrub").addEventListener("input", e => { tracePause(); traceStepTo(parseInt(e.target.value, 10)) })
+    document.getElementById("tr-speed").addEventListener("change", e => { traceSpeed = parseFloat(e.target.value); if (tracePlaying) traceSchedule() })
+    document.getElementById("tr-detail").addEventListener("change", async () => {
+      if (!traceActive) return
+      traceVerbose = document.getElementById("tr-detail").checked
+      tracePause(); await computeTrace(); traceLastRange = null; traceStepTo(0)
     })
 
     function setStatus(cls, text) { const el = document.getElementById("status"); el.className = cls; el.textContent = text }

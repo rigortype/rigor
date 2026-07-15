@@ -3,9 +3,10 @@
 # ADR-29 WD8/WD9 — the in-VM adapter packed into the ruby.wasm build.
 #
 # This is the wasm analogue of apps/rigor-playground/lib/rigor/playground/app.rb: it exposes the same
-# four operations (check / annotate / annotate-lines / type-of) but as in-process Ruby callable from
-# JavaScript via `vm.eval`, with no Rack, no HTTP, and no network. The frontend (index.html) sets the
-# request as a JSON string on a JS global, calls `vm.eval`, and reads the returned JSON string back.
+# operations (check / annotate / annotate-lines / type-of, plus the wasm-only `trace` used by the
+# in-browser type-inference animation) as in-process Ruby callable from JavaScript via `vm.eval`, with
+# no Rack, no HTTP, and no network. The frontend (index.html) sets the request as a JSON string on a JS
+# global, calls `vm.eval`, and reads the returned JSON string back.
 #
 # Contract fidelity (ADR-29 WD2): every operation routes through `Rigor::CLI.start(argv, out:, err:)`
 # against StringIO buffers — byte-for-byte the same invocation the backend's `run_cli` uses — so the JSON
@@ -66,7 +67,7 @@ module Rigor
       module_function
 
       # Browser entry point: read the request JSON from the JS global set by the frontend, dispatch, and
-      # return a JSON string. `kind` is one of "check" / "annotate" / "annotate-lines" / "type-of".
+      # return a JSON string. `kind` is one of "check" / "annotate" / "annotate-lines" / "type-of" / "trace".
       def dispatch(kind)
         req = JSON.parse(JS.global[:rigorRequestJson].to_s)
         run(kind, req)
@@ -74,8 +75,8 @@ module Rigor
         JSON.generate({ "error" => e.message })
       end
 
-      # Transport-agnostic core. `request` is a Hash with "source" and, for type-of, "line"/"column".
-      # Returns a JSON string.
+      # Transport-agnostic core. `request` is a Hash with "source" and, for type-of, "line"/"column"
+      # (for trace, an optional "verbose" flag). Returns a JSON string.
       def run(kind, request)
         source = request.fetch("source", "").to_s
         return too_large if source.bytesize > MAX_SOURCE_BYTES
@@ -85,6 +86,7 @@ module Rigor
         when "annotate"       then annotate(source)
         when "annotate-lines" then annotate_lines(source)
         when "type-of"        then type_of(source, request["line"].to_i, request["column"].to_i)
+        when "trace"          then trace(source, request["verbose"] ? true : false)
         else
           JSON.generate({ "error" => "unknown operation: #{kind}" })
         end
@@ -126,6 +128,22 @@ module Rigor
         JSON.generate(JSON.parse(out))
       rescue JSON::ParserError
         JSON.generate({ "error" => "could not resolve type at position" })
+      end
+
+      # Records the inference event stream for `source` via `rigor trace --format=json` and returns it
+      # under an { "events": [...] } envelope. The concise stream (bind / union / dispatch — the three
+      # teachable moments) is the default; `verbose` adds every expression enter/result frame. Each event
+      # is a serialised Rigor::Inference::FlowTracer::Event (kind / depth / location / stack / data); the
+      # frontend replays the stream as the type-inference animation. Unlike the other operations this one
+      # has no app.rb twin — the animation is a wasm-only surface (there is no /trace HTTP endpoint).
+      def trace(source, verbose)
+        path = write_buffer(source)
+        argv = ["trace", "--format=json", path]
+        argv << "--verbose" if verbose
+        JSON.generate({ "events" => JSON.parse(run_cli(argv)) })
+      rescue JSON::ParserError
+        # A parse error (or any empty stdout) yields no replayable stream rather than an error surface.
+        JSON.generate({ "events" => [] })
       end
 
       # ── helpers ────────────────────────────────────────────────────────────

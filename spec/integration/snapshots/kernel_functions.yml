@@ -1,0 +1,5 @@
+---
+locals:
+  h: "{ a: 1 }"
+  name: literal-string & non-empty-string
+  xs: "[1, 2]"

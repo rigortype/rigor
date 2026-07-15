@@ -140,6 +140,88 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
     end
   end
 
+  describe ".try_dispatch on Kernel#p / Kernel#pp (identity typing)" do
+    def printer_dispatch(method_name, *args)
+      described_class.try_dispatch(cc(receiver: receiver, method_name: method_name, args: args))
+    end
+
+    it "passes a single argument's type through verbatim (Constant)" do
+      expect(printer_dispatch(:p, constant_of(1))).to eq(constant_of(1))
+      expect(printer_dispatch(:pp, constant_of(:sym))).to eq(constant_of(:sym))
+    end
+
+    it "preserves shape carriers unchanged (HashShape / Tuple)" do
+      shape = Rigor::Type::Combinator.hash_shape_of(a: constant_of(1))
+      expect(printer_dispatch(:p, shape)).to equal(shape)
+      tuple = tuple_of(constant_of(1), constant_of(2))
+      expect(printer_dispatch(:pp, tuple)).to equal(tuple)
+    end
+
+    it "passes Dynamic through unchanged — Dynamic in, Dynamic out, never concretized" do
+      dynamic = Rigor::Type::Combinator.untyped
+      expect(printer_dispatch(:p, dynamic)).to equal(dynamic)
+    end
+
+    it "returns a Tuple of the argument types for the n-arg form" do
+      expect(printer_dispatch(:p, constant_of(1), constant_of(2)))
+        .to eq(tuple_of(constant_of(1), constant_of(2)))
+    end
+
+    it "declines the zero-arg form (RBS nil is already exact)" do
+      expect(printer_dispatch(:p)).to be_nil
+      expect(printer_dispatch(:pp)).to be_nil
+    end
+  end
+
+  describe ".try_dispatch on Kernel#String" do
+    def string_dispatch(*args)
+      described_class.try_dispatch(cc(receiver: receiver, method_name: :String, args: args))
+    end
+
+    it "folds value-pinned scalar constants to Constant[String]" do
+      expect(string_dispatch(constant_of(42))).to eq(constant_of("42"))
+      expect(string_dispatch(constant_of(:sym))).to eq(constant_of("sym"))
+      expect(string_dispatch(constant_of(1.5))).to eq(constant_of("1.5"))
+      expect(string_dispatch(constant_of(nil))).to eq(constant_of(""))
+      expect(string_dispatch(constant_of(true))).to eq(constant_of("true"))
+      expect(string_dispatch(constant_of("already"))).to eq(constant_of("already"))
+    end
+
+    it "declines non-constant and non-safe-class arguments" do
+      expect(string_dispatch(nominal("Integer"))).to be_nil
+      expect(string_dispatch(Rigor::Type::Combinator.untyped)).to be_nil
+    end
+
+    it "declines arities other than 1" do
+      expect(string_dispatch).to be_nil
+      expect(string_dispatch(constant_of(1), constant_of(2))).to be_nil
+    end
+  end
+
+  describe ".try_dispatch on Kernel#Hash (trivially-sound slice)" do
+    def hash_dispatch(*args)
+      described_class.try_dispatch(cc(receiver: receiver, method_name: :Hash, args: args))
+    end
+
+    it "passes a HashShape argument through unchanged" do
+      shape = Rigor::Type::Combinator.hash_shape_of(a: constant_of(1))
+      expect(hash_dispatch(shape)).to equal(shape)
+    end
+
+    it "collapses Hash(nil) and Hash(empty Tuple) to the empty HashShape" do
+      empty = Rigor::Type::Combinator.hash_shape_of({})
+      expect(hash_dispatch(constant_of(nil))).to eq(empty)
+      expect(hash_dispatch(tuple_of)).to eq(empty)
+    end
+
+    it "declines everything else (to_hash protocol not decidable from types)" do
+      expect(hash_dispatch(constant_of(1))).to be_nil
+      expect(hash_dispatch(tuple_of(constant_of(1)))).to be_nil
+      expect(hash_dispatch(nominal("Hash"))).to be_nil
+      expect(hash_dispatch).to be_nil
+    end
+  end
+
   describe ".try_dispatch on Kernel#Rational / #Complex" do
     def numeric_kernel(method_name, *args)
       described_class.try_dispatch(

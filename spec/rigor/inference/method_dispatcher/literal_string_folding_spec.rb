@@ -167,10 +167,45 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
       expect(result).to eq(literal_string)
     end
 
-    it "lifts sprintf(literal-string, Constant<Integer>) to literal-string" do
+    it "lifts sprintf(literal-string template, Constant<Integer>) to literal-string" do
       result = described_class.try_dispatch(cc(
-                                              receiver: singleton_kernel, method_name: :sprintf, args: [string_const,
-                                                                                                        int_arg]
+                                              receiver: singleton_kernel, method_name: :sprintf,
+                                              args: [literal_string, int_arg]
+                                            ))
+      expect(result).to eq(literal_string)
+    end
+
+    it "folds format(Constant template, Constant args) to the exact Constant[String]" do
+      result = described_class.try_dispatch(cc(
+                                              receiver: singleton_kernel, method_name: :format,
+                                              args: [Rigor::Type::Combinator.constant_of("%d"), int_arg]
+                                            ))
+      expect(result).to eq(Rigor::Type::Combinator.constant_of("3"))
+    end
+
+    it "folds sprintf(Constant template, Constant args) with width directives" do
+      result = described_class.try_dispatch(cc(
+                                              receiver: singleton_kernel, method_name: :sprintf,
+                                              args: [Rigor::Type::Combinator.constant_of("%05d"),
+                                                     Rigor::Type::Combinator.constant_of(42)]
+                                            ))
+      expect(result).to eq(Rigor::Type::Combinator.constant_of("00042"))
+    end
+
+    it "declines the exact fold to the literal-string lift when a directive mismatches its argument" do
+      result = described_class.try_dispatch(cc(
+                                              receiver: singleton_kernel, method_name: :format,
+                                              args: [Rigor::Type::Combinator.constant_of("%d"),
+                                                     Rigor::Type::Combinator.constant_of("abc")]
+                                            ))
+      expect(result).to eq(literal_string)
+    end
+
+    it "declines the exact fold when the result exceeds STRING_FOLD_BYTE_LIMIT" do
+      limit = Rigor::Inference::MethodDispatcher::ConstantFolding::STRING_FOLD_BYTE_LIMIT
+      result = described_class.try_dispatch(cc(
+                                              receiver: singleton_kernel, method_name: :format,
+                                              args: [Rigor::Type::Combinator.constant_of("%#{limit + 1}d"), int_arg]
                                             ))
       expect(result).to eq(literal_string)
     end

@@ -892,6 +892,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/kernel_functions.rb — Kernel module-function precision (p/pp identity + folds)" do
+    let(:harness) { harness_for("kernel_functions") }
+
+    it "self-asserts the p/pp identity typing, the format/String constant folds, and the FP guards" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/complex_catalog.rb — Complex catalog-driven folding" do
     let(:harness) { harness_for("complex_catalog") }
 

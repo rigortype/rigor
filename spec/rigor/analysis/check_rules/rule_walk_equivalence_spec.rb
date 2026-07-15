@@ -206,7 +206,7 @@ module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curate
       clean = { a: 1, "a" => 2, 1 => :i, 1.0 => :f, CONST => 3, CONST => 4 }
       [1].each { |i| puts({ i => 1, i => 2 }.merge(h, nested, straddle, clean)) }
     RUBY
-    "return in ensure: def / begin / block firing, nested frames skipped, nested ensure once" => <<~RUBY
+    "return in ensure: def / begin / block firing, nested frames skipped, nested ensure once" => <<~RUBY,
       def in_def
         compute
       ensure
@@ -242,6 +242,16 @@ module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curate
         end
       end
     RUBY
+    "shadowed rescue chain via a namespaced project subclass (prefix-dependent)" => <<~RUBY
+      module M
+        class E < StandardError; end
+        def self.go
+          work
+        rescue StandardError
+        rescue E
+        end
+      end
+    RUBY
   }.freeze
 
   FIXTURE_FILES = Dir[File.expand_path("../../../integration/fixtures/*.rb", __dir__)].freeze
@@ -251,6 +261,7 @@ module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curate
   HOSTED_COLLECTOR_CLASSES = [
     Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
     Rigor::Analysis::CheckRules::UnreachableClauseCollector,
+    Rigor::Analysis::CheckRules::ShadowedRescueCollector,
     Rigor::Analysis::CheckRules::IvarWriteCollector,
     Rigor::Analysis::CheckRules::DeadAssignmentCollector,
     Rigor::Analysis::CheckRules::DuplicateHashKeyCollector,

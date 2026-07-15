@@ -35,6 +35,7 @@ module Rigor
       RULE_UNREACHABLE_CLAUSE = "flow.unreachable-clause"
       RULE_DUPLICATE_HASH_KEY = "flow.duplicate-hash-key"
       RULE_RETURN_IN_ENSURE = "flow.return-in-ensure"
+      RULE_SHADOWED_RESCUE_CLAUSE = "flow.shadowed-rescue-clause"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -52,6 +53,7 @@ module Rigor
         RULE_UNREACHABLE_CLAUSE,
         RULE_DUPLICATE_HASH_KEY,
         RULE_RETURN_IN_ENSURE,
+        RULE_SHADOWED_RESCUE_CLAUSE,
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
         RULE_OVERRIDE_VISIBILITY_REDUCED,
@@ -80,7 +82,8 @@ module Rigor
         "always-truthy-condition" => RULE_ALWAYS_TRUTHY_CONDITION,
         "unreachable-clause" => RULE_UNREACHABLE_CLAUSE,
         "duplicate-hash-key" => RULE_DUPLICATE_HASH_KEY,
-        "return-in-ensure" => RULE_RETURN_IN_ENSURE
+        "return-in-ensure" => RULE_RETURN_IN_ENSURE,
+        "shadowed-rescue-clause" => RULE_SHADOWED_RESCUE_CLAUSE
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression comment or `disable:` list disables every rule

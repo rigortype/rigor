@@ -12,6 +12,7 @@ require_relative "check_rules/rule_ids"
 require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
+require_relative "check_rules/shadowed_rescue_collector"
 require_relative "check_rules/dead_assignment_collector"
 require_relative "check_rules/duplicate_hash_key_collector"
 require_relative "check_rules/return_in_ensure_collector"
@@ -96,6 +97,7 @@ module Rigor
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
         diagnostics.concat(always_truthy_condition_diagnostics(path, collectors[:always_truthy].results))
         diagnostics.concat(unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results))
+        diagnostics.concat(shadowed_rescue_diagnostics(path, collectors[:shadowed_rescues].results))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
         diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
         diagnostics.concat(duplicate_hash_key_diagnostics(path, collectors[:duplicate_hash_keys].results))
@@ -137,6 +139,7 @@ module Rigor
           main_pass: MainPassCollector.new(->(node) { main_pass_node_diagnostics(path, node, scope_index) }),
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
+          shadowed_rescues: ShadowedRescueCollector.new(scope_index),
           ivar_writes: IvarWriteCollector.new(scope_index),
           dead_assignments: DeadAssignmentCollector.new(scope_index),
           duplicate_hash_keys: DuplicateHashKeyCollector.new(scope_index),
@@ -329,6 +332,15 @@ module Rigor
       def unreachable_clause_diagnostics(path, results)
         results.map do |result|
           build_unreachable_clause_diagnostic(path, result)
+        end
+      end
+
+      # `flow.shadowed-rescue-clause` — one diagnostic per rescue clause every earlier-comparable class of
+      # which is already caught by an earlier clause of the same chain (see {ShadowedRescueCollector} for
+      # the ancestry-certainty envelope).
+      def shadowed_rescue_diagnostics(path, results)
+        results.map do |result|
+          build_shadowed_rescue_diagnostic(path, result)
         end
       end
 
@@ -1497,6 +1509,24 @@ module Rigor
             "unreachable `#{kw} #{result.condition_source}': `#{subject}' can never be " \
             "#{result.condition_source} here (the flow proves the subject disjoint)"
           end
+        end
+
+        def build_shadowed_rescue_diagnostic(path, result)
+          Diagnostic.from_node(
+            result.clause,
+            rule: RULE_SHADOWED_RESCUE_CLAUSE,
+            path: path,
+            message: shadowed_rescue_message(result),
+            severity: :warning
+          )
+        end
+
+        def shadowed_rescue_message(result)
+          earlier = result.earlier_sources.each_with_index.map do |source, index|
+            "`#{source}' (line #{result.earlier_lines[index]})"
+          end
+          "shadowed `#{result.clause_source}': every exception class it names is already caught " \
+            "by the earlier #{earlier.join(' and ')} clause#{'s' if earlier.size > 1}, so this clause can never run"
         end
 
         def build_dead_assignment_diagnostic(path, write_node, def_node)

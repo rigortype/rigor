@@ -2240,6 +2240,225 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # `flow.shadowed-rescue-clause` — a later rescue arm dead under an earlier superclass arm.
+    describe "shadowed-rescue-clause rule" do
+      def shadow_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.shadowed-rescue-clause" }
+      end
+
+      it "flags a narrower rescue after `rescue StandardError`" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError => e
+            e
+          rescue ArgumentError => e
+            e
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue ArgumentError")
+        expect(diag.message).to include("rescue StandardError")
+        expect(shadow_diags(result).size).to eq(1)
+      end
+
+      it "flags a rescue after a bare `rescue` (implicit StandardError)" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue => e
+            e
+          rescue ArgumentError => e
+            e
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue ArgumentError")
+      end
+
+      it "flags an exact duplicate exception class" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result).size).to eq(1)
+      end
+
+      it "flags a multi-class arm whose every class is covered" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            1
+          rescue ArgumentError, TypeError
+            2
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue ArgumentError, TypeError")
+      end
+
+      it "flags a project-defined exception subclass after its rescued superclass" do
+        result = analyze(<<~RUBY)
+          class CustomError < StandardError
+          end
+
+          begin
+            work
+          rescue StandardError
+            1
+          rescue CustomError
+            2
+          end
+        RUBY
+        diag = shadow_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("rescue CustomError")
+      end
+
+      it "does not fire on the normal narrow-to-wide order" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue StandardError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire on a multi-class arm only partially covered" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue ArgumentError, IOError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire when the earlier clause names an unresolved constant" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue TotallyUnknownError
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire when the later clause names an unresolved constant" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            1
+          rescue TotallyUnknownError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire when a clause names a module (custom `===` semantics)" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue Kernel
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire around a splat clause" do
+        result = analyze(<<~RUBY)
+          ERRORS = [StandardError].freeze
+          begin
+            work
+          rescue *ERRORS
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire around a dynamic exception expression" do
+        result = analyze(<<~RUBY)
+          klass = StandardError
+          begin
+            work
+          rescue klass
+            1
+          rescue ArgumentError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not fire on unrelated sibling classes" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue ArgumentError
+            1
+          rescue TypeError
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "does not compare clauses across nested begin nodes" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            begin
+              other
+            rescue ArgumentError
+              1
+            end
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable shadowed-rescue-clause`" do
+        result = analyze(<<~RUBY)
+          begin
+            work
+          rescue StandardError
+            1
+          rescue ArgumentError # rigor:disable shadowed-rescue-clause
+            2
+          end
+        RUBY
+        expect(shadow_diags(result)).to be_empty
+      end
+    end
+
     # ADR-47 — narrowing-driven `case`/`when` clause reachability (WD1).
     describe "unreachable-clause rule (ADR-47)" do
       def clause_diags(result)

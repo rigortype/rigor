@@ -187,6 +187,10 @@ Markdown / documentation-only changes — ADRs, `docs/notes/`, [`docs/CURRENT_WO
 - **Never open a pull request whose only change is `docs/CURRENT_WORK.md`.** It is a transient resume bookmark; refresh it with a direct commit to `master`, or fold the refresh into the substantive PR it accompanies.
 - A Markdown-only change commits straight to `master`. A change that also touches Ruby (or any non-`.md` file) is code and goes through a branch + PR as usual — a mixed commit runs the full suite, which is correct.
 
+## Release Cadence
+
+The versioning model (edition-style: soft-break minors behind `bleeding_edge:` / baseline, hard-break majors), the previous-line support policy (on-demand, not guaranteed), and the single-trunk branch model are normative in [ADR-50](docs/adr/50-release-engineering-and-stability-strategy.md) § WD5; the user-facing summary is [`docs/compatibility.md`](docs/compatibility.md), and the mechanical release flow is the [`rigor-release-prep`](.claude/skills/rigor-release-prep/SKILL.md) skill. The invariants this contract pins:
+
 - **No autonomous version bumps.** `Rigor::VERSION` (in `lib/rigor/version.rb`), `CHANGELOG.md` released-version sections, and `Gemfile.lock` MUST only be bumped on explicit user request. Land feature commits with their `## [Unreleased]` CHANGELOG entries — written user-facing at landing per § "CHANGELOG Style" — and stop there; the user drives the cut-over to a numbered release. Adding entries under `## [Unreleased]` does NOT count as a version bump.
 - **Single-digit version components.** Each `x.y.z` component stays single-digit. `0.0.9`'s successor is `0.1.0` — never `0.0.10`. `0.9.x`'s successor is `1.0.0`. Same rule applies recursively at every position.
 - The `bundle exec rake release` task (which tags `vx.y.z`, pushes to origin, and publishes to RubyGems) is gated separately — never run it without explicit user authorisation, even when the version is already bumped.

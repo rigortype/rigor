@@ -183,4 +183,32 @@ RSpec.describe "Rigor::Analysis::Runner with fork pool (ADR-15 Amendment)" do
       end
     end
   end
+
+  # A `fork` copies only the calling thread, so the parent's deferred-YJIT deadline thread (armed by `check` /
+  # `coverage`) does NOT survive into a worker. Each worker must therefore re-arm its own deferred YJIT, or a
+  # worker forked before the deadline fires would run its whole analysis slice un-JITted no matter how long it
+  # runs — exactly the case parallel mode exists for. `run_fork_worker` uses no instance state, so it is driven
+  # here with `allocate` + a session double (a real fork would run in a child process where a `receive` spy on
+  # the parent cannot observe the call).
+  describe "deferred YJIT in the fork worker" do
+    let(:coordinator) { Rigor::Analysis::Runner::PoolCoordinator.allocate }
+    let(:session) do
+      instance_double(
+        Rigor::Analysis::WorkerSession, analyze: [], drain_reporters: {}, drain_dependencies: {}
+      )
+    end
+
+    it "re-arms deferred YJIT before analysing its slice" do
+      Dir.mktmpdir do |dir|
+        out_path = File.join(dir, "payload")
+        allow(coordinator).to receive(:exit!) # keep the worker body in-process
+        allow(Rigor::Runtime::Jit).to receive(:enable_after)
+
+        coordinator.send(:run_fork_worker, session, ["a.rb"], out_path)
+
+        expect(Rigor::Runtime::Jit)
+          .to have_received(:enable_after).with(Rigor::Runtime::Jit.deadline_seconds)
+      end
+    end
+  end
 end

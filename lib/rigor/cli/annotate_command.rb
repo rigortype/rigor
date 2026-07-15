@@ -253,9 +253,13 @@ module Rigor
       end
 
       # For a line no statement closes (the `if` / block header lines), fall back to the widest expression ending there.
+      # A hash-pair node (`1 => 2,` inside a multi-line literal / keyword-argument list) is not an expression — typing
+      # it only echoes the `Dynamic[top]` fallback — so those interior lines stay bare and the literal's type appears
+      # once, on the line the enclosing statement closes.
       def fill_uncovered_lines(program, by_line)
         widest_per_line(program).each do |line, node|
           next if by_line.key?(line)
+          next if node.is_a?(Prism::AssocNode) || node.is_a?(Prism::AssocSplatNode)
 
           type = node.is_a?(Prism::BlockParametersNode) ? block_params_type(node) : type_of(node)
           by_line[line] = type unless type.nil?

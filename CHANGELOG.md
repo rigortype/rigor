@@ -108,6 +108,7 @@ v0.2.9 sharpens Rigor on large Rails applications, with GitLab-scale projects as
 
 ### Fixed
 
+- **[rigor annotate]** Interior lines of a multi-line Hash literal (and of a multi-line keyword-argument list) no longer carry a noise `#=> Dynamic[top]` annotation; the literal's type now appears once, on the line the enclosing statement closes.
 - **[cli]** `rigor check --format <name>` for a format listed as supported but not wired now fails loudly instead of printing nothing, so a drift between the supported-format list and the dispatch cannot pass silently.
 - **[engine]** A guard like `if login.present?` / `return if content.blank?` now narrows a nilable receiver, so the guarded call no longer reads as `possible nil receiver`.
   - When a predicate's signature declares it always returns `false` for `nil` (as ActiveSupport's `NilClass#present?` does), a truthy answer proves the receiver was not nil and the nil arm is dropped on that edge, mirrored on the falsey edge for `blank?`. Only value-pinned `nil` / `true` / `false` arms participate, and a safe-navigation guard (`x&.blank?`) is deliberately left alone. Removes four false positives on Redmine and sixteen on GitLab, none introduced anywhere.

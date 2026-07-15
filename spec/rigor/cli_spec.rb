@@ -1624,6 +1624,34 @@ RSpec.describe Rigor::CLI do
       expect(out.lines[0]).to include("#=> :else | :then")
     end
 
+    it "annotates a multi-line hash literal once, on its closing line, leaving pair lines bare" do
+      source = <<~RUBY
+        h = {
+          1 => 1,
+          1 => 2,
+          1.0 => 3,
+          1.00 => 4,
+        }
+        p h
+      RUBY
+      path = write_fixture("a.rb", source)
+
+      status, out, err = run_cli("annotate", "--no-color", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      lines = out.lines
+      # Interior pair lines are not expressions — no `Dynamic[top]` fill noise.
+      (1..4).each { |i| expect(lines[i]).not_to include("#=>") }
+      expect(lines[5]).to start_with("}").and include("#=> Hash[1 | 1.0, 1 | 2 | 3 | 4]")
+      expect(lines[6]).to include("p h").and include("#=>")
+
+      # Re-annotating the annotated output is stable (the multi-line-literal shape included).
+      second_path = write_fixture("b.rb", out)
+      _status, second, _err = run_cli("annotate", "--no-color", second_path)
+      expect(second).to eq(out)
+    end
+
     it "annotates `while`-loop body lines with the converged post-fixpoint types" do
       source = <<~RUBY
         def factorial(n)

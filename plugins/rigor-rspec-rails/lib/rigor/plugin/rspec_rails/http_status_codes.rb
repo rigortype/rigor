@@ -43,7 +43,10 @@ module Rigor
 
           require "rack/utils"
           @rack_status_symbols = Rack::Utils::SYMBOL_TO_STATUS_CODE.keys.to_set.freeze
-        rescue LoadError, StandardError
+        rescue ::LoadError, ::StandardError
+          # `::`-qualified: in this lexical scope a bare `LoadError` resolves to `Rigor::Plugin::LoadError`
+          # (the plugin-loading error, a StandardError), so the real `::LoadError` (a ScriptError) from a
+          # failed require would escape instead of declining.
           @rack_status_symbols = nil
         end
       end

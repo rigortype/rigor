@@ -91,6 +91,49 @@ RSpec.describe Rigor::CLI::PluginsCommand do
     end
   end
 
+  # ADR-90 — activation-time inflection probe: a loaded `Plugin::Inflector` consumer triggers a real
+  # `available?` probe so a standalone install where inflection-dependent checks silently degrade reports the
+  # degradation instead of an unqualified `[OK]`.
+  context "with an Inflector-consuming plugin loaded (ADR-90)" do
+    before do
+      File.write(".rigor.yml", <<~YAML)
+        paths: [.]
+        plugins:
+          - gem: rigor-activerecord
+            id: activerecord
+      YAML
+    end
+
+    it "reports the probe result in JSON" do
+      _, out, = run(["--format", "json"])
+      parsed = JSON.parse(out)
+      expect(parsed["inflection"]).to include("required_by" => ["activerecord"])
+      expect(parsed["inflection"]).to have_key("available")
+    end
+
+    it "prints no warning when inflection is available" do
+      allow(Rigor::Plugin::Inflector).to receive(:available?).and_return(true)
+      _, out, = run([])
+      expect(out).not_to include("WARNING: ActiveSupport::Inflector")
+    end
+
+    it "warns in the text view when inflection is unavailable" do
+      allow(Rigor::Plugin::Inflector).to receive(:available?).and_return(false)
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).to include("WARNING: ActiveSupport::Inflector is not loadable")
+      expect(out).to include("activerecord")
+      expect(out).to include("bundle install")
+    end
+
+    it "marks the degradation in JSON when inflection is unavailable" do
+      allow(Rigor::Plugin::Inflector).to receive(:available?).and_return(false)
+      _, out, = run(["--format", "json"])
+      parsed = JSON.parse(out)
+      expect(parsed["inflection"]).to eq({ "required_by" => ["activerecord"], "available" => false })
+    end
+  end
+
   context "with an unresolvable plugin" do
     before do
       File.write(".rigor.yml", <<~YAML)

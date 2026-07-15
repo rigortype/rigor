@@ -7,6 +7,8 @@ require_relative "options"
 require_relative "../plugin"
 require_relative "../plugin/loader"
 require_relative "../plugin/services"
+require_relative "../plugin/inflector"
+require_relative "../environment/bundle_sig_discovery"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "plugins_renderer"
@@ -67,7 +69,8 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         rows = build_rows(configuration)
 
-        renderer = PluginsRenderer.new(rows: rows, configuration_path: config_path)
+        renderer = PluginsRenderer.new(rows: rows, configuration_path: config_path,
+                                       inflection: inflection_note(configuration, rows))
         @out.puts(render(renderer, options))
 
         any_load_errors = rows.any? { |row| row.fetch(:status) == :load_error }
@@ -127,6 +130,25 @@ module Rigor
         # plugins). The renderer treats these as "orphan" errors.
         orphan_errors = orphan_load_errors(registry, rows)
         rows + orphan_errors
+      end
+
+      # ADR-90 — activation-time visibility for inflection degradation. When a loaded plugin consumes
+      # `Plugin::Inflector` (ADR-39), probe whether the real `ActiveSupport::Inflector` is actually
+      # reachable — through Rigor's own gem environment or the analyzed project's bundle — so a standalone
+      # install where every inflection-dependent check would silently produce no diagnostics says so here
+      # instead of reporting an unqualified `[OK]`. Returns nil when no consumer is loaded (a non-Rails
+      # project never sees the probe).
+      def inflection_note(configuration, rows)
+        loaded_ids = rows.filter_map { |row| row[:id] if row[:status] == :loaded }
+        required_by = loaded_ids & Plugin::Inflector::CONSUMER_PLUGIN_IDS
+        return nil if required_by.empty?
+
+        Plugin::Isolation.target_bundle_root ||= Environment::BundleSigDiscovery.resolve_bundle_path(
+          bundle_path: configuration.bundler_bundle_path,
+          project_root: Dir.pwd,
+          auto_detect: configuration.bundler_auto_detect
+        )&.to_s
+        { required_by: required_by, available: Plugin::Inflector.available? }
       end
 
       def build_services(configuration)

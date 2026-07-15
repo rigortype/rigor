@@ -13,6 +13,7 @@ require_relative "environment/missing_gem_constant_index"
 require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/rbs_collection_discovery"
+require_relative "plugin/isolation"
 require_relative "environment/rbs_coverage_report"
 require_relative "inference/synthetic_method_index"
 require_relative "inference/project_patched_methods"
@@ -223,9 +224,9 @@ module Rigor
         # ADR-82 WD9 — the resolved bundle root, so the missing-gem constant index reads each RBS-less gem's
         # entry file from the TARGET's bundle (not rigor's own — see `MissingGemConstantIndex`). Resolved
         # once here; passed through to the lazy index build.
-        bundle_root = BundleSigDiscovery.resolve_bundle_path(
+        bundle_root = resolve_target_bundle_root(
           bundle_path: bundler_bundle_path, project_root: root, auto_detect: bundler_auto_detect
-        )&.to_s
+        )
         # O4 Layer 3 slice 2 — when `rbs collection install` has been run for the target project, parse the
         # resulting `rbs_collection.lock.yaml` and feed each gem's `<collection_path>/<name>/<version>/`
         # directory into `signature_paths:`. Stdlib-typed entries are skipped (already covered by
@@ -303,6 +304,19 @@ module Rigor
       def default_signature_paths(root)
         sig = Pathname(root) / DEFAULT_PROJECT_SIG_DIR
         sig.directory? ? [sig] : []
+      end
+
+      # ADR-82 WD9 — the resolved bundle root for the missing-gem constant index, doubling (ADR-90) as the
+      # hand-off to the plugin isolation layer: ADR-39 target-library invocation (`Plugin::Inflector` →
+      # activesupport, the Rack status table) can then require the analyzed project's own locked gems when
+      # Rigor's host gem environment does not carry them — the standalone `gem install rigortype` case,
+      # where activesupport is deliberately not a runtime dependency.
+      def resolve_target_bundle_root(bundle_path:, project_root:, auto_detect:)
+        bundle_root = BundleSigDiscovery.resolve_bundle_path(
+          bundle_path: bundle_path, project_root: project_root, auto_detect: auto_detect
+        )&.to_s
+        Plugin::Isolation.target_bundle_root = bundle_root
+        bundle_root
       end
 
       # The `:missing` classification (locked gems with no RBS through any resolution path), computed once

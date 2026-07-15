@@ -18,9 +18,12 @@ module Rigor
     # rules are ingested by *statically parsing* `config/initializers/inflections.rb` in a later slice, never
     # by executing it.)
     #
-    # **Absence is silence, never a guess.** When `ActiveSupport::Inflector` cannot be loaded (a
-    # misconfiguration — the consuming plugins declare it as a dependency, so it is present in practice), the
-    # inflection methods raise {Unavailable} rather than approximate. That raise propagates to the caller's
+    # **Absence is silence, never a guess.** ActiveSupport is resolved from Rigor's host gem environment
+    # first, then from the analyzed project's own bundler install tree ({Isolation.target_bundle_root},
+    # ADR-90) — a Rails project always carries its locked activesupport on disk, and that copy is the
+    # higher-fidelity source of inflection rules anyway. When neither resolves (a standalone install
+    # analyzing a project whose bundle is not installed), the inflection methods raise {Unavailable}
+    # rather than approximate. That raise propagates to the caller's
     # per-plugin rescue boundary, so the inflection-dependent check degrades to **no diagnostics** — reduced
     # coverage, never a wrong fact. A consumer that wants to fail cleanly up front can gate on {available?}
     # and emit a single load-error.
@@ -38,6 +41,12 @@ module Rigor
       # call runs under the configured isolation strategy (none / ruby_box / process).
       FEATURE = "active_support/inflector"
       RECEIVER = "ActiveSupport::Inflector"
+
+      # The bundled plugins whose checks consume this helper (each README documents the dependency). Used
+      # by `rigor plugins` (ADR-90) to probe {available?} at activation time — so a standalone install
+      # where inflection silently degrades reports the degradation instead of an unqualified `[OK]`. When
+      # a new plugin adopts the helper, add its manifest id here.
+      CONSUMER_PLUGIN_IDS = %w[actionmailer actionpack activerecord factorybot rails-routes].freeze
 
       # Raised when `ActiveSupport::Inflector` is required for an inflection but cannot be loaded. Caught by
       # the per-plugin isolation boundary, so it surfaces as "this plugin produced no diagnostics" rather than

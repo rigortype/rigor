@@ -74,6 +74,15 @@ module Rigor
         # path, so they defer to {#discover}); the {Result} carries `nil` for them, matching {#adopt_prebuilt}.
         # Extracted so `#prepare_project_scan` and the prebuilt-less `#run` path share one implementation.
         def run(expansion:)
+          # ADR-90 — resolve the target project's bundle for the plugin isolation layer BEFORE any plugin
+          # code runs: `#prepare` hooks (the rails-routes parse, the activerecord model index) already
+          # invoke `Plugin::Inflector`, and the `Environment.for_project` assignment of the same value
+          # happens only after the pre-passes. Without this, a standalone install degrades inflection for
+          # exactly the prepare-time checks even though the analyzed project's bundle carries activesupport.
+          Plugin::Isolation.target_bundle_root ||= Environment::BundleSigDiscovery.resolve_bundle_path(
+            bundle_path: @configuration.bundler_bundle_path,
+            auto_detect: @configuration.bundler_auto_detect
+          )&.to_s
           plugin_registry = load_plugins
           dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
           # ADR-18 slice 3 — plugin prepare MUST run before the synthetic-method scanner so cross-plugin

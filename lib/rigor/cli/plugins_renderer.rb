@@ -10,9 +10,12 @@ module Rigor
     # The two formats carry the same content; JSON is meant for tooling (SKILLs, CI, editor integrations) while text is
     # for interactive inspection. Rows are printed in the order the loader resolved them.
     class PluginsRenderer # rubocop:disable Metrics/ClassLength
-      def initialize(rows:, configuration_path:)
+      # `inflection:` (ADR-90) is nil, or `{required_by: [ids], available: Boolean}` — the activation-time
+      # `Plugin::Inflector` probe result when a loaded plugin consumes the shared inflection helper.
+      def initialize(rows:, configuration_path:, inflection: nil)
         @rows = rows
         @configuration_path = configuration_path
+        @inflection = inflection
       end
 
       def text
@@ -25,17 +28,23 @@ module Rigor
         end
         lines << ""
         lines << footer
+        lines.concat(inflection_warning_lines)
         lines.join("\n")
       end
 
       def json
-        JSON.pretty_generate(
-          {
-            "configuration" => @configuration_path,
-            "plugins" => @rows.map { |row| row_json(row) },
-            "summary" => summary
+        payload = {
+          "configuration" => @configuration_path,
+          "plugins" => @rows.map { |row| row_json(row) },
+          "summary" => summary
+        }
+        unless @inflection.nil?
+          payload["inflection"] = {
+            "required_by" => @inflection.fetch(:required_by),
+            "available" => @inflection.fetch(:available)
           }
-        )
+        end
+        JSON.pretty_generate(payload)
       end
 
       # ADR-37 § "Machine-readable capability catalogue" — the focused per-plugin extension-protocol dump. Only loaded
@@ -120,6 +129,22 @@ module Rigor
           "#{errored.size} plugin(s) failed to load — see above. " \
             "Run with --strict to make this a CI gate."
         end
+      end
+
+      # ADR-90 — the text-view degradation warning. Printed only when the probe ran (an Inflector-consuming
+      # plugin is loaded) AND inflection is unavailable; the healthy case stays quiet.
+      def inflection_warning_lines
+        return [] if @inflection.nil? || @inflection.fetch(:available)
+
+        [
+          "",
+          "WARNING: ActiveSupport::Inflector is not loadable — inflection-dependent checks of " \
+          "#{@inflection.fetch(:required_by).join(', ')} will silently produce no diagnostics.",
+          "         Rigor found activesupport neither in its own gem environment nor in the project's " \
+          "bundler install tree.",
+          "         Fix: run `bundle install` in the analyzed project (Rigor reads vendor/bundle or " \
+          ".bundle/config), or install activesupport into Rigor's gem environment."
+        ]
       end
 
       def row_lines(row)

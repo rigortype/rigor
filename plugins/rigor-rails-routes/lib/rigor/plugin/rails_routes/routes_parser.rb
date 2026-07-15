@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 require "rigor/source/literals"
 
@@ -371,7 +373,7 @@ module Rigor
           when Prism::CallNode
             interpret_call(node, context)
           else
-            node.compact_child_nodes.each { |child| interpret(child, context) }
+            node.rigor_each_child { |child| interpret(child, context) }
           end
         end
 
@@ -526,7 +528,7 @@ module Rigor
           return unless node.is_a?(Prism::Node)
 
           yield node
-          node.compact_child_nodes.each { |child| walk_for_alias_pattern(child, &) }
+          node.rigor_each_child { |child| walk_for_alias_pattern(child, &) }
         end
 
         def first_block_parameter_name(block_node)
@@ -545,7 +547,7 @@ module Rigor
           body = node.block&.body
           return if body.nil?
 
-          body.compact_child_nodes.each { |child| interpret(child, context) }
+          body.rigor_each_child { |child| interpret(child, context) }
         end
 
         def handle_namespace(node, context)
@@ -625,7 +627,7 @@ module Rigor
           return [] if body.nil?
 
           skips = []
-          body.compact_child_nodes.each do |child|
+          body.rigor_each_child do |child|
             next unless child.is_a?(Prism::CallNode) && child.name == :skip_controllers
             next if child.receiver
 
@@ -748,7 +750,7 @@ module Rigor
             body = context.concern_body(concern_name)
             next if body.nil?
 
-            body.compact_child_nodes.each { |child| interpret(child, context) }
+            body.rigor_each_child { |child| interpret(child, context) }
           end
         end
 

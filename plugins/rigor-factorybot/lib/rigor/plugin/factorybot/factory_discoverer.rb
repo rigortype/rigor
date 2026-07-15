@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 require "rigor/source/literals"
 
@@ -86,7 +88,7 @@ module Rigor
             visit_factory(node, &)
             return
           end
-          node.compact_child_nodes.each { |child| walk_for_factories(child, &) }
+          node.rigor_each_child { |child| walk_for_factories(child, &) }
         end
 
         def factory_call?(node)

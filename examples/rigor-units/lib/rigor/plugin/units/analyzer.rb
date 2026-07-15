@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 module Rigor
@@ -47,7 +49,7 @@ module Rigor
           when Prism::StatementsNode then evaluate_statements(node)
           when Prism::CallNode then evaluate_call(node)
           else
-            node.compact_child_nodes.each { |child| evaluate(child) }
+            node.rigor_each_child { |child| evaluate(child) }
             nil
           end
         end
@@ -66,7 +68,7 @@ module Rigor
 
         def evaluate_statements(node)
           last = nil
-          node.compact_child_nodes.each { |child| last = evaluate(child) }
+          node.rigor_each_child { |child| last = evaluate(child) }
           last
         end
 

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 require "rigor/source/literals"
 
@@ -97,7 +99,7 @@ module Rigor
           when Prism::ClassNode then visit_class(node, lexical_path, &)
           when Prism::ModuleNode then visit_module(node, lexical_path, &)
           else
-            node.compact_child_nodes.each { |child| walk_for_mailers(child, lexical_path, &) }
+            node.rigor_each_child { |child| walk_for_mailers(child, lexical_path, &) }
           end
         end
 
@@ -124,7 +126,7 @@ module Rigor
           return [] if body.nil?
 
           names = []
-          body.compact_child_nodes.each do |node|
+          body.rigor_each_child do |node|
             next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :include
 
             (node.arguments&.arguments || []).each do |arg|
@@ -158,7 +160,7 @@ module Rigor
             inner = local_name ? lexical_path + [local_name.delete_prefix("::")] : lexical_path
             collect_module_actions(node.body, inner, accumulator) if node.body
           else
-            node.compact_child_nodes.each { |child| collect_module_actions(child, lexical_path, accumulator) }
+            node.rigor_each_child { |child| collect_module_actions(child, lexical_path, accumulator) }
           end
         end
 
@@ -231,7 +233,7 @@ module Rigor
           private_names = []
           callback_names = []
 
-          body.compact_child_nodes.each do |node|
+          body.rigor_each_child do |node|
             next unless node.is_a?(Prism::CallNode) && node.receiver.nil?
 
             args = (node.arguments&.arguments || []).filter_map do |arg|

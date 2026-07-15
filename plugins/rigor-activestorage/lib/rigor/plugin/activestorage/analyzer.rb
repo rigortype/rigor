@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 module Rigor
@@ -32,7 +34,7 @@ module Rigor
           return if node.nil?
 
           yield node
-          node.compact_child_nodes.each { |child| walk(child, &) }
+          node.rigor_each_child { |child| walk(child, &) }
         end
 
         def visit_call(node)

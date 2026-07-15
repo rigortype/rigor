@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 require_relative "controller_index"
@@ -89,7 +91,7 @@ module Rigor
 
             walk_declarations(node.body, namespace: inner_namespace, &)
           else
-            node.compact_child_nodes.each do |child|
+            node.rigor_each_child do |child|
               walk_declarations(child, namespace: namespace, &)
             end
           end
@@ -142,7 +144,7 @@ module Rigor
           return accumulator unless node.is_a?(Prism::Node)
 
           accumulator << node.name if node.is_a?(Prism::DefNode) && node.receiver.nil?
-          node.compact_child_nodes.each { |child| collect_def_names(child, accumulator) }
+          node.rigor_each_child { |child| collect_def_names(child, accumulator) }
           accumulator
         end
 
@@ -160,7 +162,7 @@ module Rigor
             end
           end
 
-          node.compact_child_nodes.each { |child| collect_include_targets(child, accumulator) }
+          node.rigor_each_child { |child| collect_include_targets(child, accumulator) }
           accumulator
         end
 

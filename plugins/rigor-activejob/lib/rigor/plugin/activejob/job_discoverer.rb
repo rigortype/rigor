@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 require_relative "job_index"
@@ -66,7 +68,7 @@ module Rigor
           when Prism::ClassNode then visit_class(node, lexical_path, &)
           when Prism::ModuleNode then visit_module(node, lexical_path, &)
           else
-            node.compact_child_nodes.each { |child| walk_for_jobs(child, lexical_path, &) }
+            node.rigor_each_child { |child| walk_for_jobs(child, lexical_path, &) }
           end
         end
 
@@ -118,7 +120,7 @@ module Rigor
         def lookup_perform_def(body)
           return nil if body.nil?
 
-          body.compact_child_nodes.each do |node|
+          body.rigor_each_child do |node|
             next unless node.is_a?(Prism::DefNode) && node.name == :perform
             next if node.receiver.is_a?(Prism::SelfNode)
 

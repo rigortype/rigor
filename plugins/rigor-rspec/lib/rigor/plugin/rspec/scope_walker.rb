@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 require "rigor/source/literals"
 
@@ -70,7 +72,7 @@ module Rigor
           if rspec_describe_call?(node)
             scopes << build_scope(node, kind: :rspec_describe)
           else
-            node.compact_child_nodes.each { |child| walk_top_level(child, scopes) }
+            node.rigor_each_child { |child| walk_top_level(child, scopes) }
           end
         end
 

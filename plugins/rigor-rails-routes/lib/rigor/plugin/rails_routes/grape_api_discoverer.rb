@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 module Rigor
@@ -106,7 +108,7 @@ module Rigor
             end
           end
 
-          node.compact_child_nodes.each { |child| walk(child, prefix_path, declarations, superclasses) }
+          node.rigor_each_child { |child| walk(child, prefix_path, declarations, superclasses) }
         end
 
         def record_class(node, qualified, declarations, superclasses)

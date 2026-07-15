@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rigor/source/node_children"
+
 require "prism"
 
 module Rigor
@@ -66,7 +68,7 @@ module Rigor
 
           yield node if node.is_a?(Prism::CallNode) && node.name == :create_table && node.receiver.nil?
 
-          node.compact_child_nodes.each { |child| collect_create_table_calls(child, &) }
+          node.rigor_each_child { |child| collect_create_table_calls(child, &) }
         end
 
         def parse_create_table(call_node)
@@ -118,7 +120,7 @@ module Rigor
             return
           end
 
-          node.compact_child_nodes.each { |child| collect_column_calls(child, &) }
+          node.rigor_each_child { |child| collect_column_calls(child, &) }
         end
 
         def parse_column(call_node)

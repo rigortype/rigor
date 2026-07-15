@@ -23,8 +23,9 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
   attr_reader :dir
 
   # Runs `rigor check` in a child process with a preload that records, at exit, how many engine features the
-  # process loaded. Returns `[exitstatus, engine_feature_count, stdout]`.
-  def check_run(*extra_args)
+  # process loaded. Returns `[exitstatus, engine_feature_count, stdout]`. Pass `baseline: true` to run without
+  # `--no-baseline`, letting the config's `baseline:` key apply.
+  def check_run(*extra_args, baseline: false)
     preload = File.join(dir, "loaded_features_probe.rb")
     marker = File.join(dir, "engine_features.txt")
     File.write(preload, <<~RUBY)
@@ -35,8 +36,9 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
       end
     RUBY
 
+    baseline_args = baseline ? [] : ["--no-baseline"]
     cmd = ["bundle", "exec", "ruby", "-r", preload, exe,
-           "check", "--no-ci-detect", "--no-stats", "--no-baseline", *extra_args, "lib"]
+           "check", "--no-ci-detect", "--no-stats", *baseline_args, *extra_args, "lib"]
     stdout, _stderr, status = Open3.capture3(*cmd, chdir: dir)
     [status.exitstatus, File.read(marker).to_i, stdout]
   end
@@ -63,6 +65,21 @@ RSpec.describe "ADR-87 WD4 run-cache hit probe (subprocess)" do
     expect(hit_engine).to eq(0)
     # The clean fixture produces a clean run, served from cache.
     expect(hit_stdout).to include("No diagnostics")
+  end
+
+  it "serves a warm HIT engine-free with an active baseline (the onboarding second-run sequence)" do
+    write_project
+    File.write(File.join(dir, ".rigor.yml"),
+               "severity_profile: balanced\nbaseline: .rigor-baseline.yml\n")
+
+    # The exact post-onboarding sequence: prime the run cache, generate + wire a baseline, run again normally.
+    check_run(baseline: true) # cold miss primes the cache
+    _stdout, _stderr, status = Open3.capture3("bundle", "exec", "ruby", exe, "baseline", "generate", chdir: dir)
+    expect(status.exitstatus).to eq(0)
+
+    hit_status, hit_engine, = check_run(baseline: true)
+    expect(hit_status).to eq(0) # regression guard: this crashed with `uninitialized constant Analysis::Baseline`
+    expect(hit_engine).to eq(0) # the baseline filter must not drag the engine onto the hit path
   end
 
   it "declines the probe (loads the engine) for --no-cache" do

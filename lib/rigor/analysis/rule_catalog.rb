@@ -370,6 +370,33 @@ module Rigor
           since: "0.1.2"
         ),
 
+        CheckRules::RULE_DUPLICATE_HASH_KEY => Entry.new(
+          id: CheckRules::RULE_DUPLICATE_HASH_KEY,
+          summary: "Duplicate literal key within a single Hash literal (the last entry wins silently at runtime).",
+          fires_when: [
+            "Two entries of one Hash literal — braced (`{ a: 1, a: 2 }`) or bare keyword arguments " \
+            "(`m(a: 1, a: 2)`) — carry the same value-pinned literal key: a symbol (the `key:` shorthand " \
+            "and `:key =>` spell the same symbol), a plain non-interpolated string, an integer, a float, " \
+            "or `true` / `false` / `nil`.",
+            "A `**splat` between two identical literal keys does not rescue the pair — the later literal " \
+            "entry still overwrites the earlier one regardless of what the splat contributes."
+          ],
+          does_not_fire_when: [
+            "Either key is not value-pinned at parse time: interpolated strings / symbols, constants, " \
+            "method calls, locals, and `**splat` entries are never compared.",
+            "The keys live in different literal kinds — `:a` vs `\"a\"`, and `1` vs `1.0` (`1.eql?(1.0)` " \
+            "is false, so Hash treats them as distinct keys) never collide.",
+            "The repeated keys sit in different Hash literals (nested literals are each their own scope)."
+          ],
+          suppression: "`# rigor:disable duplicate-hash-key` on the later occurrence's line.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Purely syntactic value-pinned comparison with no metaprogramming escape: when it fires, the
+          # runtime overwrite is certain (Ruby itself warns under `-w`).
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
         CheckRules::RULE_RETURN_TYPE => Entry.new(
           id: CheckRules::RULE_RETURN_TYPE,
           summary: "Method body's last-expression type is incompatible with the declared return type.",

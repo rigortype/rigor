@@ -33,6 +33,7 @@ module Rigor
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
       RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
       RULE_UNREACHABLE_CLAUSE = "flow.unreachable-clause"
+      RULE_DUPLICATE_HASH_KEY = "flow.duplicate-hash-key"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -48,6 +49,7 @@ module Rigor
         RULE_DEAD_ASSIGNMENT,
         RULE_ALWAYS_TRUTHY_CONDITION,
         RULE_UNREACHABLE_CLAUSE,
+        RULE_DUPLICATE_HASH_KEY,
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
         RULE_OVERRIDE_VISIBILITY_REDUCED,
@@ -74,7 +76,8 @@ module Rigor
         "ivar-write-mismatch" => RULE_IVAR_WRITE_MISMATCH,
         "dead-assignment" => RULE_DEAD_ASSIGNMENT,
         "always-truthy-condition" => RULE_ALWAYS_TRUTHY_CONDITION,
-        "unreachable-clause" => RULE_UNREACHABLE_CLAUSE
+        "unreachable-clause" => RULE_UNREACHABLE_CLAUSE,
+        "duplicate-hash-key" => RULE_DUPLICATE_HASH_KEY
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression comment or `disable:` list disables every rule

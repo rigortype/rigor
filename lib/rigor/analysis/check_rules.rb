@@ -13,6 +13,7 @@ require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
+require_relative "check_rules/duplicate_hash_key_collector"
 require_relative "check_rules/ivar_write_collector"
 require_relative "check_rules/main_pass_collector"
 require_relative "check_rules/self_closedness_scanner"
@@ -96,6 +97,7 @@ module Rigor
         diagnostics.concat(unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
         diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
+        diagnostics.concat(duplicate_hash_key_diagnostics(path, collectors[:duplicate_hash_keys].results))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
@@ -134,7 +136,8 @@ module Rigor
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
           ivar_writes: IvarWriteCollector.new(scope_index),
-          dead_assignments: DeadAssignmentCollector.new(scope_index)
+          dead_assignments: DeadAssignmentCollector.new(scope_index),
+          duplicate_hash_keys: DuplicateHashKeyCollector.new(scope_index)
         }
       end
 
@@ -275,6 +278,18 @@ module Rigor
       def dead_assignment_diagnostics(path, dead_assignments)
         dead_assignments.map do |result|
           build_dead_assignment_diagnostic(path, result[:write_node], result[:def_node])
+        end
+      end
+
+      # v0.3.0 — `flow.duplicate-hash-key`. Emits a diagnostic for each LATER occurrence of a repeated
+      # LITERAL key within one Hash literal (braced or bare-kwargs) — Ruby keeps the last entry silently
+      # at runtime, so the earlier value is dead. The
+      # `Analysis::CheckRules::DuplicateHashKeyCollector` describes the value-pinned-literal-only
+      # envelope (symbols / plain strings / integers / floats / true / false / nil; never
+      # cross-kind, never interpolation / constants / calls / splats).
+      def duplicate_hash_key_diagnostics(path, duplicate_keys)
+        duplicate_keys.map do |result|
+          build_duplicate_hash_key_diagnostic(path, result)
         end
       end
 
@@ -1474,6 +1489,21 @@ module Rigor
             rule: RULE_DEAD_ASSIGNMENT,
             path: path,
             message: "local `#{write_node.name}' assigned in `#{def_node.name}' but never read",
+            severity: :warning
+          )
+        end
+
+        # The diagnostic points at the LATER occurrence (the entry that wins at runtime) and names the
+        # first occurrence's line, so the fix — delete or rename one of the two — is visible from the
+        # message alone.
+        def build_duplicate_hash_key_diagnostic(path, result)
+          first_line = result[:first_key_node].location.start_line
+          Diagnostic.from_node(
+            result[:key_node],
+            rule: RULE_DUPLICATE_HASH_KEY,
+            path: path,
+            message: "duplicate hash key `#{result[:key_label]}' in the same literal; this entry " \
+                     "overwrites the value first set at line #{first_line}",
             severity: :warning
           )
         end

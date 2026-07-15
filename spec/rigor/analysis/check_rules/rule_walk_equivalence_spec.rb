@@ -189,7 +189,7 @@ module RuleWalkEquivalenceCases
         b
       end
     RUBY
-    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY
+    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY,
       def or_write_reads
         x = 1
         x ||= 2
@@ -197,6 +197,14 @@ module RuleWalkEquivalenceCases
         [1].each { captured }
         x
       end
+    RUBY
+    "duplicate hash keys: braced, kwargs, nested, splat-straddled, non-firing forms" => <<~RUBY
+      h = { a: 1, b: 2, a: 3 }
+      m(a: 1, a: 2)
+      nested = { outer: { x: 1, x: 2 }, x: 3 }
+      straddle = { k: 1, **h, k: 2 }
+      clean = { a: 1, "a" => 2, 1 => :i, 1.0 => :f, CONST => 3, CONST => 4 }
+      [1].each { |i| puts({ i => 1, i => 2 }.merge(h, nested, straddle, clean)) }
     RUBY
   }.freeze
 
@@ -208,7 +216,8 @@ module RuleWalkEquivalenceCases
     Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
     Rigor::Analysis::CheckRules::UnreachableClauseCollector,
     Rigor::Analysis::CheckRules::IvarWriteCollector,
-    Rigor::Analysis::CheckRules::DeadAssignmentCollector
+    Rigor::Analysis::CheckRules::DeadAssignmentCollector,
+    Rigor::Analysis::CheckRules::DuplicateHashKeyCollector
   ].freeze
 end
 

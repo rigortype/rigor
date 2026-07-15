@@ -3347,6 +3347,156 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    describe "duplicate-hash-key rule" do
+      def dup_key_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.duplicate-hash-key" }
+      end
+
+      it "flags a duplicate symbol key, pointing at the later occurrence and naming the first line" do
+        result = analyze(<<~RUBY)
+          h = {
+            a: 1,
+            b: 2,
+            a: 3
+          }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("duplicate hash key `:a'")
+        expect(diag.message).to include("first set at line 2")
+        expect(diag.line).to eq(4)
+      end
+
+      it "flags a duplicate plain-string key" do
+        result = analyze(<<~RUBY)
+          h = { "x" => 1, "x" => 2 }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include(%(duplicate hash key `"x"'))
+      end
+
+      it "flags a duplicate integer key" do
+        result = analyze(<<~RUBY)
+          h = { 1 => :a, 2 => :b, 1 => :c }
+          h
+        RUBY
+        expect(dup_key_diags(result).size).to eq(1)
+      end
+
+      it "flags the same symbol spelled as shorthand and hashrocket" do
+        result = analyze(<<~RUBY)
+          h = { a: 1, :a => 2 }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("duplicate hash key `:a'")
+      end
+
+      it "flags duplicate bare keyword arguments in a call (KeywordHashNode)" do
+        result = analyze(<<~RUBY)
+          def m(**opts)
+            opts
+          end
+          m(a: 1, a: 2)
+        RUBY
+        expect(dup_key_diags(result).size).to eq(1)
+      end
+
+      it "flags a literal pair straddling a `**splat` (the splat does not rescue the collision)" do
+        result = analyze(<<~RUBY)
+          extra = { b: 2 }
+          h = { a: 1, **extra, a: 3 }
+          h
+        RUBY
+        expect(dup_key_diags(result).size).to eq(1)
+      end
+
+      it "does not flag distinct keys" do
+        result = analyze(<<~RUBY)
+          h = { a: 1, b: 2, "a" => 3 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag repeated interpolated-string keys (not value-pinned)" do
+        result = analyze(<<~'RUBY')
+          x = "k"
+          h = { "a#{x}" => 1, "a#{x}" => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not cross-compare a symbol and a string with the same text" do
+        result = analyze(<<~RUBY)
+          h = { a: 1, "a" => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not cross-compare Integer and Float keys (1.eql?(1.0) is false)" do
+        result = analyze(<<~RUBY)
+          h = { 1 => :int, 1.0 => :float }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag repeated constant keys" do
+        result = analyze(<<~RUBY)
+          KEY = :a
+          h = { KEY => 1, KEY => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag repeated method-call keys" do
+        result = analyze(<<~RUBY)
+          def key
+            :a
+          end
+          h = { key => 1, key => 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "does not flag a `**splat` alongside distinct literal keys" do
+        result = analyze(<<~RUBY)
+          extra = { c: 3 }
+          h = { a: 1, **extra, b: 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "scopes each Hash literal independently (nested literals do not collide with the outer one)" do
+        result = analyze(<<~RUBY)
+          h = { a: { a: 1 }, b: 2 }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable duplicate-hash-key`" do
+        result = analyze(<<~RUBY)
+          h = {
+            a: 1,
+            a: 2 # rigor:disable duplicate-hash-key
+          }
+          h
+        RUBY
+        expect(dup_key_diags(result)).to be_empty
+      end
+    end
+
     describe "ivar-write-mismatch rule (v0.1.2)" do
       def ivar_diags(result)
         result.diagnostics.select { |d| d.rule == "def.ivar-write-mismatch" }

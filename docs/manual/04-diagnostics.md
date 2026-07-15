@@ -47,6 +47,7 @@ carries no `documentation_url`.
 | <a id="rule-flow-always-truthy-condition"></a>`flow.always-truthy-condition` | A condition is provably always truthy or always falsey. | medium |
 | <a id="rule-flow-dead-assignment"></a>`flow.dead-assignment` | A local is written but never read in the same method. | medium |
 | <a id="rule-flow-unreachable-clause"></a>`flow.unreachable-clause` | A `case`/`when` or `case`/`in` clause is statically dead — its subject type is disjoint with the pattern, or a prior clause already exhausted the subject. | medium |
+| <a id="rule-flow-shadowed-rescue-clause"></a>`flow.shadowed-rescue-clause` | A `rescue` clause can never run because an earlier clause of the same chain already catches a superclass (or the same class) of every exception class it names. | high |
 | <a id="rule-def-return-type-mismatch"></a>`def.return-type-mismatch` | The method body's result violates its declared RBS return type. | medium |
 | <a id="rule-def-ivar-write-mismatch"></a>`def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write. | high |
 | <a id="rule-def-method-visibility-mismatch"></a>`def.method-visibility-mismatch` | An explicit-receiver call reaches a private method. | high |

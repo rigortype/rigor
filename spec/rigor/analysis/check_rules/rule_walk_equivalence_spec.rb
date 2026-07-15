@@ -189,13 +189,23 @@ module RuleWalkEquivalenceCases
         b
       end
     RUBY
-    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY
+    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY,
       def or_write_reads
         x = 1
         x ||= 2
         captured = 5
         [1].each { captured }
         x
+      end
+    RUBY
+    "shadowed rescue chain via a namespaced project subclass (prefix-dependent)" => <<~RUBY
+      module M
+        class E < StandardError; end
+        def self.go
+          work
+        rescue StandardError
+        rescue E
+        end
       end
     RUBY
   }.freeze
@@ -207,6 +217,7 @@ module RuleWalkEquivalenceCases
   HOSTED_COLLECTOR_CLASSES = [
     Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
     Rigor::Analysis::CheckRules::UnreachableClauseCollector,
+    Rigor::Analysis::CheckRules::ShadowedRescueCollector,
     Rigor::Analysis::CheckRules::IvarWriteCollector,
     Rigor::Analysis::CheckRules::DeadAssignmentCollector
   ].freeze

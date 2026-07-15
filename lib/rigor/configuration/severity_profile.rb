@@ -42,6 +42,7 @@ module Rigor
           "flow.dead-assignment" => :info,
           "flow.always-truthy-condition" => :info,
           "flow.unreachable-clause" => :info,
+          "flow.shadowed-rescue-clause" => :info,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -71,6 +72,7 @@ module Rigor
           # green; promote to :warning once Mastodon/GitLab/Redmine triage
           # to zero net false positives.
           "flow.unreachable-clause" => :info,
+          "flow.shadowed-rescue-clause" => :warning,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -96,6 +98,7 @@ module Rigor
           # below its :error siblings) while it proves out — see the
           # balanced-profile note above.
           "flow.unreachable-clause" => :warning,
+          "flow.shadowed-rescue-clause" => :error,
           "assert.type-mismatch" => :error,
           "dump.type" => :error,
           "def.return-type-mismatch" => :error,

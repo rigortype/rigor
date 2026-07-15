@@ -346,6 +346,38 @@ module Rigor
           since: "0.1.17"
         ),
 
+        CheckRules::RULE_SHADOWED_RESCUE_CLAUSE => Entry.new(
+          id: CheckRules::RULE_SHADOWED_RESCUE_CLAUSE,
+          summary: "A `rescue` clause an earlier clause of the same chain already fully catches.",
+          fires_when: [
+            "An earlier `rescue` clause in the same `begin` / `def` rescue chain names a superclass (or " \
+            "the same class) of EVERY exception class the later clause names — `rescue StandardError` " \
+            "followed by `rescue ArgumentError` leaves the ArgumentError arm dead.",
+            "A bare `rescue` / `rescue => e` counts as the implicit `StandardError` on either side.",
+            "Every exception reference in both clauses is a constant path resolving (against its lexical " \
+            "namespace) to a CLASS with known ancestry — RBS / registry core classes, or a project class " \
+            "whose `class Foo < Bar` superclass chain is discovered.",
+            "A multi-class arm (`rescue A, B`) fires only when every class it names is covered by earlier " \
+            "clauses."
+          ],
+          does_not_fire_when: [
+            "Any exception reference in either clause is an unresolved constant, a dynamic expression " \
+            "(`rescue klass_var`), or a splat (`rescue *ERRORS`) — the comparisons involving that clause " \
+            "stay silent.",
+            "A resolved constant is a MODULE (the `rescue MyGem::Error` module-tag mixin pattern — module " \
+            "`===` semantics are custom), or a project constant the discovery cannot certify as a class.",
+            "The later clause names a SUPERCLASS of an earlier one — the normal narrow-to-wide rescue order.",
+            "The clauses belong to different (nested) `begin` nodes — only clauses of the same chain compare."
+          ],
+          suppression: "`# rigor:disable shadowed-rescue-clause` on the shadowed `rescue` line.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Purely syntactic + class-ancestry proof: both sides must resolve to concrete classes with known
+          # ancestry before a comparison happens, so a firing has no flow / mutation FP envelope.
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
         CheckRules::RULE_DEAD_ASSIGNMENT => Entry.new(
           id: CheckRules::RULE_DEAD_ASSIGNMENT,
           summary: "Local variable assigned in a method body but never read.",

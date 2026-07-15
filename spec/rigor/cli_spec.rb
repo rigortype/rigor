@@ -1643,7 +1643,9 @@ RSpec.describe Rigor::CLI do
       lines = out.lines
       # Interior pair lines are not expressions — no `Dynamic[top]` fill noise.
       (1..4).each { |i| expect(lines[i]).not_to include("#=>") }
-      expect(lines[5]).to start_with("}").and include("#=> Hash[1 | 1.0, 1 | 2 | 3 | 4]")
+      # The scalar-key HashShape folds the literal to a value-pinned shape with last-wins on duplicate keys
+      # (`1 => 1, 1 => 2` → `1 => 2`; `1.0 => 3, 1.00 => 4` share the float key `1.0` → `1.0 => 4`).
+      expect(lines[5]).to start_with("}").and include("#=> { 1 => 2, 1.0 => 4 }")
       expect(lines[6]).to include("p h").and include("#=>")
 
       # Re-annotating the annotated output is stable (the multi-line-literal shape included).

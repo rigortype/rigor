@@ -48,6 +48,9 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     # A quarantined `.rbs` keeps the env NON-empty (that is the point of quarantining it), so the class count
     # alone reads as healthy — doctor used to say exactly that while the project's own types were silently gone.
     it "reports a degraded RBS environment when a signature file was quarantined" do
+      # The loader's stderr banner is a separate channel from this command's injected `out`/`err` (Kernel#warn
+      # writes to the real $stderr, which `run` never captures); it is not what this example is about.
+      allow_any_instance_of(Rigor::Environment::RbsLoader).to receive(:warn) # rubocop:disable RSpec/AnyInstance
       File.write("clean.rb", "x = 1\n")
       FileUtils.mkdir_p("sig")
       File.write(File.join("sig", "broken.rbs"),

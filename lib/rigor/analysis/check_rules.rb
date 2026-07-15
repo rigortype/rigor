@@ -13,6 +13,7 @@ require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
+require_relative "check_rules/return_in_ensure_collector"
 require_relative "check_rules/ivar_write_collector"
 require_relative "check_rules/main_pass_collector"
 require_relative "check_rules/self_closedness_scanner"
@@ -96,6 +97,7 @@ module Rigor
         diagnostics.concat(unreachable_clause_diagnostics(path, collectors[:unreachable_clauses].results))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, collectors[:ivar_writes].results))
         diagnostics.concat(dead_assignment_diagnostics(path, collectors[:dead_assignments].results))
+        diagnostics.concat(return_in_ensure_diagnostics(path, collectors[:return_in_ensure].results))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
@@ -134,7 +136,8 @@ module Rigor
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
           ivar_writes: IvarWriteCollector.new(scope_index),
-          dead_assignments: DeadAssignmentCollector.new(scope_index)
+          dead_assignments: DeadAssignmentCollector.new(scope_index),
+          return_in_ensure: ReturnInEnsureCollector.new(scope_index)
         }
       end
 
@@ -275,6 +278,19 @@ module Rigor
       def dead_assignment_diagnostics(path, dead_assignments)
         dead_assignments.map do |result|
           build_dead_assignment_diagnostic(path, result[:write_node], result[:def_node])
+        end
+      end
+
+      # v0.3.0 — `flow.return-in-ensure`. One diagnostic per explicit
+      # `return` lexically inside an `ensure` clause body: it silently
+      # discards the method's in-flight return value and swallows any
+      # in-flight exception. Purely syntactic; the
+      # `Analysis::CheckRules::ReturnInEnsureCollector` describes the
+      # frame-aware envelope (nested def / lambda / `define_method`
+      # blocks are excluded, plain blocks are not).
+      def return_in_ensure_diagnostics(path, results)
+        results.map do |result|
+          build_return_in_ensure_diagnostic(path, result[:return_node])
         end
       end
 
@@ -1474,6 +1490,17 @@ module Rigor
             rule: RULE_DEAD_ASSIGNMENT,
             path: path,
             message: "local `#{write_node.name}' assigned in `#{def_node.name}' but never read",
+            severity: :warning
+          )
+        end
+
+        def build_return_in_ensure_diagnostic(path, return_node)
+          Diagnostic.from_location(
+            return_node.keyword_loc,
+            rule: RULE_RETURN_IN_ENSURE,
+            path: path,
+            message: "`return' inside `ensure' discards the method's in-flight return value " \
+                     "and swallows any in-flight exception",
             severity: :warning
           )
         end

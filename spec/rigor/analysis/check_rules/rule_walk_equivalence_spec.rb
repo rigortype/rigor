@@ -8,7 +8,7 @@ require "spec_helper"
 # fixture corpus, and requires identical per-collector results. A collector may only migrate onto the walk while this
 # oracle comparison holds; the corpus-scale companion is the `RIGOR_SHADOW_RULE_WALK=1` mode in
 # `CheckRules.run_node_collectors`.
-module RuleWalkEquivalenceCases
+module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curated source-shape data, not logic
   # Curated shapes: each exercises a distinct part of the traversal contract. Firing shapes are present for BOTH
   # collectors so the harness can never pass vacuously (asserted in the spec).
   CURATED = {
@@ -189,13 +189,49 @@ module RuleWalkEquivalenceCases
         b
       end
     RUBY
-    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY
+    "dead assignment suppressed by an or-write read and a closure read" => <<~RUBY,
       def or_write_reads
         x = 1
         x ||= 2
         captured = 5
         [1].each { captured }
         x
+      end
+    RUBY
+    "return in ensure: def / begin / block firing, nested frames skipped, nested ensure once" => <<~RUBY
+      def in_def
+        compute
+      ensure
+        return 1
+      end
+
+      def in_begin_and_block
+        begin
+          compute
+        ensure
+          [1].each { return 2 }
+        end
+      end
+
+      def frames_do_not_fire
+        compute
+      ensure
+        callback = -> { return :lambda }
+        other = lambda { return :lambda_kw }
+        define_method(:generated) { return :defined }
+        def helper = (return :nested_def)
+        callback.call
+        other.call
+      end
+
+      def nested_ensure_collected_once
+        compute
+      ensure
+        begin
+          cleanup
+        ensure
+          return 3
+        end
       end
     RUBY
   }.freeze
@@ -208,7 +244,8 @@ module RuleWalkEquivalenceCases
     Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
     Rigor::Analysis::CheckRules::UnreachableClauseCollector,
     Rigor::Analysis::CheckRules::IvarWriteCollector,
-    Rigor::Analysis::CheckRules::DeadAssignmentCollector
+    Rigor::Analysis::CheckRules::DeadAssignmentCollector,
+    Rigor::Analysis::CheckRules::ReturnInEnsureCollector
   ].freeze
 end
 

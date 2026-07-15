@@ -346,6 +346,31 @@ module Rigor
           since: "0.1.17"
         ),
 
+        CheckRules::RULE_RETURN_IN_ENSURE => Entry.new(
+          id: CheckRules::RULE_RETURN_IN_ENSURE,
+          summary: "Explicit `return` inside an `ensure` clause swallows in-flight exceptions.",
+          fires_when: [
+            "An explicit `return` sits lexically inside the `ensure` clause of a `begin` / `def` / class " \
+            "body (`ensure` always runs, so its `return` overrides the method's in-flight return value " \
+            "AND silently discards any exception being raised).",
+            "The `return` is inside a plain block (`each do ... return ... end`) within the ensure body — " \
+            "a `return` there still exits the enclosing method."
+          ],
+          does_not_fire_when: [
+            "The `return` is inside a nested `def`, a lambda (`->` / `lambda`), or a `define_method` " \
+            "block within the ensure body — it exits that inner frame, not the one the `ensure` guards.",
+            "The `ensure` body contains no explicit `return` (implicit last-expression values in `ensure` " \
+            "are discarded harmlessly and do not swallow exceptions)."
+          ],
+          suppression: "`# rigor:disable flow.return-in-ensure` on the `return` line.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          # Purely syntactic proof with a frame-aware envelope — Ruby's `ensure` semantics make every
+          # firing a real control-flow hazard (RuboCop `Lint/EnsureReturn` precedent, low-FP).
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
         CheckRules::RULE_DEAD_ASSIGNMENT => Entry.new(
           id: CheckRules::RULE_DEAD_ASSIGNMENT,
           summary: "Local variable assigned in a method body but never read.",

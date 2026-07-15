@@ -20,6 +20,7 @@ module Rigor
       RULE_WRONG_ARITY = "call.wrong-arity"
       RULE_ARGUMENT_TYPE = "call.argument-type-mismatch"
       RULE_NIL_RECEIVER = "call.possible-nil-receiver"
+      RULE_RAISE_NON_EXCEPTION = "call.raise-non-exception"
       RULE_DUMP_TYPE = "dump.type"
       RULE_ASSERT_TYPE = "assert.type-mismatch"
       RULE_ALWAYS_RAISES = "flow.always-raises"
@@ -46,6 +47,7 @@ module Rigor
         RULE_WRONG_ARITY,
         RULE_ARGUMENT_TYPE,
         RULE_NIL_RECEIVER,
+        RULE_RAISE_NON_EXCEPTION,
         RULE_DUMP_TYPE,
         RULE_ASSERT_TYPE,
         RULE_ALWAYS_RAISES,
@@ -76,6 +78,7 @@ module Rigor
         "wrong-arity" => RULE_WRONG_ARITY,
         "argument-type-mismatch" => RULE_ARGUMENT_TYPE,
         "possible-nil-receiver" => RULE_NIL_RECEIVER,
+        "raise-non-exception" => RULE_RAISE_NON_EXCEPTION,
         "dump-type" => RULE_DUMP_TYPE,
         "assert-type" => RULE_ASSERT_TYPE,
         "always-raises" => RULE_ALWAYS_RAISES,

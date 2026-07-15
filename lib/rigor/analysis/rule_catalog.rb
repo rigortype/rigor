@@ -215,6 +215,40 @@ module Rigor
           since: "0.0.2"
         ),
 
+        CheckRules::RULE_RAISE_NON_EXCEPTION => Entry.new(
+          id: CheckRules::RULE_RAISE_NON_EXCEPTION,
+          summary: "`raise` / `fail` operand provably cannot be raised (TypeError at runtime).",
+          fires_when: [
+            "The call is an implicit-self `raise x` / `fail x` (Kernel#raise) with a plain first " \
+            "positional argument.",
+            "The argument's inferred type is concrete and provably NOT a legal raise operand: not an " \
+            "Exception class, not an Exception instance, not a String, and its class defines no " \
+            "`#exception` (e.g. `raise 42`, `raise :sym`, `raise [1, 2]`, `raise nil` — an explicit " \
+            "nil argument is a TypeError, unlike bare `raise`).",
+            "A Class-object operand fires only when the class is RBS-known and its ancestry provably " \
+            "excludes Exception (including a concretely-resolved bare Module).",
+            "A union argument fires only when EVERY arm is independently illegal."
+          ],
+          does_not_fire_when: [
+            "The argument is `Dynamic[T]` / untyped / unresolved, or a union with any legal or unknown arm.",
+            "The call has an explicit receiver (`obj.raise(...)` is a user method, not Kernel#raise).",
+            "The project redefines `raise` / `fail` anywhere the call could resolve (toplevel def, " \
+            "Object/Kernel monkey-patch, or a def on the enclosing class — in source or `pre_eval:`).",
+            "The argument's class defines `#exception` (RBS-declared or project-defined) — the duck " \
+            "protocol `raise` consults at runtime.",
+            "The instance operand's nominal class subsumes exceptions (`Object`, `Class`, `Module`, a " \
+            "module type) — the runtime value may still be a legal operand.",
+            "The operand's class is declared in the analyzed source — a project `sig/` that omits the " \
+            "superclass would misread the ancestry as non-Exception, so source-declared classes stay silent.",
+            "Bare `raise` (re-raises `$!`), or a splat / keyword / forwarded first argument."
+          ],
+          suppression: "`# rigor:disable call.raise-non-exception`.",
+          severity_authored: :error,
+          severity_by_profile: { lenient: :warning, balanced: :error, strict: :error },
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
         CheckRules::RULE_DUMP_TYPE => Entry.new(
           id: CheckRules::RULE_DUMP_TYPE,
           summary: "`dump_type(expr)` from Rigor::Testing — informational type print.",

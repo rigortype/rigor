@@ -272,21 +272,91 @@ idiomatic corpus → it is a strengthening, not a new discipline.
 - Not in the local `make verify` fast path (too slow); a dedicated CI job,
   like `check-incremental` (ADR-46).
 
-### WD5 — Support line + the latest-Ruby-only interaction
+### WD5 — Versioning model + the support line + the latest-Ruby-only interaction
 
-- **Pre-1.0:** latest minor + the immediately-preceding minor receive
-  security + regression-fix backports; everything older is
-  pin-and-upgrade. Two lines, bounded backport cost.
-- **Post-1.0:** the `1.x` branch is the default development line (PHPStan's
-  model); the support window follows it. The major-version cadence is where
-  bleeding-edge disciplines (WD3) become default and any frozen-surface
-  break (WD1) is allowed.
-- **Ruby floor (reconciling [ADR-27](27-tool-distribution-model.md)):** a
-  backport targets the **Ruby version its line already shipped with** — it
-  does not widen the Ruby floor, and Rigor stays latest-Ruby-only *for the
-  development line*. A supported previous-minor line keeps its own Ruby
-  pin; it is not retro-fitted to a newer Ruby. So latest-Ruby-only and a
-  two-line support window coexist without conflict.
+**Versioning model (post-1.0): edition-style, not strict semver.** This is
+named explicitly because WD1/WD3 already *behave* this way — a strict-semver
+reading (a minor is 100 % behaviour-preserving) would contradict WD1's
+"strengthenings flow in a minor, baseline absorbs" — and leaving the model
+unnamed made the support rule below read as an arbitrary release count rather
+than a consequence. The three tiers, matching PHP's edition cadence and
+PHPStan's `bleedingEdge` model:
+
+- **Patch (`1.2.1`)** — fixes only, no behaviour surprise.
+- **Minor (`1.3.0`)** — the edition cadence: new features and new diagnostics,
+  which land off-by-default behind bleeding-edge (WD3) or are baseline-absorbed
+  (WD1), plus deprecation *announcements* with a warning window. A **soft**
+  break: a minor upgrade is always possible, at most costing a baseline refresh.
+  (PHP `8.4` → `8.5`; PHPStan `2.1` → `2.2`.)
+- **Major (`2.0.0`)** — the **hard** break: frozen-surface changes (WD1),
+  bleeding-edge graduations flip to default-on, deprecated forms are removed.
+  (PHP `8.0` → `9.0`.)
+
+**"Support" is two separable commitments.** Conflating them overstates what a
+version line promises:
+
+- **Troubleshooting / answering** is always-on and version-agnostic — you help
+  whoever shows up, on whatever version. It is *not* a per-line commitment.
+- A **maintenance line** is the narrower, costlier thing: security +
+  correctness/regression backports, **BC-safe only** — never a feature and
+  never a new diagnostic, because a project sitting on the line chose stability
+  and even a true-positive new diagnostic is exactly the unexpected behaviour
+  change it is avoiding. The Ruby pin is preserved (below).
+
+**Which line gets a maintenance branch, and the (non-)guarantee.** A maintenance
+line exists only for the release immediately behind the most recent **hard**
+break — the only line whose users cannot upgrade for free:
+
+- **Pre-1.0** the hard break is the *minor* (`0.x` semver, and Rigor spends a
+  minor clearing deprecations — e.g. `0.3.0`), so the maintenance line is the
+  previous minor `0.y-1`.
+- **Post-1.0** the hard break is the *major*, so the maintenance line is the
+  previous major (`(N).x` after `(N+1).0`). There is **no** per-minor line
+  within a major (`1.2.x` after `1.3.0`): a minor upgrade is soft by
+  construction, so there is nothing to be stranded behind — the machinery of
+  WD1/WD3 has already removed the reason to refuse it.
+- Maintenance is **demand-driven and not guaranteed.** A line is patched when a
+  user who genuinely cannot cross the break reports a fix-worthy bug; an old
+  line is not maintained pre-emptively with no users on it, and it tapers once
+  the next line is active. This matches the comparator: PHPStan publishes no LTS
+  window and winds its previous line down once the successor is the default
+  (its `2.1.x` became a "final send-off" after `2.2.x` took over). The doc
+  states "may receive backports on demand," never a fixed support window.
+
+**Ruby floor (reconciling [ADR-27](27-tool-distribution-model.md)):** a backport
+targets the **Ruby version its line already shipped with** — it does not widen
+the Ruby floor, and Rigor stays latest-Ruby-only *for the development line*. A
+maintained previous line keeps its own Ruby pin; it is not retro-fitted to a
+newer Ruby. So latest-Ruby-only and an on-demand previous-line coexist without
+conflict.
+
+**Branch model: single trunk, lazy tag-rooted maintenance.** The on-demand
+maintenance line above needs somewhere to live, but not a standing branch. Two
+comparators frame the choice:
+
+- The **language model** (PHP, Ruby): `master` is future development, and a
+  long-lived `X.Y` branch is cut at release-prep time to stabilize on and then
+  maintain. It fits the maintenance-line idea but carries a per-line branch
+  *pre-emptively*, for the duration of a long RC cycle plus its whole
+  maintenance life.
+- The **PHPStan model**: the version branch (`2.2.x`) *is* the development
+  surface and the default pointer advances (`2.2.x` → `2.3.x`), with older
+  minors tailing off. This implies a branch **per minor** and a willingness to
+  patch old minors.
+
+Rigor takes neither wholesale. It stays **single-trunk** — `master` is the sole
+development line; the ephemeral `release/x.y.z` branch (WD6) is a release *gate*
+that merges back, so every release tag sits on trunk. A **maintenance branch is
+cut lazily from a release tag, on demand**: a tag is a permanent branch point,
+so when a user behind a hard break reports a fix-worthy bug, the previous line's
+branch (`0.2.x` pre-1.0, `1.x` post-1.0) is created *then* from its last tag, the
+fix cherry-picked, a patch cut, and the branch left to die once the next line
+supersedes it. Cutting a branch eagerly at every hard break would carry branches
+for lines with no users (the make-work this section's demand-driven rule
+avoids), and a branch **per minor** (PHPStan) is machinery for the per-minor
+patching this WD explicitly declined. Rigor's compressed `release/x.y.z` gate
+replaces the language model's long stabilization cut: at one maintainer and a
+fast cadence, `master` never needs to fork for parallel next-version work.
 
 ### WD6 — The release acceptance gate (what must be green to cut a release)
 

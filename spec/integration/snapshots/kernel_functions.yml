@@ -2,4 +2,5 @@
 locals:
   h: "{ a: 1 }"
   name: literal-string & non-empty-string
+  scalar_h: "{ 1 => 2, 1.0 => 4 }"
   xs: "[1, 2]"

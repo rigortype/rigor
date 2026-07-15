@@ -28,6 +28,14 @@ assert_type("nil", pp)
 xs = [1, 2]
 assert_type("Dynamic[top]", p(*xs))
 
+# --- composed with scalar-key Hash-literal shapes (branch-interaction probe) --
+# The p/pp identity must pass a scalar-key HashShape through verbatim, including the
+# duplicate-key last-wins resolution (`1` vs `1.0` distinct; `1.0` vs `1.00` collide).
+scalar_h = { 1 => 1, 1 => 2, 1.0 => 3, 1.00 => 4 }
+assert_type("{ 1 => 2, 1.0 => 4 }", scalar_h)
+assert_type("{ 1 => 2, 1.0 => 4 }", p(scalar_h))
+assert_type("{ 1 => 2, 1.0 => 4 }", pp(scalar_h))
+
 # --- format / sprintf constant folding -------------------------------------
 
 assert_type('"1"', format("%d", 1))

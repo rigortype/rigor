@@ -330,6 +330,34 @@ maintained previous line keeps its own Ruby pin; it is not retro-fitted to a
 newer Ruby. So latest-Ruby-only and an on-demand previous-line coexist without
 conflict.
 
+**Branch model: single trunk, lazy tag-rooted maintenance.** The on-demand
+maintenance line above needs somewhere to live, but not a standing branch. Two
+comparators frame the choice:
+
+- The **language model** (PHP, Ruby): `master` is future development, and a
+  long-lived `X.Y` branch is cut at release-prep time to stabilize on and then
+  maintain. It fits the maintenance-line idea but carries a per-line branch
+  *pre-emptively*, for the duration of a long RC cycle plus its whole
+  maintenance life.
+- The **PHPStan model**: the version branch (`2.2.x`) *is* the development
+  surface and the default pointer advances (`2.2.x` → `2.3.x`), with older
+  minors tailing off. This implies a branch **per minor** and a willingness to
+  patch old minors.
+
+Rigor takes neither wholesale. It stays **single-trunk** — `master` is the sole
+development line; the ephemeral `release/x.y.z` branch (WD6) is a release *gate*
+that merges back, so every release tag sits on trunk. A **maintenance branch is
+cut lazily from a release tag, on demand**: a tag is a permanent branch point,
+so when a user behind a hard break reports a fix-worthy bug, the previous line's
+branch (`0.2.x` pre-1.0, `1.x` post-1.0) is created *then* from its last tag, the
+fix cherry-picked, a patch cut, and the branch left to die once the next line
+supersedes it. Cutting a branch eagerly at every hard break would carry branches
+for lines with no users (the make-work this section's demand-driven rule
+avoids), and a branch **per minor** (PHPStan) is machinery for the per-minor
+patching this WD explicitly declined. Rigor's compressed `release/x.y.z` gate
+replaces the language model's long stabilization cut: at one maintainer and a
+fast cadence, `master` never needs to fork for parallel next-version work.
+
 ### WD6 — The release acceptance gate (what must be green to cut a release)
 
 A release candidate must pass, in addition to `make verify`

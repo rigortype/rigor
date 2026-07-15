@@ -142,7 +142,10 @@ Summarised from ADR-50 (the authority for all of these):
   no per-minor maintenance within a major, because a minor upgrade is soft.
   Backports are **on demand and not guaranteed** — an older line is patched
   when a user who cannot cross the break needs a fix, and tapers once the
-  next line is the default; no fixed support window is promised.
+  next line is the default; no fixed support window is promised. Mechanically,
+  development is single-trunk (`master`); a maintenance branch is cut from the
+  previous line's release tag only when such a fix is actually needed, not kept
+  standing.
 - **New disciplines** (a rule that demands an authoring change of
   previously-idiomatic code) land off-by-default behind the
   `bleeding_edge:` opt-in and turn on only at a major (ADR-50 § WD2/WD3/WD7).

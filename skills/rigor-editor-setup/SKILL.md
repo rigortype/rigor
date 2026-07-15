@@ -89,6 +89,17 @@ The manual chapter covers:
 - **Helix** (`languages.toml`)
 - **Emacs** (Eglot and lsp-mode)
 
+**The editors are not equally cheap to wire.** Neovim / Helix / Emacs
+are plain config snippets. **VS Code has no first-party Rigor
+extension yet** — its path means authoring and side-loading a minimal
+extension (a `LanguageClient` wrapper), which is a development task,
+not a `settings.json` edit. Say so *before* starting: the developer
+may prefer to wait for a first-class extension, and an autonomous
+agent should treat the VS Code path as a **user handoff** (report the
+manual's recipe; do not scaffold an unrequested extension). Phase 4's
+verification (live diagnostics, hover) also requires a human in front
+of the editor — an agent stops there and reports, for every editor.
+
 ### Phase 3 — apply the matching config
 
 Open the manual's **Editor wiring** section and apply the snippet for

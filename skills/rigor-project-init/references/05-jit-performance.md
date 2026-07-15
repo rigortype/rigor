@@ -39,8 +39,8 @@ instead, since they always run long.
 ## Is a JIT available in my install?
 
 The deferred-YJIT feature only helps if the Ruby your `rigor` runs on was
-built with YJIT support. Rigor is installed standalone (see
-[Installing Rigor](../../../docs/manual/01-installation.md)), so this is a
+built with YJIT support. Rigor is installed standalone (see the manual's
+Installing Rigor chapter: `rigor docs manual/01-installation`), so this is a
 property of *that* Ruby, which may differ from your project's Ruby.
 
 Check the Ruby that runs `rigor`:
@@ -65,8 +65,8 @@ ruby --yjit -e 'require "rbconfig"; puts "YJIT: #{RbConfig::CONFIG["YJIT_SUPPORT
 
 ## Overriding the default
 
-Three environment variables, documented in the
-[CLI reference § Environment variables](../../../docs/manual/02-cli-reference.md#environment-variables):
+Three environment variables, documented in the CLI reference's
+"Environment variables" section (`rigor docs manual/02-cli-reference`):
 
 | Want | Do |
 | --- | --- |
@@ -116,8 +116,9 @@ a JIT helps at all:
 YJIT wins on every workload large enough to warrant a JIT; ZJIT's peak
 speed-up is roughly half. ZJIT only edges YJIT on tiny runs — the zone where
 you want no JIT at all. **Do not force ZJIT** (`RUBYOPT="--zjit"`) for Rigor;
-the automatic YJIT is faster. Full measurement + methodology:
-[`docs/notes/20260714-jit-evaluation-yjit-zjit-ruby40.md`](../../../docs/notes/20260714-jit-evaluation-yjit-zjit-ruby40.md).
+the automatic YJIT is faster. Full measurement + methodology (a
+contributor-side note, web only):
+<https://github.com/rigortype/rigor/blob/master/docs/notes/20260714-jit-evaluation-yjit-zjit-ruby40.md>.
 
 This verdict is Ruby-4.0-specific; ZJIT is younger than YJIT and improving, so
 it may close the gap in a later Ruby. Until then YJIT is the right default —

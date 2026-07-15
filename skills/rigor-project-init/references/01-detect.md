@@ -102,7 +102,7 @@ user as a list they can trim — do not silently enable everything.
 | Rails | `rigor-actionpack`, `rigor-activerecord`, `rigor-actionmailer`, `rigor-rails-routes`, `rigor-rails-i18n`, plus `rigor-activesupport-core-ext` (almost always needed — see below) |
 | dry-rb | `rigor-dry-types`, `rigor-dry-struct`, and `rigor-dry-schema` / `rigor-dry-validation` when those gems are present |
 | Sinatra | `rigor-sinatra` |
-| RSpec | `rigor-rspec` |
+| RSpec | `rigor-rspec` — **only if `paths:` will include `spec/`**. The conventional scope (see "Path scope" above) excludes `spec/`, and a plugin whose rules only fire on spec files contributes nothing outside it. Skip it under the default scope; add it later if the project opts spec files into analysis. |
 | Devise / Pundit / Sidekiq present | `rigor-devise` / `rigor-pundit` / `rigor-sidekiq` |
 | Sorbet present | `rigor-sorbet` (ingests existing `sig` blocks / RBI as type sources) |
 | plain Ruby | none required — the core analyzer covers it |

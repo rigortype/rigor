@@ -14,6 +14,14 @@ the triage command instead:
 rigor triage --format json
 ```
 
+> **Parsing the JSON from a script**: diagnostic messages can carry
+> non-ASCII bytes from the project's own strings (i18n content,
+> comments), which makes a naive `File.read` + `JSON.parse` raise
+> `Encoding::InvalidByteSequenceError`. Force UTF-8 and scrub —
+> `JSON.parse(File.read(f, encoding: "UTF-8").scrub)` — or use `jq`,
+> which handles it natively. The same applies to
+> `rigor check --format json`.
+
 `rigor triage` runs the same analysis as `rigor check`, then returns
 a structured summary instead of the per-line dump. It is read-only
 and advisory — it never edits config and never writes a baseline.
@@ -78,6 +86,18 @@ If triage flags `activesupport-core-ext` (or any config gap),
 **fix the config and re-run `rigor triage` before continuing**. The
 baseline and the real-bug review should both run against the
 post-config diagnostic set, not the inflated one.
+
+### Check for analysis-time plugin failures before baselining
+
+Scan the `distribution` for any `plugin.<id>.load-error` rule (or run
+the `jq` one-liner in
+[`02-configure.md`](02-configure.md) § "`rigor plugins` verifies
+activation, not analysis-time health"). A `load-error` means the
+plugin activated but one of its capabilities failed while analysing
+*this* project — its diagnostics and types are silently absent from
+the stream you are about to snapshot. Surface it to the user and
+resolve (or at least record) it **before** Phase 7: a `load-error`
+bucket baked into the baseline hides the degradation permanently.
 
 ## Phase 6a — Pre-baseline cleanup
 

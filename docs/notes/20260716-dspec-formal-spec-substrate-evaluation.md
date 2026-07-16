@@ -493,6 +493,48 @@ L2 は `respond_to?(:normalize)` ガードで**黙ってスキップ**された�
 綴りの問題ではなく**能力の不在**。名前の carve-out は綴りを免責するのであって、
 メソッド面ごとエンジン内ヘルパへ移設することは免責しない。
 
+## void 三択の A/B 実測(2026-07-16、ADR-92 WD2 の carry-over)
+
+ADR-92 WD2 が measurement-gated とした三択のうち、**選択肢 (b)(`void → top`、RBS に縮約)**
+を A/B した。`Bases::Void => :translate_top` に変えて corpus 診断を diff。
+
+| corpus | baseline | `void → top` | 判定 |
+| --- | --- | --- | --- |
+| mail `lib` | 26 | 26 | IDENTICAL |
+| kramdown `lib` | 68 | 68 | IDENTICAL |
+| haml `lib` | 60 | 60 | IDENTICAL |
+| liquid `lib` | 5 | 5 | IDENTICAL |
+| mastodon `app/models` | 0 | 0 | IDENTICAL(248 files / 1350 RBS classes) |
+
+**空振り検証**(green を信じる前に): translator を計装して `Bases::Void` の翻訳回数を計測 —
+mail **2回** / kramdown **29回**。kramdown の 29 サイトが実際に `Dynamic[top]` → `top` に
+変わった上で、診断は不変。**測定は非空振り。**
+
+**結論: (b) は診断上タダ。** ただし理由が重要 — **`top` と `Dynamic[top]` を区別する機構
+(`static.*` = 「無保証の `top` 呼び出しは診断」)自体が未実装**なので、両者ともメソッド
+呼び出しに対して沈黙する。つまり (b) の価値は「今効く」ことではなく、**RBS からの無許諾
+乖離を除去し、`static.*` が入った時に正しく効く土台にする**こと。表現の正しさの前払い。
+
+**(a) と (b) の関係 — 単純な上下ではない。** 仕様は void を `top` と*区別*する理由を明記
+している:
+
+> Rigor's contribution on top of the RBS rule is to record that the value reached the
+> position by recovery from `void` and to surface that as a primary diagnostic, so the
+> analyzer can explain *why* a `top` appeared
+
+つまり (b) を素朴に実装すると **void の由来が失われ**、この「なぜ `top` になったか説明する」
+能力が消える。ただしこれは **ADR-75 の型を回避する設計パターンがそのまま使える** —
+provenance は「値についてのメタデータであって、値そのものの一部ではない」。`dynamic_origins`
+と同じ identity-keyed side-table(`void_origins`)を置けば、**`void → top` + 由来 side-table
+= (a) の意図を (b) の土台の上で実現できる**。carrier を増やして lattice を分岐させる必要は
+ない(ADR-75 WD1 が `Dynamic` carrier に `provenance:` フィールドを足すのを却下したのと同じ
+理由 — value-equality が壊れる)。
+
+**推奨**: (b) を先に landing(タダ・fidelity 回復・(a) の土台)→ (a) は `static.*` +
+`void_origins` side-table と併せて設計。ただし (a) は新規必須規律 = ADR-50 WD1 の BC なので
+`bleeding_edge:` 経由。**(c)(実装追認)は測定により不要** — (b) がタダである以上、
+RBS と ADR-1:30 の両方を捨てる理由がない。
+
 ## 総合 — 発見された共通パターン
 
 本ノートの調査は、同一のバグクラスを **3 つ独立に**発見した:

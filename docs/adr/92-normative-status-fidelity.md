@@ -174,9 +174,22 @@ skip, which is the discipline this ADR exists to install.
 - **Negative / cost.** The corpus admits in writing that several founding declarations
   never shipped — a credibility cost, paid once and deliberately, against a spec that
   currently reads as complete and is not. WD4 adds one docs-spec axis (no analysis cost).
-- **Carry-over.** (1) `void`: the three-way choice in WD2 (implement / narrow to RBS /
-  narrow to the engine), pending the value-context corpus measurement. Note that option (b)
-  is not merely a concession — it *removes* an unlicensed divergence from RBS. (2) The prose-clause body stays ungated (WD1) — the P1-class probe remains a
+- **Carry-over.** (1) `void`: the three-way choice in WD2. **The measurement is now done**
+  (grounding note § "void 三択の A/B 実測"): patching `Bases::Void => :translate_top` leaves
+  diagnostics byte-identical on mail (26), kramdown (68), haml (60), liquid (5), and
+  mastodon `app/models` (0, 248 files) — non-vacuously, since instrumenting the translator
+  counts 29 real `Void` translations in kramdown and 2 in mail. So **option (b) is free**,
+  and option (c) is eliminated: with (b) costing nothing there is no reason to concede both
+  RBS and ADR-1:30. The reason (b) is free is itself the point — `static.*`, the family that
+  would diagnose an unguarded `top` call, is Reserved, so `top` and `Dynamic[top]` are
+  equally silent today; (b) buys representational fidelity that pays off when `static.*`
+  lands, not a diagnostic today. (a) is **not** simply (b) plus more: this section wants
+  `void` distinct from `top` precisely to explain *why* a `top` appeared, which a naive (b)
+  discards — but [ADR-75](75-dynamic-provenance.md)'s pattern applies unchanged (provenance
+  is metadata *about* a value, never part of what it *is*), so `void → top` plus a
+  `void_origins` identity-keyed side-table reaches (a)'s intent on (b)'s foundation without
+  adding a carrier or forking the lattice. Recommended sequence: land (b), then design (a)
+  with `static.*` and the side-table together, behind `bleeding_edge:` per ADR-50 WD1. (2) The prose-clause body stays ungated (WD1) — the P1-class probe remains a
   manual instrument. (3) `internal-spec`'s other documents were not swept; only
   `internal-type-api.md` was probed.
 

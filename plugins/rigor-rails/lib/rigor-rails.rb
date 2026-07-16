@@ -1,19 +1,18 @@
 # frozen_string_literal: true
 
-# Convenience entry point. `require "rigor-rails"` requires every Tier 1+2 Rails ecosystem plugin in one go,
-# so projects that prefer a single require statement (some `spec_helper` patterns, ad-hoc scripts) do not
-# have to list seven require lines.
+# The Tier 1+2 Rails set, as a single require. Requiring this file registers every member class with
+# `Rigor::Plugin`; the loader's lookup phase then finds them by id when `.rigor.yml` enumerates them.
 #
-# Note: requiring this entry point does NOT mark every plugin as active. The Rigor plugin loader walks
-# `.rigor.yml`'s `plugins:` list and instantiates only the plugins enumerated there. This is per ADR-12
-# WD1's "Gemfile-convenience meta-gem" pattern — users still control which plugins participate in analysis
-# via `.rigor.yml`.
+# UNWIRED — this entry point has no supported use today, and is kept deliberately (ADR-96 WD5) rather
+# than removed. It was ADR-12 WD1's "Gemfile-convenience meta-gem": each plugin was to be its own gem, and
+# `gem "rigor-rails"` was to pull the Rails set into a project's Gemfile in one line. Commit `9769f5fa`
+# dropped the per-plugin gemspecs and ADR-31 settled distribution on the single bundled `rigortype` gem, so
+# there is no `rigor-rails` gem to add to a Gemfile — and `plugins: [rigor-rails]` is rejected by the
+# loader, which requires the members to be enumerated (or one selected with an explicit `id:`).
 #
-# Sub-plugins ARE registered with `Rigor::Plugin` when this file loads (each gem's entry point side-effects
-# a `Plugin.register` call); the loader's lookup phase finds them by id when listed.
-#
-# Adding the gem to a project's Gemfile without listing any plugin in `.rigor.yml` is harmless: the requires
-# happen on `Bundler.require`, but no plugin's `init` / `prepare` / hooks run.
+# ADR-96 WD3 proposes the role this file would fill: `plugins: [rigor-rails]` activating those members
+# whose `target_gems:` are actually in the project's `Gemfile.lock`. If that is rejected, ADR-60 WD1's
+# never-wired-surface criterion applies and this directory goes.
 
 require "rigor-rails-routes"
 require "rigor-rails-i18n"

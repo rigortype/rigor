@@ -40,10 +40,10 @@ each plugin's options — but the families today are:
 - **Rails** — `rigor-activerecord`, `rigor-actionpack`,
   `rigor-rails-routes`, `rigor-rails-i18n`,
   `rigor-actionmailer`, `rigor-activejob`,
-  `rigor-activestorage`, `rigor-actioncable`. The
-  `rigor-rails` meta-gem bundles the Rails set for Gemfile
-  convenience; you still enumerate the individual plugins you
-  want under `plugins:`.
+  `rigor-activestorage`, `rigor-actioncable`. Enumerate the ones
+  you want under `plugins:` — there is no umbrella entry that
+  turns on the Rails set as a group
+  ([ADR-96](../adr/96-plugin-target-gems.md) WD3 proposes one).
 - **Testing** — `rigor-rspec`, `rigor-rspec-rails`,
   `rigor-minitest`, `rigor-shoulda-matchers`,
   `rigor-factorybot`.

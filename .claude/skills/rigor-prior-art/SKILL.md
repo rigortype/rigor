@@ -36,8 +36,8 @@ repo (talks, comparisons, READMEs).
 
 | Location | What lives there | When to look |
 | --- | --- | --- |
-| `CLAUDE.md` ADR bullet list | One dense paragraph per ADR, *including outcomes and numbers*. | **First stop.** Often answers the question without opening a single file. |
-| `docs/adr/README.md` | Canonical ADR index (title + implementation status). | Confirming an ADR's current status. |
+| `docs/adr/README.md` | Canonical ADR index: title + status + **one dense paragraph per ADR, including outcomes and numbers**. | **First stop.** Often answers the question without opening a single file. |
+| `CLAUDE.md` ADR list | Index only — one line per ADR, topic and link, no detail ([ADR-97](../../../docs/adr/97-claude-md-index-budget.md)). | Learning *that* an ADR on a topic exists. Never a source — go to the README row. |
 | `docs/notes/README.md` | Categorized note index: library surveys / coverage audits / regression sweeps / teeth / outside-research reviews / perf / meta. | Shortlisting notes by category. |
 | `docs/adr/*.md` | Full decisions: criteria, rejected alternatives, gate results. | The "why" behind a behaviour; what was *rejected* and why. |
 | `docs/notes/*.md` | What was observed, when, against which Rigor version. | Measurements, sweeps, adjudications. |
@@ -68,9 +68,11 @@ carry downstream — do not collapse the three into one list.
 
 ## Method
 
-1. **Indexes first.** Skim the `CLAUDE.md` ADR bullets and the two READMEs
-   for the topic. This is cheap and frequently sufficient to shortlist 2–5
-   candidate documents — or to answer outright.
+1. **Indexes first.** Skim `docs/adr/README.md` and `docs/notes/README.md`
+   for the topic — the ADR README's status column carries the dense
+   per-ADR paragraph, so this is cheap and frequently sufficient to
+   shortlist 2–5 candidate documents, or to answer outright. (`CLAUDE.md`
+   is an index only; it tells you an ADR exists, not what it decided.)
 2. **Expand terms before searching.** Name variants (`rbs_rails` /
    `rbs-rails`), English *and* Japanese vocabulary (型定義 / 生成 /
    メンテナンス / 陳腐化 …), tool aliases, and the *adjacent* tools a

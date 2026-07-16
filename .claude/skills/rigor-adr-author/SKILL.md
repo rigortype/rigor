@@ -142,11 +142,24 @@ before the previous row. (This ordering is the easy slip: anchor the edit
 on the *last* table row + the heading, not on the previous-number row.)
 Row shape: `| ADR-N | [Title](N-slug.md) | <Status + a dense one-paragraph summary> |`.
 
-### 4c. `CLAUDE.md` ADR list row
+### 4c. `CLAUDE.md` ADR index line
 
-`CLAUDE.md` carries a parallel `- [ADR-N](docs/adr/N-slug.md) — …` bullet
-list (also ascending). Append the new bullet after the current last entry.
-Keep the one-liner consistent in density with its neighbours.
+`CLAUDE.md` carries a parallel `- [ADR-N](docs/adr/N-slug.md) — <topic>`
+list (also ascending). Append the new line after the current last entry.
+
+This is an **index, not a summary** — the topic names the subject and
+nothing else. **Cap: 100 characters**, one line, no status, no dates, no
+measurements, no WD references (all of which live in the 4b row you just
+wrote). Usually the canonical title from 4b *is* the topic; shorten it if
+it does not fit. Do **not** match the density of neighbouring entries —
+that instruction is what regrew the file 8.7× and it is gone; conform to
+the cap, not to the list.
+
+Why the cap exists, and why it is enforced rather than trusted:
+[ADR-97](../../../docs/adr/97-claude-md-index-budget.md). The gate is
+`spec/docs/agent_index_spec.rb` under `make docs-check` — it also checks
+that your 4b and 4c entries agree on the ADR number and slug, so run it
+if you skipped either.
 
 (If the ADR establishes a SKILL, a release process, or anything an agent
 should discover, also add/adjust the relevant `CLAUDE.md` / `AGENTS.md`
@@ -181,7 +194,8 @@ with code, fold it into that slice's commit).
   not over-written for a low-stakes / evaluation decision.
 - `docs/adr/README.md` row inserted in **ascending** position (after the
   last row, before `## Adding a New ADR`).
-- `CLAUDE.md` ADR bullet appended.
+- `CLAUDE.md` index line appended — topic only, ≤ 100 chars, no status
+  (ADR-97). `make docs-check` green.
 - `git diff --check` clean; `git status` shows exactly the three expected
   entries.
 - Quality re-read against [ADR-49](../../../docs/adr/49-adr-authoring-guidelines.md):

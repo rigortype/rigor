@@ -703,6 +703,54 @@ honour する」ことであって「無注釈コードの untyped 影を製造�
 ADR-93 の適合形は **annotation 存在ゲート**(ファイル内容の安価なスキャン。magic comment は
 不要のまま = MUST NOT は守られる)であり、全ファイル無条件ではない。
 
+## ADR-93 WD1 の実装 — 測定が設計を二度作り替えた(2026-07-16)
+
+WD4 の測定を受けて WD1(magic-comment 不要モード)を実装。**測定が私の設計案を二度反証した。**
+
+**第一の反証(前節 Finding 3)**: 「`require_magic_comment: false` にする」= upstream の
+opt-out モード = **無注釈 def 全部に untyped スケルトンを合成**。mail 26→42。
+→ 案を「ファイルに注釈があるときだけ寄与する」ゲートに変更。
+
+**中間検証で分かった、その案も不十分な点**: 混在ファイルの実測 —
+
+```
+class Mixed
+  def annotated: (String) -> Integer        # 注釈あり: 本物
+  def unannotated: (untyped x) -> untyped   # 注釈なし: スケルトン
+```
+
+ファイル単位ゲートでも、**注釈が1つあるファイルの他メソッドは untyped で汚染される**。
+member 単位のフィルタは upstream AST への結合(ADR-32 WD1/WD3 が grammar-drift 理由で
+却下した路線)なので v1 では採らず、「注釈付きファイルは upstream 準拠(`rbs-inline --output`
+が生成するのと同じもの)」として受容。**残余として記録**。
+
+**第二の反証 — `#:nodoc:`**: ゲート実装後も mail は 26 に戻らず **31**。原因は
+`class AddressList #:nodoc:` — RDoc ディレクティブが `#: <type>` と字句衝突し、**upstream が
+型 alias `nodoc` の TypeAssertion として parse する**(`nodoc` を消費し末尾コロンを捨てる)。
+mail の **61 ファイル**がこれだけでゲートを通過していた。Ruby で最も普遍的なコメントの一つ。
+
+- upstream のバグであり報告に値するが、**出力は無害**(`# :nodoc:` コメントとして戻るだけで
+  偽の型は出ない)→ フィルタはゲート層のみで足りる
+- 検出は upstream 自身の `AnnotationParser` に委譲(正規表現で `#:` を探す実装は、
+  `http://example.com#:` を含む素の doc コメントを誤検出するし、文法は upstream のもの
+  = ADR-32 WD3)
+
+**最終測定**:
+
+| corpus | base | ゲート後 | |
+| --- | --- | --- | --- |
+| mail(注釈ゼロ) | 26 | **26** | 42 → 31 → 26 と段階的に修復 |
+| kramdown / haml / liquid | 68 / 60 / 5 | 同じ | no-op ✓ |
+| herb(実注釈あり) | 11 | 12 | **−3 genuine wins** / +4 |
+
+**教訓**: 「upstream に委譲すれば grammar は upstream のもの」(ADR-32 WD3)は正しいが、
+**upstream の*目的*は Rigor の目的と違う** — `rbs-inline --output` は sig/ を*生成*する道具
+なので無注釈 def にスケルトンを吐くのが正しい。Rigor は*推論*が一次なので同じ出力が害になる。
+委譲の境界は「文法」であって「何を寄与とみなすか」ではない。
+
+**残り(ADR-93 WD1a)**: herb の +4(`Regexp.last_match(1)` の可 nil 判定)は ADR-57 プロトコル
+上 artifact なので、**既定フリップの前に根本修正が必要**。side-quest ではなく前提条件。
+
 ## 総合 — 発見された共通パターン
 
 本ノートの調査は、同一のバグクラスを **4 つ独立に**発見した(#4 は沈黙でなく矛盾という、より鋭い亜種):

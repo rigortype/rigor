@@ -592,6 +592,12 @@ Runs a scoped analysis and audits:
   from the saved baseline.
 - **Rails plugin gap** — whether `Gemfile.lock` contains Rails gems
   but no Rails plugin is enabled.
+- **Gemfile install** — whether Rigor itself resolves as one of the
+  project's dependencies, which
+  [Installing Rigor](01-installation.md) tells you not to do. Only a
+  `rigortype` resolved from a **GEM** remote counts: a `PATH` or `GIT`
+  source means you are developing or vendoring Rigor deliberately,
+  and Rigor's own repository looks exactly like that.
 
 Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
 routed hint (e.g. "Run `rigor baseline regenerate`"). JSON output

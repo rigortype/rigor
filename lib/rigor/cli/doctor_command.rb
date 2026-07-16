@@ -34,6 +34,7 @@ module Rigor
       CHECK_PLUGINS = "plugins"
       CHECK_BASELINE = "baseline"
       CHECK_RAILS = "rails_plugins"
+      CHECK_GEMFILE = "gemfile_install"
 
       RAILS_LOCK_MARKERS = %w[railties actionpack activerecord actioncable].freeze
       RAILS_PLUGIN_MARKERS = %w[
@@ -71,6 +72,9 @@ module Rigor
 
         # 6. Rails locked but no Rails plugins.
         findings.concat(check_rails_plugins(configuration))
+
+        # 7. Rigor itself resolved as a project dependency.
+        findings.concat(check_gemfile_install)
 
         report(findings, options.fetch(:format))
         findings.any? { |f| f[:status] == :fail } ? 1 : 0
@@ -261,6 +265,52 @@ module Rigor
       def file_mentions_any?(path, markers)
         content = File.read(path)
         markers.any? { |marker| content.include?(marker) }
+      rescue StandardError
+        false
+      end
+
+      # Rigor is a tool, not a library (ADR-27): resolving it as one of the project's own dependencies pins the
+      # application to Rigor's Ruby and drags Rigor's dependency graph into the app's resolution. The gem carries
+      # guardrails against arriving here, but they only fire during install and at boot — a project that already
+      # made the mistake never sees them again, so doctor names the state.
+      def check_gemfile_install
+        lock = File.join(Dir.pwd, "Gemfile.lock")
+        return [] unless File.file?(lock)
+        return [] unless rubygems_sourced_rigortype?(lock)
+
+        [
+          {
+            check: CHECK_GEMFILE,
+            status: :fail,
+            message: "Rigor is resolved as a dependency of this project (`rigortype` under GEM in Gemfile.lock)",
+            hint: "Remove `rigortype` from the Gemfile and install Rigor on its own — see " \
+                  "https://github.com/rigortype/rigor/blob/master/docs/install.md. To keep the version " \
+                  "pinned, use `mise use --pin gem:rigortype`, or an isolated `BUNDLE_GEMFILE` holding only " \
+                  "Rigor (the CI chapter's pattern), which leaves your application's resolution untouched."
+          }
+        ]
+      end
+
+      # True only when `rigortype` resolves from a GEM remote — i.e. an ordinary `gem "rigortype"` in the app's
+      # Gemfile, the case worth reporting.
+      #
+      # The source is load-bearing, not decoration: Rigor's own repo, every fork of it, and any project vendoring
+      # Rigor for development all carry `rigortype` in Gemfile.lock too — under PATH (`remote: .`, from the
+      # `gemspec` directive) or GIT. Matching the name alone would fail this check on Rigor itself. Reading the
+      # lock by section also keeps a CHECKSUMS entry and a *dependency* line nested under another gem (six-space
+      # indent) from counting as a resolution.
+      def rubygems_sourced_rigortype?(path)
+        section = nil
+        in_specs = false
+
+        File.foreach(path) do |line|
+          case line
+          when /\A(\S.*?)\s*\z/ then (section = Regexp.last_match(1)) && (in_specs = false)
+          when /\A  specs:\s*\z/ then in_specs = true
+          when /\A    rigortype \(/ then return true if section == "GEM" && in_specs
+          end
+        end
+        false
       rescue StandardError
         false
       end

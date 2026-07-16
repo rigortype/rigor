@@ -174,6 +174,93 @@ RSpec.describe Rigor::CLI::DoctorCommand do
     end
   end
 
+  # ADR-27 — Rigor resolved as one of the project's own dependencies. The gem's own guardrails fire at install
+  # and at boot; a project that already made the mistake never sees them again, so doctor names the state.
+  describe "Gemfile install check" do
+    def write_project(lock)
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\n")
+      File.write("Gemfile.lock", lock)
+    end
+
+    it "fails when `rigortype` resolves from a GEM remote" do
+      write_project(<<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            prism (1.9.0)
+            rigortype (0.2.9)
+              prism (>= 1.0, < 2.0)
+
+        DEPENDENCIES
+          rigortype
+      LOCK
+
+      status, out, = run([])
+      expect(status).to eq(1)
+      expect(out).to include("gemfile_install")
+      expect(out).to include("FAIL")
+      expect(out).to include("resolved as a dependency of this project")
+      expect(out).to include("docs/install.md")
+    end
+
+    # The check that keeps this from firing on Rigor's own repo and every fork of it: the `gemspec` directive puts
+    # `rigortype` in the lock under PATH. Matching the gem name alone would fail `rigor doctor` on Rigor itself.
+    it "stays silent when `rigortype` comes from a PATH source" do
+      write_project(<<~LOCK)
+        PATH
+          remote: .
+          specs:
+            rigortype (0.2.9)
+
+        DEPENDENCIES
+          rigortype!
+      LOCK
+
+      _status, out, = run([])
+      expect(out).not_to include("gemfile_install")
+    end
+
+    it "stays silent when `rigortype` is vendored from git" do
+      write_project(<<~LOCK)
+        GIT
+          remote: https://github.com/rigortype/rigor.git
+          revision: 0000000000000000000000000000000000000000
+          specs:
+            rigortype (0.2.9)
+      LOCK
+
+      _status, out, = run([])
+      expect(out).not_to include("gemfile_install")
+    end
+
+    # A six-space line is another gem's *dependency*, not a resolution, and CHECKSUMS names every gem in the
+    # lock regardless of source. Neither means the project depends on Rigor.
+    it "stays silent for a nested dependency line and a CHECKSUMS entry" do
+      write_project(<<~LOCK)
+        GEM
+          remote: https://rubygems.org/
+          specs:
+            some-wrapper (1.0.0)
+              rigortype (>= 0.2)
+
+        CHECKSUMS
+          rigortype (0.2.9) sha256=0000
+      LOCK
+
+      _status, out, = run([])
+      expect(out).not_to include("gemfile_install")
+    end
+
+    it "stays silent when there is no Gemfile.lock at all" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\n")
+
+      _status, out, = run([])
+      expect(out).not_to include("gemfile_install")
+    end
+  end
+
   describe "help / usage" do
     it "is listed in `rigor help`" do
       out = StringIO.new

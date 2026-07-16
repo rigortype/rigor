@@ -2,9 +2,16 @@
 
 Rigor SHOULD prefer precise diagnostics over silent widening. This document defines the diagnostic identifier taxonomy, display rules, and the suppression-marker grammar.
 
-The cutoff identifiers used by inference budgets live in the `static.*` family (see [inference-budgets.md](inference-budgets.md)). The display rules for negative facts and difference types are in [type-operators.md](type-operators.md). The display rule for `Dynamic[T]` is here.
+The cutoff identifiers used by inference budgets are reserved under the `static.*` family (see [inference-budgets.md](inference-budgets.md)); that surface is **not yet wired** — see the taxonomy table below. The display rules for negative facts and difference types are in [type-operators.md](type-operators.md). The display rule for `Dynamic[T]` is here.
 
 ## Diagnostic guidelines
+
+> **Status.** These guidelines state the intended policy for each situation, not a claim that
+> every one is implemented. A guideline whose diagnostic would live in a family marked
+> **Reserved** in the taxonomy below (`static.*`, `compat.*`, `hint.*`, `generated.*`), or in
+> the not-yet-wired `void` surface ([special-types.md](special-types.md) § `void`), describes
+> intent — the first, second, and cutoff-reporting bullets are the current cases. See
+> [ADR-92](../adr/92-normative-status-fidelity.md).
 
 - Using `void` as a value is a primary diagnostic; downstream recovery uses `top` and SHOULD avoid duplicate cascade reports for the same expression.
 - Calling a method on `top` without proof is a diagnostic.
@@ -27,20 +34,31 @@ The cutoff identifiers used by inference budgets live in the `static.*` family (
 
 Diagnostic identifiers are hierarchical so plugin authors, RBS metadata, and user suppression markers can address them without colliding with internal numbering. Identifiers are stable within a major version. New diagnostics MAY be added under any prefix; renames or removals require a deprecation window.
 
+A family row carries a **bolded status marker containing the phrase "as of this writing"** when it
+does not resolve to a diagnostic the engine emits today — the same idiom
+[inference-budgets.md](inference-budgets.md) uses for the unwired `budgets:` surface. Two such
+statuses occur: **Reserved** names an identifier space that is claimed but carries no
+implemented diagnostic, and **Not a diagnostic family** names identifiers that exist but reach the
+user through another surface. Reserving the space *is* a decision — it keeps
+the family free of colliding claims — but it is not a statement that the diagnostics exist.
+Per [ADR-92](../adr/92-normative-status-fidelity.md), a family listed here without a
+Reserved marker MUST have at least one implemented identifier; `spec/docs/manual_drift_spec.rb`
+enforces this table against the engine's emitted vocabulary.
+
 | Prefix | Use |
 |---|---|
 | `dynamic.*` | `untyped` and `Dynamic[T]` boundary crossings, unchecked generic leaks, and method calls whose proof depends on dynamic origin. Includes `dynamic.dependency-source.*` (e.g. `gem-not-found`) for the opt-in gem-source-inference path per [ADR-10](../adr/10-dependency-source-inference.md) (analyzer contract: [`docs/internal-spec/dependency-source-inference.md`](../internal-spec/dependency-source-inference.md)). |
-| `static.*` | Static checks that stop short of a proof, including incomplete-inference cutoffs |
+| `static.*` | **Reserved — no implemented identifiers as of this writing.** Static checks that stop short of a proof, including incomplete-inference cutoffs. The budget-cutoff half is tracked by [ADR-41](../adr/41-inference-budget-design.md) (Proposed) and marked at its source in [inference-budgets.md](inference-budgets.md) § "Budget table"; the unguarded-`top`-call half ([special-types.md](special-types.md) § `top`) has no implementation and no ADR. |
 | `flow.*` | Control-flow narrowing failures, equality and predicate refinement issues, fact-stability violations |
-| `compat.*` | RBS, rbs-inline, and Steep-compatible signature compatibility |
+| `compat.*` | **Reserved — no implemented identifiers as of this writing.** RBS, rbs-inline, and Steep-compatible signature compatibility. A founding-era reservation ([ADR-1](../adr/1-types.md)); the shipped signature-compatibility rules live under `def.override-*` ([ADR-35](../adr/35-override-signature-compatibility.md)) instead. |
 | `call.*` | Method-call-site diagnostics: `call.undefined-method` (the method is not defined on the receiver's statically known class), `call.self-undefined-method` (an implicit-self call resolves to no method on a confidently-closed standalone class, [ADR-24](../adr/24-self-method-call-resolution.md) slice 4 — consumes the engine's own resolution miss, gated to a standalone project class with a complete in-file method surface, ships `:off` pending an external corpus FP gate), `call.unresolved-toplevel` (a top-level implicit-self call resolves against no same-file `def`, `pre_eval:` patch, or `Kernel` / `Object` method, [ADR-34](../adr/34-toplevel-unresolved-self-call-default.md)), `call.wrong-arity` (the positional-argument count matches no signature), `call.argument-type-mismatch` (an argument provably violates the parameter contract), and `call.possible-nil-receiver` (the receiver is `T \| nil` and the method is not defined on `NilClass`). |
 | `def.*` | Method-definition diagnostics. Includes the override signature-compatibility family `def.override-visibility-reduced` / `def.override-return-widened` / `def.override-param-narrowed` ([ADR-35](../adr/35-override-signature-compatibility.md)), which verify an override against the signature it inherits from a project-defined ancestor. They fire only when both the override and the shadowed ancestor carry an author-supplied signature (inference-only either side stays silent) and map severity through `severity_profile:`; the Liskov reasoning is in [robustness-principle.md](robustness-principle.md). |
 | `rbs_extended.*` | `RBS::Extended` payload validity, version compatibility, and conflict reports. Includes `rbs_extended.unsatisfied-conformance` ([rbs-extended.md](rbs-extended.md) § "Explicit conformance directive"): a class carrying `%a{rigor:v1:conforms-to _Interface}` either is missing a method the named structural interface requires (presence) or provides one whose RBS signature is not a behavioural subtype of the interface's (covariant return / contravariant params). The signature tier is FP-safe because both sides are authored RBS (the ADR-35 both-sides-authored construction) and compares only single-method-type, non-`Dynamic` positions, so it never frightens a class that already satisfies the interface. Authored `:warning` (`:error` under `strict`); the directive is opt-in, so the diagnostic is never unsolicited. An unresolvable interface name surfaces as `dynamic.rbs-extended.unresolved` `:info` instead. |
 | `rbs.coverage.*` | RBS environment coverage / well-formedness telemetry. `rbs.coverage.missing-gem` reports locked gems with no available RBS; `rbs.coverage.synthesized-namespace` reports project `signature_paths:` RBS that declares qualified names (`class Foo::Bar`) without the enclosing namespace — invalid upstream (`rbs validate` rejects it), which Rigor synthesizes a `module` for so the signatures still resolve. Both authored `:info`. `rbs.coverage.quarantined-signature` reports a `signature_paths:` `.rbs` that does not parse and was therefore SKIPPED: the rest of the environment still loads, but the types that file declared are absent, so the run is *quieter* rather than cleaner. Authored `:warning` (a broken sig set must not silently pass, but neither may an upgrade turn a green build red); the `reject-unparseable-signatures` bleeding-edge feature promotes it to `:error`, which is the intended default at a future major. |
 | `plugin.<plugin-id>.*` | Plugin-contributed diagnostics |
-| `generated.<provider>.*` | Generated-signature provider diagnostics |
-| `hint.*` | Style and refactor suggestions, gated by configuration (for example `hint.role-generalization.*`) |
-| `sig.*` | RBS signature-generator telemetry per [ADR-14](../adr/14-rbs-sig-generation.md). Reserves `sig.generated.new-file` / `sig.generated.new-method` / `sig.generated.tighter-return` (per-method classifications the `rigor sig-gen` command emits when it produces RBS) and `sig.skipped.complex-shape` / `sig.skipped.user-authored` / `sig.skipped.untyped-return` / `sig.skipped.unrenderable-rbs` (per-method reasons the generator declined to emit; the last is a Rigor rendering defect — the generated line does not parse as RBS, so it is dropped rather than emitted, since an unparseable `.rbs` is quarantined whole by the consumer). The slice-1 MVP surfaces these identifiers through the command's JSON output rather than the diagnostic stream; later slices wire them as `:info` diagnostics when the `--write` path lands. |
+| `generated.<provider>.*` | **Reserved — no implemented identifiers as of this writing.** Generated-signature provider diagnostics; a founding-era reservation ([ADR-1](../adr/1-types.md) / [ADR-2](../adr/2-extension-api.md)). |
+| `hint.*` | **Reserved — no implemented identifiers as of this writing.** Style and refactor suggestions, gated by configuration. [ADR-1](../adr/1-types.md) § "Capability roles" defines `hint.role-generalization.*` behind a `style.suggest_role_generalization` switch; neither the family nor that configuration key is implemented. |
+| `sig.*` | **Not a diagnostic family as of this writing** — these identifiers are surfaced through `rigor sig-gen`'s JSON output, not the diagnostic stream (see the end of this row). RBS signature-generator telemetry per [ADR-14](../adr/14-rbs-sig-generation.md). Reserves `sig.generated.new-file` / `sig.generated.new-method` / `sig.generated.tighter-return` (per-method classifications the `rigor sig-gen` command emits when it produces RBS) and `sig.skipped.complex-shape` / `sig.skipped.user-authored` / `sig.skipped.untyped-return` / `sig.skipped.unrenderable-rbs` (per-method reasons the generator declined to emit; the last is a Rigor rendering defect — the generated line does not parse as RBS, so it is dropped rather than emitted, since an unparseable `.rbs` is quarantined whole by the consumer). The slice-1 MVP surfaces these identifiers through the command's JSON output rather than the diagnostic stream; later slices wire them as `:info` diagnostics when the `--write` path lands. |
 
 ## `Dynamic[T]` display rules
 

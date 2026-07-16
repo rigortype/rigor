@@ -48,7 +48,14 @@ module Rigor
         RBS::Types::Bases::Self => :translate_self,
         RBS::Types::Bases::Instance => :translate_instance,
         RBS::Types::Bases::Class => :translate_untyped,
-        RBS::Types::Bases::Void => :translate_untyped,
+        # `void` is the top type, not `untyped`: RBS defines the two as the same type ("They are all
+        # equivalent for the type system; they are all *top type*" — rbs `docs/syntax.md`), with `void`
+        # carrying only a hint that the value should not be used. Mapping it to `untyped` made Rigor looser
+        # than the toolchain it reads — `Dynamic[top]` is consistent with everything at a gradual boundary,
+        # where `top` demands proof — so a caller could silently depend on a return whose author declared
+        # "don't rely on this". See ADR-92 WD2; `special-types.md` § `void` (a distinct carrier + a value-use
+        # diagnostic) remains unimplemented and marked.
+        RBS::Types::Bases::Void => :translate_top,
         RBS::Types::Optional => :translate_optional,
         RBS::Types::Union => :translate_union,
         RBS::Types::Literal => :translate_literal,

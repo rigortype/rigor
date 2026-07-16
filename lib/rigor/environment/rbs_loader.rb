@@ -90,8 +90,46 @@ module Rigor
           add_project_signatures(env, signature_paths)
           add_virtual_rbs(env, virtual_rbs)
           synthesize_missing_namespaces(env)
-          resolved = env.resolve_type_names
+          env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs)
           stub_missing_referenced_types(env, resolved, project_sig_files(signature_paths))
+        end
+
+        # True when `content` parses as an RBS signature. {#virtual_rbs_collision_quarantined} uses this to
+        # tell a collision-dropped virtual entry (parses, but absent from the env) from a parse-failed one
+        # (the synthesizer's own WD6 skip, reported separately).
+        def parseable_rbs?(content)
+          ::RBS::Parser.parse_signature(::RBS::Buffer.new(name: "(rigor: virtual parse check)", content: content))
+          true
+        rescue ::RBS::BaseError
+          false
+        end
+
+        # Backstop for a virtual-vs-anything `RBS::DuplicatedDeclarationError` that only materialises at
+        # `resolve_type_names` (which rebuilds the env from `sources`). {.add_virtual_rbs}'s transactional
+        # rescue already handles the add-time case — empirically everything on rbs 4.x — but the rbs gemspec
+        # range spans `>= 3.0, < 5.0` (ADR-79) and WHERE duplicate detection fires is an rbs-internal choice
+        # this code must not depend on. Resolution rule is the same as the add-time path: the explicit
+        # signature wins, the colliding VIRTUAL buffer is dropped whole (`RBS::Environment#unload`) and
+        # resolution retries; every pass removes at least one virtual buffer, so the loop is bounded by the
+        # virtual-entry count. A duplicate involving no virtual buffer (sig-vs-sig), or an env without
+        # `#unload` (rbs 3.x), re-raises into the existing one-warning degrade path.
+        #
+        # The dropped set is not returned: consumers recover it from the built env via
+        # {#virtual_rbs_collision_quarantined}, which also works on a cache HIT where this build never ran.
+        def resolve_quarantining_virtual_collisions(env, virtual_rbs)
+          virtual_names = virtual_rbs.to_set { |name, _content| name.to_s }
+          (virtual_names.size + 1).times do
+            return [env, env.resolve_type_names]
+          rescue ::RBS::DuplicatedDeclarationError => e
+            raise unless env.respond_to?(:unload)
+
+            culprits = e.decls.filter_map { |decl| decl.location&.buffer&.name }
+                              .uniq.select { |name| virtual_names.include?(name) }
+            raise if culprits.empty?
+
+            env = env.unload(culprits)
+          end
+          [env, env.resolve_type_names]
         end
 
         # ADR-5 robustness, second tier. A project `signature_paths:` RBS that *references* a type no loaded
@@ -356,9 +394,20 @@ module Rigor
             _, directives, decls = ::RBS::Parser.parse_signature(buffer)
             add_parsed_decls(env, buffer, directives, decls)
           rescue ::RBS::BaseError
-            # WD6 fail-soft: a single broken virtual RBS contribution does not pull the whole env down. The
-            # plugin layer records a `source-rbs-synthesis-failed` info diagnostic in slice 2; here we just
-            # skip the entry.
+            # WD6 fail-soft: a single broken virtual RBS contribution does not pull the whole env down — for
+            # a parse error, skipping the entry is enough. But `RBS::Environment#add_source` appends to
+            # `env.sources` BEFORE inserting decls, so when the raise is a mid-insert
+            # `RBS::DuplicatedDeclarationError` (the entry declares a constant the project's own `sig/`
+            # already declares — the expected state for a project migrating between `sig/` and inline
+            # annotations, not an authoring error), the POISONED SOURCE is left behind, and
+            # `resolve_type_names` — which rebuilds the env from `sources` — re-raises the same error outside
+            # this rescue and collapses the WHOLE env to nil (measured on herb: 1,490 classes → 0, `require`
+            # itself stopped resolving, 74 false `call.unresolved-toplevel`). Make the skip transactional:
+            # drop the poisoned source. The explicit `.rbs` declaration wins — the spec keeps standalone
+            # `.rbs` files "the preferred place for complete type definitions" (`overview.md`) — and
+            # {#warn_about_virtual_rbs_collisions} names the dropped file. `sources` is the rbs 4.x shape;
+            # under the 3.x API this degrades to today's behaviour.
+            env.sources.reject! { |source| source.buffer.name == buffer.name } if env.respond_to?(:sources)
           end
         end
 
@@ -488,6 +537,28 @@ module Rigor
       # @return [Array<Array(String, String)>] empty when every `signature_paths:` file parses.
       def quarantined_signatures
         @state[:quarantined] ||= self.class.quarantined_project_signatures(@signature_paths).freeze
+      end
+
+      # Virtual (inline-synthesized) contributions dropped by the collision quarantine
+      # ({.resolve_quarantining_virtual_collisions}): buffer names absent from the built env even though the
+      # entry's content is non-empty and parses (a parse failure is the synthesizer's own WD6 skip, reported
+      # through the synthesis reporter instead). Derived from the env rather than recorded during build —
+      # the {#quarantined_signatures} trick — so a cache HIT, which never runs the build, reports the same
+      # condition: the marshalled env simply lacks the dropped buffers.
+      #
+      # @return [Array<String>] virtual buffer names (source-file paths) whose contribution was dropped.
+      def virtual_rbs_collision_quarantined
+        @state[:virtual_rbs_collisions] ||= begin
+          built = @state[:env]
+          if built.nil? || @virtual_rbs.empty?
+            [].freeze
+          else
+            present = built.buffers.to_set(&:name)
+            @virtual_rbs.filter_map do |name, content|
+              name if !content.empty? && !present.include?(name) && self.class.parseable_rbs?(content)
+            end.freeze
+          end
+        end
       end
 
       # The referenced-but-undeclared types {.stub_missing_referenced_types} stubbed so the project classes
@@ -982,6 +1053,7 @@ module Rigor
         @state[:env_loaded] = true
         @state[:env] = cache_store ? cached_env : build_env
         warn_about_quarantined_signatures
+        warn_about_virtual_rbs_collisions
         @state[:env]
       rescue ::RBS::BaseError => e
         warn_about_env_build_failure_once(e)
@@ -1015,6 +1087,35 @@ module Rigor
           "They were QUARANTINED so the rest of your RBS env still loads, but the types they\n  " \
           "declare are absent — calls into them read `Dynamic[top]`, so coverage and diagnostics\n  " \
           "are reduced. Fix the parse error(s) to restore that coverage:\n" \
+          "#{lines.join("\n")}"
+        )
+      end
+
+      # The collision twin of {#warn_about_quarantined_signatures}: name, once per run, the source files
+      # whose inline-synthesized RBS was dropped because it collides with a declaration another signature
+      # source already made ({.resolve_quarantining_virtual_collisions} — the explicit `.rbs` wins). Without
+      # this the drop is silent, and "my `#:` annotation does nothing" has no visible cause. Reads the
+      # derived {#virtual_rbs_collision_quarantined}, so a cache HIT warns identically.
+      def warn_about_virtual_rbs_collisions
+        return if @state[:virtual_collision_warned]
+
+        dropped = virtual_rbs_collision_quarantined
+        return if dropped.empty?
+
+        @state[:virtual_collision_warned] = true
+        listed = dropped.first(QUARANTINE_WARN_LIMIT)
+        more = dropped.size - listed.size
+        lines = listed.map { |name| "    - #{name}" }
+        lines << "    … and #{more} more" if more.positive?
+        warn(
+          "rigor: dropped inline-RBS contribution(s) from #{dropped.size} file(s): they declare a
+  " \
+          "constant, alias, or global that another signature source (typically the project's own
+  " \
+          "`sig/`) already declares. The explicit `.rbs` declaration wins, so inline annotations in
+  " \
+          "these files do not bind. Remove the duplication from either side to restore them:
+" \
           "#{lines.join("\n")}"
         )
       end

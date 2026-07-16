@@ -778,4 +778,73 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(second).not_to have_received(:each_constant_decl)
     end
   end
+
+  describe "virtual RBS collision quarantine (inline-synthesized vs sig/)" do
+    # A project that ships BOTH hand-written `sig/` and rbs-inline comments on the same code declares the
+    # same constants twice — the expected state mid-migration, not an authoring error (measured on herb).
+    # `RBS::Environment#add_source` appends the source before inserting decls, so without the transactional
+    # rescue in `.add_virtual_rbs` the mid-insert `DuplicatedDeclarationError` left a poisoned source behind
+    # and `resolve_type_names` re-raised it outside every rescue: the WHOLE env collapsed to nil. These
+    # specs pin the fix: the explicit `.rbs` wins, only the colliding virtual contribution is dropped, and
+    # the drop is loud. The `sources`-based mechanics are the rbs 4.x shape.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-virtual-collision-spec-") }
+    let(:colliding_virtual) do
+      ["virtual:rbs-inline:/app/lib/m.rb", "module M\n  FOO: ::Integer\n  def self.only_inline: () -> ::Integer\nend\n"]
+    end
+    let(:clean_virtual) { ["virtual:rbs-inline:/app/lib/n.rb", "module N\n  BAR: ::Integer\nend\n"] }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    before do
+      skip "requires the sources-based RBS::Environment (rbs 4.x)" unless RBS::Environment.new.respond_to?(:sources)
+      File.write(File.join(tmpdir, "m.rbs"), "module M\n  FOO: ::String\nend\n")
+    end
+
+    def build_loader(virtual_rbs)
+      loader = described_class.new(signature_paths: [tmpdir], virtual_rbs: virtual_rbs)
+      allow(loader).to receive(:warn)
+      loader
+    end
+
+    it "keeps the env alive and drops only the colliding virtual contribution" do
+      loader = build_loader([colliding_virtual, clean_virtual])
+      env = loader.send(:env)
+      expect(env).not_to be_nil
+      expect(env.class_decls.keys.map(&:to_s)).to include("::Integer", "::M", "::N")
+      buffer_names = env.buffers.map(&:name)
+      expect(buffer_names).not_to include(colliding_virtual.first)
+      expect(buffer_names).to include(clean_virtual.first)
+    end
+
+    it "lets the explicit sig declaration win for the colliding constant" do
+      loader = build_loader([colliding_virtual])
+      env = loader.send(:env)
+      entry = env.constant_decls.find { |name, _| name.to_s == "::M::FOO" }&.last
+      expect(entry).not_to be_nil
+      expect(entry.decl.type.to_s).to eq("::String")
+    end
+
+    it "reports the dropped file via virtual_rbs_collision_quarantined, not the clean one" do
+      loader = build_loader([colliding_virtual, clean_virtual])
+      loader.send(:env)
+      expect(loader.virtual_rbs_collision_quarantined).to eq([colliding_virtual.first])
+    end
+
+    it "does not report a parse-failed virtual entry as a collision" do
+      loader = build_loader([["virtual:rbs-inline:/app/lib/broken.rb", "module {{{ not rbs"]])
+      expect(loader.send(:env)).not_to be_nil
+      expect(loader.virtual_rbs_collision_quarantined).to be_empty
+    end
+
+    it "warns once, naming the dropped source file" do
+      loader = described_class.new(signature_paths: [tmpdir], virtual_rbs: [colliding_virtual, clean_virtual])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      3.times { loader.send(:env) }
+      collision_warnings = messages.select { |m| m.include?("dropped inline-RBS") }
+      expect(collision_warnings.size).to eq(1)
+      expect(collision_warnings.first).to include(colliding_virtual.first)
+      expect(collision_warnings.first).not_to include(clean_virtual.first)
+    end
+  end
 end

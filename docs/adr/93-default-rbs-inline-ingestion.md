@@ -194,6 +194,11 @@ green.
 
 ## Relationship to other ADRs
 
+- **ADR-94** — records that rbs 4.0 absorbed the inline reader (`RBS::InlineParser`), which
+  would retire this ADR's WD2 (default-wiring a plugin) and WD3 (the standalone residual, an
+  artifact of `rbs-inline` being a separate gem). That migration is deferred behind the rbs
+  3.x floor, so both stay live; a reader inside `rbs` is the long-run shape of this ADR's
+  problem.
 - **ADR-32** — the contract this amends: WD2's default and the opt-in activation are
   superseded on acceptance; WD1/WD3/WD4–WD10 (upstream library, synthesizer hook, caching,
   fail-soft) are untouched.

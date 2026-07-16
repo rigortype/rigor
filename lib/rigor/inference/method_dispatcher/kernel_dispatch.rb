@@ -133,14 +133,27 @@ module Rigor
           end
         end
 
-        # True when the call can be attributed to Kernel's own module function. Kernel's surface is
-        # PRIVATE, so a call with an explicit non-`self` receiver is necessarily a user-defined method —
-        # decline. Likewise decline when the receiver class (or the toplevel) carries a discovered user
-        # redefinition of the name (`def p(node)` in a printer class must not be hijacked by the fold;
-        # the precise tiers run ahead of user-method inference). With no call_node / scope (internal
-        # dispatcher callers, unit probes) the guards pass — the caller vouches for the shape.
+        # True when the call can be attributed to Kernel's own module function. Kernel's instance-side
+        # surface is PRIVATE, so a call with an explicit non-`self` receiver is a user-defined method —
+        # decline — EXCEPT the `Kernel` module object itself: `module_function` exposes every intrinsic
+        # as a public singleton too, so `Kernel.p(x)` / `Kernel.format(...)` dispatch to the same
+        # intrinsic as the implicit-self spelling. Likewise decline when the receiver class (or the
+        # toplevel) carries a discovered user redefinition of the name (`def p(node)` in a printer class
+        # must not be hijacked by the fold; the precise tiers run ahead of user-method inference). With
+        # no call_node / scope (internal dispatcher callers, unit probes) the guards pass — the caller
+        # vouches for the shape.
         def kernel_owned_call?(context)
-          !explicit_foreign_receiver?(context.call_node) && !user_redefined?(context)
+          return false if user_redefined?(context)
+
+          !explicit_foreign_receiver?(context.call_node) || kernel_module_receiver?(context)
+        end
+
+        # The explicit-receiver spelling of a module function: the receiver TYPE is the `Kernel` module
+        # object itself. Typed (not node-spelled) so a user constant that happens to be named `Kernel`
+        # inside a namespace does not slip through.
+        def kernel_module_receiver?(context)
+          receiver = context.receiver
+          receiver.is_a?(Type::Singleton) && receiver.class_name == "Kernel"
         end
 
         def explicit_foreign_receiver?(call_node)

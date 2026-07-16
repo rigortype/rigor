@@ -244,9 +244,23 @@ A few things worth knowing if you have not used mise before:
   *current directory* recording the chosen versions, and installs
   the tools as part of the same command — there is no separate
   install step. (mise also reads the asdf-style `.tool-versions`.)
-- **Commit the config to share versions.** Check the generated
-  `mise.toml` into Git so every contributor — and every CI run —
-  resolves the same Ruby 4.0 and the same Rigor version.
+- **Commit the config to share versions — and pass `--pin` if you
+  mean it.** Check the generated `mise.toml` into Git so every
+  contributor, and every CI run, resolves the same versions. Note
+  what the two commands above actually record, because they differ:
+  `mise use ruby@4.0` preserves the precision you asked for and
+  writes `ruby = "4.0"` (any 4.0.x), but `mise use gem:rigortype` has
+  no requested version to preserve and writes `"gem:rigortype" =
+  "latest"` — which resolves to whatever is newest *on each machine,
+  whenever that machine first installs it*. A committed `latest` is
+  not a shared version. To share one, pin it:
+
+  ```sh
+  mise use --pin gem:rigortype     # records e.g. "gem:rigortype" = "0.2.9"
+  ```
+
+  Then read [Keeping Rigor up to date](#keeping-rigor-up-to-date):
+  a pin is a version that will not move until you move it.
 - **For a machine-wide install, add `-g`.** `mise use -g
   gem:rigortype` writes mise's global config
   (`~/.config/mise/config.toml`) instead of a project `mise.toml`,
@@ -284,6 +298,48 @@ explicitly with `mise exec gem:rigortype -- rigor`. See
 [Editor integration](09-editor-integration.md) for the editor
 side.
 
+### Keeping Rigor up to date
+
+Rigor ships often. How you upgrade depends on what your config
+records — and in one case, on knowing that mise will not tell you an
+upgrade exists.
+
+- **`"gem:rigortype" = "latest"`** — what a plain `mise use
+  gem:rigortype` writes. `mise upgrade gem:rigortype` moves you to the
+  newest release.
+- **An exact pin** — `"gem:rigortype" = "0.2.9"`, from `--pin` or from
+  `mise use gem:rigortype@0.2.9`. Here `mise upgrade` **will not move
+  it, and `mise outdated` will not report it.** Both compare the
+  installed version against the range the config asks for, and an
+  exact pin is a range containing only itself, so a pinned Rigor
+  reports itself up to date forever, however far behind it has fallen.
+  Use `--bump`, which installs the newest release *and* rewrites the
+  pin:
+
+  ```sh
+  mise upgrade --bump gem:rigortype
+  ```
+
+Neither is a bug to work around — a pin doing nothing is a pin working.
+But it does mean a pinned setup has no passive signal that a new Rigor
+exists: `--bump` is both how you look and how you move.
+
+**After a Ruby change.** mise's `gem:` backend installs each tool
+against the Ruby that was active at install time, and its
+[gem backend docs](https://mise.jdx.dev/dev-tools/backends/gem.html)
+note that "if the ruby version used by a gem package changes, (by mise
+or system ruby), you may need to reinstall the gem". Rigor's pinned
+`ruby@4.0` makes this rare — patch upgrades within 4.0.x are followed
+automatically — but if you remove or replace that Ruby, reinstall:
+
+```sh
+mise install -f gem:rigortype     # or, for every gem-backend tool:
+mise install -f "gem:*"
+```
+
+On a plain `gem install` (below), the equivalent is `gem update
+rigortype`.
+
 ## asdf
 
 `asdf` follows the same model. Install a Ruby 4.0.x with the
@@ -300,7 +356,8 @@ gem install rigortype
 `asdf` has no general-purpose gem backend, so the gem itself is
 installed with `gem install` rather than an `asdf` command. `mise`
 (above) is the more integrated option because its `gem:` backend
-pins the gem the same way it pins Ruby.
+records the gem in the same config that records Ruby, and — as the
+next section explains — keeps the two from interfering.
 
 ## Simple alternative — gem install
 
@@ -315,6 +372,43 @@ RubyGems — and the executable it installs is `rigor`. This is the
 quickest path, but it records nothing per project: a version
 manager keeps the Rigor version pinned next to the project, so
 local runs and CI cannot drift apart.
+
+It also leaves Rigor sharing a Ruby with your work, which is the
+deeper reason the version managers are listed first. The executable
+RubyGems installs begins with `#!/usr/bin/env ruby`, so it runs under
+whatever `ruby` is first on `PATH` *at the moment you invoke it* — and
+because Rigor requires Ruby 4.0 while your projects pin their own,
+running `rigor` inside a project on Ruby 3.x fails before it starts.
+mise's `gem:` backend does not have this failure mode: it installs each
+tool into its own private gem directory and points the executable at
+the Ruby the tool was installed with, so a project's Ruby pin cannot
+reach it. A `gem install` under a Ruby 4.0 you never switch away from
+is perfectly fine; one that shares a Ruby with projects you switch
+between is a footgun.
+
+## If you want Bundler to manage the version
+
+The rule at the top of this chapter is about your *application's*
+`Gemfile` — the one Bundler resolves against your app's gems, and whose
+entries `Bundler.require` loads at boot. It is not a rule against
+Bundler. A `Gemfile` holding nothing but Rigor, resolved separately and
+selected with `BUNDLE_GEMFILE`, keeps every property the prohibition
+exists to protect: your application's dependency graph never meets
+Rigor's, and your application's Ruby is never constrained by Rigor's.
+
+That arrangement — a `Gemfile` under `.github/rigor/`, plus the
+Dependabot config that keeps it current — is written up under
+[Pinning Rigor's version](11-ci.md#pinning-rigors-version) in the CI
+chapter. Nothing about it is CI-specific:
+
+```sh
+BUNDLE_GEMFILE=.github/rigor/Gemfile bundle exec rigor check
+```
+
+It is more moving parts than `mise use --pin gem:rigortype`, which
+records the same version in one line and needs no `bundle exec`. Reach
+for it when your team already runs everything through Bundler and wants
+Rigor on the same footing — not as a first choice.
 
 ## Nix
 

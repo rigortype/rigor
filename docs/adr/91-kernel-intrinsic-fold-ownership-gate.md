@@ -1,7 +1,10 @@
 # ADR-91 — Kernel intrinsic fold ownership gate + spelling-parity invariant
 
-Status: **Accepted, 2026-07-16. Not yet implemented — the implementation PR is queued
-immediately behind this record.**
+Status: **Accepted — implemented 2026-07-16 (WD1–WD4, same branch).** The WD4 gate came back
+stronger than the adjudication expectation: mail / kramdown / haml `lib` and Mastodon
+`app/models` are **byte-identical** to master (the corpora contain no foreign-receiver
+intrinsic-spelling call sites, so even the expected hijack-removal diffs did not arise),
+`make verify` green, and the WD3 parity spec (34 examples) pins the invariant.
 
 Grounding: the rigor-rs port's upstream-feedback note (rigor-rs
 `docs/notes/20260716-upstream-feedback.md`, item 1) and the PR

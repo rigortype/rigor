@@ -447,7 +447,8 @@ module Rigor
       # suffix fails LINE_SUPPRESSION_PATTERN's `\s+` and BARE_SUPPRESSION_MARKER's lookahead), so without
       # surveillance they silently suppress nothing. Matches `disable-<suffix>` for any suffix other than
       # `file`, and `enable` with or without a suffix.
-      UNKNOWN_SUPPRESSION_MARKER = /#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
+      UNKNOWN_SUPPRESSION_MARKER =
+        /#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
       private_constant :UNKNOWN_SUPPRESSION_MARKER
 
       # @return [Array<(Hash{Integer => Set}, Set)>] pair of

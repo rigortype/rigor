@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Catch drift between docs/manual/ prose and the implementation it describes.  Three axes:
+# Catch drift between docs/manual/ prose and the implementation it describes.  Five axes:
 #
 #   1. CLI subcommands — every key in CLI::HANDLERS must appear in the CLI reference, and vice versa.
 #   2. Config keys — every top-level key in Configuration::DEFAULTS must be mentioned in the configuration reference.
@@ -9,6 +9,9 @@
 #   4. Rule documentation_url anchors — every RuleCatalog entry's `documentation_url` (ADR-65, a frozen public
 #      contract) points at `04-diagnostics.md#rule-<id>`, so the catalogue must carry the matching anchor or the
 #      published URL silently 404s within the page.
+#   5. Declared diagnostic families — every family the type spec's identifier taxonomy declares resolves to a
+#      real emitted id, or says in the row that it does not (ADR-92 WD4). Axes 1-4 all run impl -> doc; this
+#      one runs doc -> impl, the direction that let five divergences ship unnoticed.
 #
 # These checks are purely textual — no Rigor analysis needed.
 
@@ -27,6 +30,27 @@ MANUAL_DRIFT_HANDBOOK_DIR = File.join(MANUAL_DRIFT_DOCS_ROOT, "handbook")
 # Introspection helpers: emitted by the engine but documented in the handbook type-inspection chapter (05),
 # not the diagnostic catalogue.
 MANUAL_DRIFT_INTROSPECTION_RULES = %w[dump.type assert.type-mismatch].freeze
+
+# Axis 5: families whose ids are contributed at runtime rather than by the engine, so the vocabulary cannot be
+# enumerated here. `CheckRules.known_suppression_token?` takes the same under-warning stance for the same reason.
+MANUAL_DRIFT_OPEN_VOCABULARY_FAMILIES = %w[plugin generated].freeze
+
+# Axis 5: `| `family.*` | description |` rows of the taxonomy table → the declared prefix (dropping the `.*` /
+# `.<provider>.*` tail) and whether the row carries the "as of this writing" status marker.
+MANUAL_DRIFT_DECLARED_FAMILIES = File.read(
+  File.join(MANUAL_DRIFT_DOCS_ROOT, "type-specification", "diagnostic-policy.md"), encoding: "utf-8"
+).scan(/^\| `([a-z_]+)[.<][^`]*` \| (.*?) \|$/).map do |prefix, description|
+  { prefix: prefix, marked: description.include?("as of this writing") }
+end.freeze
+
+# Axis 5: the engine's real diagnostic vocabulary — ALL_RULES plus every `rule:`-constructed literal in lib/,
+# reduced to first dotted segments. ALL_RULES alone would miss the non-check families and report false gaps.
+MANUAL_DRIFT_EMITTED_FAMILIES = (
+  Rigor::Analysis::CheckRules::ALL_RULES +
+  Dir[File.expand_path("../../lib/**/*.rb", __dir__)].flat_map do |rb|
+    File.read(rb, encoding: "utf-8").scan(/rule: *"([a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)+)"/).flatten
+  end
+).map { |id| id.split(".").first }.uniq.freeze
 
 RSpec.describe "manual accuracy" do
   # ── 1. CLI subcommand coverage ──────────────────────────────────
@@ -99,6 +123,53 @@ RSpec.describe "manual accuracy" do
                                    "RuleCatalog rules whose documentation_url anchor is missing from " \
                                    "04-diagnostics.md: #{missing.map(&:id).inspect}\n" \
                                    "Add `<a id=\"rule-<id-with-dots-as-dashes>\"></a>` for each."
+    end
+  end
+
+  # ── 5. Declared diagnostic families resolve (ADR-92 WD4) ─────────
+  #
+  # The four axes above all run impl → doc ("every ALL_RULES id appears in the catalogue"). This one runs
+  # doc → impl, which is the direction that let five spec/implementation divergences ship unnoticed: the type
+  # spec declared families (`static.*`, `compat.*`, `hint.*`, `generated.*`) that have never had a single
+  # implemented identifier, and no gate could see it — an unimplemented diagnostic is silence, and every
+  # analysis gate is false-positive-oriented.
+  #
+  # Per ADR-92 the taxonomy in `diagnostic-policy.md` may claim an identifier space without implementing it,
+  # but it must then say so: a family row either resolves to a real emitted id or carries a bolded status
+  # marker. The recognised marker is the phrase "as of this writing" — the corpus's existing status idiom
+  # (`inference-budgets.md`'s unwired `budgets:` table uses it), covering both "Reserved" (claimed, never
+  # implemented) and "Not a diagnostic family" (implemented, reaches the user through another surface).
+  #
+  # The comparison reads the FULL emitted vocabulary, not `ALL_RULES` alone. `CheckRules` owns 26 ids; the
+  # non-check families (`dynamic.*`, `pre-eval.*`, `rbs.coverage.*`, `rbs_extended.*`) are emitted elsewhere
+  # and admitted per-family by `CheckRules.known_suppression_token?`. Reading only `ALL_RULES` here would
+  # report those families as false gaps.
+  describe "declared diagnostic families (diagnostic-policy.md § Identifier taxonomy)" do
+    it "parses the taxonomy table (guards the regex against a table reformat)" do
+      expect(MANUAL_DRIFT_DECLARED_FAMILIES.map { |f| f[:prefix] }).to include("call", "flow", "static", "hint")
+    end
+
+    MANUAL_DRIFT_DECLARED_FAMILIES
+      .reject { |f| f[:marked] || MANUAL_DRIFT_OPEN_VOCABULARY_FAMILIES.include?(f[:prefix]) }
+      .each do |family|
+        it "`#{family[:prefix]}.*` has at least one implemented diagnostic id" do
+          expect(MANUAL_DRIFT_EMITTED_FAMILIES).to include(family[:prefix]),
+                                                   "diagnostic-policy.md declares the `#{family[:prefix]}.*` " \
+                                                   "family, but no diagnostic under that prefix is emitted " \
+                                                   "anywhere in lib/.\nPer ADR-92: implement an id, narrow the " \
+                                                   "row, or mark the row with a bolded status containing " \
+                                                   "\"as of this writing\"."
+        end
+      end
+
+    it "no family carries a status marker while emitting ids (the marker must expire)" do
+      stale = MANUAL_DRIFT_DECLARED_FAMILIES.select do |f|
+        f[:marked] && MANUAL_DRIFT_EMITTED_FAMILIES.include?(f[:prefix])
+      end
+      expect(stale.map { |f| f[:prefix] }).to be_empty,
+                                              "Families still marked in diagnostic-policy.md that now emit " \
+                                              "real ids: #{stale.map { |f| f[:prefix] }.inspect}\n" \
+                                              "Drop the status marker — the family shipped."
     end
   end
 end

@@ -8,7 +8,7 @@ Rigor distinguishes several special types that have specific semantic roles and 
 
 Using a value of type `top` is still checked. A method call on `top` MUST be accepted only when the method is known to be available for every possible inhabitant, or when a plugin supplies a stronger fact.
 
-`top` plays the role of TypeScript's `unknown` for the safe-top axis: a value of type `top` can hold any Ruby value, but the analyzer requires a guard, signature, or plugin fact before it can be used. Diagnostics for unguarded calls on `top` belong to the `static.*` family (see [diagnostic-policy.md](diagnostic-policy.md)).
+`top` plays the role of TypeScript's `unknown` for the safe-top axis: a value of type `top` can hold any Ruby value, but the analyzer requires a guard, signature, or plugin fact before it can be used. Diagnostics for unguarded calls on `top` belong to the `static.*` family (see [diagnostic-policy.md](diagnostic-policy.md)) — **a reserved family with no implemented identifiers as of this writing**; an unguarded `top` call is not diagnosed today.
 
 ## `bot`
 
@@ -64,6 +64,27 @@ Diagnostics MAY use these distinctions to explain whether a `Dynamic[T]` came fr
 Strict dynamic modes MAY report dynamic-to-precise assignments, arguments, returns, and generic-slot leaks such as `Array[Dynamic[top]]`. Strict static modes MAY additionally report method calls or branch proofs whose safety depends on dynamic-origin facts rather than checked static facts.
 
 ## `void`
+
+> **Status — not yet wired (as of this writing).** The rules in this section are
+> normative-for-v1 *intent*. The engine translates RBS `void` to `untyped`
+> ([`rbs_type_translator.rb`](../../lib/rigor/inference/rbs_type_translator.rb),
+> `RBS::Types::Bases::Void => :translate_untyped`): there is no distinct `void` carrier, no
+> "use of void value" diagnostic, and no generic-slot preservation.
+>
+> Note for a second implementer that the shipped behaviour matches neither this section nor
+> RBS. RBS specifies `void` as **`top`** — "They are all equivalent for the type system; they
+> are all *top type*", `void` being a developer hint (`docs/syntax.md` § "`void`, `boolish`,
+> or `top`?"). This section intends `void` to be *distinct* from `top` so value use can be
+> diagnosed. The engine produces **`Dynamic[top]`**, which is looser than both: it is
+> consistent with every type at a gradual boundary, where `top` demands proof.
+>
+> The intent is retained per [ADR-1](../adr/1-types.md) § "Special RBS types … must be
+> handled with type-theoretic clarity rather than as ad hoc aliases". The three-way decision
+> — implement this section, narrow to RBS's `top`, or narrow to the engine — is carried over
+> by [ADR-92](../adr/92-normative-status-fidelity.md) WD2, pending a measurement of how often
+> a `-> void` return is consumed in value position. Implementing this section is a new
+> required discipline and therefore ships behind `bleeding_edge:` per
+> [ADR-50](../adr/50-release-engineering-and-stability-strategy.md) WD1.
 
 `void` is **not** an ordinary value type in Rigor. It is a result marker for expressions whose return value should not be used.
 

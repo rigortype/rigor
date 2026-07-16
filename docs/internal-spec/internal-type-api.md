@@ -6,6 +6,28 @@ This is the engine-internal counterpart of the type-language semantics in [`docs
 
 The decisions in this document are stable. The two open questions tracked in [`docs/adr/3-type-representation.md`](../adr/3-type-representation.md) — the constant scalar/object carrier shape and the trinary-returning method naming convention — are deliberately abstracted here so that the contract does not depend on either resolution.
 
+> **Status — the *method surface* is target state, not shipped state (as of this writing).**
+> Binding and implemented: the identity, immutability, and equality rules (§ *Identity and
+> Immutability*), `describe(verbosity)`, `erase_to_rbs`, and `accepts(other, mode:)` (routed
+> through [`Rigor::Type::AcceptanceRouter`](../../lib/rigor/type/acceptance_router.rb)).
+> **Not implemented on any carrier**: every other method named below — the rest of
+> § *Relational queries* (`subtype_of`, `consistent_with`, `equal_value`), all of
+> § *Structural queries* (`has_method`, `method`, `members`, `key_type`, `value_type`,
+> `tuple_arity`, `iterable_*`), and `normalize` / `traverse` in § *Meta*.
+> `Rigor::Type::Nominal`, for instance, exposes `initialize` / `describe` / `erase_to_rbs` /
+> `inspect` and nothing else.
+>
+> The distinction that matters for a second implementer: **subtyping and acceptance are
+> capabilities the engine has** — reached through engine-internal helpers of a different
+> shape (`rbs_subtype?` and its neighbours) rather than as methods on the type object —
+> while **`normalize`, `traverse`, `consistent_with`, and `equal_value` have no
+> implementation anywhere in `lib/`**. Per
+> [ADR-92](../adr/92-normative-status-fidelity.md) WD2 this document follows the
+> implementation where the capability ships (the routing is the shipped design, and there is
+> no evidence the carrier-method shape beats it) and marks the capability where it does not.
+> § *Scope* below already declines to bind concrete method names (ADR-3 OQ2) — that
+> carve-out excuses *spelling*, not the absence of a surface, so it is recorded here instead.
+
 ## Scope
 
 This document binds:

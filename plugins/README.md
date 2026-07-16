@@ -32,12 +32,17 @@ plugins:
   # ...
 ```
 
-The Tier 1 + Tier 2 Rails plugins can be bundled via the
-[`rigor-rails`](rigor-rails/) Gemfile-convenience meta-gem
-(per [ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1) —
-adding `gem "rigor-rails"` pulls in seven sub-plugins, but
-`.rigor.yml` activation stays per-plugin so users can opt
-out of any individual member.
+Activation is per-plugin, and there is **no umbrella entry**:
+`plugins: [rigor-rails]` is rejected by the loader. The
+[`rigor-rails`](rigor-rails/) directory is a Tier 1+2 Rails
+meta-gem from [ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1,
+designed when each plugin was a separate gem you added to your
+`Gemfile`; that packaging is superseded (see above), so the
+meta-gem is currently **unwired** — it has no supported use.
+[ADR-96](../docs/adr/96-plugin-target-gems.md) WD3 proposes
+giving it one (expanding to the members whose target gem your
+`Gemfile.lock` actually has); WD5 records why it is kept rather
+than removed in the meantime.
 
 ## Catalogue
 
@@ -69,7 +74,7 @@ Larger surfaces — typically need a Rails app shape to make sense.
 
 | Plugin | Bundles |
 | --- | --- |
-| [`rigor-rails`](rigor-rails/) | Tier 1+2 Rails plugins (7 gems: rails-routes / rails-i18n / actionmailer / activejob / activerecord / actionpack / factorybot). Gemfile convenience only — users still enumerate the individual plugins they want active in `.rigor.yml`'s `plugins:` list, per [ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1. |
+| [`rigor-rails`](rigor-rails/) | Tier 1+2 Rails set (rails-routes / rails-i18n / actionmailer / activejob / activerecord / actionpack / factorybot). **Unwired** — `plugins: [rigor-rails]` is rejected by the loader, and the `Gemfile` convenience it was designed for ([ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1) is superseded by the bundled-gem model. Enumerate the members individually; [ADR-96](../docs/adr/96-plugin-target-gems.md) WD3 proposes a supported umbrella. |
 
 ### Testing & matchers (Pillar 2 "Your specs are types")
 

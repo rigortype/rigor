@@ -70,9 +70,12 @@ module Rigor
       private
 
       # Accepts:
-      #   "rigor-rails"
-      #   { "gem" => "rigor-rails", "id" => "rails", "config" => {...} }
-      #   { gem: "rigor-rails", id: "rails", config: {...} }
+      #   "rigor-activerecord"
+      #   { "gem" => "rigor-activerecord", "id" => "activerecord", "config" => {...} }
+      #   { gem: "rigor-activerecord", id: "activerecord", config: {...} }
+      #
+      # The `id:` form selects one plugin from a gem that registers several — the bare-string form
+      # raises for those (see `lookup_plugin_class!`).
       def normalise_entry(raw, index)
         case raw
         when String

@@ -144,8 +144,8 @@ RSpec.describe Rigor::Configuration do
         path = File.join(dir, ".rigor.yml")
         File.write(path, <<~YAML)
           plugins:
-            - gem: rigor-rails
-              id: rails
+            - gem: rigor-activerecord
+              id: activerecord
               config:
                 eager_load: true
         YAML
@@ -153,7 +153,7 @@ RSpec.describe Rigor::Configuration do
         configuration = described_class.load(path)
         expect(configuration.plugins).to eq(
           [
-            { "gem" => "rigor-rails", "id" => "rails", "config" => { "eager_load" => true } }
+            { "gem" => "rigor-activerecord", "id" => "activerecord", "config" => { "eager_load" => true } }
           ]
         )
       end

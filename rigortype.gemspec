@@ -9,11 +9,35 @@ Gem::Specification.new do |spec|
   spec.email = ["maintainers@example.invalid"]
 
   spec.summary = "Inference-first static analysis for Ruby."
+  # ADR-27 — the "not in your Gemfile" sentence is deliberately in the *description*, not only in the
+  # docs: rubygems.org renders it on the gem page, which is the page a coding agent fetches when it is
+  # told "install https://rubygems.org/gems/rigortype". That page's own first suggestion is `bundle add
+  # rigortype`, so the counter-instruction has to reach the same reader at the same moment.
   spec.description = "Rigor is a CLI-first static analyzer for Ruby applications that prioritizes type inference, " \
-                     "clean application code, and zero runtime dependencies."
+                     "clean application code, and zero runtime dependencies. Rigor is a standalone tool, not a " \
+                     "library: install it independently rather than adding it to your application's Gemfile. It " \
+                     "runs on Ruby 4.0 while your project keeps its own Ruby, and it reads your project as data " \
+                     "rather than loading it, so a Gemfile entry only constrains your application's Ruby and " \
+                     "dependency resolution. Installation channels (mise, asdf, gem install, container, Nix): " \
+                     "https://github.com/rigortype/rigor/blob/master/docs/install.md"
   spec.homepage = "https://github.com/rigortype/rigor"
   spec.license = "MPL-2.0"
   spec.required_ruby_version = [">= 4.0.0", "< 4.1"]
+
+  # Shown by both `gem install rigortype` (a supported channel, ADR-27 WD6) and `bundle add rigortype`
+  # (not one), so the Gemfile half is phrased conditionally rather than as an accusation. This is the
+  # only hook that reaches a Ruby-4.0 project where `bundle add` *succeeds* — there the Gemfile entry is
+  # a delayed trap that surfaces at the next boot, not at install time.
+  spec.post_install_message = <<~MESSAGE
+    Rigor installs as a standalone CLI, not a project dependency. Run `rigor check app lib` from your
+    project root — no `bundle exec`.
+
+    If this came from `bundle add rigortype` or a Gemfile entry, remove it: Rigor runs on its own Ruby
+    and analyses your project from the outside, so in a Gemfile it constrains your application's Ruby
+    and dependency resolution without giving you anything. Per-project version pinning without that
+    cost, plus every other channel, is documented in
+    https://github.com/rigortype/rigor/blob/master/docs/install.md
+  MESSAGE
 
   spec.metadata = {
     "bug_tracker_uri" => "#{spec.homepage}/issues",

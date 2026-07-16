@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "constant_folding"
 
 module Rigor
   module Inference
@@ -24,8 +25,26 @@ module Rigor
       #
       # See `docs/type-specification/value-lattice.md` for the union-distribution contract this tier
       # mirrors.
+      #
+      # ADR-91 — this tier is the single owner of the `Kernel` module-function fold surface, covering
+      # the conversion/identity folds (`Array` / `Integer` / `Float` / `Rational` / `Complex` / `p` /
+      # `pp` / `String` / `Hash`) AND the `format` / `sprintf` template fold (moved here from
+      # `LiteralStringFolding` in ADR-91 WD2 — `String#%` stays there as a receiver-typed String
+      # method). Ownership gating no longer happens per-fold: the dispatcher consults this tier only
+      # when `context.method_name` is in {INTRINSIC_NAMES} and {kernel_owned_call?} passes (ADR-91
+      # WD1), so a fold body never re-derives the guard. Callers reaching `try_dispatch` directly
+      # (internal dispatcher, unit probes) vouch for ownership themselves.
       module KernelDispatch
         module_function
+
+        # ADR-91 WD1 — the compiled method-name surface of Kernel's foldable module functions. The
+        # dispatcher gates on membership here before consulting the tier, and the WD3 parity spec
+        # derives its case list from this same table so a fold added without an entry never runs and
+        # every entry is spelling-parity checked. Public (not private_constant) and Ractor-shareable
+        # because the gate and the spec both read it.
+        INTRINSIC_NAMES = Ractor.make_shareable(
+          Set[:Array, :Integer, :Float, :Rational, :Complex, :p, :pp, :String, :Hash, :format, :sprintf]
+        )
 
         # `Kernel#Rational` / `Kernel#Complex` constructor folds. When every argument is a `Type::Constant`
         # whose value is numeric, we can run the actual Ruby constructor and lift the result into a
@@ -56,6 +75,12 @@ module Rigor
         IDENTITY_PRINTERS = Set[:p, :pp].freeze
         private_constant :IDENTITY_PRINTERS
 
+        # `Kernel#format` / `Kernel#sprintf` — a String-template fold moved here from
+        # `LiteralStringFolding` in ADR-91 WD2 so every Kernel module-function fold sits behind the
+        # WD1 gate.
+        FORMAT_METHODS = Set[:format, :sprintf].freeze
+        private_constant :FORMAT_METHODS
+
         # Value classes `Kernel#String` folds over. Each is a literal-carrier class whose `to_s` is a
         # deterministic pure function of the value, so running the real `String()` at fold time is sound.
         STRING_SAFE_CLASSES = [
@@ -75,6 +100,7 @@ module Rigor
           return try_identity_printer(context) if IDENTITY_PRINTERS.include?(method_name)
           return try_string(context) if method_name == :String
           return try_hash(context) if method_name == :Hash
+          return try_format(context) if FORMAT_METHODS.include?(method_name)
 
           nil
         end
@@ -85,13 +111,12 @@ module Rigor
         # `p`-wrapped expression is transparent to downstream inference. The n-arg path materialises the
         # positional types as a `Tuple`. The 0-arg path declines (RBS `nil` is already exact).
         #
-        # FP envelope (shared guards): declines on a splat / forwarding argument (the runtime arity — and
-        # hence 1-arg-identity vs n-arg-Array — is not statically known), and on any call
-        # {#kernel_owned_call?} cannot attribute to Kernel itself.
+        # FP envelope: declines on a splat / forwarding argument (the runtime arity — and hence
+        # 1-arg-identity vs n-arg-Array — is not statically known). Ownership is gated once at the
+        # dispatcher (ADR-91 WD1), so this body no longer re-checks {#kernel_owned_call?}.
         def try_identity_printer(context)
           args = context.args
           return nil if args.empty?
-          return nil unless kernel_owned_call?(context)
           return nil if unresolved_argument_arity?(context.call_node)
           return args.first if args.size == 1
 
@@ -104,7 +129,6 @@ module Rigor
         def try_string(context)
           args = context.args
           return nil unless args.size == 1
-          return nil unless kernel_owned_call?(context)
           return nil if unresolved_argument_arity?(context.call_node)
 
           arg = args.first
@@ -123,7 +147,6 @@ module Rigor
         def try_hash(context)
           args = context.args
           return nil unless args.size == 1
-          return nil unless kernel_owned_call?(context)
           return nil if unresolved_argument_arity?(context.call_node)
 
           case (arg = args.first)
@@ -131,6 +154,53 @@ module Rigor
           when Type::Constant then arg.value.nil? ? Type::Combinator.hash_shape_of({}) : nil
           when Type::Tuple then arg.elements.empty? ? Type::Combinator.hash_shape_of({}) : nil
           end
+        end
+
+        # `Kernel#format("hello %s", lit)` / `Kernel#sprintf(...)` — moved here from
+        # `LiteralStringFolding` in ADR-91 WD2 so it sits behind the WD1 ownership gate with every
+        # other Kernel module-function fold. The template plus every value argument must be
+        # literal-bearing ({Type::Combinator.literal_string_compatible?}) or a `Type::Constant` of
+        # any value (Constants are always provably literal). The template arg specifically must be
+        # literal-bearing — a `Constant<Integer>` first arg would not be a valid format template, so
+        # the `Type::Constant` allowance applies only to subsequent value args.
+        #
+        # When the template AND every value argument are value-pinned `Constant`s, the fold sharpens
+        # to the exact `Constant[String]` (`format("%d", 1)` → `"1"`) — the module-function sibling
+        # of `ConstantFolding#try_fold_string_format`'s `String#%` fold. This is a strict refinement
+        # inside the same firing envelope: every exact-foldable input was already lifted to
+        # `literal-string`. Ownership is gated at the dispatcher, so the fold itself needs no check.
+        def try_format(context)
+          args = context.args
+          return nil if args.empty?
+
+          exact = fold_format_constant(args)
+          return exact if exact
+          return nil unless Type::Combinator.literal_string_compatible?(args.first)
+          return nil unless args.drop(1).all? { |arg| literal_or_constant?(arg) }
+
+          Type::Combinator.literal_string
+        end
+
+        # Runs the real `Kernel#format` when everything is value-pinned. A malformed directive or an
+        # argument-count mismatch raises at fold time; the handler declines so the literal-string
+        # lift (or the RBS `String` envelope) answers instead. Results larger than the shared
+        # `ConstantFolding::STRING_FOLD_BYTE_LIMIT` decline too, keeping the carrier-size convention.
+        def fold_format_constant(args)
+          return nil unless args.all?(Type::Constant)
+          return nil unless args.first.value.is_a?(String)
+
+          result = format(args.first.value, *args.drop(1).map(&:value))
+          return nil if result.bytesize > ConstantFolding::STRING_FOLD_BYTE_LIMIT
+
+          Type::Combinator.constant_of(result)
+        rescue StandardError
+          nil
+        end
+
+        # KernelDispatch's own copy of the literal-or-Constant predicate (LiteralStringFolding keeps
+        # its own for the `String#%` fold that stayed there).
+        def literal_or_constant?(type)
+          Type::Combinator.literal_string_compatible?(type) || type.is_a?(Type::Constant)
         end
 
         # True when the call can be attributed to Kernel's own module function. Kernel's instance-side
@@ -142,6 +212,9 @@ module Rigor
         # must not be hijacked by the fold; the precise tiers run ahead of user-method inference). With
         # no call_node / scope (internal dispatcher callers, unit probes) the guards pass — the caller
         # vouches for the shape.
+        #
+        # ADR-91 WD1: the dispatcher calls this ONCE, before consulting the tier, so the fold bodies
+        # no longer re-check it. Kept public so the dispatcher (and unit probes) can reach it.
         def kernel_owned_call?(context)
           return false if user_redefined?(context)
 

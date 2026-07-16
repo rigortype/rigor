@@ -85,6 +85,9 @@ assert_type("[1, 2]", Kernel.pp(1, 2))
 assert_type('"1"', Kernel.format("%d", 1))
 assert_type('"2"', Kernel.sprintf("%d", 2))
 assert_type('"42"', Kernel.String(42))
+# The conversion constructors are now behind the same ownership gate (ADR-91 WD1), so the explicit
+# `Kernel.` spelling folds exactly like the implicit-self form.
+assert_type("42", Kernel.Integer("42"))
 
 # --- user redefinition must NOT be hijacked by the identity fold -------------
 
@@ -121,3 +124,27 @@ end
 # the user method's inferred return (ADR-57 adoption) answers, not the hijacked Constant["5"].
 formatter = KernelFunctionsFormatter.new
 assert_type("123", formatter.format("%d", 5))
+
+# --- the conversion constructors observe the same ownership guard (ADR-91 WD1) -----------------
+# Before ADR-91 the `Integer` / `Float` / `Array` / `Rational` / `Complex` folds were NOT gated on
+# ownership, so a user `def Integer(x)` was hijacked and `Integer("42")` folded to Constant[42].
+# The single dispatcher-held gate now declines on the discovered redefinition, so the user method
+# answers instead — the same hijack #110 removed from `format`, closed for the whole family.
+
+class KernelFunctionsConverter
+  def Integer(_x)
+    :user
+  end
+
+  def show
+    # Resolves against the discovered redefinition, so the fold declines — the result must NOT be
+    # the hijacked Constant[42]. The RBS `Kernel#Integer -> Integer` envelope answers instead.
+    result = Integer("42")
+    assert_type("Integer", result)
+  end
+end
+
+# An explicit non-Kernel receiver is a user method, never Kernel#Integer — the fold declines and
+# the user method's inferred return (ADR-57 adoption) answers, not the hijacked Constant[42].
+converter = KernelFunctionsConverter.new
+assert_type(":user", converter.Integer("42"))

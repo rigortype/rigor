@@ -701,7 +701,7 @@ module Rigor
       private_constant :STDLIB_SINGLETON_FOLDERS
 
       PRECISE_TIERS_TAIL = Ractor.make_shareable([
-        KernelDispatch, MethodFolding, ReduceFolding, ArrayToHFolding, BlockFolding
+        MethodFolding, ReduceFolding, ArrayToHFolding, BlockFolding
       ].freeze)
       private_constant :PRECISE_TIERS_TAIL
 
@@ -735,11 +735,28 @@ module Rigor
           return result if result
         end
 
+        kernel_result = dispatch_kernel_intrinsic(context)
+        return kernel_result if kernel_result
+
         PRECISE_TIERS_TAIL.each do |tier|
           result = tier.try_dispatch(context)
           return result if result
         end
         nil
+      end
+
+      # ADR-91 WD1 — the single dispatcher-held ownership gate for the Kernel module-function surface
+      # (gate-by-held-key, the same move STDLIB_SINGLETON_FOLDERS made above). The tier runs only when
+      # the method name is in the compiled `INTRINSIC_NAMES` table AND the call is attributable to
+      # Kernel itself (implicit self / `Kernel.` receiver, no discovered user redefinition). Because the
+      # gate lives HERE and nowhere else, a fold inside KernelDispatch that "forgets" its ownership
+      # guard is unrepresentable — the whole tier is unreachable for a foreign receiver. Unit probes
+      # calling `KernelDispatch.try_dispatch` directly keep the caller-vouches-for-ownership contract.
+      def dispatch_kernel_intrinsic(context)
+        return nil unless KernelDispatch::INTRINSIC_NAMES.include?(context.method_name)
+        return nil unless KernelDispatch.kernel_owned_call?(context)
+
+        KernelDispatch.try_dispatch(context)
       end
 
       def try_user_class_fallback(receiver_type, environment, call_node, context)

@@ -37,18 +37,26 @@ Then proceed to the **first** matching case below.
 and pins language runtimes (Ruby, Node, Python, …) and tool gems
 (like `rigortype`) per project, recording versions in a `mise.toml`
 that can be committed alongside the code. Other contributors — and CI
-— run `mise install` to restore the exact same versions with no
-`Gemfile` involvement.
+— run `mise install` to restore those versions with no `Gemfile`
+involvement.
 
 Run in the project root:
 
 ```sh
 mise use ruby@4.0
-mise use gem:rigortype
+mise use --pin gem:rigortype
 ```
 
 `mise use` installs the tools and writes their versions to `mise.toml`
 in one step. Commit `mise.toml` so the version is shared.
+
+`--pin` records the exact Rigor version (`"gem:rigortype" = "0.2.9"`).
+Without it mise writes `"gem:rigortype" = "latest"`, which every
+machine re-resolves to whatever is newest when it first installs — so
+a committed `latest` does not give the team one shared version. The
+trade-off: a pin will not move on its own, and `mise outdated` cannot
+report a pinned tool as behind. Upgrade with `mise upgrade --bump
+gem:rigortype`.
 
 Then verify:
 
@@ -184,6 +192,6 @@ project is set up, re-run `rigor skill describe` for the step after
 that.
 
 If `rigor skill describe` is not recognised, your Rigor version predates
-it. Run `rigor --version` and upgrade with `mise use gem:rigortype` (or
-`gem update rigortype` for Case C/B); on an older version, run
-`rigor skill rigor-project-init` directly.
+it. Run `rigor --version` and upgrade with `mise upgrade --bump
+gem:rigortype` (or `gem update rigortype` for Case B/C); on an older
+version, run `rigor skill rigor-project-init` directly.

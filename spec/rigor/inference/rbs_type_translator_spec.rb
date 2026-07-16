@@ -14,7 +14,19 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
       expect(described_class.translate(parse_rbs("bot"))).to equal(Rigor::Type::Combinator.bot)
       expect(described_class.translate(parse_rbs("untyped"))).to equal(Rigor::Type::Combinator.untyped)
       expect(described_class.translate(parse_rbs("nil")).value).to be_nil
-      expect(described_class.translate(parse_rbs("void"))).to equal(Rigor::Type::Combinator.untyped)
+    end
+
+    # ADR-92 WD2 option (b). RBS specifies `void` as the top type — "They are all equivalent for the type
+    # system; they are all *top type*" (`docs/syntax.md` § "`void`, `boolish`, or `top`?"), `void` being a
+    # hint to developers rather than a distinct type. Translating it to `untyped` instead made Rigor *looser*
+    # than the toolchain it reads: `Dynamic[top]` is consistent with everything at a gradual boundary, where
+    # `top` demands proof — so a caller could silently come to depend on a return whose author declared
+    # "don't rely on this", which is the one thing `void` exists to prevent.
+    #
+    # This does NOT implement `special-types.md` § `void` (a distinct carrier + a "use of void value"
+    # diagnostic); that section stays marked and its intent is ADR-92's remaining carry-over.
+    it "maps void to top, per RBS's own definition (ADR-92 WD2)" do
+      expect(described_class.translate(parse_rbs("void"))).to equal(Rigor::Type::Combinator.top)
     end
 
     it "translates a class instance to a Nominal" do

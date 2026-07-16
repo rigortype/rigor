@@ -1,6 +1,7 @@
 # ADR-92 — Normative status fidelity: the founding-era stratum and the declare-or-mark gate
 
-Status: **Accepted — implemented 2026-07-16 (WD1–WD5).** WD2 verdicts + WD3 markers landed
+Status: **Accepted — implemented 2026-07-16 (WD1–WD5); WD2's `void` verdict resolved to
+option (b), landed.** WD2 verdicts + WD3 markers landed
 in `special-types.md` (§ `void`, § `top`), `diagnostic-policy.md` (four family rows + the
 guidelines preamble), and `internal-type-api.md` (a document-level status block narrowing
 the method surface to what ships). WD4's gate is axis 5 of
@@ -8,7 +9,9 @@ the method surface to what ships). WD4's gate is axis 5 of
 both directions (removing a marker from an unimplemented family goes red; leaving a marker
 on a family that later ships goes red — the marker expires). `make docs-check` green, 246
 examples. The `void` implement-vs-narrow decision is deliberately carried over (WD2,
-measurement-gated); the prose-clause body stays ungated by design (WD1).
+measurement-gated) — **now resolved: option (b) landed** (`Bases::Void => :translate_top`),
+leaving only the distinct-`void` intent of `special-types.md` § `void` carried over. The
+prose-clause body stays ungated by design (WD1).
 
 One in-flight correction worth recording: the gate's first run failed on `sig.*`, which the
 spec *had* marked honestly but in different words than WD3's `Reserved`. That surfaced a
@@ -188,8 +191,23 @@ skip, which is the discipline this ADR exists to install.
   discards — but [ADR-75](75-dynamic-provenance.md)'s pattern applies unchanged (provenance
   is metadata *about* a value, never part of what it *is*), so `void → top` plus a
   `void_origins` identity-keyed side-table reaches (a)'s intent on (b)'s foundation without
-  adding a carrier or forking the lattice. Recommended sequence: land (b), then design (a)
-  with `static.*` and the side-table together, behind `bleeding_edge:` per ADR-50 WD1. (2) The prose-clause body stays ungated (WD1) — the P1-class probe remains a
+  adding a carrier or forking the lattice.
+
+  **(b) landed in this change set** (`Bases::Void => :translate_top`; full suite 7,914
+  examples green, `make check` / `check-plugins` clean, corpus byte-identical on
+  mail/kramdown/haml/liquid). A user report sharpened the case beyond the fidelity argument
+  and is why it landed now rather than waiting: a author writing `#: void` is declaring "do
+  not rely on this return", and `Dynamic[top]` — consistent with everything at a gradual
+  boundary — lets a caller silently build that dependency anyway, which is the one outcome
+  `void` exists to prevent. `top` demands proof, so it serves the declared contract; the
+  widening the author asked for is to `top`, exactly as RBS defines it.
+
+  **What remains carried over** is (a): `special-types.md` § `void`'s distinct-`void` intent,
+  whose value-position diagnostic needs two more pieces — the **`static.*` family** (Reserved,
+  and the connective that actually makes `top` bite: without it `top` and `Dynamic[top]` are
+  equally silent, which is why (b) measured free) and a **`void_origins` side-table** for the
+  transitive case (`def bar; foo; end; a = bar` — `bar` declares nothing, so a call-site rule
+  reading `bar`'s RBS cannot see the `void` that reached it through the body). (2) The prose-clause body stays ungated (WD1) — the P1-class probe remains a
   manual instrument. (3) `internal-spec`'s other documents were not swept; only
   `internal-type-api.md` was probed.
 

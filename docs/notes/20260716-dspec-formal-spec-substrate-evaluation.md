@@ -535,6 +535,77 @@ provenance は「値についてのメタデータであって、値そのもの
 `bleeding_edge:` 経由。**(c)(実装追認)は測定により不要** — (b) がタダである以上、
 RBS と ADR-1:30 の両方を捨てる理由がない。
 
+## void セマンティクスの検証 — ユーザー報告から(2026-07-16)
+
+報告された想定挙動:
+
+```ruby
+def foo #: void
+  p 1
+end
+def bar = foo
+a = bar   # 「a: 1 になっている。void ≒ top まで広げてほしい」
+```
+
+**実測(rbs-inline プラグイン + `# rbs_inline: enabled`)**:
+
+| 書き方 | `dump_type` |
+| --- | --- |
+| トップレベル `def foo #: void` → `a = bar` | **`1`**(報告どおり) |
+| クラス内 `def cv #: void` | `Dynamic[top]`(landing 前) |
+| クラス内 `def cbar; cv; end`(**注釈なし**) | `Dynamic[top]` ← **void 性は伝播していた** |
+
+**原因は void ではなくトップレベル。** synthesizer の出力を直接確認すると:
+
+```rbs
+class C
+  def cv: () -> void
+end
+```
+
+トップレベル `def` は **一行も生成されない**(upstream rbs-inline は `class`/`module` 宣言しか
+出さない)。行末 `#: void` 構文自体は正しく `() -> void` に変換されている。void 固有ではなく
+`#: () -> String` でも同じく無視される。
+
+**方法論の落とし穴 2 件**(どちらも危うく誤報):
+1. magic comment `# rbs_inline: enabled` が必須(ADR-32 WD2)。無いとプラグインは**何も寄与
+   しない**。最初のテストがこれで「注釈が効かない」と結論しかけた
+2. `#: void` は def 行末尾で正しい。upstream rbs-inline 自身が `def self.write(...) #: void` と
+   書いている
+
+**accepted signature は境界で信頼されている**(`relations-and-certainty.md:48` のとおり) —
+対照実験で `#: () -> String` を `p 1` の本体に付けると型は `String` になり
+`return-type mismatch: declared String, inferred 1` が出る。宣言が推論に勝つ。
+
+### 報告が (b) の論拠を強くした
+
+報告者の要望は「`void` ≒ `top` まで広げて**後方互換性を保証しない**」。これは fidelity 論より
+強い (b) の論拠になる — **`Dynamic[top]` は目的を裏切る**:
+
+- `Dynamic[top]` = gradual の逃がし口。何とでも consistent。`a = bar; a.length` は黙って通る →
+  **呼び出し側が静かに依存できてしまう**(= `void` が防ぎたかった唯一のこと)
+- `top` = 使用前に証明を要求 → 宣言した契約に忠実
+
+**(b) を landing した**(`Bases::Void => :translate_top`)。
+
+### 残りは二部品に分解される
+
+報告者の第二の要望「代入・引数を警告」= 仕様 § void の未実装 MUST = ADR-92 選択肢 (a)。
+報告者自身が挙げた「型とは別のルールレベル」案は**直接使用なら carrier 不要**で成立するが、
+**報告例は transitive ケース**(`a = bar`、`bar` は無注釈)なので呼び出し点の RBS を読むだけ
+では void が見えない。必要なのは:
+
+1. **`static.*` の実装** — 今日 Reserved と marker を付けた 4 family の一つ。**これが (b) が
+   タダだった理由そのもの**: `static.*` が無いので `top` も `Dynamic[top]` も等しく沈黙する。
+   これが入って初めて `top` が噛む。**欠けていた連結子**
+2. **`void_origins` side-table** — ADR-75 パターン(provenance は値についてのメタデータであって
+   値の一部ではない)+ ADR-82 WD6 の chain-origin 伝播。carrier 不要・lattice 非分岐で
+   transitive ケースが解ける
+
+三部品((b) / `static.*` / `void_origins`)とも、本ノートの調査が触った場所。**報告された
+二つの理想は、仕様が元々書いていた意図とほぼ一致し、`static.*` という欠けた連結子まで含めて
+説明がつく。**
+
 ## 総合 — 発見された共通パターン
 
 本ノートの調査は、同一のバグクラスを **3 つ独立に**発見した:

@@ -39,6 +39,7 @@ module Rigor
       RULE_SHADOWED_RESCUE_CLAUSE = "flow.shadowed-rescue-clause"
       RULE_SUPPRESSION_UNKNOWN_RULE = "suppression.unknown-rule"
       RULE_SUPPRESSION_EMPTY = "suppression.empty"
+      RULE_SUPPRESSION_UNKNOWN_MARKER = "suppression.unknown-marker"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -65,7 +66,8 @@ module Rigor
         RULE_OVERRIDE_PARAM_NARROWED,
         RULE_IVAR_WRITE_MISMATCH,
         RULE_SUPPRESSION_UNKNOWN_RULE,
-        RULE_SUPPRESSION_EMPTY
+        RULE_SUPPRESSION_EMPTY,
+        RULE_SUPPRESSION_UNKNOWN_MARKER
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward compatibility"). Existing user code with

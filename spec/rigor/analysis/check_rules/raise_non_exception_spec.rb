@@ -92,6 +92,41 @@ RSpec.describe "raise non-exception operand" do
     end
   end
 
+  # The singleton/instance verdict asymmetry is deliberate and easy to "simplify" away in a refactor
+  # (the rigor-rs port nearly did, twice — docs/notes/20260716-upstream-feedback.md item 4): a
+  # `singleton(Object)` operand is EXACT knowledge (that one class object provably lacks `.exception`,
+  # and both `:superclass` and `:disjoint` orderings are illegal), while an `Object`-TYPED instance is
+  # not exact (the runtime value may well be an Exception), so the instance path excludes the generic
+  # carriers and fires on `:disjoint` only.
+  describe "singleton vs instance operand asymmetry (pinned)" do
+    it "fires on `raise Object` — the singleton path treats :superclass ordering as illegal" do
+      messages = raise_diagnostics("raise Object\n").map(&:message)
+      expect(messages).to include(a_string_matching(/singleton\(Object\)/))
+    end
+
+    it "fires on `raise Class` (generic metaclass carrier is still an exact class object)" do
+      expect(raise_diagnostics("raise Class\n")).not_to be_empty
+    end
+
+    it "fires on `raise Comparable` — a module constant orders :disjoint and has no .exception" do
+      expect(raise_diagnostics("raise Comparable\n")).not_to be_empty
+    end
+
+    it "stays silent on `raise Object.new` — an Object-typed INSTANCE is not exact knowledge" do
+      expect(raise_diagnostics("raise Object.new\n")).to be_empty
+    end
+  end
+
+  describe "first-operand shape (pinned)" do
+    it "stays silent on bare keyword arguments (`raise(a: 1)` has no positional operand)" do
+      expect(raise_diagnostics("raise(a: 1)\n")).to be_empty
+    end
+
+    it "fires on a braced Hash literal (`raise({ a: 1 })` is a positional Hash operand)" do
+      expect(raise_diagnostics("raise({ a: 1 })\n")).not_to be_empty
+    end
+  end
+
   describe "uncertainty (silent)" do
     it "does not fire when the argument is untyped / Dynamic" do
       source = <<~RUBY

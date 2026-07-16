@@ -75,6 +75,17 @@ assert_type("(1+2i)", Complex(1, 2))
 assert_type("Array[bot]", Array(nil))
 assert_type("Array[5]", Array(5))
 
+# --- explicit `Kernel.` receiver = the module_function spelling --------------
+# `module_function` exposes each intrinsic as a public singleton on the Kernel module object, so
+# the explicit `Kernel.` spelling dispatches to the same intrinsic and folds exactly like the
+# implicit-self form. One polarity for the whole family (p/pp identity AND format/sprintf/String)
+# — pinned after the rigor-rs port found `Kernel.p` declining while `Kernel.format` folded.
+assert_type("42", Kernel.p(42))
+assert_type("[1, 2]", Kernel.pp(1, 2))
+assert_type('"1"', Kernel.format("%d", 1))
+assert_type('"2"', Kernel.sprintf("%d", 2))
+assert_type('"42"', Kernel.String(42))
+
 # --- user redefinition must NOT be hijacked by the identity fold -------------
 
 class KernelFunctionsPrinter
@@ -89,3 +100,24 @@ class KernelFunctionsPrinter
     assert_type("Dynamic[top]", result)
   end
 end
+
+# --- format/sprintf observe the same ownership guard --------------------------
+
+class KernelFunctionsFormatter
+  def format(_template, _value)
+    123
+  end
+
+  def show
+    # Resolves to the user-defined `format` above, not Kernel#format — the fold declines on a
+    # discovered redefinition, so the result must NOT be the hijacked Constant["9"] (the RBS
+    # `Kernel#format -> String` envelope answers instead).
+    result = format("%d", 9)
+    assert_type("String", result)
+  end
+end
+
+# An explicit non-Kernel receiver is a user method, never Kernel#format — the fold declines and
+# the user method's inferred return (ADR-57 adoption) answers, not the hijacked Constant["5"].
+formatter = KernelFunctionsFormatter.new
+assert_type("123", formatter.format("%d", 5))

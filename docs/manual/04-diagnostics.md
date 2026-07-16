@@ -59,6 +59,7 @@ carries no `documentation_url`.
 | <a id="rule-def-override-param-narrowed"></a>`def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). | high |
 | <a id="rule-suppression-unknown-rule"></a>`suppression.unknown-rule` | A `# rigor:disable[-file]` comment names a rule that does not exist (typically a typo), so the suppression silently does nothing. `plugin.`-prefixed tokens are never flagged. | high |
 | <a id="rule-suppression-empty"></a>`suppression.empty` | A `# rigor:disable[-file]` comment lists no rules, so it suppresses nothing. | high |
+| <a id="rule-suppression-unknown-marker"></a>`suppression.unknown-marker` | A comment uses a suppression marker Rigor does not recognise — typically the RuboCop reflex `# rigor:disable-next-line <rule>` or `# rigor:enable <rule>`. Rigor's only markers are `# rigor:disable <rules>` (suppresses on its own line) and `# rigor:disable-file <rules>`, so the comment suppresses nothing. | high |
 | <a id="rule-rbs_extended-unsatisfied-conformance"></a>`rbs_extended.unsatisfied-conformance` | A class declares `%a{rigor:v1:conforms-to _Interface}` in its RBS but is missing a method the interface requires. Presence-based: only definitively-absent required methods fire. | — |
 | <a id="rule-assert-type-mismatch"></a>`assert.type-mismatch` | An `assert_type` expectation does not match the inferred type. | high |
 | <a id="rule-dump-type"></a>`dump.type` | A `dump_type` call — informational, prints the inferred type. | — |
@@ -202,11 +203,15 @@ A marker that cannot work is flagged rather than silently
 ignored: a token that names no known rule (a typo like
 `call.undefined-metod`) fires
 [`suppression.unknown-rule`](#rule-suppression-unknown-rule),
-and a bare marker with no rules at all fires
-[`suppression.empty`](#rule-suppression-empty) — both
-`:warning` in every profile. Tokens under the `plugin.`
+a bare marker with no rules at all fires
+[`suppression.empty`](#rule-suppression-empty), and a marker
+word outside Rigor's grammar (the RuboCop reflex
+`# rigor:disable-next-line <rule>`, or `# rigor:enable`)
+fires
+[`suppression.unknown-marker`](#rule-suppression-unknown-marker)
+— all `:warning` in every profile. Tokens under the `plugin.`
 prefix are never flagged (plugin rule vocabularies load
-dynamically), and both diagnostics are themselves
+dynamically), and the surveillance diagnostics are themselves
 suppressible like any other rule.
 
 **In-source, whole file.** `# rigor:disable-file <rules>`

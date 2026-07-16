@@ -1367,6 +1367,48 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(rules).to eq(["suppression.empty", "suppression.unknown-rule"])
         end
 
+        it "warns on the RuboCop-reflex `# rigor:disable-next-line` marker" do
+          result = analyze(%("x".no_method # rigor:disable-next-line call.undefined-method\n))
+
+          warning = suppression_diagnostics(result)
+          expect(warning.map(&:rule)).to eq(["suppression.unknown-marker"])
+          expect(warning.first.severity).to eq(:warning)
+          expect(warning.first.message).to include("`rigor:disable-next-line`")
+          # The unrecognised marker suppresses nothing — the original diagnostic still fires.
+          expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
+        end
+
+        it "warns on `# rigor:enable` (Rigor has no enable form) and on a token-less unknown marker" do
+          result = analyze(<<~RUBY)
+            x = 1 # rigor:enable call.undefined-method
+            y = 2 # rigor:disable-next-line
+            [x, y]
+          RUBY
+
+          warnings = suppression_diagnostics(result)
+          expect(warnings.map(&:rule)).to eq(%w[suppression.unknown-marker suppression.unknown-marker])
+          expect(warnings.map(&:line)).to eq([1, 2])
+        end
+
+        it "leaves prose mentioning an unknown marker alone" do
+          result = analyze(<<~RUBY)
+            # `# rigor:disable-next-line` is not supported; use `# rigor:disable <rule>` instead.
+            x = 1
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "keeps `suppression.unknown-marker` suppressible like its siblings" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file suppression.unknown-marker
+            x = 1 # rigor:enable call.undefined-method
+            x
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
         it "treats prose mentioning the marker followed by non-token text as an ordinary comment" do
           result = analyze(<<~RUBY)
             # Use `# rigor:disable <rule1>, <rule2>` on the offending line.
@@ -3777,6 +3819,20 @@ RSpec.describe Rigor::Analysis::Runner do
           h
         RUBY
         expect(dup_key_diags(result)).to be_empty
+      end
+
+      it "flags Float spellings of the same value and labels with the repeat's raw source slice" do
+        # `1.0` and `1.00` DO collide (`Float#eql?` on the same f64), and the label deliberately
+        # renders the raw source slice of the REPEAT node — not a canonicalised `1.0` — so the
+        # message points at the spelling the user actually wrote. Symbol/string keys canonicalise
+        # instead; this split is contract (docs/notes/20260716-upstream-feedback.md item 5).
+        result = analyze(<<~RUBY)
+          h = { 1.0 => :a, 1.00 => :b }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("duplicate hash key `1.00'")
       end
 
       it "does not cross-compare Integer and Float keys (1.eql?(1.0) is false)" do

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "kernel_dispatch"
 
 module Rigor
   module Inference
@@ -15,8 +16,9 @@ module Rigor
       #   size cap).
       # - `Array#join` on `Tuple[…]` receivers whose every element plus the separator argument (when given)
       #   is literal-bearing.
-      # - `Kernel#format` / `Kernel#sprintf` (any receiver) and `String#%` (literal-bearing receiver) when
-      #   every value argument is literal-bearing or a Type::Constant of any value.
+      # - `Kernel#format` / `Kernel#sprintf` (Kernel-owned spellings only — implicit self or an explicit
+      #   `Kernel.` receiver, per {KernelDispatch.kernel_owned_call?}) and `String#%` (literal-bearing
+      #   receiver) when every value argument is literal-bearing or a Type::Constant of any value.
       #
       # Result rule:
       #
@@ -64,7 +66,7 @@ module Rigor
           method_name = context.method_name
           args = context.args
           return fold_array_join(receiver, args) if method_name == :join
-          return fold_format(args) if FORMAT_METHODS.include?(method_name)
+          return fold_format(context) if FORMAT_METHODS.include?(method_name)
           return nil unless Type::Combinator.literal_string_compatible?(receiver)
           return fold_string_percent(args) if method_name == :%
           return fold_no_arg(receiver, method_name) if args.empty?
@@ -154,8 +156,14 @@ module Rigor
         # the exact `Constant[String]` (`format("%d", 1)` → `"1"`) — the module-function sibling of
         # `ConstantFolding#try_fold_string_format`'s `String#%` fold. This is a strict refinement inside
         # the same firing envelope: every exact-foldable input was already lifted to `literal-string`.
-        def fold_format(args)
+        #
+        # Gated on {KernelDispatch.kernel_owned_call?} — the same ownership guard the `p`/`pp` identity
+        # fold observes: implicit-self and explicit-`Kernel` spellings fold, while `obj.format(...)` and
+        # a project-redefined `format` are user methods this tier must not hijack.
+        def fold_format(context)
+          args = context.args
           return nil if args.empty?
+          return nil unless KernelDispatch.kernel_owned_call?(context)
 
           exact = fold_format_constant(args)
           return exact if exact

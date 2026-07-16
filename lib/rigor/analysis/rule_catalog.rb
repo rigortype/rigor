@@ -693,6 +693,34 @@ module Rigor
           # Syntactic: the marker word is present and the token list is provably empty.
           evidence_tier: :high,
           since: "0.3.0"
+        ),
+
+        CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(
+          id: CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER,
+          summary: "A comment uses a suppression marker Rigor does not recognise " \
+                   "(`rigor:disable-next-line`, `rigor:enable`, ...).",
+          fires_when: [
+            "A comment carries `rigor:disable-<suffix>` with a suffix other than `file`, or " \
+            "`rigor:enable[-<suffix>]` — typically the RuboCop reflex `# rigor:disable-next-line " \
+            "<rule>` — followed by nothing or a rule-list-shaped remainder.",
+            "Such a marker is invisible to the whole suppression grammar, so it silently suppresses " \
+            "nothing; Rigor's only markers are `# rigor:disable <rules>` (same line) and " \
+            "`# rigor:disable-file <rules>`."
+          ],
+          does_not_fire_when: [
+            "The marker is one of the two recognised forms (their tokens are then checked by " \
+            "`suppression.unknown-rule` / `suppression.empty` instead).",
+            "Non-token text follows the marker (documentation prose mentioning the spelling)."
+          ],
+          suppression: "Rewrite as `# rigor:disable <rules>` on the offending line (Rigor has no " \
+                       "next-line or enable form) or delete the comment; " \
+                       "`disable: [\"suppression.unknown-marker\"]` in `.rigor.yml`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :warning, balanced: :warning, strict: :warning },
+          # Syntactic: the marker word is present and provably outside the suppression grammar; the
+          # prose escape is excluded before firing.
+          evidence_tier: :high,
+          since: "0.3.0"
         )
       }.freeze
 

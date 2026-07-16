@@ -441,6 +441,16 @@ module Rigor
       BARE_SUPPRESSION_MARKER = /#\s*rigor:disable(?<file>-file)?(?![\w-])(?<rest>.*)/
       private_constant :BARE_SUPPRESSION_MARKER
 
+      # A `rigor:` marker word that is NOT part of Rigor's suppression grammar but reads like an attempted
+      # suppression — the RuboCop-reflex spellings `rigor:disable-next-line <rules>` and
+      # `rigor:enable <rules>`. These are invisible to both suppression patterns above (the hyphenated
+      # suffix fails LINE_SUPPRESSION_PATTERN's `\s+` and BARE_SUPPRESSION_MARKER's lookahead), so without
+      # surveillance they silently suppress nothing. Matches `disable-<suffix>` for any suffix other than
+      # `file`, and `enable` with or without a suffix.
+      UNKNOWN_SUPPRESSION_MARKER =
+        /#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
+      private_constant :UNKNOWN_SUPPRESSION_MARKER
+
       # @return [Array<(Hash{Integer => Set}, Set)>] pair of
       #   `(line_suppressions, file_suppressions)`. Line
       #   suppressions are keyed by source line number; file
@@ -507,10 +517,29 @@ module Rigor
       # comment, matching the parse path, which never treats it as a suppression either.
       def diagnose_bare_suppression_marker(path, comment, source, diagnostics)
         bare = BARE_SUPPRESSION_MARKER.match(source)
-        return if bare.nil? || !bare[:rest].match?(/\A[\s,]*\z/)
+        if bare
+          return unless bare[:rest].match?(/\A[\s,]*\z/)
 
-        marker = bare[:file] ? "rigor:disable-file" : "rigor:disable"
-        diagnostics << empty_suppression_diagnostic(path, comment, marker)
+          marker = bare[:file] ? "rigor:disable-file" : "rigor:disable"
+          diagnostics << empty_suppression_diagnostic(path, comment, marker)
+          return
+        end
+
+        diagnose_unknown_suppression_marker(path, comment, source, diagnostics)
+      end
+
+      # `# rigor:disable-next-line <rule>` / `# rigor:enable <rule>` — a marker word Rigor's grammar does
+      # not recognise but that reads as an attempted suppression (the RuboCop reflex). Fires only when the
+      # remainder is empty or looks like a rule list, so prose mentioning the spelling in backticks stays
+      # an ordinary comment — the same escape the empty-marker detection observes.
+      def diagnose_unknown_suppression_marker(path, comment, source, diagnostics)
+        unknown = UNKNOWN_SUPPRESSION_MARKER.match(source)
+        return if unknown.nil?
+
+        rest = unknown[:rest]
+        return unless rest.match?(/\A[\s,]*\z/) || rest.match?(/\A\s+[\w.,\s-]+\z/)
+
+        diagnostics << unknown_suppression_marker_diagnostic(path, comment, unknown[:marker])
       end
 
       # True when a suppression token resolves to a diagnostic identifier some producer can emit: a
@@ -537,6 +566,20 @@ module Rigor
                    "lists the canonical ids.",
           severity: :warning,
           rule: RULE_SUPPRESSION_UNKNOWN_RULE,
+          source_family: :builtin
+        )
+      end
+
+      def unknown_suppression_marker_diagnostic(path, comment, marker)
+        Diagnostic.new(
+          path: path,
+          line: comment.location.start_line,
+          column: comment.location.start_column + 1,
+          message: "unrecognised suppression marker `rigor:#{marker}` — Rigor's markers are " \
+                   "`# rigor:disable <rules>` (suppresses on its own line) and " \
+                   "`# rigor:disable-file <rules>`, so this comment suppresses nothing.",
+          severity: :warning,
+          rule: RULE_SUPPRESSION_UNKNOWN_MARKER,
           source_family: :builtin
         )
       end

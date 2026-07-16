@@ -101,6 +101,95 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
+  # ADR-93's first WD4 measurement: without the magic comment gate, upstream's opt-out mode synthesizes a
+  # full `def f: (untyped x) -> untyped` skeleton for EVERY unannotated def. Rigor trusts an accepted
+  # signature over body inference, so the skeleton REPLACES real inferred types with untyped — on mail (zero
+  # annotations) that moved diagnostics 26 -> 42. The magic-comment-free mode therefore gates on the file
+  # actually carrying an annotation.
+  describe "annotation-presence gate for the magic-comment-free mode (ADR-93 WD1)" do
+    let(:override) do
+      { "gem" => "rigor-rbs-inline", "config" => { "require_magic_comment" => false } }
+    end
+
+    def synthesized_for(source)
+      Dir.mktmpdir("rigor-rbs-inline-gate-") do |dir|
+        path = File.join(dir, "subject.rb")
+        File.write(path, source)
+        plugin = Rigor::Plugin::RbsInline.new(
+          services: Rigor::Plugin::Services.new(
+            reflection: Rigor::Reflection,
+            type: Rigor::Type::Combinator,
+            configuration: Rigor::Configuration.new
+          ),
+          config: { "require_magic_comment" => false }
+        )
+        plugin.manifest.source_rbs_synthesizer.call(path)
+      end
+    end
+
+    it "contributes nothing for a file carrying no annotation" do
+      expect(synthesized_for(<<~RUBY)).to be_nil
+        class Plain
+          def value(x)
+            x.to_s
+          end
+        end
+      RUBY
+    end
+
+    it "leaves an unannotated file's inference untouched" do
+      source = <<~RUBY
+        class Plain
+          def value
+            "text"
+          end
+        end
+
+        Plain.new.value.no_such_method
+      RUBY
+      result = run_plugin(source: source, plugin_entry: override)
+      # The body infers String; a synthesized `-> untyped` skeleton would erase that and silence this.
+      undefined = result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }
+      expect(undefined).not_to be_empty
+    end
+
+    it "still contributes for a file carrying an annotation" do
+      expect(synthesized_for(<<~RUBY)).to include("Integer")
+        class Annotated
+          #: (String) -> Integer
+          def size_of(s)
+            s.length
+          end
+        end
+      RUBY
+    end
+
+    # `class Foo #:nodoc:` is one of the most common comments in Ruby, and upstream's parser reads the RDoc
+    # directive as a type assertion of an alias named `nodoc`. Left ungated, 61 of mail's files opted into
+    # synthesis on that alone — which is why the annotation gate by itself only got mail from 42 to 31
+    # diagnostics rather than its true 26.
+    it "does not treat an RDoc directive as an annotation" do
+      expect(synthesized_for(<<~RUBY)).to be_nil
+        class Documented #:nodoc:
+          def value(x)
+            x.to_s
+          end
+        end
+      RUBY
+    end
+
+    it "still contributes when an RDoc directive sits alongside a real annotation" do
+      expect(synthesized_for(<<~RUBY)).to include("Integer")
+        class Documented #:nodoc:
+          #: (String) -> Integer
+          def size_of(s)
+            s.length
+          end
+        end
+      RUBY
+    end
+  end
+
   describe "failure diagnostic (ADR-32 WD6)" do
     it "emits source-rbs-synthesis-failed on a file with bad inline-RBS grammar" do
       # `# @rbs ` followed by garbage that rbs-inline can't parse.

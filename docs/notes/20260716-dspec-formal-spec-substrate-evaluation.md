@@ -661,6 +661,48 @@ standalone install(gem 不在)の懸念は**機構**を制約するのであっ�
 - 残余(standalone で gem 不在)— 「always parsed」は core 依存なしには完全充足不能。
   ADR-0 との真の緊張はここ**だけ**に絞られる
 
+## ADR-93 WD4 の初回測定(2026-07-16、herb + mail)
+
+自然実験 = **herb**(marcoroth の HTML+ERB toolchain): 本物の rbs-inline annotation が
+~25 ファイル、magic comment は 2 ファイルのみ、**そして手書き `sig/` が同じコードを覆う**。
+
+**発見 1(ブロッカー、同日修正)**: プラグイン有効化で **env 全崩壊**(1,490 classes → 0、
+`require` すら未解決化、偽 `call.unresolved-toplevel` 74 件)。機構 —
+`RBS::Environment#add_source` は `sources` へ**先に** append してから decl を挿入するので、
+`sig/` と衝突する virtual 定数が挿入途中で raise → per-entry rescue は skip するが**毒された
+source が残り**、`sources` から作り直す `resolve_type_names` が全 rescue の外で再噴出。
+sig/ と inline の重複は移行中プロジェクトの*期待される状態*であり、**今日の opt-in ユーザー
+全員が踏む実バグ**(ADR-93 とは独立)。修正 = skip の transactional 化 + rbs `>= 3.0, < 5.0`
+帯への resolve 時 backstop + 明示 `.rbs` 勝ち + cache-hit 安全な
+`virtual_rbs_collision_quarantined` + 一回限りの命名 warning。
+
+**方法論の教訓(2件、自分の誤り)**: ① 最初「RBS は重複検出を resolve まで遅延する」と
+読んだが誤り — 真の機構は「eager 挿入 + dirty partial add の再噴出」。backtrace を
+resolve_type_names:533 で止めずに add_source の内部まで読むべきだった。② 私の最初の修正
+(retry ループ)は、rescue **ハンドラ内**で `unload` が再 raise して自分の rescue に
+捕まらず、herb で沈黙失敗した。最小再現の green を herb で再検証したことが命拾い。
+
+**発見 2(修正後の A/B/C、herb lib)**:
+
+| モード | 診断 | 差分 |
+| --- | --- | --- |
+| A: プラグイン無し | 11 | — |
+| B: opt-in + magic 尊重(現行 ADR-32) | 11 | ±0(magic 2 ファイルは両方 sig/ と衝突 → 隔離、sig 勝ち) |
+| C: `--treat-all-as-inline-rbs`(ADR-93 目標形) | 12 | **−3 genuine wins** + 4 FP |
+
++4 は `call.possible-nil-receiver` × `Regexp.last_match(1)`(`=~` 成功後、group は
+`/\n([ \t]+)\z/` で必ず参加 → 実行時 nil 不可能)。**annotation が引き起こしたのではなく、
+sig/ の `-> untyped` が隠していた既存の engine 不精度が露出した**もの。match-成功エッジでの
+`last_match(n)` 非nil 化という将来の narrowing fact に routing。
+
+**発見 3(WD1/WD2 を作り替える反証)**: 注釈ゼロの mail で `--treat-all-as-inline-rbs` が
+26 → 42。原因 — upstream rbs-inline の opt-out モードは**無注釈 def 全部に `-> untyped`
+スケルトンを合成**し、accepted signature は本体推論に勝つので、**inference-first と正面
+衝突**する(推論の方が `untyped` より精密)。spec が bind するのは「annotation が在れば
+honour する」ことであって「無注釈コードの untyped 影を製造する」ことではない。よって
+ADR-93 の適合形は **annotation 存在ゲート**(ファイル内容の安価なスキャン。magic comment は
+不要のまま = MUST NOT は守られる)であり、全ファイル無条件ではない。
+
 ## 総合 — 発見された共通パターン
 
 本ノートの調査は、同一のバグクラスを **4 つ独立に**発見した(#4 は沈黙でなく矛盾という、より鋭い亜種):

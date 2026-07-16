@@ -1,7 +1,8 @@
 # ADR-93 — Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec
 
-Status: **Proposed, 2026-07-16.** Measurement-gated (WD4); nothing implemented. The
-divergence this reconciles is marked in
+Status: **Proposed, 2026-07-16 — WD4's first measurement ran the same day; it found and
+fixed one blocker and reshaped WD1/WD2 (see § "WD4 — first measurement").** The default
+flips themselves remain unimplemented. The divergence this reconciles is marked in
 [`overview.md`](../type-specification/overview.md) § "Compatibility hierarchy" per
 [ADR-92](92-normative-status-fidelity.md).
 
@@ -75,6 +76,51 @@ count files carrying annotation-shaped comments without the magic comment, and a
 every new diagnostic per the ADR-57 protocol (genuine = the spec working; artifact = fix at
 root). The known upstream top-level-def gap (ADR-32 WD9) is measured, not assumed, and its
 routing (hint vs upstream issue) decided on the numbers.
+
+## WD4 — first measurement (2026-07-16, herb + mail)
+
+The natural experiment is **herb** (marcoroth's HTML+ERB toolchain): pervasive real
+rbs-inline annotations (method types, attr annotations, `-> void` returns) across ~25 files,
+only 2 carrying the magic comment — **and a hand-written `sig/` covering the same code**.
+
+**Finding 1 — a blocker, found and fixed (an engine bug that predates this ADR).** Enabling
+the plugin on herb collapsed the whole RBS env (1,490 classes → 0), un-typing the project
+and manufacturing 74 false `call.unresolved-toplevel` — on `require` itself. Mechanics:
+`RBS::Environment#add_source` appends to `sources` *before* inserting decls, so a virtual
+entry whose constant collides with `sig/` raises mid-insert, the per-entry rescue skips it,
+but the poisoned source stays behind and `resolve_type_names` — which rebuilds from
+`sources` — re-raises outside every rescue. Overlap between `sig/` and inline annotations is
+the *expected* state for a migrating project, and this hit every opt-in user with both. The
+fix (landed with this measurement) makes the skip transactional, adds a resolve-time backstop
+for the rbs `>= 3.0, < 5.0` range where detection timing may differ, keeps the explicit
+`.rbs` as the winner, reports the dropped files via the cache-hit-safe
+`virtual_rbs_collision_quarantined`, and warns once naming them.
+
+**Finding 2 — post-fix A/B/C on herb `lib` is sane.** A (no plugin) 11 diagnostics; B
+(opt-in, magic default) 11 — zero delta, herb's 2 magic files both collide with `sig/` and
+quarantine cleanly; C (`--treat-all-as-inline-rbs`, this ADR's target mode) 12: **−3 genuine
+wins** (annotations resolving false `undefined-method` / override-FP pairs) **+4
+`call.possible-nil-receiver`**, adjudicated as a *pre-existing* engine imprecision unmasked,
+not caused: the receiver is `Regexp.last_match(1)` after a successful `=~` whose group
+always participates (`/\n([ \t]+)\z/`), so nil is unreachable at runtime; mode A never saw
+it because herb's `sig/` declares those methods `-> untyped`. Routes to a future
+match-success narrowing fact, not to this ADR.
+
+**Finding 3 — the naive always-parse wiring fails the no-op property, reshaping WD1/WD2.**
+On mail (zero annotations), `--treat-all-as-inline-rbs` moved diagnostics 26 → 42. Cause:
+upstream rbs-inline's opt-out mode synthesizes a **full `-> untyped` skeleton for every
+unannotated def**, and an accepted signature outranks body inference — so the skeleton
+actively *fights* Rigor's inference-first analysis on exactly the projects that write no
+annotations. The spec's clause binds Rigor to honour *annotations* whenever present, not to
+manufacture untyped shadows of unannotated code. WD1/WD2 are therefore reshaped: the
+conforming default gates synthesis on **annotation presence in the file** (a cheap content
+scan replacing the magic-comment gate — still no `# rbs_inline: enabled` required, so the
+MUST NOT holds), never on-for-everything. `--treat-all-as-inline-rbs` keeps the true
+opt-out-mode semantics for hosts that want them (the playground).
+
+Verification for the landed fix: loader specs cover collision/parse/sig-wins/warn-once, the
+existing sig-vs-stdlib degrade specs still pass, the no-plugin path is byte-identical on
+mail, and the full suite is green.
 
 ## Rejected alternatives
 

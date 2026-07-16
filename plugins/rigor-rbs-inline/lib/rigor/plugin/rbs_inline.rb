@@ -35,13 +35,19 @@ module Rigor
       # env-build time. Returns the synthesised RBS source as a String, or `nil` when the file contributes
       # nothing (no magic comment in the default mode, empty annotation set, parse error per WD6).
       class Synthesizer
-        # RDoc directive names that parse as a bare type alias, so `#:<name>:` is indistinguishable from an
-        # rbs-inline `#: <type>` assertion to upstream's parser. See {#rbs_inline_annotation?}. Hyphenated
-        # directives (`:call-seq:`) are absent because they do not parse as an alias name in the first place.
-        RDOC_DIRECTIVES = %i[
-          nodoc doc notnew stopdoc startdoc enddoc main title category section
-          args yields method attr include toc
-        ].to_set.freeze
+        # An RDoc directive comment: `#:` followed by a bare word (RDoc allows a hyphen, as in `:call-seq:`)
+        # and a closing colon. RDoc predates rbs-inline by about two decades and `#:<name>:` is
+        # indistinguishable from an rbs-inline `#: <type>` assertion to upstream's parser, which reads the
+        # directive name as a type alias — `def f #:nodoc:` becomes `def f: () -> nodoc`, a type nothing
+        # declares (upstream issue: https://github.com/soutaro/rbs-inline/issues/248).
+        #
+        # Matching on shape rather than a name list covers all 17 directives the Ruby docs list
+        # (https://docs.ruby-lang.org/ja/latest/library/rdoc.html) with nothing to maintain, and none of
+        # `#: () -> void`, `#: String`, `#:Integer`, `#: bool`, `#:my_alias`, `#: { name: String }`,
+        # `#: (name: String) -> void`, `#: Integer?`, `#[Integer]` or `# @rbs x: String` matches it: a valid
+        # RBS type never starts with a bare lowercase word that is immediately closed by a colon. Only the
+        # space-free spelling is affected; `# :nodoc:` never reaches upstream's annotation grammar.
+        RDOC_DIRECTIVE_COMMENT = /\A#:[a-z_][\w-]*:/
 
         # @param require_magic_comment [Boolean] when `true` (the default, WD2), only files with
         #   `# rbs_inline: enabled` are processed, and upstream's opt-in semantics apply verbatim. When
@@ -64,6 +70,7 @@ module Rigor
           return nil if source.empty?
 
           result = ::Prism.parse(source)
+          _, result = neutralize_rdoc_directives(source, result)
           return nil if !@require_magic_comment && !annotated?(result)
 
           # `opt_in: true` is rbs-inline's "require the magic comment" mode (per upstream parser.rb:62).
@@ -101,27 +108,36 @@ module Rigor
         # the magic comment keeps upstream's semantics verbatim — the author opted that file in explicitly,
         # skeletons and all, which is what `rbs-inline --output` would generate for it.
         def annotated?(prism_result)
-          ::RBS::Inline::AnnotationParser.parse(prism_result.comments).any? do |parsed|
-            parsed.each_annotation.any? { |annotation| rbs_inline_annotation?(annotation) }
-          end
+          ::RBS::Inline::AnnotationParser.parse(prism_result.comments)
+                                         .any? { |parsed| parsed.each_annotation.any? }
         end
 
-        # RDoc directives (`#:nodoc:`, `#:stopdoc:`, …) collide lexically with rbs-inline's `#: <type>` and
-        # upstream's parser reads them as a type assertion of an alias named after the directive — it consumes
-        # `nodoc` and drops the trailing colon. `class Foo #:nodoc:` is one of the most common comments in
-        # Ruby, so without this every file carrying one would opt into synthesis: 61 of mail's files did,
-        # which is why the annotation gate alone left it at 31 diagnostics instead of its true 26.
+        # Rewrite every RDoc directive comment to its spaced spelling (`#:nodoc:` -> `# :nodoc:`) so
+        # upstream's annotation grammar never sees it, and re-parse. Two reasons this happens here rather
+        # than in {#annotated?}: the directive must not gate a file in, AND it must not reach the synthesis,
+        # because one mis-parsed directive takes the whole class down with it. `def f #:nodoc:` renders as
+        # `def f: (untyped x) -> nodoc`; `nodoc` resolves to nothing, `RBS::DefinitionBuilder` raises
+        # `NoTypeFoundError` for the class, and every real annotation in that class is silently lost —
+        # measured on a class whose `#: (String) -> Integer` method fell back to body inference because a
+        # sibling method carried `#:nodoc:`. `fileutils.rb` alone carries 29 of these.
         #
-        # The mis-parse is upstream's and worth reporting there; it is harmless in the OUTPUT (the directive
-        # renders back as a plain `# :nodoc:` comment, not a bogus `nodoc` type), so this filter is needed
-        # only at the gate — deciding whether the file carries a real annotation at all.
-        def rbs_inline_annotation?(annotation)
-          return true unless annotation.is_a?(::RBS::Inline::AST::Annotations::TypeAssertion)
+        # The rewrite touches comment text only, so it cannot change what Ruby does; it shifts columns
+        # within the comment, which nothing downstream reads (the synthesized RBS is fresh text with its own
+        # buffer). Prism decides what is a comment, so a `#:nodoc:` inside a string literal stays put. Files
+        # without a directive re-parse nothing.
+        def neutralize_rdoc_directives(source, prism_result)
+          offsets = prism_result.comments.filter_map do |comment|
+            location = comment.location
+            # `start_character_offset`, not `start_offset`: the latter counts BYTES while `String#insert`
+            # indexes CHARACTERS, so on a file with any multi-byte content the space lands mid-word and
+            # rewrites `#:nodoc:` to `#:n odoc:` — still a directive to upstream, and now a corrupted one.
+            location.start_character_offset if RDOC_DIRECTIVE_COMMENT.match?(location.slice)
+          end
+          return [source, prism_result] if offsets.empty?
 
-          type = annotation.type
-          return true unless type.is_a?(::RBS::Types::Alias) && type.name.namespace.empty?
-
-          !RDOC_DIRECTIVES.include?(type.name.name)
+          # Back to front, so each insertion leaves the earlier offsets valid.
+          rewritten = offsets.sort.reverse.inject(source.dup) { |acc, offset| acc.insert(offset + 1, " ") }
+          [rewritten, ::Prism.parse(rewritten)]
         end
       end
 

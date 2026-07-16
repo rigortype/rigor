@@ -140,17 +140,38 @@ grammar upstream's, so the gate must not re-implement it as a regexp).
 
 **Finding 4 — `#:nodoc:`, found because Finding 3's first fix only got mail to 31.** RDoc
 directives collide lexically with `#: <type>`, and upstream reads `class Foo #:nodoc:` as a
-type assertion of an alias named `nodoc` (it consumes `nodoc`, drops the trailing colon). It
+type assertion of an alias named `nodoc` (it consumes the word, drops the trailing colon). It
 is one of the most common comments in Ruby: **61 of mail's files** opted into synthesis on
-that alone. The mis-parse is upstream's and worth reporting there, but it is harmless in the
-OUTPUT — the directive renders back as a plain `# :nodoc:` comment, not a bogus type — so the
-filter belongs at the gate only. With it, **mail / kramdown / haml / liquid are all
+that alone. Reported upstream as [soutaro/rbs-inline#248](https://github.com/soutaro/rbs-inline/issues/248).
+
+**Finding 5 — the directive is not harmless, and gating on it is not enough.** The initial
+read (that the mis-parse only affects the gate, because a directive on a *class* renders back
+as a `# :nodoc:` comment) held only for the leading position. In the trailing positions
+upstream emits the directive name **as the type**: `def f #:nodoc:` becomes
+`def f: (untyped x) -> nodoc`, and `nodoc` resolves to nothing, so
+`RBS::DefinitionBuilder#build_instance` raises `NoTypeFoundError` **for the whole class** and
+every real annotation in it is silently lost — measured on a class whose
+`#: (String) -> Integer` method fell back to body inference because a sibling carried
+`#:nodoc:`. Rigor's `stub_missing_referenced_types` does not cover it: that tier takes
+`project_sig_files`, so a virtual buffer's undeclared references are never stubbed. rbs-inline
+emits 29 of these for Ruby's own `lib/fileutils.rb` (49 across 8 first-party files in
+ruby/ruby, plus 128 more in vendored copies). The plugin therefore rewrites every directive to
+its spaced spelling (`#:nodoc:` → `# :nodoc:`, which upstream's grammar ignores) before
+synthesis, matching on shape (`/\A#:[a-z_][\w-]*:/`) so all 17 directives the Ruby docs list
+are covered with no name list. With this, **mail / kramdown / haml / liquid are all
 byte-identical** under the mode, and herb keeps its −3 wins.
 
-Verification: 6 new plugin specs (no-annotation → no contribution; unannotated inference
-survives; annotated file still contributes; `#:nodoc:`-only → nothing; `#:nodoc:` + a real
-annotation → contributes), the loader collision specs, the no-plugin path byte-identical on
-mail, and the full suite green.
+One trap is worth recording: `Prism::Location#start_offset` counts **bytes** while
+`String#insert` indexes **characters**, so the first cut of the rewrite put the space mid-word
+(`#:n odoc:`) on any file with multi-byte content and left the directive live. mail's own
+`field.rb` caught it (26 → 32); `start_character_offset` is the fix, pinned by a spec.
+
+Verification: 11 plugin specs (no-annotation → no contribution; unannotated inference
+survives; annotated file still contributes; `#:nodoc:`-only → nothing; directive never emitted
+as a type; a sibling's annotation keeps binding; argument-taking directives; the spaced
+spelling untouched; a directive-shaped string literal untouched; the multi-byte regression),
+the loader collision specs, the no-plugin path byte-identical on mail, and the full suite
+green.
 
 ## Rejected alternatives
 

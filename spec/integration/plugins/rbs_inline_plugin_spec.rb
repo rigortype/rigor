@@ -165,7 +165,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
 
     # `class Foo #:nodoc:` is one of the most common comments in Ruby, and upstream's parser reads the RDoc
-    # directive as a type assertion of an alias named `nodoc`. Left ungated, 61 of mail's files opted into
+    # directive as a type assertion of an alias named `nodoc`. Left alone, 61 of mail's files opted into
     # synthesis on that alone — which is why the annotation gate by itself only got mail from 42 to 31
     # diagnostics rather than its true 26.
     it "does not treat an RDoc directive as an annotation" do
@@ -177,16 +177,131 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         end
       RUBY
     end
+  end
 
-    it "still contributes when an RDoc directive sits alongside a real annotation" do
-      expect(synthesized_for(<<~RUBY)).to include("Integer")
-        class Documented #:nodoc:
+  # Upstream reads `def f #:nodoc:` as a return type: `def f: () -> nodoc`, naming a type nothing declares.
+  # `RBS::DefinitionBuilder` then raises `NoTypeFoundError` for the whole class, so EVERY real annotation in
+  # it is silently lost. rbs-inline emits 29 of these for Ruby's own `lib/fileutils.rb`. Reported upstream as
+  # soutaro/rbs-inline#248; until a fix ships in our supported range, the plugin rewrites the directive to
+  # its spaced spelling before upstream's grammar sees it.
+  describe "RDoc directive neutralization (soutaro/rbs-inline#248)" do
+    let(:override) do
+      { "gem" => "rigor-rbs-inline", "config" => { "require_magic_comment" => false } }
+    end
+
+    def synthesized_for(source)
+      Dir.mktmpdir("rigor-rbs-inline-rdoc-") do |dir|
+        path = File.join(dir, "subject.rb")
+        File.write(path, source)
+        plugin = Rigor::Plugin::RbsInline.new(
+          services: Rigor::Plugin::Services.new(
+            reflection: Rigor::Reflection,
+            type: Rigor::Type::Combinator,
+            configuration: Rigor::Configuration.new
+          ),
+          config: { "require_magic_comment" => false }
+        )
+        plugin.manifest.source_rbs_synthesizer.call(path)
+      end
+    end
+
+    it "never emits a directive name as a type" do
+      rendered = synthesized_for(<<~RUBY)
+        class Widget
           #: (String) -> Integer
           def size_of(s)
             s.length
           end
+
+          def internal(x) #:nodoc:
+            x.to_s
+          end
         end
       RUBY
+      expect(rendered).to include("def size_of: (String) -> Integer")
+      expect(rendered).not_to include("nodoc")
+    end
+
+    # The regression that motivated this: one sibling `#:nodoc:` used to take `size_of`'s annotation with it.
+    it "keeps a sibling method's annotation binding" do
+      source = <<~RUBY
+        class Widget
+          #: (String) -> Integer
+          def size_of(s)
+            s.length
+          end
+
+          def internal(x) #:nodoc:
+            x.to_s
+          end
+        end
+
+        Widget.new.size_of("ab").no_such_method
+      RUBY
+      result = run_plugin(source: source, plugin_entry: override)
+      undefined = result.diagnostics.select { |d| d.qualified_rule == "call.undefined-method" }
+      expect(undefined.map(&:message).join).to include("Integer")
+    end
+
+    it "covers the directives that take an argument" do
+      expect(synthesized_for(<<~RUBY)).not_to match(/nodoc|filename/)
+        class Widget #:nodoc: all
+          #: () -> Integer
+          def size
+            1
+          end
+
+          def internal #:include: filename
+            2
+          end
+        end
+      RUBY
+    end
+
+    it "leaves the spaced spelling alone" do
+      rendered = synthesized_for(<<~RUBY)
+        class Widget
+          #: () -> Integer
+          def size # :nodoc:
+            1
+          end
+        end
+      RUBY
+      expect(rendered).to include("def size: () -> Integer")
+    end
+
+    # Regression: `Prism::Location#start_offset` counts BYTES and `String#insert` indexes CHARACTERS, so on
+    # a file with any multi-byte content the space landed mid-word (`#:n odoc:`) and upstream still read a
+    # directive. mail's `field.rb` and `multibyte/unicode.rb` caught this; the corpus went 26 -> 32.
+    it "rewrites the directive correctly in a file with multi-byte content" do
+      rendered = synthesized_for(<<~RUBY)
+        # 日本語のコメント
+        class Widget
+          #: () -> Integer
+          def size # 説明
+            1
+          end
+
+          def internal #:nodoc:
+            2
+          end
+        end
+      RUBY
+      expect(rendered).to include("def size: () -> Integer")
+      expect(rendered).not_to include("nodoc")
+    end
+
+    # Prism decides what is a comment, so a directive-shaped string is not rewritten.
+    it "does not rewrite a directive-shaped string literal" do
+      rendered = synthesized_for(<<~RUBY)
+        class Widget
+          #: () -> String
+          def marker
+            "#:nodoc:"
+          end
+        end
+      RUBY
+      expect(rendered).to include("def marker: () -> String")
     end
   end
 

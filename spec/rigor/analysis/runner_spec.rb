@@ -3821,6 +3821,20 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(dup_key_diags(result)).to be_empty
       end
 
+      it "flags Float spellings of the same value and labels with the repeat's raw source slice" do
+        # `1.0` and `1.00` DO collide (`Float#eql?` on the same f64), and the label deliberately
+        # renders the raw source slice of the REPEAT node — not a canonicalised `1.0` — so the
+        # message points at the spelling the user actually wrote. Symbol/string keys canonicalise
+        # instead; this split is contract (docs/notes/20260716-upstream-feedback.md item 5).
+        result = analyze(<<~RUBY)
+          h = { 1.0 => :a, 1.00 => :b }
+          h
+        RUBY
+        diag = dup_key_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("duplicate hash key `1.00'")
+      end
+
       it "does not cross-compare Integer and Float keys (1.eql?(1.0) is false)" do
         result = analyze(<<~RUBY)
           h = { 1 => :int, 1.0 => :float }

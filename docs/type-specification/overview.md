@@ -65,6 +65,17 @@ The compatibility hierarchy is:
 
 When the three sources differ, Rigor follows the resolution order documented in [README.md](README.md).
 
+> **Status — the shipped ingestion diverges from this clause (as of this writing).** Inline
+> rbs-inline annotations are read only when the opt-in `rigor-rbs-inline` plugin is configured
+> ([ADR-32](../adr/32-rbs-inline-comment-ingestion.md)), and that plugin's default
+> (`require_magic_comment: true`) requires the very `# rbs_inline: enabled` comment this
+> clause forbids requiring. The conforming semantics exist as the plugin's
+> `require_magic_comment: false` mode (upstream honours `# rbs_inline: disabled`
+> unconditionally, so the per-file opt-out survives); what diverges is the default and the
+> wiring. [ADR-93](../adr/93-default-rbs-inline-ingestion.md) carries the reconciliation;
+> [ADR-92](../adr/92-normative-status-fidelity.md) records why the divergence is marked
+> rather than silently kept.
+
 Inline annotation handling: Rigor MUST be 100% compatible with RBS and rbs-inline syntax, and SHOULD follow Steep 2.0 behavior for inline annotation interpretation and precedence. Existing rbs-inline and Steep-compatible annotations are official type sources. Rigor MUST NOT rewrite them, MUST NOT warn solely because they are complex, and MUST NOT require `# rbs_inline: enabled` to begin parsing them. Only the rbs-inline configuration directives such as `# rbs_inline: enabled` and `# rbs_inline: disabled` are interpreted; the rbs-inline annotation comments themselves (for example `#: String`, `# @rbs`, parameter annotations) are always parsed and used whenever present.
 
 Standalone `.rbs` files and generated stubs remain the preferred place for complete type definitions. Inline annotations are nevertheless real contracts when present. They are not merely hints. Implementation-side checking is independent of where the contract came from: a return type written as `#: void`, a method type written with `# @rbs`, parameter types written in rbs-inline style, a generated stub, and an external `.rbs` declaration all constrain the implementation in the same way.

@@ -606,15 +606,71 @@ end
 二つの理想は、仕様が元々書いていた意図とほぼ一致し、`static.*` という欠けた連結子まで含めて
 説明がつく。**
 
+## 第四の事例 — rbs-inline ingestion: spec と ADR-32 の正面衝突(2026-07-16 裁定)
+
+「rbs-inline をデフォルトロードにしては?」というユーザー提案を受けて、`overview.md:68` の
+MUST と ADR-32 のプラグイン方式が整合しているかを裁定した。**結果: 整合していない。しかも
+第 1〜3 事例(沈黙による未実装)より鋭い — accepted・実装済みの ADR が binding spec と
+正面衝突している。**
+
+`overview.md` § "Compatibility hierarchy"(**2026-04-28**、`4e49c10b`):
+
+> Rigor … **MUST NOT require `# rbs_inline: enabled` to begin parsing them**. Only the
+> rbs-inline configuration directives such as `# rbs_inline: enabled` and
+> `# rbs_inline: disabled` are interpreted; the rbs-inline annotation comments themselves
+> (for example `#: String`, `# @rbs`, parameter annotations) are **always parsed and used
+> whenever present**.
+
+ADR-32(**2026-05-25**、accepted・v0.1.10 実装):
+
+> WD2 — The plugin synthesises RBS **only** for files whose first non-blank lines include
+> `# rbs_inline: enabled`. … Rejected: **Always-on once the plugin is loaded**
+
+タイムラインが決定的: **spec が 1 ヶ月先**。ADR-32 は spec の存在を認識しないまま
+(References は ADR-0/2/5/6/15/25/27/29 — **overview.md を一度も引かない**)、spec が
+MUST NOT と書いた形をそのまま WD2 で採用し、spec が要求する形を「Rejected alternative」に
+置いた。2026-05-29 の docs-alignment pass もこの節を素通りしている。
+
+**CLAUDE.md の規則で裁定は自動**: "When an ADR and the spec disagree on analyzer behaviour,
+the spec binds." → **出荷挙動が非準拠**。二軸で:
+
+1. **起動モデル** — spec は annotation を「official type sources … always parsed whenever
+   present」とする。素の Rigor(プラグイン未設定)は一切 parse しない
+2. **magic comment** — spec は「MUST NOT require」。プラグイン既定は `require_magic_comment:
+   true`
+
+**準拠形は既に存在する**: WD10 の `require_magic_comment: false` がまさに spec の意味論。
+upstream `parser.rb:73` を検証 — `# rbs_inline: disabled` は `opt_in` 判定より**前に**無条件で
+守られる(`return if with_disable_magic_comment`)ので、`false` 側でも per-file opt-out は
+生きる。**準拠は工学の問題ではなく、配線とデフォルトの問題。**
+
+### ユーザー提案への回答が反転した
+
+当初私は「ADR-27/31 の auto-load deferral に反する」としてデフォルト化に反対した。裁定の
+結果、**binding spec はユーザー提案より強いことを要求している**(提案 = デフォルトロード +
+オプトアウト可能;spec = magic comment 不要で常時 parse、`disabled` のみ解釈)。反対は
+起動モデルの問いについて一次資料により覆った。ADR-0(zero-dep)/ ADR-27/31(コード実行)/
+standalone install(gem 不在)の懸念は**機構**を制約するのであって、**義務**を消さない。
+
+機構の選択肢と残余(ADR-93 に整理):
+- core 再実装 — ADR-32 WD1 の却下理由(grammar drift)は健在。義務は挙動であって実装方式
+  ではないので、却下を維持できる
+- **presence-gated デフォルト配線**(ADR-72 パターン)— rbs-inline ライブラリが解決可能
+  (Rigor 環境 or ADR-90 の bundle-fallback)なら bundled プラグインを自動有効 +
+  `require_magic_comment: false`。解決不能なら hint
+- 残余(standalone で gem 不在)— 「always parsed」は core 依存なしには完全充足不能。
+  ADR-0 との真の緊張はここ**だけ**に絞られる
+
 ## 総合 — 発見された共通パターン
 
-本ノートの調査は、同一のバグクラスを **3 つ独立に**発見した:
+本ノートの調査は、同一のバグクラスを **4 つ独立に**発見した(#4 は沈黙でなく矛盾という、より鋭い亜種):
 
 | # | 場所 | 内容 | 記録 |
 | --- | --- | --- | --- |
 | 1 | `special-types.md` § void | 2 MUST を含む節が丸ごと未実装(`Bases::Void => :translate_untyped`) | **なし** |
 | 2 | `diagnostic-policy.md` § taxonomy | 宣言 12 family 中 4 つ(`static.*` / `compat.*` / `hint.*` / `generated.*`)が実装ゼロ | **なし** |
 | 3 | `internal-type-api.md` § method surface | 契約メソッド `normalize` / `traverse` / `consistent_with` / `equal_value` / `has_method` / `subtype_of` が carrier に不在 | **なし** |
+| 4 | `overview.md:68` vs ADR-32 | binding spec「always parsed / MUST NOT require magic comment」に対し、accepted ADR が opt-in プラグイン + magic-comment ゲートを実装(spec が 1 ヶ月先、ADR は spec を引かない) | **なし**(相互参照ゼロ) |
 
 **共通の診断**: Rigor の規範コーパスには**創設期の地層**(ADR-1 / ADR-2 / ADR-3 期)が
 あり、それは*設計目標*として書かれたものが*束縛的契約*として現在形で提示されたまま、

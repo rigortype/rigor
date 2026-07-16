@@ -42,6 +42,22 @@ present tense, behaviour that has never shipped:
 | 2 | [`diagnostic-policy.md`](../type-specification/diagnostic-policy.md) § Identifier taxonomy — 12 declared families | `static.*` / `compat.*` / `hint.*` / `generated.<provider>.*` have **zero** implemented ids |
 | 3 | [`internal-type-api.md`](../internal-spec/internal-type-api.md) — "the public contract that every Rigor type object MUST satisfy" | `normalize` / `traverse` / `consistent_with` / `equal_value` / `has_method` / `subtype_of` absent from all 23 carriers. `Type::Nominal` exposes `initialize` / `describe` / `erase_to_rbs` / `inspect` |
 
+**Amendment (2026-07-16, same day): a fourth instance**, found by applying the same probe to
+a user question about rbs-inline default-loading, and a sharper class than the three above —
+not silent non-implementation but a **direct contradiction between the binding spec and an
+accepted, shipped ADR**. [`overview.md`](../type-specification/overview.md) § "Compatibility
+hierarchy" (2026-04-28) requires inline annotations to be "always parsed and used whenever
+present" and says Rigor "MUST NOT require `# rbs_inline: enabled` to begin parsing them";
+[ADR-32](32-rbs-inline-comment-ingestion.md) (2026-05-25, implemented v0.1.10) shipped an
+opt-in plugin whose WD2 requires exactly that magic comment and lists the spec-mandated
+behaviour as a *rejected alternative* — without citing the month-older spec clause anywhere.
+Per CLAUDE.md the spec binds, so the shipped behaviour is non-conforming on both the
+activation model and the magic-comment gate. The WD4 gate cannot catch this class (it reads
+the diagnostic-family table, and WD1 deliberately leaves the prose body ungated), which
+confirms the carry-over: the manual probe stays the instrument for prose clauses. The marker
+lands in `overview.md`; the design resolution is
+[ADR-93](93-default-rbs-inline-ingestion.md).
+
 None is recorded as deferred in any ADR, ROADMAP, CURRENT_WORK, or CHANGELOG entry, and
 none carries a marker in its own text. All three are **founding-era**
 ([ADR-1](1-types.md) / [ADR-2](2-extension-api.md) / [ADR-3](3-type-representation.md))

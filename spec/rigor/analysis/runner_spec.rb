@@ -1367,6 +1367,48 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(rules).to eq(["suppression.empty", "suppression.unknown-rule"])
         end
 
+        it "warns on the RuboCop-reflex `# rigor:disable-next-line` marker" do
+          result = analyze(%("x".no_method # rigor:disable-next-line call.undefined-method\n))
+
+          warning = suppression_diagnostics(result)
+          expect(warning.map(&:rule)).to eq(["suppression.unknown-marker"])
+          expect(warning.first.severity).to eq(:warning)
+          expect(warning.first.message).to include("`rigor:disable-next-line`")
+          # The unrecognised marker suppresses nothing — the original diagnostic still fires.
+          expect(result.diagnostics.map(&:rule)).to include("call.undefined-method")
+        end
+
+        it "warns on `# rigor:enable` (Rigor has no enable form) and on a token-less unknown marker" do
+          result = analyze(<<~RUBY)
+            x = 1 # rigor:enable call.undefined-method
+            y = 2 # rigor:disable-next-line
+            [x, y]
+          RUBY
+
+          warnings = suppression_diagnostics(result)
+          expect(warnings.map(&:rule)).to eq(%w[suppression.unknown-marker suppression.unknown-marker])
+          expect(warnings.map(&:line)).to eq([1, 2])
+        end
+
+        it "leaves prose mentioning an unknown marker alone" do
+          result = analyze(<<~RUBY)
+            # `# rigor:disable-next-line` is not supported; use `# rigor:disable <rule>` instead.
+            x = 1
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
+        it "keeps `suppression.unknown-marker` suppressible like its siblings" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file suppression.unknown-marker
+            x = 1 # rigor:enable call.undefined-method
+            x
+          RUBY
+
+          expect(suppression_diagnostics(result)).to be_empty
+        end
+
         it "treats prose mentioning the marker followed by non-token text as an ordinary comment" do
           result = analyze(<<~RUBY)
             # Use `# rigor:disable <rule1>, <rule2>` on the offending line.

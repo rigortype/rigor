@@ -59,6 +59,7 @@ module Rigor
           # both rules stay :warning across all three profiles (including strict).
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
+          "suppression.unknown-marker" => :warning,
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
           # lenient — it is never unsolicited noise.
@@ -94,6 +95,7 @@ module Rigor
           "def.ivar-write-mismatch" => :warning,
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
+          "suppression.unknown-marker" => :warning,
           "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         strict: {
@@ -125,6 +127,7 @@ module Rigor
           "def.ivar-write-mismatch" => :error,
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
+          "suppression.unknown-marker" => :warning,
           "rbs_extended.unsatisfied-conformance" => :error
         }.freeze
       }.freeze

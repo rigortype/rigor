@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
-require_relative "kernel_dispatch"
 
 module Rigor
   module Inference
@@ -16,9 +15,9 @@ module Rigor
       #   size cap).
       # - `Array#join` on `Tuple[…]` receivers whose every element plus the separator argument (when given)
       #   is literal-bearing.
-      # - `Kernel#format` / `Kernel#sprintf` (Kernel-owned spellings only — implicit self or an explicit
-      #   `Kernel.` receiver, per {KernelDispatch.kernel_owned_call?}) and `String#%` (literal-bearing
-      #   receiver) when every value argument is literal-bearing or a Type::Constant of any value.
+      # - `String#%` (literal-bearing receiver) when every value argument is literal-bearing or a
+      #   Type::Constant of any value. (`Kernel#format` / `Kernel#sprintf` moved to {KernelDispatch} in
+      #   ADR-91 WD2 — they are Kernel module functions, not receiver-typed String methods.)
       #
       # Result rule:
       #
@@ -40,7 +39,6 @@ module Rigor
         module_function
 
         CONCAT_METHODS = %i[+ << concat].freeze
-        FORMAT_METHODS = %i[format sprintf].freeze
         # v0.1.1 Track 1 slice 5a — methods that, called with no arguments on a literal-bearing receiver,
         # return a value that is also literal-bearing. `#strip` / `#lstrip` / `#rstrip` / `#chomp` (no-arg)
         # / `#chop` strip a known subset of characters from the ends, so the survivors are always a
@@ -57,7 +55,7 @@ module Rigor
         # Integer plus an optional literal padding `String`. When the receiver and the (default or
         # supplied) padding are both literal-bearing, the result is literal-bearing too.
         WIDTH_PADDING_METHODS = %i[center ljust rjust].freeze
-        private_constant :CONCAT_METHODS, :FORMAT_METHODS,
+        private_constant :CONCAT_METHODS,
                          :LITERAL_PRESERVING_METHODS, :NON_EMPTY_LITERAL_PRESERVING_METHODS,
                          :WIDTH_PADDING_METHODS
 
@@ -66,7 +64,6 @@ module Rigor
           method_name = context.method_name
           args = context.args
           return fold_array_join(receiver, args) if method_name == :join
-          return fold_format(context) if FORMAT_METHODS.include?(method_name)
           return nil unless Type::Combinator.literal_string_compatible?(receiver)
           return fold_string_percent(args) if method_name == :%
           return fold_no_arg(receiver, method_name) if args.empty?
@@ -146,49 +143,6 @@ module Rigor
           Type::Combinator.literal_string
         end
 
-        # `format("hello %s", lit)` / `sprintf(...)` — template plus every value argument must be
-        # literal-bearing ({Type::Combinator.literal_string_compatible?}) or a `Type::Constant` of any
-        # value (Constants are always provably literal). The template arg specifically must be
-        # literal-bearing — a Constant<Integer> first arg would not be a valid format template, so the
-        # `Type::Constant` allowance applies only to subsequent value args.
-        #
-        # When the template AND every value argument are value-pinned `Constant`s, the fold sharpens to
-        # the exact `Constant[String]` (`format("%d", 1)` → `"1"`) — the module-function sibling of
-        # `ConstantFolding#try_fold_string_format`'s `String#%` fold. This is a strict refinement inside
-        # the same firing envelope: every exact-foldable input was already lifted to `literal-string`.
-        #
-        # Gated on {KernelDispatch.kernel_owned_call?} — the same ownership guard the `p`/`pp` identity
-        # fold observes: implicit-self and explicit-`Kernel` spellings fold, while `obj.format(...)` and
-        # a project-redefined `format` are user methods this tier must not hijack.
-        def fold_format(context)
-          args = context.args
-          return nil if args.empty?
-          return nil unless KernelDispatch.kernel_owned_call?(context)
-
-          exact = fold_format_constant(args)
-          return exact if exact
-          return nil unless Type::Combinator.literal_string_compatible?(args.first)
-          return nil unless args.drop(1).all? { |arg| literal_or_constant?(arg) }
-
-          Type::Combinator.literal_string
-        end
-
-        # Runs the real `Kernel#format` when everything is value-pinned. A malformed directive or an
-        # argument-count mismatch raises at fold time; the handler declines so the literal-string lift
-        # (or the RBS `String` envelope) answers instead. Results larger than the shared
-        # `ConstantFolding::STRING_FOLD_BYTE_LIMIT` decline too, keeping the carrier-size convention.
-        def fold_format_constant(args)
-          return nil unless args.all?(Type::Constant)
-          return nil unless args.first.value.is_a?(String)
-
-          result = format(args.first.value, *args.drop(1).map(&:value))
-          return nil if result.bytesize > ConstantFolding::STRING_FOLD_BYTE_LIMIT
-
-          Type::Combinator.constant_of(result)
-        rescue StandardError
-          nil
-        end
-
         # `"foo %s" % "x"` / `"foo %s" % ["x", "y"]` — receiver is the template (already verified
         # literal-bearing by the caller); arg is either:
         #
@@ -249,7 +203,7 @@ module Rigor
         end
 
         private_class_method :fold_no_arg, :fold_concat, :fold_repeat, :fold_array_join,
-                             :fold_format, :fold_format_constant, :fold_string_percent, :fold_width_pad,
+                             :fold_string_percent, :fold_width_pad,
                              :non_empty_literal_result, :literal_or_constant?,
                              :integer_typed?, :known_negative_integer?,
                              :known_zero_integer?, :known_positive_integer?

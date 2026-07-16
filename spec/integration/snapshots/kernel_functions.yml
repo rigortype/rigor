@@ -1,5 +1,6 @@
 ---
 locals:
+  converter: Dynamic[top]
   formatter: Dynamic[top]
   h: "{ a: 1 }"
   name: literal-string & non-empty-string

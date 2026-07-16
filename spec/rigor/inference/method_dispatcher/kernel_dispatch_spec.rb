@@ -255,4 +255,57 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(numeric_kernel(:Rational, 1, 2, 3)).to be_nil
     end
   end
+
+  # ADR-91 WD2 — the `Kernel#format` / `Kernel#sprintf` template fold moved here from
+  # LiteralStringFolding. These probes call `try_dispatch` directly, so they vouch for ownership
+  # (the dispatcher's WD1 gate is bypassed at this unit level); the fold body carries no ownership
+  # check of its own any more.
+  describe ".try_dispatch on Kernel#format / Kernel#sprintf (ADR-91 WD2)" do
+    let(:literal_string) { Rigor::Type::Combinator.literal_string }
+    let(:string_const) { constant_of("hi") }
+    let(:int_const) { constant_of(3) }
+    let(:nominal_string) { nominal("String") }
+    let(:nominal_integer) { nominal("Integer") }
+
+    def fmt(method_name, *args)
+      described_class.try_dispatch(cc(receiver: receiver, method_name: method_name, args: args))
+    end
+
+    it "lifts format(literal-string, literal-string) to literal-string" do
+      expect(fmt(:format, string_const, literal_string)).to eq(literal_string)
+    end
+
+    it "lifts sprintf(literal-string template, Constant<Integer>) to literal-string" do
+      expect(fmt(:sprintf, literal_string, int_const)).to eq(literal_string)
+    end
+
+    it "folds format(Constant template, Constant args) to the exact Constant[String]" do
+      expect(fmt(:format, constant_of("%d"), int_const)).to eq(constant_of("3"))
+    end
+
+    it "folds sprintf(Constant template, Constant args) with width directives" do
+      expect(fmt(:sprintf, constant_of("%05d"), constant_of(42))).to eq(constant_of("00042"))
+    end
+
+    it "declines the exact fold to the literal-string lift when a directive mismatches its argument" do
+      expect(fmt(:format, constant_of("%d"), constant_of("abc"))).to eq(literal_string)
+    end
+
+    it "declines the exact fold when the result exceeds STRING_FOLD_BYTE_LIMIT" do
+      limit = Rigor::Inference::MethodDispatcher::ConstantFolding::STRING_FOLD_BYTE_LIMIT
+      expect(fmt(:format, constant_of("%#{limit + 1}d"), int_const)).to eq(literal_string)
+    end
+
+    it "declines when the template is not literal-bearing" do
+      expect(fmt(:format, nominal_string, literal_string)).to be_nil
+    end
+
+    it "declines when a value arg is plain Nominal[Integer]" do
+      expect(fmt(:format, string_const, nominal_integer)).to be_nil
+    end
+
+    it "declines an empty argument list" do
+      expect(fmt(:format)).to be_nil
+    end
+  end
 end

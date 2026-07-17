@@ -19,6 +19,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[type inference]** `Array#join` on an array of string literals now infers the exact resulting string. `["a", "b"].join("-")` types as `"a-b"` rather than a generic `String`, matching the precision already given to `[1, 2, 3].join` and to non-string arrays. The gain flows through any downstream use of the joined value.
 
+- **[rigor check]** When your `signature_paths:` RBS conflicts with Rigor's bundled RBS and collapses the whole RBS environment — most often a `sig/` file that redeclares a constant or class Ruby core already ships — Rigor now reports it as a diagnostic naming the conflicting files, instead of only printing a stderr note. The finding reaches `--format=json`, SARIF, and CI, so a run that came back suspiciously empty is no longer mistaken for a clean one. It is a warning by default (the conflict is usually against Rigor's own signatures, so upgrading Rigor must not turn a green build red); opting into the `reject-unparseable-signatures` bleeding-edge feature promotes it to an error, alongside the unparseable-signature rule it already covers.
+
 - **[rigor check]** A top-level key in `.rigor.yml` that Rigor does not recognise is now reported instead of silently ignored, with the nearest real key suggested.
   - Previously a typo'd `exclude:` loaded in silence, so the exclusion never applied and the run reported errors from the very files you meant to skip. Nothing said the key had done nothing.
   - It is a warning, never an error — your exit code does not change. The finding also appears in `--format=json` under `config_warnings` with `"kind": "unknown_key"`, so CI can assert on it.

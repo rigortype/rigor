@@ -34,12 +34,15 @@ module Rigor
         # @param synthesized_namespaces_snapshot [#call] reader.
         # @param quarantined_signatures_snapshot [#call] reader returning the `signature_paths:` files skipped
         #   because they do not parse (`[path, first_error_line]` pairs).
+        # @param env_build_failure_snapshot [#call] reader returning the total RBS env-build failure tuple
+        #   (`[error_class, first_error_line, conflicting_buffer_names]`) or nil when the env built.
         # @param conformance_results_snapshot [#call] reader.
         def initialize(configuration:, rbs_extended_reporter:, boundary_cross_reporter:, # rubocop:disable Metrics/ParameterLists
                        source_rbs_synthesis_reporter:, plugin_registry:, dependency_source_index:,
                        pool_mode:, cached_plugin_prepare_diagnostics:,
                        pre_eval_diagnostics_from_scanner:, synthesized_namespaces_snapshot:,
-                       quarantined_signatures_snapshot:, conformance_results_snapshot:)
+                       quarantined_signatures_snapshot:, env_build_failure_snapshot:,
+                       conformance_results_snapshot:)
           @configuration = configuration
           @rbs_extended_reporter = rbs_extended_reporter
           @boundary_cross_reporter = boundary_cross_reporter
@@ -51,6 +54,7 @@ module Rigor
           @pre_eval_diagnostics_from_scanner_reader = pre_eval_diagnostics_from_scanner
           @synthesized_namespaces_snapshot_reader = synthesized_namespaces_snapshot
           @quarantined_signatures_snapshot_reader = quarantined_signatures_snapshot
+          @env_build_failure_snapshot_reader = env_build_failure_snapshot
           @conformance_results_snapshot_reader = conformance_results_snapshot
         end
 
@@ -253,6 +257,27 @@ module Rigor
           [build_rbs_quarantined_signature_diagnostic(quarantined)]
         end
 
+        # The twin of {#rbs_quarantined_signature_diagnostics}, one tier louder in consequence. Quarantine
+        # drops ONE unparseable file and keeps the rest of the env; a total build failure — typically a
+        # `signature_paths:` entry redeclaring a constant/class Rigor's bundled RBS already ships, which raises
+        # `RBS::DuplicatedDeclarationError` at resolve — collapses the WHOLE env to nil, so every type-of query
+        # degrades to `Dynamic[top]` and most rules stop firing: the run comes back EMPTY, which reads as clean.
+        # The stderr banner ({RbsLoader#warn_about_env_build_failure_once}) is not a diagnostic, so it never
+        # reached `--format json` / SARIF / CI annotations / the LSP; this puts it in the diagnostic stream so
+        # every channel sees it, and names the conflicting signature files off the raised error's `#decls`.
+        #
+        # Authored `:warning`, not `:error`, for the same reason as its quarantine twin: the conflict is
+        # *typically* between the user's `sig/` and Rigor's OWN bundled RBS, so an `:error` default would let a
+        # Rigor release turn a green build red with zero user change (AGENTS.md § FP discipline). The
+        # `reject-unparseable-signatures` bleeding-edge feature promotes it to `:error` for anyone who opts in
+        # (and by default at the next major).
+        def rbs_environment_build_failed_diagnostics
+          failure = env_build_failure_snapshot
+          return [] if failure.nil?
+
+          [build_rbs_environment_build_failed_diagnostic(failure)]
+        end
+
         def rbs_synthesized_namespace_diagnostics
           synthesized = synthesized_namespaces_snapshot
           return [] if synthesized.nil? || synthesized.empty?
@@ -337,6 +362,29 @@ module Rigor
                      "parse error(s) (`rbs validate`) to restore that coverage.",
             severity: :warning,
             rule: "rbs.coverage.quarantined-signature",
+            source_family: :builtin
+          )
+        end
+
+        def build_rbs_environment_build_failed_diagnostic(failure)
+          error_class, first_line, buffers = failure
+          sample_size = 5
+          files = Array(buffers).map { |name| relative_signature_path(name.to_s) }
+          sample = files.first(sample_size)
+          suffix = files.size > sample_size ? ", and #{files.size - sample_size} more" : ""
+          conflicts = sample.empty? ? "" : " Conflicting signature file(s): #{sample.join(', ')}#{suffix}."
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "The RBS environment failed to build (#{error_class}): #{first_line}.#{conflicts} " \
+                     "A `signature_paths:` entry typically redeclares a constant or class that Rigor's " \
+                     "bundled RBS already ships, which collapses the WHOLE environment to nil — every " \
+                     "type-of query then reads `Dynamic[top]` and most diagnostics stop firing, so this " \
+                     "run is EMPTY rather than clean. Remove the conflicting declaration from your `sig/` " \
+                     "(`rbs validate`) to restore type coverage.",
+            severity: :warning,
+            rule: "rbs.coverage.environment-build-failed",
             source_family: :builtin
           )
         end
@@ -539,6 +587,10 @@ module Rigor
 
         def quarantined_signatures_snapshot
           @quarantined_signatures_snapshot_reader.call
+        end
+
+        def env_build_failure_snapshot
+          @env_build_failure_snapshot_reader.call
         end
 
         def conformance_results_snapshot

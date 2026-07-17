@@ -539,6 +539,21 @@ module Rigor
         @state[:quarantined] ||= self.class.quarantined_project_signatures(@signature_paths).freeze
       end
 
+      # The total RBS-environment build failure captured this run, or nil when the env built. Unlike
+      # {#quarantined_signatures} — which the env survives, one file lighter, and which is re-derived by
+      # re-parsing so a cache HIT reports it too — a total failure (typically `RBS::DuplicatedDeclarationError`:
+      # a `signature_paths:` entry redeclaring a constant/class Rigor's bundled RBS already ships) collapses the
+      # WHOLE env to nil. A failed build produces no cached success to hide behind (nothing is persisted, so
+      # every run re-attempts and re-raises), so this is captured directly in {#env}'s rescue rather than
+      # re-derived. Forcing `env` (any query does) populates it.
+      #
+      # @return [Array(String, String, Array<String>), nil] `[error_class_name, first_error_line,
+      #   conflicting_buffer_names]`, or nil when the environment built successfully.
+      def env_build_failure
+        env unless @state[:env_loaded]
+        @state[:env_build_failure]
+      end
+
       # Virtual (inline-synthesized) contributions dropped by the collision quarantine
       # ({.resolve_quarantining_virtual_collisions}): buffer names absent from the built env even though the
       # entry's content is non-empty and parses (a parse failure is the synthesizer's own WD6 skip, reported
@@ -1056,6 +1071,7 @@ module Rigor
         warn_about_virtual_rbs_collisions
         @state[:env]
       rescue ::RBS::BaseError => e
+        record_env_build_failure(e)
         warn_about_env_build_failure_once(e)
         @state[:env] = nil
       end
@@ -1118,6 +1134,31 @@ module Rigor
 " \
           "#{lines.join("\n")}"
         )
+      end
+
+      # Records the total RBS-environment build failure captured in {#env}'s rescue so the analysis layer can
+      # surface it as the `rbs.coverage.environment-build-failed` diagnostic (the twin of
+      # {#quarantined_signatures}: quarantine keeps the env alive minus one file, a total failure collapses the
+      # WHOLE env to nil, so every type-of query degrades to `Dynamic[top]` and most rules stop firing). Stored
+      # as `[error_class_name, first_error_line, conflicting_buffer_names]`. The buffer names are lifted off a
+      # `RBS::DuplicatedDeclarationError#decls` — the typical failure, a `signature_paths:` entry redeclaring a
+      # constant/class Rigor's bundled RBS already ships — so the diagnostic can name the colliding files.
+      def record_env_build_failure(error)
+        first_line = error.message.to_s.lines.first.to_s.strip
+        @state[:env_build_failure] = [error.class.name, first_line, env_build_conflict_buffers(error)].freeze
+      end
+
+      # The buffer (file) names carried by the colliding declarations of a `RBS::DuplicatedDeclarationError`, so
+      # the diagnostic names the conflicting signature files rather than guessing. A buffer name is a `String`
+      # path for a project `signature_paths:` file and a `Pathname` for a bundled RBS file, so each is coerced
+      # to `String`. Other RBS build errors carry no `.decls`; they yield an empty list and the diagnostic
+      # falls back to the message's first line alone.
+      def env_build_conflict_buffers(error)
+        return [].freeze unless error.respond_to?(:decls)
+
+        error.decls.filter_map { |decl| decl.location&.buffer&.name }.map(&:to_s).uniq.freeze
+      rescue ::RBS::BaseError, StandardError
+        [].freeze
       end
 
       def warn_about_env_build_failure_once(error)

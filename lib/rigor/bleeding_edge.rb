@@ -48,11 +48,16 @@ module Rigor
     FEATURES = [
       Feature.new(
         id: "reject-unparseable-signatures",
-        summary: "An unparseable `.rbs` under `signature_paths:` fails the run instead of being " \
-                 "skipped with a warning. A quarantined signature file silently removes the types " \
-                 "it declares, so the run gets quieter rather than cleaner — this treats a broken " \
-                 "sig set as a build error, the way a broken source file already is.",
-        severity_overrides: { "rbs.coverage.quarantined-signature" => :error }.freeze
+        summary: "A broken `signature_paths:` RBS set fails the run instead of degrading it silently. An " \
+                 "unparseable `.rbs` is otherwise skipped with a warning, and a duplicate-declaration " \
+                 "conflict (a file that parses fine but collides on resolve — typically against Rigor's " \
+                 "own bundled RBS) collapses the whole env with a warning; either way the run gets quieter " \
+                 "rather than cleaner. This treats both as a build error, the way a broken source file " \
+                 "already is.",
+        severity_overrides: {
+          "rbs.coverage.quarantined-signature" => :error,
+          "rbs.coverage.environment-build-failed" => :error
+        }.freeze
       )
     ].freeze
 

@@ -139,8 +139,27 @@ module Rigor
           return nil unless receiver.elements.all? { |el| Type::Combinator.literal_string_compatible?(el) }
           return nil unless args.size <= 1
           return nil if args.size == 1 && !Type::Combinator.literal_string_compatible?(args.first)
+          # Defer to {ShapeDispatch}'s `tuple_join` when the precise `Constant<String>` fold is reachable —
+          # every element is a `Constant` and the separator is absent or a `Constant<String>`. This tier runs
+          # AHEAD of ShapeDispatch, so returning the generic `literal-string` here would shadow that strictly
+          # more precise result (`["a", "b"].join("-")` → `Constant<"a-b">` rather than `literal-string`).
+          # Mixed tuples that carry a non-`Constant` `literal-string` element keep folding to `literal-string`
+          # here, because no exact value is knowable for them.
+          return nil if constant_join_reachable?(receiver, args)
 
           Type::Combinator.literal_string
+        end
+
+        # True when every tuple element is a `Constant` and the separator is absent or a `Constant<String>` —
+        # exactly the inputs for which `ShapeDispatch.tuple_join` materialises a precise `Constant<String>`.
+        # An empty tuple qualifies (`[].join` → `Constant<"">`). Callers have already verified every element
+        # is literal-string-compatible, so a `Constant` element is necessarily a `Constant<String>`.
+        def constant_join_reachable?(receiver, args)
+          return false unless receiver.elements.all?(Type::Constant)
+          return true if args.empty?
+
+          arg = args.first
+          arg.is_a?(Type::Constant) && arg.value.is_a?(String)
         end
 
         # `"foo %s" % "x"` / `"foo %s" % ["x", "y"]` — receiver is the template (already verified
@@ -203,6 +222,7 @@ module Rigor
         end
 
         private_class_method :fold_no_arg, :fold_concat, :fold_repeat, :fold_array_join,
+                             :constant_join_reachable?,
                              :fold_string_percent, :fold_width_pad,
                              :non_empty_literal_result, :literal_or_constant?,
                              :integer_typed?, :known_negative_integer?,

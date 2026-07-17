@@ -13,6 +13,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[type inference]** A successful `String#match?` or `=~` against a fully anchored digit/hex/octal/letter pattern now refines the string itself. `if s.match?(/\A\d+\z/)` types `s` as a decimal-integer string in the branch (and `\h`/`[0-9a-fA-F]`, `[0-7]`, `[a-z]`, `[A-Z]`, `[[:digit:]]` map to their matching refinements), so a following `Integer(s)` or `s.to_i(16)` is seen as safe. The pattern must be anchored with `\A…\z`: an unanchored `/\d+/`, the newline-admitting `\Z`, line anchors `^`/`$`, or one-sided anchoring narrow nothing, because they do not constrain the whole string.
+
 - **[type inference]** `Struct` and `Data.define` value objects now infer precise member types through a setter and through a block-defined class, in two more cases.
   - After a straight-line `s.x = 5`, reading `s.x` back now infers the assigned value (and a sibling `s.y` keeps its own value) — where before the whole struct went untyped the moment you wrote to any member. A read is left untyped, exactly as before, when the struct is aliased, passed to another method, or mutated inside a loop or block, so a later write you can't see never makes an earlier read wrong.
   - A `Data.define(:x) do … end` assigned to a plain local variable now folds its member reads too, matching the constant form — unless the block redefines a member's reader (`def x`), in which case the read stays untyped because it would run your method, not return the member.

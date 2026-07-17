@@ -969,8 +969,8 @@ module Rigor
         end
 
         def simple_dispatch_name?(name)
-          %i[nil? ! is_a? kind_of? instance_of? == != === =~ key? has_key? empty? any? none?
-             respond_to?].include?(name)
+          %i[nil? ! is_a? kind_of? instance_of? == != === =~ match? key? has_key? empty? any?
+             none? respond_to?].include?(name)
         end
 
         def dispatch_call_simple(node, scope, name)
@@ -981,6 +981,7 @@ module Rigor
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           when :=== then analyse_case_equality_predicate(node, scope)
           when :=~ then analyse_regex_match_predicate(node, scope)
+          when :match? then analyse_whole_regex_match_predicate(node, scope)
           when :key?, :has_key? then analyse_key_presence_predicate(node, scope)
           when :empty?, :any?, :none? then analyse_array_emptiness_predicate(node, scope, name)
           when :respond_to? then analyse_respond_to_predicate(node, scope)
@@ -1212,7 +1213,8 @@ module Rigor
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
-          pattern = regex_match_pattern(node.receiver, node.arguments.arguments.first, scope)
+          arg = node.arguments.arguments.first
+          pattern = regex_match_pattern(node.receiver, arg, scope)
           return nil if pattern.nil?
           # Extended mode (`//x`) lets the pattern carry free whitespace and `#` comments, and a
           # comment may contain a literal `(` — which the light char-scan walker would miscount as a
@@ -1222,7 +1224,53 @@ module Rigor
           return nil if pattern.extended
 
           unconditional = unconditional_capture_groups(pattern.source)
-          regex_match_predicate_scopes(scope, unconditional)
+          truthy, falsey = regex_match_predicate_scopes(scope, unconditional)
+          # #164 — layer whole-receiver refinement onto the truthy edge without disturbing the
+          # match-global logic above. A successful `str =~ /\A\d+\z/` proves the WHOLE string
+          # matched, so the string operand narrows to the imported refinement the anchored pattern
+          # names. The falsey edge is untouched: a failed match proves nothing about the shape.
+          truthy = apply_whole_receiver_refinement(truthy, node.receiver, arg, pattern.source, scope)
+          [truthy, falsey]
+        end
+
+        # `str.match?(/\A\d+\z/)` — `String#match?` is a pure boolean predicate whose truthy edge
+        # proves a property of the ENTIRE receiver. When the argument is a fully `\A…\z`-anchored
+        # single-char-class pattern recognised by {RegexRefinement.for_whole_pattern}, narrow the
+        # receiver local to the matching imported refinement on the truthy edge; the falsey edge
+        # passes through unchanged (failing one pattern proves nothing about the string's shape).
+        # A non-literal / unanchored / `\Z` / line-anchored / `//x` pattern falls through to no
+        # narrowing.
+        def analyse_whole_regex_match_predicate(node, scope)
+          return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
+          return nil if node.arguments.nil? || node.arguments.arguments.size != 1
+
+          pattern = regex_operand_pattern(node.arguments.arguments.first, scope)
+          return nil unless pattern.is_a?(RegexMatchPattern)
+          return nil if pattern.extended
+
+          refinement = ::Rigor::Builtins::RegexRefinement.for_whole_pattern(pattern.source)
+          return nil if refinement.nil?
+
+          local_name = node.receiver.name
+          return nil if scope.local(local_name).nil?
+
+          [scope.with_local(local_name, refinement), scope]
+        end
+
+        # Narrows the string operand of a `=~` predicate to a whole-receiver refinement when the
+        # regex source is a recognised `\A…\z`-anchored pattern. Returns the (possibly unchanged)
+        # truthy scope; the falsey edge is never touched by this layer.
+        def apply_whole_receiver_refinement(truthy, receiver, arg, source, scope)
+          refinement = ::Rigor::Builtins::RegexRefinement.for_whole_pattern(source)
+          return truthy if refinement.nil?
+
+          # `regex_match_pattern` already resolved the regex operand from a literal or a
+          # `Constant[Regexp]` constant read — never a bare local — so the string subject is
+          # unambiguously the local-read operand, if either operand is one.
+          subject = [receiver, arg].find { |operand| operand.is_a?(Prism::LocalVariableReadNode) }
+          return truthy if subject.nil? || scope.local(subject.name).nil?
+
+          truthy.with_local(subject.name, refinement)
         end
 
         # Recognises the regex pattern operand of a `=~` predicate. An operand resolves to a regex when

@@ -87,7 +87,23 @@ session writing an entry, not to every session. The rules:
   sentences max, one topic each.
 - A changelog entry is **not** a commit message: many commits may collapse into
   one entry, and one fat `[Unreleased]` line may split into several.
-- End with a GitHub issue / PR link and `thank you @handle!` when applicable.
+- **Link the PR that landed it**, as a full markdown link at the end of the
+  bullet: `([#170](https://github.com/rigortype/rigor/pull/170))`. Put it on
+  the child item instead when one bullet consolidates several PRs and each
+  detail traces to a different one. Add the reporting issue too when there is
+  one, and `thank you @handle!` for an outside report. The link is how a user
+  gets from "what changed" to the detail — `AGENTS.md` says the git log is
+  where detail lives, and this is the door to it.
+  - **The full form, never a bare `#170`.** This section is extracted
+    **verbatim** as the GitHub Release body (`rake release:github`), where
+    GitHub autolinks a bare `#170` — but the same text is also `CHANGELOG.md`
+    rendered from the repo tree, where it is **not** autolinked and stays dead
+    text. Only the markdown form works in both, which is why every link already
+    in the file uses it.
+  - Omit it when there is no PR. A Markdown-only change lands straight on
+    `master` (`AGENTS.md` § "Commit and PR Etiquette"), so it has a commit and
+    no PR. Do not invent one, and do not link the commit instead — if the
+    change is user-facing enough to have an entry, the entry is the record.
 
 The three shapes to reject on sight:
 
@@ -115,15 +131,31 @@ delete the internal detail, and restate the third as what a user can now do:
 Procedure — the enumeration is what makes the rewrite un-skippable, so do not
 shortcut it:
 
-1. Read the entire `[Unreleased]` block. For **each** top-level bullet,
+1. **Pull the cycle's merged PRs up front**, so linking is a lookup rather than
+   a recall. Take the previous release's date from its `## [x.y.z] - DATE`
+   heading:
+
+   ```sh
+   gh pr list --state merged --limit 200 --search "merged:>=<prev-release-date>" \
+     --json number,title,mergedAt --jq 'sort_by(.mergedAt) | .[] | "#\(.number)  \(.title)"'
+   ```
+
+   Keep the list beside you for step 4. It is also a **completeness check**: a
+   PR in it with no entry anywhere is either a user-facing change nobody wrote
+   up, or correctly internal — decide which, do not skip past it.
+2. Read the entire `[Unreleased]` block. For **each** top-level bullet,
    explicitly classify it: release-style (leave) or commit-style (rewrite).
-2. Rewrite every commit-style bullet — lead sentence to one clause, move the
+3. Rewrite every commit-style bullet — lead sentence to one clause, move the
    "why / how it works / measured numbers" into a child item, delete internal
    detail outright.
-3. Watch for **merge artefacts**: two entries accidentally glued into one
+4. **Link each bullet to the PR that landed it**, from the step-1 list. Match on
+   the change, not the title wording — a bullet that consolidates several PRs
+   links each on the child item it belongs to. Leave a bullet unlinked only when
+   its change genuinely had no PR (a Markdown-only push to `master`).
+5. Watch for **merge artefacts**: two entries accidentally glued into one
    bullet (a stray second `**[label]**` mid-sentence, an env-var description
    hanging off an unrelated entry). Split them.
-4. Re-read the sealed section top-to-bottom as a user would. If any top-level
+6. Re-read the sealed section top-to-bottom as a user would. If any top-level
    bullet still has two sentences or an em-dash clause, it is not done.
 
 Worked collapse (a real shape this repo produces):
@@ -148,6 +180,11 @@ Worked collapse (a real shape this repo produces):
     (e.g. `ActionController::Base`) keeps the `Dynamic[Top]` fallback, so a
     controller calling a method an incomplete gem RBS omits is never flagged.
 ```
+
+(ADR-43 predates public development and landed by direct commit, so it has no
+PR to link — the omission above is the rule working, not a lapse. A change that
+did go through one reads
+`… so the scan no longer re-runs per file ([#74](https://github.com/rigortype/rigor/pull/74)).`)
 
 This step is judgment-heavy — deciding what is user-facing, and preserving
 facts while compressing. It rewards a capable model and full attention; if you
@@ -444,6 +481,10 @@ accepted by RubyGems, then run `rake release:github` once the tag is on
   new `## [x.y.z]` section has two sentences, an em-dash clause, internal-only
   detail, or a merge artefact. (This is the step `make verify` cannot check;
   confirm it by eye.)
+- Every bullet whose change went through a PR carries it as a full markdown
+  link (`([#170](https://github.com/rigortype/rigor/pull/170))`), and the
+  step-1 PR list has no merged PR that is neither linked nor deliberately
+  internal. No bare `#170` anywhere — it is dead text in `CHANGELOG.md`.
 - The new `## [x.y.z]` section opens with a short release-summary paragraph
   (themes, a few simple sentences) before `### Added`.
 - `README.md`'s `## Status` line names the new version + date (surrounding

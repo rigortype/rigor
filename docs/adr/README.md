@@ -99,19 +99,14 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-83 | [Dynamic-origin algebra: keep union arms over absorbing into `Dynamic`](83-dynamic-origin-algebra.md) | Accepted (supersedes the value-lattice.md join algebra; spec revised to match engine behavior) |
 | ADR-84 | [Cross-file return-memo scoping and the taint-precise store gate](84-cross-file-return-memo-scoping.md) | Accepted (WD1 landed in PR #79; WD2-WD3 implemented; mail body evals 3355→557) |
 | ADR-85 | [Per-file seed bundles and lazy def-node handles (pre-pass incrementalization)](85-seed-bundles-and-lazy-def-node-handles.md) | Accepted (WD1 in PR #81; WD2-WD3 in PR #82; gitlab warm-incremental allocs 16.7M→2.06M) |
-
 | ADR-86 | [Partial native extensions for residual hot paths (rejected; rigor-rs owns native speed)](86-partial-native-extensions.md) | Accepted (standing rejection of native extensions; rigor-rs owns native speed; WD4 candidate staged) |
-
 | ADR-87 | [The null-build floor: stat-then-digest validation, zero-change snapshot skip, hit-path boot slimming](87-null-build-floor.md) | Accepted (WD1-WD5 implemented, PR #85; supersedes ADR-54's rejected mtime fast-path) |
-
 | ADR-88 | [Incremental plugin-fact soundness](88-incremental-plugin-fact-soundness.md) | Accepted (WD1-WD4 implemented, PR #89; WD5 deferred) |
 | ADR-89 | [Semantic propagation gates: declaration-shape and observed-key return summaries](89-semantic-propagation-gates.md) | Accepted (WD1 declaration-shape gate + WD2 return-summary gate implemented, PR #90; gitlab 341→1) |
 | ADR-90 | [Target-library resolution from the analyzed project's bundle](90-target-library-resolution-from-project-bundle.md) | Accepted (implemented 2026-07-16; WD1-WD3 landed) |
 | ADR-91 | [Kernel intrinsic fold ownership gate + spelling-parity invariant](91-kernel-intrinsic-fold-ownership-gate.md) | Accepted (implemented 2026-07-16, WD1-WD4; corpus gate byte-identical) |
 | ADR-92 | [Normative status fidelity: the founding-era stratum and the declare-or-mark gate](92-normative-status-fidelity.md) | Accepted (implemented 2026-07-16, WD1-WD5; void verdict resolved to option b) |
-
 | ADR-93 | [Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec](93-default-rbs-inline-ingestion.md) | Proposed (WD4 measurement ran; default flips remain unimplemented) |
-
 | ADR-94 | [The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor](94-rbs-inline-reader-and-the-rbs-3x-floor.md) | Accepted (migration deferred; rigor-rbs-inline stays the reader) |
 | ADR-95 | [Homebrew distribution: deferred behind the single binary](95-homebrew-tap-deferral.md) | Proposed (deferred, trigger-gated; nothing implemented) |
 | ADR-96 | [Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion](96-plugin-target-gems.md) | Accepted (WD1-WD2 committed; WD3 umbrella expansion proposed) |

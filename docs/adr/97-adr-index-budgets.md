@@ -1,11 +1,14 @@
 # ADR-97 — Index entries are not summaries: the ADR-index budgets and their gate
 
-Status: **Accepted, 2026-07-17 — implemented.** Both ADR indexes are restored to
-index entries and capped: `CLAUDE.md`'s bullet list to a ≤ 100-character topic
-(file: 134,688 → 25,103 bytes) and `docs/adr/README.md`'s status column to a
-≤ 200-character status (file: 141,169 → 17,061). `rigor-prior-art` is repointed
-at the ADR bodies, the `rigor-adr-author` § 4c density instruction is replaced
-by the cap, and `spec/docs/agent_index_spec.rb` gates both under the existing
+Status: **Accepted, 2026-07-17 — implemented.** `CLAUDE.md`'s ADR list becomes a
+**premise set** — the foundation / conceptual core plus the standing policies, 10
+entries against a cap of 12, everything else reached via the README (file:
+134,688 → 16,082 bytes). `docs/adr/README.md` stays the complete index and its
+status column is restored to a ≤ 200-character status (141,169 → 17,061), with
+five long-standing blank rows that had been silently breaking the table's
+markdown rendering removed. `rigor-prior-art` is repointed at the ADR bodies, the
+`rigor-adr-author` density instruction is replaced by the membership rule + caps,
+and `spec/docs/agent_index_spec.rb` gates all of it under the existing
 `make docs-check`.
 
 Grounding: the measurements in § Context; commit `db8d01bf` (2026-05-29,
@@ -33,6 +36,14 @@ headed **Status**, and the README's own "How to Read" declares its contract:
 > note (e.g. *partially implemented*, *slice N deferred*).
 
 So in both files the declared contract was already right. Only the entries drifted.
+
+The README's table had also accumulated **five blank lines between its rows**. A
+blank line ends a markdown table, so the index rendered as six separate tables,
+each promoting the next ADR row to a header. This had been true on `master` for
+some time and nobody saw it — when every cell is a thousand-character essay, no
+one reads the table rendered. It became obvious within minutes of the cells
+getting short. An unenforced formatting rule is not observably true either, which
+is criterion 2 arriving from a second direction.
 
 **The same audit already happened once.** `db8d01bf` found the `CLAUDE.md`
 defect in nearly these words — "CLAUDE.md calls itself a navigation index but had
@@ -96,14 +107,35 @@ compression, applied by hand and left to instruction, regressed 8.7× in seven
 weeks — while the same ratchet quietly did the same thing to the README. The gate
 is part of this decision, not a follow-up to it.
 
-### WD1 — `CLAUDE.md`: index-only, ≤ 100-character topic
+### WD1 — `CLAUDE.md`: a premise set, not an index
 
-Each entry is `- [ADR-N](docs/adr/N-slug.md) — <topic>`: one line, no status, no
-dates, no measurements, no WD references. The topic answers only *does a decision
-about this exist, and on what subject*. Its budget is the tightest of the two
-because it is the only one **loaded unconditionally** — paid for by every session
-before the task is even known, so content of merely conditional value belongs
-behind a pointer however valuable it is when needed. 97 entries ≈ 11 KB.
+`CLAUDE.md` is loaded **unconditionally**, before the task is known, so it does
+not get an index at all. It lists only the ADRs an agent would get wrong
+*without knowing to look them up* — two classes:
+
+- **Foundation and conceptual core** (ADR-0–5): what Rigor is. The README's own
+  "How to Read" already draws this line — ADR-0 the foundation, ADR-1–3 the
+  conceptual core, "higher-numbered ADRs build on the foundation and **can be
+  read as needed**."
+- **Standing policies in force** (ADR-31, 49, 50, 97): rules that bind a
+  contribution whatever it touches.
+
+Everything else — 88 of 98 — is a **lookup**: it matters only to a session
+already in its area, and that session finds it in `docs/adr/README.md`, one hop
+away. The discriminating question is not "is this ADR important?" but "will a
+session that never thought to look it up do the wrong thing?" ADR-5's
+robustness principle silently governs every type anyone authors here; ADR-93's
+rbs-inline default flips govern only a session already editing rbs-inline
+ingestion.
+
+Each entry is `- [ADR-N](docs/adr/N-slug.md) — <topic>`: one line, **≤ 100
+characters**, no status, no dates, no measurements, no WD references. 10 entries
+≈ 1.3 KB, **capped at 12**.
+
+The cap matters more than its value. It means a new ADR normally adds *nothing*
+here, and an eleventh premise costs a deliberate argument — which is a stronger
+ratchet-stopper than a per-entry budget, because it removes the default of
+"append mine too."
 
 ### WD2 — `docs/adr/README.md`: status-only, ≤ 200-character status
 
@@ -135,12 +167,14 @@ supply re-grows it.
 ### WD4 — both caps are gated, not instructed
 
 `spec/docs/agent_index_spec.rb`, under the existing `make docs-check` target,
-asserts the `CLAUDE.md` topic cap, the README status cap, that each status cell
-opens with a declared status word, that the README indexes every ADR file on
-disk, and that the two indexes agree on the ADR set, slugs, and ordering. § 4c's
-density instruction is replaced by the cap plus a pointer here. The gate is the
-load-bearing half: § 4c is what a *conforming* author reads; the gate is what
-catches the author who does not.
+asserts the `CLAUDE.md` premise cap and topic cap, that no status leaks into a
+premise topic, that every premise names a real ADR, the README status cap, that
+each status cell opens with a declared status word, that the README indexes every
+ADR file on disk, that **its table stays contiguous** (the blank-row rendering
+break above), and that both lists are ascending. The skill's density instruction
+is replaced by the membership rule plus a pointer here. The gate is the
+load-bearing half: the skill is what a *conforming* author reads; the gate is
+what catches the author who does not.
 
 The gate's progress-vocabulary check is deliberately **narrow** — "deferred" /
 "rejected" / "proposed" are not progress markers, because for an evaluation ADR
@@ -164,7 +198,8 @@ proportional is precisely the axis an index does not have.
 | Candidate | Status | Reason |
 | --- | --- | --- |
 | Keep the dense entries | Rejected | ~34k tokens every session plus ~128 KB of restatement, for content the ADR bodies already carry — and the copies had begun to contradict the bodies (ADR-48, ADR-73). This is the state the ADR exists to end. |
-| Drop the `CLAUDE.md` list entirely; keep only the pointer | Rejected | The list's residual job is **discovery** — an agent scanning `CLAUDE.md` learns a decision about X exists without a file read, whereas a bare pointer only helps an agent already suspecting one. ~11 KB buys that; `db8d01bf` made the same call and discovery value is not what regressed. |
+| Keep all 98 in `CLAUDE.md`, capped at 100 characters each (~11 KB) | Rejected | The first cut of this ADR did exactly that, and it is what `db8d01bf` restored in 2026-05. It answers the token question but not the premise question: a flat list asserts every ADR is equally worth a session's attention, when 88 of them are lookups a session reaches only if it is already in their area. The discovery it buys for ADR-93 is not worth what every session pays for it; the discovery it buys for ADR-5 is. Hence WD1's two classes. |
+| Drop the `CLAUDE.md` list entirely; keep only the pointer | Rejected | Discovery is real but only for the premises: a bare pointer helps an agent that already suspects an ADR exists, which is exactly the agent that does *not* need ADR-5 pointed out. ~1.3 KB keeps the unprompted cases; the lookups lose nothing, since finding them was always a `docs/adr/README.md` hop. |
 | Compress by instruction only (i.e. repeat `db8d01bf`) | Rejected | Measured to fail: `db8d01bf` did exactly this and regressed 8.7× in seven weeks. Criterion 2. |
 | Keep a one-sentence decision summary in the README status column | Rejected | The Title column already names the subject and the body already holds the decision, so the sentence's marginal shortlisting value is small — while "one sentence" is precisely the seed that grew the 5,195-character cell. Considered and declined by the maintainer at ~30 KB vs ~17 KB. |
 | Cap each section's total bytes rather than the per-entry payload | Rejected | Both indexes grow linearly and *legitimately* with the ADR count; a total cap would fail on the 130th ADR for the right reason and force an unrelated fight. The per-entry cap is what holds density constant. |
@@ -175,12 +210,12 @@ proportional is precisely the axis an index does not have.
 
 Positive:
 
-- `CLAUDE.md` 134,688 → 25,103 bytes (list: 120,260 → 11,033); ~27k tokens
+- `CLAUDE.md` 134,688 → 16,082 bytes (ADR list: 120,260 → ~1,300); ~30k tokens
   returned to every session. The residual ~14 KB is the spec/skills navigation
   tables, which are the file's actual job.
-- `docs/adr/README.md` 141,169 → 17,061 bytes (8.3×), and its status column is
-  now derived from each ADR's own Status block — so the ADR-48 / ADR-73 class of
-  staleness has one fewer place to live.
+- `docs/adr/README.md` 141,169 → 17,061 bytes (8.3×), its table renders again,
+  and its status column is now derived from each ADR's own Status block — so the
+  ADR-48 / ADR-73 class of staleness has one fewer place to live.
 - Per-ADR authoring drops two dense summaries. The ADR body remains; both index
   entries become mechanical and derivable (the topic from the title, the status
   from the body's Status block).
@@ -192,10 +227,15 @@ Negative:
 - A corpus-archaeology session that previously answered "did we evaluate X?" from
   an index alone now opens 2–5 ADR bodies. `rigor-prior-art` routes it (WD3), the
   bodies are canonical rather than a drifting cache, and the trade is deliberate.
-- Two caps are two numbers, and numbers invite lawyering. 100 is the longest
-  canonical ADR title today; 200 is headroom over the longest legitimate status.
-  Neither is a derived optimum. If an entry genuinely needs more, move the cap
-  **here**, not per-entry.
+- The premise set is a judgement call with a hard edge. ADR-27 (distribution
+  model) and ADR-63 (protection coverage) are arguable eleventh entries; the rule
+  ("would a session that never looked it up go wrong?") decides them out, but
+  another reader could decide otherwise. That argument is the cap working, not
+  failing — it just has to happen here rather than in a drive-by append.
+- Three numbers invite lawyering. 100 is the longest canonical ADR title today;
+  200 is headroom over the longest legitimate status; 12 is two above the current
+  premise count. None is a derived optimum. If an entry genuinely needs more,
+  move the number **here**, not per-entry.
 - The 58 rewritten status cells are a hand pass over prose. The gate checks their
   shape, not their truth; `make docs-check` cannot tell you a status is wrong,
   only that it is short and well-formed.

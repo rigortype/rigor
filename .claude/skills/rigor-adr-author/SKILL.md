@@ -1,7 +1,7 @@
 ---
 name: rigor-adr-author
 description: |
-  Author a new Architecture Decision Record under docs/adr/. Use when the user asks to "write an ADR", "record this decision as an ADR", "add ADR-N for X", or when a design discussion reaches a decision worth recording. Covers the quality bar (defers to ADR-49's rubric — archetype, stakes, eight axes) and the mechanical wiring (next number, the file, the docs/adr/README.md index row in ascending order, the CLAUDE.md ADR list row, verification). NOT for editing the type spec or internal-spec corpus, and NOT a substitute for reading ADR-49 — this skill is the procedure; ADR-49 is the binding quality contract.
+  Author a new Architecture Decision Record under docs/adr/. Use when the user asks to "write an ADR", "record this decision as an ADR", "add ADR-N for X", or when a design discussion reaches a decision worth recording. Covers the quality bar (defers to ADR-49's rubric — archetype, stakes, eight axes) and the mechanical wiring (next number, the file, the docs/adr/README.md index row in ascending order with its capped status, whether the ADR earns a CLAUDE.md premise line at all — usually not — and verification). NOT for editing the type spec or internal-spec corpus, and NOT a substitute for reading ADR-49 — this skill is the procedure; ADR-49 is the binding quality contract.
 metadata:
   internal: true
 ---
@@ -158,24 +158,27 @@ grew this column to 5,195 characters a cell before
 | ADR-40 | [`config_schema` declared defaults](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
 ```
 
-### 4c. `CLAUDE.md` ADR index line
+### 4c. `CLAUDE.md` — **usually nothing to do**
 
-`CLAUDE.md` carries a parallel `- [ADR-N](docs/adr/N-slug.md) — <topic>`
-list (also ascending). Append the new line after the current last entry.
+`CLAUDE.md` is loaded into context at the start of every session, so its
+ADR list is a **premise set, not an index** ([ADR-97](../../../docs/adr/97-adr-index-budgets.md)
+WD1): only the ADRs an agent would get wrong *without knowing to look
+them up* — the foundation / conceptual core (ADR-0–5) and the standing
+policies in force. It holds 10 entries against a cap of 12.
 
-This is an **index, not a summary** — the topic names the subject and
-nothing else. **Cap: 100 characters**, one line, no status, no dates, no
-measurements, no WD references (all of which live in the 4b row you just
-wrote). Usually the canonical title from 4b *is* the topic; shorten it if
-it does not fit. Do **not** match the density of neighbouring entries —
-that instruction is what regrew the file 8.7× and it is gone; conform to
-the cap, not to the list.
+**Your ADR almost certainly does not belong there.** 88 of 98 do not. It
+earns a line only if it is a new **standing policy** — a rule that binds
+a contribution whatever it touches, not merely an important decision in
+its own area. "This is significant" is not the test; "a session that
+never thought to look this up will do the wrong thing" is. When in doubt,
+leave it out: `docs/adr/README.md` is one hop away, and the gate will not
+let you quietly spend the session budget.
 
-Why the cap exists, and why it is enforced rather than trusted:
-[ADR-97](../../../docs/adr/97-adr-index-budgets.md). The gate is
-`spec/docs/agent_index_spec.rb` under `make docs-check` — it also checks
-that your 4b and 4c entries agree on the ADR number and slug, so run it
-if you skipped either.
+If it genuinely qualifies, add `- [ADR-N](docs/adr/N-slug.md) — <topic>`
+to the matching sub-list: topic only, **≤ 100 characters**, no status, no
+dates, no measurements, no WD references.
+
+The gate is `spec/docs/agent_index_spec.rb` under `make docs-check`.
 
 (If the ADR establishes a SKILL, a release process, or anything an agent
 should discover, also add/adjust the relevant `CLAUDE.md` / `AGENTS.md`
@@ -184,8 +187,10 @@ pointer — most ADRs do not need this.)
 ## Step 5 — Verify
 
 ```sh
-git diff --check        # whitespace
-git status --short      # expect: new ADR file + modified docs/adr/README.md + modified CLAUDE.md
+git diff --check                                # whitespace
+git status --short                              # expect: new ADR file + modified docs/adr/README.md
+                                                # (+ CLAUDE.md only in the rare 4c case)
+nix … develop --command make docs-check         # gates the index rules (ADR-97)
 ```
 
 ADR authoring is docs-only, so `make verify` is not required for the ADR
@@ -211,11 +216,11 @@ with code, fold it into that slice's commit).
 - `docs/adr/README.md` row inserted in **ascending** position (after the
   last row, before `## Adding a New ADR`) — status only, ≤ 200 chars,
   derived from your ADR's own `Status:` block (ADR-97).
-- `CLAUDE.md` index line appended — topic only, ≤ 100 chars, no status
-  (ADR-97).
-- `make docs-check` green — it gates both caps and their agreement.
-- `git diff --check` clean; `git status` shows exactly the three expected
-  entries.
+- `CLAUDE.md` — confirmed the ADR is a *lookup*, so no line added (the
+  normal case); or it is a new standing policy and earns one (ADR-97).
+- `make docs-check` green — it gates both lists.
+- `git diff --check` clean; `git status` shows exactly the expected
+  entries (normally two: the ADR file + `docs/adr/README.md`).
 - Quality re-read against [ADR-49](../../../docs/adr/49-adr-authoring-guidelines.md):
   which one or two axes drag, and is that drag archetype-correct (fine) or
   a real gap (fix)?

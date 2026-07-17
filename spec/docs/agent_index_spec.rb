@@ -1,14 +1,16 @@
 # frozen_string_literal: true
 
-# Gate the two ADR indexes as INDEXES rather than summaries, per ADR-97.
+# Gate the two ADR lists against what each is actually for, per ADR-97.
 #
 # Both had drifted into carrying a dense per-ADR essay that merely restates the ADR body:
 #
-#   - `CLAUDE.md`'s bullet list is loaded into context at the start of every session, so it is paid for
-#     by every session regardless of relevance. Its entry names a subject and nothing else.
-#   - `docs/adr/README.md`'s third column is headed **Status**, and that README's own "How to Read"
-#     declares the contract: `Accepted` / `Proposed` / `Superseded`, plus a parenthetical for an
-#     in-flight implementation. It is a status, not a summary.
+#   - `CLAUDE.md` is loaded into context at the start of every session, so its list is paid for by every
+#     session regardless of relevance. It is a **premise set**, not an index: only the ADRs an agent
+#     would otherwise get wrong without knowing to look them up (the foundation / conceptual core, and
+#     the standing policies). Every other ADR is a lookup, reached via docs/adr/README.md.
+#   - `docs/adr/README.md` is the complete index, and its third column is headed **Status**. That
+#     README's own "How to Read" declares the contract: `Accepted` / `Proposed` / `Superseded`, plus a
+#     parenthetical for an in-flight implementation. It is a status, not a summary.
 #
 # These axes exist because the rule regressed once already without one. Commit db8d01bf (2026-05-29)
 # applied the identical CLAUDE.md compression by hand and left it to instruction; within seven weeks the
@@ -26,6 +28,12 @@ AGENT_INDEX_ADR_GLOB = File.expand_path("../../docs/adr/[0-9]*.md", __dir__)
 # The longest canonical ADR title today is 100 characters. A budget, not a derived optimum: if a title
 # genuinely needs more, move the cap in ADR-97 rather than exempting an entry here.
 AGENT_INDEX_TOPIC_MAX = 100
+
+# CLAUDE.md's premise set is 10 today (ADR-0..5 + the four standing policies). The cap is the point, not
+# the number: adding an 11th or 12th premise should cost a deliberate argument, because every session
+# pays for it. Growing past this means a new *standing policy* landed, which is rare — a new ADR
+# normally adds nothing here at all. If a 13th genuinely earns its place, move the cap in ADR-97.
+AGENT_INDEX_PREMISE_MAX = 12
 
 # Fits `Accepted (WD1-WD5 implemented, PR #85; supersedes ADR-54's rejected mtime fast-path)` with room
 # to spare. The pre-ADR-97 status cells ran to 5,195 characters; the compliant pre-ADR-40 ones median 19.
@@ -75,10 +83,21 @@ RSpec.describe "ADR index budgets (ADR-97)" do
   let(:bullets) { claude_md_adr_bullets }
   let(:readme) { adr_readme_entries }
 
-  describe "CLAUDE.md ADR index" do
-    it "carries one bullet per ADR" do
+  describe "CLAUDE.md ADR premise set" do
+    it "lists each premise once" do
       expect(bullets).not_to be_empty
       expect(bullets.map { |b| b[:number] }.tally.select { |_, c| c > 1 }).to be_empty
+    end
+
+    it "stays within the #{AGENT_INDEX_PREMISE_MAX}-entry cap" do
+      listed = bullets.map { |b| "ADR-#{b[:number]}" }.join(", ")
+      expect(bullets.size).to be <= AGENT_INDEX_PREMISE_MAX,
+                              "CLAUDE.md is loaded every session, so its ADR list is a premise set, not " \
+                              "an index (ADR-97 WD1):\nonly the ADRs an agent would get wrong without " \
+                              "knowing to look them up — the foundation / conceptual core, and the " \
+                              "standing policies in force. Every other ADR is a lookup and belongs only " \
+                              "in docs/adr/README.md.\n#{bullets.size} entries (cap " \
+                              "#{AGENT_INDEX_PREMISE_MAX}): #{listed}"
     end
 
     it "keeps every topic within the #{AGENT_INDEX_TOPIC_MAX}-character cap" do
@@ -99,8 +118,12 @@ RSpec.describe "ADR index budgets (ADR-97)" do
                          "Status/progress detail in the CLAUDE.md ADR index (ADR-97):\n#{tainted.join("\n")}"
     end
 
-    it "lists exactly the ADRs docs/adr/README.md indexes" do
-      expect(bullets.map { |b| b[:number] }.sort).to eq(readme.map { |e| e[:number] }.sort)
+    it "lists only ADRs docs/adr/README.md indexes" do
+      # A subset, deliberately: the complete index is docs/adr/README.md's job (ADR-97 WD1). This axis
+      # catches a premise pointing at an ADR that does not exist, not a README ADR "missing" from here.
+      orphans = bullets.map { |b| b[:number] } - readme.map { |e| e[:number] }
+      expect(orphans).to be_empty,
+                         "CLAUDE.md names ADRs absent from docs/adr/README.md: #{orphans.inspect}"
     end
 
     it "links each ADR at the same slug docs/adr/README.md uses" do
@@ -118,10 +141,26 @@ RSpec.describe "ADR index budgets (ADR-97)" do
     end
   end
 
-  describe "docs/adr/README.md status column" do
+  describe "docs/adr/README.md index" do
     it "indexes every ADR file in docs/adr/" do
       on_disk = Dir[AGENT_INDEX_ADR_GLOB].map { |p| File.basename(p)[/\A\d+/].to_i }
       expect(readme.map { |e| e[:number] }.sort).to eq(on_disk.sort)
+    end
+
+    # A blank line ends a markdown table. Five had accumulated between rows, so the index rendered as
+    # six separate tables, each re-reading the next ADR row as its header — invisible for as long as the
+    # cells were thousand-character essays nobody read rendered, and obvious the moment they were not.
+    it "keeps the index table contiguous — a blank row would end it" do
+      lines = File.readlines(AGENT_INDEX_ADR_README, encoding: "utf-8").map(&:chomp)
+      first = lines.index { |l| l.start_with?("| ADR-") }
+      last = lines.rindex { |l| l.start_with?("| ADR-") }
+      expect(first).not_to be_nil
+
+      breaks = (first..last).reject { |i| lines[i].start_with?("| ADR-") }
+      detail = breaks.map { |i| "  line #{i + 1}: #{lines[i].inspect}" }
+      expect(breaks).to be_empty,
+                        "Non-row lines inside the ADR index table break its markdown rendering:\n" \
+                        "#{detail.join("\n")}"
     end
 
     it "keeps every status cell within the #{AGENT_INDEX_STATUS_MAX}-character cap" do

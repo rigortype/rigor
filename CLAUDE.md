@@ -54,9 +54,11 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 
 ### Architecture decision records (rationale)
 
-ADRs record design rationale and rejected / deferred alternatives. **The canonical index — title + current implementation status for every ADR — is [`docs/adr/README.md`](docs/adr/README.md)**; open the individual ADR for its full working-decision detail. When an ADR and the spec disagree on analyzer behaviour, the spec binds.
+ADRs record design rationale and rejected / deferred alternatives. **The complete index — title + current implementation status for every ADR — is [`docs/adr/README.md`](docs/adr/README.md)**; open the individual ADR for its full working-decision detail. When an ADR and the spec disagree on analyzer behaviour, the spec binds.
 
-The list below is an **index, not a summary**: one line per ADR, topic only, capped at 100 characters and carrying no status, dates, or measurements — it answers only *does a decision about this exist, and on what subject*. Go to `docs/adr/README.md` for status and to the ADR for detail. This file is loaded into context every session, so the cap is [ADR-97](docs/adr/97-adr-index-budgets.md)'s budget decision and `spec/docs/agent_index_spec.rb` enforces it under `make docs-check`.
+Below are **only the ADRs that are premises** — the ones that govern work you would otherwise get wrong *without knowing to look them up*. The other 88 are **lookups**: they matter to a session already in their area, which finds them in `docs/adr/README.md` one hop away. This file is loaded into context every session, so this list is a premise set, not an index — the membership rule, its cap, and the gate (`spec/docs/agent_index_spec.rb`, under `make docs-check`) are [ADR-97](docs/adr/97-adr-index-budgets.md)'s.
+
+**Foundation and conceptual core** — what Rigor *is*; you cannot correctly change the engine without them (`docs/adr/README.md` § "How to Read" names ADR-0 the foundation and ADR-1–3 the conceptual core):
 
 - [ADR-0](docs/adr/0-concept.md) — Project concept and design boundaries
 - [ADR-1](docs/adr/1-types.md) — Type model and RBS-superset strategy
@@ -64,97 +66,12 @@ The list below is an **index, not a summary**: one line per ADR, topic only, cap
 - [ADR-3](docs/adr/3-type-representation.md) — Internal type-object representation
 - [ADR-4](docs/adr/4-type-inference-engine.md) — Type inference engine
 - [ADR-5](docs/adr/5-robustness-principle.md) — Robustness principle (Postel's law for types)
-- [ADR-6](docs/adr/6-cache-persistence-backend.md) — Cache persistence backend
-- [ADR-7](docs/adr/7-v0.1.0-slice-decisions.md) — v0.1.0 slice decisions
-- [ADR-8](docs/adr/8-steep-inspired-improvements.md) — Steep-inspired diagnostic improvements
-- [ADR-9](docs/adr/9-cross-plugin-api.md) — Cross-plugin API (`FactStore` + `prepare(services)` + `produces:` / `consumes:`)
-- [ADR-10](docs/adr/10-dependency-source-inference.md) — Opt-in dependency-source inference
-- [ADR-11](docs/adr/11-sorbet-input-adapter.md) — Sorbet input adapter (`rigor-sorbet`)
-- [ADR-12](docs/adr/12-dry-rb-packaging.md) — dry-rb adapter packaging
-- [ADR-13](docs/adr/13-typenode-resolver-plugin.md) — `TypeNodeResolver` + shape-projection type functions
-- [ADR-14](docs/adr/14-rbs-sig-generation.md) — `rigor sig-gen` RBS generation
-- [ADR-15](docs/adr/15-ractor-concurrency.md) — Ractor concurrency model
-- [ADR-16](docs/adr/16-macro-expansion.md) — Macro / DSL expansion substrate
-- [ADR-17](docs/adr/17-monkey-patch-pre-evaluation.md) — Project-side monkey-patch pre-evaluation (`pre_eval:`)
-- [ADR-18](docs/adr/18-substrate-per-call-site-return-type.md) — Substrate per-call-site return type (`returns_from_arg:`)
-- [ADR-19](docs/adr/19-language-server-packaging.md) — Language Server packaging (`rigor lsp`)
-- [ADR-20](docs/adr/20-lightweight-hkt.md) — Lightweight HKT (`App[F, A]`)
-- [ADR-21](docs/adr/21-rubydex-evaluation.md) — Rubydex evaluation
-- [ADR-22](docs/adr/22-baseline-and-project-onboarding.md) — Baseline + project onboarding (`.rigor-baseline.yml`)
-- [ADR-23](docs/adr/23-diagnostic-triage-command.md) — `rigor triage` diagnostic triage command
-- [ADR-24](docs/adr/24-self-method-call-resolution.md) — Implicit-self method-call resolution
-- [ADR-25](docs/adr/25-plugin-contributed-rbs.md) — Plugin-contributed RBS (`signature_paths:`)
-- [ADR-26](docs/adr/26-activerecord-relation-typing.md) — ActiveRecord relation typing (`open_receivers:`)
-- [ADR-27](docs/adr/27-tool-distribution-model.md) — Tool distribution + installation model
-- [ADR-28](docs/adr/28-path-scoped-protocol-contracts.md) — Path-scoped protocol contracts (`protocol_contracts:`)
-- [ADR-29](docs/adr/29-browser-playground.md) — Browser playground
-- [ADR-30](docs/adr/30-rigor-ffi-plugin-shape.md) — `rigor-ffi` plugin family shape
+
+**Standing policies in force** — these bind a contribution whatever it touches:
+
 - [ADR-31](docs/adr/31-contribution-and-supply-chain-policy.md) — Contribution + supply-chain policy
-- [ADR-32](docs/adr/32-rbs-inline-comment-ingestion.md) — Inline-RBS comment ingestion (`rigor-rbs-inline`)
-- [ADR-33](docs/adr/33-mcp-server.md) — MCP server packaging (`rigor mcp`)
-- [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) — Toplevel unresolved-self-call diagnostic
-- [ADR-35](docs/adr/35-override-signature-compatibility.md) — Override signature compatibility (Liskov signature rule)
-- [ADR-36](docs/adr/36-mangrove-enum-nested-class-emission.md) — Macro-substrate nested-class emission tier (Mangrove `Enum`)
-- [ADR-37](docs/adr/37-plugin-interface-segregation.md) — Plugin interface segregation (narrow extension protocols)
-- [ADR-38](docs/adr/38-additional-initializers.md) — Plugin-declared additional initializers (`additional_initializers:`)
-- [ADR-39](docs/adr/39-plugin-target-library-invocation.md) — Plugins may invoke their target library's safe methods directly
-- [ADR-40](docs/adr/40-config-schema-defaults.md) — `config_schema` declared defaults (`{kind:, default:}`)
-- [ADR-41](docs/adr/41-inference-budget-design.md) — Inference budget design (wiring, on-hit policy, measurement-gated defaults)
-- [ADR-42](docs/adr/42-plugin-binary-operator-return-types.md) — Plugin-contributed binary-operator return types (coerce-direction)
-- [ADR-43](docs/adr/43-rbs-complete-ancestor-resolution.md) — RBS-complete ancestor resolution (allow-list inherited-method dispatch)
-- [ADR-44](docs/adr/44-dispatch-allocation-churn.md) — Per-dispatch / per-narrow allocation churn (Scope, CallContext)
-- [ADR-45](docs/adr/45-unchanged-project-fast-path.md) — Unchanged-project fast path (run-result cache)
-- [ADR-46](docs/adr/46-incremental-dependency-graph.md) — Incremental analysis via a cross-file dependency graph
-- [ADR-47](docs/adr/47-narrowing-driven-clause-reachability.md) — Narrowing-driven clause reachability (`flow.unreachable-clause`)
-- [ADR-48](docs/adr/48-data-struct-value-folding.md) — Struct / Data value folding (member-shape carriers)
-- [ADR-49](docs/adr/49-adr-authoring-guidelines.md) — ADR authoring guidelines (a rubric for necessary-and-sufficient ADRs)
+- [ADR-49](docs/adr/49-adr-authoring-guidelines.md) — ADR authoring guidelines (the binding quality rubric)
 - [ADR-50](docs/adr/50-release-engineering-and-stability-strategy.md) — Release engineering and stability strategy (v0.2.0 → v1.0.0)
-- [ADR-51](docs/adr/51-ci-diagnostic-output-formats.md) — CI-native diagnostic output formats
-- [ADR-52](docs/adr/52-compiled-plugin-contribution-dispatch.md) — Compiled plugin contribution dispatch
-- [ADR-53](docs/adr/53-scope-discovery-index-separation.md) — Scope discovery-index separation + check-rule walk consolidation
-- [ADR-54](docs/adr/54-cache-slimming.md) — Cache slimming: definitions-blob retirement, payload compression, default eviction
-- [ADR-55](docs/adr/55-recursive-return-precision.md) — Recursive-method return-type precision
-- [ADR-56](docs/adr/56-block-captured-local-mutation.md) — Block-captured local write-back and loop-body fixpoint
-- [ADR-57](docs/adr/57-self-call-return-adoption.md) — Opening the implicit-self call return-adoption gate
-- [ADR-58](docs/adr/58-ivar-field-typing.md) — Instance-variable field typing
-- [ADR-59](docs/adr/59-spec-assertions-are-not-signatures.md) — Spec assertions are not implementation signatures
-- [ADR-60](docs/adr/60-pre-freeze-plugin-contract-consolidation.md) — Pre-freeze plugin contract consolidation
-- [ADR-61](docs/adr/61-agent-friendly-diagnostic-statistics.md) — Agent-friendly diagnostic statistics (structured selector axis)
-- [ADR-62](docs/adr/62-mutation-testing-teeth-measurement.md) — Mutation-testing the analyzer (false-negative / teeth measurement)
-- [ADR-63](docs/adr/63-type-protection-coverage.md) — User-facing type-protection coverage
-- [ADR-64](docs/adr/64-non-nil-argument-type-mismatch.md) — Non-nil argument-type-mismatch and the coerce barrier
-- [ADR-65](docs/adr/65-diagnostic-evidence-tier-and-doc-url.md) — Diagnostic evidence tier and documentation URL
-- [ADR-66](docs/adr/66-discriminated-union-member-typing.md) — Discriminated-union member typing (tag-keyed narrowing)
-- [ADR-67](docs/adr/67-parameter-type-inference.md) — Parameter type inference (the M3 frontier)
-- [ADR-68](docs/adr/68-class-builder-folding.md) — Plugin-declarable class-builder folding
-- [ADR-69](docs/adr/69-pluggable-mutation-substrate.md) — Pluggable mutation substrate (kill-oracle + operator seam)
-- [ADR-70](docs/adr/70-fused-protection-coverage.md) — Fused static∪dynamic protection coverage
-- [ADR-71](docs/adr/71-type-guided-external-mutation-testing.md) — Type-guided external incremental mutation testing
-- [ADR-72](docs/adr/72-gemfile-lock-gated-rbs-overlays.md) — Gemfile.lock-gated bundled RBS overlays
-- [ADR-73](docs/adr/73-skill-driven-user-experience.md) — SKILL-driven Rigor user experience
-- [ADR-74](docs/adr/74-offline-doc-access-and-llms-txt.md) — Offline doc access (`rigor docs`) + `llms.txt` linkage
-- [ADR-75](docs/adr/75-dynamic-provenance.md) — `Dynamic[T]` provenance and explanation
-- [ADR-76](docs/adr/76-effect-modeling-freeze-dup-shape-preservation.md) — Effect modeling for `freeze` / `dup` / `clone` and shape-carrier preservation
-- [ADR-77](docs/adr/77-doctor-and-upgrade-commands.md) — `rigor doctor` and `rigor upgrade` evidence-routing commands
-- [ADR-78](docs/adr/78-reflexive-overfold-always-truthy.md) — Reflexive over-fold and the `flow.always-truthy-condition` envelope
-- [ADR-79](docs/adr/79-rbs-version-range-over-pinned-determinism.md) — RBS version-range fidelity over checker-pinned determinism
-- [ADR-80](docs/adr/80-narrowing-facts-rename.md) — Rename the `type_specifier` plugin hook to `narrowing_facts`
-- [ADR-81](docs/adr/81-skill-set-optimization.md) — Skill-set optimization: per-skill freshness + the `waza` evaluation stance
-- [ADR-82](docs/adr/82-dynamic-provenance-wiring.md) — `Dynamic[T]` provenance wiring: breaking the catch-all on real apps
-- [ADR-83](docs/adr/83-dynamic-origin-algebra.md) — Dynamic-origin algebra: keep union arms over absorbing into `Dynamic`
-- [ADR-84](docs/adr/84-cross-file-return-memo-scoping.md) — Cross-file return-memo scoping and the taint-precise store gate
-- [ADR-85](docs/adr/85-seed-bundles-and-lazy-def-node-handles.md) — Per-file seed bundles and lazy def-node handles
-- [ADR-86](docs/adr/86-partial-native-extensions.md) — Partial native extensions for residual hot paths (rejected; rigor-rs owns native speed)
-- [ADR-87](docs/adr/87-null-build-floor.md) — The null-build floor: stat-then-digest validation and hit-path boot slimming
-- [ADR-88](docs/adr/88-incremental-plugin-fact-soundness.md) — Incremental plugin-fact soundness
-- [ADR-89](docs/adr/89-semantic-propagation-gates.md) — Semantic propagation gates: declaration-shape and observed-key return summaries
-- [ADR-90](docs/adr/90-target-library-resolution-from-project-bundle.md) — Target-library resolution from the analyzed project's bundle
-- [ADR-91](docs/adr/91-kernel-intrinsic-fold-ownership-gate.md) — Kernel intrinsic fold ownership gate + spelling-parity invariant
-- [ADR-92](docs/adr/92-normative-status-fidelity.md) — Normative status fidelity: the founding-era stratum and the declare-or-mark gate
-- [ADR-93](docs/adr/93-default-rbs-inline-ingestion.md) — Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec
-- [ADR-94](docs/adr/94-rbs-inline-reader-and-the-rbs-3x-floor.md) — The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor
-- [ADR-95](docs/adr/95-homebrew-tap-deferral.md) — Homebrew distribution: deferred behind the single binary
-- [ADR-96](docs/adr/96-plugin-target-gems.md) — Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion
 - [ADR-97](docs/adr/97-adr-index-budgets.md) — Index entries are not summaries: the ADR-index budgets and their gate
 
 ## Skills available in this repository
@@ -171,9 +88,9 @@ Skills follow the [Anthropic Agent Skills](https://agentskills.io/) shape — a 
 | [`rigor-plugin-author`](.claude/skills/rigor-plugin-author/SKILL.md) | "Create a Rigor plugin for X." Phase 0.5 routes non-maintainers to [ADR-31](docs/adr/31-contribution-and-supply-chain-policy.md); maintainers follow requirements → template → scaffold → walker → integration spec → CHANGELOG. |
 | [`rigor-ffi-plugin-author`](.claude/skills/rigor-ffi-plugin-author/SKILL.md) | FFI sibling of `rigor-plugin-author`. Starts by *talking you out of* a plugin when core `rigor-ffi` suffices; otherwise routes through ADR-31. |
 | [`rigor-regression-sweep`](.claude/skills/rigor-regression-sweep/SKILL.md) | Multi-version baseline-drift sweep against a real OSS Ruby project; tabulates the surfaced-diagnostic curve and grows the `docs/notes/` corpus. |
-| [`rigor-adr-author`](.claude/skills/rigor-adr-author/SKILL.md) | "Write an ADR for X." The procedure for adding a `docs/adr/` record: tag archetype + stakes, pick the matching skeleton, write sized-to-stakes (economy is the corpus's one drift), then the mechanical wiring (next number, the ascending-order `docs/adr/README.md` index row, the `CLAUDE.md` bullet, verify). Defers to [ADR-49](docs/adr/49-adr-authoring-guidelines.md) for the binding quality rubric. |
+| [`rigor-adr-author`](.claude/skills/rigor-adr-author/SKILL.md) | "Write an ADR for X." The procedure for adding a `docs/adr/` record: tag archetype + stakes, pick the matching skeleton, write sized-to-stakes (economy is the corpus's one drift), then the mechanical wiring (next number, the ascending-order `docs/adr/README.md` index row + its ≤ 200-char status, whether it earns a `CLAUDE.md` premise line at all, verify). Defers to [ADR-49](docs/adr/49-adr-authoring-guidelines.md) for the binding quality rubric and [ADR-97](docs/adr/97-adr-index-budgets.md) for the index budgets. |
 | [`rigor-docs-review`](.claude/skills/rigor-docs-review/SKILL.md) | "Review the docs / manual / handbook" / "査読して". The multi-lens review battery over `docs/manual/` + `docs/handbook/`: L0 mechanical gate (`make docs-check`) → L1 fidelity → L2 reader lenses → L3 bloat (inverted) → L4 copyedit, run as independent-context subagents, parallel-within / sequential-across, findings to `docs/notes/`. Methodology freeze; design in [`docs/notes/20260610-user-docs-review-battery-design.md`](docs/notes/20260610-user-docs-review-battery-design.md). |
-| [`rigor-prior-art`](.claude/skills/rigor-prior-art/SKILL.md) | "過去に評価/調査したことある?" / "what does the corpus say about X?". Corpus archaeology with citation-grade output: the corpus map (CLAUDE.md ADR bullets first; archived CHANGELOGs — currently `docs/CHANGELOG-0.1.x.md` — are the comparative-evidence trove), a three-class source taxonomy (first-party evaluation / external material incl. `deep-research/` / mere mention), verify-before-cite (`cat -v`), and an output contract that reports absences ("no head-to-head run exists") to prevent overclaiming. Use before publishing any comparative claim about Rigor. |
+| [`rigor-prior-art`](.claude/skills/rigor-prior-art/SKILL.md) | "過去に評価/調査したことある?" / "what does the corpus say about X?". Corpus archaeology with citation-grade output: the corpus map (`docs/adr/README.md` to shortlist, then the ADR bodies — the indexes hold no detail per [ADR-97](docs/adr/97-adr-index-budgets.md); archived CHANGELOGs — currently `docs/CHANGELOG-0.1.x.md` — are the comparative-evidence trove), a three-class source taxonomy (first-party evaluation / external material incl. `deep-research/` / mere mention), verify-before-cite (`cat -v`), and an output contract that reports absences ("no head-to-head run exists") to prevent overclaiming. Use before publishing any comparative claim about Rigor. |
 
 ### Evaluating skills with `waza`
 

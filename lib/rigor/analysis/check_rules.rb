@@ -2504,11 +2504,16 @@ module Rigor
           declared_return_union(method_def, scope.environment)
         end
 
-        def declared_return_union(method_def, _environment)
+        # `type_vars:` — ADR-35 WD9 tier 1. When the caller supplies a generic-instantiation
+        # substitution map (parent-side, keyed by the parent class's declared type-parameter names),
+        # a `-> T` return is translated at its instantiated type (`-> Integer`) rather than degrading
+        # to `Dynamic[Top]`. The default empty map is the pre-WD9 behaviour, under which any type
+        # variable degrades to `Dynamic[Top]` and the rule stays silent.
+        def declared_return_union(method_def, _environment, type_vars: {})
           translated = method_def.method_types.filter_map do |mt|
             Inference::RbsTypeTranslator.translate(
               mt.type.return_type,
-              self_type: nil, instance_type: nil, type_vars: {}
+              self_type: nil, instance_type: nil, type_vars: type_vars
             )
           rescue StandardError
             nil
@@ -2736,8 +2741,9 @@ module Rigor
           return nil if resolved.nil?
 
           scope, override_method, parent_class, parent_method = resolved
+          parent_type_vars = ancestor_instantiation_type_vars(scope, parent_class)
           override_return = declared_return_union(override_method, scope.environment)
-          parent_return = declared_return_union(parent_method, scope.environment)
+          parent_return = declared_return_union(parent_method, scope.environment, type_vars: parent_type_vars)
           return nil if override_return.nil? || parent_return.nil?
           return nil if dynamic_top?(parent_return) # untyped / unbound-generic parent contract
 
@@ -2776,6 +2782,56 @@ module Rigor
           name.to_s.delete_prefix("::")
         end
 
+        # ADR-35 WD9 tier 1 — generic-instantiation-aware comparison. Builds the substitution map
+        # `{ parent_type_param_name => instantiated Rigor::Type }` for the parent contract as the
+        # overriding subclass instantiates it (RBS `class Sub < Parent[Concrete]` / `include
+        # _Iface[Concrete]`). Mirrors the ADR-4 Phase 2d dispatcher zip (`build_type_vars`): the
+        # parent's declared type-parameter names zipped against the subclass-side instantiation args.
+        #
+        # Returns `{}` — restoring the pre-WD9 behaviour under which any parent type variable degrades
+        # to `Dynamic[Top]` and the rule stays silent — whenever the subclass does not instantiate the
+        # ancestor generically, the RBS definition cannot be built, arities disagree, or an argument
+        # fails to translate. This is the FP-safety contract: substitution only ever *adds* precision
+        # (a `-> T` compared at `-> Integer`); an unbound / unresolved generic keeps degrading to
+        # silence, never a false `:no`.
+        def ancestor_instantiation_type_vars(scope, parent_class)
+          self_type = scope.self_type
+          return {} unless self_type.respond_to?(:class_name)
+
+          args = ancestor_instantiation_args(scope, self_type.class_name.to_s, parent_class)
+          return {} if args.nil? || args.empty?
+
+          param_names = Reflection.class_type_param_names(parent_class, scope: scope)
+          return {} if param_names.empty? || param_names.size != args.size
+
+          translated = args.map do |arg|
+            Inference::RbsTypeTranslator.translate(arg, self_type: nil, instance_type: nil, type_vars: {})
+          rescue StandardError
+            nil
+          end
+          return {} if translated.any?(&:nil?)
+
+          param_names.zip(translated).to_h
+        end
+
+        # The RBS type arguments the subclass applies to `parent_class` in its ancestry, or nil when
+        # the subclass has no RBS definition or does not name that ancestor. Reads the resolved
+        # instance-ancestor list (`RBS::Definition#ancestors`), whose `Ancestor::Instance` entries carry
+        # the instantiation `.args` for each superclass / included module. Fail-soft: any RBS build
+        # error yields nil, which the caller treats as "no instantiation" and degrades to silence.
+        def ancestor_instantiation_args(scope, subclass_name, parent_class)
+          definition = Reflection.instance_definition(subclass_name, scope: scope)
+          return nil if definition.nil?
+
+          target = normalize_class_name(parent_class)
+          ancestor = definition.ancestors.ancestors.find do |anc|
+            anc.respond_to?(:args) && normalize_class_name(anc.name.to_s) == target
+          end
+          ancestor&.args
+        rescue ::RBS::BaseError, StandardError
+          nil
+        end
+
         def build_override_return_widened_diagnostic(path, def_node, parent_class, parent_return, override_return)
           Diagnostic.from_name_loc(
             def_node,
@@ -2804,9 +2860,10 @@ module Rigor
           resolved = resolve_authored_override(def_node, scope_index)
           return nil if resolved.nil?
 
-          _scope, override_method, parent_class, parent_method = resolved
+          scope, override_method, parent_class, parent_method = resolved
+          parent_type_vars = ancestor_instantiation_type_vars(scope, parent_class)
           override_params = positional_param_types(override_method)
-          parent_params = positional_param_types(parent_method)
+          parent_params = positional_param_types(parent_method, type_vars: parent_type_vars)
           return nil if override_params.nil? || parent_params.nil?
 
           index = first_narrowed_param_index(override_params, parent_params)
@@ -2822,7 +2879,11 @@ module Rigor
         # parameter list is not introspectable. Per-position translation failures yield `nil` at that slot
         # (skipped by the comparison). `self`/`instance` translate with `self_type: nil` (→
         # `Dynamic[Top]`), matching the return-side handling.
-        def positional_param_types(method_def)
+        # `type_vars:` — ADR-35 WD9 tier 1, parent side only. Substitutes the generic-instantiation
+        # map (parent class's type params → the subclass's instantiation) so a parent `(T)` parameter
+        # is compared at its instantiated type. Empty (the default, and the override side) keeps the
+        # pre-WD9 degrade-to-`Dynamic[Top]` behaviour.
+        def positional_param_types(method_def, type_vars: {})
           method_types = method_def.method_types
           return nil unless method_types.size == 1
 
@@ -2831,7 +2892,7 @@ module Rigor
 
           (func.required_positionals + func.optional_positionals).map do |param|
             Inference::RbsTypeTranslator.translate(
-              param.type, self_type: nil, instance_type: nil, type_vars: {}
+              param.type, self_type: nil, instance_type: nil, type_vars: type_vars
             )
           rescue StandardError
             nil

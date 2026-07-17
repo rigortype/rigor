@@ -20,72 +20,78 @@ this file is the one that is wrong.
 
 - **v0.2.9 published 2026-07-11.** master accumulates toward **v0.3.0**. Both mandatory pieces are
   done (deprecation clearance #94, perf recalibration #95), so the cut is already shippable — what
-  follows is what it *earns*, not what unblocks it.
-- The line is **evaluation** (ADR-50): outside feedback + completing the feature set toward the
-  v1.0.0 freeze. The protection ceiling is a measured floor (ADR-67 WD2 spiked and deferred — do not
-  re-recommend it).
-- **The cut is now decided (triaged 2026-07-17).** v0.3.0's axis is **type-inference quality**: 13
-  issues. LSP/editor work moved to a new **`v0.4.x`** milestone — improved gradually across the
-  series, not pinned to one cut. 27 issues stay unmilestoned; that is the healthy resting state for
-  demand-gated work, not a backlog to drain.
+  follows is what it *earns*.
+- **v0.3.0's axis is type-inference quality** (triaged 2026-07-17): 14 issues, 7 `ready-for-agent`.
+  LSP work lives in **`v0.4.x`** — improved gradually across the series, not pinned to one cut. 28
+  issues stay unmilestoned; that is the healthy resting state for demand-gated work, not a queue.
 - `make verify` and `make docs-check` clean; master and `origin/master` agree.
 
 ## Next session — implement, then release
 
-**1. Implement the v0.3.0 set.** `gh issue list --milestone v0.3.0`. Four are `ready-for-agent`
-(specified enough to start with no human context — named injection point, constraint envelope, and
-the gate that proves it done): **#121** (FP-safe builtin/stdlib folds — the `rigor-type-coverage-uplift`
-skill is the procedure), **#131** (Data/Struct value folding), **#155** (subclass-aware gating for
-`call.self-undefined-method`), **#174** (correct ADR-94 WD2 — a docs fix, see below).
+**1. Implement the v0.3.0 set.** `gh issue list --milestone v0.3.0`. Seven are `ready-for-agent`.
+Four were found on 2026-07-17 and are fresh, verified, and specified:
 
-The rest need a decision before code. Three are design-first and have no carrier or mechanism today:
-**#172** (`Regexp.last_match` match-success narrowing), **#126** (length-range carrier), **#152**
-(widen the `&&`/`||` polarity gate past Constant-only). Two touch the ADR-50 v1.0-frozen diagnostic
-vocabulary, so their rule ids and default severities are deliberate choices, not implementation
-details: **#161** (a total RBS env-build failure currently exits 0 with `Dynamic[top]` project-wide
-and no diagnostic) and **#162** (the `static.*` family + a `void_origins` side-table). **#120**
-(mature `--incremental` toward default-capable) is the perf headline; its acceptance bar already
-exists — `--verify-incremental` (incremental == full `--no-cache`, byte-identical), wired into CI.
+- **#176** — a **false positive**, so it outranks the rest: `arr.clear` does not widen the
+  `non-empty-array` refinement, so `arr.size == 0` reports always-falsey on code that is true at
+  runtime. **Being worked in a separate local session as of this writing — check before assigning.**
+- **#178** — a normative-spec violation: a constant hash indexed with a non-static key folds to a
+  nil-less union, where the shape tier MUST defer so the `Hash#[] -> V?` projection applies.
+- **#177** — `$+` is bound to `String` on every truthy match edge but is nil when a successful
+  match's groups are all optional. False-negative side; small.
+- **#172** — see the rbs-inline chain below.
 
-**2. Release — and budget for the CHANGELOG.** `[Unreleased]` holds **55 bullets, 39 of them
-multi-sentence**. Sealing them is the highest-value, most-skipped step of `rigor-release-prep`, it
-needs cycle-wide context, and it is the one release step `make verify` cannot rescue. Measured
-2026-07-17; plan for it rather than discovering it at the cut. **Version bumps and `rake release`
-stay user-gated** — land entries, stop, and let the user drive the cut-over (AGENTS.md § Release
-Cadence).
+The other three: **#121** (FP-safe builtin/stdlib folds — the `rigor-type-coverage-uplift` skill is
+the procedure), **#131** (Data/Struct value folding), **#155** (subclass-aware gating for
+`call.self-undefined-method`).
+
+The rest need a decision first. **#126** (length-range carrier) has a design pass attached whose own
+recommendation is *don't build it* — thin yield, and the common upper-bound idiom mutates the
+receiver inside its own guard; #176 is the prerequisite it surfaced, and stands alone. Two touch the
+ADR-50 v1.0-frozen diagnostic vocabulary, so their rule ids and default severities are deliberate
+choices: **#161** (a total RBS env-build failure exits 0 with `Dynamic[top]` project-wide and no
+diagnostic) and **#162** (the `static.*` family + a `void_origins` side-table). **#120** (mature
+`--incremental` toward default-capable) is the perf headline; its acceptance bar already exists —
+`--verify-incremental` (incremental == full `--no-cache`, byte-identical), wired into CI.
+
+**2. Release — and budget for the CHANGELOG.** `[Unreleased]` holds **56 bullets**. Sealing them is
+the highest-value, most-skipped step of `rigor-release-prep`, it needs cycle-wide context, and it is
+the one release step `make verify` cannot rescue. Plan for it rather than discovering it at the cut.
+**Version bumps and `rake release` stay user-gated** — land entries, stop, and let the user drive the
+cut-over (AGENTS.md § Release Cadence).
 
 ## The rbs-inline chain — ordering is load-bearing
 
-Three issues, and the order is a protocol requirement rather than a preference:
+**#172 → #173.** Per ADR-93 WD1a and the ADR-57 protocol, the artifact the ADR-93 default flip
+surfaces on herb is fixed at root **before** the flip lands.
 
-**#172 → #173.** ADR-93 WD1a: the 4 `call.possible-nil-receiver` that the ADR-93 default flip
-surfaces on herb are a *pre-existing* `Regexp.last_match` imprecision, masked until now by herb's
-`-> untyped` sigs. Per the ADR-57 protocol an artifact is fixed at root **before** the change that
-surfaces it lands, so #172 is a prerequisite of #173, not a follow-up.
+**#172 is `ready-for-agent`, and its original framing was wrong.** It claimed two soundness calls had
+no design; both landed 2026-06-12 (`0cfa4f55`, `b6affe87`). The real gap is one recognition upgrade —
+the pattern operand is matched only as a syntactic `Prism::RegularExpressionNode`, while herb's is a
+constant the typer already folds to a value-pinned `Constant[Regexp]`. Validated with a throwaway
+patch: herb 12 → 8 diagnostics, the −3 wins kept, four corpora byte-identical. Full brief on the
+issue.
 
-**#173 is the user's call, not an agent's.** Flipping ADR-93's `require_magic_comment:` default is
-the mechanical part; WD2 (default-wiring the bundled plugin) is a partial reversal of the
-ADR-27/ADR-31 auto-load deferral, and its opt-out schema is open — the plugin-entry schema has no
-`enabled:` key, and ADR-99 now makes the JSON schema a named source of truth. WD3 (the standalone
-residual) is a second open choice. ADR-93 is still **Proposed**; accepting it is part of the work.
-
-**#174 is a documentation fix, and the tree is the evidence.** ADR-94 WD2 claims the arity path in
-`Analysis::CheckRules` does not guard `RBS::Types::UntypedFunction`. It does — `arity_eligible?` and
-`argument_check_eligible?` both bail via `respond_to?(:required_keywords)`, with a comment naming the
-form and calling the bail the correct conservative move. Both predate the ADR (in place by
-2026-05-02; re-verified 2026-07-17). ADR-94's Status block still leads with that phantom blocker, so
-it misleads anyone sizing the ADR-93 work — fix the text, do not touch the guards.
+**#173 is the user's call, not an agent's.** The default flip is mechanical; WD2 (default-wiring the
+bundled plugin) is a partial reversal of the ADR-27/ADR-31 auto-load deferral with an open opt-out
+schema, and WD3 (the standalone residual) is a second open choice. ADR-93 is still **Proposed**.
 
 Standing context: ADR-94 records that rbs 4.0 absorbed the reader (`RBS::InlineParser`), which would
-retire WD2 and WD3 outright. That migration is deferred behind the `rbs >= 3.0, < 5.0` floor
-(ADR-79) and is **not** planned for v0.3.0.
+retire WD2 and WD3 outright. Deferred behind the `rbs >= 3.0, < 5.0` floor (ADR-79); **not** planned
+for v0.3.0. ADR-94's WD2 text was corrected 2026-07-17 (PR #175) — its "live crash" named the wrong
+site, symptom, and trigger, though the defect was real and is now fixed.
 
-## Known couplings inside the milestone
+## Decided this cycle — do not re-propose
 
-- **#130's slice 5 is blocked by #156**, which stayed unmilestoned on purpose — its own text says it
-  is gated on general return-inference precision, so there is nothing to schedule there yet. v0.3.0
-  carries only #130's two unblocked follow-ons (WD9 generic-instantiation comparison; RBS-only
-  ancestors + `def self.` coverage). Note posted on the issue.
+- **#152 (widen the `&&`/`||` polarity gate) is evidence-rejected and demand-gated**, deliberately
+  off v0.3.0. The measured evaluation is on the issue: zero drift across a 14-project corpus, the
+  widened edges fired **once** in the whole corpus, and that firing would have made the type *wrong*
+  — it rests on the #178 over-fold. `a || b` is the idiom by which an author hedges against exactly
+  the optimism the lattice contains; ADR-78 WD1 drew this line once already. Re-open only on a demand
+  signal, and read the issue's preconditions first. Two findings outlive the rejection: **nothing in
+  the 7976-example suite pins the changed edges**, and the widening would re-create the b7c155fb
+  two-typer divergence.
+- **#130's slice 5 is blocked by #156**, unmilestoned on purpose — its own text says it is gated on
+  general return-inference precision. v0.3.0 carries only #130's two unblocked follow-ons.
 - **#162 creates the `static.*` family that #158 (v1.0.0, inference budgets) reserves its cutoffs
   under.** Family first is the right order; #158 stays demand-deferred either way.
 

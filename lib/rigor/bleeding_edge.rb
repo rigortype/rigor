@@ -58,6 +58,18 @@ module Rigor
           "rbs.coverage.quarantined-signature" => :error,
           "rbs.coverage.environment-build-failed" => :error
         }.freeze
+      ),
+      Feature.new(
+        id: "use-of-void-value",
+        summary: "Using a value recovered from an author-declared `-> void` return in value context (an " \
+                 "assignment right-hand side, a call receiver, or an argument) becomes a `:warning`. An " \
+                 "explicit `-> void` is the strongest possible \"do not rely on this return\" signal, so " \
+                 "the direct-dispatch case is FP-narrow; a bare-statement `void` result and a legitimate " \
+                 "`top` value both stay silent. Off by default because a new required diagnostic is an " \
+                 "ADR-50 WD1 compatibility change (ADR-100 WD2).",
+        severity_overrides: {
+          "static.value-use.void" => :warning
+        }.freeze
       )
     ].freeze
 

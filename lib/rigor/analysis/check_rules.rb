@@ -18,6 +18,7 @@ require_relative "check_rules/duplicate_hash_key_collector"
 require_relative "check_rules/return_in_ensure_collector"
 require_relative "check_rules/ivar_write_collector"
 require_relative "check_rules/main_pass_collector"
+require_relative "check_rules/void_value_use_collector"
 require_relative "check_rules/self_closedness_scanner"
 
 module Rigor
@@ -95,6 +96,7 @@ module Rigor
         collectors = node_collectors || run_node_collectors(path, root, scope_index)
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
+        diagnostics.concat(void_value_use_diagnostics(path, root, scope_index))
         COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
           diagnostics.concat(send(builder, path, collectors[role].results))
         end
@@ -348,6 +350,16 @@ module Rigor
       def unreachable_clause_diagnostics(path, results)
         results.map do |result|
           build_unreachable_clause_diagnostic(path, result)
+        end
+      end
+
+      # ADR-100 WD2 — `static.value-use.void`. Runs a standalone walk (like `self_undefined_method_diagnostics`)
+      # over `root`, so its value-context slot inspection stays independent of the shared per-node
+      # {RuleWalk}. Each result is a value-context use of a call whose author-declared `-> void` return the
+      # engine recovered to `top`.
+      def void_value_use_diagnostics(path, root, scope_index)
+        VoidValueUseCollector.new(scope_index).collect(root).map do |result|
+          build_void_value_use_diagnostic(path, result)
         end
       end
 
@@ -1819,6 +1831,17 @@ module Rigor
             rule: RULE_UNREACHABLE_CLAUSE,
             path: path,
             message: unreachable_clause_message(result),
+            severity: :warning
+          )
+        end
+
+        def build_void_value_use_diagnostic(path, result)
+          Diagnostic.from_node(
+            result.void_node,
+            rule: RULE_VALUE_USE_VOID,
+            path: path,
+            message: "value use of `void': `#{result.origin.label}' declares `-> void', so its return " \
+                     "recovers to `top' and should not be used as a value",
             severity: :warning
           )
         end

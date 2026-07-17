@@ -2,18 +2,19 @@
 
 Rigor SHOULD prefer precise diagnostics over silent widening. This document defines the diagnostic identifier taxonomy, display rules, and the suppression-marker grammar.
 
-The cutoff identifiers used by inference budgets are reserved under the `static.*` family (see [inference-budgets.md](inference-budgets.md)); that surface is **not yet wired** — see the taxonomy table below. The display rules for negative facts and difference types are in [type-operators.md](type-operators.md). The display rule for `Dynamic[T]` is here.
+The `static.*` family splits into use-site guards (`static.value-use.*`) and incomplete-inference cutoffs (`static.incomplete-inference.*`) per [ADR-100](../adr/100-static-diagnostic-family-and-void-origins.md); its first implemented identifier is `static.value-use.void` (an author-declared `-> void` return used in value context), shipped behind the `use-of-void-value` bleeding-edge feature. The budget-cutoff identifiers are still reserved (see [inference-budgets.md](inference-budgets.md)) and **not yet wired**. The display rules for negative facts and difference types are in [type-operators.md](type-operators.md). The display rule for `Dynamic[T]` is here.
 
 ## Diagnostic guidelines
 
 > **Status.** These guidelines state the intended policy for each situation, not a claim that
 > every one is implemented. A guideline whose diagnostic would live in a family marked
-> **Reserved** in the taxonomy below (`static.*`, `compat.*`, `hint.*`, `generated.*`), or in
-> the not-yet-wired `void` surface ([special-types.md](special-types.md) § `void`), describes
-> intent — the first, second, and cutoff-reporting bullets are the current cases. See
+> **Reserved** in the taxonomy below (`compat.*`, `hint.*`, `generated.*`), or in the
+> `static.incomplete-inference.*` budget half, describes intent. The `void`-value guard is now
+> implemented for the direct author-declared case ([special-types.md](special-types.md) § `void`;
+> [ADR-100](../adr/100-static-diagnostic-family-and-void-origins.md)), behind `bleeding_edge:`. See
 > [ADR-92](../adr/92-normative-status-fidelity.md).
 
-- Using `void` as a value is a primary diagnostic; downstream recovery uses `top` and SHOULD avoid duplicate cascade reports for the same expression.
+- Using `void` as a value is a primary diagnostic (`static.value-use.void`, opt-in behind the `use-of-void-value` bleeding-edge feature); downstream recovery uses `top` and SHOULD avoid duplicate cascade reports for the same expression.
 - Calling a method on `top` without proof is a diagnostic.
 - Calling a method on raw `untyped` is allowed but SHOULD be traceable to an unchecked boundary.
 - Calling a method on `Dynamic[T]` MAY use the static facet `T`, but diagnostics SHOULD be able to explain that the proof depended on a dynamic-origin value.
@@ -48,7 +49,8 @@ enforces this table against the engine's emitted vocabulary.
 | Prefix | Use |
 |---|---|
 | `dynamic.*` | `untyped` and `Dynamic[T]` boundary crossings, unchecked generic leaks, and method calls whose proof depends on dynamic origin. Includes `dynamic.dependency-source.*` (e.g. `gem-not-found`) for the opt-in gem-source-inference path per [ADR-10](../adr/10-dependency-source-inference.md) (analyzer contract: [`docs/internal-spec/dependency-source-inference.md`](../internal-spec/dependency-source-inference.md)). |
-| `static.*` | **Reserved — no implemented identifiers as of this writing.** Static checks that stop short of a proof, including incomplete-inference cutoffs. The budget-cutoff half is tracked by [ADR-41](../adr/41-inference-budget-design.md) (Proposed) and marked at its source in [inference-budgets.md](inference-budgets.md) § "Budget table"; the unguarded-`top`-call half ([special-types.md](special-types.md) § `top`) has no implementation and no ADR. |
+| `static.*` | Static checks that stopped short of a proof, split by *which way* they fell short ([ADR-100](../adr/100-static-diagnostic-family-and-void-origins.md)). **`static.value-use.*`** — a value that demands proof reached a use position: `static.value-use.void` (implemented, see the row below) and `static.value-use.top` (the unguarded-`top`-call half, [special-types.md](special-types.md) § `top`; no implementation and no ADR yet). **`static.incomplete-inference.*`** — inference gave up and widened: the budget-cutoff identifiers (`.recursion`, `.union-size`, …) tracked by [ADR-41](../adr/41-inference-budget-design.md) (Proposed) / [#158](https://github.com/rigortype/rigor/issues/158) and marked at their source in [inference-budgets.md](inference-budgets.md) § "Budget table", authored `:info`, remain deferred with no implemented id. |
+| `static.value-use.void` | An author-declared `-> void` return used in value context (an assignment right-hand side, a call receiver, or a call argument): the value the author said not to rely on was recovered to `top` and used. Direct-dispatch case only ([ADR-100](../adr/100-static-diagnostic-family-and-void-origins.md) WD2; the transitive / ancestor-fallback case is deferred WD4). Authored `:warning`, resolved `:off` by every profile and promoted to `:warning` only by the `use-of-void-value` bleeding-edge feature — a new required diagnostic is an [ADR-50](../adr/50-release-engineering-and-stability-strategy.md) WD1 compatibility change. |
 | `flow.*` | Control-flow narrowing failures, equality and predicate refinement issues, fact-stability violations |
 | `compat.*` | **Reserved — no implemented identifiers as of this writing.** RBS, rbs-inline, and Steep-compatible signature compatibility. A founding-era reservation ([ADR-1](../adr/1-types.md)); the shipped signature-compatibility rules live under `def.override-*` ([ADR-35](../adr/35-override-signature-compatibility.md)) instead. |
 | `call.*` | Method-call-site diagnostics: `call.undefined-method` (the method is not defined on the receiver's statically known class), `call.self-undefined-method` (an implicit-self call resolves to no method on a confidently-closed standalone class, [ADR-24](../adr/24-self-method-call-resolution.md) slice 4 — consumes the engine's own resolution miss, gated to a standalone project class with a complete in-file method surface, ships `:off` pending an external corpus FP gate), `call.unresolved-toplevel` (a top-level implicit-self call resolves against no same-file `def`, `pre_eval:` patch, or `Kernel` / `Object` method, [ADR-34](../adr/34-toplevel-unresolved-self-call-default.md)), `call.wrong-arity` (the positional-argument count matches no signature), `call.argument-type-mismatch` (an argument provably violates the parameter contract), and `call.possible-nil-receiver` (the receiver is `T \| nil` and the method is not defined on `NilClass`). |

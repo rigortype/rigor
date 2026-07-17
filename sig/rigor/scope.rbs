@@ -11,6 +11,7 @@ module Rigor
     attr_reader dynamic_origins: Hash[untyped, Symbol]
     attr_reader local_origins: Hash[Symbol, Symbol]
     attr_reader ivar_origins: Hash[Symbol, Symbol]
+    attr_reader void_origins: Hash[untyped, Inference::VoidOrigin]
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
@@ -38,6 +39,8 @@ module Rigor
     def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
     def run_generation: () -> Object?
     def record_dynamic_origin: (untyped node, Symbol cause) -> Scope
+
+    def record_void_origin: (untyped node, Inference::VoidOrigin origin) -> Scope
 
     class DiscoveryIndex
       attr_reader declared_types: Hash[untyped, Type::t]

@@ -695,6 +695,36 @@ module Rigor
           since: "0.3.0"
         ),
 
+        CheckRules::RULE_VALUE_USE_VOID => Entry.new(
+          id: CheckRules::RULE_VALUE_USE_VOID,
+          summary: "A value recovered from an author-declared `-> void` return is used in value context.",
+          fires_when: [
+            "A call resolves through direct RBS dispatch (the receiver's own resolvable class) to a method " \
+            "whose selected overload declares a `-> void` return.",
+            "That call node sits in a value position: an assignment right-hand side (`x = obj.log(...)`), a " \
+            "call's explicit receiver (`obj.log(...).inspect`), or a call's positional argument.",
+            "The `use-of-void-value` bleeding-edge feature is enabled (the rule resolves `:off` otherwise)."
+          ],
+          does_not_fire_when: [
+            "The void call is a bare statement (statement context) — a `void` result is accepted there.",
+            "The value is a legitimate `top` (an author-declared `-> top` return) or any non-void type — " \
+            "only an author-declared `-> void` is recorded, so a real `top` never fires.",
+            "The `-> void` return was resolved through the Object / user-class ancestor fallback rather than " \
+            "direct dispatch (the transitive / ancestor case is deferred, ADR-100 WD4).",
+            "The `use-of-void-value` bleeding-edge feature is not enabled (the default)."
+          ],
+          suppression: "`# rigor:disable static.value-use.void` on the call line, or " \
+                       "`disable: [\"static.value-use.void\"]` in `.rigor.yml`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :off, balanced: :off, strict: :off },
+          # Recorded only for an author-written `-> void` on the direct-dispatch path — the strongest
+          # possible "do not rely on this return" signal — so a firing is a concrete misuse, not an
+          # inference guess. It ships `:off` behind `bleeding_edge:` per ADR-50 WD1 (a new required
+          # diagnostic is a compatibility change), not for lack of confidence.
+          evidence_tier: :high,
+          since: "0.3.0"
+        ),
+
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(
           id: CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER,
           summary: "A comment uses a suppression marker Rigor does not recognise " \

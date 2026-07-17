@@ -4,6 +4,7 @@ require_relative "../../reflection"
 require_relative "../../type"
 require_relative "../../rbs_extended"
 require_relative "../rbs_type_translator"
+require_relative "../void_origin"
 require_relative "overload_selector"
 
 module Rigor
@@ -96,7 +97,8 @@ module Rigor
             block_type: context.block_type,
             self_type_override: context.self_type_override,
             public_only: context.public_only,
-            scope: context.scope
+            scope: context.scope,
+            call_node: context.call_node
           )
         end
 
@@ -135,23 +137,23 @@ module Rigor
           private
 
           def dispatch_for(receiver:, method_name:, args:, environment:, block_type:, self_type_override: nil, # rubocop:disable Metrics/ParameterLists
-                           public_only: false, scope: nil)
+                           public_only: false, scope: nil, call_node: nil)
             args ||= []
             case receiver
             when Type::Union
               dispatch_union(receiver, method_name, args, environment, block_type, self_type_override,
-                             public_only: public_only, scope: scope)
+                             public_only: public_only, scope: scope, call_node: call_node)
             else
               dispatch_one(receiver, method_name, args, environment, block_type, self_type_override,
-                           public_only: public_only, scope: scope)
+                           public_only: public_only, scope: scope, call_node: call_node)
             end
           end
 
           def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
-                             public_only: false, scope: nil)
+                             public_only: false, scope: nil, call_node: nil)
             results = receiver.members.map do |member|
               dispatch_one(member, method_name, args, environment, block_type, self_type_override,
-                           public_only: public_only, scope: scope)
+                           public_only: public_only, scope: scope, call_node: call_node)
             end
             return nil if results.any?(&:nil?)
 
@@ -159,7 +161,7 @@ module Rigor
           end
 
           def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
-                           public_only: false, scope: nil)
+                           public_only: false, scope: nil, call_node: nil)
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
@@ -173,11 +175,14 @@ module Rigor
               method_definition,
               class_name: class_name,
               kind: kind,
+              method_name: method_name,
               args: args,
               type_vars: type_vars,
               block_type: block_type,
               environment: environment,
-              self_type_override: self_type_override
+              self_type_override: self_type_override,
+              scope: scope,
+              call_node: call_node
             )
           rescue StandardError
             # Defensive: if RBS' definition builder raises on a broken hierarchy (e.g., partially loaded
@@ -318,7 +323,8 @@ module Rigor
 
           # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,
-                                    environment: nil, self_type_override: nil)
+                                    method_name: nil, environment: nil, self_type_override: nil,
+                                    scope: nil, call_node: nil)
             # rubocop:enable Metrics/ParameterLists
             # Slice 4b-3 (ADR-7 § "Slice 4-A/4-B") — read the return-type override through the merger so
             # future plugin / `:rbs_extended` bundles that also assert a `return_type` slot at this call
@@ -348,6 +354,15 @@ module Rigor
             )
             return nil unless method_type
 
+            # ADR-100 WD2/WD3 — the return-typing tier is where `void → top` widens, so it is the one place
+            # that still knows the RBS return was an author-declared `-> void` before the translator erases
+            # it to a plain `top`. Record the recovery on the scope's `void_origins` side-table, keyed by the
+            # call node, so the `static.value-use.void` check rule can fire when this `top` is used in value
+            # context. Recording is gated on `scope` && `call_node` being present, which naturally scopes it
+            # to the *direct*-RBS dispatch (the receiver's own resolvable class): the user-class / Object
+            # ancestor fallback nils both out (WD4 defers that, murkier, surface).
+            record_void_recovery(method_type, scope, call_node, [class_name, method_name, kind])
+
             full_type_vars = compose_block_type_vars(method_type, type_vars, block_type)
 
             RbsTypeTranslator.translate(
@@ -356,6 +371,24 @@ module Rigor
               instance_type: instance_type,
               type_vars: full_type_vars
             )
+          end
+
+          # Record the `void → top` recovery when the selected overload declares `-> void` and both `scope` and
+          # `call_node` are present (the direct-dispatch path). `void_site` is the `[class_name, method_name,
+          # kind]` triple the {VoidOrigin} carries.
+          def record_void_recovery(method_type, scope, call_node, void_site)
+            return unless scope && call_node && void_return?(method_type)
+
+            class_name, method_name, kind = void_site
+            scope.record_void_origin(
+              call_node,
+              VoidOrigin.new(class_name: class_name, method_name: method_name, kind: kind)
+            )
+          end
+
+          def void_return?(method_type)
+            fun = method_type.type
+            fun.respond_to?(:return_type) && fun.return_type.is_a?(RBS::Types::Bases::Void)
           end
 
           # ADR-7 § "Slice 4-A/4-B" — folds the `RBS::Extended` `return:` directive (and any other

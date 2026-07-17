@@ -84,6 +84,41 @@ RSpec.describe Rigor::Scope do
     end
   end
 
+  describe "void-value origins (ADR-100 WD3)" do
+    let(:call_node) { Prism.parse("puts 1").value.statements.body.first }
+    let(:origin) { Rigor::Inference::VoidOrigin.new(class_name: "VoidBox", method_name: :log, kind: :instance) }
+
+    it "records and reads an origin keyed by the introduction-site node identity" do
+      s = scope.record_void_origin(call_node, origin)
+      expect(s.void_origins[call_node]).to eq(origin)
+      expect(s).to equal(scope) # mutates the shared advisory table in place, like record_dynamic_origin
+    end
+
+    it "is identity-keyed (a value-equal but distinct node does not collide)" do
+      twin = Prism.parse("puts 1").value.statements.body.first
+      scope.record_void_origin(call_node, origin)
+      expect(scope.void_origins[twin]).to be_nil
+    end
+
+    # Teeth for the `==` / `#hash` exclusion (ADR-100 WD3, mirroring dynamic_origins): recording a void
+    # origin must NOT fork a flow-dedup or cache key. Two independent-but-equal scopes (each with its own
+    # fresh advisory table, as fresh method-body entry scopes get) must stay `==` / hash-equal after one
+    # records a void origin. Reverting the exclusion (adding void_origins to `==` / `#hash`) fails this pair.
+    it "is ignored by == and hash (advisory metadata, never varies a flow decision)" do
+      base = described_class.empty
+      with_void = described_class.empty
+      with_void.record_void_origin(call_node, origin)
+      expect(with_void).to eq(base)
+      expect(with_void.hash).to eq(base.hash)
+    end
+
+    it "threads the table by reference through #join (never joined / dropped)" do
+      recorded = scope.record_void_origin(call_node, origin)
+      joined = recorded.join(scope)
+      expect(joined.void_origins[call_node]).to eq(origin)
+    end
+  end
+
   describe "declaration-sourced provenance (ADR-58 WD1)" do
     let(:type) { Rigor::Type::Combinator.union(Rigor::Type::Combinator.nominal_of("P"), Rigor::Type::Combinator.constant_of(nil)) }
 

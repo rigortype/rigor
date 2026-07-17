@@ -18,96 +18,79 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.2.9 published 2026-07-11.** master accumulates toward **v0.3.0**. Both mandatory pieces are
-  done (deprecation clearance #94, perf recalibration #95), so the cut is already shippable — what
-  follows is what it *earns*.
-- **v0.3.0's axis is type-inference quality** (triaged 2026-07-17): 12 issues open, 5
-  `ready-for-agent`. LSP work lives in **`v0.4.x`** — improved gradually across the series, not
-  pinned to one cut. Unmilestoned issues are the healthy resting state for demand-gated work.
-- `make verify` and `make docs-check` clean; master and `origin/master` agree.
+- **v0.3.0 is nearly assembled.** The 2026-07-17 triage's implementation wave is done: ten issues
+  closed this cycle (#161 #164 #172 #174 #176 #177 #178 + the config batch), PRs #175 #179–#185 all
+  merged. Milestone open: **#121** (ongoing fold category, one slice landed), **#162** (direct-void
+  slice, see below), **#173** (rbs-inline, slice 1 of 5 in PR #186). `[Unreleased]` holds **63
+  bullets** — sealing them is the release step `make verify` cannot rescue; budget for it.
+- **PR #186 is open and awaiting review**: the ADR-93 WD1 default flip (`require_magic_comment` →
+  `false`, annotation-presence-gated). Verified standalone: 18 plugin-spec examples, full
+  `make verify` green on the branch. It only affects projects that already load the plugin.
+- ADR-100 landed (`f6112ae3`): the `static.*` family split, `static.value-use.void` as first id, the
+  `void_origins` interface. #130's cut-scoped piece landed in #184; the issue left the milestone,
+  keeping only deferred follow-ons.
+- `make verify` and `make docs-check` clean on master; master and `origin/master` agree.
 
-## Next session — implement, then release
+## Next session — three tracks, in this order
 
-**1. Implement the v0.3.0 set.** `gh issue list --milestone v0.3.0`. Five are `ready-for-agent`.
+**1. Check the in-flight #162 void slice.** A background agent was implementing ADR-100 WD2+WD3
+(branch `static-value-use-void`, PR titled around `static.value-use.void`) when this session ended.
+If its PR exists: verify it the way this cycle verified every fleet PR — read the diff against the
+brief on the issue, confirm the spec teeth claim, check `bleeding_edge:` gating and that
+statement-context stays silent. If no branch/PR appeared, the slice is fully specified: ADR-100 WD2
++ WD3 and the 2026-07-18 issue comment on #162 are the brief; relaunch.
 
-Two of the four inference-quality bugs found 2026-07-17 have landed: **#174** (`(?)` return-discard,
-PR #175) and **#176** (mutator now retracts the `non-empty-array` refinement, PR #179 — reproducer
-re-verified clean on master, pre-mutation narrowing intact). **#178** was closed as intended
-behaviour — see the decided list below. That leaves one from the batch still open:
+**2. #173 slices 2–5 — the auto-wire. This is the careful one; do not fleet it.** Slice 1 (the
+default flip) is PR #186. What remains, with the design already settled and the blast radius already
+measured this session:
 
-- **#177** — `$+` is bound to `String` on every truthy match edge but is nil when a successful
-  match's groups are all optional. False-negative side; small. `ready-for-agent`.
-- **#172** — see the rbs-inline chain below. `ready-for-agent`.
+- **The shape is decided**: the loader stays generic; auto-wiring is a *config-level* policy. Filter
+  `enabled: false` entries in `Plugin::Loader#resolve_entries` (an entry-level key — the maintainer
+  chose the `pluginEntry.enabled` form over a dedicated top-level key or a `disable_plugins:` list),
+  and inject `{gem: "rigor-rbs-inline", config: {require_magic_comment: false}}` from the
+  **`Configuration.load` path only** (the real-project route) — NOT `Configuration#initialize`, or
+  every bare `Configuration.new` in the suite auto-wires. Gate on: not explicitly listed (gem name
+  `rigor-rbs-inline` *or* manifest id `rbs-inline` — the loader raises on a duplicate id), not
+  disabled, and upstream resolvable (`Gem::Specification.find_by_name("rbs-inline")`, a probe with no
+  load side effect).
+- **The measured blast radius** (a loader-level prototype was built, run, and reverted this session):
+  `make verify` fails ~30 examples across 6 files — `plugin/loader_spec` (18; stays untouched once
+  auto-wire moves out of the loader), `analysis/plugin_fact_fingerprint_spec` (8),
+  `integration/plugins/activerecord_plugin_spec`, `integration/examples/routes_plugin_spec`,
+  `integration/precision_snapshot_spec`, `ractor_readiness_spec`. Each integration failure must be
+  **adjudicated individually**: stale assertion of the plugin-less world (update) vs real regression
+  (fix). Do not bulk-update; this cycle's lesson is that the two look identical at a glance.
+- Slice 3: `enabled` (boolean) on `pluginEntry` in `schemas/rigor-config.schema.json` (ADR-99 makes
+  the schema a source of truth; the key becomes public vocabulary). Slice 4: the WD3 standalone
+  residual — an `rbs.coverage.*`-style `:info` hint when annotation-shaped comments are seen with no
+  synthesizer available (do NOT make `rbs-inline` a core dependency; ADR-0). Slice 5: flip ADR-93 to
+  Accepted with WD2/WD3 resolved in its text + the `overview.md` divergence marker updated.
+- Corpus gate at the end: mail / kramdown / haml / liquid byte-identical, herb keeps its −3 wins
+  (the WD4 corpora, all under `~/repo/ruby/rigor-survey/`).
 
-The other three `ready-for-agent`: **#121** (FP-safe builtin/stdlib folds — the
-`rigor-type-coverage-uplift` skill is the procedure), **#131** (Data/Struct value folding), **#155**
-(subclass-aware gating for `call.self-undefined-method`).
+**3. Release — seal the CHANGELOG.** 63 `[Unreleased]` bullets. The `rigor-release-prep` skill is
+the flow; **version bumps and `rake release` stay user-gated** — land entries, stop, and let the
+user drive the cut-over (AGENTS.md § Release Cadence).
 
-The rest need a decision first. **#126** (length-range carrier) has a design pass attached whose own
-recommendation is *don't build it* — thin yield, and the common upper-bound idiom mutates the
-receiver inside its own guard; #176 was the prerequisite it surfaced and has now shipped. Two touch the
-ADR-50 v1.0-frozen diagnostic vocabulary, so their rule ids and default severities are deliberate
-choices: **#161** (a total RBS env-build failure exits 0 with `Dynamic[top]` project-wide and no
-diagnostic) and **#162** (the `static.*` family + a `void_origins` side-table). **#120** (mature
-`--incremental` toward default-capable) is the perf headline; its acceptance bar already exists —
-`--verify-incremental` (incremental == full `--no-cache`, byte-identical), wired into CI.
+## Decided this cycle — do not re-litigate
 
-**2. Release — and budget for the CHANGELOG.** `[Unreleased]` holds **57 bullets**. Sealing them is
-the highest-value, most-skipped step of `rigor-release-prep`, it needs cycle-wide context, and it is
-the one release step `make verify` cannot rescue. Plan for it rather than discovering it at the cut.
-**Version bumps and `rake release` stay user-gated** — land entries, stop, and let the user drive the
-cut-over (AGENTS.md § Release Cadence).
-
-## The rbs-inline chain — ordering is load-bearing
-
-**#172 → #173.** Per ADR-93 WD1a and the ADR-57 protocol, the artifact the ADR-93 default flip
-surfaces on herb is fixed at root **before** the flip lands.
-
-**#172 is `ready-for-agent`, and its original framing was wrong.** It claimed two soundness calls had
-no design; both landed 2026-06-12 (`0cfa4f55`, `b6affe87`). The real gap is one recognition upgrade —
-the pattern operand is matched only as a syntactic `Prism::RegularExpressionNode`, while herb's is a
-constant the typer already folds to a value-pinned `Constant[Regexp]`. Validated with a throwaway
-patch: herb 12 → 8 diagnostics, the −3 wins kept, four corpora byte-identical. Full brief on the
-issue.
-
-**#173 is the user's call, not an agent's.** The default flip is mechanical; WD2 (default-wiring the
-bundled plugin) is a partial reversal of the ADR-27/ADR-31 auto-load deferral with an open opt-out
-schema, and WD3 (the standalone residual) is a second open choice. ADR-93 is still **Proposed**.
-
-Standing context: ADR-94 records that rbs 4.0 absorbed the reader (`RBS::InlineParser`), which would
-retire WD2 and WD3 outright. Deferred behind the `rbs >= 3.0, < 5.0` floor (ADR-79); **not** planned
-for v0.3.0. ADR-94's WD2 text was corrected 2026-07-17 (PR #175) — its "live crash" named the wrong
-site, symptom, and trigger, though the defect was real and is now fixed.
-
-## Decided this cycle — do not re-propose
-
-- **#152 (widen the `&&`/`||` polarity gate) is evidence-rejected and demand-gated**, deliberately
-  off v0.3.0. The measured evaluation is on the issue: zero drift across a 14-project corpus, the
-  widened edges fired **once** in the whole corpus, and that firing (kramdown's `ESCAPE_MAP[m] || m`)
-  would have made the type *wrong* — it rests on the deliberate nil-free read of a dynamic-key Hash
-  lookup, which `5d5a9359` now documents as optimism, not proof, with an explicit rule that certainty
-  judgments may not rest on it (the #178 resolution — see below). `a || b` is the idiom by which an
-  author hedges against exactly that optimism; ADR-78 WD1 drew this line once already. Re-open only on
-  a demand signal, and read the issue's preconditions first. Two findings outlive the rejection:
-  **nothing in the 7976-example suite pins the changed edges**, and the widening would re-create the
-  b7c155fb two-typer divergence.
-- **#178 (constant hash + non-static key → nil-free union) is closed as intended behaviour**, not a
-  spec violation as first filed. The shape tier defers correctly; the nil-free answer is `RbsDispatch`
-  deliberately not honouring core RBS's `%a{implicitly-returns-nil}`, because honouring it costs 25
-  false positives on Rigor's own `lib` (`Hash.new(0)` / `default_proc` / non-empty `Array#max`).
-  `5d5a9359` records the optimism in the spec and bounds it. Do not re-file it as a bug.
-- **#130's slice 5 is blocked by #156**, unmilestoned on purpose — its own text says it is gated on
-  general return-inference precision. v0.3.0 carries only #130's two unblocked follow-ons.
-- **#162 creates the `static.*` family that #158 (v1.0.0, inference budgets) reserves its cutoffs
-  under.** Family first is the right order; #158 stays demand-deferred either way.
+- **The `enabled: false` opt-out shape** (pluginEntry key) — maintainer-decided 2026-07-18, over a
+  dedicated top-level key and a `disable_plugins:` list.
+- **#152** (widen `&&`/`||` polarity) is evidence-rejected, demand-gated, off the milestone — the
+  measured evaluation is on the issue. **#126** (length-range carrier): its own design pass says
+  don't build; demand-gated. **#120** (`--incremental` default): opt-in this cut; the gap analysis
+  is on the issue, and the one human call left is ADR-45-cache vs incremental precedence. **#178**
+  closed as intended behaviour (`5d5a9359` documents the optimism and bars certainty from resting on
+  it). **#155** closed as already-implemented since `01491c63`.
+- **#130 deferred remainder** (RBS-only ancestors + singleton) needs a corpus FP-acceptance decision
+  first — it would fire on user overrides of library methods. Slice 5 stays blocked by #156.
 
 ## Waiting on the user
 
+- **Review/merge PR #186** (the rbs-inline default flip; slice 2 builds on it) and the dependabot
+  rubocop PR #86 stays deliberately held (upstream autocorrect bug).
 - **Publish the staged `ruby/rbs` upstream fix** — branch `widen-strscan-resolv-stdlib-sigs` in
-  `references/rbs` (widens `StringScanner#[]`, `Resolv#initialize`); push + upstream PR are the
-  user's action. Tracked as #159, deliberately unmilestoned: it cannot ship in our cut.
+  `references/rbs`; push + upstream PR are the user's action. Tracked as #159.
 - The upstream `rbs-inline` RDoc fix ([soutaro/rbs-inline#249](https://github.com/soutaro/rbs-inline/pull/249))
   is open under the user's fork; nothing to do repo-side until upstream responds.
-- **rigor-rs:** the reserve pipeline (ADR-99) has its first reservation — `rigor_rs.ruby` is declared
-  in our schema, so the port can implement against it and its vendored copy stops rejecting its own
-  key on the next submodule bump.
+- **rigor-rs:** `rigor_rs.ruby` is reserved in our schema (ADR-99); the port implements against it.

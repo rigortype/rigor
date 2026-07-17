@@ -113,6 +113,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-97 | [Index entries are not summaries: the ADR-index budgets and their gate](97-adr-index-budgets.md) | Accepted (implemented 2026-07-17; both ADR indexes compressed to their declared contract and gated by spec/docs/agent_index_spec.rb) |
 | ADR-98 | [Development-flow document roles: handoff, issues, changelog](98-development-flow-document-roles.md) | Accepted (implemented 2026-07-17; backlog migrated to GitHub Issues, ROADMAP.md dissolved, handoff capped and gated) |
 | ADR-99 | [The config schema is a source of truth: `.rigor.yml` tiers and the reserve pipeline](99-config-schema-authority.md) | Accepted (implemented 2026-07-17; schema named a source of truth, `rigor_rs:` reserved, nested + reserved + URL gates added) |
+| ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (family shape decided; direct-void-use slice ready-for-agent, transitive case + `static.incomplete-inference.*` budget ids deferred) |
 
 ## Adding a New ADR
 

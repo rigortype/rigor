@@ -109,6 +109,7 @@ comparison) appears nowhere else in this index.
 | 2026-06-10 | [キャッシュ機構監査 — ディスク使用量と warm-run ロードコスト](20260610-cache-disk-runtime-audit.md) |
 | 2026-06-13 | [プラグインインターフェイス最終レビュー — v1.0 凍結前の BC-break 機会監査](20260613-plugin-interface-bc-review.md) |
 | 2026-06-27 | [Corpus cold/warm re-profile — v0.2.6 new-bottleneck check](20260627-corpus-cold-warm-reprofile.md) |
+| 2026-07-18 | [CI テスト時間の伸び — 要因分解（instance gacha vs テスト増加 vs binpacker）、カテゴリ分割・有料runner の否定、md-only PR スキップの落としどころ](20260718-ci-test-time-growth-attribution.md) |
 
 ## Process & meta
 

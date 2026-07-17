@@ -6,9 +6,12 @@ on:
     # A Markdown-only push (ADRs, notes, CHANGELOG, READMEs, skills) does
     # not change analysable code, so skip the full suite for it. Mixed
     # commits still run — paths-ignore only skips when EVERY changed file
-    # matches. Applied to `push` only: `pull_request` stays unfiltered so
-    # the required "CI required" fan-in always reports on a PR (a paths-
-    # filtered required check hangs as pending and blocks the merge).
+    # matches. Applied to `push` only: `pull_request` stays unfiltered at
+    # the trigger level, because a paths-filtered required check hangs
+    # pending and blocks the merge. The equivalent PR-side skip is done
+    # downstream by the `changes` job, which gates the code jobs on whether
+    # any non-Markdown file changed while the "CI required" fan-in still
+    # always reports.
     paths-ignore:
       - "**/*.md"
   pull_request:
@@ -32,9 +35,60 @@ permissions:
   contents: read
 
 jobs:
+  # ── 0. Change detection — skip the code suite for md-only PRs ────
+  # A pull request that touches only *.md gains nothing from the RSpec
+  # suite, self-check, lint, or the RBS matrix — the same reasoning that
+  # lets a Markdown-only *push* skip the whole workflow (paths-ignore
+  # above). But `pull_request` cannot use paths-ignore: a paths-filtered
+  # required check hangs pending and blocks the merge. So this job always
+  # runs, and the code jobs gate on its `code` output. Non-PR events
+  # (master push) always run the suite. On any detection error we fail
+  # safe to `code=true` — never skip on doubt (false-positive discipline:
+  # a skipped suite that should have run is worse than a redundant run).
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Detect non-Markdown changes
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Non-PR event — running the full suite."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
+            echo "diff failed — failing safe to the full suite."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed files:"
+          printf '%s\n' "$changed"
+          non_md=$(printf '%s\n' "$changed" | grep -vE '\.md$' || true)
+          if [ -n "$non_md" ]; then
+            echo "Non-Markdown files changed — running the full suite."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Markdown-only PR — skipping the code suite."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── 1. RSpec suite (via binpacker) ──────────────────────────────
   test:
     name: Tests (Ruby ${{ matrix.ruby }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -81,6 +135,8 @@ jobs:
   # ── 2. RBS compatibility (3.x + 4.x) ────────────────────────────
   rbs-compat:
     name: RBS compatibility (RBS ${{ matrix.rbs }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -146,6 +202,8 @@ jobs:
   # ── 3. RuboCop ───────────────────────────────────────────────────
   lint:
     name: Lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -185,6 +243,8 @@ jobs:
   # Both must pass for the required fan-in job to succeed.
   self-check:
     name: Self-check (${{ matrix.cache }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -297,9 +357,13 @@ jobs:
   # still executes when one variant failed, surfacing a discrepancy).
   self-check-diff:
     name: Self-check diff (warm == cold)
-    needs: self-check
+    needs: [changes, self-check]
     runs-on: ubuntu-latest
-    if: always() && needs.self-check.result != 'cancelled'
+    # Skip on a Markdown-only PR (self-check was skipped, so there are no
+    # artifacts to diff). Otherwise run whenever self-check was not
+    # outright cancelled, so a discrepancy still surfaces when one variant
+    # failed.
+    if: always() && needs.changes.outputs.code == 'true' && needs.self-check.result != 'cancelled'
     steps:
       - name: Download warm diagnostics
         uses: actions/download-artifact@v8
@@ -329,12 +393,13 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [test, rbs-compat, lint, self-check, self-check-diff]
+    needs: [changes, test, rbs-compat, lint, self-check, self-check-diff]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: All checks passed
         env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           TEST_RESULT: ${{ needs.test.result }}
           RBS_COMPAT_RESULT: ${{ needs.rbs-compat.result }}
           LINT_RESULT: ${{ needs.lint.result }}
@@ -342,8 +407,16 @@ jobs:
           SELF_CHECK_DIFF_RESULT: ${{ needs.self-check-diff.result }}
         run: |
           failed=0
+          # Change detection must always succeed — it is what decides
+          # whether the gated jobs were legitimately skipped.
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "Change detection did not succeed (result: $CHANGES_RESULT)"
+            failed=1
+          fi
+          # A gated job that was skipped (Markdown-only PR) is acceptable;
+          # only an outright failure or cancellation blocks the merge.
           for job_result in "$TEST_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT"; do
-            if [[ "$job_result" != "success" ]]; then
+            if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1
             fi

@@ -149,6 +149,21 @@ module Rigor
     PATH_KEYS = %w[paths signature_paths pre_eval].freeze
     private_constant :PATH_KEYS
 
+    # Top-level keys this implementation DECLARES but never reads — see `docs/internal-spec/config.md`
+    # § "Reserved namespaces" and ADR-99.
+    #
+    # A sibling implementation (`rigor-rs`, which vendors our schema rather than keeping its own)
+    # groups keys for concepts we do not have under its own namespace, so one `.rigor.yml` feeds both.
+    # Such a key answers to the SCHEMA TIER ONLY: it is type-checked where it is written, and here it
+    # is never read, never validated, never coerced, and never an error however invalid its value.
+    #
+    # That is already the emergent behaviour — `#initialize` fetches each key it owns and never
+    # enumerates the rest — so this constant does not gate the runtime. It exists to make the
+    # reservation FINDABLE by the next person adding config validation (#166 is exactly that), and to
+    # give the schema-parity spec something to key on: a reserved namespace is by definition absent
+    # from DEFAULTS, so the DEFAULTS-driven schema gate can never see it.
+    RESERVED_NAMESPACES = %w[rigor_rs].freeze
+
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
                 :cache_validation, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zenwerk/rigor/raw/master/schemas/rigor-config.schema.json",
+  "$id": "https://github.com/rigortype/rigor/raw/master/schemas/rigor-config.schema.json",
   "title": "Rigor configuration",
   "description": "Configuration schema for `.rigor.yml` and `.rigor.dist.yml`. The committed default lives in `.rigor.dist.yml`; per-developer overrides live in `.rigor.yml` (gitignored). Path-bearing keys (`paths`, `signature_paths`, `plugins_io.allowed_paths`, `includes`) resolve relative to the config file that declares them. The full surface is documented at docs/handbook/01-getting-started.md.",
   "type": "object",
@@ -74,6 +74,18 @@
         "path": {
           "description": "Cache root directory. Default `.rigor/cache`.",
           "type": "string"
+        },
+        "max_bytes": {
+          "description": "LRU eviction cap for the cache directory, in bytes (ADR-54 WD3). Default 268435456 (256 MB). `null` disables eviction entirely, restoring the pre-ADR-54 unbounded store.",
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "default": 268435456
+        },
+        "validation": {
+          "description": "How the cache decides a file is unchanged (ADR-87). `stat` (default) compares size + nanosecond mtime + inode and only re-hashes a file whose stat moved; `digest` re-hashes every file every run. Both keep the content hash as the sole change authority — `stat` only skips the hash when the stat proves the file untouched. `RIGOR_STRICT_VALIDATION=1` forces `digest` for one run and wins over this key.",
+          "type": "string",
+          "enum": ["stat", "digest"],
+          "default": "stat"
         }
       }
     },
@@ -153,12 +165,12 @@
       }
     },
     "parallel": {
-      "description": "ADR-15 Phase 4c — opt-in parallel analysis. When `workers` is greater than zero, `rigor check` dispatches per-file analysis across N Ractor workers. Default `0` keeps the sequential coordinator path. The CLI's `--workers=N` flag and the `RIGOR_RACTOR_WORKERS` env var both override this setting; precedence is CLI > env > config > 0.",
+      "description": "ADR-15 — opt-in parallel analysis. When `workers` is greater than zero, `rigor check` dispatches per-file analysis across N worker processes (the fork-based pool is the active backend; the Ractor pool is deferred). Default `0` keeps the sequential path. The CLI's `--workers=N` flag and the `RIGOR_RACTOR_WORKERS` env var both override this setting; precedence is CLI > env > config > 0. Applies to `--incremental` re-checks as well as full runs.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "workers": {
-          "description": "Number of Ractor workers. `0` (default) runs sequentially; `N > 0` dispatches per-file analysis across N workers. Pool mode is currently bound by file-content triviality (Phase 4b.x worker-side env-build stability is the next sub-phase).",
+          "description": "Number of parallel workers. `0` (default) runs sequentially; `N > 0` dispatches per-file analysis across N forked workers.",
           "type": "integer",
           "minimum": 0,
           "default": 0
@@ -184,6 +196,17 @@
           "description": "Explicit path to a `Gemfile.lock` (O4 Layer 3 slice 1). When set (or auto-detected next to the project root via the `auto_detect:` flag), Rigor parses the lockfile and FILTERS the bundle-discovered `sig/` directories so only gems whose `(name, version, platform)` matches a lockfile entry are admitted. Stale gems left in the bundle install tree (out-of-band installs, version drift after `bundle update`) are silently dropped.",
           "type": ["string", "null"],
           "default": null
+        }
+      }
+    },
+    "rigor_rs": {
+      "description": "RESERVED — declared here, never read by this implementation. A sibling implementation (`rigor-rs`) groups its own keys under this namespace so one `.rigor.yml` feeds both; reference-schema keys stay top-level for parity. This implementation type-checks the shape at schema level ONLY: it never reads, validates, or coerces the value, and never errors on it however invalid. The reservation is authoritative, so an undeclared key here is an error — a sibling key is reserved in this schema BEFORE the sibling implements it. See docs/internal-spec/config.md and ADR-99.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ruby": {
+          "description": "The sibling's Ruby-sidecar coverage posture. One of the reserved keywords `require` / `auto` / `off`, or a path to a ruby binary (any other string is read as a path; use a path form such as `./off` to name a ruby colliding with a keyword). Deliberately unconstrained beyond `string` — an enum would reject every path form. This implementation has no sidecar concept and ignores the key entirely.",
+          "type": "string"
         }
       }
     },

@@ -1,14 +1,17 @@
 # ADR-97 — Index entries are not summaries: the ADR-index budgets and their gate
 
-Status: **Accepted, 2026-07-17 — implemented.** `CLAUDE.md`'s ADR list becomes a
-**premise set** — the foundation / conceptual core plus the standing policies, 10
-entries against a cap of 12, everything else reached via the README (file:
-134,688 → 16,082 bytes). `docs/adr/README.md` stays the complete index and its
-status column is restored to a ≤ 200-character status (141,169 → 17,061), with
-five long-standing blank rows that had been silently breaking the table's
-markdown rendering removed. `rigor-prior-art` is repointed at the ADR bodies, the
-`rigor-adr-author` density instruction is replaced by the membership rule + caps,
-and `spec/docs/agent_index_spec.rb` gates all of it under the existing
+Status: **Accepted, 2026-07-17 — implemented.** The agent contract's ADR list
+becomes a **premise set** — the foundation / conceptual core plus the standing
+policies, 10 entries against a cap of 12, everything else reached via the README.
+It lives in `AGENTS.md`, which `CLAUDE.md` pulls in with `@AGENTS.md`; the two
+files together fell from 163,981 → ~10,900 bytes of per-session context, and now
+carry the contract, which the auto-loaded file previously did not.
+`docs/adr/README.md` stays the complete index, its status column restored to a
+≤ 200-character status (141,169 → 17,061), with five long-standing blank rows
+that had been silently breaking the table's markdown rendering removed.
+`rigor-prior-art` is repointed at the ADR bodies, the `rigor-adr-author` density
+instruction is replaced by the membership rule + caps, and
+`spec/docs/agent_index_spec.rb` gates all of it under the existing
 `make docs-check`.
 
 Grounding: the measurements in § Context; commit `db8d01bf` (2026-05-29,
@@ -20,12 +23,14 @@ README's status cells recorded in § Context.
 
 Rigor keeps two ADR indexes, and both had stopped being indexes.
 
-**`CLAUDE.md`** is loaded into context at the start of every session. On
-2026-07-17 it measured **134,688 bytes (~34k tokens), of which the ADR bullet
-list was 120,260 — 89%**. The file's own header calls it "a navigation index
-that points at the documents an agent typically needs", and the ADR section's
-preamble already named `docs/adr/README.md` "**The canonical index**". The
-bullets contradicted both.
+**`CLAUDE.md`** is loaded into context at the start of every session — it, and
+not `AGENTS.md`, which Claude Code does not read. On 2026-07-17 it measured
+**134,688 bytes (~34k tokens), of which the ADR bullet list was 120,260 — 89%**.
+The file's own header calls it "a navigation index that points at the documents
+an agent typically needs", and the ADR section's preamble already named
+`docs/adr/README.md` "**The canonical index**". The bullets contradicted both.
+Meanwhile the *contract* — the Flake mandate, the verification protocol, the
+commit conventions — sat in `AGENTS.md` and never loaded at all.
 
 **`docs/adr/README.md`** measured **141,169 bytes across 98 rows**, its status
 cells averaging 1,420 characters and peaking at 5,195 (ADR-82). That column is
@@ -107,11 +112,12 @@ compression, applied by hand and left to instruction, regressed 8.7× in seven
 weeks — while the same ratchet quietly did the same thing to the README. The gate
 is part of this decision, not a follow-up to it.
 
-### WD1 — `CLAUDE.md`: a premise set, not an index
+### WD1 — the contract carries a premise set, not an index
 
-`CLAUDE.md` is loaded **unconditionally**, before the task is known, so it does
-not get an index at all. It lists only the ADRs an agent would get wrong
-*without knowing to look them up* — two classes:
+The contract (`AGENTS.md`, which `CLAUDE.md` pulls in with `@AGENTS.md` — Claude
+Code reads `CLAUDE.md`, not `AGENTS.md`) is loaded **unconditionally**, before
+the task is known, so it does not get an index at all. It lists only the ADRs an
+agent would get wrong *without knowing to look them up* — two classes:
 
 - **Foundation and conceptual core** (ADR-0–5): what Rigor is. The README's own
   "How to Read" already draws this line — ADR-0 the foundation, ADR-1–3 the
@@ -210,9 +216,9 @@ proportional is precisely the axis an index does not have.
 
 Positive:
 
-- `CLAUDE.md` 134,688 → 16,082 bytes (ADR list: 120,260 → ~1,300); ~30k tokens
-  returned to every session. The residual ~14 KB is the spec/skills navigation
-  tables, which are the file's actual job.
+- `CLAUDE.md` + `AGENTS.md` 163,981 → ~10,900 bytes of per-session context
+  (ADR list: 120,260 → ~1,300); ~37k tokens returned to every session — and the
+  contract now loads, which it did not before.
 - `docs/adr/README.md` 141,169 → 17,061 bytes (8.3×), its table renders again,
   and its status column is now derived from each ADR's own Status block — so the
   ADR-48 / ADR-73 class of staleness has one fewer place to live.

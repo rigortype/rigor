@@ -4,10 +4,11 @@
 #
 # Both had drifted into carrying a dense per-ADR essay that merely restates the ADR body:
 #
-#   - `CLAUDE.md` is loaded into context at the start of every session, so its list is paid for by every
-#     session regardless of relevance. It is a **premise set**, not an index: only the ADRs an agent
-#     would otherwise get wrong without knowing to look them up (the foundation / conceptual core, and
-#     the standing policies). Every other ADR is a lookup, reached via docs/adr/README.md.
+#   - `AGENTS.md` is the contract, loaded into every session (Claude Code reads CLAUDE.md, which pulls
+#     it in with `@AGENTS.md`), so its ADR list is paid for by every session regardless of relevance.
+#     It is a **premise set**, not an index: only the ADRs an agent would otherwise get wrong without
+#     knowing to look them up (the foundation / conceptual core, and the standing policies). Every
+#     other ADR is a lookup, reached via docs/adr/README.md.
 #   - `docs/adr/README.md` is the complete index, and its third column is headed **Status**. That
 #     README's own "How to Read" declares the contract: `Accepted` / `Proposed` / `Superseded`, plus a
 #     parenthetical for an in-flight implementation. It is a status, not a summary.
@@ -21,7 +22,7 @@
 
 require "spec_helper"
 
-AGENT_INDEX_CLAUDE_MD = File.expand_path("../../CLAUDE.md", __dir__)
+AGENT_INDEX_AGENTS_MD = File.expand_path("../../AGENTS.md", __dir__)
 AGENT_INDEX_ADR_README = File.expand_path("../../docs/adr/README.md", __dir__)
 AGENT_INDEX_ADR_GLOB = File.expand_path("../../docs/adr/[0-9]*.md", __dir__)
 
@@ -29,7 +30,7 @@ AGENT_INDEX_ADR_GLOB = File.expand_path("../../docs/adr/[0-9]*.md", __dir__)
 # genuinely needs more, move the cap in ADR-97 rather than exempting an entry here.
 AGENT_INDEX_TOPIC_MAX = 100
 
-# CLAUDE.md's premise set is 10 today (ADR-0..5 + the four standing policies). The cap is the point, not
+# AGENTS.md's premise set is 10 today (ADR-0..5 + the four standing policies). The cap is the point, not
 # the number: adding an 11th or 12th premise should cost a deliberate argument, because every session
 # pays for it. Growing past this means a new *standing policy* landed, which is rare — a new ADR
 # normally adds nothing here at all. If a 13th genuinely earns its place, move the cap in ADR-97.
@@ -47,7 +48,7 @@ AGENT_INDEX_ADR_ROW = /^\| ADR-(\d+) \| \[.+?\]\((\d+-[^)]+\.md)\) \| (.*?) \|\s
 # The status vocabulary docs/adr/README.md's "How to Read" declares.
 AGENT_INDEX_STATUS_WORD = /\A(?:Accepted|Proposed|Superseded)\b/
 
-# Progress vocabulary that belongs in the README's status column, never in the CLAUDE.md index topic. An
+# Progress vocabulary that belongs in the README's status column, never in the AGENTS.md premise topic. An
 # index entry names a subject; it does not track implementation state (which drifts — a second copy of
 # the status is exactly what went stale on ADR-48 and ADR-73 before ADR-97).
 #
@@ -60,8 +61,8 @@ AGENT_INDEX_PROGRESS_WORDS =
   /\b(?:implemented|landed|shipped|partially|in flight)\b|\bslice \d|\bwd\d|\d{4}-\d{2}-\d{2}/i
 
 module AgentIndexHelpers
-  def claude_md_adr_bullets
-    File.read(AGENT_INDEX_CLAUDE_MD, encoding: "utf-8").each_line.filter_map do |line|
+  def agents_md_adr_bullets
+    File.read(AGENT_INDEX_AGENTS_MD, encoding: "utf-8").each_line.filter_map do |line|
       next unless (m = line.chomp.match(AGENT_INDEX_BULLET))
 
       { number: m[1].to_i, slug: m[2], topic: m[3].strip }
@@ -80,10 +81,10 @@ end
 RSpec.describe "ADR index budgets (ADR-97)" do
   include AgentIndexHelpers
 
-  let(:bullets) { claude_md_adr_bullets }
+  let(:bullets) { agents_md_adr_bullets }
   let(:readme) { adr_readme_entries }
 
-  describe "CLAUDE.md ADR premise set" do
+  describe "AGENTS.md ADR premise set" do
     it "lists each premise once" do
       expect(bullets).not_to be_empty
       expect(bullets.map { |b| b[:number] }.tally.select { |_, c| c > 1 }).to be_empty
@@ -92,7 +93,7 @@ RSpec.describe "ADR index budgets (ADR-97)" do
     it "stays within the #{AGENT_INDEX_PREMISE_MAX}-entry cap" do
       listed = bullets.map { |b| "ADR-#{b[:number]}" }.join(", ")
       expect(bullets.size).to be <= AGENT_INDEX_PREMISE_MAX,
-                              "CLAUDE.md is loaded every session, so its ADR list is a premise set, not " \
+                              "AGENTS.md loads into every session, so its ADR list is a premise set, not " \
                               "an index (ADR-97 WD1):\nonly the ADRs an agent would get wrong without " \
                               "knowing to look them up — the foundation / conceptual core, and the " \
                               "standing policies in force. Every other ADR is a lookup and belongs only " \
@@ -104,7 +105,7 @@ RSpec.describe "ADR index budgets (ADR-97)" do
       over = bullets.select { |b| b[:topic].length > AGENT_INDEX_TOPIC_MAX }
       detail = over.map { |b| "  ADR-#{b[:number]}: #{b[:topic].length} chars (cap #{AGENT_INDEX_TOPIC_MAX})" }
       expect(over).to be_empty,
-                      "CLAUDE.md is loaded every session; its ADR list is an index, not a summary (ADR-97).\n" \
+                      "AGENTS.md loads into every session; its ADR list is a premise set (ADR-97 WD1).\n" \
                       "Put the detail in the ADR body instead:\n#{detail.join("\n")}"
     end
 
@@ -115,7 +116,7 @@ RSpec.describe "ADR index budgets (ADR-97)" do
         "  ADR-#{b[:number]}: #{m[0].inspect} — status belongs in docs/adr/README.md"
       end
       expect(tainted).to be_empty,
-                         "Status/progress detail in the CLAUDE.md ADR index (ADR-97):\n#{tainted.join("\n")}"
+                         "Status/progress detail in the AGENTS.md ADR premises (ADR-97):\n#{tainted.join("\n")}"
     end
 
     it "lists only ADRs docs/adr/README.md indexes" do
@@ -123,14 +124,14 @@ RSpec.describe "ADR index budgets (ADR-97)" do
       # catches a premise pointing at an ADR that does not exist, not a README ADR "missing" from here.
       orphans = bullets.map { |b| b[:number] } - readme.map { |e| e[:number] }
       expect(orphans).to be_empty,
-                         "CLAUDE.md names ADRs absent from docs/adr/README.md: #{orphans.inspect}"
+                         "AGENTS.md names ADRs absent from docs/adr/README.md: #{orphans.inspect}"
     end
 
     it "links each ADR at the same slug docs/adr/README.md uses" do
       by_number = readme.to_h { |e| [e[:number], e[:slug]] }
       mismatched = bullets.filter_map do |b|
         expected = by_number[b[:number]]
-        "  ADR-#{b[:number]}: CLAUDE.md=#{b[:slug]} README=#{expected}" if expected && expected != b[:slug]
+        "  ADR-#{b[:number]}: AGENTS.md=#{b[:slug]} README=#{expected}" if expected && expected != b[:slug]
       end
       expect(mismatched).to be_empty, "Slug mismatch between the two ADR indexes:\n#{mismatched.join("\n")}"
     end

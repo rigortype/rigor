@@ -20,6 +20,16 @@ module Rigor
   class CLI # rubocop:disable Metrics/ClassLength
     EXIT_USAGE = 64
 
+    # The published location of `schemas/rigor-config.schema.json`, written into the `.rigor.yml` that
+    # `rigor init` generates so an editor validates the file as the user types.
+    #
+    # This MUST equal the schema's own `$id`, and it MUST resolve. Both are gated
+    # (`spec/rigor/config_schema_spec.rb`) because neither failure has a symptom: an unreachable schema
+    # is indistinguishable from a schema with no complaints, so a stale URL here silently disables
+    # validation for every project that ran `rigor init`. It pointed at a nonexistent org until
+    # 2026-07-17 and nothing noticed. See `docs/internal-spec/config.md`.
+    CONFIG_SCHEMA_URL = "https://github.com/rigortype/rigor/raw/master/schemas/rigor-config.schema.json"
+
     HANDLERS = {
       "check" => :run_check,
       "init" => :run_init,
@@ -138,9 +148,10 @@ module Rigor
     # most likely to want to edit.
     def init_template
       <<~YAML
-        # yaml-language-server: $schema=https://github.com/zenwerk/rigor/raw/master/schemas/rigor-config.schema.json
-        # Rigor configuration. See docs/CURRENT_WORK.md for the
-        # full set of features the analyzer ships in this preview.
+        # yaml-language-server: $schema=#{CONFIG_SCHEMA_URL}
+        # Rigor configuration. The full key reference is
+        # https://github.com/rigortype/rigor/blob/master/docs/manual/03-configuration.md
+        # (or run `rigor docs configuration`).
         #
         # Keys you may want to edit:
         # - target_ruby: minimum Ruby version your project targets.

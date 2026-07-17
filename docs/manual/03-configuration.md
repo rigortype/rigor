@@ -22,6 +22,24 @@ discovery entirely.
 All relative paths in a config file resolve against that
 file's own directory.
 
+## Editor validation
+
+Rigor ships a JSON Schema for this file. Editors that
+understand the [`yaml-language-server`](https://github.com/redhat-developer/yaml-language-server)
+magic comment — VS Code's YAML extension, the IntelliJ
+family, Helix, Neovim with `yaml-ls` — give you
+autocomplete, hover docs, and structural validation as you
+type:
+
+```yaml
+# yaml-language-server: $schema=https://github.com/rigortype/rigor/raw/master/schemas/rigor-config.schema.json
+```
+
+`rigor init` writes that line for you. The schema is not a
+copy of this page — it is a source of truth in its own
+right, kept in step with the loader by a spec, so a key it
+rejects is a key Rigor does not accept.
+
 ## A minimal config
 
 ```yaml
@@ -133,6 +151,12 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 | `plugins_io.network` | String | `"disabled"` | Plugin network policy — `disabled` or `allowlist`. |
 | `plugins_io.allowed_paths` | Array | `[]` | Filesystem paths plugins may read. |
 | `plugins_io.allowed_url_hosts` | Array | `[]` | URL hosts plugins may fetch from when `network: allowlist`. |
+
+### Reserved for other implementations
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `rigor_rs` | Hash | — | **Reserved; this implementation skips it.** Another Rigor implementation reads keys under this namespace, so one `.rigor.yml` can serve both. Rigor validates its shape at the schema level only — it never reads the value, and an invalid one is never a runtime error here. Leave it alone unless the tool that reads it tells you otherwise. |
 
 ## A worked example
 

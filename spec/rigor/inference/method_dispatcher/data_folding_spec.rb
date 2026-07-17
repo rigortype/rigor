@@ -121,18 +121,6 @@ RSpec.describe "Data.define value folding", type: :runner do
       RUBY
     end
 
-    it "does not fold a bare-local Data.define carrying a block" do
-      # The local block form has no resolvable class name, so its block method definitions cannot be consulted to guard
-      # a redefined reader; it stays conservatively unfolded (the named forms below do fold, guarded).
-      types = dumped_types(<<~RUBY)
-        c = Data.define(:x) do
-          def double = x * 2
-        end
-        dump_type(c.new(1).x)
-      RUBY
-      expect(types.first).not_to eq("1")
-    end
-
     it "does not fold non-literal members" do
       types = dumped_types(<<~RUBY)
         names = [:x, :y]
@@ -182,6 +170,41 @@ RSpec.describe "Data.define value folding", type: :runner do
       RUBY
       expect(types[0]).not_to eq("7")  # redefined reader
       expect(types[1]).to eq("7")      # value access still folds
+    end
+  end
+
+  describe "the bare-local block form (ADR-48 remaining, slice-4 parity)" do
+    it "folds a member read when the block adds only non-reader helpers" do
+      # No resolvable class name, but the block AST is in hand: no member reader is redefined, so the read is sound.
+      expect(dumped_types(<<~RUBY)).to eq(%w[1 2])
+        c = Data.define(:x, :y) do
+          def double = x * 2
+        end
+        inst = c.new(1, 2)
+        dump_type(inst.x)
+        dump_type(inst.y)
+      RUBY
+    end
+
+    it "stays unfolded when the block redefines a member reader" do
+      # `def x` would run instead of returning the member; with no class name to key the read-time guard on, the whole
+      # carrier bails conservatively (FP-safe).
+      types = dumped_types(<<~RUBY)
+        c = Data.define(:x) do
+          def x = "overridden"
+        end
+        dump_type(c.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
+    end
+
+    it "stays unfolded for a &proc block argument (no scannable body)" do
+      types = dumped_types(<<~RUBY)
+        body = proc { def helper = 0 }
+        c = Data.define(:x, &body)
+        dump_type(c.new(1).x)
+      RUBY
+      expect(types.first).not_to eq("1")
     end
   end
 

@@ -47,10 +47,14 @@ assert_type("[1, 2]", Struct.new(:x, :y).new(1, 2).deconstruct)
 stored = Struct.new(:foo).new(1)
 assert_type("1", stored.foo)
 
-# SOUNDNESS: a mutated binding is NOT fold-safe — a later setter could have
-# changed the member — so its read degrades to `Dynamic[top]`, never a stale 1.
-# (Alias / escape degradation is covered in struct_folding_spec, where the
-# heredoc source is immune to the auto-formatter stripping a "useless" alias.)
+# ADR-48 slice 4 — a straight-line member setter re-types the binding, so the
+# read folds to the assigned value (never the stale 1). The write-back keeps the
+# local's StructInstance current; a sibling member would stay precise too.
 mutated = Struct.new(:foo).new(1)
 mutated.foo = 9
-assert_type("Dynamic[top]", mutated.foo)
+assert_type("9", mutated.foo)
+
+# SOUNDNESS: aliasing / escape / loop-and-block setters keep a binding unfolded —
+# a later write Rigor cannot see must never make an earlier read wrong. These
+# degradations are covered in struct_folding_spec, where the heredoc source is
+# immune to the auto-formatter stripping a "useless" alias or `if` guard.

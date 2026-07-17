@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
+require "prism"
+
 require_relative "../../type"
+require_relative "../../source/node_children"
 
 module Rigor
   module Inference
@@ -24,6 +27,36 @@ module Rigor
           return false if class_name.nil? || scope.nil?
 
           !scope.user_def_for(class_name, method_name).nil?
+        end
+
+        # The bare-local block-form counterpart of {#reader_overridden?}: when a `Data.define`/`Struct.new`
+        # block has no resolvable class name to look up in the project def-node table, its member-reader
+        # redefinitions are read straight off the block AST instead. True when the block body defines a
+        # `def <member>` (a plain instance method, receiver-less) for any member — folding that member's
+        # read would run the redefined reader, not return the member. Nested `class`/`module`/`sclass`
+        # bodies open a different namespace and are skipped; a `def` anywhere else in the body counts.
+        def block_redefines_member_reader?(block, members)
+          body = block.body
+          return false if body.nil?
+
+          member_set = members.is_a?(Set) ? members : members.to_set
+          reader_def?(body, member_set)
+        end
+
+        def reader_def?(node, member_set)
+          return false unless node.is_a?(Prism::Node)
+          return true if node.is_a?(Prism::DefNode) && node.receiver.nil? && member_set.include?(node.name)
+          # A nested class / module / singleton-class body opens a different namespace — its `def`s do not
+          # redefine the value object's reader, so the walk does not descend into it.
+          return false if reader_scope_boundary?(node)
+
+          node.rigor_each_child { |child| return true if reader_def?(child, member_set) }
+          false
+        end
+
+        def reader_scope_boundary?(node)
+          node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode) ||
+            node.is_a?(Prism::SingletonClassNode)
         end
 
         def instance_index(instance, args)

@@ -13,6 +13,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[type inference]** `Struct` and `Data.define` value objects now infer precise member types through a setter and through a block-defined class, in two more cases.
+  - After a straight-line `s.x = 5`, reading `s.x` back now infers the assigned value (and a sibling `s.y` keeps its own value) — where before the whole struct went untyped the moment you wrote to any member. A read is left untyped, exactly as before, when the struct is aliased, passed to another method, or mutated inside a loop or block, so a later write you can't see never makes an earlier read wrong.
+  - A `Data.define(:x) do … end` assigned to a plain local variable now folds its member reads too, matching the constant form — unless the block redefines a member's reader (`def x`), in which case the read stays untyped because it would run your method, not return the member.
+
 - **[type inference]** `Array#join` on an array of string literals now infers the exact resulting string. `["a", "b"].join("-")` types as `"a-b"` rather than a generic `String`, matching the precision already given to `[1, 2, 3].join` and to non-string arrays. The gain flows through any downstream use of the joined value.
 
 - **[rigor check]** A top-level key in `.rigor.yml` that Rigor does not recognise is now reported instead of silently ignored, with the nearest real key suggested.

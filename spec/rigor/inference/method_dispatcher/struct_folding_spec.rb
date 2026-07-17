@@ -96,15 +96,6 @@ RSpec.describe "Struct.new value folding", type: :runner do
       RUBY
     end
 
-    it "does NOT fold a bound local mutated through a setter" do
-      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
-        Point = Struct.new(:x, :y)
-        p = Point.new(1, 2)
-        p.x = 9
-        dump_type(p.x)
-      RUBY
-    end
-
     it "does NOT fold a bound local that escapes through an alias" do
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
         Point = Struct.new(:x, :y)
@@ -130,6 +121,76 @@ RSpec.describe "Struct.new value folding", type: :runner do
           p = Point.new(1, 2)
           dump_type(p.x)
         end
+      RUBY
+    end
+  end
+
+  describe "precise mutated-member re-typing (slice 4)" do
+    it "re-types a member read to the assigned value after a straight-line setter" do
+      expect(dumped_types(<<~RUBY)).to eq(%w[5 2])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        p.x = 5
+        dump_type(p.x)
+        dump_type(p.y)
+      RUBY
+    end
+
+    it "reflects an incompatible-type mutation soundly (String into an Integer member)" do
+      expect(dumped_types(<<~RUBY)).to eq(["\"hi\""])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        p.x = "hi"
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "threads several straight-line setters (last write wins)" do
+      expect(dumped_types(<<~RUBY)).to eq(["6"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        p.x = 5
+        p.x = 6
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "does NOT fold a member setter inside a loop (iteration-specific)" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        while cond
+          p.x = p.x + 1
+        end
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "does NOT fold a member setter inside a block" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        [1].each { p.x = 9 }
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "does NOT fold a member read after a mutation through an alias" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        q = p
+        q.x = 5
+        dump_type(p.x)
+      RUBY
+    end
+
+    it "does NOT fold a member read after the local escapes to a callee" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[top]"])
+        Point = Struct.new(:x, :y)
+        p = Point.new(1, 2)
+        mutate!(p)
+        dump_type(p.x)
       RUBY
     end
   end

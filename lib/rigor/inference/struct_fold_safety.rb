@@ -60,11 +60,18 @@ module Rigor
         return EMPTY if members.empty?
 
         total = Hash.new(0)
-        pure = Hash.new(0)
-        count_uses(root, members, total, pure)
+        safe_uses = Hash.new(0)
+        deferred_setter = {}
+        count_uses(root, members, total, safe_uses, deferred_setter, false)
 
+        # A local is fold-safe iff every read of it is a safe use — a pure read OR (ADR-48 slice 4) a
+        # straight-line member setter (`n.x = v`) that the setter write-back re-types the binding for.
+        # `deferred_setter` disqualifies a local whose setter sits inside a loop / block / lambda, where a
+        # single static pass cannot model the setter's per-iteration effect (the write-back would leave a
+        # stale binding for the fold to read).
         safe = members.each_key.select do |name|
-          writes[name] == 1 && total[name].positive? && total[name] == pure[name]
+          writes[name] == 1 && total[name].positive? &&
+            total[name] == safe_uses[name] && !deferred_setter[name]
         end
         safe.empty? ? EMPTY : safe.to_set
       end
@@ -85,22 +92,30 @@ module Rigor
         end
       end
 
-      # Pass 2 — count, per recorded struct local, total reads vs. reads that are the receiver of a pure-read call.
-      def count_uses(node, members, total, pure)
+      # Pass 2 — count, per recorded struct local, total reads vs. SAFE-use reads (the receiver of a pure-read call,
+      # or of a straight-line member setter). `deferred` is true inside a loop / block / lambda; a member setter seen
+      # there marks the local's `deferred_setter` so it is excluded (its write-back cannot be modelled statically).
+      def count_uses(node, members, total, safe_uses, deferred_setter, deferred)
         return if node.nil?
 
         total[node.name] += 1 if node.is_a?(Prism::LocalVariableReadNode) && members.key?(node.name)
 
         if node.is_a?(Prism::CallNode)
           receiver = node.receiver
-          if receiver.is_a?(Prism::LocalVariableReadNode) && members.key?(receiver.name) &&
-             pure_read_call?(node, members[receiver.name])
-            pure[receiver.name] += 1
+          if receiver.is_a?(Prism::LocalVariableReadNode) && members.key?(receiver.name)
+            member_set = members[receiver.name]
+            if pure_read_call?(node, member_set)
+              safe_uses[receiver.name] += 1
+            elsif member_setter_call?(node, member_set)
+              safe_uses[receiver.name] += 1
+              deferred_setter[receiver.name] = true if deferred
+            end
           end
         end
 
+        child_deferred = deferred || deferred_boundary?(node)
         each_local_scope_child(node) do |child|
-          count_uses(child, members, total, pure)
+          count_uses(child, members, total, safe_uses, deferred_setter, child_deferred)
         end
       end
 
@@ -109,6 +124,27 @@ module Rigor
       def pure_read_call?(call_node, member_set)
         name = call_node.name
         FIXED_READS.include?(name) || member_set.include?(name)
+      end
+
+      # A `n.<member> = v` attribute setter on the receiver (ADR-48 slice 4): the selector strips its trailing `=` to
+      # a member reader and the call carries exactly one argument. Comparison operators (`==`, `>=`, `!=`) also end
+      # with `=` but never strip to a member, so they stay unknown (unsafe) calls. `:[]=` is likewise not a member.
+      def member_setter_call?(call_node, member_set)
+        name = call_node.name.to_s
+        return false unless name.length > 1 && name.end_with?("=")
+        return false unless member_set.include?(name[0..-2].to_sym)
+
+        (call_node.arguments&.arguments&.size || 0) == 1
+      end
+
+      # Constructs whose body runs zero-or-many times or is deferred (loops, blocks, lambdas): a single static pass
+      # over the body cannot model a member setter's effect across iterations, so a setter inside one disqualifies the
+      # local. Straight-line conditionals (`if` / `unless` / `case`) are NOT boundaries — their branch scopes join
+      # soundly, so a setter in one branch is fine.
+      def deferred_boundary?(node)
+        node.is_a?(Prism::WhileNode) || node.is_a?(Prism::UntilNode) ||
+          node.is_a?(Prism::ForNode) || node.is_a?(Prism::BlockNode) ||
+          node.is_a?(Prism::LambdaNode)
       end
 
       # The member set of a `<Struct chain>.new(...)` / `.[]` materialisation, or nil. Handles the inline

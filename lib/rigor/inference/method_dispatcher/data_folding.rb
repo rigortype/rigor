@@ -11,9 +11,11 @@ module Rigor
       # and degrading to today's behaviour (no carrier / the `Data` nominal) the moment a premise is
       # uncertain, so the tier is precision-additive and adds no false-positive surface:
       #
-      # 1. `Data.define(:x, :y)` on a `Singleton[Data]` receiver with literal-Symbol args and NO block ->
-      #    `DataClass{members: [...]}`. A block (`Data.define(:x) do ... end`) defers (slice 4 hardens the
-      #    block-body case); non-literal members (`Data.define(*names)`) defer.
+      # 1. `Data.define(:x, :y)` on a `Singleton[Data]` receiver with literal-Symbol args ->
+      #    `DataClass{members: [...]}`. A `do ... end` block folds too when its body redefines no member
+      #    reader (bare-local block-form parity — the block AST stands in for the class name the read-time
+      #    guard would otherwise need); a `&proc` block, a reader-redefining block, or non-literal members
+      #    (`Data.define(*names)`) defer.
       # 2. `.new` / `.[]` on a `DataClass` receiver -> a `DataInstance` whose member map is built from the
       #    call's positional or keyword arguments. An arity / key mismatch degrades to the `Data` (or the
       #    tagged class) nominal rather than a wrong member map.
@@ -63,11 +65,31 @@ module Rigor
 
         def fold_define(context)
           return nil unless context.method_name == :define
-          # Block-form (`Data.define(:x) do ... end`) defers — slice 4.
-          return nil unless context.block_type.nil?
 
           members = member_names_from_args(context.args)
           return nil if members.nil? || members.empty?
+
+          # Block-form (`Data.define(:x) do ... end`) bare-local parity (ADR-48 "Remaining"): the assigned
+          # constant / subclass forms already fold via the layout side-table, with the reader-redefinition
+          # guard consulting `Scope#user_def_for`; the bare-local form has no resolvable class name for it
+          # to key on. But the block AST is in hand, so the guard is applied directly against it: fold when
+          # the block redefines no member's synthesised reader (folding `inst.x` would otherwise run the
+          # redefined `def x`), and bail conservatively — the prior behaviour — the moment the block cannot
+          # be soundly cleared (a `&proc` argument, or any `def <member>` in the body).
+          return fold_define_block(context, members) unless context.block_type.nil?
+
+          Type::Combinator.data_class_of(members: members)
+        end
+
+        # The block-form fold decision. Only a literal `do ... end` block whose body redefines no member
+        # reader folds; a `&proc` block argument (no scannable body) or a body with a member-reader `def`
+        # stays unfolded. The resulting `DataClass` carries no `class_name` — folding is already proven
+        # reader-safe here, so the read-time `reader_overridden?` guard (which keys on the class name) has
+        # nothing left to catch.
+        def fold_define_block(context, members)
+          block = context.call_node&.block
+          return nil unless block.is_a?(Prism::BlockNode)
+          return nil if block_redefines_member_reader?(block, members)
 
           Type::Combinator.data_class_of(members: members)
         end

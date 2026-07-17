@@ -1,8 +1,8 @@
 # ADR-48 — Struct / Data value folding (member-shape carriers)
 
-Status: **Accepted — `Data.define` slices 1–4 implemented (v0.1.17); `Struct`
-follow-up slices 1–3 implemented (fresh-chain + fold-safe bound-local member
-folding).** Two new
+Status: **Accepted — `Data.define` slices 1–4 implemented (v0.1.17) plus
+bare-local block-form parity; `Struct` follow-up slices 1–4 implemented
+(fresh-chain + fold-safe bound-local + setter re-typing).** Two new
 type carriers — a **member-class carrier** (`Type::DataClass`) and a
 **member-instance carrier** (`Type::DataInstance`) — so that a
 `Data.define`-defined value object folds member reads to precise types
@@ -16,9 +16,11 @@ named forms. **Slice 4 (block-body hardening) landed:** a named class whose
 body redefines a member's synthesised reader (`def x`) no longer folds that
 member's *read* (it would run the redefined method) — the value accessors
 (`[:x]` / `to_h`) still fold because they bypass the reader — gated on a real
-`def` node in the project def-node table; the bare-local block form stays
-conservatively unfolded. The `Struct` sibling is deferred behind its
-mutation-soundness story (§ "Struct follow-up"). Folding is
+`def` node in the project def-node table. **Bare-local block-form parity
+landed:** the block form with no resolvable class name (`c = Data.define(:x)
+do … end`) now folds too — the block AST is scanned directly for a
+member-reader `def`, so a helper-only block folds and a reader-redefining (or
+`&proc`) block bails. Folding is
 **precision-additive only** — no new diagnostic family, no false-positive
 surface (per the project's false-positive-discipline value). Grounded in the
 Phase-5 coverage audit
@@ -51,12 +53,18 @@ p.x` → `Constant[1]`); a written / aliased / escaped local stays
 on the scope (`Scope#struct_fold_safe?`) at the top-level and method-body
 entry points. See § "Struct follow-up".
 
-**Remaining (demand-gated):** bare-local block-form parity
-(`c = Data.define(:x) do … end`, where the block's defs aren't registered
-under a resolvable name so the reader-redefinition guard can't consult them —
-no corpus demand, conservative bail is FP-safe), and the `Struct`
-**slice 4** (precise re-typing of a mutated member through a setter — `s.x = 5;
-s.x` → the assigned type, the sibling stays precise), designed in
+**The two demand-gated remnants landed together.** *Bare-local block-form
+parity* (`c = Data.define(:x) do … end`): the block has no resolvable class
+name for the read-time reader-redefinition guard, but the block AST is in hand
+at `Data.define` time, so it is scanned directly — the carrier folds when the
+block redefines no member reader, and bails conservatively (a `&proc` block, a
+reader-redefining `def <member>`) the way the unresolvable case did before. And
+the `Struct` **slice 4** (precise re-typing of a mutated member through a setter
+— `s.x = 5; s.x` → the assigned type, the sibling stays precise): a fold-safe
+local extended to allow straight-line member setters, whose binding a setter
+write-back (`StructFolding.apply_setter_writeback`, at `eval_call`'s post-call
+scope) keeps current so the later read folds. A setter inside a loop / block /
+lambda, an alias, or an escape keeps the local unfolded (FP-safe). Designed in
 [`docs/notes/20260615-struct-folding-slice3-design.md`](../notes/20260615-struct-folding-slice3-design.md).
 
 ## Motivation
@@ -219,10 +227,14 @@ uncertain. Each degradation is a *precision floor*, never a wrong answer:
    accessors `[]` / `to_h` / `deconstruct` bypass the reader and stay
    foldable, so the gate is on the bare member read only. The **bare-local**
    block form (`c = Data.define(:x) do … end`) has no resolvable class name,
-   so its block defs cannot be consulted for the guard — it stays
-   conservatively unfolded (current behaviour, FP-safe). Validated against
-   Rigor's own `lib` (dense with the block-and-subclass form): no self-check
-   regression.
+   so its block defs cannot be looked up in the def-node table — but the
+   block AST is in hand at `Data.define` time, so the guard is applied
+   against it directly (`fold_define_block` /
+   `MemberShapeProjection.block_redefines_member_reader?`): the whole carrier
+   folds when the body redefines no member reader, and bails conservatively
+   for a reader-redefining `def <member>` or a `&proc` block (no scannable
+   body). Validated against Rigor's own `lib` (dense with the
+   block-and-subclass form): no self-check regression.
 2. **Non-literal / non-Symbol members** (`Data.define(*names)`,
    `Data.define(dynamic_expr)`) — member set unknown → no carrier
    (`Nominal[Data]` / current behaviour).
@@ -350,7 +362,7 @@ Slices 1–2 are the value; 3 is what makes it pay off on real code (most
 4 is the false-positive guard that keeps the subclass form sound when the
 body redefines a reader.
 
-## Struct follow-up (slices 1 + 2 landed; slices 3 + 4 deferred)
+## Struct follow-up (slices 1–4 landed)
 
 The class carrier is nearly identical to `DataClass` (it adds a
 `keyword_init: bool` field, parsing the trailing `keyword_init:` option the
@@ -403,9 +415,16 @@ scope (respecting `def` / `class` / `module` boundaries; blocks share locals)
 and installed on the scope (`Scope#struct_fold_safe?`) at the top-level
 (`ScopeIndexer`) and method-body (`build_method_entry_scope` /
 `build_user_method_body_scope`) entry points — measured perf-neutral on the
-self-check. **Deferred:** slice 4 = precise re-typing of a mutated member
-through a setter (`s.x = 5; s.x` → the assigned type, the sibling stays
-precise), designed in
+self-check. **Slice 4 landed:** the fold-safe scan is relaxed to also admit a
+local whose only mutations are **straight-line member setters** (`s.x = v`):
+the setter's assigned type is written back into the local's `StructInstance`
+binding at `eval_call`'s post-call scope (`StructFolding.apply_setter_writeback`,
+mirroring `MutationWidening.widen_after_call`), so a later `s.x` folds to the
+assigned value and a sibling `s.y` stays precise. The write-back is sound only
+because the scan still disqualifies any alias, escape, `[]=`, or setter inside a
+loop / block / lambda (where a single static pass cannot model the per-iteration
+effect) — a straight-line conditional is fine, its branch scopes join. Designed
+in
 [`docs/notes/20260615-struct-folding-slice3-design.md`](../notes/20260615-struct-folding-slice3-design.md).
 
 ## Rejected / deferred alternatives

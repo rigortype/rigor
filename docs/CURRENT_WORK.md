@@ -33,12 +33,14 @@ this file is the one that is wrong.
 
 ## Next session — three tracks, in this order
 
-**1. Check the in-flight #162 void slice.** A background agent was implementing ADR-100 WD2+WD3
-(branch `static-value-use-void`, PR titled around `static.value-use.void`) when this session ended.
-If its PR exists: verify it the way this cycle verified every fleet PR — read the diff against the
-brief on the issue, confirm the spec teeth claim, check `bleeding_edge:` gating and that
-statement-context stays silent. If no branch/PR appeared, the slice is fully specified: ADR-100 WD2
-+ WD3 and the 2026-07-18 issue comment on #162 are the brief; relaunch.
+**1. Review/merge PR #187 — the #162 void slice landed.** The agent finished after the handoff was
+first written: `static.value-use.void` behind the new `use-of-void-value` bleeding-edge feature,
+`void_origins` mirroring `dynamic_origins`, spec rows in the same commit, `Advances #162` (the
+transitive case + budget ids stay tracked). Verified this session: gates green, teeth 2+1, CHANGELOG
+conflict resolved and re-verified (EXIT=0), mergeState CLEAN. One honest deviation worth knowing at
+review: the issue's `x = puts(1)` example was wrong — core RBS declares `puts` `-> nil`, not
+`-> void` (verified against `references/rbs`), so the fixtures use an author-declared `-> void`
+method, which is the rule's actual normative trigger.
 
 **2. #173 slices 2–5 — the auto-wire. This is the careful one; do not fleet it.** Slice 1 (the
 default flip) is PR #186. What remains, with the design already settled and the blast radius already

@@ -140,7 +140,23 @@ The index table is ordered `ADR-0, 1, 2, …`. Insert the new row **after**
 the current-highest row, **before** the `## Adding a New ADR` heading — not
 before the previous row. (This ordering is the easy slip: anchor the edit
 on the *last* table row + the heading, not on the previous-number row.)
-Row shape: `| ADR-N | [Title](N-slug.md) | <Status + a dense one-paragraph summary> |`.
+Row shape: `| ADR-N | [Title](N-slug.md) | <status> |`.
+
+The third column is headed **Status** and carries exactly that — the
+README's own "How to Read" is the contract: `Accepted` / `Proposed` /
+`Superseded`, plus one parenthetical for an in-flight implementation
+(which WD/slice landed, what remains, a version or PR). **Cap: 200
+characters**, one line, no `|`. Derive it from your ADR's own `Status:`
+block so the two cannot disagree — that block is canonical (ADR-92).
+
+Not a summary: no criteria, no rationale, no rejected alternatives, no
+measurements. They are in the ADR body, and duplicating them here is what
+grew this column to 5,195 characters a cell before
+[ADR-97](../../../docs/adr/97-adr-index-budgets.md) capped it.
+
+```
+| ADR-40 | [`config_schema` declared defaults](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
+```
 
 ### 4c. `CLAUDE.md` ADR index line
 
@@ -156,7 +172,7 @@ that instruction is what regrew the file 8.7× and it is gone; conform to
 the cap, not to the list.
 
 Why the cap exists, and why it is enforced rather than trusted:
-[ADR-97](../../../docs/adr/97-claude-md-index-budget.md). The gate is
+[ADR-97](../../../docs/adr/97-adr-index-budgets.md). The gate is
 `spec/docs/agent_index_spec.rb` under `make docs-check` — it also checks
 that your 4b and 4c entries agree on the ADR number and slug, so run it
 if you skipped either.
@@ -193,9 +209,11 @@ with code, fold it into that slice's commit).
 - **Length is proportional to stakes** — reference dumps moved to a note;
   not over-written for a low-stakes / evaluation decision.
 - `docs/adr/README.md` row inserted in **ascending** position (after the
-  last row, before `## Adding a New ADR`).
+  last row, before `## Adding a New ADR`) — status only, ≤ 200 chars,
+  derived from your ADR's own `Status:` block (ADR-97).
 - `CLAUDE.md` index line appended — topic only, ≤ 100 chars, no status
-  (ADR-97). `make docs-check` green.
+  (ADR-97).
+- `make docs-check` green — it gates both caps and their agreement.
 - `git diff --check` clean; `git status` shows exactly the three expected
   entries.
 - Quality re-read against [ADR-49](../../../docs/adr/49-adr-authoring-guidelines.md):

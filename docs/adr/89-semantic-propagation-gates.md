@@ -145,7 +145,9 @@ eligible leaf callee stop re-checking its callers (WD2). Negative: the snapshot 
 `--verify-incremental` are the insurance); observed-key re-evaluation adds bounded work per changed file, only
 when a declaration-stable pair carries a summary. Precision-additive throughout — no type / diagnostic /
 severity change; cold diagnostics byte-identical to `origin/master` (mail 26, kramdown 68); gitlab
-`--verify-incremental` byte-identical (887/1,774, 2,494, 0 mismatch).
+`--verify-incremental` byte-identical (887/1,774, 2,494, 0 mismatch). The S1 single-file recheck wall stays
+within noise of `origin/master` — the gates buy their precision by dropping dependents, not by adding a
+measurable per-run cost.
 
 **Measurement note (divergence from the gate's expected numbers).** The gitlab S5a closure collapsed to **1**,
 not the recon-estimated ~13–14, because `safe_find_or_create_by` has ZERO recorded in-scope symbol callers

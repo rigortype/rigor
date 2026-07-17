@@ -36,8 +36,8 @@ repo (talks, comparisons, READMEs).
 
 | Location | What lives there | When to look |
 | --- | --- | --- |
-| `docs/adr/README.md` | Canonical ADR index: title + status + **one dense paragraph per ADR, including outcomes and numbers**. | **First stop.** Often answers the question without opening a single file. |
-| `CLAUDE.md` ADR list | Index only — one line per ADR, topic and link, no detail ([ADR-97](../../../docs/adr/97-claude-md-index-budget.md)). | Learning *that* an ADR on a topic exists. Never a source — go to the README row. |
+| `docs/adr/README.md` | Canonical ADR index: title + a short status (`Accepted (WD1–WD4 landed; WD5 deferred)`). Index only — no detail, by [ADR-97](../../../docs/adr/97-adr-index-budgets.md). | **First stop**, to shortlist 2–5 ADRs and to see which are live. Never a source for *what* was decided. |
+| `CLAUDE.md` ADR list | Thinner still — one line per ADR, topic and link, no status ([ADR-97](../../../docs/adr/97-adr-index-budgets.md)). | Learning *that* an ADR on a topic exists. Never a source. |
 | `docs/notes/README.md` | Categorized note index: library surveys / coverage audits / regression sweeps / teeth / outside-research reviews / perf / meta. | Shortlisting notes by category. |
 | `docs/adr/*.md` | Full decisions: criteria, rejected alternatives, gate results. | The "why" behind a behaviour; what was *rejected* and why. |
 | `docs/notes/*.md` | What was observed, when, against which Rigor version. | Measurements, sweeps, adjudications. |
@@ -68,11 +68,14 @@ carry downstream — do not collapse the three into one list.
 
 ## Method
 
-1. **Indexes first.** Skim `docs/adr/README.md` and `docs/notes/README.md`
-   for the topic — the ADR README's status column carries the dense
-   per-ADR paragraph, so this is cheap and frequently sufficient to
-   shortlist 2–5 candidate documents, or to answer outright. (`CLAUDE.md`
-   is an index only; it tells you an ADR exists, not what it decided.)
+1. **Indexes first, then the bodies.** Skim `docs/adr/README.md` and
+   `docs/notes/README.md` for the topic. Both are **indexes** — title +
+   short status, no detail ([ADR-97](../../../docs/adr/97-adr-index-budgets.md))
+   — so they shortlist 2–5 candidates but never answer outright. The
+   substance is in the ADR bodies; open the shortlist, and expect the
+   answer to come from `rg` over `docs/adr/*.md` (step 2) rather than
+   from any index. An index's status line is the one thing you *can*
+   cite from it: whether the decision is live.
 2. **Expand terms before searching.** Name variants (`rbs_rails` /
    `rbs-rails`), English *and* Japanese vocabulary (型定義 / 生成 /
    メンテナンス / 陳腐化 …), tool aliases, and the *adjacent* tools a

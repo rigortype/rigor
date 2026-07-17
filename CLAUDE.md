@@ -56,7 +56,7 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 
 ADRs record design rationale and rejected / deferred alternatives. **The canonical index — title + current implementation status for every ADR — is [`docs/adr/README.md`](docs/adr/README.md)**; open the individual ADR for its full working-decision detail. When an ADR and the spec disagree on analyzer behaviour, the spec binds.
 
-The list below is an **index, not a summary**: one line per ADR, topic only, capped at 100 characters and carrying no status, dates, or measurements — it answers only *does a decision about this exist, and on what subject*. Go to `docs/adr/README.md` for status and to the ADR for detail. This file is loaded into context every session, so the cap is [ADR-97](docs/adr/97-claude-md-index-budget.md)'s budget decision and `spec/docs/agent_index_spec.rb` enforces it under `make docs-check`.
+The list below is an **index, not a summary**: one line per ADR, topic only, capped at 100 characters and carrying no status, dates, or measurements — it answers only *does a decision about this exist, and on what subject*. Go to `docs/adr/README.md` for status and to the ADR for detail. This file is loaded into context every session, so the cap is [ADR-97](docs/adr/97-adr-index-budgets.md)'s budget decision and `spec/docs/agent_index_spec.rb` enforces it under `make docs-check`.
 
 - [ADR-0](docs/adr/0-concept.md) — Project concept and design boundaries
 - [ADR-1](docs/adr/1-types.md) — Type model and RBS-superset strategy
@@ -155,7 +155,7 @@ The list below is an **index, not a summary**: one line per ADR, topic only, cap
 - [ADR-94](docs/adr/94-rbs-inline-reader-and-the-rbs-3x-floor.md) — The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor
 - [ADR-95](docs/adr/95-homebrew-tap-deferral.md) — Homebrew distribution: deferred behind the single binary
 - [ADR-96](docs/adr/96-plugin-target-gems.md) — Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion
-- [ADR-97](docs/adr/97-claude-md-index-budget.md) — CLAUDE.md as an index: the unconditional-load budget and its gate
+- [ADR-97](docs/adr/97-adr-index-budgets.md) — Index entries are not summaries: the ADR-index budgets and their gate
 
 ## Skills available in this repository
 

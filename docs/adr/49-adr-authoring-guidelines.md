@@ -175,7 +175,8 @@ Negative:
 
 - Archetype and stakes tagging is a human judgement call; two reviewers may
   tag differently at the deliberative/mechanical boundary. Mitigated by the
-  worked exemplars (43/46 deliberative, 40 mechanical) as anchors, and by the
+  worked exemplars (43/46 deliberative × `high` stakes, 40 mechanical × `low`)
+  as the calibration set and tagging anchors, and by the
   score being advisory.
 - Eight axes is more than a quick gut-check. For a clearly trivial mechanical
   ADR, axes 3/6/8 alone are a reasonable fast path; the full eight are for the

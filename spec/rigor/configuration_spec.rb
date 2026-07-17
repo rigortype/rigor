@@ -558,6 +558,42 @@ RSpec.describe Rigor::Configuration do
     end
   end
 
+  describe "#unknown_keys" do
+    it "records a top-level key the loader does not own" do
+      configuration = described_class.new(described_class::DEFAULTS.merge("excludee" => ["x/**"]))
+
+      expect(configuration.unknown_keys).to eq(["excludee"])
+    end
+
+    it "does not record a reserved namespace" do
+      configuration = described_class.new(described_class::DEFAULTS.merge("rigor_rs" => { "ruby" => "auto" }))
+
+      expect(configuration.unknown_keys).to be_empty
+    end
+
+    it "is empty for a conforming config" do
+      expect(described_class.new(described_class::DEFAULTS).unknown_keys).to be_empty
+    end
+
+    it "does not record `includes:`, which the include merge consumes before this point" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "base.yml"), "libraries: [csv]\n")
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "includes:\n  - base.yml\n")
+
+        expect(described_class.load(path).unknown_keys).to be_empty
+      end
+    end
+  end
+
+  describe "KNOWN_KEYS" do
+    it "is the DEFAULTS keys plus `includes:` plus the reserved namespaces" do
+      expect(described_class::KNOWN_KEYS.to_set).to eq(
+        (described_class::DEFAULTS.keys + %w[includes] + described_class::RESERVED_NAMESPACES).to_set
+      )
+    end
+  end
+
   describe ".load with `includes:`" do
     it "merges an explicit included file under the current file's keys" do
       Dir.mktmpdir do |dir|

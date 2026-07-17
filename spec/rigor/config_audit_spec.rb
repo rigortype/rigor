@@ -15,6 +15,45 @@ RSpec.describe Rigor::ConfigAudit do
     described_class.warnings(Rigor::Configuration.new(config_hash), project_root: project_root)
   end
 
+  describe "unknown top-level keys" do
+    it "flags a typo'd key and suggests the near miss" do
+      warnings = audit("excludee" => ["generated/**"])
+
+      unknown = warnings.find { |w| w.kind == :unknown_key }
+      expect(unknown).not_to be_nil
+      expect(unknown.message).to include("`excludee` is not a recognized configuration key")
+      expect(unknown.message).to include("Did you mean `exclude`?")
+      expect(unknown.to_h).to include("kind" => "unknown_key", "key" => "excludee", "suggestion" => "exclude")
+    end
+
+    it "flags a key with no near miss, without a suggestion" do
+      warnings = audit("wibble" => 1)
+
+      unknown = warnings.find { |w| w.kind == :unknown_key }
+      expect(unknown.message).to eq("`wibble` is not a recognized configuration key; it has no effect.")
+      expect(unknown.to_h).to include("suggestion" => nil)
+    end
+
+    it "stays silent on a reserved namespace" do
+      # Unknown on purpose: another implementation reads it from the same file. Warning here would push
+      # users to delete the key their other tool needs (ADR-99).
+      expect(audit("rigor_rs" => { "ruby" => "auto" })).to all(satisfy { |w| w.kind != :unknown_key })
+    end
+
+    it "stays silent on a nested key DEFAULTS does not carry" do
+      # `budget_overrun_strategy` is real, documented, and schema-declared, but absent from
+      # DEFAULTS["dependencies"] — so a DEFAULTS-keyed nested check would flag a working config. Nested
+      # unknowns are the schema tier's job; this axis is top-level only (ADR-99, docs/internal-spec/config.md).
+      warnings = audit("dependencies" => { "budget_overrun_strategy" => "walker_cap" })
+
+      expect(warnings).to all(satisfy { |w| w.kind != :unknown_key })
+    end
+
+    it "stays silent on a conforming config" do
+      expect(audit("target_ruby" => "4.0", "paths" => ["lib"])).to all(satisfy { |w| w.kind != :unknown_key })
+    end
+  end
+
   describe "signature_paths" do
     it "flags a missing path with kind :signature_path" do
       warnings = audit("signature_paths" => ["/no/such/path/sig"])

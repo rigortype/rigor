@@ -86,6 +86,69 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(described_class.widen_for_mutator(Rigor::Type::Combinator.constant_of(1), :<<)).to be_nil
       expect(described_class.widen_for_mutator(nil, :<<)).to be_nil
     end
+
+    it "widens a non-empty-array refinement to its base Array nominal under a size-mutator" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      widened = described_class.widen_for_mutator(non_empty, :clear)
+      expect(widened).to be_a(Rigor::Type::Nominal)
+      expect(widened.class_name).to eq("Array")
+      expect(widened.type_args.first.class_name).to eq("String")
+    end
+
+    it "widens a non-empty-array refinement under every Array mutator that can empty it" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      %i[pop shift delete_if reject! clear replace select!].each do |mutator|
+        expect(described_class.widen_for_mutator(non_empty, mutator)).to(
+          eq(non_empty.base), "expected #{mutator} to widen non-empty-array to its base"
+        )
+      end
+    end
+
+    it "keeps the non-empty-array refinement under readers and non-mutating siblings" do
+      non_empty = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      expect(described_class.widen_for_mutator(non_empty, :size)).to be_nil
+      expect(described_class.widen_for_mutator(non_empty, :empty?)).to be_nil
+      expect(described_class.widen_for_mutator(non_empty, :map)).to be_nil
+      expect(described_class.widen_for_mutator(non_empty, :first)).to be_nil
+    end
+
+    it "widens a non-empty-hash refinement to its base Hash nominal under a Hash mutator" do
+      non_empty = Rigor::Type::Combinator.non_empty_hash(
+        Rigor::Type::Combinator.nominal_of("Symbol"),
+        Rigor::Type::Combinator.nominal_of("Integer")
+      )
+      widened = described_class.widen_for_mutator(non_empty, :clear)
+      expect(widened).to be_a(Rigor::Type::Nominal)
+      expect(widened.class_name).to eq("Hash")
+      expect(widened.type_args.map(&:class_name)).to eq(%w[Symbol Integer])
+    end
+
+    it "does not cross the mutator tables between the Array and Hash refinements" do
+      non_empty_array = Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("String"))
+      non_empty_hash = Rigor::Type::Combinator.non_empty_hash
+      # `store` is Hash-only; `pop` is Array-only.
+      expect(described_class.widen_for_mutator(non_empty_array, :store)).to be_nil
+      expect(described_class.widen_for_mutator(non_empty_hash, :pop)).to be_nil
+    end
+
+    it "leaves the String / Integer refinements alone — their mutators are in neither table" do
+      # `non-empty-string` and `non-zero-int` are empty-witness Differences too, but no method that
+      # could reach them is listed as an Array / Hash mutator. Pinned so a future table addition
+      # that would silently widen them fails here.
+      expect(described_class.widen_for_mutator(Rigor::Type::Combinator.non_empty_string, :<<)).to be_nil
+      expect(described_class.widen_for_mutator(Rigor::Type::Combinator.non_empty_string, :concat)).to be_nil
+      expect(described_class.widen_for_mutator(Rigor::Type::Combinator.non_zero_int, :<<)).to be_nil
+    end
+
+    it "declines for a Difference that is not an empty-witness refinement" do
+      # `Array[String] - Tuple[String]` removes a one-element witness, not the empty one: not a
+      # catalogued refinement, so the widening arm must not claim it.
+      odd = Rigor::Type::Combinator.difference(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")]),
+        Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
+      )
+      expect(described_class.widen_for_mutator(odd, :clear)).to be_nil
+    end
   end
 
   describe ".widen_after_call" do

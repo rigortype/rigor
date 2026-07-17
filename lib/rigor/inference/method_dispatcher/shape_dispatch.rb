@@ -433,29 +433,12 @@ module Rigor
             base = difference.base
             return nil unless base.is_a?(Type::Nominal)
 
-            if removes_empty_witness?(difference)
+            if difference.removes_empty_witness?
               precise = empty_removal_projection(difference, method_name, args)
               return precise if precise
             end
 
             dispatch_nominal_size(base, method_name, args)
-          end
-
-          EMPTY_WITNESS_PREDICATES = {
-            "String" => ->(removed) { removed.is_a?(Type::Constant) && removed.value == "" },
-            "Integer" => lambda { |removed|
-              removed.is_a?(Type::Constant) && removed.value.is_a?(Integer) && removed.value.zero?
-            },
-            "Array" => ->(removed) { removed.is_a?(Type::Tuple) && removed.elements.empty? },
-            "Hash" => ->(removed) { removed.is_a?(Type::HashShape) && removed.pairs.empty? }
-          }.freeze
-          private_constant :EMPTY_WITNESS_PREDICATES
-
-          def removes_empty_witness?(difference)
-            return false unless difference.base.is_a?(Type::Nominal)
-
-            predicate = EMPTY_WITNESS_PREDICATES[difference.base.class_name]
-            !!(predicate && predicate.call(difference.removed))
           end
 
           # Methods on a non-empty String that preserve non-emptiness (they transform characters but never

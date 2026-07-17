@@ -140,6 +140,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/non_empty_refinement_mutation_widening.rb — a mutator invalidates `non-empty-array`" do
+    let(:harness) { harness_for("non_empty_refinement_mutation_widening") }
+
+    it "is diagnostic-clean — `arr.size == 0` after `clear` / `pop` / `shift` no longer folds" do
+      messages = harness.diagnostics.map(&:message)
+      expect(messages.grep(/always-(truthy|falsey)|condition is always/)).to be_empty
+    end
+  end
+
   describe "fixtures/intervening_call_ivar_invalidation.rb — implicit-self call invalidates ivar narrowings" do
     let(:harness) { harness_for("intervening_call_ivar_invalidation") }
 

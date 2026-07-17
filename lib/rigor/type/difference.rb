@@ -48,6 +48,30 @@ module Rigor
         base.erase_to_rbs
       end
 
+      # True when `removed` is the *empty witness* of `base` — the single value whose removal makes this
+      # difference one of the catalogued `non-empty-*` / `non-zero-int` refinements (`""` for String, `0`
+      # for Integer, `[]` for Array, `{}` for Hash).
+      #
+      # This is the shared recogniser for the whole engine: the display side (`canonical_name` below),
+      # `ShapeDispatch`'s refinement-aware projections, and `MutationWidening`'s invalidation arm all ask
+      # this one question, so the recognised set cannot drift between them.
+      def removes_empty_witness?
+        return false unless base.is_a?(Nominal)
+
+        predicate = EMPTY_WITNESS_PREDICATES[base.class_name]
+        !!predicate && predicate.call(removed)
+      end
+
+      EMPTY_WITNESS_PREDICATES = {
+        "String" => ->(removed) { removed.is_a?(Constant) && removed.value == "" },
+        "Integer" => lambda { |removed|
+          removed.is_a?(Constant) && removed.value.is_a?(Integer) && removed.value.zero?
+        },
+        "Array" => ->(removed) { removed.is_a?(Tuple) && removed.elements.empty? },
+        "Hash" => ->(removed) { removed.is_a?(HashShape) && removed.pairs.empty? }
+      }.freeze
+      private_constant :EMPTY_WITNESS_PREDICATES
+
       def top
         Trinary.no
       end
@@ -80,45 +104,25 @@ module Rigor
       # The recognised set is kept in sync with the imported-built-in catalogue
       # ([`imported-built-in-types.md`](docs/type-specification/imported-built-in-types.md)).
       def canonical_name
-        return nil unless base.is_a?(Nominal)
+        return nil unless removes_empty_witness?
 
-        send(CANONICAL_HANDLERS[base.class_name] || :no_canonical_name)
+        send(CANONICAL_HANDLERS[base.class_name])
       end
 
       CANONICAL_HANDLERS = {
         "String" => :string_canonical_name,
         "Integer" => :integer_canonical_name,
-        "Array" => :array_canonical_name_if_empty,
-        "Hash" => :hash_canonical_name_if_empty
+        "Array" => :array_canonical_name,
+        "Hash" => :hash_canonical_name
       }.freeze
       private_constant :CANONICAL_HANDLERS
 
-      def no_canonical_name
-        nil
-      end
-
       def string_canonical_name
-        return nil unless removed.is_a?(Constant) && removed.value == ""
-
         "non-empty-string"
       end
 
       def integer_canonical_name
-        return nil unless removed.is_a?(Constant) && removed.value.is_a?(Integer) && removed.value.zero?
-
         "non-zero-int"
-      end
-
-      def array_canonical_name_if_empty
-        return nil unless removed.is_a?(Tuple) && removed.elements.empty?
-
-        array_canonical_name
-      end
-
-      def hash_canonical_name_if_empty
-        return nil unless removed.is_a?(HashShape) && removed.pairs.empty?
-
-        hash_canonical_name
       end
 
       def array_canonical_name

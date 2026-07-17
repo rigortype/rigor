@@ -41,8 +41,13 @@ module Rigor
             end
           end
 
+          # `RBS::Types::UntypedFunction` (a `(?)` method type, e.g. core's `Proc#call`) declares no
+          # parameters and exposes none of the per-arity accessors. It has no param classes to compare
+          # against the receiver, so it carries no affinity either way.
           def overload_param_classes_in_ancestry?(method_type, self_class_name, environment)
             fun = method_type.type
+            return false unless fun.respond_to?(:required_positionals)
+
             params = fun.required_positionals + fun.optional_positionals + fun.trailing_positionals
             return false if params.empty?
 

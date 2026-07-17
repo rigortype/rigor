@@ -39,7 +39,7 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     expect(instance.manifest.source_rbs_synthesizer).to respond_to(:call)
   end
 
-  describe "default mode (require_magic_comment: true, ADR-32 WD2)" do
+  describe "default mode (require_magic_comment: false, ADR-93 WD1)" do
     it "flags an argument-type mismatch on a class-wrapped # @rbs param annotation" do
       source = <<~RUBY
         # rbs_inline: enabled
@@ -59,9 +59,9 @@ RSpec.describe "plugins/rigor-rbs-inline" do
       expect(mismatches.first.message).to include(":bad")
     end
 
-    it "contributes nothing for a file without the magic comment" do
+    it "processes an annotated file even without the magic comment (the ADR-93 flip)" do
       source = <<~RUBY
-        # NOTE: no `# rbs_inline: enabled` magic comment here.
+        # NOTE: no `# rbs_inline: enabled` magic comment — the default no longer requires it.
         class AscDesc
           # @rbs asc_or_desc: :asc | :desc
           def ascdesc(asc_or_desc)
@@ -72,6 +72,29 @@ RSpec.describe "plugins/rigor-rbs-inline" do
         AscDesc.new.ascdesc(:bad)
       RUBY
       result = run_plugin(source: source)
+      mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
+      expect(mismatches).not_to be_empty
+    end
+
+    it "restores the ADR-32 opt-in when require_magic_comment: true is set explicitly" do
+      source = <<~RUBY
+        # NOTE: annotated, but no `# rbs_inline: enabled` magic comment.
+        class AscDesc
+          # @rbs asc_or_desc: :asc | :desc
+          def ascdesc(asc_or_desc)
+            asc_or_desc
+          end
+        end
+
+        AscDesc.new.ascdesc(:bad)
+      RUBY
+      result = run_plugin(
+        source: source,
+        plugin_entry: {
+          "gem" => "rigor-rbs-inline",
+          "config" => { "require_magic_comment" => true }
+        }
+      )
       mismatches = result.diagnostics.select { |d| d.qualified_rule == "call.argument-type-mismatch" }
       expect(mismatches).to be_empty
     end

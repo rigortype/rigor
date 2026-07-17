@@ -13,68 +13,87 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 # Current Work — Session Handoff
 
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones
-(`v0.3.0` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is
-the one that is wrong.
+(`v0.3.0` / `v0.4.x` / `v1.0.0`). If this file disagrees with an ADR, the CHANGELOG, or an issue,
+this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.2.9 published 2026-07-11.** master accumulates toward **v0.3.0**; both mandatory pieces are
-  done (deprecation clearance #94, perf recalibration #95). What else the cut carries is **not yet
-  decided** — that is the next session's first job.
+- **v0.2.9 published 2026-07-11.** master accumulates toward **v0.3.0**. Both mandatory pieces are
+  done (deprecation clearance #94, perf recalibration #95), so the cut is already shippable — what
+  follows is what it *earns*, not what unblocks it.
 - The line is **evaluation** (ADR-50): outside feedback + completing the feature set toward the
   v1.0.0 freeze. The protection ceiling is a measured floor (ADR-67 WD2 spiked and deferred — do not
-  re-recommend it); the next direction is the line's purpose, not another engine-precision feature.
-- **Two arcs closed 2026-07-17.** The docs/flow re-org (ADR-97, ADR-98, #119): backlog → GitHub
-  Issues, `docs/ROADMAP.md` deleted and gated against recreation, `CLAUDE.md` an `@AGENTS.md` shell,
-  this file capped at 120 lines. The config surface (ADR-99, #170, #171): the JSON schema is a named
-  source of truth, `rigor_rs:` is reserved for the Rust port, unknown top-level keys warn.
+  re-recommend it).
+- **The cut is now decided (triaged 2026-07-17).** v0.3.0's axis is **type-inference quality**: 13
+  issues. LSP/editor work moved to a new **`v0.4.x`** milestone — improved gradually across the
+  series, not pinned to one cut. 27 issues stay unmilestoned; that is the healthy resting state for
+  demand-gated work, not a backlog to drain.
 - `make verify` and `make docs-check` clean; master and `origin/master` agree.
 
-## Next session — triage, then implement, then release
+## Next session — implement, then release
 
-**1. Triage the backlog into the v0.3.0 cut.** 45 issues are open; **43 are unmilestoned** (17
-`ready-for-agent`, 26 `ready-for-human`) and only #120 carries `v0.3.0`. They were migrated from the
-old ROADMAP with a liveness adjudication, not a priority one — so nothing has yet decided what ships.
-Deciding is milestone assignment: `gh issue edit <n> --milestone v0.3.0`. The `/triage` skill reads
-`docs/agents/issue-tracker.md`; conventions and the label vocabulary are there and in
-`docs/agents/triage-labels.md`. Area spread of the unmilestoned set: engine 19, plugins 8, editor 7,
-perf 4, self-testing 3, docs 2, sig-gen 2.
+**1. Implement the v0.3.0 set.** `gh issue list --milestone v0.3.0`. Four are `ready-for-agent`
+(specified enough to start with no human context — named injection point, constraint envelope, and
+the gate that proves it done): **#121** (FP-safe builtin/stdlib folds — the `rigor-type-coverage-uplift`
+skill is the procedure), **#131** (Data/Struct value folding), **#155** (subclass-aware gating for
+`call.self-undefined-method`), **#174** (correct ADR-94 WD2 — a docs fix, see below).
 
-**2. Implement what the triage picked.** A `ready-for-agent` issue is specified enough to start with
-no human context — named injection point, constraint envelope, and the gate that proves it done. A
-`ready-for-human` one needs a decision first; #120 (mature `--incremental` toward default-capable) is
-the example, and its acceptance bar already exists: `--verify-incremental` (incremental == full
-`--no-cache`, byte-identical), wired into CI.
+The rest need a decision before code. Three are design-first and have no carrier or mechanism today:
+**#172** (`Regexp.last_match` match-success narrowing), **#126** (length-range carrier), **#152**
+(widen the `&&`/`||` polarity gate past Constant-only). Two touch the ADR-50 v1.0-frozen diagnostic
+vocabulary, so their rule ids and default severities are deliberate choices, not implementation
+details: **#161** (a total RBS env-build failure currently exits 0 with `Dynamic[top]` project-wide
+and no diagnostic) and **#162** (the `static.*` family + a `void_origins` side-table). **#120**
+(mature `--incremental` toward default-capable) is the perf headline; its acceptance bar already
+exists — `--verify-incremental` (incremental == full `--no-cache`, byte-identical), wired into CI.
 
-**3. Release — and budget for the CHANGELOG.** `[Unreleased]` holds **55 bullets, 39 of them
+**2. Release — and budget for the CHANGELOG.** `[Unreleased]` holds **55 bullets, 39 of them
 multi-sentence**. Sealing them is the highest-value, most-skipped step of `rigor-release-prep`, it
 needs cycle-wide context, and it is the one release step `make verify` cannot rescue. Measured
 2026-07-17; plan for it rather than discovering it at the cut. **Version bumps and `rake release`
 stay user-gated** — land entries, stop, and let the user drive the cut-over (AGENTS.md § Release
 Cadence).
 
-## Open, not milestoned — decide in step 1 whether these are v0.3.0
+## The rbs-inline chain — ordering is load-bearing
 
-Carried from the rbs-inline arc; all three are specified:
+Three issues, and the order is a protocol requirement rather than a preference:
 
-- **`Regexp.last_match` match-success narrowing (ADR-93 WD1a).** herb gains 4
-  `call.possible-nil-receiver` under `--treat-all-as-inline-rbs`: the receiver is
-  `Regexp.last_match(1)` after a successful `=~` whose group always participates (`/\n([ \t]+)\z/`),
-  so nil is unreachable. A pre-existing imprecision masked by herb's `-> untyped` sigs; FP-reducing
-  on its own, and per the ADR-57 protocol it must land **before** ADR-93's default flip, which
-  surfaces it.
-- **ADR-93's `require_magic_comment:` default flip + the WD2 default-wiring decision.** Note ADR-94:
-  if the rbs 3.x floor ever moves, the reader migrates to `RBS::InlineParser` and WD2/WD3 evaporate.
-- **Correct ADR-94 WD2 — its `UntypedFunction` "live bug" does not reproduce.** `CheckRules` guards
-  the form via `arity_eligible?` / `argument_check_eligible?` (both landed 2026-05-01, `fc1da90e` /
-  `ef0dd777`); the ADR's own repro plus six variant shapes run clean (probed 2026-07-17). Adjudicate
-  whether any reproducing shape exists, then fix the ADR text.
+**#172 → #173.** ADR-93 WD1a: the 4 `call.possible-nil-receiver` that the ADR-93 default flip
+surfaces on herb are a *pre-existing* `Regexp.last_match` imprecision, masked until now by herb's
+`-> untyped` sigs. Per the ADR-57 protocol an artifact is fixed at root **before** the change that
+surfaces it lands, so #172 is a prerequisite of #173, not a follow-up.
+
+**#173 is the user's call, not an agent's.** Flipping ADR-93's `require_magic_comment:` default is
+the mechanical part; WD2 (default-wiring the bundled plugin) is a partial reversal of the
+ADR-27/ADR-31 auto-load deferral, and its opt-out schema is open — the plugin-entry schema has no
+`enabled:` key, and ADR-99 now makes the JSON schema a named source of truth. WD3 (the standalone
+residual) is a second open choice. ADR-93 is still **Proposed**; accepting it is part of the work.
+
+**#174 is a documentation fix, and the tree is the evidence.** ADR-94 WD2 claims the arity path in
+`Analysis::CheckRules` does not guard `RBS::Types::UntypedFunction`. It does — `arity_eligible?` and
+`argument_check_eligible?` both bail via `respond_to?(:required_keywords)`, with a comment naming the
+form and calling the bail the correct conservative move. Both predate the ADR (in place by
+2026-05-02; re-verified 2026-07-17). ADR-94's Status block still leads with that phantom blocker, so
+it misleads anyone sizing the ADR-93 work — fix the text, do not touch the guards.
+
+Standing context: ADR-94 records that rbs 4.0 absorbed the reader (`RBS::InlineParser`), which would
+retire WD2 and WD3 outright. That migration is deferred behind the `rbs >= 3.0, < 5.0` floor
+(ADR-79) and is **not** planned for v0.3.0.
+
+## Known couplings inside the milestone
+
+- **#130's slice 5 is blocked by #156**, which stayed unmilestoned on purpose — its own text says it
+  is gated on general return-inference precision, so there is nothing to schedule there yet. v0.3.0
+  carries only #130's two unblocked follow-ons (WD9 generic-instantiation comparison; RBS-only
+  ancestors + `def self.` coverage). Note posted on the issue.
+- **#162 creates the `static.*` family that #158 (v1.0.0, inference budgets) reserves its cutoffs
+  under.** Family first is the right order; #158 stays demand-deferred either way.
 
 ## Waiting on the user
 
 - **Publish the staged `ruby/rbs` upstream fix** — branch `widen-strscan-resolv-stdlib-sigs` in
   `references/rbs` (widens `StringScanner#[]`, `Resolv#initialize`); push + upstream PR are the
-  user's action. Tracked as #159.
+  user's action. Tracked as #159, deliberately unmilestoned: it cannot ship in our cut.
 - The upstream `rbs-inline` RDoc fix ([soutaro/rbs-inline#249](https://github.com/soutaro/rbs-inline/pull/249))
   is open under the user's fork; nothing to do repo-side until upstream responds.
 - **rigor-rs:** the reserve pipeline (ADR-99) has its first reservation — `rigor_rs.ruby` is declared

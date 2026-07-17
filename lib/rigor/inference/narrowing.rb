@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../reflection"
+require_relative "../source/constant_path"
 require_relative "../type"
 require_relative "../environment"
 require_relative "../rbs_extended"
@@ -41,7 +42,13 @@ module Rigor
       TRUSTED_EQUALITY_LITERAL_CLASSES = [String, Symbol, Integer, TrueClass, FalseClass, NilClass].freeze
       SINGLETON_LITERAL_CLASSES = [TrueClass, FalseClass, NilClass].freeze
       ClassNarrowingContext = Data.define(:exact, :polarity, :environment)
-      private_constant :TRUSTED_EQUALITY_LITERAL_CLASSES, :SINGLETON_LITERAL_CLASSES, :ClassNarrowingContext
+      # A recognised `=~` regex pattern operand: the pattern `source` string and whether it was
+      # compiled in extended (`//x`) mode. Extraction from a literal `RegularExpressionNode` and from
+      # a value-pinned `Constant[Regexp]` share this carrier so the participation walk and the
+      # extended-mode bail read one shape.
+      RegexMatchPattern = Data.define(:source, :extended)
+      private_constant :TRUSTED_EQUALITY_LITERAL_CLASSES, :SINGLETON_LITERAL_CLASSES, :ClassNarrowingContext,
+                       :RegexMatchPattern
 
       module_function
 
@@ -1199,30 +1206,76 @@ module Rigor
         # - Falsey edge (`=~` returned nil — no match): `$~` and every numbered / back-reference
         #   global bound to `Constant<nil>`.
         #
-        # Returns nil (no narrowing) when the receiver / argument pair does not include a
-        # `RegularExpressionNode` literal we can count.
+        # Returns nil (no narrowing) when the receiver / argument pair does not resolve to exactly one
+        # regex pattern we can count (see {#regex_match_pattern}).
         def analyse_regex_match_predicate(node, scope)
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
-          regex_node = regex_match_literal(node.receiver, node.arguments.arguments.first)
-          return nil if regex_node.nil?
+          pattern = regex_match_pattern(node.receiver, node.arguments.arguments.first, scope)
+          return nil if pattern.nil?
+          # Extended mode (`//x`) lets the pattern carry free whitespace and `#` comments, and a
+          # comment may contain a literal `(` — which the light char-scan walker would miscount as a
+          # capturing group, shifting `$N` indices and narrowing the wrong global. That is a
+          # false-negative-class misnarrowing, so bail rather than risk it. The literal path shares
+          # this bail: `RegularExpressionNode` carries the same latent miscount.
+          return nil if pattern.extended
 
-          unconditional = unconditional_capture_groups(regex_node.unescaped)
+          unconditional = unconditional_capture_groups(pattern.source)
           regex_match_predicate_scopes(scope, unconditional)
         end
 
-        def regex_match_literal(left, right)
-          return left if left.is_a?(Prism::RegularExpressionNode)
-          return right if right.is_a?(Prism::RegularExpressionNode)
+        # Recognises the regex pattern operand of a `=~` predicate. An operand resolves to a regex when
+        # it is either a syntactic `RegularExpressionNode` literal OR a constant read whose type is a
+        # value-pinned `Constant[Regexp]` (`RE = /.../` and `RE = Regexp.new(...)` both fold to the
+        # carrier in the whole-program constant pre-pass). Returns a single {RegexMatchPattern}, or nil
+        # (no narrowing) when NEITHER operand resolves to a regex, when BOTH do (`/a/ =~ /b/` — no
+        # string subject to bind), or when a constant operand is ambiguous — typed as a `Union` from a
+        # twice-assigned constant, where no single source can be pinned.
+        def regex_match_pattern(left, right, scope)
+          left_pattern = regex_operand_pattern(left, scope)
+          right_pattern = regex_operand_pattern(right, scope)
+          return nil if left_pattern == :ambiguous || right_pattern == :ambiguous
 
-          nil
+          patterns = [left_pattern, right_pattern].grep(RegexMatchPattern)
+          patterns.size == 1 ? patterns.first : nil
         end
 
-        # Curated set of back-reference globals bound by every
-        # `=~`. Numbered references (`$1..$N`) are handled
-        # separately because N depends on the regex source.
-        REGEX_MATCH_GLOBALS = %i[$~ $& $` $' $+].freeze
+        # Classifies one `=~` operand: a {RegexMatchPattern} when it resolves to a regex (literal or
+        # `Constant[Regexp]`), `:ambiguous` when a constant operand types as a `Union` (a twice-assigned
+        # constant), or nil when the operand is not a regex at all.
+        def regex_operand_pattern(node, scope)
+          case node
+          when Prism::RegularExpressionNode
+            RegexMatchPattern.new(source: node.unescaped, extended: node.extended?)
+          when Prism::ConstantReadNode, Prism::ConstantPathNode
+            regex_operand_from_constant(node, scope)
+          end
+        end
+
+        # Resolves a constant-reference operand to a regex pattern via the shared lexical-constant
+        # resolution (`Reflection.resolve_constant_type`). `Regexp#options` gives the real
+        # extended-mode flag; `Regexp#source` the pattern. Returns `:ambiguous` for a `Union`-typed
+        # constant so the caller bails, and nil when the constant does not resolve to a `Constant[Regexp]`.
+        def regex_operand_from_constant(node, scope)
+          name = Source::ConstantPath.qualified_name_or_nil(node)
+          return nil if name.nil?
+
+          type = Reflection.resolve_constant_type(name, scope: scope)
+          return :ambiguous if type.is_a?(Type::Union)
+          return nil unless type.is_a?(Type::Constant)
+
+          value = type.value
+          return nil unless value.is_a?(Regexp)
+
+          RegexMatchPattern.new(source: value.source, extended: value.options.anybits?(Regexp::EXTENDED))
+        end
+
+        # Curated set of match globals bound non-nil on every successful `=~` regardless of grouping:
+        # `$~` (the MatchData), `$&` (whole match), `` $` `` (pre-match), `$'` (post-match). Numbered
+        # references (`$1..$N`) and `$+` (the last matched group) are handled separately because they
+        # depend on the regex source — `$+` is gated on the same participation set as `$N` (#177).
+        REGEX_MATCH_GLOBALS = %i[$~ $& $` $'].freeze
         private_constant :REGEX_MATCH_GLOBALS
 
         # `unconditional` is the Set of 1-based numbered-capture indices whose group is
@@ -1250,6 +1303,15 @@ module Rigor
             name = :"$#{index}"
             truthy = truthy.with_global(name, string_t)
             falsey = falsey.with_global(name, nil_t)
+          end
+          # `$+` is the LAST matched group, so it is nil on a successful match whose groups are all
+          # optional (`"b" =~ /(a)?b/` matches yet leaves `$+` nil) or absent (no capture group). It
+          # narrows to `String` only when some group is guaranteed to participate — the same
+          # participation gate `$N` uses (#177). With no unconditional group it is left unbound on both
+          # edges (fall through to the RBS `String?` default), exactly as an optional `$N` is.
+          unless unconditional.empty?
+            truthy = truthy.with_global(:$+, string_t)
+            falsey = falsey.with_global(:$+, nil_t)
           end
           [truthy, falsey]
         end

@@ -1442,6 +1442,113 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  describe ".predicate_scopes — #172 constant-operand regex match" do
+    def string_t = Rigor::Type::Combinator.nominal_of("String")
+    def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")
+
+    def const_scope(constants)
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: constants)
+      Rigor::Scope.empty.with_discovery(index)
+    end
+
+    def edges_with(source, constants)
+      predicate = parse_predicate(source, locals: %i[x])
+      described_class.predicate_scopes(predicate, const_scope(constants))
+    end
+
+    def const_regexp(regexp)
+      Rigor::Type::Combinator.constant_of(regexp)
+    end
+
+    it "narrows through a `Constant[Regexp]` constant operand (`x =~ RE`)" do
+      truthy, falsey = edges_with("x =~ RE", { "RE" => const_regexp(/\n([ \t]+)\z/) })
+      expect(truthy.global(:$~)).to eq(matchdata_t)
+      expect(truthy.global(:$1)).to eq(string_t)
+      expect(falsey.global(:$1)).to eq(constant_nil)
+    end
+
+    it "narrows regardless of operand order (`RE =~ x`)" do
+      truthy, = edges_with("RE =~ x", { "RE" => const_regexp(/(\d+)/) })
+      expect(truthy.global(:$1)).to eq(string_t)
+    end
+
+    it "resolves a `Regexp.new`-built constant the same way (already folded to Constant[Regexp])" do
+      truthy, = edges_with("x =~ RE", { "RE" => const_regexp(Regexp.new("(\\d+)")) })
+      expect(truthy.global(:$1)).to eq(string_t)
+    end
+
+    it "keeps optional-group participation through a constant operand" do
+      truthy, = edges_with("x =~ RE", { "RE" => const_regexp(/x(y)?/) })
+      expect(truthy.global(:$1)).to be_nil
+    end
+
+    it "bails when a constant operand types as a Union (twice-assigned)" do
+      constants = { "RE" => Rigor::Type::Combinator.union(const_regexp(/a/), const_regexp(/b/)) }
+      truthy, = edges_with("x =~ RE", constants)
+      expect(truthy.global(:$~)).to be_nil
+    end
+
+    it "does not narrow when a constant operand is not a Regexp" do
+      truthy, = edges_with("x =~ COUNT", { "COUNT" => Rigor::Type::Combinator.constant_of(3) })
+      expect(truthy.global(:$~)).to be_nil
+    end
+
+    it "does not narrow when an unresolved constant operand yields no type" do
+      truthy, = edges_with("x =~ UNKNOWN_RE", {})
+      expect(truthy.global(:$~)).to be_nil
+    end
+
+    it "bails when both operands resolve to a regexp" do
+      truthy, = edges_with("RE =~ OTHER", { "RE" => const_regexp(/a/), "OTHER" => const_regexp(/b/) })
+      expect(truthy.global(:$~)).to be_nil
+    end
+
+    it "bails on an extended-mode (`//x`) constant operand — the `(` miscount trap" do
+      truthy, = edges_with("x =~ RE", { "RE" => const_regexp(/a(b)c # comment with ( paren/x) })
+      expect(truthy.global(:$~)).to be_nil
+    end
+
+    it "bails on an extended-mode (`//x`) regex literal operand" do
+      predicate = parse_predicate("x =~ /a(b)c # comment with ( paren/x", locals: %i[x])
+      truthy, = described_class.predicate_scopes(predicate, scope)
+      expect(truthy.global(:$~)).to be_nil
+    end
+  end
+
+  describe ".predicate_scopes — #177 `$+` participation gate" do
+    def string_t = Rigor::Type::Combinator.nominal_of("String")
+    def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")
+
+    def edges(source)
+      predicate = parse_predicate(source, locals: %i[x])
+      described_class.predicate_scopes(predicate, scope)
+    end
+
+    it "narrows `$+` to String when at least one group is unconditional" do
+      truthy, falsey = edges("/\\n([ \\t]+)\\z/ =~ x")
+      expect(truthy.global(:$+)).to eq(string_t)
+      expect(falsey.global(:$+)).to eq(constant_nil)
+    end
+
+    it "leaves `$+` unbound (nilable) when every group is optional" do
+      truthy, = edges("/(a)?b/ =~ x")
+      expect(truthy.global(:$+)).to be_nil
+    end
+
+    it "leaves `$+` unbound (nilable) when the pattern has no capture group" do
+      truthy, = edges("/abc/ =~ x")
+      expect(truthy.global(:$+)).to be_nil
+    end
+
+    it "leaves `$~`/`$&`/`` $` ``/`$'` non-nil regardless of grouping" do
+      truthy, = edges("/abc/ =~ x")
+      expect(truthy.global(:$~)).to eq(matchdata_t)
+      expect(truthy.global(:$&)).to eq(string_t)
+      expect(truthy.global(:$`)).to eq(string_t)
+      expect(truthy.global(:$')).to eq(string_t)
+    end
+  end
+
   describe ".case_when_scopes — C1 regex `when` clause globals" do
     def string_t = Rigor::Type::Combinator.nominal_of("String")
     def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")

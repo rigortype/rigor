@@ -69,6 +69,36 @@ RSpec.describe Rigor::Reflection do
       scope = Rigor::Scope.empty(environment: env)
       expect(described_class.constant_type_for("FROBINATOR", scope: scope)).to be_nil
     end
+  end
+
+  describe ".resolve_constant_type" do
+    it "resolves an in-source value constant to its pinned type" do
+      pinned = Rigor::Type::Combinator.constant_of(/\n([ \t]+)\z/)
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: { "RE" => pinned })
+      scope = Rigor::Scope.empty.with_discovery(index)
+      expect(described_class.resolve_constant_type("RE", scope: scope)).to eq(pinned)
+    end
+
+    it "resolves a registry class name to a Singleton carrier" do
+      type = described_class.resolve_constant_type("String")
+      expect(type).to be_a(Rigor::Type::Singleton)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "walks the enclosing class path (most-qualified candidate wins)" do
+      pinned = Rigor::Type::Combinator.constant_of(42)
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(in_source_constants: { "Foo::RE" => pinned })
+      scope = Rigor::Scope.empty
+                          .with_self_type(Rigor::Type::Combinator.nominal_of("Foo"))
+                          .with_discovery(index)
+      expect(described_class.resolve_constant_type("RE", scope: scope)).to eq(pinned)
+    end
+
+    it "returns nil for a constant no source knows" do
+      env = Rigor::Environment.new
+      scope = Rigor::Scope.empty(environment: env)
+      expect(described_class.resolve_constant_type("FROBINATOR", scope: scope)).to be_nil
+    end
 
     describe "RBS-backed lookups under cache_store (v0.0.9 group A slice 4)" do
       let(:tmpdir) { Dir.mktmpdir("rigor-reflection-cache-spec-") }

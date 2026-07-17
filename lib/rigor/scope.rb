@@ -23,7 +23,8 @@ module Rigor
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
-                :dynamic_origins, :local_origins, :ivar_origins
+                :dynamic_origins, :local_origins, :ivar_origins,
+                :void_origins
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -122,6 +123,16 @@ module Rigor
       self
     end
 
+    # ADR-100 WD3 — records that the value introduced at `node` (a call node) is a `top` recovered from an
+    # author-declared `-> void` return, keyed by the origin site (`origin`, an {Inference::VoidOrigin}). The
+    # value-context check rule `static.value-use.void` consumes this table. Mirrors {#record_dynamic_origin}
+    # exactly: identity-keyed advisory metadata, mutated in place on the shared table (threaded by reference
+    # through `#join` / `#rebuild`), excluded from `==` / `hash`, so it never forks a flow-dedup or cache key.
+    def record_void_origin(node, origin)
+      @void_origins[node] = origin
+      self
+    end
+
     def initialize(
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
@@ -137,7 +148,8 @@ module Rigor
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
       dynamic_origins: {}.compare_by_identity,
       local_origins: EMPTY_ORIGINS,
-      ivar_origins: EMPTY_ORIGINS
+      ivar_origins: EMPTY_ORIGINS,
+      void_origins: {}.compare_by_identity
     )
       @environment = environment
       @locals = locals
@@ -155,6 +167,7 @@ module Rigor
       @dynamic_origins = dynamic_origins
       @local_origins = local_origins
       @ivar_origins = ivar_origins
+      @void_origins = void_origins
       freeze
     end
 
@@ -677,7 +690,8 @@ module Rigor
       struct_fold_safe_locals: @struct_fold_safe_locals,
       dynamic_origins: @dynamic_origins,
       local_origins: @local_origins,
-      ivar_origins: @ivar_origins
+      ivar_origins: @ivar_origins,
+      void_origins: @void_origins
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -691,7 +705,8 @@ module Rigor
         struct_fold_safe_locals: struct_fold_safe_locals,
         dynamic_origins: dynamic_origins,
         local_origins: local_origins,
-        ivar_origins: ivar_origins
+        ivar_origins: ivar_origins,
+        void_origins: void_origins
       )
     end
 
@@ -728,7 +743,8 @@ module Rigor
         source_path: source_path,
         dynamic_origins: @dynamic_origins,
         local_origins: join_origins(@local_origins, other.local_origins),
-        ivar_origins: join_origins(@ivar_origins, other.ivar_origins)
+        ivar_origins: join_origins(@ivar_origins, other.ivar_origins),
+        void_origins: @void_origins
       )
     end
 

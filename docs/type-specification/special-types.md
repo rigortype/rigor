@@ -65,25 +65,31 @@ Strict dynamic modes MAY report dynamic-to-precise assignments, arguments, retur
 
 ## `void`
 
-> **Status — partially wired (as of this writing).** The engine translates RBS `void` to
-> **`top`** ([`rbs_type_translator.rb`](../../lib/rigor/inference/rbs_type_translator.rb),
+> **Status — the direct value-context diagnostic is implemented; distinct-`void` machinery is
+> not.** The engine translates RBS `void` to **`top`**
+> ([`rbs_type_translator.rb`](../../lib/rigor/inference/rbs_type_translator.rb),
 > `RBS::Types::Bases::Void => :translate_top`), which is RBS's own definition — "They are all
 > equivalent for the type system; they are all *top type*" (`docs/syntax.md` § "`void`,
 > `boolish`, or `top`?"). So the widening half of this section holds: an author's `void`
 > return is not typed as the body's inferred value, and a caller cannot silently depend on it.
 >
-> What is **not** implemented is everything that requires `void` to be *distinct* from `top`:
-> there is no `void` carrier, no "use of void value" diagnostic, no generic-slot preservation,
-> and no `void | bot` normalization. Note also that an unguarded call on `top` is not
-> diagnosed today either — the `static.*` family that would do so is Reserved (see
-> [diagnostic-policy.md](diagnostic-policy.md) § "Identifier taxonomy"), so `top` does not yet
-> bite. That family is the missing connective for this section's value-context rule.
+> The **value-context diagnostic now exists** for the direct case:
+> [ADR-100](../adr/100-static-diagnostic-family-and-void-origins.md) added the `void_origins`
+> side-table (populated in the return-typing tier where `void → top` widens) and the
+> `static.value-use.void` check rule (`static.value-use.*` in
+> [diagnostic-policy.md](diagnostic-policy.md) § "Identifier taxonomy"). It fires when a `top`
+> recovered from an **author-declared `-> void`** return, resolved on the direct-dispatch path,
+> is used in value context (an assignment right-hand side, a call receiver, or a call argument),
+> and is materialized as `top` for downstream recovery. It ships behind the `use-of-void-value`
+> `bleeding_edge:` feature because a new required diagnostic is an
+> [ADR-50](../adr/50-release-engineering-and-stability-strategy.md) WD1 compatibility change.
 >
-> The intent is retained per [ADR-1](../adr/1-types.md) § "Special RBS types … must be handled
-> with type-theoretic clarity rather than as ad hoc aliases"; the remaining work is carried
-> over by [ADR-92](../adr/92-normative-status-fidelity.md) WD2. Implementing the value-context
-> diagnostic is a new required discipline and therefore ships behind `bleeding_edge:` per
-> [ADR-50](../adr/50-release-engineering-and-stability-strategy.md) WD1.
+> What is still **not** implemented: no `void` carrier, no generic-slot preservation, and no
+> `void | bot` normalization; the **transitive** case (a value returned through a method whose
+> own signature declares nothing) is deferred (ADR-100 WD4), as is the sibling unguarded-call-on-
+> `top` diagnostic (`static.value-use.top`, the `top` section below — no implementation yet). The
+> intent is retained per [ADR-1](../adr/1-types.md) § "Special RBS types … must be handled with
+> type-theoretic clarity rather than as ad hoc aliases".
 
 `void` is **not** an ordinary value type in Rigor. It is a result marker for expressions whose return value should not be used.
 

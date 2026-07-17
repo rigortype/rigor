@@ -60,6 +60,10 @@ module Rigor
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
           "suppression.unknown-marker" => :warning,
+          # ADR-100 — a new required diagnostic (ADR-50 WD1), so it is `:off` in every shipped profile and
+          # reaches a user only through the `use-of-void-value` bleeding-edge feature, which overrides this
+          # to `:warning`.
+          "static.value-use.void" => :off,
           # Opt-in author assertion: you only see it if you wrote a
           # `conforms-to` directive, so it stays a :warning even in
           # lenient — it is never unsolicited noise.
@@ -96,6 +100,7 @@ module Rigor
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
           "suppression.unknown-marker" => :warning,
+          "static.value-use.void" => :off,
           "rbs_extended.unsatisfied-conformance" => :warning
         }.freeze,
         strict: {
@@ -128,6 +133,8 @@ module Rigor
           "suppression.unknown-rule" => :warning,
           "suppression.empty" => :warning,
           "suppression.unknown-marker" => :warning,
+          # `:off` even under strict: the gate is `bleeding_edge:`, not the profile (ADR-50 WD1 / ADR-100).
+          "static.value-use.void" => :off,
           "rbs_extended.unsatisfied-conformance" => :error
         }.freeze
       }.freeze

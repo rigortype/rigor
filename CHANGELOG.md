@@ -13,6 +13,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[rigor check]** Using the return of a method whose RBS declares `-> void` as a value — assigning it, calling a method on it, or passing it as an argument — is now reported as `static.value-use.void`. An explicit `-> void` is the author saying "do not rely on this return", so relying on the `top` it recovers to is a mistake worth surfacing. It fires only on a method resolved directly on the receiver's own class (not through an inherited fallback), and a bare-statement `void` call or a genuine `top` value stays silent. Opt-in behind the new `use-of-void-value` bleeding-edge feature, since a new required diagnostic is a compatibility change.
+
 - **[type inference]** The override-signature checks (`def.override-return-widened`, `def.override-param-narrowed`) now compare a generic parent contract at the type its subclass instantiates: when `class Sub < Parent[Integer]`, an inherited `-> T` is checked as `-> Integer` instead of being waved through. A subclass that leaves the type parameter open still reports nothing, so no correct override is newly flagged.
 
 - **[type inference]** `Struct` and `Data.define` value objects now infer precise member types through a setter and through a block-defined class, in two more cases.

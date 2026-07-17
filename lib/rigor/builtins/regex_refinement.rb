@@ -19,7 +19,7 @@ module Rigor
     # Recognised body shapes (each row admits the `+` quantifier and the bounded `{n}` /
     # `{n,m}` forms with `n >= 1`):
     #
-    #   - `\d`                     -> decimal-int-string
+    #   - `\d`, `[0-9]`            -> decimal-int-string
     #   - `\h`                     -> hex-int-string
     #   - `[0-9a-fA-F]`            -> hex-int-string
     #   - `[0-9a-f]`, `[0-9A-F]`   -> hex-int-string
@@ -45,6 +45,7 @@ module Rigor
       # `Ractor::IsolationError` on the first row access.
       RULES = Ractor.make_shareable([
                                       [/\A\\d#{QUANTIFIER_SOURCE}\z/, :decimal_int_string],
+                                      [/\A\[0-9\]#{QUANTIFIER_SOURCE}\z/, :decimal_int_string],
                                       [/\A\\h#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
                                       [/\A\[0-9a-fA-F\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
                                       [/\A\[0-9a-f\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
@@ -75,6 +76,40 @@ module Rigor
         return nil unless valid_bounds?(body)
 
         Type::Combinator.public_send(rule.last)
+      end
+
+      # Whole-receiver regime (#164). Where {for_capture_body} narrows a named-capture body —
+      # sound *without* anchors because the capture boundary is itself the anchor — this maps a
+      # WHOLE regex `source` (as from `Regexp#source` or a literal `RegularExpressionNode`)
+      # matched against an entire string via `String#match?` / `=~`. The predicate proves a
+      # property of the whole string only when the pattern is fully anchored, so a required
+      # leading `\A` **and** trailing `\z` are load-bearing: both must be present, and the inner
+      # body must be one of the curated single-char-class shapes {for_capture_body} already
+      # audits.
+      #
+      # Deliberately rejected (each admits a string the carrier would misdescribe):
+      #
+      #   - bare / one-sided anchoring (`\d+`, `\A\d+`, `\d+\z`) — matches a substring, not the
+      #     whole string;
+      #   - `\Z` (capital) — anchors before an optional trailing newline, so `"12\n"` matches
+      #     `/\A\d+\Z/` yet is not a decimal-int-string;
+      #   - line anchors `^` / `$` — match per-line, so `"12\nabc"` matches `/^\d+$/`;
+      #   - any inner body outside the curated table (`\w+`, alternation, multi-class).
+      #
+      # Extended (`//x`) mode is the caller's concern — the char-class table cannot see the
+      # free-whitespace/`#`-comment flag from the `source` alone, so consumers bail on it before
+      # calling here.
+      #
+      # @param source [String, nil] the full regex source string.
+      # @return [Rigor::Type, nil] the matching imported refinement carrier, or `nil`.
+      def for_whole_pattern(source)
+        return nil if source.nil?
+        return nil unless source.start_with?('\A') && source.end_with?('\z')
+
+        inner = source[2...-2]
+        return nil if inner.nil? || inner.empty?
+
+        for_capture_body(inner)
       end
 
       # Filters the bounded-quantifier forms to ones whose lower bound is at least 1 and

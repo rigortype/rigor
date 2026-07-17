@@ -1549,6 +1549,108 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  describe ".predicate_scopes — #164 whole-receiver anchored refinement" do
+    def string_t = Rigor::Type::Combinator.nominal_of("String")
+    def decimal_int = Rigor::Type::Combinator.decimal_int_string
+    def lowercase = Rigor::Type::Combinator.lowercase_string
+    def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")
+
+    def edges(source)
+      bound = scope.with_local(:s, string_t)
+      predicate = parse_predicate(source, locals: %i[s])
+      described_class.predicate_scopes(predicate, bound)
+    end
+
+    context "with String#match? (receiver narrows on the truthy edge only)" do
+      it "narrows `s.match?(/\\A\\d+\\z/)` to decimal-int-string" do
+        truthy, falsey = edges('s.match?(/\A\d+\z/)')
+        expect(truthy.local(:s)).to eq(decimal_int)
+        expect(falsey.local(:s)).to eq(string_t)
+      end
+
+      it "narrows `s.match?(/\\A[0-9]+\\z/)` to decimal-int-string" do
+        truthy, = edges('s.match?(/\A[0-9]+\z/)')
+        expect(truthy.local(:s)).to eq(decimal_int)
+      end
+
+      it "narrows `s.match?(/\\A[a-z]+\\z/)` to lowercase-string" do
+        truthy, = edges('s.match?(/\A[a-z]+\z/)')
+        expect(truthy.local(:s)).to eq(lowercase)
+      end
+
+      it "resolves an anchored `Constant[Regexp]` argument the same way" do
+        bound = scope.with_local(:s, string_t)
+        predicate = parse_predicate("s.match?(RE)", locals: %i[s])
+        index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+          in_source_constants: { "RE" => Rigor::Type::Combinator.constant_of(/\A\d+\z/) }
+        )
+        truthy, = described_class.predicate_scopes(predicate, bound.with_discovery(index))
+        expect(truthy.local(:s)).to eq(decimal_int)
+      end
+
+      it "does NOT narrow the unanchored `/\\d+/` (matches a substring)" do
+        truthy, = edges('s.match?(/\d+/)')
+        expect(truthy.local(:s)).to eq(string_t)
+      end
+
+      it "does NOT narrow `/\\A\\d+\\Z/` (capital `\\Z` admits a trailing newline)" do
+        truthy, = edges('s.match?(/\A\d+\Z/)')
+        expect(truthy.local(:s)).to eq(string_t)
+      end
+
+      it "does NOT narrow the line-anchored `/^\\d+$/`" do
+        truthy, = edges('s.match?(/^\d+$/)')
+        expect(truthy.local(:s)).to eq(string_t)
+      end
+
+      it "does NOT narrow one-sided `/\\A\\d+/` or `/\\d+\\z/`" do
+        expect(edges('s.match?(/\A\d+/)').first.local(:s)).to eq(string_t)
+        expect(edges('s.match?(/\d+\z/)').first.local(:s)).to eq(string_t)
+      end
+
+      it "does NOT narrow the unrecognised `/\\A\\w+\\z/` body" do
+        truthy, = edges('s.match?(/\A\w+\z/)')
+        expect(truthy.local(:s)).to eq(string_t)
+      end
+
+      it "does NOT narrow an empty-admitting `/\\A\\d*\\z/`" do
+        truthy, = edges('s.match?(/\A\d*\z/)')
+        expect(truthy.local(:s)).to eq(string_t)
+      end
+
+      it "does NOT narrow an extended-mode (`//x`) anchored pattern" do
+        truthy, = edges('s.match?(/\A \d+ \z/x)')
+        expect(truthy.local(:s)).to eq(string_t)
+      end
+    end
+
+    context "with String#=~ (receiver refinement layered onto match-global narrowing)" do
+      it "narrows the string operand on `s =~ /\\A\\d+\\z/` (and keeps `$~`)" do
+        truthy, falsey = edges('s =~ /\A\d+\z/')
+        expect(truthy.local(:s)).to eq(decimal_int)
+        expect(truthy.global(:$~)).to eq(matchdata_t)
+        expect(falsey.local(:s)).to eq(string_t)
+      end
+
+      it "narrows regardless of operand order (`/\\A[a-z]+\\z/ =~ s`)" do
+        truthy, = edges('/\A[a-z]+\z/ =~ s')
+        expect(truthy.local(:s)).to eq(lowercase)
+      end
+
+      it "does NOT narrow the operand for the unanchored `s =~ /\\d+/`" do
+        truthy, = edges('s =~ /\d+/')
+        expect(truthy.local(:s)).to eq(string_t)
+        # The match-global narrowing is unaffected by the absent receiver refinement.
+        expect(truthy.global(:$~)).to eq(matchdata_t)
+      end
+
+      it "does NOT narrow the operand for `s =~ /\\A\\d+\\Z/`" do
+        truthy, = edges('s =~ /\A\d+\Z/')
+        expect(truthy.local(:s)).to eq(string_t)
+      end
+    end
+  end
+
   describe ".case_when_scopes — C1 regex `when` clause globals" do
     def string_t = Rigor::Type::Combinator.nominal_of("String")
     def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")

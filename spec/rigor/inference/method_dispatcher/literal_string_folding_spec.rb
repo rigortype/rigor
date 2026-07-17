@@ -108,8 +108,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
 
   describe "Array#join (Tuple receiver lift)" do
     let(:tuple_of_literals) { Rigor::Type::Combinator.tuple_of(literal_string, string_const) }
+    let(:tuple_of_constants) { Rigor::Type::Combinator.tuple_of(string_const, string_const) }
     let(:tuple_with_nominal) { Rigor::Type::Combinator.tuple_of(literal_string, nominal_string) }
-    let(:empty_tuple) { Rigor::Type::Combinator.tuple_of }
 
     it "lifts Tuple[literal, Constant<String>].join to literal-string (no separator)" do
       result = described_class.try_dispatch(cc(receiver: tuple_of_literals, method_name: :join, args: []))
@@ -123,8 +123,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
       expect(result).to eq(literal_string)
     end
 
-    it "lifts Tuple[].join (empty tuple) to literal-string" do
+    # An all-`Constant` tuple with an absent or `Constant<String>` separator is exactly what
+    # `ShapeDispatch.tuple_join` folds to a precise `Constant<String>`. This tier runs ahead of
+    # ShapeDispatch, so it MUST decline (return nil) rather than shadow that with `literal-string`.
+    it "declines Tuple[Constant<String>, Constant<String>].join so ShapeDispatch folds the precise Constant" do
+      result = described_class.try_dispatch(cc(receiver: tuple_of_constants, method_name: :join, args: []))
+      expect(result).to be_nil
+    end
+
+    it "declines an all-Constant tuple join with a Constant<String> separator" do
+      result = described_class.try_dispatch(cc(
+                                              receiver: tuple_of_constants, method_name: :join, args: [string_const]
+                                            ))
+      expect(result).to be_nil
+    end
+
+    it "declines Tuple[].join (empty tuple) so ShapeDispatch folds Constant<\"\">" do
+      empty_tuple = Rigor::Type::Combinator.tuple_of
       result = described_class.try_dispatch(cc(receiver: empty_tuple, method_name: :join, args: []))
+      expect(result).to be_nil
+    end
+
+    it "still lifts an all-Constant tuple join to literal-string when the separator is non-Constant" do
+      # A `literal-string` separator has no knowable value, so the precise Constant fold is unreachable and
+      # this tier keeps producing `literal-string`.
+      result = described_class.try_dispatch(cc(
+                                              receiver: tuple_of_constants, method_name: :join, args: [literal_string]
+                                            ))
       expect(result).to eq(literal_string)
     end
 

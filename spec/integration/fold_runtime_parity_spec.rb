@@ -76,7 +76,8 @@ FOLD_PARITY_CASES = {
     "[1, 2, 3].length", "[1, 2, 3].count", "[1, 2, 2].include?(2)",
     "[1, 2, 3].empty?", "[].empty?", "[1, nil, 2].compact", "[1, 2, 3].take(2)",
     "[1, 2] + [3, 4]", "[10, 20, 30][1]",
-    '[1, 2, 3].join("-")', "[1, 2, 3].join"
+    '[1, 2, 3].join("-")', "[1, 2, 3].join",
+    '["a", "b"].join("-")', '["a", "b"].join', "[].join"
   ],
   "Hash — ShapeDispatch" => [
     "{ a: 1 }.merge(b: 2)", "{ a: 1, b: 2 }.keys", "{ a: 1, b: 2 }.values",

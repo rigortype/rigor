@@ -13,6 +13,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[type inference]** `Array#join` on an array of string literals now infers the exact resulting string. `["a", "b"].join("-")` types as `"a-b"` rather than a generic `String`, matching the precision already given to `[1, 2, 3].join` and to non-string arrays. The gain flows through any downstream use of the joined value.
+
 - **[rigor check]** A top-level key in `.rigor.yml` that Rigor does not recognise is now reported instead of silently ignored, with the nearest real key suggested.
   - Previously a typo'd `exclude:` loaded in silence, so the exclusion never applied and the run reported errors from the very files you meant to skip. Nothing said the key had done nothing.
   - It is a warning, never an error — your exit code does not change. The finding also appears in `--format=json` under `config_warnings` with `"kind": "unknown_key"`, so CI can assert on it.

@@ -21,39 +21,38 @@ this file is the one that is wrong.
 - **v0.2.9 published 2026-07-11.** master accumulates toward **v0.3.0**. Both mandatory pieces are
   done (deprecation clearance #94, perf recalibration #95), so the cut is already shippable — what
   follows is what it *earns*.
-- **v0.3.0's axis is type-inference quality** (triaged 2026-07-17): 14 issues, 7 `ready-for-agent`.
-  LSP work lives in **`v0.4.x`** — improved gradually across the series, not pinned to one cut. 28
-  issues stay unmilestoned; that is the healthy resting state for demand-gated work, not a queue.
+- **v0.3.0's axis is type-inference quality** (triaged 2026-07-17): 12 issues open, 5
+  `ready-for-agent`. LSP work lives in **`v0.4.x`** — improved gradually across the series, not
+  pinned to one cut. Unmilestoned issues are the healthy resting state for demand-gated work.
 - `make verify` and `make docs-check` clean; master and `origin/master` agree.
 
 ## Next session — implement, then release
 
-**1. Implement the v0.3.0 set.** `gh issue list --milestone v0.3.0`. Seven are `ready-for-agent`.
-Four were found on 2026-07-17 and are fresh, verified, and specified:
+**1. Implement the v0.3.0 set.** `gh issue list --milestone v0.3.0`. Five are `ready-for-agent`.
 
-- **#176** — a **false positive**, so it outranks the rest: `arr.clear` does not widen the
-  `non-empty-array` refinement, so `arr.size == 0` reports always-falsey on code that is true at
-  runtime. **Being worked in a separate local session as of this writing — check before assigning.**
-- **#178** — a normative-spec violation: a constant hash indexed with a non-static key folds to a
-  nil-less union, where the shape tier MUST defer so the `Hash#[] -> V?` projection applies.
+Two of the four inference-quality bugs found 2026-07-17 have landed: **#174** (`(?)` return-discard,
+PR #175) and **#176** (mutator now retracts the `non-empty-array` refinement, PR #179 — reproducer
+re-verified clean on master, pre-mutation narrowing intact). **#178** was closed as intended
+behaviour — see the decided list below. That leaves one from the batch still open:
+
 - **#177** — `$+` is bound to `String` on every truthy match edge but is nil when a successful
-  match's groups are all optional. False-negative side; small.
-- **#172** — see the rbs-inline chain below.
+  match's groups are all optional. False-negative side; small. `ready-for-agent`.
+- **#172** — see the rbs-inline chain below. `ready-for-agent`.
 
-The other three: **#121** (FP-safe builtin/stdlib folds — the `rigor-type-coverage-uplift` skill is
-the procedure), **#131** (Data/Struct value folding), **#155** (subclass-aware gating for
-`call.self-undefined-method`).
+The other three `ready-for-agent`: **#121** (FP-safe builtin/stdlib folds — the
+`rigor-type-coverage-uplift` skill is the procedure), **#131** (Data/Struct value folding), **#155**
+(subclass-aware gating for `call.self-undefined-method`).
 
 The rest need a decision first. **#126** (length-range carrier) has a design pass attached whose own
 recommendation is *don't build it* — thin yield, and the common upper-bound idiom mutates the
-receiver inside its own guard; #176 is the prerequisite it surfaced, and stands alone. Two touch the
+receiver inside its own guard; #176 was the prerequisite it surfaced and has now shipped. Two touch the
 ADR-50 v1.0-frozen diagnostic vocabulary, so their rule ids and default severities are deliberate
 choices: **#161** (a total RBS env-build failure exits 0 with `Dynamic[top]` project-wide and no
 diagnostic) and **#162** (the `static.*` family + a `void_origins` side-table). **#120** (mature
 `--incremental` toward default-capable) is the perf headline; its acceptance bar already exists —
 `--verify-incremental` (incremental == full `--no-cache`, byte-identical), wired into CI.
 
-**2. Release — and budget for the CHANGELOG.** `[Unreleased]` holds **56 bullets**. Sealing them is
+**2. Release — and budget for the CHANGELOG.** `[Unreleased]` holds **57 bullets**. Sealing them is
 the highest-value, most-skipped step of `rigor-release-prep`, it needs cycle-wide context, and it is
 the one release step `make verify` cannot rescue. Plan for it rather than discovering it at the cut.
 **Version bumps and `rake release` stay user-gated** — land entries, stop, and let the user drive the
@@ -84,12 +83,19 @@ site, symptom, and trigger, though the defect was real and is now fixed.
 
 - **#152 (widen the `&&`/`||` polarity gate) is evidence-rejected and demand-gated**, deliberately
   off v0.3.0. The measured evaluation is on the issue: zero drift across a 14-project corpus, the
-  widened edges fired **once** in the whole corpus, and that firing would have made the type *wrong*
-  — it rests on the #178 over-fold. `a || b` is the idiom by which an author hedges against exactly
-  the optimism the lattice contains; ADR-78 WD1 drew this line once already. Re-open only on a demand
-  signal, and read the issue's preconditions first. Two findings outlive the rejection: **nothing in
-  the 7976-example suite pins the changed edges**, and the widening would re-create the b7c155fb
-  two-typer divergence.
+  widened edges fired **once** in the whole corpus, and that firing (kramdown's `ESCAPE_MAP[m] || m`)
+  would have made the type *wrong* — it rests on the deliberate nil-free read of a dynamic-key Hash
+  lookup, which `5d5a9359` now documents as optimism, not proof, with an explicit rule that certainty
+  judgments may not rest on it (the #178 resolution — see below). `a || b` is the idiom by which an
+  author hedges against exactly that optimism; ADR-78 WD1 drew this line once already. Re-open only on
+  a demand signal, and read the issue's preconditions first. Two findings outlive the rejection:
+  **nothing in the 7976-example suite pins the changed edges**, and the widening would re-create the
+  b7c155fb two-typer divergence.
+- **#178 (constant hash + non-static key → nil-free union) is closed as intended behaviour**, not a
+  spec violation as first filed. The shape tier defers correctly; the nil-free answer is `RbsDispatch`
+  deliberately not honouring core RBS's `%a{implicitly-returns-nil}`, because honouring it costs 25
+  false positives on Rigor's own `lib` (`Hash.new(0)` / `default_proc` / non-empty `Array#max`).
+  `5d5a9359` records the optimism in the spec and bounds it. Do not re-file it as a bug.
 - **#130's slice 5 is blocked by #156**, unmilestoned on purpose — its own text says it is gated on
   general return-inference precision. v0.3.0 carries only #130's two unblocked follow-ons.
 - **#162 creates the `static.*` family that #158 (v1.0.0, inference budgets) reserves its cutoffs

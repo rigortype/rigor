@@ -2,11 +2,13 @@
 
 2026-06-15. **Slice 3 LANDED 2026-06-15** as designed below
 ([`Inference::StructFoldSafety`](../../lib/rigor/inference/struct_fold_safety.rb)
-+ the `Scope#struct_fold_safe?` field + the top-level / method-body wiring);
-this note is kept as its design record and the live spec for the still-deferred
-**slice 4** (precise mutated-member re-typing). Slices 1 + 2 landed earlier
-(the sound *transient* form). The soundness argument below is what the
-implementation realises.
++ the `Scope#struct_fold_safe?` field + the top-level / method-body wiring).
+**Slice 4 LANDED** as designed in § "Slice 4" below: the same fold-safe scan is
+relaxed to admit straight-line member setters, and `StructFolding.apply_setter_writeback`
+re-types the local's `StructInstance` binding at `eval_call`'s post-call scope,
+so `s.x = 5; s.x` folds to the assigned type. Slices 1 + 2 landed earlier (the
+sound *transient* form). The soundness argument below is what the implementation
+realises.
 
 ## What landed (slices 1 + 2)
 

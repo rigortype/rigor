@@ -12,13 +12,12 @@ module Rigor
       # `Data` path does not need: **mutation soundness.**
       #
       # A `Struct` instance is mutable (`s.x = v`, `s[:x] = v`, escape), so a member map bound to a
-      # variable can be invalidated by a later write. This slice (ADR-48 slices 1+2 in the sound
-      # *transient* form) folds a member read ONLY off a **fresh** instance — the transient receiver of a
-      # `.new(...).x` / `.with(...).x` chain, which provably cannot have been mutated between
-      # materialisation and the read. A member read off a *stored* binding degrades to `Dynamic[top]`
-      # rather than fold a possibly-stale value. Promoting the fold to mutation-free bound locals is the
-      # deferred slice 3 (relax the fresh-receiver gate to a fold-safe-local scan); precise mutated-member
-      # re-typing is slice 4.
+      # variable can be invalidated by a later write. A member read folds off a **fresh** instance (the
+      # transient receiver of a `.new(...).x` / `.with(...).x` chain, unmutatable between materialisation
+      # and the read — slices 1+2), off a **fold-safe stored local** the {Inference::StructFoldSafety} scan
+      # proved is never mutated / aliased / escaped (slice 3), or off a **setter-mutated fold-safe local**
+      # whose bindings {#apply_setter_writeback} keeps current (slice 4). Any other stored receiver degrades
+      # to `Dynamic[top]` rather than fold a possibly-stale value.
       #
       # Responsibilities:
       #
@@ -272,7 +271,8 @@ module Rigor
         end
 
         # A fold-safe stored receiver is a local-variable read whose name the body's fold-safe set (on the
-        # scope) marks as never mutated.
+        # scope) marks as safe to fold — never aliased / escaped, and any mutation a straight-line member
+        # setter the write-back keeps the binding current for.
         def fold_safe_local_receiver?(context)
           node = context.call_node
           receiver = node&.receiver
@@ -280,6 +280,38 @@ module Rigor
           return false unless receiver.is_a?(Prism::LocalVariableReadNode) && scope
 
           scope.struct_fold_safe?(receiver.name)
+        end
+
+        # ADR-48 slice 4 — precise mutated-member re-typing. After a `local.member = v` setter on a
+        # fold-safe `StructInstance` local, rebind the local to a `StructInstance` with that member replaced
+        # by the assigned type, so a later `local.member` read folds to the assigned value (and a sibling
+        # `local.other` stays precise). Called from `eval_call`'s post-call scope, mirroring
+        # `MutationWidening.widen_after_call`. Sound ONLY for a fold-safe local: the fold-safe scan proves it
+        # is never aliased / escaped and its setters are straight-line, so the binding this installs is the
+        # local's true member state at every later read on the path. A non-fold-safe local is left untouched
+        # (its reads do not fold, so the binding is never consulted for folding).
+        #
+        # @param call_node    [Prism::CallNode]  the `local.member = v` call
+        # @param assigned_type [Rigor::Type, nil] the setter's assigned value type (the call's own result)
+        # @param scope        [Rigor::Scope, nil]
+        # @return             [Rigor::Scope]     the (possibly) rebound scope
+        def apply_setter_writeback(call_node:, assigned_type:, scope:)
+          return scope if scope.nil? || assigned_type.nil?
+
+          receiver = call_node.receiver
+          return scope unless receiver.is_a?(Prism::LocalVariableReadNode)
+          return scope unless scope.struct_fold_safe?(receiver.name)
+
+          current = scope.local(receiver.name)
+          return scope unless current.is_a?(Type::StructInstance)
+
+          member = member_setter_target(call_node.name, current.members)
+          return scope if member.nil?
+
+          rebound = Type::Combinator.struct_instance_of(
+            members: current.members.merge(member => assigned_type), class_name: current.class_name
+          )
+          scope.with_local(receiver.name, rebound)
         end
       end
     end

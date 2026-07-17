@@ -42,10 +42,6 @@ RSpec.describe Rigor::Inference::StructFoldSafety do
   end
 
   describe "mutation / escape / aliasing (must NOT be fold-safe)" do
-    it "rejects a member setter" do
-      expect(safe("p = Point.new(1, 2)\np.x = 5\np.x")).to eq(Set[])
-    end
-
     it "rejects an index write" do
       expect(safe("p = Point.new(1, 2)\np[0] = 5\np.x")).to eq(Set[])
     end
@@ -88,6 +84,28 @@ RSpec.describe Rigor::Inference::StructFoldSafety do
 
     it "does not mark an unknown (non-struct) local" do
       expect(safe("p = make_something\np.x")).to eq(Set[])
+    end
+  end
+
+  describe "straight-line member setters (slice 4)" do
+    it "accepts a local mutated only through a straight-line member setter" do
+      expect(safe("p = Point.new(1, 2)\np.x = 5\np.x")).to eq(Set[:p])
+    end
+
+    it "accepts several straight-line member setters" do
+      expect(safe("p = Point.new(1, 2)\np.x = 5\np.y = 6\np.x")).to eq(Set[:p])
+    end
+
+    it "still rejects a member setter inside a loop" do
+      expect(safe("p = Point.new(1, 2)\nwhile c\n  p.x = p.x + 1\nend\np.x")).to eq(Set[])
+    end
+
+    it "still rejects a member setter inside a block" do
+      expect(safe("p = Point.new(1, 2)\n[1].each { p.x = 5 }\np.x")).to eq(Set[])
+    end
+
+    it "still rejects an index write alongside a setter" do
+      expect(safe("p = Point.new(1, 2)\np.x = 5\np[0] = 9\np.x")).to eq(Set[])
     end
   end
 

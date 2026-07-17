@@ -170,8 +170,8 @@ discovery composes uniformly across both shapes.
 
 `Struct.new(*Symbol)` produces a positional-arg constructor
 plus the same accessors as `Data.define`. Rigor folds struct
-member reads too, but — because a `Struct` is mutable — only
-where the value cannot have changed:
+member reads too, and — because a `Struct` is mutable — tracks a
+straight-line setter so the read stays precise:
 
 ```ruby
 Coord = Struct.new(:x, :y)
@@ -181,18 +181,27 @@ c = Coord.new(10, 20)
 assert_type("10", c.x)
 assert_type("20", c.y)
 
-# A local that is mutated, aliased, or escapes is not fold-safe —
-# its reads degrade to Dynamic, never a stale value.
+# A straight-line setter re-types the member; the sibling stays precise.
 m = Coord.new(1, 2)
 m.x = 9
-assert_type("Dynamic[top]", m.x)
+assert_type("9", m.x)
+assert_type("2", m.y)
+
+# A local that is aliased, escapes, or is mutated inside a loop or
+# block is not fold-safe — its reads degrade to Dynamic, never a
+# stale value, because a write Rigor cannot see could have changed it.
+a = Coord.new(1, 2)
+alias_ref = a
+a.x = 9
+assert_type("Dynamic[top]", a.x)
 ```
 
 Because `Struct` accessors are also writers, the fold is gated:
-a member read off a freshly constructed instance (`Coord.new(1,
-2).x`) or a local the analysis proves is never written, aliased,
-or passed away folds to the member's type; anything else widens
-to `Dynamic[top]`. `Data` is read-only, so its reads always fold.
+a member read folds off a freshly constructed instance (`Coord.new(1,
+2).x`), off a local the analysis proves is never written, aliased, or
+passed away, or off one whose only writes are straight-line member
+setters (their assigned type flows into the later read); anything else
+widens to `Dynamic[top]`. `Data` is read-only, so its reads always fold.
 
 ## Inheritance and method resolution
 

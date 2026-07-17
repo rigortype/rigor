@@ -1340,6 +1340,13 @@ module Rigor
         # (e.g. `arms << x`, `@tags << hashtag`). Stops a literal-shape carrier (`Tuple` / `HashShape`) from outliving
         # its justification when the value is mutated. Always-safe (loses precision, never invents facts).
         post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope)
+        # ADR-48 slice 4 — Struct member-setter re-typing. After `s.x = v` on a fold-safe StructInstance local, rebind
+        # `s` to a StructInstance with member `:x` replaced by the assigned type, so a later `s.x` folds to `v` and a
+        # sibling `s.y` stays precise. `call_type` is the setter's own result (the assigned value type). Sound only for
+        # a fold-safe local (never aliased / escaped, straight-line setters) — the fold-safe scan is the gate.
+        post_scope = MethodDispatcher::StructFolding.apply_setter_writeback(
+          call_node: node, assigned_type: call_type, scope: post_scope
+        )
         # ADR-57 slice 3 work-item 1 (cross-method-boundary variant). When a self-call resolves to a user method that
         # CONTENT-mutates one of its parameters inside an escaping block (the `build_option_parser(opts)` idiom — the
         # callee returns an `OptionParser` whose `opts.on { o[:k] = v }` blocks close over the passed-in hash), floor

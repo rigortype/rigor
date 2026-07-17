@@ -3505,6 +3505,161 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # ADR-35 WD9 tier 1 — generic-instantiation-aware comparison. When the overriding subclass binds a
+    # generic ancestor's type parameters (RBS `class Sub < Parent[Concrete]`), the parent signature is
+    # compared at the *instantiated* type instead of degrading its type variable to `Dynamic[Top]`. An
+    # unbound / propagated type variable keeps degrading to `Dynamic[Top]` and stays silent (FP-safe).
+    describe "override rules — generic-instantiation-aware comparison (ADR-35 WD9 tier 1)" do
+      def override_return_diags(result)
+        result.diagnostics.select { |d| d.rule == "def.override-return-widened" }
+      end
+
+      def override_param_diags(result)
+        result.diagnostics.select { |d| d.rule == "def.override-param-narrowed" }
+      end
+
+      it "flags a return widened relative to the instantiated generic parent contract" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Container
+            def fetch
+              1
+            end
+          end
+
+          class IntContainer < Container
+            def fetch
+              Object.new
+            end
+          end
+        RUBY
+          class Container[T]
+            def fetch: () -> T
+          end
+
+          class IntContainer < Container[Integer]
+            def fetch: () -> Object
+          end
+        RBS
+        # Parent `-> T` instantiated at `T = Integer` is `-> Integer`; the override widens to `-> Object`.
+        # Before WD9 the bare `T` degraded to `Dynamic[Top]` and this stayed silent.
+        diag = override_return_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.severity).to eq(:warning)
+        expect(diag.message).to include("`fetch'")
+        expect(diag.message).to include("Container")
+      end
+
+      it "stays silent when the subclass propagates (does not bind) the ancestor type variable" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Container
+            def fetch
+              1
+            end
+          end
+
+          class OpenContainer < Container
+            def fetch
+              Object.new
+            end
+          end
+        RUBY
+          class Container[T]
+            def fetch: () -> T
+          end
+
+          class OpenContainer[T] < Container[T]
+            def fetch: () -> Object
+          end
+        RBS
+        # The subclass forwards its own unbound `T` to the ancestor, so the parent return degrades to
+        # `Dynamic[Top]`, which accepts everything. This is the load-bearing FP-safety case.
+        expect(override_return_diags(result)).to be_empty
+      end
+
+      it "does not fire when the override narrows relative to the instantiated parent (covariant-safe)" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Container
+            def fetch
+              1
+            end
+          end
+
+          class NumContainer < Container
+            def fetch
+              1
+            end
+          end
+        RUBY
+          class Container[T]
+            def fetch: () -> T
+          end
+
+          class NumContainer < Container[Numeric]
+            def fetch: () -> Integer
+          end
+        RBS
+        # Parent instantiated at `Numeric`; override returns the narrower `Integer` — allowed.
+        expect(override_return_diags(result)).to be_empty
+      end
+
+      it "flags a parameter narrowed relative to the instantiated generic parent contract" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Sink
+            def accept(value)
+              value
+            end
+          end
+
+          class NumSink < Sink
+            def accept(value)
+              value
+            end
+          end
+        RUBY
+          class Sink[T]
+            def accept: (T) -> void
+          end
+
+          class NumSink < Sink[Numeric]
+            def accept: (Integer) -> void
+          end
+        RBS
+        # Parent `(T)` instantiated at `Numeric` is `(Numeric)`; the override narrows to `(Integer)`,
+        # which cannot accept the wider parent argument. Before WD9 the bare `T` degraded to
+        # `Dynamic[Top]` and this stayed silent.
+        diag = override_param_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.severity).to eq(:warning)
+        expect(diag.message).to include("`accept'")
+      end
+
+      it "stays silent on a narrowed parameter when the subclass propagates the type variable" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Sink
+            def accept(value)
+              value
+            end
+          end
+
+          class OpenSink < Sink
+            def accept(value)
+              value
+            end
+          end
+        RUBY
+          class Sink[T]
+            def accept: (T) -> void
+          end
+
+          class OpenSink[T] < Sink[T]
+            def accept: (Integer) -> void
+          end
+        RBS
+        # The unbound ancestor `T` degrades to `Dynamic[Top]`, which is skipped by the comparison.
+        expect(override_param_diags(result)).to be_empty
+      end
+    end
+
     # ADR-35 slice 3 — Liskov signature rule for parameters (contravariance). Uses real (loadable) classes
     # Numeric/Integer so the nominal subtype check resolves to :no rather than the FP-safe :maybe it returns for
     # unloadable user-only class hierarchies.

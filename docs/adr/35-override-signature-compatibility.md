@@ -1,6 +1,7 @@
 # ADR-35 — Override signature compatibility (Liskov signature rule)
 
-Status: **Accepted, 2026-05-29 (slices 1–4 done; slice 5 deferred).**
+Status: **Accepted, 2026-05-29 (slices 1–4 done; WD9 tier 1 landed
+2026-07-18; slice 5 deferred).**
 
 Records the decision to add a new family of diagnostics that check a
 method override against the contract it inherits — the **Liskov Substitution Principle (LSP)
@@ -375,6 +376,22 @@ still catch a genuine violation inside a generic context
 The param/return slices ship FP-safely without it; substitution is a
 follow-on precision uplift.
 
+**Tier-1 landed (2026-07-18).** The return (slice 2) and parameter
+(slice 3) comparisons now build a substitution map from the RBS
+instance-ancestor `.args` the overriding subclass applies to the
+generic ancestor (`class Sub < Parent[Concrete]` / `include
+_Iface[Concrete]`) and translate the parent signature under it, so a
+parent `-> T` is compared at `-> Integer` instead of `Dynamic[Top]`.
+The map is built only when arities agree and every instantiation
+argument translates; otherwise it is empty and the type variable
+keeps degrading to `Dynamic[Top]` (the pre-WD9 silence). A subclass
+that *propagates* rather than binds the variable (`class Open[T] <
+Parent[T]`) translates the forwarded `T` to `Dynamic[Top]` under the
+empty caller map, so it too stays silent — the FP-safety proof. Scope
+is unchanged: user-source ancestors + instance methods only; the
+RBS-only-ancestor reach and singleton (`def self.`) coverage remain
+deferred follow-ons.
+
 **Tier 2 — The body-narrowing dual layer (the everyday case).** Most
 "I want a narrower type here" situations need no escape hatch at all.
 Keep the *declared* parameter at the parent's wide type (LSP-safe)
@@ -407,11 +424,14 @@ synergistic: a user who has authored both signatures is already in
 bounded generic (tier 1) is a natural, in-language move rather than
 a foreign imposition.
 
-**How to apply:** tier 1 requires the WD3 / WD6 comparison to
-substitute ancestor `type_args` into the parent signature before
-`accepts`; unbound / unresolved type parameters degrade to `:maybe`
-(silent per WD7), never a false `:no`. Tiers 2–3 need no new
-mechanism. A structured RBS::Extended opt-out annotation
+**How to apply:** tier 1 (landed 2026-07-18) has the WD3 / WD6
+comparison substitute the subclass's instantiation args
+(`RBS::Definition#ancestors` `.args`, zipped against the parent's
+declared type-parameter names — the same ADR-4 Phase 2d `type_vars`
+threading the dispatcher uses) into the parent signature before
+`accepts`; unbound / unresolved type parameters keep degrading to
+`Dynamic[Top]` (silent per WD7), never a false `:no`. Tiers 2–3 need
+no new mechanism. A structured RBS::Extended opt-out annotation
 (`%a{rigor:v1:override-exempt}`-shape) as a middle ground between
 tier 1 and tier 3 is deferred — see Open Questions.
 
@@ -445,7 +465,9 @@ Recommended order; each slice independently shippable.
    `Dynamic[Top]` and stay silent (FP-safe per WD9 finding). Scoped
    to **user-source ancestors** + **instance methods** in this slice;
    RBS-only ancestors and singleton (`def self.`) methods are
-   follow-ons.
+   follow-ons. **WD9 tier 1 (landed 2026-07-18)** now translates the
+   parent return at its instantiated type when the subclass binds the
+   generic ancestor (`class Sub < Parent[Concrete]`).
 3. **Parameter contravariance. — LANDED (v0.1.x, 2026-05-29).**
    `def.override-param-narrowed` — per-position type comparison in
    the corrected parameter direction `override_param.accepts(parent_param)
@@ -460,10 +482,12 @@ Recommended order; each slice independently shippable.
    silent on it (FP-safe per WD7). Reach is therefore over core /
    stdlib / loadable-gem hierarchies; firing on app-only hierarchies
    would need a project-RBS-ancestor-aware subtype path (follow-on).
-   WD9 tier 1 (generic-instantiation-aware comparison) is the
-   *precision* follow-on noted in WD9 — it is **not** required for
-   FP-safety here, since unbound generics already degrade to
-   `Dynamic[Top]`.
+   WD9 tier 1 (generic-instantiation-aware comparison) — the
+   *precision* follow-on noted in WD9 — **landed 2026-07-18**: a
+   parameter is compared at the ancestor's instantiated type when the
+   subclass binds it (`class Sub < Parent[Concrete]`). It was never
+   required for FP-safety here, since an unbound / propagated generic
+   still degrades to `Dynamic[Top]`.
 4. **Mastodon-corpus FP verification. — DONE (v0.1.x, 2026-05-29).**
    Ran all three against the full Mastodon `app` + `lib` (1219 files)
    under a forced `strict` profile. Findings (full write-up:
@@ -631,3 +655,12 @@ for an inherited contract.
   must never false-fire. A structured `%a{rigor:v1:override-exempt}`
   annotation is floated as an open question and provisionally
   declined.
+- 2026-07-18 — WD9 tier 1 (generic-instantiation-aware comparison)
+  landed for the return + parameter checks. The parent signature is
+  now translated under the subclass's instantiation args before the
+  `accepts` comparison, so a `-> T` inherited from `Parent[Integer]`
+  is compared at `-> Integer`. Reframed as a *precision* uplift, not a
+  correctness requirement (an unbound / propagated generic already
+  degrades to `Dynamic[Top]` and stays silent, so it adds no
+  false-positive risk). RBS-only-ancestor reach and singleton (`def
+  self.`) coverage stay deferred.

@@ -13,6 +13,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[type inference]** The override-signature checks (`def.override-return-widened`, `def.override-param-narrowed`) now compare a generic parent contract at the type its subclass instantiates: when `class Sub < Parent[Integer]`, an inherited `-> T` is checked as `-> Integer` instead of being waved through. A subclass that leaves the type parameter open still reports nothing, so no correct override is newly flagged.
+
 - **[type inference]** `Struct` and `Data.define` value objects now infer precise member types through a setter and through a block-defined class, in two more cases.
   - After a straight-line `s.x = 5`, reading `s.x` back now infers the assigned value (and a sibling `s.y` keeps its own value) — where before the whole struct went untyped the moment you wrote to any member. A read is left untyped, exactly as before, when the struct is aliased, passed to another method, or mutated inside a loop or block, so a later write you can't see never makes an earlier read wrong.
   - A `Data.define(:x) do … end` assigned to a plain local variable now folds its member reads too, matching the constant form — unless the block redefines a member's reader (`def x`), in which case the read stays untyped because it would run your method, not return the member.

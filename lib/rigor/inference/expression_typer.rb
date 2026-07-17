@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "../reflection"
 require_relative "../ast"
 require_relative "../source/constant_path"
 require_relative "../source/node_children"
@@ -442,58 +443,13 @@ module Rigor
         inner
       end
 
-      # Try the literal name first, then walk Ruby's lexical lookup by progressively prefixing the surrounding
-      # class path (peeled one `::segment` at a time). For each candidate the lookup consults
-      # `Environment#singleton_for_name` (a class object) and then `Environment#constant_for_name` (a
-      # non-class constant value such as `BUCKETS: Array[Symbol]`). Returns the matched `Rigor::Type` or nil;
-      # the caller decides whether to fall back.
+      # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared
+      # `Reflection.resolve_constant_type` owner so the same walk (registry singleton, discovered class,
+      # in-source value, RBS constant, across the peeled `::` prefix candidates) is reused by
+      # `Inference::Narrowing`'s `Constant[Regexp]` match-operand recognition. Returns the matched
+      # `Rigor::Type` or nil; the caller decides whether to fall back.
       def resolve_constant_name(name)
-        env = scope.environment
-        discovered = scope.discovered_classes
-        in_source = scope.in_source_constants
-        lexical_constant_candidates(name).each do |candidate|
-          singleton = env.singleton_for_name(candidate)
-          return singleton if singleton
-
-          in_source_class = discovered[candidate]
-          return in_source_class if in_source_class
-
-          # In-source value-bearing constants take precedence over RBS constant decls because user code is
-          # the authoritative source for its own constants.
-          in_source_value = in_source[candidate]
-          return in_source_value if in_source_value
-
-          value = env.constant_for_name(candidate)
-          return value if value
-        end
-        nil
-      end
-
-      # The candidate qualified names to try, in Ruby's lexical order: most-qualified first (the surrounding
-      # class path joined to `name`), then progressively less-qualified, then the bare `name`. Top-level
-      # scopes (no `self_type`) yield only `[name]`, preserving the pre-walk behaviour.
-      def lexical_constant_candidates(name)
-        prefix = enclosing_class_path
-        candidates = []
-        while prefix && !prefix.empty?
-          candidates << "#{prefix}::#{name}"
-          # Strip the last `::` segment without `rpartition`'s throwaway 3-element array + extra substrings
-          # (this loop is the sole caller of the `String#rpartition` allocation seen in the profile): `rindex`
-          # + slice gives the same prefix, or nil.
-          idx = prefix.rindex("::")
-          prefix = idx ? prefix[0, idx] : nil
-        end
-        candidates << name
-        candidates
-      end
-
-      # Pulls the enclosing qualified class name out of `scope.self_type` when one is set. `Nominal[T]` and
-      # `Singleton[T]` both expose `class_name`. Returns nil when no class context is available (top-level).
-      def enclosing_class_path
-        st = scope.self_type
-        case st
-        when Type::Nominal, Type::Singleton then st.class_name
-        end
+        Reflection.resolve_constant_type(name, scope: scope)
       end
 
       # Slice 5 phase 1 upgrades hash literals to `HashShape{...}` when every entry is a static `AssocNode`

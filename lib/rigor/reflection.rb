@@ -93,6 +93,11 @@ module Rigor
     # Returns the type of the named constant. Joins in-source constants (recorded by
     # `ScopeIndexer`) and RBS-side constants. In-source wins on collision because the user's
     # source is the authoritative declaration.
+    #
+    # This is the flat lookup keyed on the literal `constant_name`. Callers that need Ruby's
+    # lexical constant resolution (walking the enclosing class path, and folding in registry
+    # classes / source-discovered classes as `Singleton` / class types) use
+    # {.resolve_constant_type} instead.
     def constant_type_for(constant_name, scope: Scope.empty)
       key = constant_name.to_s
       in_source = scope.in_source_constants[key]
@@ -100,6 +105,65 @@ module Rigor
 
       scope.environment.constant_for_name(constant_name)
     end
+
+    # Resolves a constant *reference* to its type through Ruby's lexical constant lookup: the
+    # most-qualified candidate first (the enclosing class path joined to `name`), then
+    # progressively less-qualified, then the bare `name`. Each candidate consults, in order,
+    # the class registry (yielding a `Singleton[C]`), source-discovered classes, in-source
+    # value constants, and finally RBS-side constants — in-source value constants winning over
+    # RBS because the user's source is authoritative for its own constants. Returns the matched
+    # `Rigor::Type`, or nil when no source knows the constant.
+    #
+    # This is the shared owner of the lexical-constant resolution: `Inference::ExpressionTyper`
+    # reads it to type a constant read, and `Inference::Narrowing` reads it to recognise a
+    # value-pinned `Constant[Regexp]` match-predicate operand.
+    def resolve_constant_type(name, scope: Scope.empty)
+      env = scope.environment
+      discovered = scope.discovered_classes
+      in_source = scope.in_source_constants
+      lexical_constant_candidates(name, scope: scope).each do |candidate|
+        singleton = env.singleton_for_name(candidate)
+        return singleton if singleton
+
+        in_source_class = discovered[candidate]
+        return in_source_class if in_source_class
+
+        # In-source value-bearing constants take precedence over RBS constant decls because
+        # user code is the authoritative source for its own constants.
+        in_source_value = in_source[candidate]
+        return in_source_value if in_source_value
+
+        value = env.constant_for_name(candidate)
+        return value if value
+      end
+      nil
+    end
+
+    # The candidate qualified names to try, in Ruby's lexical order: most-qualified first (the
+    # enclosing class path joined to `name`), then progressively less-qualified, then the bare
+    # `name`. A top-level scope (no `self_type`) yields only `[name]`.
+    def lexical_constant_candidates(name, scope: Scope.empty)
+      prefix = enclosing_class_path(scope)
+      candidates = []
+      while prefix && !prefix.empty?
+        candidates << "#{prefix}::#{name}"
+        idx = prefix.rindex("::")
+        prefix = idx ? prefix[0, idx] : nil
+      end
+      candidates << name
+      candidates
+    end
+    private_class_method :lexical_constant_candidates
+
+    # Pulls the enclosing qualified class name out of `scope.self_type` when one is set.
+    # `Nominal[T]` and `Singleton[T]` both expose `class_name`. Returns nil at the top level.
+    def enclosing_class_path(scope)
+      st = scope.self_type
+      case st
+      when Type::Nominal, Type::Singleton then st.class_name
+      end
+    end
+    private_class_method :enclosing_class_path
 
     # Returns the RBS `RBS::Definition::Method` for the instance method, or nil when the
     # class or method is not in RBS. The source-side discovered-method facts are reachable

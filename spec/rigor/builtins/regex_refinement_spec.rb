@@ -121,4 +121,77 @@ RSpec.describe Rigor::Builtins::RegexRefinement do
       end
     end
   end
+
+  describe ".for_whole_pattern" do
+    context "with fully `\\A…\\z`-anchored single-char-class sources (SOUND)" do
+      it "maps `\\A\\d+\\z` and `\\A[0-9]+\\z` to decimal-int-string" do
+        expect(described_class.for_whole_pattern('\A\d+\z'))
+          .to eq(Rigor::Type::Combinator.decimal_int_string)
+        expect(described_class.for_whole_pattern('\A[0-9]+\z'))
+          .to eq(Rigor::Type::Combinator.decimal_int_string)
+      end
+
+      it "maps the bounded `\\A\\d{4}\\z` to decimal-int-string" do
+        expect(described_class.for_whole_pattern('\A\d{4}\z'))
+          .to eq(Rigor::Type::Combinator.decimal_int_string)
+      end
+
+      it "maps `\\A[[:digit:]]+\\z` to numeric-string" do
+        expect(described_class.for_whole_pattern('\A[[:digit:]]+\z'))
+          .to eq(Rigor::Type::Combinator.numeric_string)
+      end
+
+      it "maps `\\A\\h+\\z` and `\\A[0-9a-fA-F]+\\z` to hex-int-string" do
+        expect(described_class.for_whole_pattern('\A\h+\z'))
+          .to eq(Rigor::Type::Combinator.hex_int_string)
+        expect(described_class.for_whole_pattern('\A[0-9a-fA-F]+\z'))
+          .to eq(Rigor::Type::Combinator.hex_int_string)
+      end
+
+      it "maps `\\A[0-7]+\\z` to octal-int-string" do
+        expect(described_class.for_whole_pattern('\A[0-7]+\z'))
+          .to eq(Rigor::Type::Combinator.octal_int_string)
+      end
+
+      it "maps `\\A[a-z]+\\z` / `\\A[A-Z]+\\z` to lower/uppercase-string" do
+        expect(described_class.for_whole_pattern('\A[a-z]+\z'))
+          .to eq(Rigor::Type::Combinator.lowercase_string)
+        expect(described_class.for_whole_pattern('\A[A-Z]+\z'))
+          .to eq(Rigor::Type::Combinator.uppercase_string)
+      end
+    end
+
+    context "with sources the whole-receiver regime MUST NOT narrow" do
+      it "rejects a bare / unanchored source (matches a substring)" do
+        expect(described_class.for_whole_pattern('\d+')).to be_nil
+      end
+
+      it "rejects one-sided anchoring (`\\A\\d+` or `\\d+\\z`)" do
+        expect(described_class.for_whole_pattern('\A\d+')).to be_nil
+        expect(described_class.for_whole_pattern('\d+\z')).to be_nil
+      end
+
+      it "rejects the capital `\\Z` end anchor (admits a trailing newline)" do
+        expect(described_class.for_whole_pattern('\A\d+\Z')).to be_nil
+      end
+
+      it "rejects line anchors `^`/`$`" do
+        expect(described_class.for_whole_pattern('^\d+$')).to be_nil
+      end
+
+      it "rejects an unrecognised inner body (`\\A\\w+\\z`)" do
+        expect(described_class.for_whole_pattern('\A\w+\z')).to be_nil
+      end
+
+      it "rejects empty-admitting quantifiers between anchors" do
+        expect(described_class.for_whole_pattern('\A\d*\z')).to be_nil
+        expect(described_class.for_whole_pattern('\A\d?\z')).to be_nil
+      end
+
+      it "rejects the empty anchored source `\\A\\z` and a nil source" do
+        expect(described_class.for_whole_pattern('\A\z')).to be_nil
+        expect(described_class.for_whole_pattern(nil)).to be_nil
+      end
+    end
+  end
 end

@@ -141,11 +141,24 @@ Only what you would not guess from the tree:
 
 ## Where the Current State Lives
 
-- [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) — the resume bookmark. Start here.
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — the forward-looking commitment envelope.
-- `CHANGELOG.md` — what shipped.
+- [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) — the session handoff: what the next session enters
+  on. Short-lived, replaced wholesale. Start here.
+- **GitHub Issues** — the backlog. Every mid/long-term work item is an issue; release planning is the
+  **Milestones** surface (`v0.3.0`, `v1.0.0`). Conventions:
+  [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) ([ADR-98](docs/adr/98-development-flow-document-roles.md)).
+  Do not add backlog sections to tracked markdown files.
+- `CHANGELOG.md` — what shipped, written for users; the detail is the git log.
 - [`docs/adr/README.md`](docs/adr/README.md) — the complete ADR index (title + status). The decision
   itself is only ever in the ADR body.
+
+## Agent Skills
+
+- **Issue tracker** — GitHub Issues on `rigortype/rigor`; external PRs are a triage surface. See
+  [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+- **Triage labels** — the five canonical roles, default strings, plus one `area:*` label per issue.
+  See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+- **Domain docs** — single-context: [`CONTEXT.md`](CONTEXT.md) at the root (the glossary, with this
+  repo's trapped terms) + `docs/adr/`. See [`docs/agents/domain.md`](docs/agents/domain.md).
 
 ## Architecture Decision Records
 
@@ -168,3 +181,4 @@ Standing policies, binding whatever a contribution touches:
 - [ADR-49](docs/adr/49-adr-authoring-guidelines.md) — ADR authoring guidelines (the quality rubric)
 - [ADR-50](docs/adr/50-release-engineering-and-stability-strategy.md) — Release engineering and stability strategy
 - [ADR-97](docs/adr/97-adr-index-budgets.md) — Index entries are not summaries: the ADR-index budgets and their gate
+- [ADR-98](docs/adr/98-development-flow-document-roles.md) — Development-flow document roles: handoff, issues, changelog

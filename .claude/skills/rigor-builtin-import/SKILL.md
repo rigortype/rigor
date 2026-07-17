@@ -269,3 +269,14 @@ The procedure above is correct but not yet optimal. Known optimisation candidate
 - **Catalogue diff tooling.** A `make catalog-diff` that prints the (additions, removals, purity-changes) between two extractor runs so reviewers can audit a CRuby submodule bump in seconds.
 
 These are NOT prerequisites for landing a new class import; they are improvements that make the next import easier.
+
+## RBS-overlay gotcha (cost a CI-only env collapse)
+
+When adding a `data/core_overlay/*.rbs` reopen of a core/stdlib constant, **match the upstream
+class/module KIND**: `ERB` and `CSV` are **classes** in rbs, not modules — a `module ERB` reopen
+raises `RBS::DuplicatedDeclarationError` that collapses the *whole* env to
+`RBS classes available: 0`, and this repo does not load erb/csv, so self-check cannot catch it (a
+project that does, like GitLab, can). Wrap a nested class in its explicit parent
+(`class CSV; class MalformedCSVError`) — a flat `class CSV::MalformedCSVError` makes RBS synthesize
+the namespace and fails the `synthesized_namespaces` spec as an order-dependent, binpacker-masked
+flake. Validate against a stdlib-loading corpus project, and run the affected spec in isolation.

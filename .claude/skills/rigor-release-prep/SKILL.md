@@ -289,6 +289,29 @@ commit that work separately before creating the version-bump commit. Do not
 fold release verification cleanup into the `Bump up version to x.y.z`
 commit.
 
+### Perf-gate gotchas (learned the hard way)
+
+- The Make target is `bench-perf`, not `bench` (the bare name collides with
+  the `bench/` data directory). `release-gate.yml` is **advisory** during the
+  evaluation line — it reports but does not block; `ci.yml` is the required
+  gate. The signal is still release-quality: review it.
+- Both baselines (`bench/baseline.json`,
+  `data/oss-sweep/mastodon-thresholds.json`) are exact-count / banded with
+  little headroom, so a precision or allocation change flips them red **by
+  design** until recalibrated. Recalibrate from the **CI-measured Linux**
+  values: allocations is the deterministic signal; **`wall_s` is a rerunnable
+  flake — `gh run rerun --failed` clears it; never recalibrate for wall
+  alone.** Diff the OSS-sweep diagnostics for FPs before blessing a higher
+  count (the v0.2.0 recalibration found 3 `StringScanner#[]` FPs → fixed at
+  root, not blessed in).
+- Perf-measurement comparability: warm numbers are only comparable within one
+  process model (an in-process cold-then-warm chain is ~186k allocs cheaper
+  than a fresh-process warm — a phantom regression otherwise). Self-check
+  allocation numbers require `vendor/bundle` present (~8M allocs of vendored
+  sigs). A peak-RSS rise on a run over ~5s is the deadline **YJIT**, not a
+  leak — A/B with `RIGOR_DISABLE_YJIT=1` before diagnosing. Details:
+  [`docs/notes/20260713-corpus-perf-campaign.md`](../../../docs/notes/20260713-corpus-perf-campaign.md).
+
 ## Commit the Result
 
 Prefer a single release-prep commit containing:

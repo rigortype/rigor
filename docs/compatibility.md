@@ -163,7 +163,8 @@ Summarised from ADR-50 (the authority for all of these):
   plugin-author view of the pinned namespaces and the promotion path.
 - [Manual ch. 11 — Running Rigor in CI](manual/11-ci.md) § version
   pinning — how to pin a Rigor version in a pipeline.
-- [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to
-  v0.2.0" — the forward-looking commitment envelope.
+- [ADR-50](adr/50-release-engineering-and-stability-strategy.md) — the
+  release strategy (the road to v1.0.0); release planning is the GitHub
+  Milestones surface.
 </content>
 </invoke>

@@ -776,7 +776,7 @@ first v0.2.x release.
 
 - 2026-05-18 — initial proposal. Triggered by the user's request
   to start the design for the Lightweight HKT direction queued
-  under [ROADMAP](../ROADMAP.md) § Future cycles ("Lightweight HKT
+  under ROADMAP § Future cycles ("Lightweight HKT
   (higher-kinded types) in DSL signatures") with the concrete
   goal of replacing `JSON.parse`'s `untyped` slot. Scope set by
   the user's chosen references: the Yallop & White 2014 paper and

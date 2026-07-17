@@ -501,7 +501,7 @@ acceptance; the documentation rollout is mechanical:
 | 2 | [`rigor-plugin-author`](../../.claude/skills/rigor-plugin-author/SKILL.md) SKILL updated: new Phase 0.5 "Where this plugin will live" routing new authors to WD2 / WD4; in-monorepo path retained only for maintenance of already-bundled plugins. |
 | 3 | [`rigor-ffi-plugin-author`](../../.claude/skills/rigor-ffi-plugin-author/SKILL.md) SKILL updated: Phase 2 and Phase 6 reference ADR-31; Phase 3/4 add wrapped-gem version-pinning note. |
 | 4 | [CLAUDE.md](../../CLAUDE.md) ADR table adds ADR-31 row; ADR-30 row simplified; SKILL rows updated; the existing "v0.2.0-queued external-SKILL" note reconciled with the new policy. |
-| 5 | [`docs/ROADMAP.md`](../ROADMAP.md): Plugins / ecosystem section adds an ADR-31 governance reference at the top; FFI entry simplified. |
+| 5 | `docs/ROADMAP.md`: Plugins / ecosystem section adds an ADR-31 governance reference at the top; FFI entry simplified. |
 | 6 | (Deferred, no slice scheduled.) GitHub issue template for plugin proposals capturing the WD2 fields (wrapped gem identity, adoption evidence, sample-implementation pointer, upstream-effort confirmation). |
 | 7 | (Deferred, no slice scheduled.) Informational catalog (Wiki or pinned discussion) where third-party plugin authors list their work. |
 

@@ -40,6 +40,11 @@ AGENT_INDEX_PREMISE_MAX = 12
 # to spare. The pre-ADR-97 status cells ran to 5,195 characters; the compliant pre-ADR-40 ones median 19.
 AGENT_INDEX_STATUS_MAX = 200
 
+# The session handoff (ADR-98 WD2): where things stand + what the next session does + what waits on the
+# user. Today's is 62 lines; the pre-ADR-98 file hit 189 lines / 75KB by absorbing the backlog. A handoff
+# that needs more than this is carrying another surface's content.
+AGENT_INDEX_HANDOFF_MAX = 120
+
 # `- [ADR-N](docs/adr/N-slug.md) — <topic>`
 AGENT_INDEX_BULLET = %r{^- \[ADR-(\d+)\]\(docs/adr/([^)]+)\) — (.+)$}
 # `| ADR-N | [Title](N-slug.md) | <status> |`
@@ -185,6 +190,27 @@ RSpec.describe "ADR index budgets (ADR-97)" do
     it "lists the ADRs in ascending order" do
       numbers = readme.map { |e| e[:number] }
       expect(numbers).to eq(numbers.sort)
+    end
+  end
+
+  describe "development-flow documents (ADR-98)" do
+    it "keeps docs/ROADMAP.md dissolved" do
+      # The backlog is GitHub Issues and release planning is Milestones (docs/agents/issue-tracker.md).
+      # ROADMAP.md was deleted after per-item adjudication; recreating it is the regression ADR-98
+      # exists to prevent — a tracked markdown backlog has no state machine, so it only accumulates.
+      recreated = File.exist?(File.expand_path("../../docs/ROADMAP.md", __dir__))
+      expect(recreated).to be(false),
+                           "docs/ROADMAP.md has been recreated. The backlog belongs in GitHub Issues " \
+                           "(ADR-98 WD1); a new planning document needs an ADR superseding ADR-98, not a file."
+    end
+
+    it "keeps the session handoff within its #{AGENT_INDEX_HANDOFF_MAX}-line cap" do
+      lines = File.readlines(File.expand_path("../../docs/CURRENT_WORK.md", __dir__), encoding: "utf-8")
+      expect(lines.size).to be <= AGENT_INDEX_HANDOFF_MAX,
+                            "docs/CURRENT_WORK.md is a full-replace session handoff (ADR-98 WD2): what the next " \
+                            "session should do, and nothing that outlives two sessions.\n" \
+                            "#{lines.size} lines (cap #{AGENT_INDEX_HANDOFF_MAX}) — move backlog to issues, " \
+                            "pitfalls to the workflow's skill, decisions to an ADR, measurements to docs/notes/."
     end
   end
 end

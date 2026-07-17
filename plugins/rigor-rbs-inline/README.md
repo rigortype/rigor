@@ -44,3 +44,15 @@ that opt into this plugin pay the cost.
 ## License
 
 [MPL-2.0](../../LICENSE), same as the parent project.
+
+## Gotchas for anyone changing this plugin
+
+- The `# rbs_inline: enabled` magic comment is **mandatory** in the default mode (ADR-32 WD2):
+  without it the plugin contributes *nothing*, so a test omitting it measures the plugin being
+  absent, not failing.
+- Upstream emits **no declaration at all for a toplevel `def`** (ADR-32 WD9) — a "`#: void` does
+  nothing" report that reproduces only at toplevel is this, not the annotation.
+- `Prism::Location#start_offset` counts **bytes**; `String#insert` indexes **characters**. A source
+  rewrite keyed on the former lands mid-word on any multi-byte file — use
+  `start_character_offset`. ASCII-only fixtures stay green through this bug; mail's own `field.rb`
+  is what caught it.

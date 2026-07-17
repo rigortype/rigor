@@ -1,11 +1,13 @@
 # ADR-94 — The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor
 
-Status: **Accepted, 2026-07-16.** rbs 4.0 absorbed the inline implementation, which dissolves
-the premise [ADR-32](32-rbs-inline-comment-ingestion.md) chose its plugin boundary on.
-Migrating there is the right direction and is **deferred**: it costs the rbs 3.x floor, and
-dropping that floor is not planned for v0.3.0 or the versions near it. The
-`rigor-rbs-inline` plugin stays the reader. One measured blocker, the `UntypedFunction`
-crash (WD2), is a live bug independent of the migration and lands on its own.
+Status: **Accepted, 2026-07-16; WD2 corrected and closed 2026-07-17.** rbs 4.0 absorbed the
+inline implementation, which dissolves the premise
+[ADR-32](32-rbs-inline-comment-ingestion.md) chose its plugin boundary on. Migrating there is
+the right direction and is **deferred**: it costs the rbs 3.x floor, and dropping that floor
+is not planned for v0.3.0 or the versions near it. The `rigor-rbs-inline` plugin stays the
+reader. WD2's `UntypedFunction` defect was real and independent of the migration, as recorded
+— but this ADR misidentified its site and its symptom, and re-adjudication found it wider
+than a hand-written `.rbs`. It is fixed; see WD2 for what was actually true.
 
 Grounding: [`docs/notes/20260716-dspec-formal-spec-substrate-evaluation.md`](../notes/20260716-dspec-formal-spec-substrate-evaluation.md)
 § "ADR-93 WD1 の実装" and the measurements below.
@@ -59,13 +61,34 @@ that to delete ~40 lines of plugin code inverts the trade.
 WD1. The annotation-presence gate and the RDoc neutralization stay; both would be deleted at
 migration, and neither is load-bearing enough to force one.
 
-**WD2 — the `UntypedFunction` crash is a separate bug and lands independently.** A `(?)`
-method type in a hand-written `.rbs` crashes `rigor check` today:
-`NoMethodError: undefined method 'required_positionals' for an instance of
-RBS::Types::UntypedFunction`. `Inference::MethodDispatcher::RbsDispatch` guards the form for
-blocks; the arity path in `Analysis::CheckRules` does not. This is reachable without any
-migration (a user writes `(?)`, or rbs 4.x core RBS adopts it), and it is a prerequisite of
-the migration rather than part of it.
+**WD2 — the `UntypedFunction` defect is a separate bug and lands independently. Correct as
+written; wrong on every particular. Fixed 2026-07-17.** The call this working decision made —
+that the defect is independent of the migration, reachable without it, and lands on its own —
+held. Re-adjudication (2026-07-17, prompted by the claim not reproducing) confirmed the bug
+and corrected three things about it:
+
+- **Not a crash.** `rigor check` never died. The `NoMethodError` was raised and then swallowed
+  by one of the dispatcher's broad `rescue StandardError` clauses, so the dispatch degraded to
+  `Dynamic[top]` and the method's **declared return type was silently discarded**. A `(?) ->
+  String` method typed as untyped. Silent precision loss is the symptom, which is why the
+  original probe read as a crash that would not reproduce.
+- **Not `Analysis::CheckRules`.** That path was already guarded, and had been since before this
+  ADR was written: `arity_eligible?` and `argument_check_eligible?` both bail via
+  `respond_to?(:required_keywords)`, each documenting the untyped-function case as the reason.
+  The unguarded site was `MethodDispatcher::ReceiverAffinity`'s pre-sort, which reached for
+  `required_positionals` while reordering overloads by receiver affinity — upstream of the
+  selector, which is why no selector-level guard could have caught it. `OverloadSelector`'s own
+  arity path was unguarded too, but latent: the pre-sort raised first.
+- **Not confined to hand-written `.rbs`.** This ADR guessed the trigger was a user writing `(?)`
+  "or rbs 4.x core RBS adopting it". Core RBS ships it **already**, on `Proc#call`,
+  `Method#call`, `Ractor.select` and `IO.for_fd` — so the defect fired on a stock `rigor check`
+  against a project with no `sig/` at all. `Proc#call` and `Method#call` return `untyped`
+  regardless, which is very likely why the loss stayed invisible for so long.
+
+The fix guards each site with the bail the form implies: no affinity to compare, no arity to
+enforce, no declared params to zip — and, load-bearing for false positives, `(?)` must never
+win the selector's strict pass over a genuinely typed sibling overload, since a param list of
+nothing otherwise satisfies "every param is strict" vacuously.
 
 **WD3 — the decision under review is the floor, not the reader.** Re-open this ADR when the
 rbs 3.x floor moves for its own reasons, not to make the migration possible. The reader

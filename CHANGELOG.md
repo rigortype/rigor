@@ -20,6 +20,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[type inference]** A method whose RBS declares an untyped parameter list — `def call: (?) -> String` — now contributes its return type instead of silently reading as untyped.
+  - Rigor discarded the whole signature for these methods, so `(?) -> String` typed as `untyped` and nothing downstream of the call was checked. This affected stock projects with no `sig/` of their own: core RBS ships the form on `Proc#call`, `Method#call`, `Ractor.select` and `IO.for_fd`.
+  - `(?)` still constrains nothing about arity or argument types, which is what it means — you will not see new argument diagnostics at these call sites. Where such a method is one arm of an overload set, a genuinely typed arm still wins.
+
 - **[rigor init]** Fixed the generated config's editor-schema link, which pointed at a URL that did not exist — so **every project started with `rigor init` had no schema validation at all**: no autocomplete, no hover docs, no structural checking.
   - An unreachable schema looks exactly like a schema with no complaints, which is why this went unnoticed. If you ran `rigor init` before this release, re-run it or repoint the `# yaml-language-server: $schema=…` line at [the schema](schemas/rigor-config.schema.json).
   - The generated file also referred you to an internal contributor document for the key reference; it now links the [configuration manual](docs/manual/03-configuration.md), also available offline via `rigor docs configuration`.

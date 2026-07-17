@@ -241,6 +241,9 @@ module Rigor
           # would beat strictly-typed alternatives in pass 2 of the selector.
           def strictly_typed_params?(method_type, actual_count)
             fun = method_type.type
+            # A `(?)` method type declares no params at all: it is the gradual case by construction, so it
+            # must never win the strict pass over a genuinely typed sibling overload.
+            return false unless fun.respond_to?(:required_positionals)
             return false unless arity_compatible?(fun, actual_count)
 
             params = positional_params_for(fun, actual_count)
@@ -299,7 +302,11 @@ module Rigor
             !fun.required_keywords.empty?
           end
 
+          # `RBS::Types::UntypedFunction` (`(?)`) declares no arity to enforce, so every call site is
+          # arity-compatible with it.
           def arity_compatible?(fun, actual_count)
+            return true unless fun.respond_to?(:required_positionals)
+
             min_arity = fun.required_positionals.size + fun.trailing_positionals.size
             return false if actual_count < min_arity
 
@@ -314,6 +321,10 @@ module Rigor
           # Rest_positionals consumes the remainder; we repeat its single declaration for each absorbed
           # argument.
           def positional_params_for(fun, actual_count)
+            # `(?)` declares no positional params; the caller zips this against the actual args, so an empty
+            # list is what "accepts anything, constrains nothing" looks like here.
+            return [] unless fun.respond_to?(:required_positionals)
+
             required = fun.required_positionals
             optional = fun.optional_positionals
             rest = fun.rest_positionals

@@ -123,11 +123,12 @@ module Rigor
         end
 
         # The whole-run findings about the project's OWN `signature_paths:` RBS — the namespaces the loader had
-        # to synthesize, the files it had to quarantine, and the `rigor:v1:conforms-to` results. Snapshotted as
-        # small plain data (NOT the env) so `#run` can surface them as diagnostics without rebuilding it.
+        # to synthesize, the files it had to quarantine, the total env-build failure (if any), and the
+        # `rigor:v1:conforms-to` results. Snapshotted as small plain data (NOT the env) so `#run` can surface
+        # them as diagnostics without rebuilding it.
         #
-        # All three are gated on the project actually declaring `signature_paths:`, for one reason: each forces
-        # the (otherwise lazy) RBS env to build, and doing that when there is no project sig set would warm
+        # All are gated on the project actually declaring `signature_paths:`, for one reason: each forces the
+        # (otherwise lazy) RBS env to build, and doing that when there is no project sig set would warm
         # `.rigor/cache` on a bare `--no-stats` run. The loader has already memoised each answer, so reading
         # them here is free.
         def snapshot_project_signature_state(environment)
@@ -135,12 +136,14 @@ module Rigor
             @snapshots.synthesized_namespaces = []
             @snapshots.quarantined_signatures = []
             @snapshots.conformance_results = []
+            @snapshots.env_build_failure = nil
             return
           end
 
           loader = environment.rbs_loader
           @snapshots.synthesized_namespaces = loader&.synthesized_namespaces || []
           @snapshots.quarantined_signatures = loader&.quarantined_signatures || []
+          @snapshots.env_build_failure = loader&.env_build_failure
           @snapshots.conformance_results = RbsExtended::ConformanceChecker.scan(loader)
         end
 
@@ -413,9 +416,10 @@ module Rigor
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
           # The workers each quarantine the same broken file, but they report no diagnostics for it — the row is
           # a whole-run one. Read it off the parent session's loader so a pooled run says exactly what a
-          # sequential one says.
+          # sequential one says. The same reasoning holds for a total env-build failure.
           @snapshots.quarantined_signatures =
             project_signature_paths? ? (loader&.quarantined_signatures || []) : []
+          @snapshots.env_build_failure = project_signature_paths? ? loader&.env_build_failure : nil
         end
 
         # Waits for every forked child, merges each successful payload into `results_by_path`, and returns
@@ -487,6 +491,7 @@ module Rigor
           @snapshots.signature_paths = loader&.signature_paths || [].freeze
           @snapshots.quarantined_signatures =
             project_signature_paths? ? (loader&.quarantined_signatures || []) : []
+          @snapshots.env_build_failure = project_signature_paths? ? loader&.env_build_failure : nil
           diagnostics.unshift(
             Diagnostic.new(
               path: ".rigor.yml", line: 1, column: 1,

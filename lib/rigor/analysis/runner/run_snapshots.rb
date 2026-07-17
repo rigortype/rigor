@@ -15,16 +15,20 @@ module Rigor
       # back-reference cycle.
       class RunSnapshots
         attr_accessor :class_decl_paths, :signature_paths,
-                      :synthesized_namespaces, :quarantined_signatures, :conformance_results
+                      :synthesized_namespaces, :quarantined_signatures, :conformance_results,
+                      :env_build_failure
 
         # Constructor defaults match the {Runner} constructor: the pre-seed values `build_run_stats` /
-        # `pre_file_diagnostics` read before the first analysis path runs are frozen empties.
+        # `pre_file_diagnostics` read before the first analysis path runs are frozen empties. The
+        # `env_build_failure` slot is nil (no failure) rather than an empty collection — it holds a single
+        # `[error_class, first_line, buffer_names]` tuple or nothing.
         def initialize
           @class_decl_paths = {}.freeze
           @signature_paths = [].freeze
           @synthesized_namespaces = [].freeze
           @quarantined_signatures = [].freeze
           @conformance_results = [].freeze
+          @env_build_failure = nil
         end
 
         # Per-`#run` reset. Mirrors the original `#run` body, which reset these to NON-frozen empties (distinct
@@ -35,6 +39,7 @@ module Rigor
           @synthesized_namespaces = []
           @quarantined_signatures = []
           @conformance_results = []
+          @env_build_failure = nil
         end
       end
     end

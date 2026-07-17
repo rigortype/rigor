@@ -164,6 +164,27 @@ module Rigor
     # from DEFAULTS, so the DEFAULTS-driven schema gate can never see it.
     RESERVED_NAMESPACES = %w[rigor_rs].freeze
 
+    # Every top-level key a conforming `.rigor.yml` may carry: the keys this implementation owns, plus
+    # `includes:`, plus the namespaces reserved for another implementation. Anything else is recorded in
+    # {#unknown_keys} and warned about by {ConfigAudit}, and is also the did-you-mean dictionary for a
+    # near-miss.
+    #
+    # `includes:` is a load-time directive — {load_with_includes} `delete`s it while merging, so it never
+    # reaches `#initialize` and could not be seen as unknown regardless. It is listed because a user
+    # legitimately writes it, so a typo like `include:` must be able to suggest it.
+    KNOWN_KEYS = (DEFAULTS.keys + %w[includes] + RESERVED_NAMESPACES).freeze
+
+    # Top-level keys the loaded config carried that this implementation does not own — neither a
+    # {DEFAULTS} key, nor `includes:`, nor a reserved namespace. Recorded rather than acted on: an
+    # unknown key stays as inert at run time as it has always been, and {ConfigAudit} turns the record
+    # into a warning. Empty for every conforming config.
+    #
+    # This exists because `#initialize` fetches each key it owns and never enumerates the rest, so by
+    # the time anything holds a Configuration the unknown keys are gone. The audit reads a
+    # Configuration, so without this the class of mistake it exists to catch — a value that silently
+    # resolves to nothing — was structurally invisible to it for whole keys.
+    attr_reader :unknown_keys
+
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
                 :cache_validation, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,
@@ -301,6 +322,10 @@ module Rigor
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def initialize(data = DEFAULTS)
+      # Record before the per-key fetches below discard the evidence. Top level only, deliberately —
+      # see {ConfigAudit.unknown_key_warnings} for why a nested check cannot key on DEFAULTS.
+      @unknown_keys = (data.keys.map(&:to_s) - KNOWN_KEYS).sort.freeze
+
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
 

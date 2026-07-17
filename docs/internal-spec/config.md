@@ -42,9 +42,23 @@ design, not an implementation detail** — a key may sit in one tier, or all thr
 
 Tier 2 is for a value the loader cannot proceed on (a malformed `dependencies.source_inference[]`
 entry, an out-of-range `budget_per_gem`). Tier 3 is for a value that is well-formed but **silently
-resolves to nothing** — a missing signature path, an unknown library name, an inert suppression;
-the class of mistake whose only symptom is confusing and downstream. Tier 3 warns and never errors,
-because a partial or forward-looking config is a valid setup, and it never fires on an unset default.
+resolves to nothing** — a missing signature path, an unknown library name, an inert suppression, an
+unrecognised top-level key; the class of mistake whose only symptom is confusing and downstream.
+Tier 3 warns and never errors, because a partial or forward-looking config is a valid setup, and it
+never fires on an unset default.
+
+Tiers 1 and 3 overlap on unrecognised **top-level** keys, and both are needed: tier 1 catches the
+mistake as it is typed but only for a user whose editor loads the schema, while tier 3 always runs.
+`Configuration::KNOWN_KEYS` is the complete set a conforming file may carry (the `DEFAULTS` keys +
+`includes:` + the reserved namespaces); anything else is recorded on `Configuration#unknown_keys` —
+the loader fetches each key it owns and never enumerates the rest, so without that record the keys
+are gone before the audit sees a Configuration.
+
+**Tier 3 covers top-level keys only.** A nested check would need each group's known key set, and
+`DEFAULTS` cannot supply it: `DEFAULTS["dependencies"]` omits `budget_overrun_strategy`, which is
+real, documented, and schema-declared — a `DEFAULTS`-keyed nested check would flag a working config.
+`severity_overrides:` is an open map of rule ids besides. Nested unknown keys are tier 1's job: every
+nested object in the schema is `additionalProperties: false`, and the gate below keeps it complete.
 
 ## Reserved namespaces
 

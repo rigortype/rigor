@@ -83,6 +83,7 @@ types it was meant to describe into a high-confidence
 of real type errors. The audit covers:
 
 ```
+rigor: `excludee` is not a recognized configuration key; it has no effect. Did you mean `exclude`?
 rigor: signature_paths: "/path/to/sig" does not exist (no signatures loaded from it)
 rigor: signature_paths: "/path/to/sig" matched 0 signature files
 rigor: libraries: "csb" is not an available RBS library (no signatures loaded from it)
@@ -90,6 +91,11 @@ rigor: disable: "call.undefined-methdo" is not a recognized rule id; the suppres
 rigor: severity_overrides: "flow.bogus" is not a recognized rule id; the override has no effect
 rigor: bundler.lockfile: "./missing/Gemfile.lock" does not exist
 ```
+
+The unrecognised-key check covers **top-level** keys, and skips
+the namespaces reserved for other implementations (see below).
+A typo *inside* a group — `cache: { pth: … }` — is caught by
+the JSON schema as you type rather than at check time.
 
 These are warnings, not errors — partial or optional bundles and
 forward-looking config are valid setups. The audit only fires on explicit,

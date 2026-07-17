@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "did_you_mean"
+
 require_relative "signature_path_audit"
 # ADR-87 WD4 — only the pure rule-id table (`ALL_RULES` / `RULE_FAMILIES`) is needed, so require the light
 # `rule_ids.rb` rather than the engine-pulling `check_rules.rb`; keeps `config_audit` (loaded by every check)
@@ -39,11 +41,52 @@ module Rigor
     #   paths resolve against (the CLI's CWD), used only by the explicit-path checks.
     # @return [Array<Warning>]
     def self.warnings(configuration, project_root: Dir.pwd)
-      signature_path_warnings(configuration) +
+      unknown_key_warnings(configuration) +
+        signature_path_warnings(configuration) +
         library_warnings(configuration) +
         rule_token_warnings(configuration) +
         explicit_path_warnings(configuration, project_root)
     end
+
+    # Top-level keys the loader does not own. The archetypal case is a typo — `excludee:` for
+    # `exclude:` — which the loader drops in silence, so the exclusion never applies and the run
+    # reports errors from the very files the user meant to skip, with nothing anywhere saying the key
+    # did nothing. That is exactly this module's class of mistake, and it was the one whole-key
+    # instance of it going unwarned.
+    #
+    # A reserved namespace ({Configuration::RESERVED_NAMESPACES}) is unknown *on purpose* — another
+    # implementation reads it from the same file — so it is exempt. {Configuration#unknown_keys}
+    # already applies that exemption; warning here would push users to delete the key their other
+    # tool needs.
+    #
+    # **Top level only, and deliberately.** A nested check would have to name each group's known keys,
+    # and DEFAULTS cannot supply them: `DEFAULTS["dependencies"]` carries `source_inference` and
+    # `budget_per_gem` but not `budget_overrun_strategy`, which is real (`Configuration::Dependencies`
+    # reads it), documented, and schema-declared — so a DEFAULTS-keyed nested check would flag a
+    # working config. `severity_overrides:` is an open map of rule ids besides. Nested unknown keys are
+    # the schema tier's job: every nested object in `schemas/rigor-config.schema.json` is
+    # `additionalProperties: false`, and `config_schema_spec` keeps it complete
+    # ([ADR-99](../../docs/adr/99-config-schema-authority.md), `docs/internal-spec/config.md`).
+    def self.unknown_key_warnings(configuration)
+      configuration.unknown_keys.map do |key|
+        suggestion = suggest_config_key(key)
+        hint = suggestion ? " Did you mean `#{suggestion}`?" : ""
+        Warning.new(
+          kind: :unknown_key,
+          message: "`#{key}` is not a recognized configuration key; it has no effect.#{hint}",
+          fields: { "key" => key, "suggestion" => suggestion }
+        )
+      end
+    end
+
+    # Nearest known key, or nil. Uses `DidYouMean::SpellChecker` — the engine behind Ruby's own
+    # `NoMethodError` hints, and the one `Plugin::Base.suggest` wraps. Called directly rather than
+    # through that helper because `plugin/base.rb` pulls Prism and the diagnostic model in, and
+    # ADR-87 WD4 keeps this file (loaded by every check) off that path; `did_you_mean` is stdlib.
+    def self.suggest_config_key(key)
+      DidYouMean::SpellChecker.new(dictionary: Configuration::KNOWN_KEYS).correct(key.to_s).first
+    end
+    private_class_method :suggest_config_key
 
     # `signature_paths:` entries that resolve to nothing — delegated to {SignaturePathAudit},
     # which mirrors the loader's `directory?` + recursive `**/*.rbs` acceptance test.

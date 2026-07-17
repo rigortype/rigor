@@ -87,10 +87,13 @@ per-class gate still cannot see:
   (the other half of the slice-4 backlog) — the C-ext / metaprogramming FP
   classes would only grow.
 
-## Follow-up (demand-gated)
+## Follow-up
 
-Subclass-aware gating: record, at the recorder, whether the missed method is
-defined on any known subclass of the class (the project class hierarchy is
-already in the discovery index); suppress the firing when it is. That is the
-shape a future promotion attempt needs; this eval is the evidence it is
-required.
+Subclass-aware gating — recorded here as the required shape — **landed in this
+same commit** (`01491c63`); see "Fixed — abstract / template-method base
+classes" above. It is implemented read-side in `CheckRules`
+(`method_defined_on_known_subclass?`) against the project-global discovery index
+rather than literally "at the recorder", which is functionally equivalent and
+cross-file correct. Nothing here remains open: the rule stays `:off` because of
+the C-extension / metaprogrammed **Remaining** class, which a source-only scan
+cannot enumerate — not for want of subclass-aware gating.

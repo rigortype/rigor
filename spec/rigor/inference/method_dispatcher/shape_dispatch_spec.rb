@@ -181,6 +181,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
           .to eq(constant("1-2-3"))
       end
 
+      it "folds join across all-String Constant elements to a precise Constant" do
+        string_t = tuple(constant("a"), constant("b"))
+        expect(dispatch(receiver: string_t, method_name: :join)).to eq(constant("ab"))
+        expect(dispatch(receiver: string_t, method_name: :join, args: [constant("-")]))
+          .to eq(constant("a-b"))
+      end
+
+      it "folds join on the empty tuple to Constant<\"\">" do
+        expect(dispatch(receiver: tuple, method_name: :join)).to eq(constant(""))
+      end
+
       it "declines join with a non-Constant-String separator" do
         expect(dispatch(receiver: numeric_t, method_name: :join, args: [constant(0)])).to be_nil
       end

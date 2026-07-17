@@ -17,12 +17,18 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - After a straight-line `s.x = 5`, reading `s.x` back now infers the assigned value (and a sibling `s.y` keeps its own value) — where before the whole struct went untyped the moment you wrote to any member. A read is left untyped, exactly as before, when the struct is aliased, passed to another method, or mutated inside a loop or block, so a later write you can't see never makes an earlier read wrong.
   - A `Data.define(:x) do … end` assigned to a plain local variable now folds its member reads too, matching the constant form — unless the block redefines a member's reader (`def x`), in which case the read stays untyped because it would run your method, not return the member.
 
+- **[type inference]** `Array#join` on an array of string literals now infers the exact resulting string. `["a", "b"].join("-")` types as `"a-b"` rather than a generic `String`, matching the precision already given to `[1, 2, 3].join` and to non-string arrays. The gain flows through any downstream use of the joined value.
+
 - **[rigor check]** A top-level key in `.rigor.yml` that Rigor does not recognise is now reported instead of silently ignored, with the nearest real key suggested.
   - Previously a typo'd `exclude:` loaded in silence, so the exclusion never applied and the run reported errors from the very files you meant to skip. Nothing said the key had done nothing.
   - It is a warning, never an error — your exit code does not change. The finding also appears in `--format=json` under `config_warnings` with `"kind": "unknown_key"`, so CI can assert on it.
   - Top-level keys only. A typo *inside* a group (`cache: { pth: … }`) is caught by the [JSON schema](schemas/rigor-config.schema.json) as you type instead.
 
 ### Fixed
+
+- **[type inference]** A `str =~ RE` match where the pattern is a constant (`RE = /.../` or `Regexp.new(...)`) now narrows the match globals just like a literal `str =~ /.../`, so `$1`, `$~`, and the rest read as their matched types after a successful match instead of staying nilable — removing spurious possible-nil warnings on the common "compile the regex once as a constant" idiom.
+
+- **[type inference]** `$+` (the last matched group) is no longer assumed non-nil after a successful match whose groups are all optional or absent (`"b" =~ /(a)?b/` matches yet leaves `$+` nil); it now narrows to `String` only when at least one capture group is guaranteed to participate, matching how an optional `$1` is already treated.
 
 - **[type inference]** A method whose RBS declares an untyped parameter list — `def call: (?) -> String` — now contributes its return type instead of silently reading as untyped.
   - Rigor discarded the whole signature for these methods, so `(?) -> String` typed as `untyped` and nothing downstream of the call was checked. This affected stock projects with no `sig/` of their own: core RBS ships the form on `Proc#call`, `Method#call`, `Ractor.select` and `IO.for_fd`.

@@ -2,6 +2,21 @@
 
 2026-05-22 生成。Ruby 4.0 の `"".methods - Object.new.methods` 等から型ごとに固有メソッドを抽出し、現在の精度カバレッジを分類する。
 
+> **2026-07-18 監査パス（#121 P3 スライス）。** 本表の多くの 🔲 は 2026-05-22 以降に実装済み
+> （`String#[]`/`slice`、`Tuple#drop`/`rotate`/`flatten`/`join`、CGI/URI/Regexp/Math シングルトン
+> フォールド等）。空きの主因は「フォールドが存在しないこと」ではなく、**先行ティアによる遮蔽**だった。
+> 本スライスで閉じたのは `Array#join`：全要素が `Constant[String]`（セパレータが Constant/省略）の
+> ときだけ、`ShapeDispatch.tuple_join` の精密 `Constant[String]` を `LiteralStringFolding` が
+> 汎用 `literal-string` で覆い隠していた（整数・混在要素の tuple は既に精密フォールド済み）。
+>
+> **本スライスで対象外と判断した項目（P0 側／FP リスク）:**
+> - `String#to_r` / `Integer#to_r` / `Float#to_r` / `#to_c` の一部 — `Rational`/`Complex` の同値・
+>   算術は演算子 `==` がオペランド `==` に委譲し得るため、フォールドの一部が **ユーザ再定義可能な経路**
+>   を通る（本表 `RATIONAL_BINARY`/`COMPLEX_BINARY` が `==` を除外している理由と同じ）。単純な `to_r`
+>   自体は純粋だが、下流の同値比較で新規診断（`flow.*`）を誘発し得るため、別途評価とする。
+> - `String#%` の Hash 形式（`"%{k}" % {…}`）— HashShape 経由の精密化は可能だが、フォーマット文字列の
+>   検証で新規診断を生む可能性があり、P3 の「新規診断ゼロ」制約に抵触し得る。
+
 ---
 
 ## 凡例
@@ -375,7 +390,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `index` / `find_index` | ✅ | `PER_ELEMENT_TUPLE_METHODS` → `Constant[Integer\|nil]`。 |
 | `insert` | 🚫 | 破壊的変更。 |
 | `intersection` | 🔲 | 集合交差。低優先度。 |
-| `join` | 🔲 | Tuple 要素を String に連結。中優先度（すべて Constant のとき `Constant[String]`）。 |
+| `join` | ✅ | `tuple_join` — すべて Constant のとき `Constant[String]`。全要素が `Constant[String]` かつセパレータが Constant/省略の場合は `LiteralStringFolding` が精密フォールドに道を譲る（2026-07-18）。 |
 | `keep_if` | 🚫 | 破壊的変更。 |
 | `last` | ✅ | `tuple_last` → 末尾 n 要素。 |
 | `length` / `size` | ✅ | `tuple_size` → `Constant[Integer]`。 |
@@ -420,10 +435,12 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [x] take(n)             → TUPLE_HANDLERS → 先頭 n 要素 Tuple
 
 中優先度:
-[ ] drop(n)   → TUPLE_HANDLERS → n 以降の部分 Tuple
-[ ] rotate(n) → TUPLE_HANDLERS → 回転後 Tuple
-[ ] flatten   → TUPLE_HANDLERS → 1 段ネスト展開（depth=1 限定で実用十分）
-[ ] join      → TUPLE_HANDLERS → すべて Constant のとき Constant[String]
+[x] drop(n)   → TUPLE_HANDLERS → n 以降の部分 Tuple
+[x] rotate(n) → TUPLE_HANDLERS → 回転後 Tuple
+[x] flatten   → TUPLE_HANDLERS → 1 段ネスト展開（depth=1 限定で実用十分）
+[x] join      → TUPLE_HANDLERS `tuple_join`（すべて Constant のとき Constant[String]）。
+    2026-07-18: 全要素 Constant[String] のケースを `LiteralStringFolding` が
+    `literal-string` で覆い隠していたのを解消（精密フォールドに委譲）。
 [x] slice     → TUPLE_HANDLERS → `[]` の別名（整数 / Range / start-length 形式）
 
 低優先度:

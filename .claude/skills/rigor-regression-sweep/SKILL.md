@@ -238,3 +238,34 @@ and pass `BUNDLE_GEMFILE=<rigor>/Gemfile` so `bundle exec
 <rigor>/exe/rigor` runs with rigor's gem environment while the target
 is the working directory (diagnostic paths then resolve
 target-relative, keeping baseline keys stable across tags).
+
+## Corpus-gating gotchas (each cost a wrong conclusion first)
+
+- **A worktree isolates the ENGINE, never a PLUGIN.** `exe/rigor` unshifts its
+  own tree's `lib/`, so `$worktree/exe/rigor` measures that worktree's engine —
+  but `plugins/` still resolves from the main repo, so a worktree "before" run
+  silently loads the *modified* plugin and the diff comes out empty. It presents
+  as a **passing** gate. For a plugin change swap the directory instead:
+  `git checkout origin/master -- plugins/rigor-<name>` (plus `rm` any file the
+  change adds), run the before side, then
+  `git checkout HEAD -- plugins/rigor-<name>`. Verify with `rigor plugins`,
+  which prints each manifest's version.
+- **`make verify` gates only `lib` + `plugins` — the external corpus still
+  exposes false positives** from receivers Rigor mistypes. Never widen a union /
+  nilable-receiver diagnostic (or promote any default) on a clean `make verify`
+  alone; run this sweep, or at minimum a before/after corpus diff, first.
+- **Adjudicate against the framework's own source, not the symptom.** A GENUINE
+  verdict on a hot production code path is presumptively-FP until confirmed
+  against the library's source — two GitLab "bugs" overturned to FP that way.
+- **`dump_type`-via-`check` is the ground truth** — single-file `dump_type`
+  probes are wrong for cross-file symbols. Analyze the whole directory.
+- **Prove the path is exercised before trusting a green run.** A clean corpus
+  result proves nothing until you instrument it (29 real `Void` translations in
+  kramdown; 61 mail files matching `#:nodoc:` — twice, that instrumentation is
+  what separated a real no-op from a vacuous one). Measure the layer, not the
+  aggregate: a `--depth 1` clone collapses every commit to one author/date, and
+  a vendored directory can inflate a grep count 3×.
+- **Survey checkouts**: `mise.toml` needs `mise trust` first; `git stash push --
+  <tracked files>` (an untracked pathspec errors and stashes nothing); never run
+  two `rigor` processes against one target — cache-lock contention corrupts the
+  run.

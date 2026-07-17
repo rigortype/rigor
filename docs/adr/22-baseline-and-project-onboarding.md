@@ -423,7 +423,7 @@ workflows for the rigor monorepo. Audience consequence:
   internal-only modules) are off-limits.
 - They live under the **`skills/` top-level tree** that the
   ROADMAP reserved for the v0.2.0 external-SKILL track (see
-  [`docs/ROADMAP.md`](../ROADMAP.md) § "Agent workflows /
+  `docs/ROADMAP.md` § "Agent workflows /
   SKILLs"). The `skills/rigor-project-init/` and
   `skills/rigor-baseline-reduce/` directories become the
   first concrete occupants of that tree alongside the
@@ -738,7 +738,7 @@ baseline material: app-specific metaprogramming → a project-private plugin
 - The two SKILLs ship as contributor-facing artefacts under
   `.claude/skills/`. The external-author variant queued for
   v0.2.0 (per
-  [`docs/ROADMAP.md`](../ROADMAP.md) § "Agent workflows /
+  `docs/ROADMAP.md` § "Agent workflows /
   SKILLs (committed: v0.2.0)") covers the same workflow shape
   for users running Rigor inside their own gem / project
   checkout, outside the rigor monorepo.
@@ -855,6 +855,6 @@ This ADR's design is re-litigated if any of these become true:
   surfaced diagnostics stayed at 0 across the whole release line,
   empirically validating the acknowledge-mode "adopt once, surface
   only regressions" contract.
-- [`docs/ROADMAP.md`](../ROADMAP.md) § "Agent workflows /
+- `docs/ROADMAP.md` § "Agent workflows /
   SKILLs (committed: v0.2.0)" — companion external-author
   SKILL track this ADR's SKILLs feed into.

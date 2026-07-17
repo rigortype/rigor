@@ -275,7 +275,8 @@ end
 (Narrowing the truthy edge further to specific refinement
 carriers — so `\d{4}` would produce `decimal-int-string` — is a
 demand-driven follow-up on the regex-pattern → refinement-name
-recogniser track; see [`docs/ROADMAP.md`](../ROADMAP.md).)
+recogniser track, tracked as
+[#164](https://github.com/rigortype/rigor/issues/164).)
 
 ## Negation and `unless`
 

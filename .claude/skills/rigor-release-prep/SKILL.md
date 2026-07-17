@@ -53,7 +53,7 @@ Update these files:
 **Do this first, before the mechanical version-heading move below, and treat
 the entries — not the version bump — as the deliverable of this skill.** The
 intended state is that every `[Unreleased]` entry was already written
-release-style **at landing** (per `AGENTS.md` § "CHANGELOG Style"), so this step
+release-style **at landing** (per `AGENTS.md` § "Release Cadence"), so this step
 is mostly **cross-entry consolidation**: fold several commits' entries into one
 user-recognisable change, reorder, dedupe, and split any merge artefacts —
 work that needs the cycle-wide context only release time has. In practice the
@@ -70,8 +70,10 @@ to `make verify`, so nothing downstream will catch a skipped rewrite. It is the
 one step silently lost when the mechanical steps around it get done; do not let
 "the entries are already there" stand in for reviewing and consolidating them.
 
-The canonical rules live in `AGENTS.md` § "CHANGELOG Style". The load-bearing
-ones are inlined here so this step never depends on a skipped hop:
+`CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
+**This skill is the canonical statement of the entry rules** — `AGENTS.md`
+carries only the landing-time one-liner, because the full set matters to a
+session writing an entry, not to every session. The rules:
 
 - **One sentence per top-level bullet.** One period, no em-dash clauses, no
   run-ons. Self-contained enough to understand without the body.
@@ -85,6 +87,30 @@ ones are inlined here so this step never depends on a skipped hop:
   sentences max, one topic each.
 - A changelog entry is **not** a commit message: many commits may collapse into
   one entry, and one fat `[Unreleased]` line may split into several.
+- End with a GitHub issue / PR link and `thank you @handle!` when applicable.
+
+The three shapes to reject on sight:
+
+```markdown
+# ✗ two sentences joined by an em-dash
+- **[plugins]** All bundled plugins now ship inside the `rigortype` gem — `require "rigor-foo"` resolves without any workaround. Activate with `plugins: [rigor-foo]`.
+
+# ✗ internal implementation detail as a child item
+  - Individual gemspecs inside `plugins/` are removed; the plugin family ships as a single unit.
+
+# ✗ commit-message prose instead of a user-meaningful description
+- **[baseline]** Fix `group_for_baseline` to normalise paths to relative before building bucket keys.
+```
+
+Each is fixable in place — split the em-dash into a bullet plus a child item,
+delete the internal detail, and restate the third as what a user can now do:
+
+```markdown
+- **[rigor baseline generate]** Fixed a crash when `plugins:` entries in `.rigor.yml` were plain strings.
+
+- **[plugins]** All bundled plugins now ship inside the `rigortype` gem, so `require "rigor-foo"` works without any `RUBYLIB` or `Gemfile` workaround.
+  - Activate any plugin with one line in `.rigor.yml`: `plugins: [rigor-foo]`.
+```
 
 Procedure — the enumeration is what makes the rewrite un-skippable, so do not
 shortcut it:
@@ -262,6 +288,29 @@ If `make verify` requires formatting fixes or other non-version cleanup,
 commit that work separately before creating the version-bump commit. Do not
 fold release verification cleanup into the `Bump up version to x.y.z`
 commit.
+
+### Perf-gate gotchas (learned the hard way)
+
+- The Make target is `bench-perf`, not `bench` (the bare name collides with
+  the `bench/` data directory). `release-gate.yml` is **advisory** during the
+  evaluation line — it reports but does not block; `ci.yml` is the required
+  gate. The signal is still release-quality: review it.
+- Both baselines (`bench/baseline.json`,
+  `data/oss-sweep/mastodon-thresholds.json`) are exact-count / banded with
+  little headroom, so a precision or allocation change flips them red **by
+  design** until recalibrated. Recalibrate from the **CI-measured Linux**
+  values: allocations is the deterministic signal; **`wall_s` is a rerunnable
+  flake — `gh run rerun --failed` clears it; never recalibrate for wall
+  alone.** Diff the OSS-sweep diagnostics for FPs before blessing a higher
+  count (the v0.2.0 recalibration found 3 `StringScanner#[]` FPs → fixed at
+  root, not blessed in).
+- Perf-measurement comparability: warm numbers are only comparable within one
+  process model (an in-process cold-then-warm chain is ~186k allocs cheaper
+  than a fresh-process warm — a phantom regression otherwise). Self-check
+  allocation numbers require `vendor/bundle` present (~8M allocs of vendored
+  sigs). A peak-RSS rise on a run over ~5s is the deadline **YJIT**, not a
+  leak — A/B with `RIGOR_DISABLE_YJIT=1` before diagnosing. Details:
+  [`docs/notes/20260713-corpus-perf-campaign.md`](../../../docs/notes/20260713-corpus-perf-campaign.md).
 
 ## Commit the Result
 

@@ -571,6 +571,49 @@ independent of the packaging discussion.
   `observed-strict`) discussion — the paper is the
   *automated-expansion* alternative Rigor declined.
 
+## The authorship policy, and why
+
+`AGENTS.md` § "RBS Authorship" carries the rule — prefer `rigor sig-gen` over
+hand-written or AI-authored RBS in this repository. The reasoning lives here.
+
+The **aspiration** is that deterministic inference is precise enough to make
+AI-authored RBS unnecessary. Every gap that pushes someone toward freehand RBS
+is therefore information about where the engine still has work, and the
+preferred response is to extend the generator rather than route around it. AI
+assistance is not forbidden — it is simply rarely the right first move here, and
+any AI-authored RBS lands only after explicit human review.
+
+What `sig-gen` enforces that hand-rolling bypasses:
+
+- The `def.return-type-mismatch` strict-acceptance check — the generator never
+  emits a tightening the analyzer itself would reject.
+- The ADR-5 robustness asymmetry: strict on returns, lenient on parameters
+  (`--params=untyped` by default, `observed` opt-in via `--observe=PATH`).
+- `erase_to_rbs` round-trip discipline — every carrier without a faithful RBS
+  spelling erases to its nominal envelope.
+
+When sig-gen falls short on a method shape (`sig.skipped.complex-shape`, a
+missing carrier), record the gap as a follow-up candidate for the engine rather
+than backfilling by hand because it would be quick. The gap is the more valuable
+signal.
+
+### The inference-vs-RBS contradiction rule
+
+When `sig-gen` proposes a **`tighter-return`** that contradicts existing RBS, the
+default is to **not overwrite, even with `--overwrite`.**
+
+The dogfood pass over Rigor's own `lib/` (2026-05-12) produced 7 tighter-return
+candidates, and **every one was an inference incompleteness** rather than a real
+precision win: early-return `return nil unless …` paths missed, two-valued
+booleans literal-folded to one, `Array[T]` collapsed to `Tuple[T, ...]`. The
+hand-maintained RBS captured branches the engine does not yet see, so the
+existing form was the more accurate one.
+
+So treat any tightening that **loses union members** against the declared RBS as
+a contradiction signal: do not apply it, and surface the discrepancy as a
+follow-up for the engine. New methods with no existing RBS remain freely
+applicable after review; `equivalent` classifications are no-ops.
+
 ## Revision history
 
 - 2026-05-12 — initial draft.
@@ -578,3 +621,6 @@ independent of the packaging discussion.
   `lib/rigor/sig_gen/` is the production namespace.
   Policy promoted to AGENTS.md § "RBS Authorship":
   prefer `rigor sig-gen` over AI-authored RBS.
+- 2026-07-17 — the policy's rationale and the tighter-return contradiction rule
+  moved here from AGENTS.md, which keeps the rule alone (ADR-97: the contract
+  loads into every session; the reasoning is a lookup).

@@ -383,3 +383,12 @@ trade for speed. Defenses:
   the project; they share ADR-6's no-eviction backend and need a size
   story (the per-file entries are keyed by stable path, so they overwrite
   rather than accumulate, like ADR-45's slot).
+
+## Implementation trap (do not refactor this away)
+
+Do NOT extract the `Runner#initialize` ivar pre-seeds
+(`@class_decl_paths_snapshot = {}` etc.) into a helper method. Moving them out
+of the constructor hides them from the engine's OWN flow analysis, and
+`make check` self-flags `snapshot.size` as a nil-receiver false positive. Keep
+them inline — the constructor carries an `AbcSize` rubocop disable for exactly
+this reason.

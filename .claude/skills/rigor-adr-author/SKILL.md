@@ -1,7 +1,7 @@
 ---
 name: rigor-adr-author
 description: |
-  Author a new Architecture Decision Record under docs/adr/. Use when the user asks to "write an ADR", "record this decision as an ADR", "add ADR-N for X", or when a design discussion reaches a decision worth recording. Covers the quality bar (defers to ADR-49's rubric — archetype, stakes, eight axes) and the mechanical wiring (next number, the file, the docs/adr/README.md index row in ascending order, the CLAUDE.md ADR list row, verification). NOT for editing the type spec or internal-spec corpus, and NOT a substitute for reading ADR-49 — this skill is the procedure; ADR-49 is the binding quality contract.
+  Author a new Architecture Decision Record under docs/adr/. Use when the user asks to "write an ADR", "record this decision as an ADR", "add ADR-N for X", or when a design discussion reaches a decision worth recording. Covers the quality bar (defers to ADR-49's rubric — archetype, stakes, eight axes) and the mechanical wiring (next number, the file, the docs/adr/README.md index row in ascending order with its capped status, whether the ADR earns a CLAUDE.md premise line at all — usually not — and verification). NOT for editing the type spec or internal-spec corpus, and NOT a substitute for reading ADR-49 — this skill is the procedure; ADR-49 is the binding quality contract.
 metadata:
   internal: true
 ---
@@ -140,13 +140,45 @@ The index table is ordered `ADR-0, 1, 2, …`. Insert the new row **after**
 the current-highest row, **before** the `## Adding a New ADR` heading — not
 before the previous row. (This ordering is the easy slip: anchor the edit
 on the *last* table row + the heading, not on the previous-number row.)
-Row shape: `| ADR-N | [Title](N-slug.md) | <Status + a dense one-paragraph summary> |`.
+Row shape: `| ADR-N | [Title](N-slug.md) | <status> |`.
 
-### 4c. `CLAUDE.md` ADR list row
+The third column is headed **Status** and carries exactly that — the
+README's own "How to Read" is the contract: `Accepted` / `Proposed` /
+`Superseded`, plus one parenthetical for an in-flight implementation
+(which WD/slice landed, what remains, a version or PR). **Cap: 200
+characters**, one line, no `|`. Derive it from your ADR's own `Status:`
+block so the two cannot disagree — that block is canonical (ADR-92).
 
-`CLAUDE.md` carries a parallel `- [ADR-N](docs/adr/N-slug.md) — …` bullet
-list (also ascending). Append the new bullet after the current last entry.
-Keep the one-liner consistent in density with its neighbours.
+Not a summary: no criteria, no rationale, no rejected alternatives, no
+measurements. They are in the ADR body, and duplicating them here is what
+grew this column to 5,195 characters a cell before
+[ADR-97](../../../docs/adr/97-adr-index-budgets.md) capped it.
+
+```
+| ADR-40 | [`config_schema` declared defaults](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
+```
+
+### 4c. `CLAUDE.md` — **usually nothing to do**
+
+`CLAUDE.md` is loaded into context at the start of every session, so its
+ADR list is a **premise set, not an index** ([ADR-97](../../../docs/adr/97-adr-index-budgets.md)
+WD1): only the ADRs an agent would get wrong *without knowing to look
+them up* — the foundation / conceptual core (ADR-0–5) and the standing
+policies in force. It holds 10 entries against a cap of 12.
+
+**Your ADR almost certainly does not belong there.** 88 of 98 do not. It
+earns a line only if it is a new **standing policy** — a rule that binds
+a contribution whatever it touches, not merely an important decision in
+its own area. "This is significant" is not the test; "a session that
+never thought to look this up will do the wrong thing" is. When in doubt,
+leave it out: `docs/adr/README.md` is one hop away, and the gate will not
+let you quietly spend the session budget.
+
+If it genuinely qualifies, add `- [ADR-N](docs/adr/N-slug.md) — <topic>`
+to the matching sub-list: topic only, **≤ 100 characters**, no status, no
+dates, no measurements, no WD references.
+
+The gate is `spec/docs/agent_index_spec.rb` under `make docs-check`.
 
 (If the ADR establishes a SKILL, a release process, or anything an agent
 should discover, also add/adjust the relevant `CLAUDE.md` / `AGENTS.md`
@@ -155,8 +187,10 @@ pointer — most ADRs do not need this.)
 ## Step 5 — Verify
 
 ```sh
-git diff --check        # whitespace
-git status --short      # expect: new ADR file + modified docs/adr/README.md + modified CLAUDE.md
+git diff --check                                # whitespace
+git status --short                              # expect: new ADR file + modified docs/adr/README.md
+                                                # (+ CLAUDE.md only in the rare 4c case)
+nix … develop --command make docs-check         # gates the index rules (ADR-97)
 ```
 
 ADR authoring is docs-only, so `make verify` is not required for the ADR
@@ -180,10 +214,13 @@ with code, fold it into that slice's commit).
 - **Length is proportional to stakes** — reference dumps moved to a note;
   not over-written for a low-stakes / evaluation decision.
 - `docs/adr/README.md` row inserted in **ascending** position (after the
-  last row, before `## Adding a New ADR`).
-- `CLAUDE.md` ADR bullet appended.
-- `git diff --check` clean; `git status` shows exactly the three expected
-  entries.
+  last row, before `## Adding a New ADR`) — status only, ≤ 200 chars,
+  derived from your ADR's own `Status:` block (ADR-97).
+- `CLAUDE.md` — confirmed the ADR is a *lookup*, so no line added (the
+  normal case); or it is a new standing policy and earns one (ADR-97).
+- `make docs-check` green — it gates both lists.
+- `git diff --check` clean; `git status` shows exactly the expected
+  entries (normally two: the ADR file + `docs/adr/README.md`).
 - Quality re-read against [ADR-49](../../../docs/adr/49-adr-authoring-guidelines.md):
   which one or two axes drag, and is that drag archetype-correct (fine) or
   a real gap (fix)?

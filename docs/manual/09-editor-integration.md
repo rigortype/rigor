@@ -201,8 +201,8 @@ For a legacy bundler-based install, swap the connection list to
   analyzer assigns the receiver.
 - Mid-edit buffer support is best-effort. If parse fails AND the
   cursor isn't right after `.` / `::`, the v1 LSP returns no
-  completions; deeper recovery is queued (see ROADMAP §
-  "Editor / IDE integration").
+  completions; deeper recovery is queued (see the open
+  [`area:editor` issues](https://github.com/rigortype/rigor/issues?q=is%3Aissue+is%3Aopen+label%3Aarea%3Aeditor)).
 
 **Hover shows `untyped` everywhere.**
 
@@ -236,8 +236,8 @@ LSP v1 + v2 landed in v0.1.6 and ship in the `0.1.x` line. Queued
 follow-ups (`textDocument/signatureHelp`, hash-key completion,
 `textDocument/definition`, incremental `didChange` sync, Ractor
 pool dispatch, codeAction / rename / semanticTokens / inlayHint)
-are demand-driven; see ROADMAP § "Editor / IDE integration" for
-the current queue.
+are demand-driven; the current queue is the open
+[`area:editor` issues](https://github.com/rigortype/rigor/issues?q=is%3Aissue+is%3Aopen+label%3Aarea%3Aeditor).
 
 To request a queued feature or report an LSP issue, open a GitHub
 issue with: the editor + version, the Rigor version

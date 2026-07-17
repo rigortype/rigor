@@ -92,9 +92,9 @@ bundle exec rspec spec/rigor/type/refined_spec.rb  # one file
   resume bookmark for the next implementer (highest-leverage
   open slices, parallel-safe entry points, open engineering
   items).
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — the
-  forward-looking commitment envelope (active cycle + queued
-  work). The released-version record is `CHANGELOG.md`.
+- GitHub Issues / Milestones — the backlog and release planning
+  (conventions: [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md)).
+  The released-version record is `CHANGELOG.md`.
 - [`docs/adr/`](docs/adr/) — architecture decision records.
 - [`docs/type-specification/`](docs/type-specification/) — the
   normative type-language specification.

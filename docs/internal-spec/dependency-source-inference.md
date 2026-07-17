@@ -11,8 +11,8 @@ per-call return-type precision from gem source).
 
 The binding design surface is
 [ADR-10](../adr/10-dependency-source-inference.md); the
-release-by-release commitment envelope is in
-[`docs/ROADMAP.md`](../ROADMAP.md). When this spec
+release-by-release planning surface is GitHub Issues / Milestones
+(see [`docs/agents/issue-tracker.md`](../agents/issue-tracker.md)). When this spec
 disagrees with ADR-10, the ADR binds and this document is out of
 date.
 

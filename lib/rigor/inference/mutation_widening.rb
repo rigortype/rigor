@@ -102,7 +102,8 @@ module Rigor
 
       # Returns a scope with the call's receiver widened, when the receiver is a
       # local-/instance-variable read whose current binding is a literal-shape carrier
-      # (`Tuple` / `HashShape`) AND the call name is a known in-place mutator for that shape.
+      # (`Tuple` / `HashShape`) or an empty-witness refinement (`non-empty-array` /
+      # `non-empty-hash`) AND the call name is a known in-place mutator for that shape.
       # Returns `current_scope` unchanged otherwise.
       #
       # @param call_node     [Prism::CallNode]
@@ -217,6 +218,30 @@ module Rigor
           return nil unless HASH_MUTATORS.include?(method_name)
 
           widen_hash_shape(type)
+        when Type::Difference
+          widen_difference(type, method_name)
+        end
+      end
+
+      # `non-empty-array[T]` / `non-empty-hash[K, V]` → the bare base nominal. These refinement
+      # carriers are what `empty?` / `any?` narrowing writes (ADR-47 §4-4), and they are just as
+      # invalidated by an in-place mutator as a `Tuple` is: `arr.clear` makes `arr` empty, so a
+      # surviving `Difference[Array[T], Tuple[]]` would project `arr.size` to `positive-int` and
+      # fold `arr.size == 0` to `Constant[false]` — a false `flow.always-falsey-condition` on
+      # correct code.
+      #
+      # Only the EMPTY-witness differences over Array / Hash are widened, and only for that
+      # base's mutator table. The other catalogued refinements are unreachable from these tables
+      # by construction: `non-empty-string` and `non-zero-int` bind String / Integer receivers,
+      # whose mutators (`String#<<` and friends) appear in neither `ARRAY_MUTATORS` nor
+      # `HASH_MUTATORS` — and none of them can empty a non-empty string anyway.
+      def widen_difference(difference, method_name)
+        return nil unless difference.removes_empty_witness?
+
+        base = difference.base
+        case base.class_name
+        when "Array" then ARRAY_MUTATORS.include?(method_name) ? base : nil
+        when "Hash" then HASH_MUTATORS.include?(method_name) ? base : nil
         end
       end
 

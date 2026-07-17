@@ -155,11 +155,16 @@ module Rigor
       # override (returned by `#manifest`, which `Plugin::Registry#source_rbs_synthesizers` consults via
       # `plugin.manifest.source_rbs_synthesizer`).
       #
-      # ADR-32 WD10 — `require_magic_comment` defaults to `true`. Setting it to `false` in `.rigor.yml`
-      # flips the synthesizer into "process every file" mode.
+      # ADR-93 WD1 — `require_magic_comment` defaults to `false`: annotations are official type sources
+      # "always parsed whenever present" per the binding spec (overview.md § Compatibility hierarchy), so
+      # a file is processed when it actually carries an annotation, with the magic comment not required.
+      # The magic-comment-free mode is annotation-presence-gated (see {Synthesizer#annotated?}), so an
+      # unannotated file contributes nothing and the flip cannot regress it. Set `require_magic_comment:
+      # true` in `.rigor.yml` to restore the ADR-32 opt-in behaviour; `# rbs_inline: disabled` remains the
+      # per-file opt-out either way (honoured by upstream unconditionally).
       def initialize(services:, config: {})
         super
-        @require_magic_comment = config.fetch("require_magic_comment", true) ? true : false
+        @require_magic_comment = config.fetch("require_magic_comment", false) ? true : false
         @synthesizer = Synthesizer.new(require_magic_comment: @require_magic_comment)
         # Build the per-instance manifest eagerly (before `freeze`) so the registry's repeated reads
         # return the same object and we don't need to mutate a frozen instance later.

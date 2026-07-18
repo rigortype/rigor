@@ -35,6 +35,7 @@ module Rigor
       CHECK_BASELINE = "baseline"
       CHECK_RAILS = "rails_plugins"
       CHECK_GEMFILE = "gemfile_install"
+      CHECK_PLUGIN_SKEW = "plugin_skew"
 
       RAILS_LOCK_MARKERS = %w[railties actionpack activerecord actioncable].freeze
       RAILS_PLUGIN_MARKERS = %w[
@@ -64,8 +65,9 @@ module Rigor
         # 3. RBS environment check.
         findings.concat(check_rbs_environment(result))
 
-        # 4. Plugin load check.
-        findings.concat(check_plugins(configuration))
+        # 4. Plugin load check + 8. installation-skew check share one loaded registry.
+        registry = load_plugin_registry(configuration)
+        findings.concat(check_plugins(registry))
 
         # 5. Baseline drift check.
         findings.concat(check_baseline(configuration, result))
@@ -75,6 +77,9 @@ module Rigor
 
         # 7. Rigor itself resolved as a project dependency.
         findings.concat(check_gemfile_install)
+
+        # 8. A bundled plugin loaded from a different rigortype installation than the engine (#194 slice 3).
+        findings.concat(check_plugin_skew(registry))
 
         report(findings, options.fetch(:format))
         findings.any? { |f| f[:status] == :fail } ? 1 : 0
@@ -176,14 +181,17 @@ module Rigor
         result.diagnostics.select { |diagnostic| diagnostic.rule == "rbs.coverage.quarantined-signature" }
       end
 
-      def check_plugins(configuration)
+      def load_plugin_registry(configuration)
         services = Plugin::Services.new(
           reflection: Reflection,
           type: Type::Combinator,
           configuration: configuration,
           cache_store: nil
         )
-        registry = Plugin::Loader.load(configuration: configuration, services: services)
+        Plugin::Loader.load(configuration: configuration, services: services)
+      end
+
+      def check_plugins(registry)
         errors = registry.load_errors
         return [] if errors.empty?
 
@@ -195,6 +203,52 @@ module Rigor
             hint: "Run `rigor plugins --strict` for the full per-plugin report."
           }
         ]
+      end
+
+      # WD5 (#194 slice 3) — a bundled plugin should load from the engine's own `plugins/` tree; slice 2
+      # anchors it there. This guards the residual anchoring cannot see: a bundled plugin whose resolved file
+      # sits OUTSIDE the engine tree — the fallback-require path, or a genuinely mixed installation where a
+      # foreign copy was already loaded. That is the #194 skew, which ran the engine with a load-bearing
+      # false-positive gate silently missing. Only plugins the engine bundles are checked; a third-party /
+      # project-bundle plugin is not the engine's to vouch for and is never flagged, and a nil resolved path
+      # (an injected requirer, an in-process no-op load) carries no provenance and is skipped.
+      def check_plugin_skew(registry)
+        registry.resolved_gem_paths.filter_map do |gem_name, resolved_path|
+          next if resolved_path.nil?
+          next unless Plugin::Loader.bundled_plugin_path(gem_name)
+          next if inside_engine_tree?(resolved_path)
+
+          plugin_skew_finding(gem_name, resolved_path)
+        end
+      end
+
+      def plugin_skew_finding(gem_name, resolved_path)
+        {
+          check: CHECK_PLUGIN_SKEW,
+          status: :warn,
+          message: "Plugin #{gem_name} loaded from a different rigortype installation than the engine " \
+                   "(loaded from #{resolved_path}; engine at #{Plugin::Loader::ENGINE_ROOT})",
+          hint: "The engine and its bundled plugins are versioned together, so a copy resolved from another " \
+                "installation can run the engine with a mismatched plugin (the cause of wrong diagnostics in " \
+                "#194). Ensure a single `rigortype` is on the load path — remove any separately-installed " \
+                "`rigortype` gem that shadows this checkout, or reinstall so the engine and its `plugins/` " \
+                "tree come from one place."
+        }
+      end
+
+      # True when `resolved_path` lives inside the engine's own tree. Both sides are resolved through
+      # `File.realpath` first so a symlinked gem home / checkout (e.g. macOS `/var` → `/private/var`) does not
+      # read as foreign; a vanished file degrades to `File.expand_path` rather than raising.
+      def inside_engine_tree?(resolved_path)
+        engine = real_or_expanded(Plugin::Loader::ENGINE_ROOT)
+        target = real_or_expanded(resolved_path)
+        target == engine || target.start_with?("#{engine}#{File::SEPARATOR}")
+      end
+
+      def real_or_expanded(path)
+        File.realpath(path)
+      rescue StandardError
+        File.expand_path(path)
       end
 
       def check_baseline(configuration, result)

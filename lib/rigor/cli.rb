@@ -11,7 +11,7 @@ require_relative "analysis/diagnostic"
 require_relative "analysis/result"
 require_relative "cli/options"
 require_relative "cli/diagnostic_formats"
-require_relative "cli/ci_detector"
+require_relative "ci_detector"
 
 module Rigor
   # The CLI class is a dispatcher: each `run_*` method delegates to a command-specific class once the command grows

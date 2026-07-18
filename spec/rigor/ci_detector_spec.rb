@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-RSpec.describe Rigor::CLI::CiDetector do
+RSpec.describe Rigor::CiDetector do
   def detect(env)
     described_class.detect(env)
   end

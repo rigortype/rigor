@@ -11,6 +11,7 @@ require_relative "../scope"
 require_relative "type_scan_renderer"
 require_relative "type_scan_report"
 require_relative "command"
+require_relative "probe_environment"
 
 module Rigor
   class CLI
@@ -69,20 +70,19 @@ module Rigor
 
       def scan_paths(paths, options)
         configuration = Configuration.load(options.fetch(:config))
-        scope = Scope.empty(environment: project_environment(configuration))
+        scope = Scope.empty(environment: project_environment(configuration, paths))
         scanner = Inference::CoverageScanner.new(scope: scope)
         accumulator = ScanAccumulator.new
         paths.each { |path| scan_one(path, scanner, accumulator, configuration) }
         accumulator.to_report(paths, options)
       end
 
-      # Builds a project-aware environment that auto-detects `<cwd>/sig` by default and honours the configuration's
-      # `libraries:` / `signature_paths:` keys when present.
-      def project_environment(configuration)
-        Environment.for_project(
-          libraries: configuration.libraries,
-          signature_paths: configuration.signature_paths
-        )
+      # Builds the plugin-aware environment that auto-detects `<cwd>/sig` by default and honours the
+      # configuration's `libraries:` / `signature_paths:` keys when present. The scanned `paths` are threaded as
+      # the plugin `source_rbs_synthesizer` inputs so coverage reflects the same synthesized RBS `rigor check`
+      # sees (see {ProbeEnvironment}).
+      def project_environment(configuration, source_files)
+        ProbeEnvironment.build(configuration: configuration, source_files: source_files)
       end
 
       def scan_one(path, scanner, accumulator, configuration)

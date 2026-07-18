@@ -40,6 +40,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cli]** The type probes — `rigor type-of`, `type-scan`, `trace`, and `annotate` — now build the same plugin-aware environment `rigor check` analyses with, so a type synthesized from an inline rbs-inline annotation (or any other plugin) is reported instead of a plugin-free `Dynamic[top]`, and a probe no longer disagrees with the check it is meant to explain. A project with no plugins, or with broken plugin setup, degrades to the previous behaviour rather than failing.
+
 - **[type inference]** A `str =~ RE` match where the pattern is a constant (`RE = /.../` or `Regexp.new(...)`) now narrows the match globals just like a literal `str =~ /.../`, so `$1`, `$~`, and the rest read as their matched types after a successful match instead of staying nilable — removing spurious possible-nil warnings on the common "compile the regex once as a constant" idiom.
 
 - **[type inference]** `$+` (the last matched group) is no longer assumed non-nil after a successful match whose groups are all optional or absent (`"b" =~ /(a)?b/` matches yet leaves `$+` nil); it now narrows to `String` only when at least one capture group is guaranteed to participate, matching how an optional `$1` is already treated.

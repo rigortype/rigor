@@ -81,6 +81,7 @@ module Rigor
             dependency_source_budget_diagnostics +
             dependency_source_config_conflict_diagnostics +
             rbs_coverage_diagnostics +
+            rbs_inline_annotation_hint_diagnostics(expansion) +
             expansion.fetch(:errors)
         end
 
@@ -230,6 +231,68 @@ module Rigor
           return [] if missing.empty?
 
           [build_rbs_coverage_missing_diagnostic(missing)]
+        end
+
+        # ADR-93 WD3 — the standalone residual. A bare `gem install rigortype` has no `rbs-inline` library,
+        # so the spec's "annotations are official type sources whenever present" cannot be satisfied: the
+        # annotated code reads `Dynamic[top]`. When the library is absent AND the project actually carries
+        # annotation-shaped comments, emit one `:info` routing the user to install it. Rigor never bundles it
+        # (ADR-0 zero-dep). Suppressed whenever the library resolves (auto-wire or an explicit `plugins:`
+        # entry then handles it — including the deliberate `enabled: false` opt-out, which resolves and so is
+        # never nagged) or an `rbs-inline` plugin is already active for another reason.
+        def rbs_inline_annotation_hint_diagnostics(expansion)
+          return [] if Configuration.rbs_inline_library_resolvable?
+          return [] if rbs_inline_plugin_active?
+
+          first = expansion.fetch(:files).find { |path| file_carries_inline_annotation?(path) }
+          return [] unless first
+
+          [build_rbs_inline_unsynthesized_diagnostic(first)]
+        end
+
+        def rbs_inline_plugin_active?
+          plugin_registry.plugins.any? { |plugin| plugin.manifest.id == "rbs-inline" }
+        end
+
+        # A deliberately coarse routing scan — NOT the upstream annotation grammar, which is exactly what is
+        # unavailable here (that is the whole condition). It keys on the `# @rbs` block form and on a `#:`
+        # comment immediately followed by the start of an RBS type (`(`, `[`, `{`, `?`, a `Constant`, or an
+        # RBS lowercase base type), and never on an RDoc directive (`#:nodoc:` and friends read as a bare
+        # lowercase word closed by a colon), so a project with no real annotations stays silent. Reads the
+        # file directly (the analysis buffer is not threaded here) and early-exits on the first hit; this runs
+        # at most once per run and only in the library-absent standalone case, so the extra read is bounded.
+        INLINE_ANNOTATION_SHAPE = /
+          (?:^|\s)\#\s*@rbs\b
+          |
+          (?:^|\s)\#:[ \t]*(?:[\[({?A-Z]|(?:bool|void|nil|untyped|top|bot|self|instance|class)\b)
+        /x
+        private_constant :INLINE_ANNOTATION_SHAPE
+
+        def file_carries_inline_annotation?(path)
+          File.foreach(path) do |line|
+            return true if INLINE_ANNOTATION_SHAPE.match?(line)
+          end
+          false
+        rescue StandardError
+          false
+        end
+
+        def build_rbs_inline_unsynthesized_diagnostic(sample_path)
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "Inline rbs-inline annotations (`# @rbs …`, `#: <type>`) are present in your project " \
+                     "(e.g. #{relative_signature_path(sample_path)}), but the `rbs-inline` library is not " \
+                     "installed, so Rigor cannot read them and the annotated code stays `Dynamic[top]` — " \
+                     "this run is quieter than your annotations intend, not cleaner. Install the " \
+                     "`rbs-inline` gem (its dependency closure, `prism` + `rbs`, already ships with Rigor) " \
+                     "and Rigor honours the annotations automatically (ADR-93); it is not bundled, keeping " \
+                     "the core zero-dep (ADR-0).",
+            severity: :info,
+            rule: "rbs.coverage.inline-annotations-unsynthesized",
+            source_family: :builtin
+          )
         end
 
         # Robustness uplift companion (ADR-5) — when the project's `signature_paths:` RBS declared

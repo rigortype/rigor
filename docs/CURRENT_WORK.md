@@ -7,8 +7,8 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Verify a claim before carrying it forward. Two recent saves: #194's "auto-wire regresses in-source
   inference" was withdrawn once root-caused (an installed-gem/checkout plugin version skew, not an
-  engine bug), and the #162 tier attribution in an early memory was a `rigor type-of` artifact (that
-  command builds the environment without the plugin registry — pitfall 4 in the probe-pitfalls memory).
+  engine bug), and the #162 tier attribution in an early memory was a `rigor type-of` artifact —
+  since fixed at the root by #196, which gave the probes check's plugin-aware environment.
 -->
 
 # Current Work — Session Handoff
@@ -19,50 +19,49 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **#162 transitive-void: the DESIGN PASS is done, implementation is next.** The ADR-100 WD4 addendum
-  (`docs/adr/100-static-diagnostic-family-and-void-origins.md` § "Addendum — WD4", commit `2ffa3b40`)
-  names the tier and the mechanism. **Read that addendum, not the memory prose, for the design.**
-- **#194 root-caused and re-scoped** (now `bug` / `ready-for-human` / `area:plugins`). The reported
-  engine regressions were **withdrawn**: they came from an **engine↔plugin version skew** — a newer
-  engine (git checkout) with an older `rigortype` gem installed, where the auto-wire's
-  `require "rigor-rbs-inline"` resolved to the *gem's* plugin copy, which predates the WD1 `annotated?`
-  gate and synthesizes untyped skeletons for every file. #192's auto-wire introduced this silent path.
-- #121 (ongoing demand-gated folds) still open, not a blocker. `[Unreleased]` holds **68** entries;
-  release seal still pending and user-gated at the bump.
-- `make verify` / `make docs-check` clean on master; master and `origin/master` agree.
+- **#162 is DONE and closed.** The ADR-100 WD4 addendum (`2ffa3b40`) named the two serving tiers and
+  the mechanism; PR #195 (merged, `2c7b68e5`) implemented it: transitive `static.value-use.void` via
+  the lazy, pure, per-def `Inference::VoidTailSummary`, consulted result-independently from the
+  `MethodDispatcher.dispatch` wrapper. Corpus gate mail/kramdown/haml/liquid byte-identical, zero new
+  bleeding-edge firings; still behind `use-of-void-value` (off by default). Promotion to a default
+  profile is a separate, evidence-gated decision (ADR-50 WD1).
+- **PR #196 (merged, `48a26c20`) fixed the probe/check environment asymmetry** that had misled the
+  #162 design: `type-of` / `type-scan` / `trace` / `annotate` now build the plugin-aware environment
+  through `CLI::ProbeEnvironment` (loader-only — no producer-plugin pre-pass), so probes see ADR-93
+  auto-wire synthesis. `coverage_scan` was deliberately left (measurement surface, baselines would
+  shift).
+- **v0.3.0 milestone: only #121 (ongoing demand-gated folds, not a blocker) remains open.** The
+  release seal is the real remaining work: `[Unreleased]` holds **70** entries; `rigor-release-prep`
+  is the flow; version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence).
+- **#194 root-caused and re-scoped** (`bug` / `ready-for-human` / `area:plugins`). The reported
+  engine regressions were withdrawn: an **engine↔plugin version skew** — a newer engine (git
+  checkout) with an older installed `rigortype` gem, where auto-wire's `require "rigor-rbs-inline"`
+  resolved to the *gem's* plugin copy, which predates the WD1 `annotated?` gate and synthesizes
+  untyped skeletons for every file. #192 introduced this silent path.
+- `make verify` / `make docs-check` clean on the post-merge master; master and `origin/master` agree.
 
-## Next session — pick one
+## Next session — the #194 auto-wire version-skew guard
 
-**Track 1 — #162 implementation slice (design settled, ready to build).** Implement the ADR-100 WD4
-addendum's mechanism: a lazy per-`def_node` **VoidTail summary** (`VoidTail(def_node) → VoidOrigin |
-none`), consulted at the `MethodDispatcher.dispatch` choke point so it fires **result-independently**
-across BOTH serving tiers the addendum identified (RbsDispatch answering a synthesized `untyped`
-skeleton under auto-wire; `ExpressionTyper#try_user_method_inference` answering a re-typed body under a
-partial `sig/`). The summary must be **pure** (AST shape + RBS reflection + discovery-index only, no
-expression evaluation → no dispatch re-entry, order-independent, fork-pool-safe — an eager
-record-at-body-evaluation table was rejected for exactly that). Admission gate, FP envelope
-(`use-of-void-value` bleeding-edge, off by default), and the corpus gate (mail/kramdown/haml/liquid
-byte-identical; herb no new firings) are all in the addendum. Reuse the shipped direct-case
-`void_origins` side-table + `VoidValueUseCollector` unchanged.
+Effort-ordered, from the issue comment's framing (Track 2 of the previous handoff, now the focus):
 
-**Track 2 — #194 the auto-wire version-skew guard (`ready-for-human`).** #192 made the engine
-`require` a bundled plugin *by gem name* every run, so a stale installed `rigortype` can silently win.
-Three parts, effort-ordered (the issue comment has the full framing):
-
-- **Split as a `ready-for-agent` slice:** print each loaded plugin's **resolved file path** in
-  `rigor plugins` and in the `plugin_loader.load-error` diagnostic (the plugin's own `v0.1.0` constant
-  never moves, so today both the correct and the skewed load read identically).
+- **`ready-for-agent` slice:** print each loaded plugin's **resolved file path** in `rigor plugins`
+  and in the `plugin_loader.load-error` diagnostic (the plugin's own `v0.1.0` constant never moves,
+  so today the correct and the skewed load read identically).
 - **The real fix (human design call):** auto-wire should prefer the **engine's own bundled
   `plugins/`** over gem resolution — decide how the engine locates its bundled dir robustly across
-  install modes (git checkout, installed `rigortype` gem, ADR-27 single-binary) without reopening the
-  ADR-27/31 auto-load concerns the WD2 gate guarded.
-- Follow-on: `doctor` flags "plugin loaded from a different `rigortype` installation than the engine."
+  install modes (git checkout, installed `rigortype` gem, ADR-27 single-binary) without reopening
+  the ADR-27/31 auto-load concerns the WD2 gate guarded.
+- Follow-on: `doctor` flags "plugin loaded from a different `rigortype` installation than the
+  engine."
+
+Alternatively, if the user wants the release first: run `rigor-release-prep` up to (not including)
+the version bump and present the seal for approval.
 
 ## Also open, lower priority
 
 - **#121** — ongoing FP-safe builtin/stdlib folds (demand-gated, not a release blocker).
-- **Release — seal the CHANGELOG.** 68 `[Unreleased]` entries. `rigor-release-prep` is the flow;
-  version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence).
+- The `static.value-use.top` sibling diagnostic and the `static.incomplete-inference.*` budget ids
+  stay reserved (ADR-100 / ADR-41 / #158) — do not start them without a demand signal.
 
 ## Waiting on the user / external
 

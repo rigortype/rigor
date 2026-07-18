@@ -143,7 +143,9 @@ RSpec.describe "rigor-dry-struct integration" do
             configuration: configuration,
             cache_store: nil,
             plugin_requirer: lambda do |name|
-              case name
+              # #194 slice 2 — a bundled plugin now arrives as its engine-anchored absolute path; basename
+              # recovers the gem name (a bare name passes through unchanged).
+              case File.basename(name, ".rb")
               when "rigor-dry-types" then Rigor::Plugin.register(dry_types_plugin)
               when "rigor-dry-struct" then Rigor::Plugin.register(plugin_class)
               end

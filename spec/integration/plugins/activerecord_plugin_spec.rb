@@ -148,7 +148,7 @@ RSpec.describe "plugins/rigor-activerecord" do
           runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
-              Rigor::Plugin.register(plugin_class) if name == "rigor-activerecord"
+              Rigor::Plugin.register(plugin_class) if File.basename(name, ".rb") == "rigor-activerecord"
               true
             }
           )
@@ -175,7 +175,7 @@ RSpec.describe "plugins/rigor-activerecord" do
           runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
-              Rigor::Plugin.register(plugin_class) if name == "rigor-activerecord"
+              Rigor::Plugin.register(plugin_class) if File.basename(name, ".rb") == "rigor-activerecord"
               true
             }
           )
@@ -1031,7 +1031,10 @@ RSpec.describe "plugins/rigor-activerecord" do
           runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
-              case name
+              # #194 slice 2 — a bundled plugin now arrives as its engine-anchored absolute path; basename
+              # recovers the gem name (a bare name, e.g. the non-bundled `rigor-model-consumer`, passes
+              # through unchanged).
+              case File.basename(name, ".rb")
               when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
               when "rigor-model-consumer" then Rigor::Plugin.register(consumer_plugin)
               end

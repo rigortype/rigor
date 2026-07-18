@@ -71,7 +71,7 @@ RSpec.describe "plugins/rigor-actionpack" do
           configuration: configuration,
           cache_store: nil,
           plugin_requirer: lambda do |name|
-            case name
+            case File.basename(name, ".rb")
             when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
             when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
             end
@@ -302,7 +302,7 @@ RSpec.describe "plugins/rigor-actionpack" do
             configuration: configuration,
             cache_store: nil,
             plugin_requirer: lambda do |name|
-              case name
+              case File.basename(name, ".rb")
               when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
               when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
               end
@@ -340,7 +340,7 @@ RSpec.describe "plugins/rigor-actionpack" do
           runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
-              case name
+              case File.basename(name, ".rb")
               when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
               when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
               end
@@ -632,7 +632,7 @@ RSpec.describe "plugins/rigor-actionpack" do
           runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
-              case name
+              case File.basename(name, ".rb")
               when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
               when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
               end
@@ -740,7 +740,7 @@ RSpec.describe "plugins/rigor-actionpack" do
           runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
-              case name
+              case File.basename(name, ".rb")
               when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
               when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
               when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
@@ -869,7 +869,7 @@ RSpec.describe "plugins/rigor-actionpack" do
       Rigor::Analysis::Runner.new(
         configuration: configuration, cache_store: nil,
         plugin_requirer: lambda { |name|
-          case name
+          case File.basename(name, ".rb")
           when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
           when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
           end
@@ -941,7 +941,7 @@ RSpec.describe "plugins/rigor-actionpack" do
             configuration: configuration,
             cache_store: nil,
             plugin_requirer: lambda do |name|
-              Rigor::Plugin.register(Rigor::Plugin::Actionpack) if name == "rigor-actionpack"
+              Rigor::Plugin.register(Rigor::Plugin::Actionpack) if File.basename(name, ".rb") == "rigor-actionpack"
               true
             end
           )

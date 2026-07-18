@@ -18,79 +18,60 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.3.0 is nearly assembled.** The 2026-07-17 triage's implementation wave is done: ten issues
-  closed this cycle (#161 #164 #172 #174 #176 #177 #178 + the config batch), PRs #175 #179–#185 all
-  merged. Milestone open: **#121** (ongoing fold category, one slice landed), **#162** (direct-void
-  slice, see below), **#173** (rbs-inline, slice 1 of 5 in PR #186). `[Unreleased]` holds **63
-  bullets** — sealing them is the release step `make verify` cannot rescue; budget for it.
-- **PR #186 is open and awaiting review**: the ADR-93 WD1 default flip (`require_magic_comment` →
-  `false`, annotation-presence-gated). Verified standalone: 18 plugin-spec examples, full
-  `make verify` green on the branch. It only affects projects that already load the plugin.
-- ADR-100 landed (`f6112ae3`): the `static.*` family split, `static.value-use.void` as first id, the
-  `void_origins` interface. #130's cut-scoped piece landed in #184; the issue left the milestone,
-  keeping only deferred follow-ons.
-- `make verify` and `make docs-check` clean on master; master and `origin/master` agree.
+- **v0.3.0 is nearly assembled.** PRs #175 #179–#187 all merged; the CI cache-validation follow-ons
+  (#188–#191, `cache.validation: auto` strict-in-CI) landed after them. Milestone open:
+  **#173** (rbs-inline auto-wire — now in **PR #192**, see below), **#162** (void diagnostic:
+  transitive / ancestor-fallback case + budget ids remain), **#121** (ongoing fold category,
+  demand-gated). `[Unreleased]` holds ~96 bullets — sealing them is the release step `make verify`
+  cannot rescue; budget for it.
+- **PR #192 is open and awaiting review** ([link](https://github.com/rigortype/rigor/pull/192)):
+  ADR-93 WD2 + WD3 — auto-wire the bundled `rigor-rbs-inline` plugin from `Configuration.load` when
+  the upstream library is resolvable, the `enabled: false` opt-out (new `pluginEntry` schema key),
+  and the WD3 `rbs.coverage.inline-annotations-unsynthesized` `:info` for standalone installs. ADR-93
+  moved to **Accepted**. Verified this session: `make verify` (8098 ex, 0 fail), `make docs-check`
+  (270), corpus gate (mail/kramdown/haml/liquid byte-identical; herb keeps its −3 wins). On merge,
+  #173 closes and only #162 + #121 remain on the milestone.
+- **Known pre-existing self-check FP** (NOT introduced by PR #192; reproduces on `master` with the
+  branch stashed): `make check` emits `lib/rigor/cli/doctor_command.rb:279:26: warning: condition is
+  always falsey` — `rubygems_sourced_rigortype?` can genuinely return `true`, so this is an inference
+  FP. `make check` exits 0 (warnings don't fail the gate), which is why it went unnoticed, but
+  AGENTS.md wants check clean. Fix at root (engine), never by editing doctor_command.rb. Spawned as a
+  background task this session.
 
-## Next session — three tracks, in this order
+## Next session — in this order
 
-**1. Review/merge PR #187 — the #162 void slice landed.** The agent finished after the handoff was
-first written: `static.value-use.void` behind the new `use-of-void-value` bleeding-edge feature,
-`void_origins` mirroring `dynamic_origins`, spec rows in the same commit, `Advances #162` (the
-transitive case + budget ids stay tracked). Verified this session: gates green, teeth 2+1, CHANGELOG
-conflict resolved and re-verified (EXIT=0), mergeState CLEAN. One honest deviation worth knowing at
-review: the issue's `x = puts(1)` example was wrong — core RBS declares `puts` `-> nil`, not
-`-> void` (verified against `references/rbs`), so the fixtures use an author-declared `-> void`
-method, which is the rule's actual normative trigger.
+**1. Review/merge PR #192** (the #173 auto-wire). Note at review: `spec_helper` pins
+`Configuration.rbs_inline_library_resolvable?` off suite-wide (mirroring the `RIGOR_CI_DETECT` pin) —
+left live, auto-wire would inject the plugin into nearly every in-process `rigor check`, and the
+suite's `Plugin.unregister!` + require-once semantics would surface a spurious
+`plugin_loader.load-error` against the emptied registry (a suite artifact — a real `rigor` process
+loads it cleanly, verified e2e). Specs that exercise the auto-wire tag `:rbs_inline_autowire`.
 
-**2. #173 slices 2–5 — the auto-wire. This is the careful one; do not fleet it.** Slice 1 (the
-default flip) is PR #186. What remains, with the design already settled and the blast radius already
-measured this session:
+**2. #162 remainder** — the void diagnostic's base case landed in #187 (`static.value-use.void`,
+direct-dispatch only). What remains: the transitive / ancestor-fallback case (ADR-100 WD4) and the
+budget ids. Engine-side precision work.
 
-- **The shape is decided**: the loader stays generic; auto-wiring is a *config-level* policy. Filter
-  `enabled: false` entries in `Plugin::Loader#resolve_entries` (an entry-level key — the maintainer
-  chose the `pluginEntry.enabled` form over a dedicated top-level key or a `disable_plugins:` list),
-  and inject `{gem: "rigor-rbs-inline", config: {require_magic_comment: false}}` from the
-  **`Configuration.load` path only** (the real-project route) — NOT `Configuration#initialize`, or
-  every bare `Configuration.new` in the suite auto-wires. Gate on: not explicitly listed (gem name
-  `rigor-rbs-inline` *or* manifest id `rbs-inline` — the loader raises on a duplicate id), not
-  disabled, and upstream resolvable (`Gem::Specification.find_by_name("rbs-inline")`, a probe with no
-  load side effect).
-- **The measured blast radius** (a loader-level prototype was built, run, and reverted this session):
-  `make verify` fails ~30 examples across 6 files — `plugin/loader_spec` (18; stays untouched once
-  auto-wire moves out of the loader), `analysis/plugin_fact_fingerprint_spec` (8),
-  `integration/plugins/activerecord_plugin_spec`, `integration/examples/routes_plugin_spec`,
-  `integration/precision_snapshot_spec`, `ractor_readiness_spec`. Each integration failure must be
-  **adjudicated individually**: stale assertion of the plugin-less world (update) vs real regression
-  (fix). Do not bulk-update; this cycle's lesson is that the two look identical at a glance.
-- Slice 3: `enabled` (boolean) on `pluginEntry` in `schemas/rigor-config.schema.json` (ADR-99 makes
-  the schema a source of truth; the key becomes public vocabulary). Slice 4: the WD3 standalone
-  residual — an `rbs.coverage.*`-style `:info` hint when annotation-shaped comments are seen with no
-  synthesizer available (do NOT make `rbs-inline` a core dependency; ADR-0). Slice 5: flip ADR-93 to
-  Accepted with WD2/WD3 resolved in its text + the `overview.md` divergence marker updated.
-- Corpus gate at the end: mail / kramdown / haml / liquid byte-identical, herb keeps its −3 wins
-  (the WD4 corpora, all under `~/repo/ruby/rigor-survey/`).
-
-**3. Release — seal the CHANGELOG.** 63 `[Unreleased]` bullets. The `rigor-release-prep` skill is
+**3. Release — seal the CHANGELOG.** ~96 `[Unreleased]` bullets. The `rigor-release-prep` skill is
 the flow; **version bumps and `rake release` stay user-gated** — land entries, stop, and let the
 user drive the cut-over (AGENTS.md § Release Cadence).
 
 ## Decided this cycle — do not re-litigate
 
-- **The `enabled: false` opt-out shape** (pluginEntry key) — maintainer-decided 2026-07-18, over a
-  dedicated top-level key and a `disable_plugins:` list.
-- **#152** (widen `&&`/`||` polarity) is evidence-rejected, demand-gated, off the milestone — the
-  measured evaluation is on the issue. **#126** (length-range carrier): its own design pass says
-  don't build; demand-gated. **#120** (`--incremental` default): opt-in this cut; the gap analysis
-  is on the issue, and the one human call left is ADR-45-cache vs incremental precedence. **#178**
-  closed as intended behaviour (`5d5a9359` documents the optimism and bars certainty from resting on
-  it). **#155** closed as already-implemented since `01491c63`.
+- **ADR-93 fully resolved** (PR #192): WD1 flip (#186), WD2 auto-wire + `enabled: false` opt-out,
+  WD3 `:info` hint. The opt-out shape (`pluginEntry.enabled`) was maintainer-decided 2026-07-18 over
+  a dedicated top-level key and a `disable_plugins:` list.
+- **#152** (widen `&&`/`||` polarity) evidence-rejected, demand-gated, off the milestone. **#126**
+  (length-range carrier): its own design pass says don't build; demand-gated. **#120**
+  (`--incremental` default): opt-in this cut; the one human call left is ADR-45-cache vs incremental
+  precedence. **#178** closed as intended behaviour (`5d5a9359`). **#155** already-implemented since
+  `01491c63`.
 - **#130 deferred remainder** (RBS-only ancestors + singleton) needs a corpus FP-acceptance decision
   first — it would fire on user overrides of library methods. Slice 5 stays blocked by #156.
 
 ## Waiting on the user
 
-- **Review/merge PR #186** (the rbs-inline default flip; slice 2 builds on it) and the dependabot
-  rubocop PR #86 stays deliberately held (upstream autocorrect bug).
+- **Review/merge PR #192** (rbs-inline auto-wire, above) and the dependabot rubocop **PR #86** stays
+  deliberately held (upstream autocorrect bug).
 - **Publish the staged `ruby/rbs` upstream fix** — branch `widen-strscan-resolv-stdlib-sigs` in
   `references/rbs`; push + upstream PR are the user's action. Tracked as #159.
 - The upstream `rbs-inline` RDoc fix ([soutaro/rbs-inline#249](https://github.com/soutaro/rbs-inline/pull/249))

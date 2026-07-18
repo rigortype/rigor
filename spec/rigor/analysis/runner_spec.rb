@@ -500,6 +500,45 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # Regression: File.foreach / IO iteration blocks must get the same loop-body re-narrowing as Array#each,
+    # so a local written in one `when` arm is visible in a sibling arm across iterations. Without it,
+    # `flag` reads its pre-loop `false` at the `return true if flag` site, the guard folds to a constant, the
+    # block-level `return` is dropped from the method's return summary, and the caller's guard on the method
+    # false-fires `flow.always-truthy-condition` (polarity "falsey").
+    it "does not false-fire always-falsey on a File.foreach block-carried local" do # rubocop:disable RSpec/ExampleLength
+      Dir.mktmpdir("rigor-foreach-fixpoint-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+        File.write(File.join(tmpdir, "lib", "scan.rb"), <<~RUBY)
+          # frozen_string_literal: true
+          class Scan
+            def hit?(path)
+              flag = false
+              File.foreach(path) do |line|
+                case line
+                when /a/ then flag = true
+                when /b/ then return true if flag
+                end
+              end
+              false
+            end
+
+            def guard(path)
+              return [] unless hit?(path)
+              [1]
+            end
+          end
+        RUBY
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          falsey = result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+
+          expect(falsey).to be_empty
+        end
+      end
+    end
+
     # ADR-72 — Gemfile.lock-gated bundled RBS overlays.
     def write_duration_project(tmpdir, lock_gem:)
       File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)

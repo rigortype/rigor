@@ -33,29 +33,33 @@ this file is the one that is wrong.
 - **v0.3.0 milestone: only #121 (ongoing demand-gated folds, not a blocker) remains open.** The
   release seal is the real remaining work: `[Unreleased]` holds **70** entries; `rigor-release-prep`
   is the flow; version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence).
-- **#194 root-caused and re-scoped** (`bug` / `ready-for-human` / `area:plugins`). The reported
-  engine regressions were withdrawn: an **engine↔plugin version skew** — a newer engine (git
-  checkout) with an older installed `rigortype` gem, where auto-wire's `require "rigor-rbs-inline"`
-  resolved to the *gem's* plugin copy, which predates the WD1 `annotated?` gate and synthesizes
-  untyped skeletons for every file. #192 introduced this silent path.
+- **#194 (auto-wire version skew): designed and implemented, awaiting merge.** The user chose the
+  uniform rule — ALL engine-bundled plugins anchor to the engine, not just the auto-wired one —
+  recorded as the ADR-93 WD5 addendum (`8e75fa9f`); the three slices are the stacked PRs below.
+  (Background: a stale installed `rigortype`'s plugin copy, predating the WD1 `annotated?` gate,
+  could silently win gem-name resolution whenever the engine ran without its own gemspec
+  activation.)
 - `make verify` / `make docs-check` clean on the post-merge master; master and `origin/master` agree.
 
-## Next session — the #194 auto-wire version-skew guard
+## Next session — merge the #194 stack, then the release seal
 
-Effort-ordered, from the issue comment's framing (Track 2 of the previous handoff, now the focus):
+**The #194 wave is implemented as three stacked PRs, verified and CI-green, awaiting the user's
+merge in order #197 → #198 → #199** (each PR body states its base; #199 carries `Closes #194`):
 
-- **`ready-for-agent` slice:** print each loaded plugin's **resolved file path** in `rigor plugins`
-  and in the `plugin_loader.load-error` diagnostic (the plugin's own `v0.1.0` constant never moves,
-  so today the correct and the skewed load read identically).
-- **The real fix (human design call):** auto-wire should prefer the **engine's own bundled
-  `plugins/`** over gem resolution — decide how the engine locates its bundled dir robustly across
-  install modes (git checkout, installed `rigortype` gem, ADR-27 single-binary) without reopening
-  the ADR-27/31 auto-load concerns the WD2 gate guarded.
-- Follow-on: `doctor` flags "plugin loaded from a different `rigortype` installation than the
-  engine."
+- **#197** (`194-plugin-resolved-path`) — slice 1: resolved-path visibility in `rigor plugins`
+  (text + JSON `"path"`) and `(loaded from <path>)` on post-require load-error diagnostics.
+  Adds the `Registry#resolved_gem_paths` public reader (API-drift snapshot updated).
+- **#198** (`194-bundled-plugin-anchor`) — slice 2, the fix, per the **ADR-93 WD5 addendum**
+  (`8e75fa9f`): every engine-bundled plugin is required by its engine-anchored absolute path
+  (`Loader.bundled_plugin_path`), gem-name fallback when absent; the `requirer` seam widens to
+  name-or-path.
+- **#199** (`194-doctor-plugin-skew`) — slice 3: `doctor` warns when a bundled plugin resolved
+  outside the engine's tree. **One open call:** it reports at `:warn` (deliberate deviation from
+  #116's `:fail` — path comparison is fuzzier than a lockfile parse and must not flip CI); flip to
+  `:fail` is one line if preferred.
 
-Alternatively, if the user wants the release first: run `rigor-release-prep` up to (not including)
-the version bump and present the seal for approval.
+After the merge: **the release seal.** `[Unreleased]` will hold 73 entries; `rigor-release-prep`
+is the flow; version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence).
 
 ## Also open, lower priority
 

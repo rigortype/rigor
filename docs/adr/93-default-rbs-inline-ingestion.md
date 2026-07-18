@@ -7,6 +7,9 @@ auto-wire with the `enabled: false` opt-out, and WD3's `rbs.coverage.inline-anno
 routing hint. The `overview.md` § "Compatibility hierarchy" marker now records the resolved
 state (conforming wherever `rbs-inline` is present; the standalone residual carried by WD3) per
 [ADR-92](92-normative-status-fidelity.md).
+**Amended 2026-07-19** — WD5 (below) closes the engine↔plugin version-skew hazard
+[#194](https://github.com/rigortype/rigor/issues/194) surfaced in WD2's gem-name require:
+bundled-plugin resolution anchors to the engine.
 
 Grounding: [`docs/notes/20260716-dspec-formal-spec-substrate-evaluation.md`](../notes/20260716-dspec-formal-spec-substrate-evaluation.md)
 § "第四の事例" — the adjudication, with the timeline and the upstream `disabled`-handling
@@ -228,3 +231,51 @@ green.
   composes.
 - **ADR-27 / ADR-31** — the auto-load deferral WD2 partially and explicitly reverses.
 - **ADR-50** — classifies WD1/WD2 as minor-legal strengthenings; WD4 is their gate.
+## Addendum — WD5: bundled-plugin resolution anchors to the engine (2026-07-19)
+
+[#194](https://github.com/rigortype/rigor/issues/194) surfaced the hazard WD2 created without
+naming: the auto-wire `require`s the bundled plugin **by gem name** on every run, and a gem-name
+require resolves against whichever *installation's* `require_paths` happens to win. The gemspec
+declares `require_paths = ["lib"] + Dir.glob("plugins/*/lib")`, so under the checkout's own bundle
+the checkout's copy wins — but an engine loaded without its own gemspec activation (`ruby -I lib`,
+an embedding, a future packaging) falls through to RubyGems, which activates the newest *installed*
+`rigortype` and serves **that** gem's plugin copy. In #194's environment this loaded a v0.2.4-era
+`rigor-rbs-inline` predating the WD1 `annotated?` gate: the engine ran with a load-bearing FP gate
+silently missing, and `rigor plugins` printed an indistinguishable `[OK] rbs-inline v0.1.0` either
+way. The engine and its bundled plugins are versioned together; a gem-resolved copy is skew-prone
+by definition.
+
+**Decision (user call, 2026-07-19): every bundled plugin anchors to the engine — not only the
+auto-wired one.** In the loader, a `plugins:` entry whose `gem` names a directory the engine
+itself bundles (`<engine root>/plugins/<gem>/`, engine root anchored from the loader's own
+`__dir__`, which resolves identically in a git checkout and inside an installed gem because the
+gem ships the `plugins/` tree) is required **by absolute path** —
+`<engine root>/plugins/<gem>/lib/<gem>.rb` — instead of by name. When the anchored file does not
+exist (a trimmed packaging, the [ADR-27](27-tool-distribution-model.md) single-binary target),
+the loader falls back to today's gem-name require, so no install mode regresses. The rule is
+uniform across auto-wired and user-listed entries because the skew mechanism is identical for
+both: a user listing `rigor-activerecord` means the engine's `rigor-activerecord`, and before
+this decision a stale installed `rigortype` could displace it just as silently.
+
+Boundary notes, recorded so they are not re-litigated:
+
+- **This narrows the ADR-31 surface, not widens it.** WD2's auto-load reversal was justified on
+  "the executed code is already vendored"; anchoring makes that literally true — the engine loads
+  *its own* vendored file rather than whatever RubyGems resolves the name to. No new code source
+  appears, and one (the foreign installation's copy) disappears.
+- **The `requirer` seam widens from gem names to name-or-absolute-path.** The loader's injectable
+  `requirer` (and every spec fake behind it) now receives the anchored path for bundled plugins;
+  the resolved-path capture (#194 slice 1) is unaffected — the loaded feature still ends in
+  `/<gem>.rb`.
+- **No name-level escape hatch back to gem resolution.** Deliberately: "install a different
+  version of a bundled plugin as a gem to override the engine's copy" is indistinguishable from
+  the accident this closes. If a real workflow ever needs an external copy, it earns an explicit
+  per-entry `path:` key (schema change, [ADR-99](99-config-schema-authority.md)), not a silent
+  name race.
+- **`doctor`'s skew flag (#194 slice 3) stays wanted.** It guards the fallback path and any
+  residual mixed-installation state that anchoring cannot see.
+
+Acceptance: loader specs cover anchored-hit, fallback-on-absence, and the widened requirer
+contract; the #194 reproduction (`ruby -I lib` with a stale installed `rigortype`) stops loading
+the stale copy; the corpus is untouched (resolution changes which identical-version file loads in
+every healthy install, and only rescues the skewed one).

@@ -250,6 +250,14 @@ jobs:
       fail-fast: false
       matrix:
         cache: [warm, cold]
+    # A CI checkout regenerates every stat tuple (mtime/ctime/inode), so the
+    # stat tier of cache validation (ADR-87) never short-circuits here and any
+    # glob-watched slot would read as stale on every run.  Strict mode
+    # validates by content digest — deterministic across checkouts — which is
+    # the same work the digest fallback already does in CI for file slots, and
+    # keeps the warm restore effective for every slot kind.
+    env:
+      RIGOR_STRICT_VALIDATION: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7

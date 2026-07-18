@@ -13,6 +13,7 @@ require_relative "../inference/scope_indexer"
 require_relative "type_of_renderer"
 require_relative "command"
 require_relative "options"
+require_relative "probe_environment"
 
 module Rigor
   class CLI
@@ -92,14 +93,14 @@ module Rigor
         0
       end
 
-      # Builds a project-aware environment relative to the probed file. Project-RBS auto-detection roots at CWD today;
-      # future work will walk parent directories to find the enclosing `Gemfile`/`*.gemspec` so probes against files
-      # outside the current process's CWD still see the right `sig/` tree.
-      def project_environment(_file, configuration)
-        Environment.for_project(
-          libraries: configuration.libraries,
-          signature_paths: configuration.signature_paths
-        )
+      # Builds the plugin-aware environment relative to the probed file, so the reported type matches what `rigor
+      # check` computes for the same position — including types synthesized from inline RBS annotations by the
+      # ADR-93 auto-wired `rigor-rbs-inline` plugin (see {ProbeEnvironment} for the #162 misattribution this
+      # closes). The probed file is threaded as the synthesizer's `source_files:`. Project-RBS auto-detection
+      # roots at CWD today; future work will walk parent directories to find the enclosing `Gemfile`/`*.gemspec`
+      # so probes against files outside the current process's CWD still see the right `sig/` tree.
+      def project_environment(file, configuration)
+        ProbeEnvironment.build(configuration: configuration, source_files: [file])
       end
 
       def file_exists?(file)

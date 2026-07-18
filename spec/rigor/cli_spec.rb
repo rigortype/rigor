@@ -193,6 +193,86 @@ RSpec.describe Rigor::CLI do
       expect(err).to include("file not found")
     end
 
+    # ADR-93 / #162 — type-of must build the same plugin-aware environment `rigor check` analyses with, so a
+    # type synthesized from an inline RBS annotation by the auto-wired `rigor-rbs-inline` plugin is observed by
+    # the probe instead of the plugin-free `Dynamic[top]`. See `Rigor::CLI::ProbeEnvironment`.
+    describe "plugin-synthesized RBS (rbs-inline auto-wire parity)" do
+      # `foo`'s ONLY signature is the inline `#: () -> void`; `bar` / `baz` are un-annotated. Lines match the
+      # #162 design-session repro: `a = foo` is line 14, `b = bar` is line 19.
+      let(:void_source) do
+        <<~RUBY
+          class VoidRepro
+            #: () -> void
+            def foo; end
+
+            def bar
+              foo
+            end
+
+            def baz
+              bar
+            end
+
+            def use_foo
+              a = foo
+              a
+            end
+
+            def use_bar
+              b = bar
+              b
+            end
+
+            def use_baz
+              c = baz
+              c
+            end
+          end
+        RUBY
+      end
+
+      # The suite pins the auto-wire probe off and pervasively empties the plugin registry (see spec_helper), so
+      # an auto-wire spec lifts the pin with `:rbs_inline_autowire` and re-registers the plugin class (whose
+      # top-level `register` is a require-no-op after another spec's `unregister!`).
+      context "with the rbs-inline plugin auto-wired", :rbs_inline_autowire do
+        before do
+          allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(true)
+          require "rigor-rbs-inline"
+          Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+        end
+
+        it "resolves an inline-annotated method through the synthesized RBS under type-of" do
+          path = write_fixture("void_repro.rb", void_source)
+          config = write_fixture(".rigor.yml", %(target_ruby: "4.0"\n))
+
+          _s, foo_out, _e = run_cli("type-of", "--format=json", "--config", config, "#{path}:14:8")
+          _s, bar_out, _e = run_cli("type-of", "--format=json", "--config", config, "#{path}:19:8")
+
+          # `a = foo`: foo's synthesized `-> void` recovers to `top` (was `Dynamic[top]` under the plugin-free env).
+          expect(JSON.parse(foo_out)["type"]).to eq("top")
+          # `b = bar`: bar is un-annotated, so its synthesized skeleton is `() -> untyped` and it stays Dynamic —
+          # proving the flip at 14 is the annotation's synthesis, not an unrelated change.
+          expect(JSON.parse(bar_out)["type"]).to eq("Dynamic[top]")
+        end
+      end
+
+      it "degrades to the plugin-free type when the synthesizer is disabled (fail-soft)" do
+        path = write_fixture("void_repro.rb", void_source)
+        config = write_fixture(".rigor.yml", <<~YAML)
+          plugins:
+            - gem: rigor-rbs-inline
+              enabled: false
+        YAML
+
+        status, out, err = run_cli("type-of", "--format=json", "--config", config, "#{path}:14:8")
+
+        expect(err).to eq("")
+        expect(status).to eq(0)
+        # No synthesizer contributes, so `foo` reads exactly as it did before this parity fix — never a crash.
+        expect(JSON.parse(out)["type"]).to eq("Dynamic[top]")
+      end
+    end
+
     describe "editor mode (--tmp-file / --instead-of)" do
       it "rejects --tmp-file alone" do
         status, _out, err = run_cli("type-of", "--tmp-file=/nonexistent", "lib/foo.rb:1:1")

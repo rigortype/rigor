@@ -12,6 +12,7 @@ require_relative "../inference/flow_tracer"
 require_relative "../inference/scope_indexer"
 require_relative "command"
 require_relative "trace_renderer"
+require_relative "probe_environment"
 
 module Rigor
   class CLI
@@ -90,13 +91,11 @@ module Rigor
         0
       end
 
-      # Mirrors the single-file path `rigor type-of` takes: a project-aware environment, an empty seed scope, one
-      # statement-level evaluation of the whole program — but recorded under the FlowTracer.
+      # Mirrors the single-file path `rigor type-of` takes: the plugin-aware environment (so a trace replays the
+      # same dispatch `rigor check` would, including plugin-synthesized RBS — see {ProbeEnvironment}), an empty
+      # seed scope, one statement-level evaluation of the whole program — but recorded under the FlowTracer.
       def record_events(root, file, configuration)
-        environment = Environment.for_project(
-          libraries: configuration.libraries,
-          signature_paths: configuration.signature_paths
-        )
+        environment = ProbeEnvironment.build(configuration: configuration, source_files: [file])
         scope = Scope.empty(environment: environment, source_path: file)
         Inference::FlowTracer.record { scope.evaluate(root) }
       end

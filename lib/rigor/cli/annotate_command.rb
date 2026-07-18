@@ -15,6 +15,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/statement_evaluator"
 require_relative "prism_colorizer"
 require_relative "command"
+require_relative "probe_environment"
 
 module Rigor
   class CLI
@@ -106,7 +107,7 @@ module Rigor
         # bindings, so a loop-body line annotates the joined widened type (`Integer`) rather than a stale
         # first-iterations constant (`1 | 2`).
         scope_index = Inference::ScopeIndexer.index(
-          parse_result.value, default_scope: base_scope(configuration),
+          parse_result.value, default_scope: base_scope(configuration, file),
                               converged_loop_recording: true
         )
         line_types = LineTypeCollector.new(scope_index).collect(parse_result.value)
@@ -129,12 +130,12 @@ module Rigor
         @out.puts(JSON.generate({ "annotations" => annotations }))
       end
 
-      def base_scope(configuration)
+      # The plugin-aware environment for the annotated file, so a `#=> <type>` matches what `rigor check`
+      # infers on that line — including types synthesized from the file's own inline RBS annotations (the file
+      # is threaded as the synthesizer's `source_files:`; see {ProbeEnvironment}).
+      def base_scope(configuration, file)
         Scope.empty(
-          environment: Environment.for_project(
-            libraries: configuration.libraries,
-            signature_paths: configuration.signature_paths
-          )
+          environment: ProbeEnvironment.build(configuration: configuration, source_files: [file])
         )
       end
 

@@ -6,6 +6,9 @@ side-table that the spec's mandated "use of void value" diagnostic needs. Nothin
 is implemented yet: the direct-author-declared-`void` slice is the first
 implementation and is `ready-for-agent` once this lands; the transitive case and
 the `static.incomplete-inference.*` budget identifiers ([#158](https://github.com/rigortype/rigor/issues/158) / [ADR-41](41-inference-budget-design.md)) are deferred.
+**Amended 2026-07-19** — the direct slice has since shipped (#187/#192); the WD4
+addendum below names the transitive case's tier and mechanism, unblocking its
+implementation slice. The budget identifiers stay deferred.
 
 Grounding: [#162](https://github.com/rigortype/rigor/issues/162); [special-types.md](../type-specification/special-types.md) § `void` (the "use of void value" MUST); [diagnostic-policy.md](../type-specification/diagnostic-policy.md) § the `static.*` reservation; [ADR-92](92-normative-status-fidelity.md) (which resolved `void → top` and carried option (a) forward as unfinished design); [ADR-75](75-dynamic-provenance.md) (the provenance-as-side-channel precedent this mirrors).
 
@@ -97,7 +100,9 @@ by analogy to the shipped `dynamic_origins` (`scope.rb`):
 (`def bar; foo; end; a = bar`, where `bar`'s own signature declares nothing) is
 strictly harder: today's per-body origin tables reset per method body and do not
 carry provenance across a method-return summary, which is exactly what the
-transitive case needs. It earns its own downstream slice. The
+transitive case needs. It earns its own downstream slice — designed in the
+[2026-07-19 addendum](#addendum--wd4-the-transitive-case-tier-and-mechanism-2026-07-19)
+below. The
 **`static.incomplete-inference.*` budget identifiers** stay blocked on
 [ADR-41](41-inference-budget-design.md) leaving Proposed and its own demand-gated
 measurement — this ADR only *reserves* their sub-family so the void id does not
@@ -122,3 +127,125 @@ have to anticipate them.
 - **ADR-75** — the provenance-as-side-channel precedent; `void_origins` mirrors `dynamic_origins` in key, hygiene, and consumption.
 - **ADR-41 / #158** — own the `static.incomplete-inference.*` half; this ADR reserves their sub-family and defers their ids.
 - **ADR-50** — WD1 freezes the diagnostic vocabulary, which is why the family shape is decided here rather than grown ad hoc, and why the first id ships behind `bleeding_edge:`.
+
+## Addendum — WD4: the transitive case, tier and mechanism (2026-07-19)
+
+The transitive case is `def bar; foo; end; a = bar` where `foo` is author-declared
+`-> void` and `bar`'s own signature declares nothing: the void value reaches `a`
+through `bar`'s body, so no rule reading `bar`'s signature can see it. An
+implementation attempt (2026-07-18, reverted) recorded provenance in
+`ExpressionTyper`'s post-dispatch call tiers (`try_user_method_inference` and
+siblings) — none of them fired on the check path. This addendum records where the
+value actually flows and the mechanism that fits, so the slice is de-risked.
+
+### The tier map, established empirically
+
+Which tier answers the intermediate's call depends on where the leaf's RBS came
+from — there are **two** serving paths, and neither is the one the reverted
+attempt targeted:
+
+1. **Under [ADR-93](93-default-rbs-inline-ingestion.md) auto-wire (the default).**
+   An inline `#: () -> void` gates the *file* in, and upstream's writer then emits
+   a `def bar: () -> untyped` skeleton for **every** un-annotated def in it (the
+   rigor-rbs-inline synthesizer keeps upstream semantics verbatim for gated-in
+   files; the ADR-93 annotation gate only excludes annotation-free *files*). The
+   intermediate's call is therefore answered by **`RbsDispatch`** resolving the
+   synthesized `untyped` signature to `Dynamic[Top]` (`EXPLICIT_UNTYPED` origin).
+   The `ExpressionTyper` tiers are never reached.
+2. **Under a partial hand-written `sig/`** (leaf declared, intermediate absent,
+   no inline annotations), the intermediate has no signature at all: `RbsDispatch`
+   misses, `try_discovered_method` deliberately declines (re-typable body),
+   `try_user_class_fallback` declines (the class *is* RBS-known), and the call is
+   answered by **`ExpressionTyper#try_user_method_inference`** re-typing the body
+   to `top`.
+
+(A `rigor type-of` probe cannot observe path 1: `TypeOfCommand#project_environment`
+builds `Environment.for_project` without the plugin registry, so no source-RBS
+synthesis runs there — the earlier probe that attributed the check-path return to
+`try_user_class_fallback`, and saw `nil` types where check computes `top`, was
+reading this asymmetric environment, not the check path.)
+
+Both answers are correct *types* that must not change; recording provenance inside
+any one result tier is therefore the wrong shape. The recording has to be
+**result-independent**.
+
+### Decision — a lazy per-def void-tail summary, consulted at the dispatch choke point
+
+**The summary.** `VoidTail(def_node) → VoidOrigin | none`: computed on demand at
+the first consult, memoised per `def_node` (identity-keyed), cycle-guarded
+(visited set ⇒ reject), and **pure** — AST shape, RBS reflection, and
+discovery-index lookups only, never expression evaluation — so it cannot re-enter
+dispatch and is independent of evaluation order and of the fork-pool's file
+partitioning (an *eager* record-at-body-evaluation table was rejected exactly
+there: public-API-first files evaluate callers before callees, and cross-file
+firings would depend on which worker analyzed which file). A def is admitted iff:
+
+1. its **own** resolved signature for `(owner, name, kind)` is absent or returns
+   `untyped` — an author-declared concrete return keeps it out (including
+   `-> void` itself, which the direct rule already serves at the call site);
+2. its body is a plain statements body — no `rescue` / `else` / `ensure` — with
+   **no `ReturnNode` anywhere** (a bare `return` yields `nil`, a non-void value
+   path, so the void tail must be the *sole* return path);
+3. its tail (last) expression is a `CallNode` with implicit-`self` receiver
+   (`nil` receiver or literal `self`); and
+4. that tail resolves on the same owner (exact class, no ancestor walk on the
+   discovery side) to either an RBS definition **every** overload of which
+   returns `void` — the leaf; the recorded origin is
+   `VoidOrigin(owner, tail_name, kind)` — or another discovered def
+   (`user_def_for` / `singleton_def_for`), which recurses.
+
+Everything else — explicit-receiver tails, conditional/boolean/begin tails,
+unresolvable names, non-void concrete RBS — rejects. Composition
+(`def baz; bar; end`) is the recursion, and the origin stays the *leaf*, so the
+message still names the author's `-> void` method.
+
+**The consult.** One hook in `MethodDispatcher.dispatch` — the wrapper every
+`ExpressionTyper` call passes *before* the post-dispatch inference tiers run, so
+it covers both serving paths with one site. When `scope` and `call_node` are
+threaded (internal dispatcher callers nil them out) and the receiver projects
+through `discovered_method_lookup` (`Nominal`/`Singleton` only — unions and
+`Dynamic` receivers stay out), pre-filter with `Scope#discovered_method?` (two
+pure hash reads, so the hot path pays nothing), resolve the def, and on a summary
+hit call `scope.record_void_origin(call_node, origin)` — the same record the
+direct rule writes, so `VoidValueUseCollector` and the diagnostic id fire
+unchanged. Recording is type-blind and ignores the dispatch result; statement-
+position records stay inert because the collector only reads value positions.
+
+**Type precedence is orthogonal, not a prerequisite.** The reverted attempt
+framed "`-> void` does not win the *type* over body inference" as possibly the
+real work. It is not: the collector's entire gate is `void_origins` membership —
+the value's type never participates — and [ADR-92](92-normative-status-fidelity.md)'s
+measured-free result rests precisely on `void → top` staying silent in the type
+domain. Because the summary derives from AST + RBS only and the consult ignores
+the result, any future change to untyped-signature-vs-body-inference precedence
+(the #194 axis) leaves this mechanism intact in both directions.
+
+### FP envelope
+
+Unchanged gate: `use-of-void-value` under `bleeding_edge:`, resolved `:off` by
+every default profile; unchanged id and severity (`static.value-use.void`,
+authored `:warning`). The sole-return-path rule (admission 2) is the envelope's
+core — a method that can return anything *other* than the void tail never enters
+the table, so a `top` produced for any other reason never fires, and admission 1
+makes the direct rule and the summary disjoint by construction (no double
+record). `untyped` is read as "no claim" per RBS's own semantics, so a
+hand-written `-> untyped` intermediate still admits — the provenance fact ("this
+value was produced by an author-declared `-> void` return") remains true of it;
+if corpus evidence ever shows this biting a deliberate opt-out, admission 1 can
+harden on the signature's provenance (synthesized-buffer vs `sig/`-file) without
+touching the family, the table, or the collector. Deliberate false *negatives*
+of this slice, acceptable under [ADR-5](5-robustness-principle.md): explicit-
+receiver tails (`def bar; other.foo; end`), branch/boolean tails, inherited
+intermediates (the exact-class discovery lookup), top-level defs (served by
+`try_local_def_dispatch` ahead of the choke point), and `MultiWriteNode` spreads
+(already excluded by the collector).
+
+### Acceptance
+
+Same bar as the direct slice: mail / kramdown / haml / liquid byte-identical with
+the feature off (recording exists but nothing reads it) and no new firings with
+it on; `make verify` + `make check-plugins` clean; on the repro, the one-hop and
+two-hop value uses fire and the statement-position calls stay silent. The
+[special-types.md](../type-specification/special-types.md) § `void` status
+paragraph moves the transitive case from deferred to implemented in the same
+commit as the slice, per the spec-binds rule.

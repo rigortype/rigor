@@ -66,6 +66,16 @@ cache:
 or, for a single run, set `RIGOR_STRICT_VALIDATION=1` (which
 wins over the config key).
 
+CI is the common case of untrustworthy stat metadata: a fresh
+checkout regenerates every timestamp and inode, so a cache
+restored across CI runs (for example with `actions/cache`) never
+passes the stat check. Most entries still validate through the
+content-hash fallback, but plugin watch-glob entries are
+stat-signature only and would recompute on every run. When you
+restore Rigor's cache in CI, set `RIGOR_STRICT_VALIDATION=1` (or
+`cache.validation: digest`) so validation is deterministic
+across checkouts.
+
 ## Controlling the cache
 
 | Flag | Effect |

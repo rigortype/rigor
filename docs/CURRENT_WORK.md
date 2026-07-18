@@ -18,62 +18,90 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.3.0 is nearly assembled.** PRs #175 #179–#187 all merged; the CI cache-validation follow-ons
-  (#188–#191, `cache.validation: auto` strict-in-CI) landed after them. Milestone open:
-  **#173** (rbs-inline auto-wire — now in **PR #192**, see below), **#162** (void diagnostic:
-  transitive / ancestor-fallback case + budget ids remain), **#121** (ongoing fold category,
-  demand-gated). `[Unreleased]` holds ~96 bullets — sealing them is the release step `make verify`
-  cannot rescue; budget for it.
-- **PR #192 is open and awaiting review** ([link](https://github.com/rigortype/rigor/pull/192)):
-  ADR-93 WD2 + WD3 — auto-wire the bundled `rigor-rbs-inline` plugin from `Configuration.load` when
-  the upstream library is resolvable, the `enabled: false` opt-out (new `pluginEntry` schema key),
-  and the WD3 `rbs.coverage.inline-annotations-unsynthesized` `:info` for standalone installs. ADR-93
-  moved to **Accepted**. Verified this session: `make verify` (8098 ex, 0 fail), `make docs-check`
-  (270), corpus gate (mail/kramdown/haml/liquid byte-identical; herb keeps its −3 wins). On merge,
-  #173 closes and only #162 + #121 remain on the milestone.
-- **Known pre-existing self-check FP** (NOT introduced by PR #192; reproduces on `master` with the
-  branch stashed): `make check` emits `lib/rigor/cli/doctor_command.rb:279:26: warning: condition is
-  always falsey` — `rubygems_sourced_rigortype?` can genuinely return `true`, so this is an inference
-  FP. `make check` exits 0 (warnings don't fail the gate), which is why it went unnoticed, but
-  AGENTS.md wants check clean. Fix at root (engine), never by editing doctor_command.rb. Spawned as a
-  background task this session.
+- **v0.3.0 nearly assembled.** #173 is **done and closed** (PR #192 auto-wire + opt-out + WD3 hint,
+  ADR-93 Accepted; PR #193 fixed a File/IO `always-falsey` self-check FP found while validating).
+  Milestone open: **#162** (void diagnostic — next session's focus, below) and **#121** (ongoing
+  demand-gated folds, not a blocker). `[Unreleased]` holds **68** entries — the release seal is still
+  pending and user-gated at the bump.
+- **#194 is filed and triaged → `bug` + `needs-info`, awaiting @zonuexe.** It reports that #192's
+  auto-wire regresses in-source inference (return-chain fold lost, interprocedural fold lost, a
+  cross-owner singleton FP). **I could not reproduce any of it** at the issue's `b70adcb5`, at
+  pre-wave `7a69f142`, or at master, with auto-wire confirmed active (rbs-inline 0.14.0,
+  `require_magic_comment: false`) — the WD1 annotation-gate holds, so annotation-free files contribute
+  nothing. Almost certainly an environment gap (the harness's rbs-inline version, or its oracle
+  invocation). Comment asks for their rbs-inline version + exact oracle command + `rigor plugins`
+  output. **Do not action #194 until the reporter replies**; when they do, move it back to
+  `needs-triage` and re-evaluate. If they confirm a version whose `AnnotationParser` lets an
+  annotation-free file through, the fix is gate-hardening in `Synthesizer#annotated?`.
+- `make verify` / `make docs-check` clean on master; master and `origin/master` agree.
 
-## Next session — in this order
+## Next session — the #162 transitive-void DESIGN PASS (ADR-100 WD4 addendum)
 
-**1. Review/merge PR #192** (the #173 auto-wire). Note at review: `spec_helper` pins
-`Configuration.rbs_inline_library_resolvable?` off suite-wide (mirroring the `RIGOR_CI_DETECT` pin) —
-left live, auto-wire would inject the plugin into nearly every in-process `rigor check`, and the
-suite's `Plugin.unregister!` + require-once semantics would surface a spurious
-`plugin_loader.load-error` against the emptied registry (a suite artifact — a real `rigor` process
-loads it cleanly, verified e2e). Specs that exercise the auto-wire tag `:rbs_inline_autowire`.
+**Goal: produce an ADR-100 WD4 addendum that names the tier and the mechanism, so the subsequent
+implementation is de-risked.** Do NOT jump straight to code — an implementation attempt this cycle was
+reverted precisely because it targeted the wrong tier (details below). This is the lighter,
+correctness-establishing step the user chose over implementing blind.
 
-**2. #162 remainder** — the void diagnostic's base case landed in #187 (`static.value-use.void`,
-direct-dispatch only). What remains: the transitive / ancestor-fallback case (ADR-100 WD4) and the
-budget ids. Engine-side precision work.
+**What #162 wants.** The direct case shipped in #192/#187 (`static.value-use.void` fires on
+`x = foo` where `foo` is author-declared `-> void`; `void_origins` side-table + the
+`use-of-void-value` bleeding-edge gate, off by default). The remainder is the **transitive case**:
 
-**3. Release — seal the CHANGELOG.** ~96 `[Unreleased]` bullets. The `rigor-release-prep` skill is
-the flow; **version bumps and `rake release` stay user-gated** — land entries, stop, and let the
-user drive the cut-over (AGENTS.md § Release Cadence).
+```ruby
+class C
+  #: () -> void
+  def foo; end
+  def bar; foo; end       # bar's own signature declares nothing
+  def use; a = bar; end   # SHOULD flag static.value-use.void — void reached `a` through bar's body
+end
+```
 
-## Decided this cycle — do not re-litigate
+**Findings from the reverted attempt (verified with `rigor type-of`, saved in
+`memory/project_162_transitive_void.md` — read it first):**
 
-- **ADR-93 fully resolved** (PR #192): WD1 flip (#186), WD2 auto-wire + `enabled: false` opt-out,
-  WD3 `:info` hint. The opt-out shape (`pluginEntry.enabled`) was maintainer-decided 2026-07-18 over
-  a dedicated top-level key and a `disable_plugins:` list.
-- **#152** (widen `&&`/`||` polarity) evidence-rejected, demand-gated, off the milestone. **#126**
-  (length-range carrier): its own design pass says don't build; demand-gated. **#120**
-  (`--incremental` default): opt-in this cut; the one human call left is ADR-45-cache vs incremental
-  precedence. **#178** closed as intended behaviour (`5d5a9359`). **#155** already-implemented since
-  `01491c63`.
-- **#130 deferred remainder** (RBS-only ancestors + singleton) needs a corpus FP-acceptance decision
-  first — it would fire on user overrides of library methods. Slice 5 stays blocked by #156.
+1. **Wrong tier.** `infer_user_method_return` / `evaluate_body_with_returns` (the ADR-55/84 memo tier)
+   are NOT exercised for a plain `a = bar` in `check`. In `ExpressionTyper#call_type_for`,
+   `MethodDispatcher.dispatch` runs first and `return result if result` short-circuits, so a no-RBS
+   user-instance-method return is served by **`MethodDispatcher#try_user_class_fallback`**
+   (`lib/rigor/inference/method_dispatcher.rb:762`), NOT the ExpressionTyper call-site tiers
+   (`try_user_method_inference` etc.) that only run after dispatch misses. The reverted patch recorded
+   provenance in those ExpressionTyper tiers — they never fired.
+2. **Type-propagation prerequisite.** The leaf `void → top` does not even cross the boundary as a
+   TYPE: `foo`, `foo` inside `bar`, and `bar` all `type-of` as **`nil`** (their body-last expression).
+   `rbs_dispatch` records the `void_origins` side-table (which fires the DIRECT diagnostic) and returns
+   `top`, but the user-def / body-inference tier then WINS the type. So provenance across a method
+   summary sits behind a type-precedence question too.
 
-## Waiting on the user
+**Design questions the addendum must answer:**
 
-- **Review/merge PR #192** (rbs-inline auto-wire, above) and the dependabot rubocop **PR #86** stays
+- Where does the void-return provenance get computed and carried? Candidate: a per-`def_node`
+  void-return summary populated where `try_user_class_fallback` (or whatever computes the user
+  method's body-last-expr return) sees the return node is in that body's `void_origins`; consulted at
+  the call site to copy the origin onto the call node's `void_origins`, so the existing
+  `VoidValueUseCollector` fires unchanged. Composition (`def baz; bar; end`) should fall out of the
+  same tail recording.
+- Is the type-precedence gap (rbs `-> void` not winning the type over body inference) in-scope, a
+  prerequisite, or orthogonal? Establish this before implementation — it may be the real work.
+- FP envelope: stay behind `use-of-void-value` (off by default). Require the sole return path to be
+  the void tail (no explicit non-void returns) — a method returning `top` for any other reason must
+  never enter the table. The corpus gate (mail/kramdown/haml/liquid byte-identical; no new firings) is
+  the acceptance check, same as #192.
+
+Deliverable: the ADR-100 WD4 addendum (naming the tier + mechanism + FP envelope), then a scoped
+implementation slice. `budget ids` (`static.incomplete-inference.*`) stay deferred to ADR-41.
+
+## Also open, lower priority
+
+- **#121** — ongoing FP-safe builtin/stdlib folds (demand-gated, not a release blocker).
+- **Release — seal the CHANGELOG.** 68 `[Unreleased]` entries. `rigor-release-prep` is the flow;
+  version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence).
+
+## Waiting on the user / external
+
+- **#194** — awaiting @zonuexe's harness details (above); the dependabot rubocop **PR #86** stays
   deliberately held (upstream autocorrect bug).
 - **Publish the staged `ruby/rbs` upstream fix** — branch `widen-strscan-resolv-stdlib-sigs` in
   `references/rbs`; push + upstream PR are the user's action. Tracked as #159.
 - The upstream `rbs-inline` RDoc fix ([soutaro/rbs-inline#249](https://github.com/soutaro/rbs-inline/pull/249))
   is open under the user's fork; nothing to do repo-side until upstream responds.
-- **rigor-rs:** `rigor_rs.ruby` is reserved in our schema (ADR-99); the port implements against it.
+- **rigor-rs:** `rigor_rs.ruby` is reserved in our schema (ADR-99); the port implements against it,
+  and its differential harness is the source of #194.

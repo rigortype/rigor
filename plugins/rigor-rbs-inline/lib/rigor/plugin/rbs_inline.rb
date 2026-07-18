@@ -8,9 +8,10 @@ require "rigor/plugin"
 # name: T`, `# @rbs return: T`, attribute `#:`, …) and contributes the result to the analysis environment
 # through the `source_rbs_synthesizer:` manifest hook.
 #
-# By default (WD2) only files starting with the upstream `# rbs_inline: enabled` magic comment are
-# processed; a host context can flip this off by setting `require_magic_comment: false` in the plugin
-# config (WD10).
+# Since ADR-93 WD1 the default is `require_magic_comment: false`: a file is processed whenever it actually
+# carries an annotation (see {Synthesizer#annotated?}), with only the upstream `# rbs_inline: disabled`
+# directive opting a file out. Set `require_magic_comment: true` to restore the old ADR-32 WD2 gate that
+# processed only files opening with `# rbs_inline: enabled`.
 module Rigor
   module Plugin
     # The plugin gem requires `rbs/inline` at load time; without the upstream library the synthesizer can't
@@ -49,10 +50,10 @@ module Rigor
         # space-free spelling is affected; `# :nodoc:` never reaches upstream's annotation grammar.
         RDOC_DIRECTIVE_COMMENT = /\A#:[a-z_][\w-]*:/
 
-        # @param require_magic_comment [Boolean] when `true` (the default, WD2), only files with
-        #   `# rbs_inline: enabled` are processed, and upstream's opt-in semantics apply verbatim. When
-        #   `false` (WD10 host-context override), the magic comment is not required and the file is
-        #   processed only if it actually carries an annotation — see {#annotated?}.
+        # @param require_magic_comment [Boolean] when `false` (the default since ADR-93 WD1), the magic
+        #   comment is not required and the file is processed only if it actually carries an annotation — see
+        #   {#annotated?}. When `true` (the old ADR-32 WD2 gate), only files opening with
+        #   `# rbs_inline: enabled` are processed, and upstream's opt-in semantics apply verbatim.
         def initialize(require_magic_comment:)
           @require_magic_comment = require_magic_comment
           freeze

@@ -60,6 +60,25 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors).to be_empty
     end
 
+    it "skips an entry marked `enabled: false` without requiring or loading it (ADR-93 WD2 opt-out)" do
+      requirer = ->(name) { raise "should not require disabled gem #{name}" }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "plugins" => [{ "gem" => "rigor-alpha", "enabled" => false }]
+        )
+      )
+      services = Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection,
+        type: Rigor::Type::Combinator,
+        configuration: configuration
+      )
+
+      registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
+
+      expect(registry.plugins).to be_empty
+      expect(registry.load_errors).to be_empty
+    end
+
     it "preserves configuration order across multiple plugins" do
       requirer = lambda { |name|
         case name

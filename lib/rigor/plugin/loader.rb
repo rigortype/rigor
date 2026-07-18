@@ -12,7 +12,8 @@ module Rigor
     #
     # Steps per entry (in order):
     #
-    # 1. Normalise the entry into `{ gem:, id:, config: }`.
+    # 0. Skip the entry entirely when it carries `enabled: false` (the ADR-93 WD2 opt-out).
+    # 1. Normalise the entry into `{ gem:, id:, config:, enabled: }`.
     # 2. `require` the gem (failures surface as a {LoadError}).
     # 3. Look up the registered plugin class by id (or by gem name if the entry omitted an explicit id).
     # 4. Validate the user's config against the manifest's `config_schema`.
@@ -48,6 +49,11 @@ module Rigor
         rescue LoadError => e
           load_errors << e
         else
+          # ADR-93 WD2 — `enabled: false` opts a listed plugin out entirely: it is neither required nor
+          # trusted nor id-checked. This is the project-level opt-out for the auto-wired `rigor-rbs-inline`
+          # default (a user re-lists it with `enabled: false`), but it works for any entry.
+          next unless entry[:enabled]
+
           begin
             plugin = resolve_and_instantiate(entry, seen_ids)
             plugins << plugin if plugin
@@ -79,7 +85,7 @@ module Rigor
       def normalise_entry(raw, index)
         case raw
         when String
-          { gem: raw, id: nil, config: {} }
+          { gem: raw, id: nil, config: {}, enabled: true }
         when Hash
           string_keyed = raw.to_h { |k, v| [k.to_s, v] }
           gem_name = string_keyed["gem"] || string_keyed["id"]
@@ -90,7 +96,9 @@ module Rigor
             )
           end
 
-          { gem: gem_name, id: string_keyed["id"], config: string_keyed["config"] || {} }
+          # `enabled:` defaults to true; only the explicit `false` disables (nil / absent stays enabled).
+          { gem: gem_name, id: string_keyed["id"], config: string_keyed["config"] || {},
+            enabled: string_keyed["enabled"] != false }
         else
           raise LoadError.new(
             "plugin entry ##{index} must be a String or Hash, got #{raw.class}",

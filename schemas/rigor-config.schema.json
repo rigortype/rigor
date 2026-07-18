@@ -279,6 +279,10 @@
             "config": {
               "description": "Plugin-specific configuration. Validated by the plugin's `manifest(config_schema:)`. The shape varies per plugin; see each plugin's README for the recognised keys.",
               "type": "object"
+            },
+            "enabled": {
+              "description": "Set `false` to opt a listed plugin out entirely — it is neither required, trusted, nor loaded. The intended use (ADR-93 WD2) is disabling the `rigor-rbs-inline` plugin that Rigor auto-wires by default when the upstream `rbs-inline` library is resolvable. Defaults to `true`.",
+              "type": "boolean"
             }
           }
         }

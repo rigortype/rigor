@@ -37,6 +37,19 @@ RSpec.describe Rigor::Inference::ClosureEscapeAnalyzer do
         %i[times upto downto].each { |m| expect(classify(integer_nominal, m)).to eq(:non_escaping) }
       end
 
+      it "recognises IO / File line iteration, singleton foreach and instance each_line/each_char" do
+        # File.foreach's receiver is singleton(File); io.each_line's is a File / IO instance. Both must be
+        # non_escaping so the loop-body re-narrowing applies (a local written in one `when` arm is visible in
+        # a sibling arm across iterations) — otherwise a guarding condition folds to a spurious constant and a
+        # block-level `return` is dropped from the method's return summary.
+        expect(classify(Rigor::Type::Combinator.singleton_of("File"), :foreach)).to eq(:non_escaping)
+        expect(classify(Rigor::Type::Combinator.singleton_of("IO"), :foreach)).to eq(:non_escaping)
+        %i[each_line each each_byte each_char each_codepoint].each do |m|
+          expect(classify(Rigor::Type::Combinator.nominal_of("File"), m)).to eq(:non_escaping)
+          expect(classify(Rigor::Type::Combinator.nominal_of("IO"), m)).to eq(:non_escaping)
+        end
+      end
+
       it "recognises Object#tap / then / yield_self on any receiver" do
         %i[tap then yield_self].each do |m|
           expect(classify(string_nominal, m)).to eq(:non_escaping)

@@ -144,6 +144,16 @@ module Rigor
       RANGE_EXTRA = %i[step].freeze
       INTEGER_EXTRA = %i[times upto downto].freeze
 
+      # IO / File / StringIO line- and byte-iteration methods invoke the block immediately, once per line /
+      # byte / char, and never retain it — the same immediate-invocation contract as `Array#each`. Both the
+      # singleton `File.foreach` / `IO.foreach` (receiver `singleton(File)` → class name "File") and the
+      # instance `io.each_line` / `each_char` … forms resolve through the same class-name key. Without these,
+      # `File.foreach(path) { case … when … then flag = true when … then return true if flag end }` classifies
+      # `:unknown` and misses the loop-body re-narrowing, so a local written in one `when` arm reads its
+      # pre-loop value in a sibling arm and a guarding condition folds to a spurious constant.
+      IO_ITERATION = %i[each_line each each_byte each_char each_codepoint].freeze
+      IO_SINGLETON_ITERATION = %i[foreach].freeze
+
       NON_ESCAPING = {
         "Array" => (ENUMERABLE_NON_ESCAPING + ARRAY_EXTRA).freeze,
         "Hash" => (ENUMERABLE_NON_ESCAPING + HASH_EXTRA).freeze,
@@ -151,7 +161,10 @@ module Rigor
         "Set" => ENUMERABLE_NON_ESCAPING,
         "Integer" => INTEGER_EXTRA,
         "Enumerator" => ENUMERABLE_NON_ESCAPING,
-        "Enumerator::Lazy" => ENUMERABLE_NON_ESCAPING
+        "Enumerator::Lazy" => ENUMERABLE_NON_ESCAPING,
+        "IO" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
+        "File" => (IO_ITERATION + IO_SINGLETON_ITERATION).freeze,
+        "StringIO" => IO_ITERATION
       }.freeze
 
       # Methods that are documented to **retain** the block past the call. The block is stored or scheduled,

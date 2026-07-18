@@ -4,6 +4,9 @@ require "tmpdir"
 
 RSpec.describe Rigor::Configuration do
   describe ".load" do
+    # The ADR-93 WD2 auto-wire is pinned off suite-wide in spec_helper (untagged examples), so these unit
+    # examples assert the YAML→config coercion mechanics without the injected `rigor-rbs-inline` entry; the
+    # auto-wire itself is exercised in its own `:rbs_inline_autowire` describe block below.
     it "loads defaults when the configuration file is absent" do
       Dir.mktmpdir do |dir|
         configuration = described_class.load(File.join(dir, "missing.yml"))
@@ -420,6 +423,82 @@ RSpec.describe Rigor::Configuration do
           )
         )
       end.to raise_error(ArgumentError, /plugins_io\.network/)
+    end
+  end
+
+  # ADR-93 WD2 — the bundled `rigor-rbs-inline` plugin is default-wired from `.load` (the real-project route),
+  # in WD1's annotation-gated, magic-comment-free mode, when the upstream `rbs-inline` library is resolvable
+  # and the user has not already listed it. A bare `Configuration.new` never auto-wires.
+  describe ".load auto-wiring rigor-rbs-inline (ADR-93 WD2)", :rbs_inline_autowire do
+    def load_with_config(dir, yaml)
+      path = File.join(dir, ".rigor.yml")
+      File.write(path, yaml)
+      described_class.load(path)
+    end
+
+    context "when the upstream rbs-inline library is resolvable" do
+      before { allow(described_class).to receive(:rbs_inline_library_resolvable?).and_return(true) }
+
+      it "injects the plugin with require_magic_comment: false when the user lists no plugins" do
+        Dir.mktmpdir do |dir|
+          configuration = described_class.load(File.join(dir, "missing.yml"))
+          expect(configuration.plugins).to eq(
+            [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+               "config" => { "require_magic_comment" => false } }]
+          )
+        end
+      end
+
+      it "appends the auto-wired entry after the user's own plugins" do
+        Dir.mktmpdir do |dir|
+          configuration = load_with_config(dir, "plugins:\n  - rigor-rails\n")
+          expect(configuration.plugins).to eq(
+            ["rigor-rails",
+             { "gem" => "rigor-rbs-inline", "id" => "rbs-inline",
+               "config" => { "require_magic_comment" => false } }]
+          )
+        end
+      end
+
+      it "does not double-wire when the user already lists the gem" do
+        Dir.mktmpdir do |dir|
+          configuration = load_with_config(dir, "plugins:\n  - rigor-rbs-inline\n")
+          expect(configuration.plugins).to eq(["rigor-rbs-inline"])
+        end
+      end
+
+      it "does not double-wire when the user lists it by manifest id" do
+        Dir.mktmpdir do |dir|
+          configuration = load_with_config(dir, "plugins:\n  - gem: rigor-rbs-inline\n    id: rbs-inline\n")
+          expect(configuration.plugins).to eq(
+            [{ "gem" => "rigor-rbs-inline", "id" => "rbs-inline" }]
+          )
+        end
+      end
+
+      it "leaves an explicit enabled: false opt-out entry in place for the loader to skip" do
+        Dir.mktmpdir do |dir|
+          configuration = load_with_config(dir, "plugins:\n  - gem: rigor-rbs-inline\n    enabled: false\n")
+          expect(configuration.plugins).to eq(
+            [{ "gem" => "rigor-rbs-inline", "enabled" => false }]
+          )
+        end
+      end
+    end
+
+    context "when the upstream rbs-inline library is not resolvable (standalone, WD3)" do
+      before { allow(described_class).to receive(:rbs_inline_library_resolvable?).and_return(false) }
+
+      it "does not auto-wire the plugin" do
+        Dir.mktmpdir do |dir|
+          configuration = described_class.load(File.join(dir, "missing.yml"))
+          expect(configuration.plugins).to eq([])
+        end
+      end
+    end
+
+    it "never auto-wires from a bare Configuration.new" do
+      expect(described_class.new.plugins).to eq([])
     end
   end
 

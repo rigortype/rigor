@@ -58,6 +58,34 @@ RSpec.describe Rigor::CLI::PluginsCommand do
     end
   end
 
+  # ADR-93 WD2 — with no `plugins:` entry, `Configuration.load` auto-wires the bundled `rigor-rbs-inline`
+  # plugin when the upstream library is resolvable, so `rigor plugins` reports the plugin set that analysis
+  # actually loads. Tagged `:rbs_inline_autowire` so the suite-wide probe pin (spec_helper) is lifted; the
+  # plugin is re-registered here because the shared before-hooks that clear the registry leave `require` a
+  # no-op (see the comment on the top-level before).
+  context "with rigor-rbs-inline auto-wired (ADR-93 WD2)", :rbs_inline_autowire do
+    before do
+      allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(true)
+      require "rigor-rbs-inline"
+      Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
+      File.write(".rigor.yml", "paths: [.]\nplugins: []\n")
+    end
+
+    it "reports the auto-wired plugin as loaded even with no plugins: entry" do
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).to include("loaded: 1")
+      expect(out).to include("rbs-inline")
+    end
+
+    it "does not auto-wire when the user opts out with enabled: false" do
+      File.write(".rigor.yml", "paths: [.]\nplugins:\n  - gem: rigor-rbs-inline\n    enabled: false\n")
+      status, out, = run([])
+      expect(status).to eq(0)
+      expect(out).to include("loaded: 0")
+    end
+  end
+
   context "with a valid bundled plugin" do
     before do
       # Use the explicit gem/id form so the loader's id-based lookup matches the already-registered plugin class even

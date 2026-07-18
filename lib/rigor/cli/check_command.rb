@@ -527,24 +527,15 @@ module Rigor
       end
 
       def inject_treat_all_as_inline_rbs(entries)
-        filtered = entries.reject { |entry| rigor_rbs_inline_entry?(entry) }
+        # Single-homed with the WD2 auto-wire gate (`Configuration.rbs_inline_plugin_entry?`) so the flag and
+        # the default agree on what "already listed" means; a pre-existing entry is removed so this one's
+        # `require_magic_comment: false` wins unconditionally.
+        filtered = entries.reject { |entry| Configuration.rbs_inline_plugin_entry?(entry) }
         filtered + [{
           "gem" => "rigor-rbs-inline",
           "id" => "rbs-inline",
           "config" => { "require_magic_comment" => false }
         }]
-      end
-
-      def rigor_rbs_inline_entry?(entry)
-        case entry
-        when String
-          entry == "rigor-rbs-inline"
-        when Hash
-          string_keyed = entry.to_h { |k, v| [k.to_s, v] }
-          string_keyed["gem"] == "rigor-rbs-inline" || string_keyed["id"] == "rbs-inline"
-        else
-          false
-        end
       end
 
       def handle_clear_cache(cache_root)

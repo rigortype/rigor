@@ -158,7 +158,7 @@ RSpec.describe "Rigor configuration JSON Schema" do
 
     object_alt = plugin_entry.find { |alt| alt["type"] == "object" }
     expect(object_alt["required"]).to eq(["gem"])
-    expect(object_alt["properties"].keys).to contain_exactly("gem", "id", "config")
+    expect(object_alt["properties"].keys).to contain_exactly("gem", "id", "config", "enabled")
   end
 
   it "constrains dependencies.budget_per_gem to the runtime MIN/MAX bounds and default" do

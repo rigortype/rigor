@@ -106,7 +106,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-90 | [Target-library resolution from the analyzed project's bundle](90-target-library-resolution-from-project-bundle.md) | Accepted (implemented 2026-07-16; WD1-WD3 landed) |
 | ADR-91 | [Kernel intrinsic fold ownership gate + spelling-parity invariant](91-kernel-intrinsic-fold-ownership-gate.md) | Accepted (implemented 2026-07-16, WD1-WD4; corpus gate byte-identical) |
 | ADR-92 | [Normative status fidelity: the founding-era stratum and the declare-or-mark gate](92-normative-status-fidelity.md) | Accepted (implemented 2026-07-16, WD1-WD5; void verdict resolved to option b) |
-| ADR-93 | [Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec](93-default-rbs-inline-ingestion.md) | Proposed (WD4 measurement ran; default flips remain unimplemented) |
+| ADR-93 | [Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec](93-default-rbs-inline-ingestion.md) | Accepted |
 | ADR-94 | [The inline-RBS reader: `RBS::InlineParser` and the rbs 3.x floor](94-rbs-inline-reader-and-the-rbs-3x-floor.md) | Accepted (migration deferred; rigor-rbs-inline stays the reader) |
 | ADR-95 | [Homebrew distribution: deferred behind the single binary](95-homebrew-tap-deferral.md) | Proposed (deferred, trigger-gated; nothing implemented) |
 | ADR-96 | [Plugin target-gem declaration, the plugin-gap advisory, and presence-gated umbrella expansion](96-plugin-target-gems.md) | Accepted (WD1-WD2 committed; WD3 umbrella expansion proposed) |

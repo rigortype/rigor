@@ -76,4 +76,19 @@ RSpec.configure do |config|
   # override can never destabilise the main suite. Set `RIGOR_INCLUDE_RACTOR_POOL=1` to opt the file back in to a
   # same-process run.
   config.exclude_pattern = "spec/rigor/analysis/runner_pool_spec.rb" unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
+
+  # ADR-93 WD2 — `Configuration.load` default-wires the bundled `rigor-rbs-inline` plugin whenever the upstream
+  # `rbs-inline` library is resolvable, which it is under this repo's bundle. Left live, that would inject the
+  # plugin into almost every in-process `rigor check` the suite runs; and because the suite pervasively calls
+  # `Rigor::Plugin.unregister!` while `require` is a once-per-process no-op, the reload against the emptied
+  # registry surfaces a spurious `plugin_loader.load-error` (a suite artifact — a real `rigor` process starts
+  # fresh, requires the plugin once, and loads it cleanly). So the environment probe is pinned off for the
+  # whole suite, mirroring the RIGOR_CI_DETECT pin above. Specs that exercise the auto-wire tag themselves
+  # `:rbs_inline_autowire` (and stub the probe to `true` in a controlled registry); the real behaviour is
+  # covered end-to-end by those specs plus the ADR-93 WD4 corpus gate.
+  config.before do |example|
+    unless example.metadata[:rbs_inline_autowire]
+      allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(false)
+    end
+  end
 end

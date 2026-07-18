@@ -216,10 +216,67 @@ module Rigor
     # [PHPStan](https://phpstan.org/config-reference#paths).
     def self.load(path = nil)
       resolved = path || discover
-      return new(DEFAULTS) if resolved.nil? || !File.exist?(resolved)
+      data =
+        if resolved.nil? || !File.exist?(resolved)
+          DEFAULTS
+        else
+          DEFAULTS.merge(load_with_includes(resolved))
+        end
+      new(autowire_default_plugins(data))
+    end
 
-      data = load_with_includes(resolved)
-      new(DEFAULTS.merge(data))
+    # ADR-93 WD2 — the one bundled plugin default-wired without a `plugins:` entry. `rigor-rbs-inline` is the
+    # gem; `rbs-inline` is its manifest id (the loader raises on a duplicate id, so both forms count as
+    # "already listed").
+    AUTOWIRED_RBS_INLINE_GEM = "rigor-rbs-inline"
+    AUTOWIRED_RBS_INLINE_ID = "rbs-inline"
+
+    # ADR-93 WD2 — default-wire the bundled `rigor-rbs-inline` plugin, in WD1's annotation-gated,
+    # magic-comment-free mode, when the upstream `rbs-inline` library is resolvable and the user has not
+    # already listed the plugin. Runs from {load} only — the real-project route — never from a bare
+    # {Configuration.new}, so the suite's unit constructions do not auto-wire. The gate is presence-based
+    # (ADR-72's shape): an annotation-free project pays only a comment scan and contributes nothing, so
+    # wiring it on cannot regress the run. This partially reverses the ADR-27/ADR-31 auto-load deferral for
+    # this one bundled plugin (the executed code is already vendored, not arbitrary third-party plugin code).
+    # Opt out with a `plugins:` entry disabling it (`enabled: false`), or per-file `# rbs_inline: disabled`.
+    def self.autowire_default_plugins(data)
+      entries = Array(data["plugins"])
+      return data if entries.any? { |entry| rbs_inline_plugin_entry?(entry) }
+      return data unless rbs_inline_library_resolvable?
+
+      merged = data.dup
+      merged["plugins"] = entries + [{
+        "gem" => AUTOWIRED_RBS_INLINE_GEM,
+        "id" => AUTOWIRED_RBS_INLINE_ID,
+        "config" => { "require_magic_comment" => false }
+      }]
+      merged
+    end
+
+    # True when a `plugins:` entry (String or Hash, string- or symbol-keyed) already references the
+    # `rigor-rbs-inline` plugin by gem name or by manifest id. Single-homed here so the CLI's
+    # `--treat-all-as-inline-rbs` injection and the WD2 auto-wire gate agree on what "already listed" means.
+    def self.rbs_inline_plugin_entry?(entry)
+      case entry
+      when String
+        entry == AUTOWIRED_RBS_INLINE_GEM
+      when Hash
+        string_keyed = entry.to_h { |k, v| [k.to_s, v] }
+        string_keyed["gem"] == AUTOWIRED_RBS_INLINE_GEM || string_keyed["id"] == AUTOWIRED_RBS_INLINE_ID
+      else
+        false
+      end
+    end
+
+    # A probe with no load side effect: it does not `require` the library, only asks whether RubyGems can
+    # resolve the name. `Gem::Specification.find_by_name` raises `Gem::MissingSpecError` (a `Gem::LoadError`)
+    # when the gem is absent — the standalone `gem install rigortype` case, WD3's residual. ADR-90's
+    # project-bundle fallback resolves the same name at the plugin's own `require` time.
+    def self.rbs_inline_library_resolvable?
+      Gem::Specification.find_by_name("rbs-inline")
+      true
+    rescue Gem::LoadError
+      false
     end
 
     # Returns the path to the config file Rigor would load under auto-discovery, or `nil` when neither

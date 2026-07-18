@@ -437,6 +437,69 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # ADR-93 WD3 — the standalone residual routing hint. `rbs_inline_library_resolvable?` is pinned false
+    # suite-wide (spec_helper), which models the library-absent standalone install these examples describe.
+    it "surfaces the WD3 :info hint when annotations exist but rbs-inline is absent" do
+      Dir.mktmpdir("rigor-wd3-hint-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+        File.write(File.join(tmpdir, "lib", "anno.rb"), <<~RUBY)
+          # frozen_string_literal: true
+          class Anno
+            #: (Integer) -> void
+            def log(n) = puts(n)
+          end
+        RUBY
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          hints = result.diagnostics.select { |d| d.rule == "rbs.coverage.inline-annotations-unsynthesized" }
+
+          expect(hints.length).to eq(1)
+          expect(hints.first.severity).to eq(:info)
+          expect(hints.first.message).to include("lib/anno.rb")
+          expect(hints.first.message).to include("rbs-inline")
+        end
+      end
+    end
+
+    it "does not surface the WD3 hint for RDoc directives alone (no real annotation)" do
+      Dir.mktmpdir("rigor-wd3-nodoc-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+        File.write(File.join(tmpdir, "lib", "plain.rb"), <<~RUBY)
+          # frozen_string_literal: true
+          class Plain #:nodoc:
+            #:stopdoc:
+            def work = 1
+          end
+        RUBY
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          hints = result.diagnostics.select { |d| d.rule == "rbs.coverage.inline-annotations-unsynthesized" }
+
+          expect(hints).to be_empty
+        end
+      end
+    end
+
+    it "suppresses the WD3 hint when the rbs-inline library is resolvable", :rbs_inline_autowire do
+      allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(true)
+      Dir.mktmpdir("rigor-wd3-resolvable-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+        File.write(File.join(tmpdir, "lib", "anno.rb"), "# @rbs return: Integer\ndef n = 1\n")
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          hints = result.diagnostics.select { |d| d.rule == "rbs.coverage.inline-annotations-unsynthesized" }
+
+          expect(hints).to be_empty
+        end
+      end
+    end
+
     # ADR-72 — Gemfile.lock-gated bundled RBS overlays.
     def write_duration_project(tmpdir, lock_gem:)
       File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)

@@ -15,7 +15,7 @@ require_relative "../runtime/jit"
 require_relative "command"
 require_relative "options"
 require_relative "diagnostic_formats"
-require_relative "ci_detector"
+require_relative "../ci_detector"
 # ADR-87 WD4 — `coverage_scan` and `check_runner_factory` both pull the inference engine, so they are required
 # lazily (in `compute_coverage` / `build_check_runner`) rather than at load time: an ordinary check whose
 # result the run-cache probe serves must reach the hit verdict without `rigor/inference` in $LOADED_FEATURES.
@@ -854,7 +854,7 @@ module Rigor
         return unless options.fetch(:ci_detect)
         return unless options.fetch(:format) == "text"
 
-        platform = CLI::CiDetector.detect
+        platform = CiDetector.detect
         return if platform.nil?
 
         if platform.native_stdout?

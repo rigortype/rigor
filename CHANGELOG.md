@@ -11,6 +11,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Changed
+
+- **[cache]** An analysis cache restored across CI runs now stays effective without extra setup: `cache.validation` gained an `auto` mode — the new default — that hashes file content when a CI environment is detected (a fresh checkout regenerates the timestamps and inodes the faster stat check relies on) and keeps the stat check everywhere else. Set `cache.validation: stat` explicitly on a CI runner that reuses its workspace.
+
 ### Added
 
 - **[rigor check]** Using the return of a method whose RBS declares `-> void` as a value — assigning it, calling a method on it, or passing it as an argument — is now reported as `static.value-use.void`. An explicit `-> void` is the author saying "do not rely on this return", so relying on the `top` it recovers to is a mistake worth surfacing. It fires only on a method resolved directly on the receiver's own class (not through an inherited fallback), and a bare-statement `void` call or a genuine `top` value stays silent. Opt-in behind the new `use-of-void-value` bleeding-edge feature, since a new required diagnostic is a compatibility change.

@@ -73,7 +73,15 @@ identical (a bare `touch`) is re-hashed and correctly found fresh. The
 descriptor, plugin `watch:` globs); cache-KEY descriptors keep the
 deterministic `:digest` comparator. `cache.validation: digest` (or the
 `RIGOR_STRICT_VALIDATION=1` env, which wins) forces every entry back to
-`:digest` for a filesystem whose stat cannot be trusted.
+`:digest` for a filesystem whose stat cannot be trusted. The key's
+default is `auto` (#190): it resolves to `digest` when `CiDetector`
+recognises a CI provider — a fresh checkout regenerates every stat tuple,
+so the stat tier can never short-circuit and the stat-signature glob
+slots would read stale on every run — and to `stat` everywhere else.
+Resolution happens per run (`Configuration#cache_validation_strict?`),
+honours the `RIGOR_CI_DETECT=0` kill switch, and an explicit `stat` /
+`digest` always wins (a persistent-workspace CI runner opts back into the
+stat floor with `stat`).
 
 ### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [], globs: [])`
 

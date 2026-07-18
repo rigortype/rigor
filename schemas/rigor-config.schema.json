@@ -82,10 +82,10 @@
           "default": 268435456
         },
         "validation": {
-          "description": "How the cache decides a file is unchanged (ADR-87). `stat` (default) compares size + nanosecond mtime + inode and only re-hashes a file whose stat moved; `digest` re-hashes every file every run. Both keep the content hash as the sole change authority — `stat` only skips the hash when the stat proves the file untouched. `RIGOR_STRICT_VALIDATION=1` forces `digest` for one run and wins over this key.",
+          "description": "How the cache decides a file is unchanged (ADR-87). `auto` (default) behaves as `digest` when a CI environment is detected — a fresh checkout regenerates every stat tuple, so stat validation cannot work there; `RIGOR_CI_DETECT=0` disables detection — and as `stat` otherwise. `stat` compares size + nanosecond mtime + inode and only re-hashes a file whose stat moved; `digest` re-hashes every file every run. Both keep the content hash as the sole change authority — `stat` only skips the hash when the stat proves the file untouched. `RIGOR_STRICT_VALIDATION=1` forces `digest` for one run and wins over this key.",
           "type": "string",
-          "enum": ["stat", "digest"],
-          "default": "stat"
+          "enum": ["auto", "stat", "digest"],
+          "default": "auto"
         }
       }
     },

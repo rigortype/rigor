@@ -142,12 +142,15 @@ The exact recipe (the `BUNDLE_GEMFILE` wiring, the Dependabot entry) is in
 - **Determinism.** Add `--no-cache` in CI if you want each run independent
   of any persisted `.rigor/cache`.
 - **Cache persistence (opposite trade).** When the Rigor job's runtime
-  matters, persist `.rigor/cache` with the CI's cache facility **and set
-  `RIGOR_STRICT_VALIDATION=1` on the job** — a fresh checkout regenerates
-  every stat tuple, and without strict mode the plugin watch-glob cache
-  slots read as stale on every run. Never persist the cache without the
-  env var. Snippets: `rigor docs ci` § "Persisting the analysis cache
-  across runs".
+  matters, persist `.rigor/cache` with the CI's cache facility. Current
+  Rigor detects CI and validates the restored cache by content hash
+  automatically (`cache.validation: auto`); on versions before the
+  `auto` default, **also set `RIGOR_STRICT_VALIDATION=1` on the job** —
+  without it a fresh checkout's regenerated stat tuples make the plugin
+  watch-glob cache slots read as stale on every run. A self-hosted
+  runner that reuses its workspace opts back into the faster stat check
+  with `cache.validation: stat`. Snippets: `rigor docs ci`
+  § "Persisting the analysis cache across runs".
 
 ## Verify
 

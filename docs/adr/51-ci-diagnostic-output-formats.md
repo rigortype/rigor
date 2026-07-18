@@ -14,7 +14,7 @@ CI auto-detection** (WD7) emits the platform-native form automatically on the
 default output when a first-class CI is detected. The formatters and the
 detector live in
 [`lib/rigor/cli/diagnostic_formats.rb`](../../lib/rigor/cli/diagnostic_formats.rb)
-+ [`lib/rigor/cli/ci_detector.rb`](../../lib/rigor/cli/ci_detector.rb); the
++ [`lib/rigor/ci_detector.rb`](../../lib/rigor/ci_detector.rb); the
 copy-paste CI setup templates (ADR-27 § WD3), the
 [`rigor-ci-setup`](../../skills/rigor-ci-setup/SKILL.md) bundled skill, and
 the manual update ship in the same cut.

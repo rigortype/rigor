@@ -188,10 +188,9 @@ module Rigor
         # plugin producer's watched-glob validation (they overlap heavily on the warm path). The nested ADR-85
         # WD3 memo yields one stable `Prism::DefNode` per resolved bundle handle for the run (both are no-ops
         # outside their respective consumers — an empty thread-local table).
-        # ADR-87 WD1 — `cache.validation: digest` (or the RIGOR_STRICT_VALIDATION env, which wins) forces the
-        # digest-always freshness path for this run; the default `:stat` tier validates by stat first.
-        strict = @configuration.cache_validation == "digest"
-        Cache::FileDigest.with_run(strict: strict) do
+        # ADR-87 WD1 — `cache.validation` (or the RIGOR_STRICT_VALIDATION env, which wins) selects the
+        # freshness path for this run; the `auto` default resolves strict in CI (#190), stat-first elsewhere.
+        Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
           Inference::DefNodeResolver.with_run { run_analysis(paths) }
         end
       end
@@ -390,8 +389,7 @@ module Rigor
       def evaluate_return_types(paths, specs)
         return {} if specs.empty?
 
-        strict = @configuration.cache_validation == "digest"
-        Cache::FileDigest.with_run(strict: strict) do
+        Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
           Inference::DefNodeResolver.with_run { evaluate_return_types_setup(paths, specs) }
         end
       end

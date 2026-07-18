@@ -55,26 +55,31 @@ timestamp, identical content) is re-hashed once and correctly
 found unchanged. Editing a file always moves its timestamps, so
 an edit is never missed.
 
-If you work on a filesystem whose timestamps or inode numbers
-cannot be trusted, switch to hashing every file every run:
+The stat check is skipped where it cannot work: the default
+setting is `validation: auto`, which behaves as `stat` on your
+machine and switches to hashing every file (`digest`) when a CI
+environment is detected. CI is the common case of untrustworthy
+stat metadata — a fresh checkout regenerates every timestamp and
+inode, so a cache restored across CI runs (for example with
+`actions/cache`) never passes the stat check, and parts of it
+(plugin watch-glob entries, which are stat-signature only) would
+be recomputed on every run. Content hashes are identical across
+checkouts, so under `digest` the restored cache simply hits.
+
+The setting can be forced either way:
 
 ```yaml
 cache:
-  validation: digest    # default is "stat"
+  validation: digest    # hash always — for any filesystem whose
+                        # timestamps or inodes cannot be trusted
+  # validation: stat    # stat always — e.g. a self-hosted CI
+                        # runner that reuses its workspace, where
+                        # stat metadata IS stable across runs
 ```
 
-or, for a single run, set `RIGOR_STRICT_VALIDATION=1` (which
-wins over the config key).
-
-CI is the common case of untrustworthy stat metadata: a fresh
-checkout regenerates every timestamp and inode, so a cache
-restored across CI runs (for example with `actions/cache`) never
-passes the stat check. Most entries still validate through the
-content-hash fallback, but plugin watch-glob entries are
-stat-signature only and would recompute on every run. When you
-restore Rigor's cache in CI, set `RIGOR_STRICT_VALIDATION=1` (or
-`cache.validation: digest`) so validation is deterministic
-across checkouts.
+For a single run, `RIGOR_STRICT_VALIDATION=1` forces `digest`
+and wins over the config key; `RIGOR_CI_DETECT=0` turns off the
+CI detection that `auto` relies on.
 
 ## Controlling the cache
 

@@ -3,6 +3,7 @@
 require "yaml"
 
 require_relative "bleeding_edge"
+require_relative "ci_detector"
 require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
 
@@ -64,12 +65,17 @@ module Rigor
         # entries. Set explicitly to `null` to disable eviction (pre-WD3 behaviour: the cache grows until
         # `--clear-cache`).
         "max_bytes" => 268_435_456,
-        # ADR-87 WD1 — file-freshness validation strategy. `"stat"` (default) validates a recorded file
+        # ADR-87 WD1 — file-freshness validation strategy. `"stat"` validates a recorded file
         # dependency by stat-ing it first and re-hashing only when the `(size, mtime_ns, ctime_ns, inode)`
         # tuple moved (or the racy window fires), so an unchanged monorepo hashes ~0 bytes on a warm run.
         # `"digest"` restores the pre-ADR-87 behaviour of SHA-256'ing every recorded file on every run — the
         # per-run escape hatch is the `RIGOR_STRICT_VALIDATION=1` env var, which wins over this setting.
-        "validation" => "stat"
+        # `"auto"` (default, #190) resolves per environment: `"digest"` when {CiDetector} recognises a CI
+        # provider — a fresh checkout regenerates every stat tuple, so the stat tier can never short-circuit
+        # there and stat-signature glob slots would recompute on every run — and `"stat"` everywhere else.
+        # A self-hosted runner with a persistent workspace opts back into the stat floor with an explicit
+        # `"stat"` (or `RIGOR_CI_DETECT=0`).
+        "validation" => "auto"
       },
       "plugins_io" => {
         "network" => "disabled",
@@ -350,7 +356,7 @@ module Rigor
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
-      @cache_validation = coerce_cache_validation(cache.fetch("validation", "stat"))
+      @cache_validation = coerce_cache_validation(cache.fetch("validation", "auto"))
       @plugins_io_network = coerce_network_policy(plugins_io.fetch("network"))
       @plugins_io_allowed_paths = Array(plugins_io.fetch("allowed_paths")).map(&:to_s).freeze
       @plugins_io_allowed_url_hosts = Array(plugins_io.fetch("allowed_url_hosts")).map(&:to_s).freeze
@@ -386,6 +392,20 @@ module Rigor
       freeze
     end
     # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+
+    # Resolves the `cache.validation` tri-state to the boolean the run installs via
+    # {Cache::FileDigest.with_run}'s `strict:`. Explicit `"digest"` / `"stat"` win outright; the `"auto"`
+    # default is strict exactly when {CiDetector} recognises a CI provider (#190) — deliberately NOT stored at
+    # construction so the resolution honours the environment of the run, not of `Configuration.load`, and the
+    # frozen carrier stays env-independent. `RIGOR_STRICT_VALIDATION=1` is enforced separately inside
+    # {Cache::FileDigest.strict_validation?} and wins over all three values.
+    def cache_validation_strict?(env = ENV)
+      case cache_validation
+      when "digest" then true
+      when "stat" then false
+      else !CiDetector.detect(env).nil?
+      end
+    end
 
     def to_h # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       {
@@ -531,16 +551,16 @@ module Rigor
       value.to_s
     end
 
-    # ADR-87 WD1 — `cache.validation` is `"stat"` (default) or `"digest"`. An unrecognised value fails soft to
-    # the default rather than aborting a check over a typo — the strict `"digest"` behaviour is the safe
-    # fallback either way, and the always-available `RIGOR_STRICT_VALIDATION=1` env escape hatch does not
-    # depend on this value being valid.
-    VALID_CACHE_VALIDATIONS = %w[stat digest].freeze
+    # ADR-87 WD1 — `cache.validation` is `"auto"` (default), `"stat"`, or `"digest"`. An unrecognised value
+    # fails soft to the default rather than aborting a check over a typo — the strict `"digest"` behaviour is
+    # the safe fallback either way, and the always-available `RIGOR_STRICT_VALIDATION=1` env escape hatch does
+    # not depend on this value being valid.
+    VALID_CACHE_VALIDATIONS = %w[auto stat digest].freeze
     private_constant :VALID_CACHE_VALIDATIONS
 
     def coerce_cache_validation(value)
       str = value.to_s
-      VALID_CACHE_VALIDATIONS.include?(str) ? str : "stat"
+      VALID_CACHE_VALIDATIONS.include?(str) ? str : "auto"
     end
 
     def coerce_network_policy(value)

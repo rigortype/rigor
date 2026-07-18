@@ -284,7 +284,7 @@ module Rigor
         # `cache.validation: digest` (and `RIGOR_STRICT_VALIDATION`, which the env-only path already sees) and
         # shares one digest memo across change detection and the baseline/absorb re-pack. The inner
         # `Runner#run` nests its own `with_run` for the analysis descriptors; nesting is safe (each restores).
-        Cache::FileDigest.with_run(strict: @configuration.cache_validation == "digest") do
+        Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
           restored = fingerprint && snapshot.load(fingerprint: fingerprint)
           # ADR-88 WD1 — the plugin fact-surface fingerprint gates snapshot reuse the same way the global
           # fingerprint gates the load: a plugin sig/catalog edit outside `signature_paths:` (a Sorbet `.rbi`)

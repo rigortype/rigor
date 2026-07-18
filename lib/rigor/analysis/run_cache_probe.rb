@@ -60,7 +60,7 @@ module Rigor
         store = Cache::Store.new(root: @cache_root, max_bytes: @configuration.cache_max_bytes)
         # The digest fallback + `cache.validation` / RIGOR_STRICT_VALIDATION escape hatch route through the
         # same per-run FileDigest scope the full run uses.
-        strict = @configuration.cache_validation == "digest"
+        strict = @configuration.cache_validation_strict?
         Cache::FileDigest.with_run(strict: strict) do
           store.peek_validated(
             producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID, key_descriptor: key

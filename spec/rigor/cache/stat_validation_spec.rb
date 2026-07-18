@@ -142,6 +142,46 @@ RSpec.describe "ADR-87 stat-then-digest validation (WD5)" do
     end
   end
 
+  # #190 — the `auto` default resolves the run's strict flag per environment: strict in CI (where a fresh
+  # checkout regenerates every stat tuple, so the stat tier can never short-circuit and stat-signature glob
+  # slots would recompute every run), stat-first everywhere else. Detection is a pure function of the env
+  # hash passed in, so no ENV mutation is needed; the suite's global `RIGOR_CI_DETECT=0` does not interfere
+  # because these examples pass explicit hashes.
+  describe "auto validation default (#190)" do
+    def config(overrides = {})
+      Rigor::Configuration.new("paths" => ["lib"], "cache" => overrides)
+    end
+
+    it "defaults cache_validation to auto" do
+      expect(config.cache_validation).to eq("auto")
+    end
+
+    it "coerces an unrecognised value to auto" do
+      expect(config("validation" => "sha1").cache_validation).to eq("auto")
+    end
+
+    it "resolves auto to non-strict outside CI" do
+      expect(config.cache_validation_strict?({})).to be(false)
+    end
+
+    it "resolves auto to strict under a recognised provider and the generic CI catch-all" do
+      expect(config.cache_validation_strict?({ "GITHUB_ACTIONS" => "true" })).to be(true)
+      expect(config.cache_validation_strict?({ "CI" => "true" })).to be(true)
+    end
+
+    it "honours the RIGOR_CI_DETECT=0 kill switch" do
+      expect(config.cache_validation_strict?({ "CI" => "true", "RIGOR_CI_DETECT" => "0" })).to be(false)
+    end
+
+    it "lets an explicit stat opt a persistent-workspace CI runner back into the stat floor" do
+      expect(config("validation" => "stat").cache_validation_strict?({ "CI" => "true" })).to be(false)
+    end
+
+    it "keeps an explicit digest strict everywhere" do
+      expect(config("validation" => "digest").cache_validation_strict?({})).to be(true)
+    end
+  end
+
   # WD5 end-to-end false-invalidation guard: a touch-only change (moved stat, identical content) between two
   # cache-backed runs stays a HIT — the second run serves the cached diagnostics without re-running the
   # whole-project discovery pass, and its diagnostics are byte-identical.

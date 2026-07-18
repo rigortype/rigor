@@ -38,15 +38,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # A CI checkout regenerates every stat tuple (mtime/ctime/inode), so the
-    # default stat-tier cache validation (ADR-87) reads restored plugin
-    # `watch:`-glob slots as stale on every run and recomputes the producers
-    # even when no watched file changed.  Strict mode validates by content
-    # digest — deterministic across checkouts — so the restored cache's
-    # producer slots actually hit.  CI is exactly the "stat tuples cannot be
-    # trusted" filesystem the strict escape hatch exists for.
-    env:
-      RIGOR_STRICT_VALIDATION: "1"
+    # Cache validation runs in digest mode here without any env: the
+    # `cache.validation: auto` default (#190) detects CI and switches from the
+    # stat tier (which a fresh checkout defeats) to content hashes, so the
+    # restored plugin `watch:`-glob slots actually hit across checkouts. This
+    # job dogfoods that auto-detection on a plugin-heavy target.
 
     steps:
       - name: Checkout Rigor

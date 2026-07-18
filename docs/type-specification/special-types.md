@@ -65,8 +65,8 @@ Strict dynamic modes MAY report dynamic-to-precise assignments, arguments, retur
 
 ## `void`
 
-> **Status — the direct value-context diagnostic is implemented; distinct-`void` machinery is
-> not.** The engine translates RBS `void` to **`top`**
+> **Status — the value-context diagnostic is implemented, direct and transitive; distinct-`void`
+> machinery is not.** The engine translates RBS `void` to **`top`**
 > ([`rbs_type_translator.rb`](../../lib/rigor/inference/rbs_type_translator.rb),
 > `RBS::Types::Bases::Void => :translate_top`), which is RBS's own definition — "They are all
 > equivalent for the type system; they are all *top type*" (`docs/syntax.md` § "`void`,
@@ -84,10 +84,15 @@ Strict dynamic modes MAY report dynamic-to-precise assignments, arguments, retur
 > `bleeding_edge:` feature because a new required diagnostic is an
 > [ADR-50](../adr/50-release-engineering-and-stability-strategy.md) WD1 compatibility change.
 >
+> The **transitive** case (a value returned through a method whose own signature declares
+> nothing) is implemented per the ADR-100 WD4 addendum: a lazy per-`def` void-tail summary,
+> consulted result-independently at the dispatch choke point, records the same `void_origins`
+> entry with the author's `-> void` leaf as the origin — a `def` admits only when the void tail
+> is its sole return path, so a method that can return anything else never fires.
+>
 > What is still **not** implemented: no `void` carrier, no generic-slot preservation, and no
-> `void | bot` normalization; the **transitive** case (a value returned through a method whose
-> own signature declares nothing) is deferred (ADR-100 WD4), as is the sibling unguarded-call-on-
-> `top` diagnostic (`static.value-use.top`, the `top` section below — no implementation yet). The
+> `void | bot` normalization; the sibling unguarded-call-on-`top` diagnostic
+> (`static.value-use.top`, the `top` section below) has no implementation yet. The
 > intent is retained per [ADR-1](../adr/1-types.md) § "Special RBS types … must be handled with
 > type-theoretic clarity rather than as ad hoc aliases".
 

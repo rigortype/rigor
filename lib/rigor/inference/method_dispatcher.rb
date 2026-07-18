@@ -8,6 +8,7 @@ require_relative "../builtins/hkt_builtins"
 require_relative "../builtins/static_return_refinements"
 require_relative "dynamic_origin"
 require_relative "flow_tracer"
+require_relative "void_tail_summary"
 require_relative "method_dispatcher/call_context"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
@@ -70,6 +71,14 @@ module Rigor
           block_type: block_type, environment: environment,
           call_node: call_node, scope: scope
         )
+        # ADR-100 WD4 — the transitive-void consult, HERE in the wrapper rather than in any result
+        # tier: which tier answers the intermediate's call depends on where the leaf's RBS came from
+        # (`RbsDispatch` on the ADR-93 synthesized `untyped` skeleton, or the post-dispatch
+        # `ExpressionTyper` body-inference tiers on a partial hand-written `sig/`), and both answers
+        # are correct types that must not change. Recording is therefore result-independent and
+        # type-blind; a statement-position record stays inert because the collector only reads value
+        # positions.
+        record_transitive_void_origin(receiver_type, method_name, call_node, scope)
         # `rigor trace` — record the dispatch outcome (resolved type, or the fail-soft `nil` the
         # caller widens to `Dynamic[Top]`).
         if FlowTracer.active?
@@ -223,6 +232,36 @@ module Rigor
           scope&.record_dynamic_origin(call_node, DynamicOrigin::INFERRED_RETURN_UNTYPED)
         end
         fallback_result
+      end
+
+      # ADR-100 WD4 — records the transitive `-> void` provenance when the called method is a
+      # discovered project `def` whose {VoidTailSummary} chain ends in an author-declared `-> void`
+      # leaf on the same owner. Guards cheapest-first: the internal dispatcher callers nil `scope` /
+      # `call_node` out; the receiver must project through {#discovered_method_lookup}
+      # (`Nominal` / `Singleton` only — unions and `Dynamic` receivers stay out); and the
+      # `discovered_method?` pre-filter (two pure hash reads) keeps the hot path at ~zero cost —
+      # only a call that provably targets a discovered def of the right kind resolves the node and
+      # consults the summary. The `Prism::CallNode` guard mirrors `collect_plugin_contributions`:
+      # the `&:symbol` block path dispatches with the `Prism::BlockArgumentNode` itself, which is
+      # never a collector value position, so recording on it would be dead weight.
+      def record_transitive_void_origin(receiver_type, method_name, call_node, scope)
+        return if scope.nil? || call_node.nil?
+        return unless call_node.is_a?(Prism::CallNode)
+
+        class_name, kind = discovered_method_lookup(receiver_type)
+        return if class_name.nil?
+        return unless scope.discovered_method?(class_name, method_name, kind)
+
+        def_node =
+          if kind == :singleton
+            scope.singleton_def_for(class_name, method_name)
+          else
+            scope.user_def_for(class_name, method_name)
+          end
+        return if def_node.nil?
+
+        origin = VoidTailSummary.new(scope).origin_for(def_node, class_name, kind)
+        scope.record_void_origin(call_node, origin) if origin
       end
 
       # v0.1.3 — discovered-method dispatch tier. `scope` carries the `discovered_methods` table

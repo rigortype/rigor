@@ -526,10 +526,13 @@ runner uses before plugins load.
 
 Public exception raised inside the loader when a plugin entry
 cannot be resolved. Carries `plugin_ref` (the offending gem name
-or plugin id) and `cause_class` (the underlying exception class,
-when applicable). The runner converts each one into a
-`Rigor::Analysis::Diagnostic` with `source_family: :plugin_loader`
-and `rule: "load-error"`.
+or plugin id), `cause_class` (the underlying exception class,
+when applicable), and `resolved_path` (the file the plugin gem
+loaded from, stamped by the loader when the `require` succeeded
+but a later configuration / instantiation step failed; nil for a
+`require` that failed outright). The runner converts each one into
+a `Rigor::Analysis::Diagnostic` with `source_family:
+:plugin_loader` and `rule: "load-error"`.
 
 ## Internal surfaces (NOT public)
 
@@ -578,7 +581,11 @@ entry does not abort the others. Each failure is collected as a
 - `rule`: `"load-error"`
 - `message`: the `LoadError`'s message (gem path / registration /
   config-schema / `#init` exception, depending on the failure
-  kind).
+  kind), suffixed with ` (loaded from <path>)` when the `require`
+  succeeded but a later step failed — so a config/init failure
+  names the exact plugin copy it loaded from; a `require` that
+  failed outright has no resolved path and the message is
+  unchanged.
 
 `rigor check` continues with the analysis; plugins that loaded
 successfully still participate in later v0.1.0 slices.

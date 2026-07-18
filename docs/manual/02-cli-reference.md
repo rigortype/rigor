@@ -411,6 +411,11 @@ Report the activation status of every plugin configured in
 `.rigor.yml` — loaded, load-error (with reason), and each
 plugin's declared extension surfaces. See [Plugins](07-plugins.md).
 
+Each loaded plugin's row also reports the resolved file it
+loaded from (a `path:` line in text, a `"path"` key in JSON), so
+if a stale installed gem is shadowing a newer checkout's bundled
+plugin copy the mismatch is visible at a glance.
+
 ```sh
 rigor plugins [--format=text|json] [--strict] [--capabilities] [--config=PATH]
 ```

@@ -123,12 +123,22 @@ module Rigor
               path: ".rigor.yml",
               line: 1,
               column: 1,
-              message: error.message,
+              message: plugin_load_error_message(error),
               severity: :error,
               rule: "load-error",
               source_family: :plugin_loader
             )
           end
+        end
+
+        # #194 slice 1 — when the require SUCCEEDED but configuration / instantiation then failed, the loader
+        # stamps the resolved file on the error; naming it here turns an engine↔plugin version skew (a stale
+        # installed `rigortype` gem shadowing a checkout's bundled plugin) into a one-line diagnosis. A
+        # require that failed outright carries no resolved path and keeps its original message.
+        def plugin_load_error_message(error)
+          return error.message if error.resolved_path.nil?
+
+          "#{error.message} (loaded from #{error.resolved_path})"
         end
 
         # ADR-10 § "Diagnostic prefix family" — surfaces gems listed in `dependencies.source_inference`

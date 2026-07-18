@@ -23,18 +23,33 @@ module Rigor
     # entries that resolve to the same gem. Failures do not abort the run; the loader collects them on the
     # {Registry} so the runner can convert each one into a `:plugin_loader` diagnostic.
     class Loader # rubocop:disable Metrics/ClassLength
-      attr_reader :services, :requirer
+      attr_reader :services, :requirer, :feature_resolver
+
+      # #194 slice 1 — resolve the file that satisfied `require <gem>` by scanning `$LOADED_FEATURES` for the
+      # entry ending in `/<gem>.rb`, LAST match preferred. Provenance-agnostic: it pins the actual file for a
+      # Bundler path gem, an installed gem, and a `-I`-injected checkout alike, and — because the feature is
+      # already present from the first load — it still resolves when `require` no-ops on a repeat in-process
+      # load (ADR-88 WD4b). Returns nil, never raises, in the degenerate cases: a gem whose entry-file
+      # basename differs from the gem name, and a spec's fake requirer that never populated `$LOADED_FEATURES`.
+      FEATURE_RESOLVER = lambda do |gem_name|
+        suffix = "/#{gem_name}.rb"
+        $LOADED_FEATURES.rfind { |feature| feature.end_with?(suffix) }
+      end
 
       # @param services [Rigor::Plugin::Services]
       # @param requirer [#call] takes a gem name and returns truthy on successful require. Defaulted to
       #   `Kernel.require` via a lambda; the spec injects a fake to avoid touching the real load path.
-      def initialize(services:, requirer: ->(name) { require name })
+      # @param feature_resolver [#call] takes a gem name and returns the absolute path `require` resolved it
+      #   to (or nil). Defaulted to {FEATURE_RESOLVER}; the spec injects a fake so it never has to mutate the
+      #   real `$LOADED_FEATURES` global.
+      def initialize(services:, requirer: ->(name) { require name }, feature_resolver: FEATURE_RESOLVER)
         @services = services
         @requirer = requirer
+        @feature_resolver = feature_resolver
       end
 
-      def self.load(configuration:, services:, requirer: ->(name) { require name })
-        new(services: services, requirer: requirer).load(configuration.plugins)
+      def self.load(configuration:, services:, requirer: ->(name) { require name }, feature_resolver: FEATURE_RESOLVER)
+        new(services: services, requirer: requirer, feature_resolver: feature_resolver).load(configuration.plugins)
       end
 
       # @param entries [Array<String, Hash>] the raw `plugins:` list from the configuration.
@@ -43,6 +58,10 @@ module Rigor
         plugins = []
         load_errors = []
         seen_ids = {}
+        # #194 slice 1 — `gem name => resolved file path` for every gem the loader successfully required.
+        # A frozen plugin instance (e.g. `rigor-rbs-inline` self-freezes per ADR-32) can't carry the path,
+        # so it rides on the Registry keyed by gem name; the `rigor plugins` loaded row reads it back.
+        @resolved_gem_paths = {}
 
         Array(entries).each_with_index do |raw, index|
           entry = normalise_entry(raw, index)
@@ -70,7 +89,8 @@ module Rigor
         load_errors.concat(sort_errors)
 
         blueprints = plugins.map { |plugin| Blueprint.new(klass_name: plugin.class.name, config: plugin.config) }
-        Registry.new(plugins: plugins, blueprints: blueprints, load_errors: load_errors)
+        Registry.new(plugins: plugins, blueprints: blueprints, load_errors: load_errors,
+                     resolved_gem_paths: @resolved_gem_paths)
       end
 
       private
@@ -110,6 +130,9 @@ module Rigor
       def resolve_and_instantiate(entry, seen_ids) # rubocop:disable Metrics/AbcSize
         before = Plugin.registered.keys.to_set
         require_gem!(entry)
+        # The require SUCCEEDED — pin the file it resolved to (nil when the resolver can't, never a raise).
+        # Recorded before the fallible steps below so a config/init failure can still name the loaded copy.
+        @resolved_gem_paths[entry[:gem]] = @feature_resolver.call(entry[:gem])
         after = Plugin.registered.keys.to_set
         newly_registered = (after - before).to_a
 
@@ -141,6 +164,13 @@ module Rigor
         plugin = instantiate(plugin_class, entry[:config])
         validate_signature_paths!(plugin)
         plugin
+      rescue LoadError => e
+        # #194 slice 1 — annotate a POST-require failure (bad config, a raising `#init`, a missing signature
+        # dir, a duplicate id, no/many registrations) with the file the gem loaded from, so the surfaced
+        # diagnostic names the exact plugin copy. A require that failed outright never populated the map for
+        # this gem, so the lookup is nil and the message is left unchanged.
+        e.resolved_path ||= @resolved_gem_paths[entry[:gem]]
+        raise
       end
 
       # ADR-25 — a plugin's manifest-declared `signature_paths:` are resolved (by

@@ -108,6 +108,13 @@ RSpec.describe Rigor::CLI::PluginsCommand do
       expect(out).to match(%r{rigor-activesupport-core-ext/sig.*\.rbs file})
     end
 
+    # #194 slice 1 — the resolved file makes an engine↔plugin version skew visible; the plugin is really
+    # required by the before-hook here, so the real `$LOADED_FEATURES` scan pins its entry file.
+    it "prints the resolved plugin file path in text" do
+      _, out, = run([])
+      expect(out).to match(%r{path: /.*rigor-activesupport-core-ext\.rb$})
+    end
+
     it "exposes the manifest fields in JSON" do
       status, out, = run(["--format", "json"])
       expect(status).to eq(0)
@@ -116,6 +123,7 @@ RSpec.describe Rigor::CLI::PluginsCommand do
       expect(plugin["status"]).to eq("loaded")
       expect(plugin["id"]).to eq("activesupport-core-ext")
       expect(plugin["signature_paths"].first).to include("rbs_files" => be > 0)
+      expect(plugin["path"]).to end_with("rigor-activesupport-core-ext.rb")
     end
   end
 
@@ -190,6 +198,15 @@ RSpec.describe Rigor::CLI::PluginsCommand do
       plugin = parsed["plugins"].first
       expect(plugin["status"]).to eq("load_error")
       expect(plugin["load_error"]).to include("rigor-this-plugin-does-not-exist")
+    end
+
+    # #194 slice 1 — a require that failed outright has no resolvable file, so the additive `path` key is
+    # present but null (never fabricated, and no $LOAD_PATH dump).
+    it "carries a null path in JSON when the require failed outright" do
+      _, out, = run(["--format", "json"])
+      plugin = JSON.parse(out)["plugins"].first
+      expect(plugin).to have_key("path")
+      expect(plugin["path"]).to be_nil
     end
   end
 

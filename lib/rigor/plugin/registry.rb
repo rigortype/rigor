@@ -215,7 +215,7 @@ module Rigor
     # Ractor. The eventual Phase 4 pool ships `blueprints` across the boundary and calls {.materialize}
     # per-Ractor; the live `plugins` carriage on the coordinator registry stays unchanged.
     class Registry
-      attr_reader :plugins, :load_errors, :blueprints, :contribution_index
+      attr_reader :plugins, :load_errors, :blueprints, :contribution_index, :resolved_gem_paths
 
       # @param plugins [Array<Rigor::Plugin::Base>] instantiated plugin instances in deterministic order.
       # @param load_errors [Array<Rigor::Plugin::LoadError>] failures surfaced during loading. Each error is
@@ -223,20 +223,17 @@ module Rigor
       # @param blueprints [Array<Rigor::Plugin::Blueprint>] frozen, Ractor-shareable replay descriptors
       #   aligned 1:1 with `plugins`. The loader fills this in; callers that construct Registry manually MAY
       #   pass `[]` and accept that {.materialize} cannot replay the set.
-      def initialize(plugins: [], load_errors: [], blueprints: [])
+      # @param resolved_gem_paths [Hash{String=>String,nil}] #194 slice 1 — `gem name => resolved file path`
+      #   for each successfully required plugin gem, so `rigor plugins` can print where a loaded (and
+      #   possibly frozen) plugin actually loaded from. Defaults to empty; a worker registry built by
+      #   {.materialize} carries none (the provenance surface runs only on the coordinator).
+      def initialize(plugins: [], load_errors: [], blueprints: [], resolved_gem_paths: {})
         @plugins = plugins.dup.freeze
         @load_errors = load_errors.dup.freeze
         @blueprints = blueprints.dup.freeze
+        @resolved_gem_paths = resolved_gem_paths.dup.freeze
         @contribution_index = ContributionIndex.new(@plugins)
-        # ADR-52 WD1 — aggregate queries the engine issues per def / per diagnostic candidate / per path are
-        # compiled once here (the registry is frozen, so the flat_map-on-every-call versions re-derived an
-        # invariant). `@contracts_by_path` is a mutable per-path memo inside the frozen registry — safe
-        # because the contract set and the glob semantics are fixed for the lifetime of the run.
-        @additional_initializers = @plugins.flat_map { |p| safe_manifest(p)&.additional_initializers || [] }.freeze
-        @open_receivers = @plugins.flat_map { |p| (safe_manifest(p)&.open_receivers || []).map(&:to_s) }.uniq.freeze
-        @open_receivers_set = @open_receivers.to_set.freeze
-        @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
-        @contracts_by_path = {}
+        compile_aggregates
         # ADR-52 WD4 — the single engine-owned node-rule walk, compiled once per run from the node-rule
         # plugin subset (registry order). The runner reuses it for every file; it builds fresh per-file
         # state internally, so it is safe to freeze and share.
@@ -371,6 +368,18 @@ module Rigor
       private_constant :FNMATCH_FLAGS
 
       private
+
+      # ADR-52 WD1 — aggregate queries the engine issues per def / per diagnostic candidate / per path are
+      # compiled once at construction (the registry is frozen, so the flat_map-on-every-call versions
+      # re-derived an invariant). `@contracts_by_path` is a mutable per-path memo inside the frozen registry
+      # — safe because the contract set and the glob semantics are fixed for the lifetime of the run.
+      def compile_aggregates
+        @additional_initializers = @plugins.flat_map { |p| safe_manifest(p)&.additional_initializers || [] }.freeze
+        @open_receivers = @plugins.flat_map { |p| (safe_manifest(p)&.open_receivers || []).map(&:to_s) }.uniq.freeze
+        @open_receivers_set = @open_receivers.to_set.freeze
+        @protocol_contracts = @plugins.flat_map { |p| safe_protocol_contracts(p) }.freeze
+        @contracts_by_path = {}
+      end
 
       def path_matches_glob?(glob, path)
         File.fnmatch?(glob, path, FNMATCH_FLAGS) ||

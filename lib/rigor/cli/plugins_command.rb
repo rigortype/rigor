@@ -170,7 +170,10 @@ module Rigor
         end
 
         if plugin
-          loaded_row(plugin, gem_name, config)
+          # #194 slice 1 — a loaded plugin's resolved file rides on the registry keyed by gem name (the
+          # frozen plugin instance can't carry it). nil when the gem's entry-file basename differs from its
+          # name, or the resolver couldn't pin it.
+          loaded_row(plugin, gem_name, config, registry.resolved_gem_paths[gem_name])
         else
           # Find the load error whose plugin_ref names this entry (the ref is set by Loader to the gem name on require
           # failures and to the manifest id on later failures).
@@ -190,9 +193,10 @@ module Rigor
         [derived_id, gem_name].include?(plugin.manifest.id)
       end
 
-      def loaded_row(plugin, gem_name, config)
+      def loaded_row(plugin, gem_name, config, resolved_path)
         manifest = plugin.manifest
         identity_fields(gem_name, manifest, config)
+          .merge(path: resolved_path)
           .merge(extension_fields(plugin, manifest))
           .merge(narrow_protocol_fields(plugin))
           .merge(load_error: nil)
@@ -252,6 +256,9 @@ module Rigor
           id: entry_id,
           version: nil,
           description: nil,
+          # #194 slice 1 — set only when the require SUCCEEDED but a later step failed (the loader stamps the
+          # file on the error); a require that failed outright has no resolvable file, so this stays nil.
+          path: error&.resolved_path,
           config: config,
           signature_paths: [],
           open_receivers: [],
@@ -332,6 +339,7 @@ module Rigor
             id: nil,
             version: nil,
             description: nil,
+            path: error.resolved_path,
             config: {},
             signature_paths: [],
             open_receivers: [], owns_receivers: [], produces: [], consumes: [],

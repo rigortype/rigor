@@ -451,4 +451,86 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors.map(&:message)).to include(/signature path .* not a directory/)
     end
   end
+
+  # #194 slice 1 — the loader pins the file each successfully-required gem loaded from (via the injectable
+  # `feature_resolver` seam, so these specs never touch the real `$LOADED_FEATURES`) and threads it onto the
+  # registry / the surfaced LoadError, so an engine↔plugin version skew is diagnosable at a glance.
+  describe "resolved plugin file paths (#194 slice 1)" do
+    let(:plugins) { ["rigor-alpha"] }
+
+    def register_alpha_requirer
+      lambda { |_name|
+        Rigor::Plugin.register(plugin_class_a)
+        true
+      }
+    end
+
+    it "records the file the gem require resolved to, keyed by gem name" do
+      resolver = ->(gem) { "/fake/gems/#{gem}/lib/#{gem}.rb" }
+
+      registry = described_class.load(
+        configuration: configuration, services: services,
+        requirer: register_alpha_requirer, feature_resolver: resolver
+      )
+
+      expect(registry.ids).to eq(["alpha"])
+      expect(registry.resolved_gem_paths).to eq("rigor-alpha" => "/fake/gems/rigor-alpha/lib/rigor-alpha.rb")
+    end
+
+    it "degrades to a nil path when the resolver cannot pin the file, without failing the load" do
+      resolver = ->(_gem) {}
+
+      registry = described_class.load(
+        configuration: configuration, services: services,
+        requirer: register_alpha_requirer, feature_resolver: resolver
+      )
+
+      expect(registry.ids).to eq(["alpha"])
+      expect(registry.load_errors).to be_empty
+      expect(registry.resolved_gem_paths).to have_key("rigor-alpha")
+      expect(registry.resolved_gem_paths.fetch("rigor-alpha")).to be_nil
+    end
+
+    it "stamps the resolved path on a post-require failure so the diagnostic can name the loaded copy" do
+      bomb_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "bomb", version: "0.1.0")
+      end
+      bomb_class.define_method(:init) { |_| raise "kaboom" }
+      stub_const("FakeBombPathPlugin", bomb_class)
+      requirer = lambda { |_name|
+        Rigor::Plugin.register(bomb_class)
+        true
+      }
+      resolver = ->(gem) { "/checkout/plugins/#{gem}/lib/#{gem}.rb" }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("plugins" => ["rigor-bomb"])
+      )
+      services = Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection, type: Rigor::Type::Combinator, configuration: configuration
+      )
+
+      registry = described_class.load(
+        configuration: configuration, services: services, requirer: requirer, feature_resolver: resolver
+      )
+
+      error = registry.load_errors.first
+      expect(error.message).to include("raised during init")
+      expect(error.resolved_path).to eq("/checkout/plugins/rigor-bomb/lib/rigor-bomb.rb")
+    end
+
+    it "leaves resolved_path nil on a require that failed outright — there is no file to name" do
+      requirer = ->(_name) { raise LoadError, "cannot load such file -- rigor-alpha" }
+      # A resolver that WOULD hand back a path is never consulted, because the require never succeeded.
+      resolver = ->(gem) { "/should/not/be/used/#{gem}.rb" }
+
+      registry = described_class.load(
+        configuration: configuration, services: services, requirer: requirer, feature_resolver: resolver
+      )
+
+      error = registry.load_errors.first
+      expect(error.message).to include('could not load plugin gem "rigor-alpha"')
+      expect(error.resolved_path).to be_nil
+      expect(registry.resolved_gem_paths).to be_empty
+    end
+  end
 end

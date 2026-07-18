@@ -1,9 +1,11 @@
 # ADR-93 — Default rbs-inline ingestion: reconciling ADR-32's opt-in with the always-parse spec
 
-Status: **Proposed, 2026-07-16 — WD4's first measurement ran the same day; it found and
-fixed one blocker and reshaped WD1/WD2 (see § "WD4 — first measurement").** The default
-flips themselves remain unimplemented. The divergence this reconciles is marked in
-[`overview.md`](../type-specification/overview.md) § "Compatibility hierarchy" per
+Status: **Accepted, 2026-07-18.** Proposed 2026-07-16; WD4's first measurement ran the same
+day (§ "WD4 — first measurement"), and all three working decisions have since landed: WD1's
+default flip ([#186](https://github.com/rigortype/rigor/pull/186)), WD2's `Configuration.load`
+auto-wire with the `enabled: false` opt-out, and WD3's `rbs.coverage.inline-annotations-unsynthesized`
+routing hint. The `overview.md` § "Compatibility hierarchy" marker now records the resolved
+state (conforming wherever `rbs-inline` is present; the standalone residual carried by WD3) per
 [ADR-92](92-normative-status-fidelity.md).
 
 Grounding: [`docs/notes/20260716-dspec-formal-spec-substrate-evaluation.md`](../notes/20260716-dspec-formal-spec-substrate-evaluation.md)
@@ -52,44 +54,59 @@ accepted signature over body inference, the skeleton *replaced* real inferred ty
 carries an annotation, detected with upstream's own `AnnotationParser` (not a regexp — the
 grammar stays upstream's per ADR-32 WD3) and filtered for RDoc directives, since upstream
 reads `class Foo #:nodoc:` as a type assertion. All four annotation-free corpora are now
-byte-identical under the mode. **Remaining:** flip the plugin default to that mode — a
-diagnostic strengthening [ADR-50](50-release-engineering-and-stability-strategy.md) allows in
-a minor (output is non-contract; the baseline absorbs), with the per-file `# rbs_inline:
-disabled` escape intact and the old behaviour one config line away. ADR-32 WD2's
+byte-identical under the mode. **Landed** ([#186](https://github.com/rigortype/rigor/pull/186)):
+the plugin default is now that mode — a diagnostic strengthening
+[ADR-50](50-release-engineering-and-stability-strategy.md) allows in a minor (output is
+non-contract; the baseline absorbs), with the per-file `# rbs_inline: disabled` escape intact
+and the old behaviour one config line away (`require_magic_comment: true`). ADR-32 WD2's
 upstream-alignment rationale does not survive contact with a binding MUST NOT — but note the
 mode is deliberately NOT upstream-verbatim in the other direction either: upstream's opt-out
 generates signatures for unannotated code, and the spec asks Rigor to honour annotations
 *whenever present*, not to manufacture untyped shadows.
 
-**WD1a — the flip is blocked on a root fix, per the ADR-57 protocol.** With the gate landed,
-herb still gains 4 `call.possible-nil-receiver` in the mode — adjudicated in § "WD4 — first
-measurement" as a pre-existing `Regexp.last_match` imprecision that `sig/`'s `-> untyped` had
-masked, not something the annotations cause. The protocol says an artifact is fixed at root
-before the change that surfaces it lands, so match-success narrowing for `Regexp.last_match`
-is a prerequisite of the default flip, not a follow-up.
+**WD1a — the flip was blocked on a root fix, per the ADR-57 protocol; both have landed.** With
+the gate landed, herb still gained 4 `call.possible-nil-receiver` in the mode — adjudicated in
+§ "WD4 — first measurement" as a pre-existing `Regexp.last_match` imprecision that `sig/`'s
+`-> untyped` had masked, not something the annotations cause. The protocol says an artifact is
+fixed at root before the change that surfaces it lands, so match-success narrowing for
+`Regexp.last_match` (#172) shipped first; with it in place the default flip (#186) landed and
+the corpus re-measured clean (herb keeps its −3 wins and gains no `possible-nil-receiver`).
 
-**WD2 — default-wire the bundled plugin, presence-gated.** When the upstream `rbs-inline`
-library is resolvable — in Rigor's own environment or through the analyzed project's bundle
-per [ADR-90](90-target-library-resolution-from-project-bundle.md)'s fallback — the bundled
-plugin activates without a `plugins:` entry, in WD1's conforming (annotation-gated) mode.
-The gate is what makes this affordable: a project with no annotations pays a comment scan and
-contributes nothing, so default-wiring cannot regress it. This deliberately
+**WD2 — default-wire the bundled plugin, presence-gated. Landed.** When the upstream
+`rbs-inline` library is resolvable — in Rigor's own environment or through the analyzed
+project's bundle per [ADR-90](90-target-library-resolution-from-project-bundle.md)'s fallback —
+the bundled plugin activates without a `plugins:` entry, in WD1's conforming (annotation-gated)
+mode. The gate is what makes this affordable: a project with no annotations pays a comment scan
+and contributes nothing, so default-wiring cannot regress it. This deliberately
 reverses [ADR-27](27-tool-distribution-model.md)/[ADR-31](31-contribution-and-supply-chain-policy.md)'s
 auto-load deferral for **one bundled plugin**, on three grounds recorded here: the spec
 binds; the executed code is the already-bundled plugin plus its declared upstream dependency
 (not arbitrary third-party plugin code — the case the deferral guards); and the gate is
 [ADR-72](72-gemfile-lock-gated-rbs-overlays.md)'s shape, keyed on what is actually on disk.
-Opt-out surface: project-level (a `plugins:` entry disabling it — exact shape open, the
-plugin-entry schema has no `enabled:` key today) and per-file (`# rbs_inline: disabled`).
+Implementation: the injection lives at `Configuration.load` (the real-project route only, so a
+bare `Configuration.new` never auto-wires), gated on a side-effect-free
+`Gem::Specification.find_by_name("rbs-inline")` probe, appended after the user's own entries and
+skipped when they already list the plugin by gem name or manifest id. Opt-out surface:
+project-level via a `plugins:` entry with `enabled: false` (the maintainer-chosen shape, now a
+first-class `pluginEntry` key in [`schemas/rigor-config.schema.json`](../../schemas/rigor-config.schema.json)
+per [ADR-99](99-config-schema-authority.md); the loader skips such an entry entirely)
+and per-file (`# rbs_inline: disabled`).
 
-**WD3 — the standalone residual.** A bare `gem install rigortype` has no `rbs-inline`
-library anywhere, and "always parsed whenever present" cannot be satisfied without one. The
-honest options: (i) promote `rbs-inline` to a core runtime dependency — its dependency
-closure is `prism` + `rbs`, both already required, but it adds a versioned surface and
-contradicts [ADR-0](0-concept.md)'s zero-dep stance; (ii) keep the residual marked in
-`overview.md` and emit a routing hint (an `rbs.coverage.*`-style `:info`) when
-annotation-shaped comments are seen with no synthesizer available. Deferred to the WD4
-measurement; (ii) is the conservative default.
+**WD3 — the standalone residual. Resolved via option (ii).** A bare `gem install rigortype`
+has no `rbs-inline` library anywhere, and "always parsed whenever present" cannot be satisfied
+without one. The honest options were: (i) promote `rbs-inline` to a core runtime dependency —
+its dependency closure is `prism` + `rbs`, both already required, but it adds a versioned
+surface and contradicts [ADR-0](0-concept.md)'s zero-dep stance; (ii) keep the residual marked
+in `overview.md` and emit a routing hint. **(ii) shipped:** the
+`rbs.coverage.inline-annotations-unsynthesized` `:info` fires when the library is absent
+(so the WD2 auto-wire could not activate it) *and* the project actually carries an
+annotation-shaped comment. Detection is a deliberately coarse routing heuristic in the
+diagnostic aggregator — `# @rbs` and `#:` immediately followed by the start of an RBS type,
+excluding RDoc directives — never the upstream grammar, which is precisely what is unavailable
+in this case; it is FP-safe because a project with no real annotations stays silent, and the
+hint is suppressed the moment the library resolves (so the deliberate `enabled: false` opt-out,
+which resolves, is never nagged). The diagnostic id is normative in
+[diagnostic-policy.md](../type-specification/diagnostic-policy.md).
 
 **WD4 — measurement gate before any default flips.** A corpus sweep with WD1+WD2 active:
 count files carrying annotation-shaped comments without the magic comment, and adjudicate
@@ -189,8 +206,12 @@ green.
   and the user report ask for.
 - Negative / cost: a behaviour-changing default (bounded by WD4's adjudication + the
   baseline); a recorded partial reversal of the ADR-27/31 deferral; WD3's residual keeps a
-  marker alive until resolved.
-- Carry-over: the opt-out schema for default-wired plugins (WD2); the WD3 choice.
+  marker alive (the `:info` hint routes around it, but a standalone install still cannot read
+  annotations until the user installs the library).
+- Carry-over: none open. The opt-out schema for default-wired plugins (WD2) landed as the
+  `enabled:` `pluginEntry` key; the WD3 choice landed as option (ii). ADR-94's rbs-4.0
+  `RBS::InlineParser` migration, which would retire WD2/WD3 entirely, stays deferred behind the
+  rbs 3.x floor.
 
 ## Relationship to other ADRs
 

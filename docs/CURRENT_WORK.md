@@ -5,11 +5,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   Anything that would outlive two sessions does not belong here: backlog → a GitHub issue
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
-- Verify a claim before carrying it forward. Recent saves: the #162 tier attribution was a
-  plugin-blind `rigor type-of` artifact (fixed at root by #196); the "provenance-quality next
-  iteration" idea was already adjudicated spent by ADR-82's own Consequences; and the WD6
-  trans-method taint concern was discharged by a direct probe (param-sourced ivars stay Dynamic —
-  no FP surface, no hardening slice needed).
+- Verify a claim before carrying it forward. This cut's own lesson: the release-gate perf failure
+  read like a regression but was legitimate feature drift (54 merges after a mid-cycle baseline) —
+  confirmed by an FP-clean OSS sweep before the baseline was recalibrated, not blessed blind.
 -->
 
 # Current Work — Session Handoff
@@ -20,54 +18,40 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **The 2026-07-19 survey iteration ("typing gaps → engine improvement → perf verification") is
-  complete: two engine slices + a perf follow-up landed.** A three-codebase protection scout (mastodon, redmine, rails core;
-  raw JSON in the session scratchpad, conclusions in the ADR addenda) established that ADD_RBS is
-  ~1-2% everywhere, `unsupported_syntax` is a catch-all (not real syntax gaps), and the dominant
-  correctly-attributed engine gap is untyped params + param-sourced ivars.
-  - **PR #201** (merged) — ADR-58 WD5: constructor massign ivar targets now credit `init_writes`,
-    removing a spurious declaration-sourced `nil` that masked typed massign ivars. Corpus
-    byte-identical; +21 protected sites (mastodon models +7, redmine app +14); perf flat.
-    `||=` seeding measured and deferred with reason (zero protection movement).
-  - **PR #202** (merged) — ADR-67 WD6: check-walk activation of call-site parameter inference
-    behind the opt-in `parameter_inference:` config (off by default). Inferred-param provenance
-    mark guards ALL negative in-body rules (3-piece guard: syntactic root-walk, sticky local
-    taint, union join). Gate-off byte-identical + zero cost; gate-on zero new firings on six
-    corpus targets + one genuine redmine FP removed; **+46 (mastodon models) / +110 (redmine app)
-    protected sites**; opt-in price ≈0.9s pre-pass — why the default stays off (ADR-50 gates any
-    flip).
-  - **PR #203** (merged) — the pre-pass perf pass. Profile verdict: the price is **≈98%
-    `ScopeIndexer.index`** (the per-file flow-sensitive scope build the collector must read),
-    irreducible without seed-sharing or forced parallelism; the one justified lever (73% of Rails
-    call sites name a method no user `def` declares → skip receiver typing) trimmed +40%→+32% wall,
-    −8% allocs, table byte-identical. Recorded in ADR-67 WD6.
-- **#162 and #194 are DONE and closed** (earlier today): transitive `static.value-use.void` via
-  `VoidTailSummary` (ADR-100 WD4 addendum, PRs #195), probe environment parity (#196), and the
-  auto-wire version-skew guard (ADR-93 WD5, PRs #197/#198/#200 — remember: merge stacked PRs
-  bottom-up; #199's mis-merge was re-landed as #200).
-- **v0.3.0 milestone: only #121 (demand-gated folds, non-blocker) remains open.** The user has
-  started launch prep (`d88effca`, website-showcase inference-example inventory note).
-- `make verify` / `make docs-check` clean on the post-merge master.
+- **v0.3.0 is released** (2026-07-19): tag `v0.3.0`, RubyGems, and the GitHub Release are all live;
+  master is at the merged release commit and `CHANGELOG.md` `[Unreleased]` is empty. The cut sealed
+  75+ entries (perf-arc-led summary), bumped the version, and **recalibrated `bench/baseline.json`**
+  for the cut — the release-gate perf failure was legitimate default-on feature drift
+  (`lib` self-check allocations 22.24M → 32.40M across ~54 post-baseline merges, chiefly the #101
+  default rules and #102 Hash/Kernel typing), FP-clean on the OSS Mastodon sweep.
+- **The 2026-07-19 survey iteration shipped inside v0.3.0**: #162 transitive `static.value-use.void`
+  (`VoidTailSummary`), #194 auto-wire version-skew guard (ADR-93 WD5, three slices), probe/check
+  environment parity (#196), ADR-58 massign ivar seeding (#201), and ADR-67 WD6 opt-in call-site
+  parameter inference (#202) + its pre-pass perf pass (#203). Net protection lift +198 sites, zero
+  new false positives.
+- `make verify` / `make docs-check` clean on master.
 
-## Next session — the release seal (the launch prep signal makes this the move)
+## Next session — the v0.4.x backlog (all filed as issues)
 
-`[Unreleased]` holds **75** entries and the user is drafting v0.3.0 launch material. Run
-`rigor-release-prep` up to (not including) the version bump and present the seal for approval;
-version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence, single-digit version
-components).
+Nothing is release-blocking; pick by interest. Effort-ordered:
 
-## Queued iteration follow-ups (after the release, demand-gated)
-
-- **ADR-46 edge wiring for `parameter_inference:`** — lift the WD6c `--incremental` mutual
-  exclusion by recording caller→callee-param cross-file edges.
-- **WD6 default-on** — an ADR-50 decision on accumulated evidence (mutation-oracle honesty check
-  included); not before.
-- (WD6 pre-pass cost was addressed in #203; the residual is index-build-bound, above.)
+- **[#207](https://github.com/rigortype/rigor/issues/207)** (`ready-for-agent`, area:perf) — fold the
+  five #101 standalone diagnostic-rule walks into the shared `RuleWalk` so the tree is walked once,
+  recovering part of the v0.3.0 allocation drift. Byte-identical-diagnostics refactor; recalibrate
+  the baseline down after. The cleanest agent-ready slice.
+- **[#204](https://github.com/rigortype/rigor/issues/204)** (`ready-for-human`, area:engine) — wire
+  ADR-46 cross-file caller→callee-param edges so `parameter_inference:` composes with `--incremental`
+  (lifts the WD6c mutual exclusion). Needs the edge-recording design call.
+- **[#205](https://github.com/rigortype/rigor/issues/205)** (`ready-for-human`, area:engine) — decide
+  whether to flip `parameter_inference:` on by default (ADR-50 gate; needs accumulated protection
+  evidence + a mutation-oracle honesty check on the WD6b guard). Not before the evidence exists.
+- **#121** — ongoing FP-safe builtin/stdlib folds (demand-gated).
 
 ## Also open, lower priority
 
-- **#121** — ongoing FP-safe builtin/stdlib folds.
-- `static.value-use.top`, `static.incomplete-inference.*` (ADR-100/ADR-41/#158) stay reserved.
+- `static.value-use.top`, `static.incomplete-inference.*` (ADR-100 / ADR-41 / #158) stay reserved.
+- The next release (`0.3.1`) is the first to trigger the CHANGELOG archival rule — it moves the
+  `0.2.x` cycle into `docs/CHANGELOG-0.2.x.md` (the `rigor-release-prep` skill has the procedure).
 
 ## Waiting on the user / external
 

@@ -5,10 +5,11 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   Anything that would outlive two sessions does not belong here: backlog → a GitHub issue
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
-- Verify a claim before carrying it forward. Two recent saves: #194's "auto-wire regresses in-source
-  inference" was withdrawn once root-caused (an installed-gem/checkout plugin version skew, not an
-  engine bug), and the #162 tier attribution in an early memory was a `rigor type-of` artifact —
-  since fixed at the root by #196, which gave the probes check's plugin-aware environment.
+- Verify a claim before carrying it forward. Recent saves: the #162 tier attribution was a
+  plugin-blind `rigor type-of` artifact (fixed at root by #196); the "provenance-quality next
+  iteration" idea was already adjudicated spent by ADR-82's own Consequences; and the WD6
+  trans-method taint concern was discharged by a direct probe (param-sourced ivars stay Dynamic —
+  no FP surface, no hardening slice needed).
 -->
 
 # Current Work — Session Handoff
@@ -19,41 +20,50 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **#162 is DONE and closed.** The ADR-100 WD4 addendum (`2ffa3b40`) named the two serving tiers and
-  the mechanism; PR #195 (merged, `2c7b68e5`) implemented it: transitive `static.value-use.void` via
-  the lazy, pure, per-def `Inference::VoidTailSummary`, consulted result-independently from the
-  `MethodDispatcher.dispatch` wrapper. Corpus gate mail/kramdown/haml/liquid byte-identical, zero new
-  bleeding-edge firings; still behind `use-of-void-value` (off by default). Promotion to a default
-  profile is a separate, evidence-gated decision (ADR-50 WD1).
-- **PR #196 (merged, `48a26c20`) fixed the probe/check environment asymmetry** that had misled the
-  #162 design: `type-of` / `type-scan` / `trace` / `annotate` now build the plugin-aware environment
-  through `CLI::ProbeEnvironment` (loader-only — no producer-plugin pre-pass), so probes see ADR-93
-  auto-wire synthesis. `coverage_scan` was deliberately left (measurement surface, baselines would
-  shift).
-- **#194 is DONE and closed.** The user chose the uniform rule — ALL engine-bundled plugins anchor
-  to the engine — recorded as the ADR-93 WD5 addendum (`8e75fa9f`) and landed as three slices:
-  **#197** resolved-path visibility in `rigor plugins` + load-error diagnostics (new
-  `Registry#resolved_gem_paths` public reader), **#198** the fix (`Loader.bundled_plugin_path`
-  engine-anchored require, gem-name fallback, `requirer` seam widened to name-or-path), and
-  **#200** the `doctor` `plugin_skew` check (re-land of #199, whose stacked merge landed on its
-  base branch instead of master — merge stacked PRs bottom-up, or after base retarget). The doctor
-  check reports at `:warn`, a deliberate deviation from #116's `:fail` (path comparison is fuzzier
-  than a lockfile parse); flipping is one line if ever wanted.
-- **v0.3.0 milestone: only #121 (ongoing demand-gated folds, not a blocker) remains open.**
-- `make verify` / `make docs-check` clean on the post-merge master; master and `origin/master` agree.
+- **The 2026-07-19 survey iteration ("typing gaps → engine improvement → perf verification") is
+  complete: two slices landed.** A three-codebase protection scout (mastodon, redmine, rails core;
+  raw JSON in the session scratchpad, conclusions in the ADR addenda) established that ADD_RBS is
+  ~1-2% everywhere, `unsupported_syntax` is a catch-all (not real syntax gaps), and the dominant
+  correctly-attributed engine gap is untyped params + param-sourced ivars.
+  - **PR #201** (merged) — ADR-58 WD5: constructor massign ivar targets now credit `init_writes`,
+    removing a spurious declaration-sourced `nil` that masked typed massign ivars. Corpus
+    byte-identical; +21 protected sites (mastodon models +7, redmine app +14); perf flat.
+    `||=` seeding measured and deferred with reason (zero protection movement).
+  - **PR #202** (merged) — ADR-67 WD6: check-walk activation of call-site parameter inference
+    behind the opt-in `parameter_inference:` config (off by default). Inferred-param provenance
+    mark guards ALL negative in-body rules (3-piece guard: syntactic root-walk, sticky local
+    taint, union join). Gate-off byte-identical + zero cost; gate-on zero new firings on six
+    corpus targets + one genuine redmine FP removed; **+46 (mastodon models) / +110 (redmine app)
+    protected sites**; opt-in price ≈0.9s pre-pass (+40% wall on mastodon models) — why the
+    default stays off (ADR-50 gates any flip).
+- **#162 and #194 are DONE and closed** (earlier today): transitive `static.value-use.void` via
+  `VoidTailSummary` (ADR-100 WD4 addendum, PRs #195), probe environment parity (#196), and the
+  auto-wire version-skew guard (ADR-93 WD5, PRs #197/#198/#200 — remember: merge stacked PRs
+  bottom-up; #199's mis-merge was re-landed as #200).
+- **v0.3.0 milestone: only #121 (demand-gated folds, non-blocker) remains open.** The user has
+  started launch prep (`d88effca`, website-showcase inference-example inventory note).
+- `make verify` / `make docs-check` clean on the post-merge master.
 
-## Next session — the release seal
+## Next session — the release seal (the launch prep signal makes this the move)
 
-`[Unreleased]` holds **73** entries. Run `rigor-release-prep` up to (not including) the version
-bump and present the seal for approval; version bumps + `rake release` stay user-gated
-(AGENTS.md § Release Cadence, single-digit version components — `0.2.x`'s successor planning is
-recorded there).
+`[Unreleased]` holds **75** entries and the user is drafting v0.3.0 launch material. Run
+`rigor-release-prep` up to (not including) the version bump and present the seal for approval;
+version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence, single-digit version
+components).
+
+## Queued iteration follow-ups (after the release, demand-gated)
+
+- **ADR-46 edge wiring for `parameter_inference:`** — lift the WD6c `--incremental` mutual
+  exclusion by recording caller→callee-param cross-file edges.
+- **WD6 pre-pass cost** — the 0.9s collector round on mastodon models is the opt-in price;
+  worth a perf pass only if adoption demands it.
+- **WD6 default-on** — an ADR-50 decision on accumulated evidence (mutation-oracle honesty check
+  included); not before.
 
 ## Also open, lower priority
 
-- **#121** — ongoing FP-safe builtin/stdlib folds (demand-gated, not a release blocker).
-- The `static.value-use.top` sibling diagnostic and the `static.incomplete-inference.*` budget ids
-  stay reserved (ADR-100 / ADR-41 / #158) — do not start them without a demand signal.
+- **#121** — ongoing FP-safe builtin/stdlib folds.
+- `static.value-use.top`, `static.incomplete-inference.*` (ADR-100/ADR-41/#158) stay reserved.
 
 ## Waiting on the user / external
 
@@ -61,7 +71,5 @@ recorded there).
 - **Publish the staged `ruby/rbs` upstream fix** — branch `widen-strscan-resolv-stdlib-sigs` in
   `references/rbs`; push + upstream PR are the user's action. Tracked as #159.
 - The upstream `rbs-inline` RDoc fix ([soutaro/rbs-inline#249](https://github.com/soutaro/rbs-inline/pull/249))
-  is open under the user's fork; nothing to do repo-side until upstream responds.
-- **rigor-rs:** `rigor_rs.ruby` is reserved in our schema (ADR-99). Its harness re-pinned the oracle
-  onto the checkout plugin path (rigor-rs PR #29) and its re-run battery came back clean; with WD5
-  merged the engine now anchors itself, so ad-hoc probes are safe too.
+  is open under the user's fork.
+- **rigor-rs:** `rigor_rs.ruby` reserved in our schema (ADR-99); harness re-pinned, battery clean.

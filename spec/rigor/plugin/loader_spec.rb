@@ -310,8 +310,12 @@ RSpec.describe Rigor::Plugin::Loader do
     let(:plugins) { %w[rigor-actionpack rigor-activerecord] }
 
     def consumer_first_requirer
-      lambda { |name|
-        case name
+      # #194 slice 2 — `rigor-actionpack` / `rigor-activerecord` are both bundled plugins, so the loader now
+      # hands the requirer their engine-anchored absolute paths, not the bare gem names. `File.basename(…,
+      # ".rb")` recovers the gem name from either form (a bare name is returned unchanged), modelling
+      # `Kernel.require`, which accepts name-or-path alike.
+      lambda { |arg|
+        case File.basename(arg, ".rb")
         when "rigor-actionpack" then Rigor::Plugin.register(consumer_class)
         when "rigor-activerecord" then Rigor::Plugin.register(producer_class)
         end
@@ -531,6 +535,109 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(error.message).to include('could not load plugin gem "rigor-alpha"')
       expect(error.resolved_path).to be_nil
       expect(registry.resolved_gem_paths).to be_empty
+    end
+  end
+
+  # #194 slice 2 (ADR-93 WD5) — a `plugins:` entry naming a plugin the engine itself bundles is required BY
+  # ITS ENGINE-ANCHORED ABSOLUTE PATH, never by gem name, so a stale installed `rigortype` gem can never
+  # displace the engine's own versioned copy through RubyGems name resolution. Every other gem keeps today's
+  # bare-name require. WD5 records the spec-level requirer-argument proof as the acceptance: reproducing the
+  # real stale-gem skew is out of proportion and no-ops under Bundler (`Gem.paths` manipulation is inert).
+  describe ".bundled_plugin_path" do
+    # `rigor-rbs-inline` is the WD5-central bundled plugin (the ADR-93 auto-wire default); any bundled gem
+    # would do. The expected path is derived the same way the loader derives it, so the assertion holds
+    # wherever the checkout lives.
+    let(:bundled_gem) { "rigor-rbs-inline" }
+    let(:anchored) { File.join(described_class::ENGINE_ROOT, "plugins", bundled_gem, "lib", "#{bundled_gem}.rb") }
+
+    it "returns the engine-anchored absolute path of a plugin the engine bundles" do
+      expect(described_class.bundled_plugin_path(bundled_gem)).to eq(anchored)
+      expect(File.file?(described_class.bundled_plugin_path(bundled_gem))).to be(true)
+    end
+
+    it "returns nil for a gem the engine does not bundle (a third-party / project-bundle plugin)" do
+      expect(described_class.bundled_plugin_path("rigor-nonexistent-xyz")).to be_nil
+    end
+  end
+
+  describe "engine-anchored bundled-plugin resolution (#194 slice 2)" do
+    let(:bundled_gem) { "rigor-rbs-inline" }
+    let(:anchored) { File.join(described_class::ENGINE_ROOT, "plugins", bundled_gem, "lib", "#{bundled_gem}.rb") }
+
+    def config_for(plugins)
+      Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("plugins" => plugins))
+    end
+
+    def services_for(configuration)
+      Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection, type: Rigor::Type::Combinator, configuration: configuration
+      )
+    end
+
+    def capturing_requirer(sink)
+      lambda { |arg|
+        sink << arg
+        Rigor::Plugin.register(plugin_class_a)
+        true
+      }
+    end
+
+    # (a) A bundled-name entry hands the requirer the anchored ABSOLUTE PATH, not the gem name.
+    it "requires a bundled plugin by its engine-anchored absolute path" do
+      received = []
+      configuration = config_for([bundled_gem])
+
+      registry = described_class.load(
+        configuration: configuration, services: services_for(configuration),
+        requirer: capturing_requirer(received)
+      )
+
+      expect(received).to eq([anchored])
+      expect(registry.load_errors).to be_empty
+    end
+
+    # (b) A gem the engine does not bundle keeps today's bare-name require, unchanged.
+    it "requires a non-bundled gem by its bare name" do
+      received = []
+      configuration = config_for(["rigor-alpha"])
+      expect(described_class.bundled_plugin_path("rigor-alpha")).to be_nil
+
+      described_class.load(
+        configuration: configuration, services: services_for(configuration),
+        requirer: capturing_requirer(received)
+      )
+
+      expect(received).to eq(["rigor-alpha"])
+    end
+
+    # (c) When the engine's bundled copy is absent (a trimmed ADR-27 packaging), the loader falls back to the
+    #     bare gem name so no install mode regresses — even for a gem the engine normally bundles.
+    it "falls back to the bare gem name when the anchored file is absent" do
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:file?).with(anchored).and_return(false)
+      received = []
+      configuration = config_for([bundled_gem])
+
+      described_class.load(
+        configuration: configuration, services: services_for(configuration),
+        requirer: capturing_requirer(received)
+      )
+
+      expect(received).to eq([bundled_gem])
+    end
+
+    # (d) Slice-1 interplay: an absolute-path require's `$LOADED_FEATURES` entry still ends in `/<gem>.rb`,
+    #     the suffix FEATURE_RESOLVER matches — so anchoring does not break slice 1's resolved-path capture.
+    it "anchors to a path the slice-1 feature resolver still pins" do
+      expect(anchored).to end_with("/#{bundled_gem}.rb")
+
+      # Probe the real FEATURE_RESOLVER against an absolute-path entry, with a synthetic gem name so the real
+      # `$LOADED_FEATURES` is never left mutated for a plugin the suite might genuinely have loaded.
+      probe_path = "/fake/gems/rigor-anchor-probe/lib/rigor-anchor-probe.rb"
+      $LOADED_FEATURES.push(probe_path)
+      expect(described_class::FEATURE_RESOLVER.call("rigor-anchor-probe")).to eq(probe_path)
+    ensure
+      $LOADED_FEATURES.delete(probe_path)
     end
   end
 end

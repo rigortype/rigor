@@ -36,9 +36,18 @@ module Rigor
         $LOADED_FEATURES.rfind { |feature| feature.end_with?(suffix) }
       end
 
+      # #194 slice 2 (ADR-93 WD5) — the engine's own root, anchored from THIS file's location: the loader
+      # lives at `<root>/lib/rigor/plugin/loader.rb`, so three levels up is the engine root. It resolves
+      # identically in a git checkout and inside an installed `rigortype` gem, because the gem packages the
+      # `plugins/` tree at the same relative path — which is exactly what makes it a trustworthy anchor for
+      # the engine's own bundled plugin copies.
+      ENGINE_ROOT = File.expand_path("../../..", __dir__)
+
       # @param services [Rigor::Plugin::Services]
-      # @param requirer [#call] takes a gem name and returns truthy on successful require. Defaulted to
-      #   `Kernel.require` via a lambda; the spec injects a fake to avoid touching the real load path.
+      # @param requirer [#call] takes a gem name OR an absolute file path (#194 slice 2 — a bundled plugin is
+      #   required by its {.bundled_plugin_path}) and returns truthy on successful require. Defaulted to
+      #   `Kernel.require` via a lambda, which accepts both forms; the spec injects a fake to avoid touching
+      #   the real load path.
       # @param feature_resolver [#call] takes a gem name and returns the absolute path `require` resolved it
       #   to (or nil). Defaulted to {FEATURE_RESOLVER}; the spec injects a fake so it never has to mutate the
       #   real `$LOADED_FEATURES` global.
@@ -50,6 +59,21 @@ module Rigor
 
       def self.load(configuration:, services:, requirer: ->(name) { require name }, feature_resolver: FEATURE_RESOLVER)
         new(services: services, requirer: requirer, feature_resolver: feature_resolver).load(configuration.plugins)
+      end
+
+      # #194 slice 2 (ADR-93 WD5) — the absolute path of the engine's OWN bundled copy of a plugin gem
+      # (`<ENGINE_ROOT>/plugins/<gem>/lib/<gem>.rb`), or nil when the engine does not bundle it. A bundled
+      # plugin is required by this path rather than by gem name, so a stale installed `rigortype` gem can
+      # never displace the engine's own versioned copy through RubyGems name resolution — the engine and its
+      # bundled plugins are versioned together. Returns nil for a third-party / project-bundle plugin and for
+      # a trimmed packaging (the ADR-27 single-binary target that ships no `plugins/` tree), where the caller
+      # falls back to today's gem-name require so no install mode regresses. The rule is uniform across the
+      # auto-wired `rigor-rbs-inline` default and every user-listed entry, because the skew mechanism is
+      # identical for both. Also read by `rigor doctor`'s skew check (#194 slice 3) to decide which loaded
+      # plugins the engine bundles.
+      def self.bundled_plugin_path(gem_name)
+        path = File.join(ENGINE_ROOT, "plugins", gem_name, "lib", "#{gem_name}.rb")
+        File.file?(path) ? path : nil
       end
 
       # @param entries [Array<String, Hash>] the raw `plugins:` list from the configuration.
@@ -190,8 +214,13 @@ module Rigor
         end
       end
 
+      # #194 slice 2 (ADR-93 WD5) — a bundled plugin is required by its engine-anchored absolute path; every
+      # other gem keeps today's bare-name require. The injectable `requirer` seam therefore widens from gem
+      # names to name-or-absolute-path (both are valid arguments to `Kernel.require`). The slice-1
+      # `feature_resolver` is unaffected: an absolute-path require's `$LOADED_FEATURES` entry still ends in
+      # `/<gem>.rb`, the suffix {FEATURE_RESOLVER} matches.
       def require_gem!(entry)
-        @requirer.call(entry[:gem])
+        @requirer.call(self.class.bundled_plugin_path(entry[:gem]) || entry[:gem])
       rescue ::LoadError => e
         raise LoadError.new(
           "could not load plugin gem #{entry[:gem].inspect}: #{e.message}",

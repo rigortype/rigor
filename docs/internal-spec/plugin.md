@@ -567,6 +567,31 @@ explicit `id:` field disambiguates; without it the loader emits a
 `LoadError` rather than guessing. Duplicate ids across entries are
 an error, not a silent dedupe.
 
+## Bundled-plugin resolution ([ADR-93](../adr/93-default-rbs-inline-ingestion.md) WD5)
+
+An entry whose `gem` names a plugin the engine itself bundles —
+`<engine root>/plugins/<gem>/lib/<gem>.rb` exists, the engine root
+anchored from the loader's own location — is `require`d **by that
+absolute path**, not by gem name. The engine and its bundled
+plugins are versioned together, so name resolution against
+whichever installation's `require_paths` happens to win is
+skew-prone by definition: a stale installed `rigortype` gem could
+otherwise displace the engine's own copy silently (the [#194][i194]
+hazard). Anchoring loads the engine's own vendored file instead.
+When the anchored file does **not** exist — a trimmed packaging,
+the [ADR-27](../adr/27-tool-distribution-model.md) single-binary
+target — the loader falls back to the bare gem-name `require`, so no
+install mode regresses. The rule is uniform across the auto-wired
+`rigor-rbs-inline` default and every user-listed entry. There is no
+name-level escape hatch back to gem resolution; an external copy
+would earn an explicit per-entry `path:` key
+([ADR-99](../adr/99-config-schema-authority.md)), not a silent name
+race. `rigor doctor` flags any bundled plugin that still resolved
+outside the engine tree — the guard for the fallback path and
+genuinely mixed installations that anchoring cannot see.
+
+[i194]: https://github.com/rigortype/rigor/issues/194
+
 ## Failure isolation (per ADR-2 § "Plugin Trust and I/O Policy")
 
 Loading runs every plugin entry independently; a failure on one

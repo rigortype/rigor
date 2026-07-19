@@ -224,7 +224,9 @@ RSpec.describe "rigor-dry-schema integration" do
       Rigor::Analysis::Runner.new(
         configuration: configuration, cache_store: nil,
         plugin_requirer: lambda do |name|
-          case name
+          # #194 slice 2 — a bundled plugin now arrives as its engine-anchored absolute path; basename
+          # recovers the gem name (a bare name passes through unchanged).
+          case File.basename(name, ".rb")
           when "rigor-dry-types" then Rigor::Plugin.register(Rigor::Plugin::DryTypes)
           when "rigor-dry-schema" then Rigor::Plugin.register(Rigor::Plugin::DrySchema)
           end

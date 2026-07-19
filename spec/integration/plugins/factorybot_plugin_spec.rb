@@ -206,7 +206,9 @@ RSpec.describe "plugins/rigor-factorybot" do
           runner = Rigor::Analysis::Runner.new(
             configuration: configuration, cache_store: nil,
             plugin_requirer: lambda { |name|
-              case name
+              # #194 slice 2 — a bundled plugin now arrives as its engine-anchored absolute path; basename
+              # recovers the gem name (a bare name passes through unchanged).
+              case File.basename(name, ".rb")
               when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
               when "rigor-factorybot" then Rigor::Plugin.register(Rigor::Plugin::Factorybot)
               end

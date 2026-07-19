@@ -43,6 +43,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[plugins]** Bundled plugins now always load from the engine's own copy. A `plugins:` entry naming a plugin Rigor ships — including the auto-wired `rigor-rbs-inline` — was required by gem name, so an older `rigortype` gem installed alongside a git checkout or a newer engine could silently shadow the engine's copy with a mismatched version and produce wrong diagnostics. Rigor now requires each bundled plugin by its path inside the engine, which is versioned together with it; a trimmed or single-binary install that ships no bundled copy falls back to gem-name resolution exactly as before.
+
 - **[cli]** The type probes — `rigor type-of`, `type-scan`, `trace`, and `annotate` — now build the same plugin-aware environment `rigor check` analyses with, so a type synthesized from an inline rbs-inline annotation (or any other plugin) is reported instead of a plugin-free `Dynamic[top]`, and a probe no longer disagrees with the check it is meant to explain. A project with no plugins, or with broken plugin setup, degrades to the previous behaviour rather than failing.
 
 - **[type inference]** A `str =~ RE` match where the pattern is a constant (`RE = /.../` or `Regexp.new(...)`) now narrows the match globals just like a literal `str =~ /.../`, so `$1`, `$~`, and the rest read as their matched types after a successful match instead of staying nilable — removing spurious possible-nil warnings on the common "compile the regex once as a constant" idiom.

@@ -1495,6 +1495,67 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         # both.
         expect(type).to be_a(Rigor::Type::Union)
       end
+
+      # WD5 — the massign target of `initialize` is an `InstanceVariableTargetNode`, not an
+      # `InstanceVariableWriteNode`, so `detect_read_before_write` used to miss it: `@m` was absent from `init_writes`
+      # and, being read-before-write in a sibling method, `contribute_read_before_write_nil!` unioned a spurious `nil`,
+      # masking the recorded `Tuple[]` as `T | nil`. The ctor massign must count as an init write.
+      it "does not union a spurious nil for an initialize massign read cross-method" do
+        program = parse(<<~RUBY)
+          class H
+            def initialize
+              @m, @n = [], []
+            end
+
+            def use
+              @m
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("H")[:@m]
+        expect(type).to be_a(Rigor::Type::Tuple)
+        expect(type).not_to be_a(Rigor::Type::Union)
+      end
+
+      it "keeps an unanalyzable initialize massign read as Dynamic (no spurious nil) cross-method" do
+        program = parse(<<~RUBY)
+          class I
+            def initialize(src)
+              @a, @b = some_untyped_call(src)
+            end
+
+            def use
+              @a
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("I")[:@a]
+        # Unanalyzable RHS floors to Dynamic; the read-before-write gate must not re-inject nil on top of it.
+        expect(type).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "counts a nested massign target as an init write cross-method" do
+        program = parse(<<~RUBY)
+          class J
+            def initialize(x)
+              (@a, @b), @c = x
+            end
+
+            def use
+              @a
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("J")[:@a]
+        # `@a` is a nested target; unanalyzable slot floors to Dynamic, and the ctor write must suppress the nil union.
+        expect(type).to be_a(Rigor::Type::Dynamic)
+      end
     end
   end
 

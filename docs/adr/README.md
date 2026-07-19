@@ -71,7 +71,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-55 | [Recursive-method return-type precision](55-recursive-return-precision.md) | Accepted (slice 1 and slice 2 both implemented) |
 | ADR-56 | [Block-captured local write-back and loop-body fixpoint](56-block-captured-local-mutation.md) | Accepted (slices A and B implemented 2026-06-11; slice C implemented 2026-06-12) |
 | ADR-57 | [Opening the implicit-self call return-adoption gate](57-self-call-return-adoption.md) | Accepted (gate opened 2026-06-12; WD3 module-singleton seed fix landed 2026-07-10) |
-| ADR-58 | [Instance-variable field typing](58-ivar-field-typing.md) | Accepted (WD1 partial, WD1b queued; WD2 already-realized; WD3 implemented) |
+| ADR-58 | [Instance-variable field typing](58-ivar-field-typing.md) | Accepted (WD1 partial, WD1b queued; WD2 already-realized; WD3/WD5 implemented; `||=` seed deferred) |
 | ADR-59 | [Spec assertions are not implementation signatures](59-spec-assertions-are-not-signatures.md) | Accepted (strong form rejected; three weak forms recorded, demand-gated) |
 | ADR-60 | [Pre-freeze plugin contract consolidation](60-pre-freeze-plugin-contract-consolidation.md) | Accepted (2026-06-13) |
 | ADR-61 | [Agent-friendly diagnostic statistics (structured selector axis)](61-agent-friendly-diagnostic-statistics.md) | Accepted (implemented 2026-06-13; precision-additive) |

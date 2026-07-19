@@ -8,7 +8,13 @@ WD1b — see WD1 status). WD2 resolved as already-realized
 recursive-return Dynamic sources per the WD2 status). WD3 implemented
 (2026-06-12 — ctor definite assignment credited through unconditional
 same-class calls; closes the ipaddr `@mask_addr` 6-site cluster, see
-WD3 status). Archetype:
+WD3 status). WD5 implemented
+(2026-07-19 — a `MultiWriteNode` ivar target in `initialize` was
+recorded into the class-ivar type union but not into `init_writes`, so
+the read-before-write nil gate re-injected a spurious `nil` at every
+sibling read; `detect_read_before_write` now counts massign targets as
+writes, see WD5 status. The `||=`-seeding stretch is
+**deferred-with-reason** there). Archetype:
 deliberative. Stakes: high — this governs when `possible-nil-receiver`
 may fire on ivar-sourced optionality, the single largest FP class on
 idiomatic data-structure Ruby (94 % of possible-nil errors across the
@@ -306,6 +312,74 @@ algorithm corpora, zero-new / adjudicated-wins (ADR-56 WD4 protocol);
 hand-probed discriminating shapes mandatory (traversal loop, rotation
 read, a genuine local `@x = nil; @x.foo` that MUST keep firing, a
 failed-guard read that MUST keep firing).
+
+### WD5 — Slice 5: massign ctor targets are init writes (a latent WD2 gap)
+
+WD2's "homogeneous write union" promise silently excluded one write
+form. The class-ivar pre-pass has, since N1, decomposed a parallel
+assignment (`@m, @n = [], []`) into the accumulator: each
+`InstanceVariableTargetNode` records its tuple-position rvalue type, so
+the *accumulator* held `@m → Tuple[]`. But `detect_read_before_write` —
+the separate walk that populates `init_writes` (the ctor definite-
+assignment set gating the read-before-write nil contribution) — only
+recognised `InstanceVariableWriteNode` and the compound `@x ||= / &&= /
++=` forms, never a `MultiWriteNode` target. So an ivar written **only**
+via massign in `initialize` was absent from `init_writes`; when a
+sibling method read it before writing it,
+`contribute_read_before_write_nil!` unioned `Constant[nil]` on top of
+the recorded type, and the seed reached the read as `Tuple[] | nil`
+rather than `Tuple[]`. The declaration-sourced possible-nil mark then
+silenced the very diagnostic the concrete type should have surfaced
+(`@m.no_such_method` reads a `T | nil` receiver, so the undefined-method
+rule declines). The recorded type existed; the nil gate masked it.
+
+The fix is one walk, not the recorder: `detect_read_before_write` now
+descends a `MultiWriteNode`'s `value` first (an ivar read on the RHS
+stays read-before-write) and then records every ivar target — including
+nested `MultiTargetNode` and splat targets — into `seen_writes`, so the
+ctor massign credits `init_writes` exactly as a plain `@x = …` write
+does. Nothing in the write *universe* changes: an unanalyzable massign
+RHS still floors to `Dynamic` (never `nil`, never a guessed nominal) per
+N1, and the `guarded` / `falsey_constant?` / read-before-write-nil
+disciplines are untouched — the change only stops a spurious nil from
+overwriting an already-recorded, already-intended type. FP-safe by
+construction (it can only *remove* a nil constituent, the FP-reducing
+direction).
+
+**Status, 2026-07-19 — implemented.** Motivated by the mastodon /
+redmine / rails-core protection-coverage scout, which flagged untyped
+ivar-field reads as a dominant engine gap; the FP-safe, closable part is
+this latent massign-seed masking. Measured Tier-1 protection lift
+(`coverage --protection`, cache cleared, baseline worktree vs new):
+mastodon `app/models` 1837 → 1844 protected dispatch sites
+(31.2 % → 31.3 %), redmine `app` 6121 → 6135 (32.2 % → 32.3 %).
+Diagnostic gate (`check --no-cache --no-baseline`, baseline vs new):
+mail / kramdown / haml / liquid `lib`, mastodon `app/models`, redmine
+`app` all **byte-identical** (no new firing, no removed firing on the
+surveyed slices — the masked-diagnostic correction is demonstrated on
+the synthetic repro; the corpus slices happen not to carry the ctor-
+massign-read-cross-method shape, so the win shows as protection-metric
+movement without a diagnostic delta). `make verify` + self-check +
+`check-plugins` clean; +3 unit specs (cross-method massign read stays a
+plain `Tuple`, unanalyzable massign read stays `Dynamic`, nested target
+credited). Perf on mastodon `app/models` (cold, 3×): wall flat
+(~3.7 s), peak RSS 261 → 254 MB — within noise.
+
+**`||=` seeding — deferred with reason.** The memo idiom
+(`@memo ||= []`, `@config ||= {}`) is pervasive, and the pre-pass
+deliberately does not seed `Prism::InstanceVariableOrWriteNode` (seeding
+`@x ||= v` as `Constant[v]` folds `if @x` always-truthy → FP). The
+WD2-shaped `union(v_type, nil)` model was prototyped and run through the
+same corpus gate: on all six targets it was **diagnostic byte-identical**
+(no new always-truthy / always-falsey / possible-nil firing) **and moved
+the protection metric by zero** (mastodon 1844 → 1844, redmine 6135 →
+6135 — a `T | nil` seed silences undefined-method the same way the
+massign bug did, so it buys no new protected site here). Shipping it
+would add a nil-union seeding surface for no measured corpus yield, so
+per the WD4 decision rule (ship only if provably clean **and** carrying
+adjudicated value) it is deferred. Reopen only if a corpus surfaces a
+memo-read shape the `union(v, nil)` seed provably improves without a new
+firing.
 
 ## Rejected / deferred alternatives
 

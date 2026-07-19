@@ -286,11 +286,17 @@ no longer fires `possible-nil-receiver`, because the inferred element type prove
 lift (`coverage --protection`, collector off vs on, cache cleared between A/B): mastodon `app/models`
 0.3044 → 0.3122 (+46 protected sites), redmine `app` 0.3161 → 0.3219 (+110 sites). Perf (mastodon
 `app/models`, cold, 3 runs): gate off ≈ 2.2 s / 161 MB, unchanged from master (≈ 2.5 s, within noise —
-the gate-off guards are O(1) no-ops on an empty mark set); gate on ≈ 3.1 s / 191 MB — the one-round
-collector pre-pass is ≈ 0.9 s (+40 % wall, +19 % RSS), well over the 5 % band. Per the addendum the
+the gate-off guards are O(1) no-ops on an empty mark set); gate on ≈ 3.0 s / 191 MB — the one-round
+collector pre-pass is ≈ 0.8 s (+37 % wall, +19 % RSS), well over the 5 % band. Per the addendum the
 pre-pass is the *price* of the opt-in and is reported separately; the check walk itself is unchanged
 (the byte-identical gate-off run proves it), so the cost is entirely the whole-project re-type the WD3
-collector performs. This cost is exactly why the gate stays off by default and default-on is deferred.
+collector performs. Profiling that re-type (mastodon `app/models`) found ~98 % of it is the per-file
+scope-index build (`ScopeIndexer.index` — the flow-sensitive typing pass the collector needs to read
+each argument type), unshareable with the check walk because the two build their per-file index under
+different seeds; the call-site walk that resolves callees and unions argument types is only ~2 %. A
+call-name pre-filter (skip any call whose name no discovered `def` declares — ~73 % of call sites in a
+Rails app — before typing its receiver) trimmed the residual and cut allocations ~8 %, table-identical.
+This cost is exactly why the gate stays off by default and default-on is deferred.
 
 ## Consequences
 

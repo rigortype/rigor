@@ -274,6 +274,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     open_receivers()
     plugins()
     protocol_contracts()
+    resolved_gem_paths()
     signature_paths()
     source_rbs_synthesizers()
     type_node_resolvers()

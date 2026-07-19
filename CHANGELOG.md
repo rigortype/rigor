@@ -39,6 +39,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - It is a warning, never an error — your exit code does not change. The finding also appears in `--format=json` under `config_warnings` with `"kind": "unknown_key"`, so CI can assert on it.
   - Top-level keys only. A typo *inside* a group (`cache: { pth: … }`) is caught by the [JSON schema](schemas/rigor-config.schema.json) as you type instead.
 
+- **[plugins]** `rigor plugins` now reports the resolved file each loaded plugin loaded from — a `path:` line in the text report and a `"path"` key in `--format=json` — and the `plugin_loader.load-error` diagnostic names it when a plugin was loaded but then failed to configure. A stale installed `rigortype` gem silently shadowing a newer checkout's bundled plugin copy is now visible at a glance instead of taking a bisection to pin down.
+
 ### Fixed
 
 - **[cli]** The type probes — `rigor type-of`, `type-scan`, `trace`, and `annotate` — now build the same plugin-aware environment `rigor check` analyses with, so a type synthesized from an inline rbs-inline annotation (or any other plugin) is reported instead of a plugin-free `Dynamic[top]`, and a probe no longer disagrees with the check it is meant to explain. A project with no plugins, or with broken plugin setup, degrades to the previous behaviour rather than failing.

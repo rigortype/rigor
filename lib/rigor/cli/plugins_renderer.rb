@@ -156,6 +156,10 @@ module Rigor
                end
         lines = [head]
         lines << "        #{row[:description]}" if row[:description]
+        # #194 slice 1 — the file the plugin gem loaded from, so an engine↔plugin version skew (a stale
+        # installed `rigortype` shadowing a checkout's bundled plugin) is a glance, not a bisect. Shown for
+        # loaded rows and for a require-succeeded-then-failed error row; omitted when unresolvable.
+        lines << "        path: #{row[:path]}" if row[:path]
 
         if row[:status] == :load_error
           lines << "        load error: #{row[:load_error]}"
@@ -238,6 +242,9 @@ module Rigor
           "id" => row[:id],
           "version" => row[:version],
           "description" => row[:description],
+          # #194 slice 1 — additive per-row provenance; null when the resolver could not pin the file (a
+          # require failure, or an entry-file basename differing from the gem name).
+          "path" => row[:path],
           "config" => row[:config],
           "signature_paths" => row[:signature_paths].map do |sp|
             { "path" => sp[:path], "exists" => sp[:exists], "rbs_files" => sp[:rbs_files] }

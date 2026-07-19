@@ -30,36 +30,24 @@ this file is the one that is wrong.
   through `CLI::ProbeEnvironment` (loader-only — no producer-plugin pre-pass), so probes see ADR-93
   auto-wire synthesis. `coverage_scan` was deliberately left (measurement surface, baselines would
   shift).
-- **v0.3.0 milestone: only #121 (ongoing demand-gated folds, not a blocker) remains open.** The
-  release seal is the real remaining work: `[Unreleased]` holds **70** entries; `rigor-release-prep`
-  is the flow; version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence).
-- **#194 (auto-wire version skew): designed and implemented, awaiting merge.** The user chose the
-  uniform rule — ALL engine-bundled plugins anchor to the engine, not just the auto-wired one —
-  recorded as the ADR-93 WD5 addendum (`8e75fa9f`); the three slices are the stacked PRs below.
-  (Background: a stale installed `rigortype`'s plugin copy, predating the WD1 `annotated?` gate,
-  could silently win gem-name resolution whenever the engine ran without its own gemspec
-  activation.)
+- **#194 is DONE and closed.** The user chose the uniform rule — ALL engine-bundled plugins anchor
+  to the engine — recorded as the ADR-93 WD5 addendum (`8e75fa9f`) and landed as three slices:
+  **#197** resolved-path visibility in `rigor plugins` + load-error diagnostics (new
+  `Registry#resolved_gem_paths` public reader), **#198** the fix (`Loader.bundled_plugin_path`
+  engine-anchored require, gem-name fallback, `requirer` seam widened to name-or-path), and
+  **#200** the `doctor` `plugin_skew` check (re-land of #199, whose stacked merge landed on its
+  base branch instead of master — merge stacked PRs bottom-up, or after base retarget). The doctor
+  check reports at `:warn`, a deliberate deviation from #116's `:fail` (path comparison is fuzzier
+  than a lockfile parse); flipping is one line if ever wanted.
+- **v0.3.0 milestone: only #121 (ongoing demand-gated folds, not a blocker) remains open.**
 - `make verify` / `make docs-check` clean on the post-merge master; master and `origin/master` agree.
 
-## Next session — merge the #194 stack, then the release seal
+## Next session — the release seal
 
-**The #194 wave is implemented as three stacked PRs, verified and CI-green, awaiting the user's
-merge in order #197 → #198 → #199** (each PR body states its base; #199 carries `Closes #194`):
-
-- **#197** (`194-plugin-resolved-path`) — slice 1: resolved-path visibility in `rigor plugins`
-  (text + JSON `"path"`) and `(loaded from <path>)` on post-require load-error diagnostics.
-  Adds the `Registry#resolved_gem_paths` public reader (API-drift snapshot updated).
-- **#198** (`194-bundled-plugin-anchor`) — slice 2, the fix, per the **ADR-93 WD5 addendum**
-  (`8e75fa9f`): every engine-bundled plugin is required by its engine-anchored absolute path
-  (`Loader.bundled_plugin_path`), gem-name fallback when absent; the `requirer` seam widens to
-  name-or-path.
-- **#199** (`194-doctor-plugin-skew`) — slice 3: `doctor` warns when a bundled plugin resolved
-  outside the engine's tree. **One open call:** it reports at `:warn` (deliberate deviation from
-  #116's `:fail` — path comparison is fuzzier than a lockfile parse and must not flip CI); flip to
-  `:fail` is one line if preferred.
-
-After the merge: **the release seal.** `[Unreleased]` will hold 73 entries; `rigor-release-prep`
-is the flow; version bumps + `rake release` stay user-gated (AGENTS.md § Release Cadence).
+`[Unreleased]` holds **73** entries. Run `rigor-release-prep` up to (not including) the version
+bump and present the seal for approval; version bumps + `rake release` stay user-gated
+(AGENTS.md § Release Cadence, single-digit version components — `0.2.x`'s successor planning is
+recorded there).
 
 ## Also open, lower priority
 
@@ -74,5 +62,6 @@ is the flow; version bumps + `rake release` stay user-gated (AGENTS.md § Releas
   `references/rbs`; push + upstream PR are the user's action. Tracked as #159.
 - The upstream `rbs-inline` RDoc fix ([soutaro/rbs-inline#249](https://github.com/soutaro/rbs-inline/pull/249))
   is open under the user's fork; nothing to do repo-side until upstream responds.
-- **rigor-rs:** `rigor_rs.ruby` is reserved in our schema (ADR-99); its differential harness surfaced
-  #194 and will re-pin the oracle onto the checkout plugin path.
+- **rigor-rs:** `rigor_rs.ruby` is reserved in our schema (ADR-99). Its harness re-pinned the oracle
+  onto the checkout plugin path (rigor-rs PR #29) and its re-run battery came back clean; with WD5
+  merged the engine now anchors itself, so ad-hoc probes are safe too.

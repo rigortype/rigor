@@ -21,7 +21,7 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **The 2026-07-19 survey iteration ("typing gaps → engine improvement → perf verification") is
-  complete: two slices landed.** A three-codebase protection scout (mastodon, redmine, rails core;
+  complete: two engine slices + a perf follow-up landed.** A three-codebase protection scout (mastodon, redmine, rails core;
   raw JSON in the session scratchpad, conclusions in the ADR addenda) established that ADD_RBS is
   ~1-2% everywhere, `unsupported_syntax` is a catch-all (not real syntax gaps), and the dominant
   correctly-attributed engine gap is untyped params + param-sourced ivars.
@@ -34,8 +34,13 @@ this file is the one that is wrong.
     mark guards ALL negative in-body rules (3-piece guard: syntactic root-walk, sticky local
     taint, union join). Gate-off byte-identical + zero cost; gate-on zero new firings on six
     corpus targets + one genuine redmine FP removed; **+46 (mastodon models) / +110 (redmine app)
-    protected sites**; opt-in price ≈0.9s pre-pass (+40% wall on mastodon models) — why the
-    default stays off (ADR-50 gates any flip).
+    protected sites**; opt-in price ≈0.9s pre-pass — why the default stays off (ADR-50 gates any
+    flip).
+  - **PR #203** (merged) — the pre-pass perf pass. Profile verdict: the price is **≈98%
+    `ScopeIndexer.index`** (the per-file flow-sensitive scope build the collector must read),
+    irreducible without seed-sharing or forced parallelism; the one justified lever (73% of Rails
+    call sites name a method no user `def` declares → skip receiver typing) trimmed +40%→+32% wall,
+    −8% allocs, table byte-identical. Recorded in ADR-67 WD6.
 - **#162 and #194 are DONE and closed** (earlier today): transitive `static.value-use.void` via
   `VoidTailSummary` (ADR-100 WD4 addendum, PRs #195), probe environment parity (#196), and the
   auto-wire version-skew guard (ADR-93 WD5, PRs #197/#198/#200 — remember: merge stacked PRs
@@ -55,10 +60,9 @@ components).
 
 - **ADR-46 edge wiring for `parameter_inference:`** — lift the WD6c `--incremental` mutual
   exclusion by recording caller→callee-param cross-file edges.
-- **WD6 pre-pass cost** — the 0.9s collector round on mastodon models is the opt-in price;
-  worth a perf pass only if adoption demands it.
 - **WD6 default-on** — an ADR-50 decision on accumulated evidence (mutation-oracle honesty check
   included); not before.
+- (WD6 pre-pass cost was addressed in #203; the residual is index-build-bound, above.)
 
 ## Also open, lower priority
 

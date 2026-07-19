@@ -150,6 +150,11 @@ module Rigor
         # sequential path.
         @environment.rbs_loader&.prewarm if ForkMap.parallel?([@workers, parsed.size].min)
         discovery = discovery_seed_tables
+        # The union of every method name any discovered `def` declares. A call whose name is absent cannot
+        # bind in `resolve_callee`, so {#record_call} short-circuits it before typing its receiver (an
+        # on-demand dispatch for an otherwise-unresolved call). ~73% of call sites in a Rails app name a
+        # method no user def declares; a pure negative filter, so the resolved table is byte-identical.
+        @user_method_names = user_method_names(discovery)
         table = EMPTY
         @max_rounds.times do
           rounded = run_round(parsed, discovery, table)
@@ -264,7 +269,17 @@ module Rigor
       }.freeze
       private_constant :DISCOVERY_FIELD
 
+      # Built once over the whole project and inherited by the fork workers via copy-on-write; a frozen Set
+      # for O(1) membership in the {#record_call} hot loop.
+      def user_method_names(discovery)
+        tables = [discovery[:discovered_def_nodes], discovery[:discovered_singleton_def_nodes]].compact
+        tables.flat_map { |table| table.values.flat_map(&:keys) }.to_set.freeze
+      end
+
       def record_call(call_node, index)
+        # See {#collect}: a name no discovered def declares cannot resolve, so skip without typing anything.
+        return unless @user_method_names.include?(call_node.name)
+
         args = positional_args(call_node)
         return if args.nil?
 

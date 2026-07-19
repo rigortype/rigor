@@ -46,6 +46,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[plugins]** `rigor plugins` now reports the resolved file each loaded plugin loaded from — a `path:` line in the text report and a `"path"` key in `--format=json` — and the `plugin_loader.load-error` diagnostic names it when a plugin was loaded but then failed to configure. A stale installed `rigortype` gem silently shadowing a newer checkout's bundled plugin copy is now visible at a glance instead of taking a bisection to pin down.
 
+### Performance
+
+- **[perf]** The opt-in `parameter_inference:` pre-pass is cheaper: it now skips typing the receiver of any call whose name no user-defined method declares (~73 % of call sites in a Rails app, which can never resolve to a `def` it infers from), cutting the pre-pass cost on a cold `rigor check` with an inferred-parameter table that is byte-identical.
+
 ### Fixed
 
 - **[plugins]** Bundled plugins now always load from the engine's own copy. A `plugins:` entry naming a plugin Rigor ships — including the auto-wired `rigor-rbs-inline` — was required by gem name, so an older `rigortype` gem installed alongside a git checkout or a newer engine could silently shadow the engine's copy with a mismatched version and produce wrong diagnostics. Rigor now requires each bundled plugin by its path inside the engine, which is versioned together with it; a trimmed or single-binary install that ships no bundled copy falls back to gem-name resolution exactly as before.

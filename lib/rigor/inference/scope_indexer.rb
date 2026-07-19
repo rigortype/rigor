@@ -525,6 +525,19 @@ module Rigor
 
         read_first << node.name if node.is_a?(Prism::InstanceVariableReadNode) && !seen_writes.include?(node.name)
 
+        # N1 — parallel / multiple assignment (`@m, @n = [], []`). The ivar targets are `InstanceVariableTargetNode`s,
+        # not `InstanceVariableWriteNode`s, so the generic descent below never records them as writes. Left unhandled,
+        # an ivar written only via massign in `initialize` stays absent from `init_writes`, and
+        # `contribute_read_before_write_nil!` then unions a spurious `nil` into its class-ivar seed — masking a
+        # genuinely-typed `@m` (e.g. `Tuple[]`) as `T | nil` at every sibling read. The RHS runs before any target is
+        # committed, so descend into `value` FIRST (an ivar read there is read-before-write), then mark every ivar
+        # target as written.
+        if node.is_a?(Prism::MultiWriteNode)
+          detect_read_before_write(node.value, seen_writes, read_first) if node.value
+          detect_multi_write_target_writes(node, seen_writes, read_first)
+          return
+        end
+
         # Descend BEFORE recording a write — `@x = @x + 1`'s RHS is an `InstanceVariableReadNode` that runs before the
         # write is committed; the read is therefore read-before-write semantically. `each_child` yields the value
         # child before the lvalue target (`compact_child_nodes` field order), matching this order.
@@ -533,6 +546,26 @@ module Rigor
         end
 
         seen_writes << node.name if IVAR_WRITE_NODES.any? { |klass| node.is_a?(klass) }
+      end
+
+      # Records each ivar target of a `MultiWriteNode` / nested `MultiTargetNode` into `seen_writes`, and descends into
+      # any non-ivar target (a `CallTargetNode` / `IndexTargetNode` receiver such as `@obj.x, @y = …`) so an ivar read
+      # inside a target receiver still counts as read-before-write.
+      def detect_multi_write_target_writes(node, seen_writes, read_first)
+        targets = (node.lefts || []) + [node.rest].compact + (node.rights || [])
+        targets.each do |target|
+          case target
+          when Prism::InstanceVariableTargetNode
+            seen_writes << target.name
+          when Prism::MultiTargetNode
+            detect_multi_write_target_writes(target, seen_writes, read_first)
+          when Prism::SplatNode
+            inner = target.expression
+            seen_writes << inner.name if inner.is_a?(Prism::InstanceVariableTargetNode)
+          else
+            detect_read_before_write(target, seen_writes, read_first)
+          end
+        end
       end
 
       IVAR_BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze

@@ -298,4 +298,61 @@ RSpec.describe Rigor::CLI::DoctorCommand do
       expect(command.send(:baseline_drift_summary, [drift_row(:over)])).to eq("1 over threshold")
     end
   end
+
+  # #194 slice 3 — doctor flags a bundled plugin that resolved OUTSIDE the engine's own tree: the guard for
+  # the skew that slice 2's anchoring cannot see (the fallback-require path, or a genuinely mixed install
+  # where a foreign copy was already loaded). Non-bundled plugins are not the engine's to vouch for and are
+  # never flagged; a nil resolved path (an injected requirer / no-op load) carries no provenance and is
+  # skipped. A healthy checkout does not fire — guarded by the "all checks passed" example above, where the
+  # auto-wired `rigor-rbs-inline` resolves inside the engine tree.
+  describe "plugin installation skew check (#194 slice 3)" do
+    let(:command) { described_class.new(argv: [], out: StringIO.new, err: StringIO.new) }
+    let(:bundled_gem) { "rigor-rbs-inline" }
+
+    def registry_with(resolved_gem_paths)
+      Rigor::Plugin::Registry.new(plugins: [], load_errors: [], resolved_gem_paths: resolved_gem_paths)
+    end
+
+    it "flags a bundled plugin whose resolved file is outside the engine tree, naming both paths" do
+      foreign = "/opt/other/gems/rigortype-0.2.4/plugins/rigor-rbs-inline/lib/rigor-rbs-inline.rb"
+      findings = command.send(:check_plugin_skew, registry_with(bundled_gem => foreign))
+
+      expect(findings.size).to eq(1)
+      finding = findings.first
+      expect(finding[:check]).to eq("plugin_skew")
+      expect(finding[:status]).to eq(:warn)
+      expect(finding[:message]).to include("rigor-rbs-inline loaded from a different rigortype installation")
+      expect(finding[:message]).to include(foreign)
+      expect(finding[:message]).to include(Rigor::Plugin::Loader::ENGINE_ROOT)
+    end
+
+    it "does not flag a bundled plugin resolved inside the engine's own tree" do
+      inside = File.join(Rigor::Plugin::Loader::ENGINE_ROOT, "plugins", bundled_gem, "lib", "#{bundled_gem}.rb")
+      expect(command.send(:check_plugin_skew, registry_with(bundled_gem => inside))).to be_empty
+    end
+
+    it "does not flag a non-bundled (third-party) plugin, even resolved outside the engine tree" do
+      foreign = "/opt/other/gems/rigor-thirdparty/lib/rigor-thirdparty.rb"
+      expect(command.send(:check_plugin_skew, registry_with("rigor-thirdparty" => foreign))).to be_empty
+    end
+
+    it "silently skips a nil resolved path (an injected requirer / no-op load carries no provenance)" do
+      expect(command.send(:check_plugin_skew, registry_with(bundled_gem => nil))).to be_empty
+    end
+
+    it "surfaces the skew as a [WARN] through a full doctor run without changing the exit code" do
+      File.write("clean.rb", "x = 1\n")
+      File.write(".rigor.yml", "paths:\n  - .\n")
+      foreign = "/opt/other/gems/rigortype-0.2.4/plugins/rigor-rbs-inline/lib/rigor-rbs-inline.rb"
+      skewed = registry_with(bundled_gem => foreign)
+      # Stub only the doctor's own registry load, not the class method (the scoped analysis in step 2 loads
+      # plugins through the same `Plugin::Loader.load` and must run normally).
+      allow_any_instance_of(described_class).to receive(:load_plugin_registry).and_return(skewed) # rubocop:disable RSpec/AnyInstance
+
+      status, out, = run([])
+      expect(out).to include("[WARN] plugin_skew")
+      expect(out).to include("Plugin rigor-rbs-inline loaded from a different rigortype installation")
+      expect(status).to eq(0)
+    end
+  end
 end

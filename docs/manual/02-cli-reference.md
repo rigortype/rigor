@@ -603,6 +603,12 @@ Runs a scoped analysis and audits:
   `rigortype` resolved from a **GEM** remote counts: a `PATH` or `GIT`
   source means you are developing or vendoring Rigor deliberately,
   and Rigor's own repository looks exactly like that.
+- **Plugin installation skew** — whether a plugin Rigor bundles
+  loaded from a different `rigortype` installation than the engine,
+  naming both paths. The engine and its bundled plugins are
+  versioned together, so a copy from another installation can run
+  the engine with a mismatched plugin. A warning, not a failure;
+  third-party plugins from your own bundle are never flagged.
 
 Text output prints `[PASS]`, `[FAIL]`, or `[WARN]` per check plus a
 routed hint (e.g. "Run `rigor baseline regenerate`"). JSON output

@@ -104,6 +104,9 @@ module Rigor
     def with_declaration_sourced_local: (String | Symbol name, Type::t type) -> Scope
     def with_local_declaration_mark: (String | Symbol name) -> Scope
     def declaration_sourced?: (Symbol kind, String | Symbol name) -> bool
+    def with_inferred_param_mark: (String | Symbol name) -> Scope
+    def without_inferred_param_mark: (String | Symbol name) -> Scope
+    def inferred_param?: (String | Symbol name) -> bool
     def forget_match_globals: () -> Scope
     def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
     def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]

@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "inferred_param_guard"
 
 module Rigor
   module Analysis
@@ -103,6 +104,12 @@ module Rigor
         def collect_case(node)
           subject = node.predicate
           return unless subject.is_a?(Prism::LocalVariableReadNode)
+
+          # ADR-67 WD6b — a `case` subject that is an inferred parameter narrows to `Bot` in the non-matching
+          # clauses only because its seeded type is a lower bound; a wider real caller could match them. Decline
+          # the whole case so no clause fires unreachable.
+          scope = @scope_index[node]
+          return if scope && InferredParamGuard.rooted?(subject, scope)
 
           entry_type = entry_subject_type(node, subject.name)
           # Only meaningful for a concrete subject type: a `Dynamic` subject can never be proven disjoint

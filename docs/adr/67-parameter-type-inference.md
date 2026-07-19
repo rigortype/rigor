@@ -1,9 +1,9 @@
 # ADR-67 — Parameter type inference (the M3 frontier): call-site and in-body, precision-additive only
 
 Status: **Accepted — WD1 + WD3 + WD5 (capped fixpoint) implemented 2026-06-16; WD3
-argument-shape coverage extended 2026-07-06; the `check`-walk wiring designed 2026-07-19 as
-WD6 (addendum below — its demand gate fired on a three-codebase protection scout),
-implementation queued; WD2 in-body inference stays deferred.** Re-opens the algorithm-corpora
+argument-shape coverage extended 2026-07-06; the `check`-walk wiring (WD6, addendum below —
+its demand gate fired on a three-codebase protection scout) implemented 2026-07-19 behind the
+opt-in `parameter_inference:` gate; WD2 in-body inference stays deferred.** Re-opens the algorithm-corpora
 survey's "M3 — untyped-param → whole-method Dynamic: **EXCUSED, do not pursue**" verdict
 on new **protection-coverage** evidence. Method / ctor parameters default to `untyped`
 today (the gradual entry point); the pilot shows a param flowing into an ivar or
@@ -203,7 +203,7 @@ immediate second hop: `@options = options`). ADD_RBS was 1–2.4% on every codeb
 holes are not missing signatures, they are this inference. The check-walk addendum below is
 that follow-up.
 
-## Addendum — WD6: check-walk activation of the WD3 table (2026-07-19, design)
+## Addendum — WD6: check-walk activation of the WD3 table (2026-07-19, implemented)
 
 The consumption side already ships: `StatementEvaluator#seed_inferred_param_types`
 (`build_method_entry_scope`) consults `Scope#param_inferred_types`, overrides only
@@ -248,6 +248,49 @@ this ADR always said must land with it. Four working decisions:
   report it separately); (4) `RIGOR_BUDGET_TRACE`-style visibility if the round cap bites.
   Default-on is a *separate, later* decision under ADR-50, on this evidence.
 WD2 (in-body lower bound) may proceed independently and earlier — it is local and FP-safe.
+
+**WD6 measured + implementation reality (2026-07-19).** Landed behind `parameter_inference:`
+(schema-governed, resolved off by every profile); the pre-pass runs `ParameterInferenceCollector.collect`
+one round into the check discovery seed (`Runner#seed_parameter_inference` → `project_scope_seed_tables`,
+so both the sequential and fork-worker scopes see the same frozen table), and `parameter_inference:` +
+`--incremental` is a hard refusal (WD6c). The mark is the ADR-58-WD1 side-mark reused under a distinct
+`:inferred_param` kind (`Scope#with_inferred_param_mark` / `#inferred_param?`), stamped in
+`build_method_entry_scope` on each seeded parameter.
+
+*The "at minimum the direct param local" propagation scope did not survive contact with the corpus.* The
+gate-on diff over the six targets initially surfaced firings across **five** negative rules, none on a
+bare parameter receiver: `mail` fired `call.undefined-method` / `argument-type-mismatch` on
+`vindex = codepoints[i] - HANGUL_VBASE; vindex < n` (the value flows through a *local* derived from the
+param, with a `rescue` modifier unioning it), and `kramdown` / `haml` / `redmine` fired
+`flow.always-truthy-condition` / `flow.unreachable-clause` on `if opts.key?(:x)` / `case obj` whose
+subject is the parameter itself. The guard therefore had to be three things, all FP-safe by the same
+lower-bound argument: (a) a **syntactic root-walk** (`CheckRules::InferredParamGuard.rooted?`) so a
+diagnostic against any receiver/argument/subject *rooted at* an inferred parameter declines — through
+index (`param[i]`), method chains (`param.foo.bar`), and value-combining forms (`a rescue b`, `&&`,
+`||`); it guards `call.undefined-method`, wrong-arity, `argument-type-mismatch`, `possible-nil-receiver`,
+`call.visibility-mismatch`, `flow.always-truthy-condition`, and `flow.unreachable-clause`; (b) **sticky
+taint propagation** through a local write whose RHS roots at a parameter (`eval_local_write`), so
+`vindex` inherits the mark — the mark deliberately does NOT drop on `with_local` (narrowing) and is
+cleared only by a genuine non-param rewrite, because the `and`-narrowing between `0 <= v` and `v < n`
+would otherwise strip it; (c) a **union join** for the `:inferred_param` kind (the ADR-58 kinds keep
+their intersection join), because a value tainted on *either* branch of a merge is a lower bound. This
+is more propagation plumbing than the addendum's "if free, take it" anticipated, but the FP mandate is
+non-negotiable and each element only ever *suppresses* a diagnostic (a false negative under an opt-in
+gate, never a false positive).
+
+*Measured (six targets, `check --no-cache`).* Gate off: byte-identical to master (mail 26=26, redmine
+52=52 diagnostics, confirmed against a stashed baseline). Gate on: **zero new firings** on all six after
+the guard work above (every initial firing was a guard hole, fixed before landing), and one *removed*
+false positive on redmine (`app/models/issue.rb:605` — `allowed_trackers.detect {|t| t.core_fields…}`
+no longer fires `possible-nil-receiver`, because the inferred element type proves `t` non-nil). Protection
+lift (`coverage --protection`, collector off vs on, cache cleared between A/B): mastodon `app/models`
+0.3044 → 0.3122 (+46 protected sites), redmine `app` 0.3161 → 0.3219 (+110 sites). Perf (mastodon
+`app/models`, cold, 3 runs): gate off ≈ 2.2 s / 161 MB, unchanged from master (≈ 2.5 s, within noise —
+the gate-off guards are O(1) no-ops on an empty mark set); gate on ≈ 3.1 s / 191 MB — the one-round
+collector pre-pass is ≈ 0.9 s (+40 % wall, +19 % RSS), well over the 5 % band. Per the addendum the
+pre-pass is the *price* of the opt-in and is reported separately; the check walk itself is unchanged
+(the byte-identical gate-off run proves it), so the cost is entirely the whole-project re-type the WD3
+collector performs. This cost is exactly why the gate stays off by default and default-on is deferred.
 
 ## Consequences
 

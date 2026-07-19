@@ -44,6 +44,27 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(out).to include("error(s) in")
   end
 
+  # ADR-67 WD6c — `parameter_inference:` and the ADR-46 incremental modes are mutually exclusive in slice 1.
+  it "refuses parameter_inference: combined with --incremental (WD6c)" do
+    File.write(".rigor.yml", "paths:\n  - clean.rb\nparameter_inference: true\n")
+    File.write("clean.rb", "x = 1\n")
+
+    status, _out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--incremental", "clean.rb"])
+
+    expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+    expect(err).to include("parameter_inference: cannot combine with --incremental")
+  end
+
+  it "allows parameter_inference: on a full (non-incremental) check" do
+    File.write(".rigor.yml", "paths:\n  - clean.rb\nparameter_inference: true\n")
+    File.write("clean.rb", "x = 1\n")
+
+    status, out, = run(["--no-cache", "--no-ci-detect", "--no-stats", "clean.rb"])
+
+    expect(status).to eq(0)
+    expect(out).to include("No diagnostics")
+  end
+
   it "renders a JSON document under --format=json" do
     File.write("bad.rb", "x = \"hello\"\nx.no_such_method_here\n")
 

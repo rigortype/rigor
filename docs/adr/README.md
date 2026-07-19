@@ -80,7 +80,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-64 | [Non-nil argument-type-mismatch and the coerce barrier](64-non-nil-argument-type-mismatch.md) | Accepted (non-nil channel built and gated for multi-overload methods) |
 | ADR-65 | [Diagnostic evidence tier and documentation URL](65-diagnostic-evidence-tier-and-doc-url.md) | Accepted (implemented 2026-06-15; precision-additive) |
 | ADR-66 | [Discriminated-union member typing (tag-keyed narrowing)](66-discriminated-union-member-typing.md) | Proposed (not implemented; demand-gated) |
-| ADR-67 | [Parameter type inference (the M3 frontier)](67-parameter-type-inference.md) | Accepted (WD1+WD3+WD5 implemented 2026-06-16, extended 2026-07-06; WD2 in-body inference and check-walk wiring deferred) |
+| ADR-67 | [Parameter type inference (the M3 frontier)](67-parameter-type-inference.md) | Accepted (WD1+WD3+WD5 implemented; WD6 check-walk activation designed 2026-07-19, slice queued; WD2 deferred) |
 | ADR-68 | [Plugin-declarable class-builder folding](68-class-builder-folding.md) | Proposed (demand-gated) |
 | ADR-69 | [Pluggable mutation substrate (kill-oracle + operator seam)](69-pluggable-mutation-substrate.md) | Accepted (both seams implemented 2026-06-17) |
 | ADR-70 | [Fused static∪dynamic protection coverage](70-fused-protection-coverage.md) | Accepted (implemented 2026-06-17; co-landed with ADR-69 Seam 1) |

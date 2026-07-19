@@ -1,8 +1,9 @@
 # ADR-67 — Parameter type inference (the M3 frontier): call-site and in-body, precision-additive only
 
 Status: **Accepted — WD1 + WD3 + WD5 (capped fixpoint) implemented 2026-06-16; WD3
-argument-shape coverage extended 2026-07-06; the `check`-walk wiring and WD2 in-body
-inference still deferred.** Re-opens the algorithm-corpora
+argument-shape coverage extended 2026-07-06; the `check`-walk wiring designed 2026-07-19 as
+WD6 (addendum below — its demand gate fired on a three-codebase protection scout),
+implementation queued; WD2 in-body inference stays deferred.** Re-opens the algorithm-corpora
 survey's "M3 — untyped-param → whole-method Dynamic: **EXCUSED, do not pursue**" verdict
 on new **protection-coverage** evidence. Method / ctor parameters default to `untyped`
 today (the gradual entry point); the pilot shows a param flowing into an ivar or
@@ -192,6 +193,60 @@ Demand-gated. Proceed when **either**: (a) [ADR-63](63-type-protection-coverage.
 protection-coverage keeps surfacing M3 as the top `add_a_type_here` across user projects
 (the pilot is the first such signal); or (b) [ADR-46](46-incremental-dependency-graph.md)
 incremental analysis makes the WD3 call-site pass affordable inside the per-file model.
+
+**Trigger (a) fired, 2026-07-19.** A three-codebase protection scout (mastodon
+`app/models`+`app/services`, redmine `app`+`lib`, rails activemodel/actionpack/activesupport
+`lib`) put the correctly-attributed `inferred_return_untyped` mass at 20–51% of unprotected
+sites everywhere, and site-level drill-down traced it overwhelmingly to untyped
+`call`/`initialize`/setter parameters (with [ADR-58](58-ivar-field-typing.md) ivars as the
+immediate second hop: `@options = options`). ADD_RBS was 1–2.4% on every codebase — the
+holes are not missing signatures, they are this inference. The check-walk addendum below is
+that follow-up.
+
+## Addendum — WD6: check-walk activation of the WD3 table (2026-07-19, design)
+
+The consumption side already ships: `StatementEvaluator#seed_inferred_param_types`
+(`build_method_entry_scope`) consults `Scope#param_inferred_types`, overrides only
+untyped bindings, lets RBS-declared params win, and no-ops on the empty table — which is
+what the check path has been. Activation is therefore *populating the table in the check
+command's discovery seed*, exactly as `coverage --protection` does
+(`ParameterInferenceCollector.collect` → `seed[:param_inferred_types]`), plus the guards
+this ADR always said must land with it. Four working decisions:
+
+- **WD6a — activation, budgeted, off by default.** The check command runs the collector as
+  a pre-pass into the discovery seed, **one round** (not the protection scan's three — one
+  hop of call-site → param typing; multi-hop stays a protection-surface luxury until
+  measured), behind a `parameter_inference:` config gate resolved **off** by every default
+  profile ([ADR-50](50-release-engineering-and-stability-strategy.md) WD1: a
+  diagnostics-affecting activation is a compatibility change; the gate is the discipline).
+  The pre-pass runs before the pool split, so every worker sees the same frozen table —
+  determinism by the same seed-before-fork contract the discovery tables use.
+- **WD6b — the "inferred, not declared" mark, and the guarded rule set (the WD1 follow-up
+  named at line ~114).** The seed records provenance per `(def, param)` the ADR-58-WD1 way
+  (a side mark, never a carrier field). **Slice 1 guards every negative in-body rule** —
+  `call.undefined-method`, arity/argument-mismatch, possible-nil — from firing on a
+  receiver/value whose type is inferred-param-sourced: an open call-site set means the
+  union is a lower bound, and a diagnostic against a lower bound is an FP by construction
+  (the same reasoning that keeps WD1 non-negotiable at the boundary). What activation buys
+  in slice 1 is *positive*: folds, narrowing, downstream propagation, protection-metric
+  closure, and fewer `Dynamic` chains — not new firings. Un-guarding any rule later
+  requires the mutation oracle ([ADR-63](63-type-protection-coverage.md) Tier 2) to show
+  the closed-call-set case is separable, as its own measured slice.
+- **WD6c — incremental stays out, explicitly.** Under `--incremental`
+  ([ADR-46](46-incremental-dependency-graph.md)) the table introduces cross-file edges
+  (caller's argument types → callee's body diagnostics) that the recorder does not yet
+  carry; a cached file whose param seeds changed would serve stale results. Slice 1:
+  `parameter_inference:` and `--incremental` are mutually exclusive (the gate refuses,
+  with a message), and the edge wiring is the named follow-up before they compose.
+- **WD6d — the measurement gate (the WD4-of-ADR-93 pattern).** With the gate off: the
+  corpus is byte-identical by construction (empty table no-op). With the gate on:
+  (1) every diagnostic delta on mail/kramdown/haml/liquid + mastodon models + redmine app
+  is hand-adjudicated (expected ≈0 given WD6b guards all negative rules — any new firing
+  is a guard hole, fix before landing); (2) the protection lift on the two apps is the
+  reported yield; (3) the collector pre-pass cost is measured cold on the largest corpus
+  target and the run stays within the perf band (≤5% wall; the pre-pass is the price, so
+  report it separately); (4) `RIGOR_BUDGET_TRACE`-style visibility if the round cap bites.
+  Default-on is a *separate, later* decision under ADR-50, on this evidence.
 WD2 (in-body lower bound) may proceed independently and earlier — it is local and FP-safe.
 
 ## Consequences

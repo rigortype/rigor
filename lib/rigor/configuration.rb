@@ -56,6 +56,13 @@ module Rigor
       # filtering — the path must be named here (WD2 (b) of ADR-22).
       "baseline" => nil,
       "fold_platform_specific_paths" => false,
+      # ADR-67 WD6a — opt-in call-site parameter type inference on the `check` walk. When `true`, `rigor
+      # check` runs the {Inference::ParameterInferenceCollector} as a one-round pre-pass into the discovery
+      # seed, so an undeclared `def` / `initialize` / setter parameter is typed to the union of its resolved
+      # call-site argument types (precision-additive only — the in-body negative rules decline on the inferred
+      # lower bound, WD6b). `false` (the default, resolved off by every severity profile) keeps the table empty
+      # and the run byte-identical to today. Mutually exclusive with `--incremental` (WD6c).
+      "parameter_inference" => false,
       "cache" => {
         "path" => ".rigor/cache",
         # LRU eviction cap in bytes (ADR-54 WD3). The least-recently-used entries are removed at the end of a
@@ -193,7 +200,7 @@ module Rigor
 
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
                 :cache_validation, :disabled_rules,
-                :libraries, :signature_paths, :fold_platform_specific_paths,
+                :libraries, :signature_paths, :fold_platform_specific_paths, :parameter_inference,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides,
@@ -409,7 +416,10 @@ module Rigor
       @baseline_path = coerce_baseline_path(data.fetch("baseline", DEFAULTS.fetch("baseline")))
       @fold_platform_specific_paths = data.fetch(
         "fold_platform_specific_paths", DEFAULTS.fetch("fold_platform_specific_paths")
-      ) == true
+      )
+      # ADR-67 WD6a — resolve to a strict Boolean so a truthy non-`true` value (e.g. a stray String) does not
+      # silently enable the gate; only the literal `true` activates the check-walk collector pre-pass.
+      @parameter_inference = data.fetch("parameter_inference", DEFAULTS.fetch("parameter_inference")) == true
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
@@ -475,6 +485,7 @@ module Rigor
         "signature_paths" => signature_paths,
         "pre_eval" => pre_eval,
         "fold_platform_specific_paths" => fold_platform_specific_paths,
+        "parameter_inference" => parameter_inference,
         "cache" => {
           "path" => cache_path,
           "max_bytes" => cache_max_bytes,

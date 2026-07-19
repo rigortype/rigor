@@ -61,6 +61,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     includes_of(req:class_name)
     indexed_narrowing(req:receiver_kind,req:receiver_name,req:key)
     indexed_narrowings()
+    inferred_param?(req:name)
     ivar(req:name)
     ivar_origin(req:name)
     ivar_origins()
@@ -100,6 +101,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_fact(req:fact)
     with_global(req:name,req:type)
     with_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key,req:type)
+    with_inferred_param_mark(req:name)
     with_ivar(req:name,req:type)
     with_ivar_origin(req:name,req:cause)
     with_local(req:name,req:type)
@@ -111,6 +113,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_struct_fold_safe(req:locals)
     without_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key)
     without_indexed_narrowings_for(req:receiver_kind,req:receiver_name)
+    without_inferred_param_mark(req:name)
     without_method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name)
     without_method_chain_narrowings_for(req:receiver_kind,req:receiver_name)
   ].freeze

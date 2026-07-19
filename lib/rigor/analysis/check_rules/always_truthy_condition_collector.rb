@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "inferred_param_guard"
 
 module Rigor
   module Analysis
@@ -101,6 +102,11 @@ module Rigor
 
           scope = @scope_index[node]
           return if scope.nil?
+
+          # ADR-67 WD6b — a predicate rooted at an inferred parameter (`opts.key?(:x)`) folds to a constant only
+          # because the seed's lower-bound type pinned it; a wider real caller would not. Declining preserves
+          # the precision-additive contract.
+          return if InferredParamGuard.rooted?(predicate, scope)
 
           predicate_type = scope.type_of(predicate)
           return unless predicate_type.is_a?(Type::Constant)

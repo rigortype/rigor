@@ -18,6 +18,7 @@ require_relative "../rbs_extended/conformance_checker"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
+require_relative "../inference/parameter_inference_collector"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/project_patched_scanner"
@@ -165,6 +166,11 @@ module Rigor
         @project_discovered_methods = {}.freeze
         @project_data_member_layouts = {}.freeze
         @project_struct_member_layouts = {}.freeze
+        # ADR-67 WD6a — the call-site parameter-inference table, populated by the opt-in pre-pass in
+        # `assemble_run_diagnostics` when `parameter_inference:` is enabled, then seeded onto every per-file
+        # scope (sequential + fork-worker) through `project_scope_seed_tables`. Empty by default, so the gate-off
+        # run carries no table and is byte-identical.
+        @project_param_inferred_types = {}.freeze
         # ADR-84 WD2 — per-run identity token for the user-method return memo's bucket (see
         # Scope::DiscoveryIndex#run_generation). Minted fresh in `run_analysis` so the memo never serves an
         # entry across a run boundary (LSP re-check, ADR-62 warm loop); nil until the first run so
@@ -469,6 +475,12 @@ module Rigor
         # `assemble_run_diagnostics`, so it never runs the two whole-project parse passes. Runs over the FULL
         # expansion — subset (`analyze_only`) mode still needs the complete cross-file index (ADR-46 §2).
         ensure_project_discovery(expansion)
+        # ADR-67 WD6a — the opt-in call-site parameter-inference pre-pass. Runs on the parent BEFORE the pool
+        # split (so every worker sees the same frozen table — the seed-before-fork determinism the discovery
+        # tables use) and only on the analysis (miss / non-cacheable) path (a warm ADR-45 cache HIT never
+        # assembles). Gate off → no-op, and `environment` is left untouched so its lazy build timing is
+        # unchanged. Returns the resolved environment so the sequential dispatch reuses it (no double build).
+        environment = seed_parameter_inference(expansion, environment)
         diagnostics = @diagnostic_aggregator.pre_file_diagnostics(expansion)
         # ADR-46 — record which project files this run actually analyzed (the `analyze_only` subset, or
         # all of them). The incremental orchestrator serves every analyzed-but-not-affected file from the
@@ -483,6 +495,31 @@ module Rigor
         diagnostics += @diagnostic_aggregator.rbs_extended_reporter_diagnostics
         diagnostics += @diagnostic_aggregator.boundary_cross_diagnostics
         diagnostics + @diagnostic_aggregator.source_rbs_synthesis_diagnostics
+      end
+
+      # ADR-67 WD6a — the check-walk parameter-inference pre-pass. Populates `@project_param_inferred_types`
+      # (read by `project_scope_seed_tables`) with the call-site union of every undeclared parameter, running
+      # ONE round (a single hop of call-site → param typing; the protection scan's three-round fixpoint stays a
+      # protection-surface luxury until measured). No-op unless `parameter_inference:` is enabled, so the
+      # default run pays exactly nothing here and `environment` passes through unchanged (preserving the lazy
+      # env-build timing). When enabled, it resolves the environment once — the collector types call-site
+      # arguments against the same RBS / plugin surface the check uses — and returns it so the sequential
+      # dispatch reuses that build. The whole-project file set (not the `analyze_only` subset) is scanned: the
+      # inference is cross-file (a call site in one file types a parameter in another). Fails soft — a collector
+      # error must never break a run, so the table stays empty and the run proceeds unseeded.
+      def seed_parameter_inference(expansion, environment)
+        return environment unless @configuration.parameter_inference
+
+        files = expansion.fetch(:files)
+        environment ||= @pool_coordinator.resolve_sequential_environment(source_files: files)
+        @project_param_inferred_types = Inference::ParameterInferenceCollector.collect(
+          files: files, environment: environment,
+          target_ruby: @configuration.target_ruby, max_rounds: 1, workers: @workers
+        )
+        environment
+      rescue StandardError
+        @project_param_inferred_types = {}.freeze
+        environment
       end
 
       # A cache hit skipped the analysis, so the per-run stats (wall split, RBS-class counts, …) were never
@@ -1004,6 +1041,10 @@ module Rigor
           tables[:discovered_method_visibilities] = @project_discovered_method_visibilities
         end
         tables[:discovered_methods] = @project_discovered_methods unless @project_discovered_methods.empty?
+        # ADR-67 WD6a — the call-site parameter-inference table rides the same seed so a pooled `WorkerSession`
+        # scope seeds inferred parameters identically to the sequential path. Empty (and absent) unless the
+        # `parameter_inference:` gate ran the pre-pass.
+        tables[:param_inferred_types] = @project_param_inferred_types unless @project_param_inferred_types.empty?
         seed_member_layout_tables(tables)
         # ADR-46 slice 1 — the class-declaration source map is read only by the ancestry accessors during
         # dependency recording, so seed it only when recording is on; a normal run never carries it.

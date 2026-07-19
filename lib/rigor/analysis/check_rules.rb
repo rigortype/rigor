@@ -9,6 +9,7 @@ require_relative "../type"
 require_relative "diagnostic"
 require_relative "dependency_recorder"
 require_relative "check_rules/rule_ids"
+require_relative "check_rules/inferred_param_guard"
 require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
@@ -631,11 +632,15 @@ module Rigor
       class << self
         private
 
-        def undefined_method_diagnostic(path, call_node, scope_index)
+        def undefined_method_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil if call_node.receiver.nil?
 
           scope = scope_index[call_node]
           return nil if scope.nil?
+
+          # ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound; firing
+          # undefined-method against it is an FP by construction. Decline.
+          return nil if inferred_param_receiver?(call_node, scope)
 
           # N3 — a safe-navigation call (`recv&.m`) never dispatches on the
           # nil edge of its receiver: at runtime it short-circuits to nil.
@@ -858,6 +863,28 @@ module Rigor
         }.freeze
         private_constant :CONSTANT_CLASSES
 
+        # ADR-67 WD6b — true when this call's receiver is *rooted at* a pristine inferred-parameter local (the
+        # call-site union seeded at method entry). Every negative in-body rule (`call.undefined-method`,
+        # wrong-arity, argument-type-mismatch, possible-nil, visibility) declines on such a receiver: an open
+        # call-site set makes the inferred type a *lower bound*, so a diagnostic against it is a false positive
+        # by construction (the same reasoning that keeps ADR-67 WD1 non-negotiable at the parameter boundary,
+        # carried into the body). No-op on a normal `check` run — `inferred_param?` is false unless the
+        # `parameter_inference:` gate seeded the table.
+        def inferred_param_receiver?(call_node, scope)
+          inferred_param_rooted?(call_node.receiver, scope)
+        end
+
+        # ADR-67 WD6b — the argument-position analogue: true when `arg` is rooted at an inferred-parameter
+        # local. The argument-type-mismatch rule declines on it for the same lower-bound reason.
+        def inferred_param_argument?(arg, scope)
+          inferred_param_rooted?(arg, scope)
+        end
+
+        # ADR-67 WD6b — see {CheckRules::InferredParamGuard} for the shared root-walk contract.
+        def inferred_param_rooted?(node, scope)
+          InferredParamGuard.rooted?(node, scope)
+        end
+
         def constant_class_name(value)
           CONSTANT_CLASSES.each { |klass, name| return name if value.is_a?(klass) }
           nil
@@ -1073,6 +1100,10 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
+          # ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound; a wrong-arity
+          # firing against it is an FP by construction. Decline.
+          return nil if inferred_param_receiver?(call_node, scope)
+
           receiver_type = scope.type_of(call_node.receiver)
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
@@ -1224,6 +1255,11 @@ module Rigor
           # nil write, failed-guard narrowing) drops the mark upstream, so
           # flow-observed nil keeps firing exactly as before.
           return nil if scope.declaration_sourced?(:local, call_node.receiver.name)
+
+          # ADR-67 WD6b — an inferred-parameter receiver's type (incl. any nil constituent unioned in from a
+          # nil call site) is an open-call-site lower bound; a possible-nil firing against it is an FP by
+          # construction. Decline.
+          return nil if scope.inferred_param?(call_node.receiver.name)
 
           receiver_type = scope.type_of(call_node.receiver)
           return nil unless receiver_type.is_a?(Type::Union)
@@ -1771,6 +1807,10 @@ module Rigor
           scope = scope_index[call_node]
           return nil if scope.nil?
 
+          # ADR-67 WD6b — an inferred-parameter receiver's nominal type is an open-call-site lower bound; a
+          # private-method visibility firing against it is an FP by construction. Decline.
+          return nil if inferred_param_receiver?(call_node, scope)
+
           receiver_type = scope.type_of(call_node.receiver)
           return nil unless receiver_type.is_a?(Type::Nominal)
 
@@ -2033,6 +2073,9 @@ module Rigor
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
           mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides)
           return nil if mismatch.nil?
+          # ADR-67 WD6b — the mismatching argument is an inferred-parameter local, whose type is an
+          # open-call-site lower bound; firing argument-type-mismatch against it is an FP by construction.
+          return nil if inferred_param_argument?(mismatch[:node], scope)
 
           build_argument_type_diagnostic(path, call_node, class_name, mismatch)
         end

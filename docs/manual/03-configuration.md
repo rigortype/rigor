@@ -62,6 +62,7 @@ cache:
 | `exclude` | Array | `[]` | Glob patterns to skip. `vendor/bundle`, `.bundle`, and `node_modules` are always excluded. |
 | `includes` | Array | `[]` | Other config files to layer underneath this one. |
 | `fold_platform_specific_paths` | Boolean | `false` | Resolve Ruby-version-conditional load paths when discovering sources. |
+| `parameter_inference` | Boolean | `false` | Opt-in call-site parameter type inference on the `check` walk ([ADR-67](../adr/67-parameter-type-inference.md) WD6). When `true`, an undeclared `def` / `initialize` / setter parameter is typed to the union of its resolved call-site argument types, sharpening downstream ivar reads, folds, and protection coverage. Precision-additive only — the negative rules never fire against an inferred parameter. Cannot be combined with `--incremental`. |
 
 ### Type sources
 

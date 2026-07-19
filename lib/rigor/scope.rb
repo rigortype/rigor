@@ -312,6 +312,39 @@ module Rigor
       @declaration_sourced.include?([kind.to_sym, name.to_sym])
     end
 
+    # ADR-67 WD6b — stamp the "inferred, not declared" provenance mark on a parameter local seeded from the
+    # call-site parameter-inference table ({Inference::ParameterInferenceCollector}). Rides the ADR-58 WD1
+    # declaration-sourced side-mark machinery under a distinct `:inferred_param` kind (never a carrier field,
+    # so the displayed type is unchanged) so the negative in-body rules can decline on a receiver / argument
+    # whose type is an open-call-site *lower bound* — firing against a lower bound is a false positive by
+    # construction (the ADR-67 WD1 reasoning at the parameter boundary, carried one hop into the body). The
+    # distinct kind keeps the inferred-param sites separable from ADR-58's ivar-copy `:local` mark, which a
+    # later un-guarding slice (WD6b) needs. `with_local` drops it on any flow-live rewrite of the local
+    # (`drop_local_declaration_marks`), so only the pristine parameter binding carries it.
+    def with_inferred_param_mark(name)
+      rebuild(declaration_sourced: add_declaration_sourced(:inferred_param, name))
+    end
+
+    # ADR-67 WD6b — explicitly clear the inferred-parameter taint on `name`. The mark is deliberately STICKY:
+    # `with_local` (used by both narrowing and reassignment) does NOT drop it, so it survives the narrowing /
+    # join transitions between a lower-bound value's definition and its use (`v = param[i]-1; if 0<=v and v<n`
+    # — the `and` narrows `v` between the two comparisons). It is cleared only at a genuine source-level local
+    # write whose RHS does not derive from an inferred parameter ({StatementEvaluator#eval_local_write}), so a
+    # local rebound to an independent value stops being treated as a lower bound. Over-retention (a mark that
+    # outlives a rebind the write-path did not catch) only ever suppresses a diagnostic — the FP-safe
+    # direction — so stickiness is the conservative choice. Zero-alloc when no mark is present.
+    def without_inferred_param_mark(name)
+      dropped = drop_declaration_sourced_for(:inferred_param, name)
+      dropped.equal?(@declaration_sourced) ? self : rebuild(declaration_sourced: dropped)
+    end
+
+    # ADR-67 WD6b — true when `name`'s local binding is a pristine inferred parameter (the call-site union
+    # seeded at method entry, untouched by a flow-live write). The guard predicate the negative in-body rules
+    # consult.
+    def inferred_param?(name)
+      @declaration_sourced.include?([:inferred_param, name.to_sym])
+    end
+
     def with_cvar(name, type)
       rebuild(cvars: @cvars.merge(name.to_sym => type).freeze)
     end
@@ -766,11 +799,30 @@ module Rigor
       origins.key?(key) ? origins.reject { |k, _| k == key }.freeze : origins
     end
 
+    # Two kinds of mark share this Set with opposite join semantics:
+    #
+    # - ADR-58 WD1 declaration-sourced optionality (`:ivar` / `:local`) joins by **intersection** — a nil is
+    #   assumed a cross-method invariant only when BOTH branches agree its optionality is declaration-sourced.
+    # - ADR-67 WD6b inferred-parameter taint (`:inferred_param`) joins by **union** — a local is a lower-bound
+    #   value on the branch where it derives from an inferred parameter, so if EITHER branch taints it, a
+    #   downstream use could observe the lower-bound value and firing on it is an FP (`x = param else x = 5;
+    #   x.foo`). Intersecting would lose the taint at the merge and re-surface the false positive.
     def join_declaration_sourced(other)
-      return @declaration_sourced if @declaration_sourced.equal?(other.declaration_sourced)
-      return EMPTY_DECLARATION_SOURCED if @declaration_sourced.empty? || other.declaration_sourced.empty?
+      mine = @declaration_sourced
+      theirs = other.declaration_sourced
+      return mine if mine.equal?(theirs)
 
-      (@declaration_sourced & other.declaration_sourced).freeze
+      inferred = Set.new
+      mine.each { |ref| inferred << ref if ref[0] == :inferred_param }
+      theirs.each { |ref| inferred << ref if ref[0] == :inferred_param }
+      intersected =
+        if mine.empty? || theirs.empty?
+          EMPTY_DECLARATION_SOURCED
+        else
+          mine.select { |ref| ref[0] != :inferred_param && theirs.include?(ref) }
+        end
+      merged = inferred.merge(intersected)
+      merged.empty? ? EMPTY_DECLARATION_SOURCED : merged.freeze
     end
 
     def indexed_key(receiver_kind, receiver_name, key)

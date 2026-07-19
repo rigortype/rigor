@@ -11,6 +11,7 @@ require_relative "../source/constant_path"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "dynamic_origin"
+require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
 require_relative "indexed_narrowing"
@@ -235,6 +236,16 @@ module Rigor
         end
 
         bound = post_rhs.with_local(node.name, rhs_type)
+        # ADR-67 WD6b — a local whose RHS is (transitively) rooted at an inferred parameter inherits the
+        # "inferred, not declared" mark, so a subsequent use of the local declines the negative rules for the
+        # same lower-bound reason (`vindex = codepoints[i] - x; vindex < y`). The mark is STICKY across
+        # narrowing/joins (see `Scope#without_inferred_param_mark`), so a genuine rewrite from a non-param RHS
+        # must clear it here. No-op unless the `parameter_inference:` gate seeded a parameter this RHS reaches.
+        if Analysis::CheckRules::InferredParamGuard.rooted?(node.value, scope)
+          return [rhs_type, bound.with_inferred_param_mark(node.name)]
+        end
+
+        bound = bound.without_inferred_param_mark(node.name)
         bound = bound.with_local_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
         [rhs_type, bound]
       end
@@ -2505,7 +2516,7 @@ module Rigor
         sub_eval(node.body, fresh, class_context: new_context)
       end
 
-      def build_method_entry_scope(def_node)
+      def build_method_entry_scope(def_node) # rubocop:disable Metrics/AbcSize
         singleton = singleton_def?(def_node)
         binder = MethodParameterBinder.new(
           environment: scope.environment,
@@ -2517,8 +2528,11 @@ module Rigor
         # ADR-67 WD3 — override an undeclared parameter with its call-site inferred type (precision-additive; an
         # RBS-declared parameter wins, the table is empty on a normal `check` run). The inferred type lives only as a
         # body local, never as an RBS contract, so it cannot fire a parameter-boundary diagnostic (WD1, satisfied by
-        # construction).
-        bindings = seed_inferred_param_types(bindings, def_node, singleton)
+        # construction). WD6b — the second element is the set of parameters this seed overrode, stamped with
+        # the "inferred, not declared" provenance mark at bind time so the in-body rules can decline on them.
+        seeded = seed_inferred_param_types(bindings, def_node, singleton)
+        bindings = seeded.fetch(0)
+        inferred_names = seeded.fetch(1)
 
         # Method bodies do NOT see the outer scope's locals. They start from a fresh scope with the same environment,
         # then receive the parameter bindings. Slice 7 phase 2: instance defs ALSO seed their `ivars` map from the
@@ -2536,7 +2550,7 @@ module Rigor
             def_node.body, ->(name) { scope.struct_member_layout(name)&.[](:members) }
           )
         )
-        bindings.reduce(fresh) { |acc, (name, type)| bind_param(acc, name, type) }
+        bindings.reduce(fresh) { |acc, (name, type)| bind_param(acc, name, type, inferred_names) }
       end
 
       # ADR-82 root-enrichment — bind a method parameter, and for an *undeclared* (untyped) parameter seed its
@@ -2545,8 +2559,14 @@ module Rigor
       # route to parameter inference rather than reporting no cause at all. Reuses the WD1 `local_origins`
       # channel, so WD6 then carries the cause through any chain rooted at the parameter (`x.foo.bar`). An
       # RBS-declared / call-site-inferred parameter (a non-untyped binding) keeps no origin — it is not a hole.
-      def bind_param(acc, name, type)
+      #
+      # ADR-67 WD6b — a parameter the call-site inference seed overrode (`inferred_names`) is stamped with the
+      # "inferred, not declared" provenance mark instead: its type is a concrete (non-untyped) lower bound, so it
+      # is not an `inferred_return_untyped` hole, but the negative in-body rules must still decline on it (the
+      # union is open, so firing is an FP by construction). The mark drops on any flow-live rewrite of the local.
+      def bind_param(acc, name, type, inferred_names = nil)
         bound = acc.with_local(name, type)
+        return bound.with_inferred_param_mark(name) if inferred_names&.include?(name)
         return bound unless untyped_binding?(type)
 
         bound.with_local_origin(name, DynamicOrigin::INFERRED_RETURN_UNTYPED)
@@ -2559,19 +2579,23 @@ module Rigor
       # seed is byte-identical there.
       def seed_inferred_param_types(bindings, def_node, singleton)
         inferred = scope.param_inferred_types
-        return bindings if inferred.empty?
+        return [bindings, nil] if inferred.empty?
 
         path = current_class_path
-        return bindings if path.nil?
+        return [bindings, nil] if path.nil?
 
         table = inferred[[path, def_node.name, singleton ? :singleton : :instance]]
-        return bindings if table.nil? || table.empty?
+        return [bindings, nil] if table.nil? || table.empty?
 
         merged = bindings.dup
+        overridden = nil
         table.each do |name, type|
-          merged[name] = type if merged.key?(name) && untyped_binding?(merged[name])
+          next unless merged.key?(name) && untyped_binding?(merged[name])
+
+          merged[name] = type
+          (overridden ||= Set.new) << name
         end
-        merged
+        [merged, overridden]
       end
 
       # True for the `Dynamic[Top]` carrier `MethodParameterBinder` leaves on an undeclared parameter — the only

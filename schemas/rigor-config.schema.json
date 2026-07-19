@@ -66,6 +66,10 @@
       "description": "When `true`, `File` path-manipulation methods fold to platform-aware constants (`File::SEPARATOR` etc.). Default `false` — most projects want platform-agnostic results.",
       "type": "boolean"
     },
+    "parameter_inference": {
+      "description": "ADR-67 WD6 — opt-in call-site parameter type inference on the `check` walk. When `true`, `rigor check` runs a one-round pre-pass that types each undeclared `def` / `initialize` / setter parameter to the union of its resolved call-site argument types, sharpening downstream ivar reads, folds, narrowing, and protection coverage. Precision-additive only: the in-body negative rules (undefined-method, wrong-arity, argument-type-mismatch, possible-nil, visibility) decline on an inferred-parameter receiver/argument, because an open call-site union is a lower bound (WD6b). Default `false`, resolved off by every severity profile — a diagnostics-affecting activation is a compatibility change (ADR-50). Mutually exclusive with `--incremental` (WD6c).",
+      "type": "boolean"
+    },
     "cache": {
       "description": "On-disk cache settings. The cache stores parsed RBS environments, class ancestor tables, and plugin-side artefacts; deleting the directory is always safe (re-populates on next run).",
       "type": "object",

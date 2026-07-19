@@ -231,8 +231,8 @@ rigor docs --list                 # list every bundled page
 
 ## Status
 
-Current release: **`v0.2.9`** (2026-07-11) — the latest cut on the
-`0.2.x` evaluation line opened by `v0.2.0`, the first
+Current release: **`v0.3.0`** (2026-07-19) — the first cut on the
+`0.3.x` line, continuing the evaluation era opened by `v0.2.0`, the first
 publicly-announced (general / evaluation) release. The line publishes
 an enumerated [compatibility surface](docs/compatibility.md) as a
 minor-non-break trial, rehearsing the contract that hard-freezes at

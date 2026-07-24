@@ -4,6 +4,8 @@ Rigor's type-operator surface combines RBS-compatible operators (`|`, `&`, `T?`,
 
 This document defines the semantics of those operators, the diagnostic display contract, and the omission rules that keep negative-fact diagnostics readable. Reserved built-in names for refinements and type functions are catalogued in [imported-built-in-types.md](imported-built-in-types.md). The lattice in which these operators live is in [value-lattice.md](value-lattice.md).
 
+The internal forms are authored in `.rbs` as comment extensions (`%a{rigor:v1:…}`) and parsed by [`lib/rigor/builtins/imported_refinements.rb`](../../lib/rigor/builtins/imported_refinements.rb). Extending the grammar means editing that parser and the rows here in the same commit.
+
 ## Operator catalog
 
 | Form | Meaning |

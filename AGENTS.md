@@ -55,8 +55,7 @@ the inferred type at a position and `rigor type-scan PATH` reports per-node-clas
 **After any non-trivial change, run `make verify` then `git diff --check`**, inside the Flake.
 
 `make check` and `make check-plugins` MUST stay clean. Fix the cause — an engine regression, a missing
-per-class blocklist entry, or a genuine plugin-contract misuse — **never disable the rule**. If the
-Flake is unavailable, say so in your final report rather than skipping silently.
+per-class blocklist entry, or a genuine plugin-contract misuse — **never disable the rule**.
 
 ## Commit and PR Etiquette
 
@@ -86,7 +85,6 @@ flow is the `rigor-release-prep` skill.
 
 ## Implementation Guidelines
 
-- Keep additions small and aligned with the existing structure and naming.
 - **Ruby application code MUST NOT require Rigor-specific annotations or DSLs.**
 - **False positives outrank worst-case static reading.** "The program works" is the top-tier value;
   weigh FP cost heavily — in the engine, and equally in tooling and gates. A check that fires on
@@ -99,28 +97,17 @@ flow is the `rigor-release-prep` skill.
   (`Scope`, fact store, effect model, capability-role inference, type-object surface) in
   [`docs/internal-spec/`](docs/internal-spec/README.md). Update the topical document in the same commit
   as the behaviour.
-- **Say "structural interface", and reserve "protocol".** In Rigor/RBS an *interface* is structural —
-  Go's `interface`, Python's `Protocol` — satisfied by having the methods, not the Java/PHP nominal
-  sense. *Protocol* means only [ADR-28](docs/adr/28-path-scoped-protocol-contracts.md)'s path-scoped
-  behavioural contract; an engine-internal duck-typed seam (a dispatch tier's `try_dispatch`) is an
-  interface. Explainer: [handbook appendix](docs/handbook/appendix-protocols-and-structural-typing.md).
-- Rigor-specific type expressions live in RBS comment extensions (`%a{rigor:v1:…}`), parsed by
-  [`lib/rigor/builtins/imported_refinements.rb`](lib/rigor/builtins/imported_refinements.rb).
-  Extending the grammar means editing the parser **and** the spec rows in
-  `docs/type-specification/{imported-built-in-types,type-operators}.md` in the same commit.
-- Opt-in gem-source inference (`dependencies.source_inference:`) walks a no-RBS gem's `lib/` as a
-  `Dynamic[T]`-bearing fallback below the RBS tier. RBS / RBS::Inline / stubs / plugin contracts always
-  win on conflict; the dispatcher tier ordering is normative.
+- **Two trapped terms.** *Interface* is always structural here, and *protocol* means only
+  [ADR-28](docs/adr/28-path-scoped-protocol-contracts.md)'s path-scoped behavioural contract. Check
+  [`CONTEXT.md`](CONTEXT.md) before using either.
 
 ## RBS Authorship
 
-**Prefer [`rigor sig-gen`](docs/adr/14-rbs-sig-generation.md) over hand-written or AI-authored RBS
-here** — a gap that pushes you toward freehand RBS is information about where inference still has work,
-and **the gap is the more valuable signal**. Propose `sig-gen --print` / `--diff` first; land a
-hand-edit only when the generator surfaces a real gap AND the user has reviewed the alternatives.
-Correcting existing `.rbs` (renames, typos, intentional widening per ADR-5 clause 2) is fine when
-authorised; reading RBS is always fine. A `tighter-return` that contradicts existing RBS is **never**
-applied. Rationale and the full policy: [ADR-14](docs/adr/14-rbs-sig-generation.md).
+**Prefer `rigor sig-gen` over hand-written or AI-authored RBS here** — a gap that pushes you toward
+freehand RBS is information about where inference still has work, and **the gap is the more valuable
+signal**. Propose `sig-gen --print` / `--diff` first; land a hand-edit only once the user has reviewed
+that alternative. Correcting existing `.rbs` is fine when authorised, and reading it always is.
+Rationale, the contradiction rule, and the full policy: [ADR-14](docs/adr/14-rbs-sig-generation.md).
 
 Outside this repository, treat AI-authored RBS normally.
 
@@ -143,22 +130,17 @@ Only what you would not guess from the tree:
 
 - [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) — the session handoff: what the next session enters
   on. Short-lived, replaced wholesale. Start here.
-- **GitHub Issues** — the backlog. Every mid/long-term work item is an issue; release planning is the
-  **Milestones** surface (`v0.3.0`, `v1.0.0`). Conventions:
-  [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) ([ADR-98](docs/adr/98-development-flow-document-roles.md)).
-  Do not add backlog sections to tracked markdown files.
+- **GitHub Issues** — the backlog, on `rigortype/rigor`. Every mid/long-term work item is an issue;
+  release planning is the **Milestones** surface (`v0.3.0`, `v1.0.0`); an external PR is a triage
+  surface too. Conventions: [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) and
+  [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md)
+  ([ADR-98](docs/adr/98-development-flow-document-roles.md)). Do not add backlog sections to tracked
+  markdown files.
+- [`CONTEXT.md`](CONTEXT.md) — the domain glossary, carrying this repo's trapped terms; how the
+  skills consume it is [`docs/agents/domain.md`](docs/agents/domain.md).
 - `CHANGELOG.md` — what shipped, written for users; the detail is the git log.
 - [`docs/adr/README.md`](docs/adr/README.md) — the complete ADR index (title + status). The decision
   itself is only ever in the ADR body.
-
-## Agent Skills
-
-- **Issue tracker** — GitHub Issues on `rigortype/rigor`; external PRs are a triage surface. See
-  [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
-- **Triage labels** — the five canonical roles, default strings, plus one `area:*` label per issue.
-  See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
-- **Domain docs** — single-context: [`CONTEXT.md`](CONTEXT.md) at the root (the glossary, with this
-  repo's trapped terms) + `docs/adr/`. See [`docs/agents/domain.md`](docs/agents/domain.md).
 
 ## Architecture Decision Records
 

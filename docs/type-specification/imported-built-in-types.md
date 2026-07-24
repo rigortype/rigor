@@ -4,6 +4,8 @@ Rigor imports type ideas from PHPStan, TypeScript, and Python typing only when t
 
 This document defines the reserved built-in **names** Rigor uses for refinements and type functions. The internal forms backing these names are catalogued in [rigor-extensions.md](rigor-extensions.md). Operator forms (`~T`, `T - U`, `key_of[T]`, …) are in [type-operators.md](type-operators.md).
 
+These names are authored in `.rbs` as comment extensions (`%a{rigor:v1:…}`) and parsed by [`lib/rigor/builtins/imported_refinements.rb`](../../lib/rigor/builtins/imported_refinements.rb). Extending the grammar means editing that parser and the rows here in the same commit.
+
 ## Naming rules
 
 - Reserved built-in **refinement** names use `kebab-case`, such as `non-empty-string`, `positive-int`, and `non-empty-array[T]`.

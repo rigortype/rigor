@@ -6,11 +6,11 @@
 
 ## Claude Code
 
-- Skills are auto-discovered from [`.claude/skills/`](.claude/skills/); each `SKILL.md`'s
-  `description:` is what routes to it, so keep no catalogue here. They are **contributor** workflows
-  and assume this monorepo's `Makefile` and layout. An external-author plugin skill (a `rigor-foo` gem
-  in your own repo, [ADR-31](docs/adr/31-contribution-and-supply-chain-policy.md) WD4) is queued for
-  v0.2.0; until then `rigor-plugin-author` Phase 0.5 routes non-maintainers to ADR-31's third-party
-  path. Authoring one: [`docs/agents/skill-authoring.md`](docs/agents/skill-authoring.md).
+- **Two skill trees, and only one of them is yours.** [`.claude/skills/`](.claude/skills/) is
+  auto-discovered in this session — **contributor** workflows that assume this monorepo's `Makefile`
+  and layout. [`skills/`](skills/) is the **user-facing** set Rigor ships to projects adopting it;
+  it is not loaded here, references only the public `rigor` CLI, and several names appear in both
+  trees (`rigor-plugin-author`). Each `SKILL.md`'s `description:` is what routes to it, so keep no
+  catalogue here. Authoring either: [`docs/agents/skill-authoring.md`](docs/agents/skill-authoring.md).
 - A subagent does not inherit this contract. The Flake mandate, the `references/` read-only rule, and
   the release gate bind it too — put them in the prompt, or it will run `bundle` on the host.

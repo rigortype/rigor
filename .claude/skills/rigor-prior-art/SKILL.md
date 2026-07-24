@@ -12,6 +12,8 @@ description: >-
   rbs_rails, Tapioca, PHPStan, …). Also use before publishing any comparative
   claim about Rigor, to check what the corpus actually supports. NOT for a
   single fact in a file you already know (just rg/Read it directly).
+metadata:
+  internal: true
 ---
 
 # rigor-prior-art — corpus archaeology with citation-grade output

@@ -1,7 +1,7 @@
 # ADR-92 — Normative status fidelity: the founding-era stratum and the declare-or-mark gate
 
-Status: **Accepted — implemented 2026-07-16 (WD1–WD5); WD2's `void` verdict resolved to
-option (b), landed.** WD2 verdicts + WD3 markers landed
+Status: **Accepted — implemented 2026-07-16 (WD1–WD5) and 2026-07-25 (WD6, the corpus sweep and its
+gate); WD2's `void` verdict resolved to option (b), landed.** WD2 verdicts + WD3 markers landed
 in `special-types.md` (§ `void`, § `top`), `diagnostic-policy.md` (four family rows + the
 guidelines preamble), and `internal-type-api.md` (a document-level status block narrowing
 the method surface to what ships). WD4's gate is axis 5 of
@@ -23,6 +23,60 @@ table already used it), and admits both statuses.
 
 Grounding: [`docs/notes/20260716-dspec-formal-spec-substrate-evaluation.md`](../notes/20260716-dspec-formal-spec-substrate-evaluation.md)
 § P1 / § (b) / § 段 0 — the three findings and the probes that produced them.
+
+**Amendment (2026-07-25) — a second class, found by finishing the sweep (WD6).** The carry-over
+above ("`internal-spec`'s other documents were not swept") was worked through
+([#163](https://github.com/rigortype/rigor/issues/163); ledger:
+[`docs/notes/20260725-internal-spec-status-fidelity-sweep.md`](../notes/20260725-internal-spec-status-fidelity-sweep.md)).
+The *claimed-but-never-implemented* class recurred exactly once —
+[`implementation-expectations.md`](../internal-spec/implementation-expectations.md) § Engine surface,
+where the incomplete-inference result carrier and the *inference* half of capability roles both name
+surfaces absent from all of `lib/`. Three of the five findings were a class this ADR did not
+anticipate:
+
+> **A version-anchored future tense that the release then outran.**
+
+"The merger lands in v0.1.0" (`flow-contribution.md`, written at v0.0.9 and still there at v0.3.0,
+four sections above the note that it shipped); "the substrate the v0.1.0 plugin API will be designed
+against" plus three extensions it never got (`reflection.md`); "nothing consumes it yet"
+(`plugin-trust.md`, false since the run-result cache started folding plugin boundary reads into the
+run dependency descriptor). **Each was true the day it was written.** That is what separates this
+class from the founding-era stratum: no one misstated anything, and no author error is available to
+correct. The corpus simply has no mechanism that expires such a sentence, so the release date
+silently converts an accurate plan into a false claim — and WD4's gate cannot see it, because that
+gate reads the diagnostic-family table and WD1 leaves the prose body ungated.
+
+The inverse direction belongs to the same class: `plugin-trust.md` *under*-claimed what ships. WD4
+already names this ("the marker expires"); this amendment records that an unmarked deferral rots the
+same way a marker does.
+
+**WD6 — the gate: `manual_drift_spec.rb` axis 6.** Over `docs/type-specification/` +
+`docs/internal-spec/`, no sentence may pair a pending marker (`will` / `lands` / `introduces` /
+`adds` / …) with a **pinned** version literal at or below `Rigor::VERSION`. Three properties make
+this gateable where the general prose body is not:
+
+- **The comparison is decidable** — a version literal against `Rigor::VERSION`, never a judgement
+  about whether a clause is satisfied. That is the WD1 line, not an exception to it.
+- **A release line cannot expire.** `v0.4.x` / `v1` name a line, not a release, so a sentence about
+  one stays true as the line grows. The corpus already uses that spelling for open work
+  (`plugin-cache-producers.md`), and the gate's remediation is to adopt it.
+- **Past tense is never matched.** `landed` / `added` / `shipped` are how a corrected sentence
+  reads; matching them would fight the fix.
+
+The detector carries its own non-vacuity examples — the three real sentences above, plus the shapes
+it must not fire on. Without them the axis is silence-shaped: a corpus that is clean passes forever,
+including when the detector has quietly stopped detecting.
+
+Precision on the live corpus: two false positives, both instructive. One was a marker in one bullet
+pairing with a version literal in the next (fixed by splitting list items before joining lines); the
+other was a sentence naming an old version for *history* while promising something else entirely
+(fixed by requiring the version to sit within a short window of the marker — the promise must
+*govern* the version, not merely share a sentence with it).
+
+The gate is a floor, not a ceiling. `public-api.md` carried three stale sentences that axis 6 does
+not match ("until v0.1.0 ratifies them", "as the v0.1.0 plugin observability story finalises"); they
+were found by reading and fixed in the same pass. Per WD1 the manual probe remains the instrument
+for the prose body.
 
 ## Context
 
@@ -225,7 +279,10 @@ skip, which is the discipline this ADR exists to install.
   transitive case (`def bar; foo; end; a = bar` — `bar` declares nothing, so a call-site rule
   reading `bar`'s RBS cannot see the `void` that reached it through the body). (2) The prose-clause body stays ungated (WD1) — the P1-class probe remains a
   manual instrument. (3) `internal-spec`'s other documents were not swept; only
-  `internal-type-api.md` was probed.
+  `internal-type-api.md` was probed — **resolved 2026-07-25**, see the WD6 amendment above: the sweep
+  found one more instance of this ADR's class and three of a second one, now gated by axis 6. The
+  three largest documents (`inference-engine.md`, `plugin.md`, `cache.md`) got the enumerated-surface
+  pass rather than a line-by-line read, which is what keeps #163 open.
 
 ## Relationship to other ADRs
 

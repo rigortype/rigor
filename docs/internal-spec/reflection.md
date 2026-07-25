@@ -63,10 +63,12 @@ The RBS-consulting methods accept **either** `scope:` **or** `environment:` (the
 
 The provenance side of the API (which source family contributed
 each fact) is explicitly **out of scope for the v0.0.7 first
-pass**. v0.1.0's plugin API adds it as a separate concern, per
-ADR-2 § "Plugin Diagnostic Provenance" and the readiness
-analysis's recommendation to keep the facade narrow until plugin
-authors require provenance for diagnostic explanations.
+pass**, and remains unbuilt — it was to be a separate concern of
+the plugin API, per ADR-2 § "Plugin Diagnostic Provenance" and
+the readiness analysis's recommendation to keep the facade narrow
+until plugin authors require provenance for diagnostic
+explanations. No plugin author has asked, so the facade is still
+narrow; see the marker under § *Future evolution*.
 
 ## Stability
 

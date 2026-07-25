@@ -148,3 +148,20 @@ could: flag any spec sentence naming a released version in the future tense ("la
 be", "v0.1.0 introduces") once `Rigor::VERSION` has passed that version. That is a mechanical,
 low-false-positive check over a corpus this small, and it would have caught three of these five before
 a reader did. Worth its own issue rather than being smuggled into this sweep.
+
+**Built, same day** ([#211](https://github.com/rigortype/rigor/issues/211)) — `manual_drift_spec.rb`
+axis 6, recorded as ADR-92 WD6. Two things it taught while being calibrated against the live corpus,
+both now encoded in the check:
+
+- **Bullets are not sentences.** Joining a hard-wrapped paragraph pairs a marker in one list item
+  with a version literal in the next, and the axis reports a sentence nobody wrote. List items and
+  table rows are split as their own units first.
+- **Sharing a sentence is not being promised.** "Re-attempt the v0.0.9 carry-over … that work is
+  descoped and lands in a separate v0.1.x ticket" names an old version for *history* while promising
+  something else. The version must sit within a short window of the marker — the promise has to
+  *govern* the version.
+
+The gate is a floor, not a ceiling: `public-api.md` carried three stale sentences it does not match
+("until v0.1.0 ratifies them", "still in flux as the v0.1.0 plugin observability story finalises",
+"the one plugin-side cache producers **will** ride" — they do ride it). Found by reading, fixed in
+the same pass. Per ADR-92 WD1 the manual probe stays the instrument for the prose body.

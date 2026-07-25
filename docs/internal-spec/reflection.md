@@ -1,11 +1,13 @@
 # Reflection Facade — `Rigor::Reflection`
 
-Status: **Public read shape (v0.0.7).** This module is the unified
-read-side facade over Rigor's three reflection sources. It is the
-substrate the v0.1.0 plugin API will be designed against; per
+Status: **Public read shape, landed v0.0.7 and unchanged since.** This
+module is the unified read-side facade over Rigor's three reflection
+sources; per
 [`docs/design/20260505-v0.1.0-readiness.md`](../design/20260505-v0.1.0-readiness.md),
 landing the facade was the highest-leverage cold-start slice for
-v0.1.0 readiness.
+v0.1.0 readiness. The v0.1.0 plugin API was designed against it, and
+none of the three extensions § *Future evolution* anticipated for that
+release has been built — see the marker there.
 
 The module is **read-only and additive**. Existing call sites that
 read directly from `Rigor::Scope` or
@@ -80,17 +82,23 @@ how each source caches its lookups internally is not.
 
 ## Future evolution
 
-The v0.1.0 plugin API extends this module along three axes,
-called out in [`docs/design/20260505-v0.1.0-readiness.md`](../design/20260505-v0.1.0-readiness.md):
+> **Status — none of the three axes below shipped (as of this writing).** They were anticipated for
+> the v0.1.0 plugin API; that release came and went, and `lib/rigor/reflection.rb` still carries no
+> provenance surface, no Rigor-side `MethodDefinition` carrier, and no cache-slice descriptors. They
+> are recorded here as intent, not as contract — a reader implementing against this document (the
+> `rigor-rs` port in particular) must not expect them. Per
+> [ADR-92](../adr/92-normative-status-fidelity.md) WD2 the intent is marked rather than deleted.
+
+Three axes were called out in
+[`docs/design/20260505-v0.1.0-readiness.md`](../design/20260505-v0.1.0-readiness.md):
 
 - **Provenance** — every read returns a `(value, source_family)`
   pair so plugin diagnostics can explain why a fact came from
   source / RBS / generated / plugin.
-- **Unified `MethodDefinition` carrier** — currently
-  `instance_method_definition` returns the raw
-  `RBS::Definition::Method`; v0.1.0 introduces a Rigor-side
-  carrier that joins source `def` nodes, RBS sigs, and plugin
-  dynamic members under one shape.
+- **Unified `MethodDefinition` carrier** — `instance_method_definition`
+  returns the raw `RBS::Definition::Method`; the axis was a Rigor-side
+  carrier joining source `def` nodes, RBS sigs, and plugin dynamic
+  members under one shape.
 - **Cache slice descriptors** — each read returns or accepts a
   cache key derived from the typed-slot schema in ADR-2 § "Cache
   Invalidation Needs a Declarative API", so plugin facts that

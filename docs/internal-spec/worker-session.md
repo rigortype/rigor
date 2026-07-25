@@ -29,12 +29,19 @@ The constructor accepts only inputs that cross a worker boundary safely:
   (`Ractor.shareable?`); the per-worker plugin instances are materialised
   from these (see [`plugin.md`](plugin.md#concurrency-and-value-object-shareability-adr-15)).
 - `explain` — a Boolean.
+- `record_dependencies` — a Boolean (default `false`). When set,
+  `#analyze` wraps each file's analysis in an ADR-46 `DependencyRecorder`
+  window so the worker captures that file's cross-file reads, drained by
+  `#drain_dependencies` alongside `#drain_reporters`. The recorder's own
+  disabled fast path makes the unset case free.
 - `synthetic_method_index` / `project_patched_methods` /
   `project_scope_seed` — optional, default `nil` / `{}`. These are **not**
   `Ractor.shareable?` (the seed tables carry Prism def nodes), so a Ractor
   pool leaves them unset; the fork backend (which builds the session
   pre-fork on the parent) threads the runner's project-scan results through
   so per-file inference matches the sequential path exactly.
+  `source_files` — the analyzed-file set the session's environment is
+  built against, threaded for the same equivalence reason.
   `project_scope_seed` is the runner's cross-file pre-pass table set
   (`Runner#project_scope_seed_tables` — the same tables
   `seed_project_scope` applies on the sequential path); a session
@@ -54,7 +61,8 @@ accumulates:
 - the `RbsExtended::Reporter` and the dependency-source
   `BoundaryCrossReporter` (both Mutex-bearing and intentionally
   per-worker — the runner merges their entries post-pool via
-  `#drain_reporters`);
+  `#drain_reporters`, and the recorded dependencies via
+  `#drain_dependencies`);
 - the `Rigor::Environment`, threaded with the per-worker reporters so
   reporter writes from inference / dispatch accumulate into the worker's
   own state.

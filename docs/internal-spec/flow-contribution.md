@@ -5,9 +5,10 @@ fixes the bundle shape internal flow-contribution producers
 (built-in narrowing rules and `RBS::Extended` annotations) carry
 at a single call edge. The merge policy that consumes these
 bundles is owned by
-[ADR-2 § "Plugin Contribution Merging"](../adr/2-extension-api.md);
-v0.0.9 ships only the bundle struct itself — the merger lands
-alongside the plugin API in v0.1.0.
+[ADR-2 § "Plugin Contribution Merging"](../adr/2-extension-api.md).
+v0.0.9 shipped the bundle struct alone; the merger landed alongside
+the plugin API in v0.1.0 and is specified in
+[flow-contribution-merger.md](flow-contribution-merger.md).
 
 **Plugins no longer construct this bundle.** ADR-37 replaced the
 plugin-authored bundle hook with the narrow `dynamic_return`
@@ -62,11 +63,12 @@ The eight content slots match
 | `exceptional` | effect tag or `nil` | Non-returning, raising, or unreachable effect. |
 | `role_conformance` | `Array` or `nil` | Capability-role conformance facts the contribution provides. |
 
-The shape of the values inside the collection slots is
-intentionally not pinned in v0.0.9. The merger that lands in
-v0.1.0 will define a tagged element form; until then
-contributions are free to use the analyzer-internal narrowing
-representation that already drives built-in rules.
+The shape of the values inside the collection slots was
+intentionally not pinned in v0.0.9. The v0.1.0 merger defines the
+tagged element form the values flatten into
+(`#to_element_list`, § *Element-list flattening*); the slot values
+themselves are still the analyzer-internal narrowing representation
+that drives the built-in rules.
 
 ## Provenance
 

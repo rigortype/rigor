@@ -1,5 +1,23 @@
 # Implementation Expectations
 
+> **Status — two of § *Engine surface*'s nine bullets are target state, not shipped state (as of
+> this writing).**
+> **Inference budgets and incomplete-inference results**: no incomplete-inference result carrier
+> exists in `lib/`, and the configurable `budgets:` surface is unwired — the marker is on
+> [`inference-budgets.md`](../type-specification/inference-budgets.md), and the consuming
+> `static.incomplete-inference.*` family is Reserved. What ships is a set of hard-coded recursion /
+> fan-out guards plus ADR-10's per-gem budget, and the reason survives as a `DynamicOrigin` cause on
+> the value (`ANALYZER_BUDGET_CUTOFF`) rather than as a result object.
+> **Capability-role inference**: only its *explicit* half ships. `RbsExtended::ConformanceChecker`
+> checks an author-written `conforms-to` directive against an RBS-defined interface; deriving a
+> required role from a method body, caching per-method requirement summaries, and matching them
+> against indexed named interfaces have **no implementation anywhere in `lib/`**. That deferral is
+> already recorded in
+> [`control-flow-analysis.md`](../type-specification/control-flow-analysis.md) § "capability-role
+> *requirement inference* from method bodies"; this document stated the unshipped half in the present
+> tense and now says so. Per [ADR-92](../adr/92-normative-status-fidelity.md) WD2 the intent is
+> marked rather than deleted — both remain wanted.
+
 The implementation MUST keep parsing, internal type representation, subtyping, consistency, normalization, scope transition, effect application, and RBS erasure as separate concepts. This separation keeps RBS compatibility stable while leaving room for inference-oriented internal precision.
 
 This document is the engine-surface contract that downstream features depend on. Each surface listed here is referenced from elsewhere in the specification.

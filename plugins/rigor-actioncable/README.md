@@ -54,6 +54,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
 | `node_rule(Prism::CallNode)` (ADR-37) | Per-call validation of every `<Channel>.broadcast_to` / `ActionCable.server.broadcast` over the engine-owned walk. |
 | Recursive method-body walk for DSL recognition | `stream_from` / `stream_for` calls live inside method bodies (`subscribed`); the discoverer recursively walks the channel body to find them. |
 | `Plugin::Base.suggest` | Did-you-mean suggestions on two axes — channel name (`unknown-channel`) and stream name (`unknown-stream`). |
+| `manifest(... protocol_contracts:)` + `Plugin::Base#protocol_contracts` override ([ADR-28](../../docs/adr/28-path-scoped-protocol-contracts.md)) | Types `#receive(data)`'s `data` as `Hash`; the `channel_search_paths` config override retargets the contract's glob the same way `rigor-hanami`'s `action_path` does. |
 
 ## Future direction
 

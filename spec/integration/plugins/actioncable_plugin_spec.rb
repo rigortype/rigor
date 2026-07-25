@@ -214,4 +214,140 @@ RSpec.describe "plugins/rigor-actioncable" do
       expect(info).not_to be_nil
     end
   end
+
+  # ADR-28 provide half: `#receive(data)` is ActionCable's framework-dispatched catch-all action (invoked
+  # with the decoded JSON payload when an incoming message carries no explicit "action" key), so `data` is
+  # always a Hash. The engine substitutes `Hash` for the usual `Dynamic[Top]` fallback inside a matching
+  # `#receive` body, so a misuse surfaces as an ordinary core diagnostic.
+  describe "#receive(data) parameter-type provision" do
+    let(:body) do
+      <<~RUBY
+        class %<name>s < ApplicationCable::Channel
+          def receive(data)
+            data.no_such_actioncable_method
+          end
+        end
+      RUBY
+    end
+
+    def core_diagnostics(result)
+      result.diagnostics.reject { |d| d.source_family.to_s.start_with?("plugin.") }
+    end
+
+    it "surfaces a core diagnostic for data misuse inside a channel's #receive" do
+      result = run_plugin(
+        source: "# entry point\n",
+        files: { "app/channels/typo_channel.rb" => format(body, name: "TypoChannel") },
+        paths: ["app/channels/typo_channel.rb"],
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      offending = core_diagnostics(result).select { |d| d.message.include?("no_such_actioncable_method") }
+      expect(offending).not_to be_empty
+    end
+
+    it "stays silent for the identical body outside channel_search_paths" do
+      result = run_plugin(
+        source: "# entry point\n",
+        files: { "app/models/receive_lookalike.rb" => format(body, name: "ReceiveLookalike") },
+        paths: ["app/models/receive_lookalike.rb"],
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      offending = core_diagnostics(result).select { |d| d.message.include?("no_such_actioncable_method") }
+      expect(offending).to be_empty
+    end
+
+    it "types data as Hash — ordinary Hash usage inside #receive raises no diagnostic" do
+      result = run_plugin(
+        source: "# entry point\n",
+        files: {
+          "app/channels/echo_channel.rb" => <<~RUBY
+            class EchoChannel < ApplicationCable::Channel
+              def receive(data)
+                data["body"]
+                data.fetch("body", nil)
+              end
+            end
+          RUBY
+        },
+        paths: ["app/channels/echo_channel.rb"],
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      expect(core_diagnostics(result)).to be_empty
+    end
+  end
+
+  describe "the channel_search_paths config override" do
+    let(:custom_receive_channel) do
+      {
+        "lib/cable/typo_channel.rb" => <<~RUBY
+          class TypoChannel < MyBaseChannel
+            def receive(data)
+              data.no_such_actioncable_method
+            end
+          end
+        RUBY
+      }
+    end
+    let(:receive_body) do
+      <<~RUBY
+        class %<name>s < ApplicationCable::Channel
+          def receive(data)
+            data.no_such_actioncable_method
+          end
+        end
+      RUBY
+    end
+    let(:multi_root_files) do
+      {
+        "app/channels/typo_channel.rb" => format(receive_body, name: "TypoChannel"),
+        "engines/chat/app/channels/other_typo_channel.rb" => format(receive_body, name: "OtherTypoChannel")
+      }
+    end
+
+    def core_diagnostics(result)
+      result.diagnostics.reject { |d| d.source_family.to_s.start_with?("plugin.") }
+    end
+
+    it "retargets the #receive contract to a single custom root" do
+      result = run_plugin(
+        source: "# entry point\n",
+        files: custom_receive_channel,
+        paths: ["lib/cable/typo_channel.rb"],
+        plugin_entry: {
+          "gem" => "rigor-actioncable",
+          "config" => { "channel_search_paths" => ["lib/cable"], "channel_base_classes" => ["MyBaseChannel"] }
+        }
+      )
+      offending = core_diagnostics(result).select { |d| d.message.include?("no_such_actioncable_method") }
+      expect(offending).not_to be_empty
+    end
+
+    it "leaves the default glob non-matching for a custom root" do
+      result = run_plugin(
+        source: "# entry point\n",
+        files: custom_receive_channel,
+        paths: ["lib/cable/typo_channel.rb"],
+        plugin_entry: DEFAULT_PLUGIN_ENTRY
+      )
+      offending = core_diagnostics(result).select { |d| d.message.include?("no_such_actioncable_method") }
+      expect(offending).to be_empty
+    end
+
+    it "covers every configured root when channel_search_paths lists more than one" do
+      result = run_plugin(
+        source: "# entry point\n",
+        files: multi_root_files,
+        paths: multi_root_files.keys,
+        plugin_entry: {
+          "gem" => "rigor-actioncable",
+          "config" => {
+            "channel_search_paths" => ["app/channels", "engines/chat/app/channels"],
+            "channel_base_classes" => ["ApplicationCable::Channel"]
+          }
+        }
+      )
+      offending = core_diagnostics(result).select { |d| d.message.include?("no_such_actioncable_method") }
+      expect(offending.size).to eq(2)
+    end
+  end
 end

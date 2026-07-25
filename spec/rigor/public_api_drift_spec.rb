@@ -212,7 +212,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     node_file_context_block()
     node_rule(req:node_type,block:block)
     node_rules()
-    producer(req:id,key:watch,key:serialize,key:deserialize,block:block)
+    producer(req:id,key:watch,key:serialize,key:deserialize,key:generation_cap,block:block)
     producers()
     suggest(req:name,req:candidates)
   ].freeze

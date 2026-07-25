@@ -461,7 +461,9 @@ RSpec.describe Rigor::CLI do
         cache_root = File.join(tmpdir, ".rigor", "cache")
         store = Rigor::Cache::Store.new(root: cache_root)
         descriptor = Rigor::Cache::Descriptor.new
-        store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :seed }
+        store.fetch_or_compute(
+          producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor
+        ) { :seed }
 
         status, out, _err = run_cli("check", "--cache-stats", "a.rb")
         expect(status).to eq(0)

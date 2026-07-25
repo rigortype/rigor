@@ -14,6 +14,12 @@ module Rigor
     # PRODUCER_ID constant and a private `self.compute(loader)`.
     class RbsCacheProducer
       def self.fetch: (loader: untyped, store: untyped) -> untyped
+
+      # The generation cap this producer declares to `Cache::Store#evict!`
+      # (issue #151). `rigor sig-gen` infers the literal `2` from the base
+      # body; the contract is the wider `Integer`, since a subclass may
+      # override it.
+      def self.generation_cap: () -> Integer
     end
   end
 end

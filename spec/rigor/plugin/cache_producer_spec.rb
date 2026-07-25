@@ -249,6 +249,51 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
     end
   end
 
+  # Issue #151 — the producer, not a table inside `Cache::Store`, states how many of its generations survive
+  # a compaction pass. A plugin producer keeps many entries live at once, so the default opts out.
+  describe ".producer generation_cap: (issue #151)" do
+    it "defaults to :unbounded and accepts a positive Integer" do
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+        producer(:many) { |_p| 1 }
+        producer(:whole_project, generation_cap: 2) { |_p| 2 }
+      end
+
+      expect(klass.producers[:many][:generation_cap]).to eq(Rigor::Cache::Store::UNBOUNDED_GENERATIONS)
+      expect(klass.producers[:whole_project][:generation_cap]).to eq(2)
+    end
+
+    it "rejects a non-positive / non-symbolic generation_cap at class-definition time" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "alpha", version: "0.1.0")
+          producer(:bad, generation_cap: 0) { |_p| 1 }
+        end
+      end.to raise_error(ArgumentError, /generation_cap: must be a positive Integer/)
+    end
+
+    it "threads the declared cap through cache_for into the Store" do
+      store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+      declared = []
+      allow(store).to receive(:fetch_or_validate).and_wrap_original do |original, **kwargs, &block|
+        declared << [kwargs[:producer_id], kwargs[:generation_cap]]
+        original.call(**kwargs, &block)
+      end
+      plugin_services = Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection, type: Rigor::Type::Combinator,
+        configuration: configuration, cache_store: store, trust_policy: trust_policy
+      )
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+        producer(:whole_project, generation_cap: 3) { |_p| :value }
+      end
+
+      klass.new(services: plugin_services).cache_for(:whole_project, params: {}).call
+
+      expect(declared).to eq([["plugin.alpha.whole_project", 3]])
+    end
+  end
+
   # ADR-60 WD3 — `cache_for` rides `Cache::Store#fetch_or_validate`: the entry is keyed on the stable identity inputs,
   # and the dependency descriptor (boundary reads + `watch:` globs) is recorded AFTER the producer block runs. Each
   # "session" below uses a FRESH `Cache::Store` (empty in-process memo) and a fresh plugin instance — the faithful

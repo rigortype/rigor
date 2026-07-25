@@ -44,6 +44,30 @@ or `stream_for record`) — the absence of a literal match doesn't prove
 the stream is invalid. Non-`Channel` receivers and non-literal stream
 arguments pass through silently.
 
+## `#receive(data)` parameter typing
+
+The plugin also carries an [ADR-28](../../adr/28-path-scoped-protocol-contracts.md)
+path-scoped protocol contract: inside any `#receive(data)` defined
+under `channel_search_paths`, `data` types as `Hash` instead of
+`Dynamic[Top]`. `#receive` is ActionCable's framework-dispatched
+catch-all action — invoked with the decoded JSON payload when an
+incoming message carries no `"action"` key — so the parameter shape is
+uniform across every channel.
+
+```ruby
+# app/channels/chat_channel.rb
+class ChatChannel < ApplicationCable::Channel
+  def receive(data)
+    data["body"]           # data: Hash
+    data.no_such_method    # error: call.undefined-method
+  end
+end
+```
+
+Custom action methods (`def speak(data)`) are not covered — their
+names are project-chosen, and a protocol contract names a single fixed
+method. Only `#receive` is a reserved, uniformly-shaped hook.
+
 ## Configuration
 
 ```yaml
@@ -53,6 +77,11 @@ plugins:
       channel_search_paths: ["app/channels"]                                            # default
       channel_base_classes: ["ApplicationCable::Channel", "ActionCable::Channel::Base"] # default
 ```
+
+`channel_search_paths` also retargets the `#receive` protocol
+contract's glob — including for multiple configured roots — so a
+custom channel directory gets the same `data: Hash` typing as the
+default.
 
 ## Limitations
 
@@ -68,6 +97,9 @@ plugins:
   than directly in the channel body) is out of scope.
 - **Bare `broadcast(...)`** without an explicit `ActionCable.server`
   receiver is skipped to avoid false positives on unrelated methods.
+- **The `#receive` contract is path-scoped, not class-scoped** (ADR-28):
+  any `def receive(data)` defined anywhere under `channel_search_paths`
+  is typed, even on a class that isn't an ActionCable channel.
 
 ## Plugin internals
 

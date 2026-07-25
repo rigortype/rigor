@@ -13,6 +13,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[rigor-actioncable]** A channel's `#receive(data)` now types `data` as `Hash` instead of `Dynamic[Top]`, so misuse inside the method body is caught; the contract follows the plugin's `channel_search_paths` setting rather than assuming `app/channels` ([#139](https://github.com/rigortype/rigor/issues/139)).
 - **[skill]** `rigor skill describe --deep` (also `rigor describe --deep`) runs `rigor check` before recommending a next step, so the headline routes on what the analysis actually found — a broken setup to `rigor-doctor`, project monkey-patches to `rigor-monkeypatch-resolve`, remaining errors to `rigor-baseline-reduce` — while the un-flagged command stays the fast, presence-only probe that never runs an analysis ([#148](https://github.com/rigortype/rigor/issues/148)).
 
 ### Changed

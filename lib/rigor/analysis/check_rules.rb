@@ -97,7 +97,6 @@ module Rigor
         collectors = node_collectors || run_node_collectors(path, root, scope_index)
         diagnostics = collectors[:main_pass].results.dup
         diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
-        diagnostics.concat(void_value_use_diagnostics(path, root, scope_index))
         COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
           diagnostics.concat(send(builder, path, collectors[role].results))
         end
@@ -109,10 +108,13 @@ module Rigor
       end
 
       # The per-collector diagnostic builders {.diagnose} folds over, in the historical emission order
-      # (always-truthy → unreachable-clause → shadowed-rescue → ivar-write → dead-assignment →
-      # duplicate-hash-key → return-in-ensure). Keys match {.build_node_collectors}' roles; each value is a
-      # `(path, results)` module_function on this module.
+      # (value-use-void → always-truthy → unreachable-clause → shadowed-rescue → ivar-write →
+      # dead-assignment → duplicate-hash-key → return-in-ensure). Keys match {.build_node_collectors}'
+      # roles; each value is a `(path, results)` module_function on this module. `void_value_use` leads
+      # because its standalone walk used to run before this fold, and the emission order is byte-identical
+      # output, not an implementation detail.
       COLLECTOR_DIAGNOSTIC_BUILDERS = {
+        void_value_use: :void_value_use_diagnostics,
         always_truthy: :always_truthy_condition_diagnostics,
         unreachable_clauses: :unreachable_clause_diagnostics,
         shadowed_rescues: :shadowed_rescue_diagnostics,
@@ -155,6 +157,7 @@ module Rigor
       def build_node_collectors(path, scope_index)
         {
           main_pass: MainPassCollector.new(->(node) { main_pass_node_diagnostics(path, node, scope_index) }),
+          void_value_use: VoidValueUseCollector.new(scope_index),
           always_truthy: AlwaysTruthyConditionCollector.new(scope_index),
           unreachable_clauses: UnreachableClauseCollector.new(scope_index),
           shadowed_rescues: ShadowedRescueCollector.new(scope_index),
@@ -354,12 +357,11 @@ module Rigor
         end
       end
 
-      # ADR-100 WD2 — `static.value-use.void`. Runs a standalone walk (like `self_undefined_method_diagnostics`)
-      # over `root`, so its value-context slot inspection stays independent of the shared per-node
-      # {RuleWalk}. Each result is a value-context use of a call whose author-declared `-> void` return the
-      # engine recovered to `top`.
-      def void_value_use_diagnostics(path, root, scope_index)
-        VoidValueUseCollector.new(scope_index).collect(root).map do |result|
+      # ADR-100 WD2 — `static.value-use.void`. Its value-context slot inspection rides the shared per-node
+      # {RuleWalk} like the other collectors, so the file is not re-traversed for it. Each result is a
+      # value-context use of a call whose author-declared `-> void` return the engine recovered to `top`.
+      def void_value_use_diagnostics(path, results)
+        results.map do |result|
           build_void_value_use_diagnostic(path, result)
         end
       end

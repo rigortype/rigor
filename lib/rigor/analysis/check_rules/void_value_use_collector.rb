@@ -36,6 +36,12 @@ module Rigor
           Prism::ConstantWriteNode, Prism::ConstantPathWriteNode
         ].freeze
 
+        # ADR-53 Track B — the node classes the shared {RuleWalk} dispatches to this collector: the consumer
+        # nodes whose slots are value positions. Prism node classes are leaves, so class-equality dispatch
+        # matches the legacy walk's `case`. No context gate — a value-context void use is a use wherever the
+        # DFS reaches it, loops and blocks included.
+        NODE_CLASSES = [Prism::CallNode, *WRITE_NODE_CLASSES].freeze
+
         Result = Data.define(:void_node, :origin)
 
         def initialize(scope_index)
@@ -43,11 +49,24 @@ module Rigor
           @results = []
         end
 
-        # Walk the whole subtree once, checking each consumer node's value slots. Returns one {Result} per
-        # value-context use of a recovered-`void` call.
+        # Legacy single-collector walk — kept as the oracle the ADR-53 Track B equivalence harness compares
+        # {RuleWalk} against. Walks the whole subtree once, checking each consumer node's value slots.
+        # Returns one {Result} per value-context use of a recovered-`void` call.
         # @return [Array<Result>]
         def collect(root)
           walk(root)
+          @results.freeze
+        end
+
+        # {RuleWalk} entry point: the legacy walk's per-node slot inspection, invoked at every consumer node
+        # under the shared traversal contract. The `context` is unused — every consumer node is inspected.
+        def visit(node, _context = nil)
+          inspect_consumer(node)
+        end
+
+        # The accumulated result, frozen the same way `#collect` returns it — used by {RuleWalk}-driven
+        # callers after the walk completes.
+        def results
           @results.freeze
         end
 

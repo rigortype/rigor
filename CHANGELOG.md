@@ -11,6 +11,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Performance
+
+- **[perf]** `rigor check` no longer re-traverses each file for the `static.value-use.void` rule — its value-position scan now rides the shared per-node walk with the other built-in rules, removing one full AST traversal per file whether or not the rule is enabled. Diagnostics are unchanged ([#207](https://github.com/rigortype/rigor/issues/207)).
+
 ## [0.3.0] - 2026-07-19
 
 This release is dominated by a performance arc that makes repeat and incremental analysis of large Rails apps several times faster: an engine-free warm-hit "null build" floor, semantic propagation gates and per-file seed bundles for `--incremental`, a deadline-armed YJIT, and a broad allocation reduction ([ADR-87](docs/adr/87-null-build-floor.md), [ADR-85](docs/adr/85-seed-bundles-and-lazy-def-node-handles.md), [ADR-89](docs/adr/89-semantic-propagation-gates.md)). Inline rbs-inline annotations now work out of the box, with no `plugins:` entry and no magic comment ([ADR-93](docs/adr/93-default-rbs-inline-ingestion.md)). Several new diagnostics land — five PHPStan-derived checks, use-of-`void`, duplicate hash keys, and more — alongside sharper Hash / Struct / `Data` / Kernel value typing and opt-in call-site parameter inference. It also removes the deprecated `type_specifier` plugin hook and the verb-form `docs` / `skill` subcommands (both breaking).

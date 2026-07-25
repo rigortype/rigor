@@ -142,26 +142,42 @@ module Rigor
 
       # @param skills [Array<Hash>] discovered skills, each `{name:, path:}`.
       # @param root [String] project root to probe (defaults to the cwd).
-      def initialize(skills:, root: Dir.pwd)
+      # @param deep [Boolean] opt into `--deep`: run a real `rigor check` and let its result pick the headline. Off by
+      #   default, and off is ADR-73 WD2's contract — see {SkillDeepProbe} for why the whole analysis path lives
+      #   behind this one flag and in its own file.
+      def initialize(skills:, root: Dir.pwd, deep: false)
         @skills = skills
         @root = root
+        @deep = deep
       end
 
       # @return [String] the full describe report.
       def render
         catalog = catalog_skills
         state = ProjectStateProbe.new(@root).to_h
-        recommendation = recommend(state, catalog)
+        deep = deep_report(state)
+        recommendation = recommend(state, catalog, deep)
         [
           title,
           state_section(state),
+          deep_section(deep),
           recommendation_section(recommendation),
           catalog_section(catalog),
-          agent_prompt(recommendation)
-        ].join("\n")
+          agent_prompt(recommendation, deep)
+        ].compact.join("\n")
       end
 
       private
+
+      # The `--deep` analysis, or nil when the flag was not given. `require` sits here rather than at the top of the
+      # file so the default, presence-only path never even loads the check-invocation plumbing — WD2's "runs no
+      # analysis" guarantee is enforced by what gets loaded, not only by what gets called.
+      def deep_report(state)
+        return nil unless @deep
+
+        require_relative "skill_deep_probe"
+        SkillDeepProbe.new(config: state.fetch(:config), root: @root).run
+      end
 
       # The skills offered as "what to do next", in adoption-journey order. The entry-point skill is excluded, and
       # unknown skills sort after the known journey, alphabetically.
@@ -173,8 +189,12 @@ module Rigor
 
       # The decision tree (ADR-73 WD2). Returns `{ skill:, reason: }` for the recommended next step, or nil when no
       # catalogue skill matches.
-      def recommend(state, catalog)
-        name, reason = recommended_name_and_reason(state)
+      #
+      # A `--deep` report overrides the presence-only tree only when it actually routed: a check that was skipped,
+      # could not run, or ran clean leaves the tree's answer standing untouched. So the un-flagged behaviour is
+      # literally the `deep == nil` branch of this one method.
+      def recommend(state, catalog, deep = nil)
+        name, reason = deep&.route ? [deep.route, deep.reason] : recommended_name_and_reason(state)
         skill = catalog.find { |candidate| candidate.fetch(:name) == name }
         skill.nil? ? nil : { skill: skill, reason: reason }
       end
@@ -248,6 +268,18 @@ module Rigor
         STATE
       end
 
+      # Printed only under `--deep`, so the un-flagged report is byte-identical to what it has always been.
+      def deep_section(deep)
+        return nil if deep.nil?
+
+        <<~DEEP
+          ## Deep check (--deep)
+          A real `rigor check` was run for this recommendation — unlike the probe above it
+          is slow and it writes `.rigor/cache`, exactly as `rigor check` does.
+          - Result: #{deep.detail}
+        DEEP
+      end
+
       def recommendation_section(recommendation)
         return "## Recommended next step\n- (no bundled skill matched the current state)\n" if recommendation.nil?
 
@@ -267,7 +299,7 @@ module Rigor
         "## All skills you can run next\n#{lines.join("\n")}\n"
       end
 
-      def agent_prompt(recommendation)
+      def agent_prompt(recommendation, deep = nil)
         opener =
           if recommendation.nil?
             "Ask the user what they would like to do next"
@@ -279,6 +311,33 @@ module Rigor
           #{opener}, then run `rigor skill <name>` for the chosen skill and
           follow its body top to bottom.
 
+          #{check_awareness(deep)}
+
+          Re-run `rigor skill describe` whenever you need the next step — it always
+          reflects the project's current state.
+        PROMPT
+      end
+
+      # The check-aware routing block. Without `--deep` it teaches the agent to make the call itself from a check it
+      # has already run (the 2026-06-20 field-trial fix, unchanged); with `--deep` the headline already made that
+      # call, so the block reports what happened instead of re-teaching it. The routing vocabulary is one taxonomy
+      # shared by both branches and by {SkillDeepProbe}.
+      def check_awareness(deep)
+        return presence_only_check_awareness if deep.nil?
+        return deep_failure_check_awareness if deep.failed?
+
+        <<~DEEP.chomp
+          The recommendation above already factors in the `--deep` check result, using the
+          same routing this command teaches without `--deep`: proven project monkey-patches
+          → rigor-monkeypatch-resolve; `RBS classes available: 0` or a `configuration-error`
+          → rigor-doctor; remaining error diagnostics → rigor-baseline-reduce. It does not
+          route on weaker signals (framework calls typing as Dynamic → rigor-plugin-tune is
+          still yours to judge from the check output).
+        DEEP
+      end
+
+      def presence_only_check_awareness
+        <<~PROMPT.chomp
           The recommendation above is from a presence-only probe — it does not run
           `rigor check`. If you have run (or now run) `rigor check`, let its findings
           refine the choice:
@@ -287,9 +346,16 @@ module Rigor
           - framework calls (ActiveRecord, routes, i18n …) typing as Dynamic with no
             matching plugins enabled → rigor-plugin-tune
           - `RBS classes available: 0` or a `configuration-error` diagnostic → rigor-doctor
+          (`rigor skill describe --deep` runs that check for you and applies this routing
+          to the headline itself — at the cost of a full analysis.)
+        PROMPT
+      end
 
-          Re-run `rigor skill describe` whenever you need the next step — it always
-          reflects the project's current state.
+      def deep_failure_check_awareness
+        <<~PROMPT.chomp
+          The `--deep` check did NOT complete, so the recommendation above is the
+          presence-only one. Do not treat the project as clean: run `rigor doctor`
+          (or `rigor check`) and fix what it reports before trusting any routing.
         PROMPT
       end
 

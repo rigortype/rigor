@@ -12,7 +12,7 @@ require_relative "../plugin/loader"
 require_relative "../plugin/services"
 require_relative "../reflection"
 require_relative "../type/combinator"
-require_relative "check_runner_factory"
+require_relative "check_invocation"
 require_relative "command"
 require_relative "options"
 
@@ -53,14 +53,12 @@ module Rigor
         findings.concat(audit_config(configuration))
 
         # 2. Run a scoped analysis to gather stats + diagnostics for the
-        #    deeper checks.  Use no-cache so the probe doesn't churn disk.
-        runner = CheckRunnerFactory.build(
+        #    deeper checks, through the shared check-invocation entry point (#148).
+        #    `READ_ONLY_OPTIONS` is no-cache so the probe doesn't churn disk.
+        result = CheckInvocation.run(
           configuration: configuration,
-          options: { no_cache: true, explain: false, stats: true, workers: 0 },
-          buffer: nil,
-          cache_root: configuration.cache_path
-        )
-        result = runner.run(configuration.paths)
+          options: CheckInvocation::READ_ONLY_OPTIONS
+        ).result
 
         # 3. RBS environment check.
         findings.concat(check_rbs_environment(result))

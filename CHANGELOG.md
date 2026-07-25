@@ -11,6 +11,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[skill]** `rigor skill describe --deep` (also `rigor describe --deep`) runs `rigor check` before recommending a next step, so the headline routes on what the analysis actually found — a broken setup to `rigor-doctor`, project monkey-patches to `rigor-monkeypatch-resolve`, remaining errors to `rigor-baseline-reduce` — while the un-flagged command stays the fast, presence-only probe that never runs an analysis ([#148](https://github.com/rigortype/rigor/issues/148)).
+
 ### Changed
 
 - **[plugin API]** `Plugin::Base.producer` accepts a `generation_cap:` declaring how many generations of a producer's cache entries survive a compaction pass; it defaults to the previous behaviour (unbounded, reaped only by the `cache.max_bytes` LRU pass), so a whole-project producer that orphans its previous entry on every run can now keep its own cache slice from growing ([#151](https://github.com/rigortype/rigor/issues/151)).

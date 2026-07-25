@@ -4,8 +4,15 @@ require "fileutils"
 require "stringio"
 require "tmpdir"
 
+require "rigor/analysis/diagnostic"
+require "rigor/analysis/result"
+require "rigor/analysis/run_stats"
 require "rigor/cli"
+require "rigor/cli/check_invocation"
 require "rigor/cli/skill_command"
+# `--deep` loads this lazily (that laziness is the WD2 boundary); the spec requires it up front so the routing
+# examples can assert it is NOT reached on the un-flagged path.
+require "rigor/cli/skill_deep_probe"
 
 # `rigor skill` exposes the SKILL.md files Rigor bundles under `skills/` (`rigor-project-init`, `rigor-baseline-reduce`,
 # `rigor-plugin-author`). The integration-style examples here exercise the real on-disk skill directory so the contract
@@ -246,6 +253,182 @@ RSpec.describe Rigor::CLI::SkillCommand do
         flag = Dir.chdir(dir) { run(["--describe"]) }
         expect(flag).to eq(sub)
       end
+    end
+
+    # ADR-73 WD2's guardrail: the UN-flagged command is presence-only and side-effect-free. `--deep` (below) is the
+    # opt-in that trades that away, so these two examples pin the boundary from the default side.
+    it "runs no analysis at all without --deep" do
+      allow(Rigor::CLI::CheckInvocation).to receive(:attempt)
+      allow(Rigor::CLI::SkillDeepProbe).to receive(:new)
+      _status, out, = describe_in({ ".rigor.dist.yml" => "target_ruby: '3.3'\n" })
+      expect(Rigor::CLI::CheckInvocation).not_to have_received(:attempt)
+      expect(Rigor::CLI::SkillDeepProbe).not_to have_received(:new)
+      expect(out).not_to include("## Deep check")
+      expect(out).to include("it does not run\n`rigor check`")
+    end
+
+    it "advertises --deep from the un-flagged report without doing its work" do
+      _status, out, = describe_in({ ".rigor.dist.yml" => "target_ruby: '3.3'\n" })
+      expect(out).to include("`rigor skill describe --deep` runs that check for you")
+    end
+  end
+
+  # `rigor skill describe --deep` (issue #148 / ADR-73 § "Field-trial follow-ups") — the opt-in that runs a real
+  # `rigor check` and lets the result pick the headline. The routing examples stub the shared {CheckInvocation}
+  # entry point so each result shape is exercised deterministically; one end-to-end example below runs the real
+  # analysis so the plumbing itself is covered too.
+  describe "describe --deep" do
+    def describe_in(files, argv = %w[describe --deep])
+      Dir.mktmpdir do |dir|
+        files.each do |relative, contents|
+          path = File.join(dir, relative)
+          FileUtils.mkdir_p(File.dirname(path))
+          File.write(path, contents)
+        end
+        Dir.chdir(dir) { run(argv) }
+      end
+    end
+
+    def diagnostic(rule:, severity: :error, project_definition_site: nil)
+      Rigor::Analysis::Diagnostic.new(
+        path: "lib/a.rb", line: 1, column: 1, message: "boom",
+        severity: severity, rule: rule, project_definition_site: project_definition_site
+      )
+    end
+
+    def stub_check(diagnostics: [], rbs_classes: 400, error: nil)
+      outcome =
+        if error
+          Rigor::CLI::CheckInvocation::Outcome.new(result: nil, error: error)
+        else
+          stats = instance_double(Rigor::Analysis::RunStats, rbs_classes_total: rbs_classes)
+          result = Rigor::Analysis::Result.new(diagnostics: diagnostics, stats: stats)
+          Rigor::CLI::CheckInvocation::Outcome.new(result: result, error: nil)
+        end
+      allow(Rigor::CLI::CheckInvocation).to receive(:attempt).and_return(outcome)
+    end
+
+    let(:configured) { { ".rigor.dist.yml" => "target_ruby: '3.3'\n" } }
+
+    it "runs the check through the shared CheckInvocation helper, pointed at the discovered config" do
+      stub_check
+      describe_in(configured)
+      expect(Rigor::CLI::CheckInvocation).to have_received(:attempt)
+        .with(config_path: a_string_ending_with(".rigor.dist.yml"))
+    end
+
+    it "labels the section and warns that it is slow and writes the cache" do
+      stub_check
+      status, out, = describe_in(configured)
+      expect(status).to eq(0)
+      expect(out).to include("## Deep check (--deep)")
+      expect(out).to include("writes `.rigor/cache`")
+    end
+
+    it "routes error diagnostics to rigor-baseline-reduce" do
+      stub_check(diagnostics: [diagnostic(rule: "call.undefined-method")])
+      _status, out, = describe_in(configured)
+      expect(out).to include("→ rigor-baseline-reduce — a `--deep` check reported 1 error diagnostic(s)")
+    end
+
+    it "routes engine-proven project monkey-patches to rigor-monkeypatch-resolve" do
+      stub_check(
+        diagnostics: [
+          diagnostic(rule: "call.undefined-method", project_definition_site: "lib/core_ext/string.rb:12"),
+          diagnostic(rule: "call.undefined-method")
+        ]
+      )
+      _status, out, = describe_in(configured)
+      expect(out).to include("→ rigor-monkeypatch-resolve —")
+      expect(out).to include("lib/core_ext/string.rb")
+      expect(out).to include("1 of them proven project monkey-patches")
+    end
+
+    # A proven site is real evidence, but evidence of a site is not evidence that clearing it is the next thing to
+    # do: `pre_eval:` is the shortest path only when it materially changes the count. The finding still has to
+    # survive the headline not following it.
+    it "leaves the headline on rigor-baseline-reduce when the proven sites are not a cluster" do
+      stub_check(
+        diagnostics: [
+          diagnostic(rule: "call.undefined-method", project_definition_site: "lib/core_ext/string.rb:12"),
+          *Array.new(5) { diagnostic(rule: "call.undefined-method") }
+        ]
+      )
+      _status, out, = describe_in(configured)
+      expect(out).to include("→ rigor-baseline-reduce —")
+      expect(out).to include("1 of them proven project monkey-patches")
+      expect(out).to include("rigor-monkeypatch-resolve")
+    end
+
+    it "routes an empty RBS environment to rigor-doctor" do
+      stub_check(diagnostics: [diagnostic(rule: "call.undefined-method")], rbs_classes: 0)
+      _status, out, = describe_in(configured)
+      expect(out).to include("→ rigor-doctor —")
+      expect(out).to include("the RBS environment built to 0 classes")
+    end
+
+    it "routes a configuration-error diagnostic to rigor-doctor" do
+      stub_check(diagnostics: [diagnostic(rule: "configuration-error")])
+      _status, out, = describe_in(configured)
+      expect(out).to include("→ rigor-doctor —")
+      expect(out).to include("`configuration-error` diagnostic")
+    end
+
+    it "leaves the presence-only headline standing when the check is clean" do
+      stub_check
+      _status, out, = describe_in(configured)
+      expect(out).to include("the check ran clean — 0 error diagnostics")
+      expect(out).to include("→ rigor-ci-setup —")
+    end
+
+    # The degradation contract: a check that could not run must not crash, must not be reported as clean, and must
+    # not route. Saying less beats routing a user into the wrong workflow on evidence that never arrived.
+    it "degrades to the presence-only recommendation when the check cannot run" do
+      stub_check(error: "Rigor::Configuration::Error: plugin `rigor-nope` failed to load")
+      status, out, = describe_in(configured)
+      expect(status).to eq(0)
+      expect(out).to include("the check could NOT run: Rigor::Configuration::Error: plugin `rigor-nope`")
+      expect(out).to include("This is not a clean result")
+      expect(out).to include("The `--deep` check did NOT complete")
+      expect(out).to include("→ rigor-ci-setup —")
+    end
+
+    it "skips the check entirely when the project has no Rigor config" do
+      allow(Rigor::CLI::CheckInvocation).to receive(:attempt)
+      _status, out, = describe_in({})
+      expect(Rigor::CLI::CheckInvocation).not_to have_received(:attempt)
+      expect(out).to include("skipped — this project has no Rigor configuration")
+      expect(out).to include("→ rigor-project-init —")
+    end
+
+    it "is reachable through the top-level `rigor describe --deep` alias" do
+      stub_check(diagnostics: [diagnostic(rule: "call.undefined-method")])
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, ".rigor.dist.yml"), "target_ruby: '3.3'\n")
+        out = StringIO.new
+        Dir.chdir(dir) { Rigor::CLI.new(%w[describe --deep], out: out, err: StringIO.new).run }
+        expect(out.string).to include("## Deep check (--deep)")
+        expect(out.string).to include("→ rigor-baseline-reduce —")
+      end
+    end
+
+    it "rejects an unknown option rather than silently ignoring it" do
+      status, _out, err = run(%w[describe --deeep])
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("unknown option for `describe`: --deeep")
+    end
+
+    # End-to-end: no stubs, a real `rigor check` over a real (tiny) project — the shared invocation helper, the
+    # engine, and the routing all in one pass.
+    it "runs a real check and routes on its result" do
+      _status, out, = describe_in(
+        {
+          ".rigor.dist.yml" => "target_ruby: '3.4'\npaths:\n  - lib\n",
+          "lib/a.rb" => "# frozen_string_literal: true\nx = 1\nx.no_such_method_at_all\n"
+        }
+      )
+      expect(out).to include("## Deep check (--deep)")
+      expect(out).to include("→ rigor-baseline-reduce — a `--deep` check reported 1 error diagnostic(s)")
     end
   end
 

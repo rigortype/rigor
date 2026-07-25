@@ -35,15 +35,18 @@ this file is the one that is wrong.
 
 Nothing is release-blocking; pick by interest. Effort-ordered:
 
-- **[#163](https://github.com/rigortype/rigor/issues/163)** (`ready-for-agent`, area:docs) — **first
-  pass landed (`e7a7e8ee`); the three large documents remain.** ADR-92's probe was applied to the 14
-  unswept `docs/internal-spec/` documents: five divergences marked (ledger:
+- **[#163](https://github.com/rigortype/rigor/issues/163)** (`ready-for-agent`, area:docs) — **both
+  passes done; ready to close once the second-pass PR merges.** ADR-92's probe now covers all 15
+  documents: 5 divergences from the first pass, **31 more** from the line-by-line read of
+  `cache.md` / `inference-engine.md` / `plugin.md` (ledger:
   [`docs/notes/20260725-internal-spec-status-fidelity-sweep.md`](notes/20260725-internal-spec-status-fidelity-sweep.md)).
-  `inference-engine.md` / `plugin.md` / `cache.md` got the enumerated-surface and status-claim pass
-  but not a line-by-line read — that is the next slice. The sweep's own finding is that the dominant
-  drift class is **not** ADR-92's: it is a version-anchored future tense the release outran, now
-  filed with a gate proposal as **[#211](https://github.com/rigortype/rigor/issues/211)**
-  (`ready-for-agent`).
+  The gate the first pass proposed shipped as ADR-92 WD6 / `manual_drift_spec.rb` axis 6
+  ([#211](https://github.com/rigortype/rigor/issues/211), merged as
+  [#212](https://github.com/rigortype/rigor/pull/212)).
+  The single worst finding: `plugin.md` told plugin authors that `narrowing_facts_rules` /
+  `#narrowing_facts_for` / `narrowing_facts_methods` were **deleted in 0.3.0**. They are the current,
+  drift-pinned APIs — ADR-80's mechanical rename swept the parenthetical that named the *old*
+  surfaces, inverting its meaning. Worth remembering when renaming anything across prose.
 - **[#207](https://github.com/rigortype/rigor/issues/207)** — **PR #210 merged.** The issue's premise
   was stale: the five #101 rules were already `RuleWalk`-hosted (or comment-based). The one rule
   still re-traversing every file was `static.value-use.void`; folding it in was byte-identical and

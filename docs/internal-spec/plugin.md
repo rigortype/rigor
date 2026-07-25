@@ -1,11 +1,13 @@
-# Plugin Registration / Loading (slice 1)
+# Plugin Registration and Loading
 
-Status: **v0.1.0 slice 1 normative.** Pins the public surface plugin
-authors interact with for *registering* a plugin, declaring its
-*manifest*, and being *loaded* by `Analysis::Runner`. The
-contribution protocols (dynamic-return, type-specifying, dynamic
-reflection) attach in subsequent v0.1.0 slices and are not defined
-here.
+Status: **Normative.** Pins the public surface plugin authors
+interact with for *registering* a plugin, declaring its *manifest*,
+being *loaded* by `Analysis::Runner`, and contributing through the
+ADR-37 narrow protocols. The founding-era contribution protocols
+(dynamic-return, type-specifying, dynamic reflection) all landed
+across the `0.1.x` cycle; `dynamic_return` / `narrowing_facts` are
+specified below, and `flow_contribution_for` was removed in ADR-52
+WD3.
 
 The binding design surface is [ADR-2](../adr/2-extension-api.md);
 the v0.1.0 readiness map is at
@@ -60,9 +62,10 @@ the cached `Manifest`. Instance-level `manifest` delegates to the
 class.
 
 `#initialize(services:, config: {})` stores the injected services
-and a frozen copy of the user's config. `#init(services)` is the
-override hook plugins use to wire up state from the service
-container; the default implementation is a no-op.
+and a frozen copy of the user's config, with the manifest's declared
+defaults merged **under** it (see _Declared config defaults_ below).
+`#init(services)` is the override hook plugins use to wire up state
+from the service container; the default implementation is a no-op.
 
 The full `Base` surface is declared in RBS
 ([`sig/rigor/plugin/base.rbs`](../../sig/rigor/plugin/base.rbs)) and is
@@ -109,11 +112,17 @@ this is what lets a plugin drop the hand-rolled `def walk` /
 receives `(node, scope, path, file_context, context)`, and returns an
 `Array<Rigor::Analysis::Diagnostic>` (empty to fire nothing).
 `node_type` MUST be a `Prism::Node` subclass. Multiple rules per type
-run in declaration order. The engine invokes them through the
-instance method `#node_rule_diagnostics(path:, scope:, root:)`, which
-the runner calls alongside `#diagnostics_for_file` under the same
-`plugin.<id>` stamping and per-plugin exception isolation; a plugin
-that declares no rules pays zero cost.
+run in declaration order. The engine dispatches them through one
+shared per-run walk, `Plugin::Registry#node_rule_walk`
+([`NodeRuleWalk`](../../lib/rigor/plugin/node_rule_walk.rb), ADR-52
+WD4): a single traversal per file serves every node-rule plugin, and
+the runner merges each plugin's bucket with its
+`#diagnostics_for_file` result under the same `plugin.<id>` stamping
+and per-plugin exception isolation; a plugin that declares no rules
+pays zero cost. The instance method
+`#node_rule_diagnostics(path:, scope:, root:)` remains on `Base` as
+the equivalent single-plugin entry point (drift-pinned, used by
+plugin specs), but the engine no longer routes through it.
 
 The **fifth** block argument, `context` (ADR-37 Slice 1d), is a
 `Rigor::Plugin::NodeContext` carrying the node's lexical ancestor chain
@@ -182,9 +191,11 @@ producer published reads as `nil`. (`#producer_value` / `#producer_error`
 [`plugin-cache-producers.md`](plugin-cache-producers.md).)
 
 `#prepare(services)` (ADR-9) is the project-wide pre-pass hook,
-invoked once before per-file analysis begins. Plugins that publish
-cross-plugin facts (`manifest(produces:)`) override it to walk the
-project and call `services.fact_store.publish(...)`; the loader's
+invoked once per plugin instance before that instance's per-file
+analysis begins (see § _Concurrency and value-object shareability_).
+Plugins that publish cross-plugin facts (`manifest(produces:)`)
+override it to walk the project and call
+`services.fact_store.publish(...)`; the loader's
 topological ordering guarantees a producer's `prepare` runs before
 any consumer's. The default is a no-op.
 
@@ -214,7 +225,13 @@ The `SymbolNode`-only forms exist so a DSL that distinguishes `state
 :draft` from `state "draft"` keeps that distinction instead of
 silently widening. `#unescaped` (not `#value`) is used so an
 interpolation-free `"foo"` / `:foo` round-trips to `:foo` / `"foo"`
-consistently for both node kinds.
+consistently for both node kinds. Alongside the grid,
+`.symbol_named?(node, name)` is the predicate form — true when `node`
+is a `SymbolNode` whose `#unescaped` equals the `String` `name`,
+false for any other node — for the "is this argument exactly
+`:draft`?" test that would otherwise compare a `.symbol(node)`
+result. Like the `SymbolNode`-only grid column, it does **not** match
+a `"draft"` string literal.
 
 Two call-argument helpers sit on top of the grid:
 
@@ -272,9 +289,9 @@ the block carries logic and runs through `instance_exec`:
   worked consumers. Renamed from `type_specifier`
   ([ADR-80](../adr/80-narrowing-facts-rename.md)); the old verb was a
   deprecating alias through `0.2.x` and is gone in 0.3.0, together with
-  the reader (`narrowing_facts_rules`), the engine consumer
-  (`#narrowing_facts_for`), and the capability key
-  (`narrowing_facts_methods`) it left behind.
+  the reader (`type_specifiers`), the engine consumer
+  (`#type_specifier_facts`), and the capability key
+  (`type_specifier_methods`) it left behind.
 
 `receivers:` / `methods:` are the greppable, indexable gates the
 `rigor plugins --capabilities` catalogue (ADR-37 § "Machine-readable
@@ -339,11 +356,16 @@ project's source.
 
 - `Rigor::Plugin::Inflector` — the worked consumer + the shared
   inflection helper for the Rails-family plugins. `underscore` /
-  `camelize` / `singularize` / `pluralize` / `classify` / `tableize`
-  delegate to the real `ActiveSupport::Inflector`; it carries **no
-  approximation** (raises when the gem is unreachable, so the caller
-  declines to silence). `rigor-rails-routes` / `rigor-activerecord` /
-  `rigor-actionpack` / `rigor-actionmailer` / `rigor-factorybot` use it.
+  `camelize` / `singularize` / `pluralize` / `classify` delegate to
+  the real `ActiveSupport::Inflector` (the fixed `ALLOWED_METHODS`
+  allow-list); `tableize` is deliberately **not** delegated — it
+  composes the AS-backed `underscore` / `pluralize` with the `::` →
+  `_` flattening ActiveRecord's real table-name computation applies,
+  so `Admin::User` → `admin_users`, not AS's `admin/users`. It carries
+  **no approximation** (raises when the gem is unreachable, so the
+  caller declines to silence). `rigor-rails-routes` /
+  `rigor-activerecord` / `rigor-actionpack` / `rigor-actionmailer` /
+  `rigor-factorybot` use it.
 - `Rigor::Plugin::Isolation` — the **selectable isolation strategy** for
   the invocation, chosen by `RIGOR_PLUGIN_ISOLATION` (the `exe/rigor`
   launcher maps `.rigor.yml`'s `plugins_isolation:` onto it). One
@@ -392,12 +414,12 @@ a plugin declaring none of them is a plain per-file analyzer:
 | `owns_receivers` | `Array<String>` | Receiver class names this plugin owns for dispatch routing. |
 | `open_receivers` | `Array<String>` | Receiver class names exempted from `call.undefined-method` (their method surface is unbounded — e.g. `ActiveRecord::Relation`) (ADR-26). |
 | `type_node_resolvers` | `Array` | `Plugin::TypeNodeResolver` entries contributing custom RBS type-name resolution (ADR-13). |
-| `protocol_contracts` | `Array<ProtocolContract>` | Path-scoped behavioural contracts (`path_glob` + `method_name` + param/return types + severity); provide-and-check (ADR-28). |
+| `protocol_contracts` | `Array<ProtocolContract>` | Path-scoped behavioural contracts (`path_glob` + `method_name` + `singleton` + param/return types + severity); provide-and-check (ADR-28). |
 | `source_rbs_synthesizer` | `#call(path) -> String?` | A callable that synthesises RBS from a project source file at env-build time (e.g. rbs-inline ingestion) (ADR-32). |
 | `block_as_methods`, `heredoc_templates`, `trait_registries` | `Array<Plugin::Macro::*>` | The ADR-16 macro / DSL expansion substrate tiers (A / C / B; the never-wired Tier D `external_files:` was removed by ADR-60 WD1). Value-object shapes spec'd in [`macro-substrate.md`](macro-substrate.md). |
 | `nested_class_templates` | `Array<Plugin::Macro::NestedClassTemplate>` | Nested-subclass emission from an enum-shaped block DSL (`variant <Const>, <Type>`); the macro-substrate tier that mints classes, not just methods (ADR-36). Spec'd in [`macro-substrate.md`](macro-substrate.md). |
 | `hkt_registrations`, `hkt_definitions` | `Array` | Lightweight-HKT type-function registrations (ADR-20). |
-| `additional_initializers` | `Array<AdditionalInitializer>` | `{ receiver_constraint:, methods: }` pairs declaring which non-`initialize` `def`-form methods on a class (and its subclasses) also establish ivar state, feeding `ScopeIndexer`'s read-before-write nil soundness gate (ADR-38). |
+| `additional_initializers` | `Array<AdditionalInitializer>` | `{ receiver_constraint:, methods:, block_methods: }` entries declaring which non-`initialize` methods on a class (and its subclasses) also establish ivar state — `methods:` for `def`-form (`def setup`), `block_methods:` for call-with-block form (`before { … }`, `let(:x) { … }`); at least one must be non-empty. Feeds `ScopeIndexer`'s read-before-write nil soundness gate (ADR-38). |
 
 `#validate_config(config)` returns an array of error strings; the
 loader converts a non-empty result into a `LoadError`. Each extension
@@ -539,7 +561,9 @@ a `Rigor::Analysis::Diagnostic` with `source_family:
 - `Rigor::Plugin::Loader` — the loader is internal infrastructure.
   Plugin authors should not subclass or depend on its private
   helpers; the public entry point is `Loader.load(configuration:,
-  services:, requirer:)`.
+  services:, requirer:, feature_resolver:)` (the last two default to
+  a plain `require` and the bundled feature resolver; the specs pass
+  their own).
 
 ## `.rigor.yml` plugin entries
 
@@ -553,10 +577,16 @@ plugins:
     id: rspec                           # only required when the gem registers > 1 plugin
     config:
       include_specs: true
+  - gem: rigor-rbs-inline
+    enabled: false                      # opts the entry out entirely (ADR-93 WD3)
 ```
 
 `Configuration` normalises every entry to one of those two shapes
-and exposes them via `Configuration#plugins`.
+and exposes them via `Configuration#plugins`. A fourth key,
+`enabled:`, defaults to `true`; only an explicit `false` disables —
+the loader skips the entry without requiring the gem. It is the
+project-level opt-out for the auto-wired `rigor-rbs-inline` default,
+but it works for any entry.
 
 ## Load order
 
@@ -613,7 +643,7 @@ entry does not abort the others. Each failure is collected as a
   unchanged.
 
 `rigor check` continues with the analysis; plugins that loaded
-successfully still participate in later v0.1.0 slices.
+successfully still participate in the rest of the run.
 
 ## Concurrency and value-object shareability (ADR-15)
 
@@ -642,8 +672,13 @@ reachable. The durable requirement on plugin code is therefore:
   once at startup — `const_get` → `klass.new(services:, config:)` →
   `#init(services)`, mirroring `Loader#instantiate` — then owns its
   plugin instances and their mutable per-run accumulators for the
-  worker's lifetime. Mutable plugin state therefore never crosses a
-  boundary; only the frozen Blueprint does.
+  worker's lifetime. Each `WorkerSession` then runs
+  `#prepare(services)` on its own materialised instances at
+  construction, before its first `#analyze`, so `#prepare` is invoked
+  once **per plugin instance** (the coordinator plus each worker),
+  never once per run, and each worker's `fact_store` is rebuilt
+  rather than shipped across the boundary. Mutable plugin state
+  therefore never crosses a boundary; only the frozen Blueprint does.
 - **Documented exception:** `Environment::Reflection` (the internal
   read-side carrier backing the public `Rigor::Reflection` facade) is
   frozen but **not** `Ractor.shareable?` — its backing tables transit

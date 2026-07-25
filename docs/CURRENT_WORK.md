@@ -35,13 +35,22 @@ this file is the one that is wrong.
 
 Nothing is release-blocking; pick by interest. Effort-ordered:
 
-- **[#207](https://github.com/rigortype/rigor/issues/207)** — **[PR #210](https://github.com/rigortype/rigor/pull/210)
-  is open and awaiting review.** The issue's premise was stale: the five #101 rules were already
-  `RuleWalk`-hosted (or comment-based). The one rule still re-traversing every file was
-  `static.value-use.void`; #210 folds it in, byte-identical, for −158k allocations (−0.49%). That
-  exhausts the traversal-sharing lever — the v0.3.0 +45.7% drift is the rule bodies and #102 typing
-  doing real per-node work, so the follow-up is per-collector allocation attribution, not more
-  folding. Baseline deliberately left alone (0.5% is inside the threshold's noise band).
+- **[#163](https://github.com/rigortype/rigor/issues/163)** (`ready-for-agent`, area:docs) — **first
+  pass landed (`e7a7e8ee`); the three large documents remain.** ADR-92's probe was applied to the 14
+  unswept `docs/internal-spec/` documents: five divergences marked (ledger:
+  [`docs/notes/20260725-internal-spec-status-fidelity-sweep.md`](notes/20260725-internal-spec-status-fidelity-sweep.md)).
+  `inference-engine.md` / `plugin.md` / `cache.md` got the enumerated-surface and status-claim pass
+  but not a line-by-line read — that is the next slice. The sweep's own finding is that the dominant
+  drift class is **not** ADR-92's: it is a version-anchored future tense the release outran, now
+  filed with a gate proposal as **[#211](https://github.com/rigortype/rigor/issues/211)**
+  (`ready-for-agent`).
+- **[#207](https://github.com/rigortype/rigor/issues/207)** — **PR #210 merged.** The issue's premise
+  was stale: the five #101 rules were already `RuleWalk`-hosted (or comment-based). The one rule
+  still re-traversing every file was `static.value-use.void`; folding it in was byte-identical and
+  worth −158k allocations (−0.49%). That exhausts the traversal-sharing lever — the v0.3.0 +45.7%
+  drift is the rule bodies and #102 typing doing real per-node work, so the follow-up is
+  per-collector allocation attribution, not more folding. Baseline deliberately left alone (0.5% is
+  inside the threshold's noise band). The issue stays open for that call.
 - **[#204](https://github.com/rigortype/rigor/issues/204)** (`ready-for-human`, area:engine) — wire
   ADR-46 cross-file caller→callee-param edges so `parameter_inference:` composes with `--incremental`
   (lifts the WD6c mutual exclusion). Needs the edge-recording design call.

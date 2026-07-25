@@ -78,7 +78,9 @@ catalogue of bugs:
 - arithmetic that can be proved to raise (`5 / 0`);
 - arguments whose type does not satisfy a refined parameter
   contract;
-- a few more, all listed in
+- a few more, all catalogued in
+  [manual — Diagnostics](../manual/04-diagnostics.md) and
+  explained in
   [Chapter 8 — Understanding errors](08-understanding-errors.md).
 
 Rigor does **not** ask you to write type annotations in
@@ -170,9 +172,11 @@ on the offending line:
 The same identifier also drives the `disable:` and
 `severity_overrides:` config keys, and family wildcards work
 (`# rigor:disable call` suppresses every `call.*` rule on that
-line). The full list of families and rules, and when to reach
-for each suppression mechanism, is in
-[Chapter 8 — Understanding errors](08-understanding-errors.md).
+line). The full list of families and rules is in
+[manual — Diagnostics](../manual/04-diagnostics.md);
+[Chapter 8 — Understanding errors](08-understanding-errors.md)
+is where to read about choosing between the suppression
+mechanisms.
 
 ## The "no annotations" stance
 
@@ -278,36 +282,20 @@ non-default behaviours: extra `paths`, an alternative
 If you used the [AI-assisted setup](#the-fast-path-let-an-ai-agent-set-it-up),
 the `rigor-project-init` skill already wrote one for you. To
 write a starter by hand, `rigor init` emits `.rigor.dist.yml`
-— the project default that gets committed:
+— the project default that gets committed, with `target_ruby`,
+`paths`, and a `severity_profile` filled in and the rest
+commented out. That is all most projects need; the key
+reference, the JSON-schema editor integration, and `includes:`
+composition are in
+[Configuration](../manual/03-configuration.md).
 
-```yaml
-target_ruby: "3.4"   # your project's Ruby — not Rigor's own 4.0
-
-paths:
-  - lib
-
-# signature_paths: [sig]   # auto-detected when omitted
-
-severity_profile: balanced
-
-# severity_overrides:
-#   call.argument-type-mismatch: warning
-
-# disable: []
-
-# plugins: []
-```
-
-That is all most projects need. The remaining mechanics —
-editor autocomplete from the bundled JSON schema, the
-`.rigor.yml` vs `.rigor.dist.yml` precedence rule, `includes:`
-composition, and how path-bearing keys resolve relative to the
-declaring file — are covered in
-[Configuration](../manual/03-configuration.md). The one rule
-worth knowing up front: when a developer keeps a local
-`.rigor.yml`, it is the *sole* source of config for their runs
-(the two files are never merged automatically), so to extend
-the shared default it must list it under `includes:`.
+Two things are worth knowing up front, because they surprise
+people. `target_ruby` is *your project's* Ruby, not the 4.0
+Rigor itself runs on — those are independent on purpose. And
+when a developer keeps a local `.rigor.yml`, it is the *sole*
+source of config for their runs (the two files are never merged
+automatically), so to extend the shared default it must list it
+under `includes:`.
 
 ## What's next
 

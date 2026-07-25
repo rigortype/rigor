@@ -571,8 +571,10 @@ model"](appendix-type-theory.md#what-rigor-does-not-model) records.
   authoring the declared contracts `def.return-type-mismatch` checks
   against.
 - [Chapter 8 — Understanding errors](08-understanding-errors.md) for
-  the `def.return-type-mismatch` / `call.argument-type-mismatch`
-  rules and severity profiles.
+  what the `def.*` family claims, and
+  [manual — Diagnostics](../manual/04-diagnostics.md) for the
+  `def.return-type-mismatch` / `call.argument-type-mismatch`
+  entries and the severity profiles.
 
 If you want to compare against another *tool* rather than the
 *principle*, the sibling appendices cover

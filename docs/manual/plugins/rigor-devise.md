@@ -64,7 +64,9 @@ The macro manifest (the trait registry mapping each strategy to its
 module), the concern re-targeting walk, the demo, and the
 contract surfaces this plugin exercises are in the
 [plugin's README](../../../plugins/rigor-devise/README.md);
-[handbook chapter 9](../../handbook/09-plugins.md) covers the Tier B
-macro substrate generally. To write a plugin, see
+[`docs/internal-spec/macro-substrate.md`](../../internal-spec/macro-substrate.md)
+specifies the Tier B trait registry generally, and
+[handbook chapter 9](../../handbook/09-plugins.md) is the
+orientation. To write a plugin, see
 [`examples/`](../../../examples/README.md) and the
 [`rigor-plugin-author`](../08-skills.md) skill.

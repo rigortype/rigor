@@ -1,9 +1,16 @@
 # Understanding errors
 
-This chapter is the catalogue of diagnostics Rigor ships, the
-families they belong to, and how to suppress one when it is
-wrong (or move its severity around). It is the page to land on
-when a diagnostic surprises you, in either direction.
+A diagnostic is Rigor telling you something it proved about
+your code. This chapter is about *reading* one: what its parts
+mean, what each rule family is really claiming, why one fires
+when you did not expect it, why one stays silent when you did,
+and how to work a freshly-adopted project down to a clean run.
+
+The reference lives one door over. The full rule catalogue,
+each rule's evidence tier, the severity-profile table, and the
+exact syntax of every suppression form are in
+[Diagnostics](../manual/04-diagnostics.md) in the manual; this
+chapter links there rather than restating it.
 
 ## Anatomy of a diagnostic
 
@@ -33,251 +40,106 @@ fires, when it doesn't, the suppression token, the authored
 severity, and the per-profile severity. `rigor explain` with
 no argument prints the index of every shipped rule.
 
-### Confidence and reference fields
+### Confidence — reading the evidence tier
 
-Two extra fields ride along on every built-in diagnostic, for
-agents and dashboards consuming `rigor check --format json`
-(and on each rule in `rigor explain --format json`):
+Every built-in diagnostic carries an `evidence_tier` —
+`high` / `medium` / `low` — which is Rigor's own confidence
+that the firing is a *true positive*, derived from the rule's
+gates rather than from its severity. It is worth internalising
+as a reading habit rather than a config knob: a `high` firing
+(`call.undefined-method` on a concrete receiver) is almost
+always a real bug and can be acted on directly, while a `low`
+one (`call.unresolved-toplevel`) usually means the analyzer is
+missing context — an unanalyzed file, a monkey-patch it never
+saw — and reads better as "look at this" than "fix this". The
+tier never feeds severity, and never changes whether a
+diagnostic fires; it only routes your attention.
 
-- **`evidence_tier`** — `high` / `medium` / `low`: Rigor's own
-  confidence that the firing is a true positive, derived from
-  the rule's gates, not its severity. `high` means a concrete,
-  statically-known type with no metaprogramming escape (e.g.
-  `call.undefined-method`); `medium` rests on a flow / inference
-  proof with a documented false-positive envelope (e.g.
-  `flow.always-truthy-condition`); `low` is a resolution- or
-  coverage-gap signal that often means missing context rather
-  than a bug (e.g. `call.unresolved-toplevel`). The tier never
-  feeds severity — that stays the `severity_profile:` decision.
-  Informational helpers (`dump.type`) carry no tier.
-- **`documentation_url`** — a stable link to the rule's entry in
-  the published diagnostics catalogue.
+The per-rule tiers, and the `documentation_url` field that
+rides alongside them in `--format json`, are in
+[manual — Evidence tier](../manual/04-diagnostics.md#evidence-tier).
 
-Both are presentation metadata. They never change whether a
-diagnostic fires.
+## The five families
 
-## The rule catalogue
+Every rule ID reads `family.rule`, and the family tells you
+what kind of proof failed. The catalogue — every rule, what it
+fires on, its evidence tier — is in
+[manual — Diagnostics](../manual/04-diagnostics.md#catalogue).
+What follows is what each family is *about*.
 
-Five families, each with one or more rules:
+**`call.*` — the call site's shape is wrong.** An undefined
+method, an arity no signature accepts, an argument whose type
+provably violates the parameter contract, a receiver that
+might be `nil`. These are the highest-volume diagnostics on
+real-world code, and also the most refined: every one of them
+fires only when Rigor can prove the underlying fact about a
+statically-known receiver, which is why a `call.*` firing is
+usually worth reading first.
 
-### `call.*` — call-site rules
+**`flow.*` — the control flow itself is unsound.** Something
+provably raises on every path, a branch is dead, a `case`
+clause can never match, a local is written and never read, a
+Hash literal repeats a key. `flow.unreachable-branch`,
+`flow.always-truthy-condition` and `flow.unreachable-clause`
+form the **reachability family** — each proves that a piece of
+code cannot run. `unreachable-clause` is the newest member and
+deliberately quieter than its siblings (`:info` under
+`balanced`) while its corpus false-positive gate finishes;
+bump it with `severity_overrides:` if you want it louder.
 
-Fire when a method call's shape is wrong.
-
-| Rule | Fires when | Default severity |
-| --- | --- | --- |
-| `call.undefined-method` | The receiver class is statically known and the method is not defined on it (RBS or in-source). | error |
-| `call.wrong-arity` | The number of positional arguments does not satisfy any overload's arity. | error |
-| `call.argument-type-mismatch` | An argument's type provably does not satisfy the parameter contract (RBS or `RBS::Extended` `param:`). | error |
-| `call.possible-nil-receiver` | The receiver type is `T \| nil` and the method is not defined on `NilClass`. | error (warning under `lenient`) |
-| `call.unresolved-toplevel` | An implicit-self call at the top level (outside any `def` / `class` / `module`) resolves against no same-file `def`, `pre_eval:` monkey-patch, or `Kernel` / `Object` method — surfacing typos in standalone scripts. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
-
-`call.*` rules are the highest-volume diagnostics on
-real-world code. They are also the most refined — every one
-fires only when Rigor can prove the underlying fact.
-
-### `flow.*` — flow-analysis rules
-
-Fire when the control flow itself is unsound.
-
-| Rule | Fires when | Default severity |
-| --- | --- | --- |
-| `flow.always-raises` | Every reachable evaluation of an expression raises (e.g. `n / 0` where `n: Integer`). | error |
-| `flow.unreachable-branch` | An `if` / `unless` / ternary's predicate is a syntactic literal AND the corresponding dead branch is non-empty. | warning |
-| `flow.always-truthy-condition` | The predicate of an `if` / `unless` / ternary is provably truthy (or falsey) by inferred type, with surgical skips inside loop bodies and on defensive predicate calls. | warning |
-| `flow.unreachable-clause` | A `case <local>; when <Class>` (or bare-class `case`/`in`) clause whose subject narrowing proves it can never match — disjoint from the subject's type, or already exhausted by an earlier clause. | info under `balanced`, warning under `strict`, info under `lenient` |
-| `flow.dead-assignment` | A plain local-variable write whose target name is never read in the same `def` body. | warning |
-| `flow.duplicate-hash-key` | Two entries of one Hash literal carry the same literal key (`{ a: 1, a: 2 }`, `m("x" => 1, "x" => 2)`) — the last entry wins silently at runtime. Literal keys only; `:a` vs `"a"` and `1` vs `1.0` are distinct keys and never compared. | warning |
-
-`flow.unreachable-branch`, `flow.always-truthy-condition`, and
-`flow.unreachable-clause` are the **reachability family** — each
-proves a branch or `case` clause is dead. `unreachable-clause`
-is the newest member: it watches `case <local>; when <Class>`
-(and bare-class `case`/`in`) and fires when an earlier clause
-already covered a member's type or the clause is disjoint from
-the subject. It ships at `:info` under `balanced` (one notch
-below its siblings) while its corpus false-positive gate
-finishes; bump it with `severity_overrides:` if you want it
-louder.
-
-### `def.*` — method-definition rules
-
-Fire when the body of a method violates its declared
-contract.
-
-| Rule | Fires when | Default severity |
-| --- | --- | --- |
-| `def.return-type-mismatch` | The body's last expression's inferred type cannot satisfy the RBS-declared return type. Honors `%a{rigor:v1:return: <refinement>}` overrides. | warning under `balanced` profile, error under `strict` |
-| `def.ivar-write-mismatch` | A later `@var = ...` write's concrete class disagrees with the first write's class in the same class body (NilClass-to-clear is allowlisted). | warning under `balanced` profile, error under `strict` |
-| `def.method-visibility-mismatch` | An explicit-receiver call targets a `Nominal[X]` whose discovered method is `:private` in the surrounding class body. | error |
-| `def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor (public → protected/private, protected → private), breaking a caller that holds the supertype. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
-| `def.override-return-widened` | An override's declared return widens the inherited return (covariance). Fires only on a proven violation when both sides carry an authored RBS signature. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
-| `def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance), comparing matching positional parameters. Requires an authored single-overload RBS signature on both sides. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
-
-The three `def.override-*` rules are the Liskov Substitution
-Principle signature rule applied across a project-defined
-class/module hierarchy (superclass chain + included/prepended
-modules, resolved cross-file). They are the conceptual subject of
+**`def.*` — a definition violates the contract it declares.**
+A body whose return drifts from the declared RBS return, an
+instance variable written with two disagreeing types, an
+explicit-receiver call into a private method. The three
+`def.override-*` rules are the Liskov Substitution Principle's
+signature rule applied across a project-defined hierarchy
+(superclass chain plus included and prepended modules, resolved
+cross-file): returns may narrow, parameters may widen,
+visibility may not shrink. They are the conceptual subject of
 [appendix: Liskov substitution](appendix-liskov.md).
 
-### `assert.*` — runtime assertion rules
+**`assert.*` and `dump.*` — the introspection helpers.**
+`assert.type-mismatch` fires when an `assert_type("expected",
+value)` call disagrees with the inferred type, so a snippet in
+this handbook is a test of the engine as much as an
+illustration. `dump.type` is not a problem report at all — it
+is your probe during debugging: sprinkle `dump_type(value)`
+through suspicious code, run `rigor check`, and read the
+inferred types straight out of the diagnostic stream.
 
-| Rule | Fires when | Default severity |
-| --- | --- | --- |
-| `assert.type-mismatch` | An `assert_type("expected", value)` call's actual inferred type does not match the expected string. | error |
+## Turning a diagnostic down
 
-### `dump.*` — debug helpers
+Rigor gives you five layers, and picking the right one is
+mostly a question of *how much* you want to say:
 
-| Rule | Fires when | Default severity |
-| --- | --- | --- |
-| `dump.type` | `dump_type(value)` was called — emits an info diagnostic naming the inferred type. | info |
+1. **`severity_profile:`** — the project's overall stance.
+   `lenient` for a legacy codebase you are easing Rigor into,
+   `balanced` for everyday work, `strict` for a project with
+   no legacy noise.
+2. **`severity_overrides:`** — one rule (or one family) at a
+   different severity from the rest of the profile. The right
+   layer when a rule is *useful but not blocking* for you.
+3. **`disable:`** — the rule is off project-wide. Heavier than
+   an override to `off`; both work, and the choice is mostly
+   stylistic.
+4. **`# rigor:disable` / `# rigor:disable-file`** — this line,
+   or this file. The right layer when the analyzer is wrong
+   *here* and right everywhere else. Prefer it to a
+   project-wide switch: it keeps the exception visible next to
+   the code that needed it, and it is the thing you later
+   promote into an `RBS::Extended` directive.
+5. **A [baseline](../manual/06-baseline.md)** — the whole
+   existing backlog, recorded rather than hidden, so new
+   diagnostics still surface. This is the layer to reach for
+   on adoption day, and the one to reach for *instead of*
+   `disable:` when the rule is genuinely finding things you
+   have simply not fixed yet.
 
-`dump_type` is your introspection probe during debugging:
-sprinkle it through suspicious code, run `rigor check`, read
-the inferred types from the diagnostic stream.
-
-## Severity profiles
-
-Rigor ships three named severity profiles that re-stamp the
-shipped severities:
-
-| Profile | Behaviour |
-| --- | --- |
-| `lenient` | Only proven rules stay `error` (`call.undefined-method`, `wrong-arity`, `assert.type-mismatch`); uncertain rules drop to `warning`, and several to `off`. For incremental adoption on legacy code. |
-| `balanced` (default) | Most rules → `error`; uncertain rules → `warning`; `dump.type` → `info`. The shipped behaviour. |
-| `strict` | Nearly every rule → `error`. The exceptions: `call.self-undefined-method` stays `off` (opt-in only), and `flow.unreachable-clause` is `warning` (pending its false-positive gate). Suitable for new projects with no legacy noise. |
-
-Set in `.rigor.yml`:
-
-```yaml
-severity_profile: strict
-```
-
-## Per-rule overrides
-
-Override a single rule's severity:
-
-```yaml
-severity_overrides:
-  call.argument-type-mismatch: warning
-  def.return-type-mismatch: off
-```
-
-`off` drops the diagnostic from the result entirely — useful
-when you want a profile-wide setting for most rules but
-silence one specifically.
-
-Family wildcards work in overrides too:
-
-```yaml
-severity_overrides:
-  call: warning   # demote every call.* rule
-  dump: off       # drop every dump.* rule
-```
-
-Per-rule entries beat family-wildcard entries:
-
-```yaml
-severity_overrides:
-  call: warning                    # every call.* → warning
-  call.undefined-method: error     # except undefined-method, still error
-```
-
-YAML reserves the bareword `off`. If the stripped severity
-seems not to apply, quote it: `"off"`. Same for `on`.
-
-## In-source suppression
-
-```ruby
-"hello".no_such_method  # rigor:disable call.undefined-method
-```
-
-The comment must be on the same line as the diagnostic. Use
-the qualified rule, the family wildcard, or `all`:
-
-```ruby
-"hello".no_such_method   # rigor:disable call
-"hello".no_such_method   # rigor:disable all
-```
-
-For multiline blocks, suppress at every line — Rigor does
-not yet ship a `disable-block` syntax.
-
-### File-scope suppression
-
-When you need to silence a rule everywhere in a file —
-typically a generated file, a fixture, or a vendored snippet
-that triggers a known false positive — drop a single
-`# rigor:disable-file` comment anywhere in the file:
-
-```ruby
-# rigor:disable-file call.undefined-method
-
-# This whole file is generated; the analyzer's call surface
-# is mismatched with the runtime layer for these stubs.
-```
-
-Convention is to put the comment near the top, but Rigor
-scans every comment in the file so any placement works. The
-same token forms apply: qualified rule, family wildcard, or
-`all`. The line-scope `# rigor:disable` form continues to
-work — the two compose, and any project-wide
-`disable: [...]` in `.rigor.yml` also still applies.
-
-## Project-wide suppression
-
-```yaml
-# .rigor.yml
-disable:
-  - call.possible-nil-receiver
-```
-
-Drops the rule project-wide. Heavier hammer than
-`severity_overrides: { call.possible-nil-receiver: off }` —
-both work; the choice is stylistic.
-
-## Baseline diffing for CI
-
-When you adopt Rigor on an existing codebase, you usually
-inherit a long tail of legitimate-but-pre-existing diagnostics
-that nobody is going to fix today. The pragmatic move is to
-**snapshot the current state as a baseline** and then have CI
-fail only on *new* diagnostics introduced by a PR:
-
-```sh
-# Once: capture the current diagnostic surface.
-rigor check --format=json > rigor.baseline.json
-git add rigor.baseline.json
-git commit
-
-# Per PR: compare against the committed baseline.
-rigor diff rigor.baseline.json
-```
-
-`rigor diff` prints `+ NEW` rows for each diagnostic that
-wasn't in the baseline and `- FIXED` rows for each that has
-been resolved since. The exit code is `1` when any new
-diagnostic appears and `0` otherwise — so adding a new
-violation fails CI, but the legacy diagnostics recorded in
-the baseline don't.
-
-When you fix a row in the baseline, regenerate it with the
-same `rigor check --format=json > rigor.baseline.json` so
-the project tightens monotonically over time. The
-`--format=json` form of `rigor diff` itself is also
-available for editor / dashboard integrations.
-
-`rigor diff` is the lightweight, ad-hoc form — a JSON file you
-diff by hand in a CI script. Most projects instead adopt the
-**managed baseline**: `rigor baseline generate` writes a
-`.rigor-baseline.yml`, you point at it with the `baseline:`
-config key, and from then on `rigor check` itself exits clean
-on recorded diagnostics and surfaces only new ones — no
-separate diff step. That is the path the
-[`rigor-project-init` skill](../manual/14-rails-quickstart.md)
-sets up for you; see [Baselines](../manual/06-baseline.md) for
-the full workflow ([ADR-22](../adr/22-baseline-and-project-onboarding.md)
-for the design).
+The exact syntax of all five — profile table, override
+precedence, the three suppression forms, the baseline file and
+its `rigor baseline` commands — is in
+[manual — Diagnostics](../manual/04-diagnostics.md#severity-profiles)
+and [manual — Baselines](../manual/06-baseline.md).
 
 ## Why a diagnostic might NOT fire when you expected one
 
@@ -356,6 +218,11 @@ The pragmatic loop on a project that just adopted Rigor:
 5. As the project's invariants get more proven, demote
    `# rigor:disable` lines into `RBS::Extended` directives
    so the analyzer learns the real contract.
+
+On a codebase too large for step 2 in one sitting, record the
+existing diagnostics as a
+[baseline](../manual/06-baseline.md) first and run the loop
+against what CI newly surfaces.
 
 A clean `rigor check` run is the goal; a green CI badge says
 "every diagnostic that fires is one we accept."

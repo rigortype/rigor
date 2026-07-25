@@ -321,8 +321,10 @@ section sequentially. Three useful pointers:
   if you want to see how the directive grammar layers on top
   of the RBS you already write.
 - [Chapter 8 — Understanding errors](08-understanding-errors.md)
-  for the rule catalogue, severity profiles, and baseline
-  diffing — the analogue to Steep's diagnostic config.
+  for how to read a diagnostic, and
+  [manual — Diagnostics](../manual/04-diagnostics.md) for the
+  rule catalogue and severity profiles — the analogue to
+  Steep's diagnostic config.
 - [`docs/notes/20260503-steep-cross-check-triage.md`](../notes/20260503-steep-cross-check-triage.md)
   for a worked side-by-side run of Steep and Rigor on the
   same project (the project itself).

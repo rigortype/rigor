@@ -56,9 +56,11 @@ up the flag, key, or command that *acts* on it.
    how to nudge it through `.rbs` files and `%a{rigor:v1:…}`
    directives.
 8. [**Understanding errors**](08-understanding-errors.md) —
-   the rule catalogue (`call.undefined-method`,
-   `call.argument-type-mismatch`, `flow.always-raises`, …),
-   severity profiles, and `# rigor:disable` suppression.
+   reading a diagnostic: what each rule family claims, why one
+   fires when you did not expect it (and stays silent when you
+   did), and which layer to reach for when you want it quieter.
+   The catalogue itself is
+   [manual — Diagnostics](../manual/04-diagnostics.md).
 9. [**Plugins**](09-plugins.md) — when to author one,
    pointer to the [examples/](../../examples/README.md)
    landing page.

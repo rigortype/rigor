@@ -72,8 +72,10 @@ in another tab, almost every advanced refinement transfers.
 ## The `@phpstan-assert` family
 
 PHPStan's assertion-narrowing PHPDoc tags map directly onto
-Rigor's `RBS::Extended` directive grammar. Chapter 7 covers
-the table in depth; here it is again for reference:
+Rigor's `RBS::Extended` directive grammar. This is the mapping;
+[Chapter 7](07-rbs-and-extended.md) works the Rigor side
+through examples, and the directive reference itself is
+[manual — RBS::Extended annotations](../manual/16-rbs-extended-annotations.md):
 
 | PHPStan PHPDoc | Rigor RBS::Extended | Effect |
 | --- | --- | --- |
@@ -149,7 +151,8 @@ Rigor has two baseline mechanisms: a **managed** baseline
 the next `rigor check` via the `baseline:` config key — the
 closest match to PHPStan's `--baseline`), and a **lightweight**
 ad-hoc snapshot (`rigor diff` over a `--format=json` dump).
-Chapter 8 has the walkthrough.
+[Manual — Baselines](../manual/06-baseline.md) walks through
+both.
 
 The `includes:` semantics also match PHPStan's: declaration
 order, later overrides earlier, the current file's keys win
@@ -322,11 +325,15 @@ You probably do not need to read the rest of this appendix
 section sequentially. Three useful pointers:
 
 - [Chapter 7 — RBS and `RBS::Extended`](07-rbs-and-extended.md)
-  has the full directive grammar, including the PHPStan-mapping
-  table that this page summarises.
+  works the directive grammar through examples; the reference
+  table is
+  [manual — RBS::Extended annotations](../manual/16-rbs-extended-annotations.md).
 - [Chapter 8 — Understanding errors](08-understanding-errors.md)
-  covers the rule catalogue, severity profiles, baseline
-  diffing — every PHPStan onboarding analogue.
+  explains how to read a diagnostic and which knob to reach
+  for; the catalogue, severity profiles and baselines — every
+  PHPStan onboarding analogue — are
+  [manual — Diagnostics](../manual/04-diagnostics.md) and
+  [manual — Baselines](../manual/06-baseline.md).
 - [Chapter 9 — Plugins](09-plugins.md) for the
   Type-Specifying / Dynamic-Return analogues.
 

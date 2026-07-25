@@ -1651,7 +1651,9 @@ practical companion:
   for the directive grammar that lets you teach Rigor about a
   custom predicate.
 - [Chapter 8 — Understanding errors](08-understanding-errors.md)
-  for the rule catalogue (the user-visible end of the trinary
+  for how a diagnostic reads, and
+  [manual — Diagnostics](../manual/04-diagnostics.md) for the
+  rule catalogue (the user-visible end of the trinary
   certainty).
 
 If you want to compare against another *tool* rather than the

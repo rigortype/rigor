@@ -6,10 +6,11 @@ module Rigor
     # unless the caller passes an explicit `libraries:` array. Each entry MUST be a stdlib library name
     # accepted by `RBS::EnvironmentLoader#has_library?`; unknown libraries MUST fail-soft
     # (`RbsLoader#build_env` already filters through `has_library?`). The default set covers the common
-    # stdlib surface a Ruby program is likely to import (`pathname`, `optparse`, `json`, `yaml`, `fileutils`,
-    # `tempfile`, `uri`, `logger`, `date`) plus the analyzer-adjacent gems shipping their own RBS in this
-    # bundle (`prism`, `rbs`). On hosts where one of these libraries is not installed, the loader silently
-    # drops it.
+    # stdlib surface a Ruby program is likely to import, plus the analyzer-adjacent gems shipping their own
+    # RBS in this bundle (`prism`, `rbs`). The list below is the enumeration — no prose gloss restates a
+    # subset of it, here or in `docs/internal-spec/inference-engine.md` § Environment Surface, because a
+    # restated subset silently rots as entries are added. On hosts where one of these libraries is not
+    # installed, the loader silently drops it.
     #
     # Callers MAY add to the default by passing `libraries: %w[csv ...]`; the explicit list is appended to
     # `DEFAULT_LIBRARIES` and de-duplicated. Callers that need a strictly RBS-core view MUST construct an

@@ -116,6 +116,94 @@ Bucket key tuple, both match modes, the `count` multiplicity rule, and `CURRENT_
   descoped v0.0.9 `Reflection` carry-over; the deferred per-method return precision), and
   `plugin-cache-producers.md` even annotates a superseded item with the ADR that replaced it.
 
+## Second pass — the three large documents, read line by line
+
+The first pass left `inference-engine.md` (614), `plugin.md` (719) and `cache.md` (836) at the
+enumerated-surface level. They were then audited claim by claim, one independent-context agent each,
+every finding required to carry `file:line` evidence, and the load-bearing ones re-verified against
+`lib/` before anything was applied. The three documents together produced **31 findings** — four times
+the first pass's rate over eight documents, which is the expected shape: these are the oldest and
+largest documents in the corpus, and size is where an unrevisited sentence hides.
+
+### `cache.md` — 12 findings
+
+The subsystem has churned through ADR-6, ADR-45, ADR-54, ADR-60, ADR-87 and ADR-46; the document
+tracked the big structural changes and lost the sentences written for an earlier slice.
+
+- **The one that would have cost a plugin author a debugging session.** § `fetch_or_validate` said a
+  write that is not `Marshal`-clean "is swallowed: the freshly-computed value is returned and the next
+  run recomputes". `try_write_entry` rescues only `SystemCallError, IOError`
+  ([`store.rb:496`](../../lib/rigor/cache/store.rb)) — a producer contract violation **raises and
+  aborts the run**, deliberately, and `store_spec.rb:363` pins it in that direction. The document
+  promised graceful degradation where the code promises visibility.
+- **Two rescue clauses narrated as `StandardError`** that are `::RBS::BaseError` in `lib/`
+  (`rbs_loader.rb:644`, `rbs_constant_table.rb:26`). Both carry comments saying the narrow rescue is
+  deliberate — a broad one hid a v0.0.9 regression. A port following the document would reintroduce it.
+- **An expired reservation.** § Diagnostic provenance said no production caller sets a non-default
+  `source_family`; four do (`:rbs_extended`, `plugin.<id>`, `:contribution_merge`, `:plugin_loader`).
+  Only `generated.<provider>` is still reserved, and now says so with the marker.
+- **A counter-bump order that was the reverse of the code**, a `:stat` comparator missing from the
+  strictness ordering, an in-process memo attributed to a method that deliberately has none, "the
+  single producer-facing entry point" when there are three, a slice narrative that outran itself, a
+  descriptor section two producers and one config slot short, and a `--cache-stats` sample stale in
+  both of its checkable fields.
+
+The sample fix is worth recording as a pattern: the marker literally contains the gem version, so any
+pinned sample rots at the next release — the same failure class this sweep exists to close. It now
+carries both a current literal **and** the composition it is built from, so a future reader can tell
+staleness from fault without reading `lib/`.
+
+### `inference-engine.md` — 12 findings
+
+- **A normative purity clause that `lib/` violates.** The document says `type_of` "MUST NOT mutate the
+  receiver scope or any object reachable from it" and that the fallback tracer "is the ONLY mutable
+  state observable from `Scope#type_of`". Two identity-keyed side-tables — `dynamic_origins` (ADR-75 /
+  ADR-82) and `void_origins` (ADR-100) — are written in place during `type_of`, on the fallback path,
+  regardless of `tracer:` ([`expression_typer.rb:934`](../../lib/rigor/inference/expression_typer.rb)
+  and a dozen more sites), and are public readers. The provenance model postdates the clause and the
+  document never mentions it. What still holds — the return value and every flow-state field are pure,
+  and the tables are excluded from `Scope#==` / `#hash` and never read back into a typing decision — is
+  now stated as the guarantee, rather than left to be inferred from a clause that overshoots.
+- **Two self-contradictions.** The `&&` / `||` result-type MUST ("the union of the two operand types",
+  narrowing deferred to a later slice) is contradicted by the same document 240 lines later and by
+  `statement_evaluator.rb:1250`, which unions the *narrowed* LHS edge with the RHS. The compound-write
+  deferral is contradicted 18 lines later by the section describing the handlers that landed.
+- **`OverloadSelector`'s contract described a single first-match-wins pass** over declaration order.
+  It is three ordered passes (strict → alias-strict-arm → gradual) over a list already reordered by
+  receiver affinity, so a gradually-matching first overload loses to a strictly-matching later one.
+- **A removed surface still named in the present tense** — `with_declared_types`, which exists nowhere
+  in the repo except that sentence, and whose removal *this same document* records 280 lines earlier.
+  The mechanical backtick pre-pass should have caught it and did not: it only checks names the document
+  spells inside backticks against `lib/`, and this one is spelled that way — a gap in the pre-pass, now
+  known.
+- Plus `DEFAULT_LIBRARIES` enumerated as 11 names when it ships 55, a `DiscoveryIndex` field list two
+  short, a `dispatch` signature missing `call_node:`, a tier order missing two live tiers (one of them
+  above "first"), and `ScopeIndexer.index`'s `Hash#default` described as the caller's `default_scope`
+  when it is the seeded scope.
+
+### `plugin.md` — 7 findings, one of them the sweep's best catch
+
+**The document told plugin authors that three live APIs were deleted.** ADR-80 renamed
+`type_specifier` → `narrowing_facts`, and a mechanical rename swept the parenthetical that was supposed
+to name the **old** surfaces — so the sentence reads "the old verb … is gone in 0.3.0, together with the
+reader (`narrowing_facts_rules`), the engine consumer (`#narrowing_facts_for`), and the capability key
+(`narrowing_facts_methods`)". All three are the *current* spellings, all three ship
+([`base.rb:413`](../../lib/rigor/plugin/base.rb), `:548`, `plugins_renderer.rb:109`), and two are pinned
+as live by `public_api_drift_spec`. The document contradicts the drift spec directly and itself twice.
+The audience for this sentence is a plugin author who has just been told to migrate *to* those names.
+
+The rename's blast radius is the lesson: a search-and-replace over prose cannot distinguish a name being
+*used* from a name being *quoted as removed*, and the second reading inverts the meaning.
+
+The rest: the engine no longer invokes `#node_rule_diagnostics` (ADR-52 WD4 moved dispatch to one shared
+walk; the instance method survives for plugin specs), `tableize` is documented as delegating to
+`ActiveSupport::Inflector` when it is deliberately **not** (AS returns `admin/users`, ActiveRecord's real
+table name is `admin_users` — a port following the document is wrong on every namespaced model),
+`additional_initializers` missing its `block_methods:` tier, the `plugins:` entry shape missing
+`enabled:` (the ADR-93 opt-out for the auto-wired default), `#prepare` described as run-once when it runs
+once *per plugin instance* — coordinator plus every fork worker — and a v0.1.0 status anchor the document
+itself outruns.
+
 ## Coverage — what depth each document actually got
 
 Honesty about the instrument, since a sweep that over-claims its own coverage is the failure this

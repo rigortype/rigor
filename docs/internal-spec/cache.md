@@ -11,13 +11,15 @@ inert — is rebuilt), to `4` when [ADR-60](../adr/60-pre-freeze-plugin-contract
 WD3 added the `globs` slot (`GlobEntry`) for the record-and-validate
 plugin-producer cache, and to `5` when [ADR-87](../adr/87-null-build-floor.md)
 WD1 added the `:stat` `FileEntry` comparator (stat-then-digest
-validation). Slices 1–2 are in place:
-`Rigor::Cache::Descriptor` (the substrate every cached value
-attaches to) and `Rigor::Cache::Store` (the filesystem-backed
-storage that consumes a descriptor + producer + params and
-returns a cached or freshly computed value). Subsequent slices
-add the first cached producer (the RBS environment loader) and
-the CLI observability flags (`--cache-stats`, `--clear-cache`).
+validation). All five v0.0.8 slices landed:
+`Rigor::Cache::Descriptor` (slice 1 — the substrate every cached
+value attaches to), `Rigor::Cache::Store` (slice 2 — the
+filesystem-backed storage that consumes a descriptor + producer +
+params and returns a cached or freshly computed value), the first
+cached producer — the RBS constant table (slice 3) — the CLI
+observability flags `--cache-stats` / `--clear-cache` (slice 4),
+and diagnostic provenance (slice 5). Four further RBS-derived
+producers landed in v0.0.9.
 
 The schema this module implements is fixed by:
 
@@ -95,8 +97,11 @@ Composes any number of descriptors into a single descriptor. The
 composition rule per slot is **union by key**:
 
 - `files` group by `path`. Entries within a group prefer the
-  **stricter** comparator (`:digest > :mtime > :exists`); among
-  the strictest, all entries must agree on `value` or
+  **stricter** comparator (`:stat > :digest > :mtime > :exists`;
+  ranking `:stat` and `:digest` apart is what guarantees a path
+  contributed under both never raises a value `Conflict`, since
+  their `value` strings differ by construction); among the
+  strictest, all entries must agree on `value` or
   `Descriptor::Conflict` is raised.
 - `gems` group by `name`. All entries within a group must be
   structurally equal under `(requirement, locked)`; otherwise
@@ -167,10 +172,6 @@ but because the comparator is folded into the cache key via
 misses rather than being trusted under a comparator the old writer
 never used.
 
-The persistence layer ([`Rigor::Cache::Store`](#cache-store-v008-slice-2),
-v0.0.8 slice 2) and the cached-producer integrations follow.
-This document is updated as each slice lands.
-
 ## `Rigor::Cache::Store` (v0.0.8 slice 2)
 
 Filesystem-backed cache store. ADR-6 § "Decisions in detail" fixes
@@ -191,8 +192,10 @@ leaves the cache unbounded).
 Every `fetch_or_compute` / `fetch_or_validate` call first resolves the disk
 tier's availability for the Store's lifetime (memoized after the first
 check — see "Schema-version marker" below): unavailable means the
-producer block still runs and its result still lands in the
-in-process memo, but no disk read or write is attempted. This covers
+producer block still runs — and, for `fetch_or_compute`, its result still
+lands in the in-process memo — but no disk read or write is attempted.
+`fetch_or_validate` / `peek_validated` are deliberately **not** memoised
+in-process: validation always re-checks the filesystem. This covers
 two situations — a read-only store facing a marker it must not trust,
 and a writable store whose cache root cannot be read/repaired
 (permission error, disk full, deleted root, read-only mount) — neither
@@ -200,7 +203,9 @@ of which may ever break an analysis run.
 
 ### `store.fetch_or_compute(producer_id:, params:, descriptor:, serialize: nil, deserialize: nil) { ... } -> Object`
 
-The single producer-facing entry point.
+The compute-keyed producer entry point; `fetch_or_validate` below is
+the record-and-validate variant, and `peek_validated` its read-only
+probe half.
 
 - `producer_id` (String) — the cache namespace. Only
   `[a-z][a-z0-9._-]*` is accepted. The constraint guarantees
@@ -243,16 +248,33 @@ The block MUST return `[value, dependency_descriptor]`. On the next
 run the stored dependency descriptor is re-validated against the
 filesystem via `Descriptor#fresh?` — every recorded `FileEntry` /
 `GlobEntry` must still match — and a stale dependency forces a
-recompute. A write that is not `Marshal`-clean (or any disk error)
-is swallowed: the freshly-computed value is returned and the next run
-recomputes. This is the sound successor to a pre-analysis fingerprint,
-which would go stale when a plugin reads files Rigor cannot see up
-front.
+recompute. A **disk-side** write failure (permission, disk full, deleted
+root, read-only mount) is swallowed: the freshly-computed value is
+returned and the next run recomputes. A **producer contract violation is
+not** — a value `Marshal.dump` cannot serialise, or a custom `serialize:`
+returning a non-`String`, raises out of `fetch_or_validate` and **aborts
+the run**. It does not degrade to a cold run: the write path rescues only
+`SystemCallError` / `IOError`, deliberately, so the bug is visible rather
+than silently costing every run a recompute. A producer whose value is
+not `Marshal`-clean MUST supply a `serialize:` / `deserialize:` pair.
+This is the sound successor to a pre-analysis fingerprint, which would go
+stale when a plugin reads files Rigor cannot see up front.
 
 `Descriptor#fresh?` considers a descriptor fresh only when its
 `gems` / `plugins` / `configs` / `dependencies` slots are all empty
 (those non-file inputs belong in the cache *key*, not the validated
 set); a descriptor carrying any of them is never fresh.
+
+### `store.peek_validated(producer_id:, key_descriptor:, params: {}, deserialize: nil) -> Object?`
+
+The read half of `fetch_or_validate` ([ADR-87](../adr/87-null-build-floor.md)
+WD4), with no compute and no write: it returns the cached value on a
+fresh hit and `nil` on a miss, a stale dependency descriptor, or an
+unavailable disk tier. It takes no block and never runs a producer, so
+there is nothing to persist. The boot-slimming probe calls it to serve a
+run's diagnostics without loading the inference engine at all. It records
+a hit (so `--cache-stats` still balances) but never a miss — a probe miss
+hands off to the full path, which records its own.
 
 ### Read fault tolerance
 
@@ -520,7 +542,7 @@ backstop for the whole mechanism.
 
 Every bundled RBS-derived producer documented below (`RbsConstantTable`, `RbsKnownClassNames`, `RbsClassAncestorTable`, `RbsClassTypeParamNames`, `RbsEnvironment`) satisfies one shape — a class object responding to `fetch(loader:, store:)` and returning the cached or freshly computed value. This is codified as the structural interface `_CacheProducer` in [`sig/rigor/cache.rbs`](../../sig/rigor/cache.rbs): a structural interface (the RBS/Go sense), not an ADR-28 protocol contract, and distinct from the plugin-side producer surface in [`plugin-cache-producers.md`](plugin-cache-producers.md).
 
-The `fetch` body is identical across producers: build the RBS descriptor (`RbsDescriptor.build(loader)`), then call `store.fetch_or_compute(producer_id:, params: {}, descriptor:)` yielding to the producer's `compute(loader)`. Only the `PRODUCER_ID` constant and the `compute` body differ. That shared wiring lives on the `Rigor::Cache::RbsCacheProducer` base; a producer MUST subclass it and declare its own `PRODUCER_ID` and a (private) `self.compute(loader)`. The base reads `self::PRODUCER_ID` so the constant resolves on the concrete subclass. The per-producer sections below specify each producer's `PRODUCER_ID`, `compute` output type, and the `cache_store` consumer that reads it.
+The `fetch` body is identical across producers: read the shared RBS descriptor (`loader.rbs_cache_descriptor`, the per-loader memo around `RbsDescriptor.build`), then call `store.fetch_or_compute(producer_id:, params: {}, descriptor:)` yielding to the producer's `compute(loader)`. Only the `PRODUCER_ID` constant and the `compute` body differ. That shared wiring lives on the `Rigor::Cache::RbsCacheProducer` base; a producer MUST subclass it and declare its own `PRODUCER_ID` and a (private) `self.compute(loader)`. The base reads `self::PRODUCER_ID` so the constant resolves on the concrete subclass. The per-producer sections below specify each producer's `PRODUCER_ID`, `compute` output type, and the `cache_store` consumer that reads it.
 
 ## `Rigor::Cache::RbsConstantTable` (v0.0.8 slice 3)
 
@@ -535,8 +557,12 @@ without `_dump_data`, so a naive `Marshal.dump(env)` raises
 `TypeError`. Caching `RBS::Environment` itself therefore requires
 either a custom-serialiser surface on the `Store` or a
 schema-stable intermediate that walks every relevant node into a
-Marshal-safe shape. Both options are out of scope for the v0.0.8
-slice budget — see [ADR-6 § 8 "RBS::Environment serialisation"](../adr/6-cache-persistence-backend.md).
+Marshal-safe shape. Both options were out of scope for the v0.0.8
+slice budget — see [ADR-6 § 8 "RBS::Environment serialisation"](../adr/6-cache-persistence-backend.md)
+— and neither was taken: v0.0.9 resolved it by a third route
+neither option anticipated, an additive `RBS::Location` Marshal
+patch that lets the env ride the default `Marshal` path. See
+[§ `Rigor::Cache::RbsEnvironment`](#rigorcacherbsenvironment-v009-c2).
 
 The v0.0.8 slice instead caches a **post-translation** artefact:
 the result of translating every RBS-declared constant to its
@@ -552,7 +578,9 @@ prefixed, e.g. `"::Math::PI"`) to its translated `Rigor::Type`.
 The producer block iterates `loader.each_constant_decl` (which
 yields `(name, entry)` pairs from `env.constant_decls`) and
 translates each entry directly; entries whose translation
-returns `Rigor::Type::Bot` or raises are dropped from the table.
+returns `Rigor::Type::Bot` or raises `RBS::BaseError` (a broken
+signature) are dropped from the table — analyzer-internal errors
+propagate rather than corrupting the table silently.
 
 Going through `each_constant_decl` instead of
 `loader.constant_type` keeps the producer free of the recursion
@@ -571,8 +599,11 @@ id `"rbs.known_class_names"`.
 Returns the set. The producer block iterates
 `loader.each_known_class_name` (which walks both
 `env.class_decls` and `env.class_alias_decls`); a fail-soft
-`rescue StandardError` inside the iterator means a broken
+`rescue ::RBS::BaseError` inside the iterator means a broken RBS
 environment yields no names rather than aborting the whole run.
+Analyzer-internal errors (`NameError`, `NoMethodError`,
+`LoadError`) are deliberately **not** swallowed — a v0.0.9
+regression hid behind a broader rescue here.
 
 ### Class-known path under `cache_store`
 
@@ -644,7 +675,7 @@ post-translation caches.
 ### `RbsEnvironment.fetch(loader:, store:) -> ::RBS::Environment`
 
 Returns the env. The producer block calls
-`Rigor::Environment::RbsLoader.build_env_for(libraries:, signature_paths:)`
+`Rigor::Environment::RbsLoader.build_env_for(libraries:, signature_paths:, virtual_rbs:)`
 — a stateless class-method counterpart to
 `RbsLoader#build_env` so the producer does not need to hold a
 loader instance.
@@ -696,19 +727,51 @@ DefinitionBuilder cost for the few that aren't.
 
 ## `Rigor::Cache::RbsDescriptor` (shared)
 
-Both `RbsConstantTable` and `RbsKnownClassNames` depend on the
-same RBS environment state, so they share a descriptor builder:
+Every RBS-derived producer (`RbsConstantTable`,
+`RbsKnownClassNames`, `RbsClassAncestorTable`,
+`RbsClassTypeParamNames`, `RbsEnvironment`) depends on the same
+RBS environment state, so they share one descriptor builder —
+memoised per loader as `RbsLoader#rbs_cache_descriptor`
+([ADR-54](../adr/54-cache-slimming.md) WD4), so the `.rbs` tree is
+digested once per process rather than once per producer:
 
 ```ruby
 Rigor::Cache::RbsDescriptor.build(loader)
 # => Descriptor with:
 #    gems    = [{ name: "rbs", requirement: ">= 0", locked: ::RBS::VERSION }]
 #    files   = [...]   # :digest entries for every .rbs under signature_paths
-#    configs = [{ key: "rbs.libraries", value_hash: SHA256(sorted-libraries) }]
+#                      # + the vendored gem sigs + the core overlay
+#    configs = [{ key: "rbs.libraries",  value_hash: SHA256(sorted-libraries) },
+#               { key: "rbs.virtual_rbs", value_hash: SHA256(sorted-pairs) }]
 ```
+
+The `rbs.virtual_rbs` row is the ADR-32 WD5 slot: it hashes the
+loader's plugin-contributed synthesised RBS strings so the env
+cache invalidates when one changes or first appears. It is
+omitted entirely when the loader has no `virtual_rbs` entries, so
+a project with no synthesizer-emitting plugin pays no descriptor
+cost for it.
 
 Sharing the builder means a single signature change or rbs gem
 bump invalidates every RBS-derived cached producer in lockstep.
+
+### `RbsDescriptor.build_run(loader) -> RunDescriptor`
+
+The lazy-`files` variant behind the ADR-45 run-diagnostics
+record-and-validate cache. `RunDescriptor` is **not** a
+`Descriptor` — it is never composed, hashed, or `==`'d, and only
+its three readers (`gems`, `configs`, `files`) are consulted — so
+`files` can be deferred without costing soundness. `gems` and
+`configs` are supplied eagerly and are byte-identical to
+`.build`'s (the cache key is unchanged); `files` is computed on
+first access and memoised, so a warm HIT never digests the large
+vendored RBS tree at all. When it is read — only on a MISS, by
+the run's dependency descriptor — it uses the `:stat` comparator
+rather than `:digest`, since a validated descriptor may carry
+machine-local stat data (`.build`'s cache-KEY `files` stay
+`:digest`). `RbsDescriptor.rbs_gem_entry` is public for the same
+reason: the ADR-87 WD4 probe reconstructs the identical `gems` +
+`rbs.libraries` key slots without holding a loader.
 
 ## Constant-lookup path under `cache_store`
 
@@ -750,13 +813,21 @@ counters from the runner's `Cache::Store`. Output sample:
 
 ```
 Cache (root: .rigor/cache)
-  schema_version: 0.2.8.4.2
+  schema_version: 0.3.0.5.2
   3 entries, 12.4 KiB
     rbs.constant_type_table: 1 entries, 11.0 KiB
-    reflection.instance_method_definition: 2 entries, 1.4 KiB
+    rbs.environment: 2 entries, 1.4 KiB
   this run: 5 hits, 1 miss, 1 write
     rbs.constant_type_table: 5 hits, 1 miss, 1 write
 ```
+
+The `schema_version` line is not a fixed literal — it is
+`Store.schema_marker_value`, i.e.
+`"<PAYLOAD_ABI_VERSION>.<Descriptor::SCHEMA_VERSION>.<Store::FORMAT_VERSION>"`,
+where `PAYLOAD_ABI_VERSION` is `Rigor::VERSION`. The sample above
+is what that composes to as of this writing (`0.3.0` + schema `5`
++ format `2`); read a mismatch against your installed release as
+this sample being stale, not as a fault.
 
 When the cache directory does not exist, `schema_version` reads
 `absent` and the body shows `(empty)`. When the runner has no
@@ -777,11 +848,15 @@ Returns a frozen snapshot of the Store's per-run counters:
 ```
 
 The counters are in-memory only — every new `Store.new` starts
-at zero. Bumped inside `#fetch_or_compute`: a successful read
-increments `:hits`; a miss increments `:misses` immediately and
-then `:writes` after the producer block returns and the entry
-is persisted. Per-producer counts mirror the totals so callers
-can report the breakdown shown above.
+at zero. Bumped inside `#fetch_or_compute`, `#fetch_or_validate`,
+and `#peek_validated` (which records hits only). A hit increments
+`:hits`. On a miss both `:misses` and `:writes` are recorded
+*after* the producer block returns and the write is attempted —
+`:writes` only when the entry actually landed, so a read-only
+store or a swallowed filesystem error records a miss with no
+write, and a producer block that raises records nothing at all.
+Per-producer counts mirror the totals so callers can report the
+breakdown shown above.
 
 ### `Store.disk_inventory(root:)`
 
@@ -829,8 +904,11 @@ display when they want unambiguous attribution. JSON output
 (`to_h`) carries both fields side-by-side so downstream consumers
 can choose which one they care about.
 
-This prepares ADR-2's plugin-observability story (`plugin.<id>`,
-`rbs_extended`, `generated.<provider>`) without committing to the
-plugin API itself. No production caller in v0.0.8 sets a non-
-default source_family — the surface is reserved for plugin
-authors and future RBS-extended / generated rules.
+This carries ADR-2's plugin-observability story (`plugin.<id>`,
+`rbs_extended`, `generated.<provider>`). The surface is live: the
+runner stamps `plugin.<manifest.id>` on every plugin diagnostic
+(plugin authors must not set it themselves — any value they pass
+is overwritten), `RBS::Extended` emits `:rbs_extended`, the
+contribution merger `:contribution_merge`, and the plugin loader
+`:plugin_loader`. **As of this writing `generated.<provider>` is
+reserved with no consumer.**

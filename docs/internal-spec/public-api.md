@@ -1,18 +1,19 @@
 # Public API Stability Boundary
 
-Status: **Active (v0.1.0 contract shipped; stabilising toward v0.2.0).**
+Status: **Active — the enumerated surface is under the `v0.2.0` evaluation
+trial** ([`docs/compatibility.md`](../compatibility.md) § the three stages:
+committed-to-as-a-trial from `v0.2.0`, binding at `v1.0.0`).
 Lists the namespaces the plugin contract is designed against and pins
 them in place via the [public-API drift spec](../../spec/rigor/public_api_drift_spec.rb).
-The v0.1.0 plugin contract shipped and the `0.1.x` preview line has
-extended the surface (cross-plugin facts, `signature_paths:`,
-`open_receivers:`, `protocol_contracts:`, `source_rbs_synthesizer:`);
-v0.2.0 is the first line where this surface is stabilised for external
-`rigor-*` gems. (The `rigor <command>` CLI itself — including newer
-subcommands like `mcp`, `triage`, `baseline`, `plugin`, `skill` — stays
-internal plumbing per the exclusion list below; its user-facing
-contract lives in `docs/manual/`.) The drift spec
-catches accidental signature changes so every change stays deliberate
-and reviewable.
+The v0.1.0 plugin contract shipped and the `0.1.x` preview line extended
+the surface (cross-plugin facts, `signature_paths:`, `open_receivers:`,
+`protocol_contracts:`, `source_rbs_synthesizer:`); `v0.2.0` was the first
+line to pledge minor-non-break on it for external `rigor-*` gems. (The
+`rigor <command>` CLI itself — including newer subcommands like `mcp`,
+`triage`, `baseline`, `plugin`, `skill` — stays internal plumbing per
+the exclusion list below; its user-facing contract lives in
+`docs/manual/`.) The drift spec catches accidental signature changes so
+every change stays deliberate and reviewable.
 
 This document is the **plugin-author view** of the pinned namespaces.
 The project-wide compatibility commitment — the full public surface
@@ -110,28 +111,31 @@ Any signature change on these methods has to update the matching
   the bundle shape via the public-API drift spec. Plugin authors
   should consume bundles via the public reader / `to_h` form and
   avoid pinning the per-slot value shapes (`PredicateEffect`,
-  `AssertEffect`, …) directly until v0.1.0 ratifies them.
+  `AssertEffect`, …) directly — v0.1.0 ratified the bundle, not those.
 - **`Rigor::FlowContribution::Element` / `MergeResult` / `Conflict` /
   `Merger`** — slice 3 surface; pinned by the drift spec. The
   flattening + merge policy is normative per
   [`flow-contribution-merger.md`](flow-contribution-merger.md).
 - **`Rigor::Analysis::Diagnostic`** — `source_family` and
-  `qualified_rule` were added in v0.0.8 (`ed9ae0a`) but the
-  per-rule diagnostic identifiers are still in flux as the v0.1.0
-  plugin observability story finalises.
+  `qualified_rule` were added in v0.0.8 (`ed9ae0a`); the per-rule
+  identifiers themselves remain out of the pinned surface and freeze
+  as public vocabulary at `v1.0.0` (ADR-50), which is why
+  `Rigor::Analysis::Diagnostic` stays out of the drift spec.
 - **`Rigor::Cache::*`** — the producer-facing
   `Store#fetch_or_compute(producer_id:, params:, descriptor:,
-  serialize:, deserialize:)` API is the most stable layer and the
-  one plugin-side cache producers will ride. The descriptor schema
-  is fixed by ADR-6 and the slice-taxonomy design doc; plugin
-  authors should add `PluginEntry` rows rather than new slot kinds.
+  serialize:, deserialize:)` API is the most stable layer, and the
+  one plugin-side cache producers ride
+  ([plugin-cache-producers.md](plugin-cache-producers.md)). The
+  descriptor schema is fixed by ADR-6 and the slice-taxonomy design
+  doc; plugin authors should add `PluginEntry` rows rather than new
+  slot kinds.
 - **`Rigor::RbsExtended`** directive parsers — public reader
   methods (`read_predicate_effects`, `read_assert_effects`,
   `read_return_type_override`, `read_param_type_overrides`,
   `read_flow_contribution`) are stable shapes today; the per-effect
   Data carriers (`PredicateEffect`, `AssertEffect`,
-  `ParamOverride`) are subject to the same v0.1.0 refinement as
-  `FlowContribution`.
+  `ParamOverride`) are unpinned for the same reason as
+  `FlowContribution`'s per-slot shapes.
 - **`Rigor::Plugin::*`** — registration / loading surface landed
   in v0.1.0 slice 1. The instance-level `Rigor::Plugin::Base#init`
   hook is stable today; protocol hooks added by slices 3–6 may

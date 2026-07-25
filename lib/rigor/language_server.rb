@@ -9,6 +9,7 @@ module Rigor
   end
 end
 
+require_relative "language_server/incremental_sync"
 require_relative "language_server/buffer_table"
 require_relative "language_server/uri"
 require_relative "language_server/project_context"

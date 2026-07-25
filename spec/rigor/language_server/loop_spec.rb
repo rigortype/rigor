@@ -57,7 +57,7 @@ RSpec.describe Rigor::LanguageServer::Loop do
 
       expect(frames[0]).to include(jsonrpc: "2.0", id: 1)
       expect(frames[0][:result][:serverInfo]).to include(name: "rigor-lsp")
-      # textDocumentSync (FULL) is always advertised.
+      # textDocumentSync (INCREMENTAL) is always advertised.
       expect(frames[0][:result][:capabilities]).to include(:textDocumentSync)
     end
 

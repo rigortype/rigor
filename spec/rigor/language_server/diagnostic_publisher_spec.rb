@@ -39,6 +39,26 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       expect(writer.payloads).to be_empty
     end
 
+    it "publishes an EMPTY set for a buffer the server could not keep in sync" do
+      Dir.mktmpdir("rigor-lsp-desync-") do |tmpdir|
+        path = File.join(tmpdir, "foo.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: "def broken\n", version: 1)
+        # A malformed range edit: the table keeps the old text and marks the URI desynchronised.
+        buffer_table.apply_changes(
+          uri: uri,
+          changes: [{ range: { start: { line: 0 }, end: { line: 0, character: 0 } }, text: "x" }],
+          version: 2
+        )
+
+        Dir.chdir(tmpdir) { publisher.publish_for(uri) }
+
+        # Markers are cleared rather than left pointing at spans computed from text that has drifted.
+        expect(writer.payloads.size).to eq(1)
+        expect(writer.payloads.first.dig(:params, :diagnostics)).to eq([])
+      end
+    end
+
     it "pushes one `textDocument/publishDiagnostics` notification per call" do
       Dir.mktmpdir("rigor-lsp-publish-") do |tmpdir|
         path = File.join(tmpdir, "foo.rb")

@@ -689,6 +689,29 @@ RSpec.describe Rigor::Cache::Store do
 
       expect(File.mtime(path)).to be > old_mtime
     end
+
+    it "removes a shard directory the LRU pass empties, but keeps one still holding an entry" do
+      capped = described_class.new(root: cache_root, max_bytes: 15)
+
+      old_shard = File.join(cache_root, "evict.test", "aa")
+      keep_shard = File.join(cache_root, "evict.test", "bb")
+      FileUtils.mkdir_p(old_shard)
+      FileUtils.mkdir_p(keep_shard)
+
+      old_path = File.join(old_shard, "old.entry")
+      keep_path = File.join(keep_shard, "keep.entry")
+      File.write(old_path, "x" * 10)
+      File.write(keep_path, "y" * 10)
+      File.utime(Time.now - 60, Time.now - 60, old_path)
+      File.utime(Time.now, Time.now, keep_path)
+
+      capped.evict!
+
+      expect(File.exist?(old_path)).to be(false)
+      expect(Dir.exist?(old_shard)).to be(false)
+      expect(File.exist?(keep_path)).to be(true)
+      expect(Dir.exist?(keep_shard)).to be(true)
+    end
   end
 
   describe "read_only: true (editor mode — slice 3)" do
@@ -934,6 +957,30 @@ RSpec.describe Rigor::Cache::Store do
           .to contain_exactly(paths[2], paths[3])
       end
     end
+
+    it "removes a shard directory the generation-cap pass empties, but keeps one still holding a survivor" do
+      st = described_class.new(root: cache_root, max_bytes: nil)
+      st.send(:declare_generation_cap, "whole.project2", 1)
+
+      old_shard = File.join(cache_root, "whole.project2", "aa")
+      keep_shard = File.join(cache_root, "whole.project2", "bb")
+      FileUtils.mkdir_p(old_shard)
+      FileUtils.mkdir_p(keep_shard)
+
+      old_path = File.join(old_shard, "old.entry")
+      keep_path = File.join(keep_shard, "keep.entry")
+      File.write(old_path, "x")
+      File.write(keep_path, "y")
+      File.utime(Time.now - 60, Time.now - 60, old_path)
+      File.utime(Time.now, Time.now, keep_path)
+
+      st.evict!
+
+      expect(File.exist?(old_path)).to be(false)
+      expect(Dir.exist?(old_shard)).to be(false)
+      expect(File.exist?(keep_path)).to be(true)
+      expect(Dir.exist?(keep_shard)).to be(true)
+    end
   end
 
   describe "#evict! (stale temp-file cleanup)" do
@@ -950,6 +997,20 @@ RSpec.describe Rigor::Cache::Store do
 
       expect(File.exist?(stale)).to be(false)
       expect(File.exist?(fresh)).to be(true)
+      expect(Dir.exist?(File.dirname(stale))).to be(true)
+    end
+
+    it "removes the shard directory when sweeping the last stale temp file empties it" do
+      stale = File.join(cache_root, "p", "ef", "cdef.entry.tmp.123.deadbeef")
+      FileUtils.mkdir_p(File.dirname(stale))
+      File.write(stale, "x")
+      old_time = Time.now - ((60 * 60) + 60)
+      File.utime(old_time, old_time, stale)
+
+      described_class.new(root: cache_root, max_bytes: nil).evict!
+
+      expect(File.exist?(stale)).to be(false)
+      expect(Dir.exist?(File.dirname(stale))).to be(false)
     end
   end
 end

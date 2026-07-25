@@ -26,6 +26,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cache]** `rigor check` now removes a cache shard directory once its last entry is evicted, instead of leaving an empty directory behind permanently ([#216](https://github.com/rigortype/rigor/issues/216)).
 - **[sig-gen]** Updating an existing signature file now lands on the same nested layout a fresh generation would write — a class is placed inside its parent's block, and a flat `class Foo` / `class Foo::Bar` pair the file already carried is folded into one nested tree — so getting the canonical shape no longer means deleting the target `.rbs` and regenerating it ([#153](https://github.com/rigortype/rigor/issues/153)).
 
 ## [0.3.0] - 2026-07-19

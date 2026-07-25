@@ -468,6 +468,18 @@ enforcing a size budget, so an explicitly unbounded store
 `max_bytes:` being set. Any filesystem error during any pass is
 swallowed — `evict!` must never break a run.
 
+Every unlink in all three passes is followed by a best-effort
+`Dir.rmdir` on the shard directory (`entry_path`'s `key[0, 2]`
+component) that held the file, removing it when the unlink just
+emptied it. A shard is created on write (`FileUtils.mkdir_p`) and
+nothing else ever deletes it, so without this an evicted generation
+or a swept temp file left an empty shard directory behind
+permanently. This is cosmetic only — inode reclaim, not part of the
+eviction policy — and races (a concurrent writer's `mkdir_p`
+recreating the shard, or another pass already having removed it) are
+swallowed the same way any other filesystem error in these passes
+is.
+
 ## `Rigor::Cache::IncrementalSnapshot` (ADR-46)
 
 The persistent artefact behind `rigor check --incremental`. Distinct from

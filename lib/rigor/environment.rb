@@ -394,7 +394,8 @@ module Rigor
         cache_store.fetch_or_compute(
           producer_id: SYNTHESIZER_CACHE_PRODUCER_ID,
           params: {},
-          descriptor: descriptor
+          descriptor: descriptor,
+          generation_cap: synthesizer_generation_cap
         ) { invoke_synthesizer_safely(callable, path) || "" }
       end
 
@@ -419,6 +420,14 @@ module Rigor
 
       SYNTHESIZER_CACHE_PRODUCER_ID = "plugin.source_rbs_synthesizer"
       private_constant :SYNTHESIZER_CACHE_PRODUCER_ID
+
+      # One entry per (plugin, source file), all of them live for as long as the file is in the project — a
+      # generation count says nothing about staleness here, so this producer declares itself out of
+      # `Cache::Store#evict!`'s compaction pass and is bounded only by the size-based LRU pass. A method
+      # rather than a constant: `Cache::Store` is not loaded yet when this class body runs.
+      def synthesizer_generation_cap
+        Cache::Store::UNBOUNDED_GENERATIONS
+      end
 
       def build_synthesizer_cache_descriptor(plugin, path)
         Cache::Descriptor.new(

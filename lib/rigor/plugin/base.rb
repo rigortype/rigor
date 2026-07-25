@@ -8,6 +8,9 @@ require "prism"
 require_relative "manifest"
 require_relative "node_context"
 require_relative "../analysis/diagnostic"
+# `producer generation_cap:` defaults to (and validates against) `Cache::Store::UNBOUNDED_GENERATIONS`, and a
+# plugin class body can be evaluated before anything else pulled the cache layer in.
+require_relative "../cache/store"
 require_relative "../source/node_walker"
 
 module Rigor
@@ -86,16 +89,39 @@ module Rigor
         #
         # Producer ids are auto-prefixed `plugin.<manifest.id>.` at the cache layer (slice 6-C) so plugin-side
         # ids cannot collide with built-in producers.
-        def producer(id, watch: nil, serialize: nil, deserialize: nil, &block)
+        #
+        # `generation_cap:` declares how many generations of this producer's entries survive
+        # `Cache::Store#evict!`'s compaction pass. The default —
+        # `Cache::Store::UNBOUNDED_GENERATIONS` — suits the usual plugin producer, which keys per file or per
+        # discovered unit and keeps many entries live at once; only the size-based LRU pass bounds it. A
+        # producer whose entries are WHOLE-PROJECT and content-keyed (each run's inputs produce a fresh key
+        # and orphan the previous one) should declare a small positive Integer instead, so the orphans are
+        # reclaimed rather than accumulating under the global byte cap.
+        def producer(id, watch: nil, serialize: nil, deserialize: nil,
+                     generation_cap: Cache::Store::UNBOUNDED_GENERATIONS, &block)
           raise ArgumentError, "Plugin::Base.producer requires a block body" if block.nil?
 
           validate_producer_watch!(watch)
+          validate_producer_generation_cap!(id, generation_cap)
           @producers ||= {}
           @producers[id.to_sym] = {
-            block: block, watch: watch, serialize: serialize, deserialize: deserialize
+            block: block, watch: watch, serialize: serialize, deserialize: deserialize,
+            generation_cap: generation_cap
           }.freeze
           id.to_sym
         end
+
+        # A bad `generation_cap:` is caught at class-definition time (plugin load) rather than at the first
+        # `cache_for` round-trip, so the plugin author sees it before any caching happens.
+        def validate_producer_generation_cap!(id, generation_cap)
+          return if generation_cap == Cache::Store::UNBOUNDED_GENERATIONS
+          return if generation_cap.is_a?(Integer) && generation_cap.positive?
+
+          raise ArgumentError,
+                "Plugin::Base.producer #{id.inspect} generation_cap: must be a positive Integer or " \
+                "#{Cache::Store::UNBOUNDED_GENERATIONS.inspect}, got #{generation_cap.inspect}"
+        end
+        private :validate_producer_generation_cap!
 
         # ADR-60 WD3 — `watch:` is nil (no glob coverage), a static tuple Array, or a Proc evaluated per
         # `cache_for` call.
@@ -728,6 +754,7 @@ module Rigor
           store.fetch_or_validate(
             producer_id: prefixed_id,
             key_descriptor: key_descriptor,
+            generation_cap: producer[:generation_cap],
             params: params,
             serialize: pair_serializer(producer[:serialize]),
             deserialize: pair_deserializer(producer[:deserialize])

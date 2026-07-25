@@ -16,7 +16,9 @@ RSpec.describe Rigor::Cache::Store do
   describe "#fetch_or_compute" do
     it "runs the block on cache miss and returns its value" do
       called = 0
-      result = store.fetch_or_compute(producer_id: "test.producer", params: { x: 1 }, descriptor: descriptor) do
+      result = store.fetch_or_compute(
+        producer_id: "test.producer", generation_cap: :unbounded, params: { x: 1 }, descriptor: descriptor
+      ) do
         called += 1
         { value: 42 }
       end
@@ -25,12 +27,16 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "skips the block on cache hit and returns the stored value" do
-      store.fetch_or_compute(producer_id: "test.producer", params: { x: 1 }, descriptor: descriptor) do
+      store.fetch_or_compute(
+        producer_id: "test.producer", generation_cap: :unbounded, params: { x: 1 }, descriptor: descriptor
+      ) do
         { value: 42 }
       end
 
       called = 0
-      result = store.fetch_or_compute(producer_id: "test.producer", params: { x: 1 }, descriptor: descriptor) do
+      result = store.fetch_or_compute(
+        producer_id: "test.producer", generation_cap: :unbounded, params: { x: 1 }, descriptor: descriptor
+      ) do
         called += 1
         { value: 0 }
       end
@@ -39,8 +45,12 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "treats different params as different cache entries" do
-      a = store.fetch_or_compute(producer_id: "p", params: { x: 1 }, descriptor: descriptor) { :a }
-      b = store.fetch_or_compute(producer_id: "p", params: { x: 2 }, descriptor: descriptor) { :b }
+      a = store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: { x: 1 }, descriptor: descriptor
+      ) { :a }
+      b = store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: { x: 2 }, descriptor: descriptor
+      ) { :b }
       expect(a).to eq(:a)
       expect(b).to eq(:b)
     end
@@ -50,29 +60,39 @@ RSpec.describe Rigor::Cache::Store do
       d2 = Rigor::Cache::Descriptor.new(
         files: [Rigor::Cache::Descriptor::FileEntry.new(path: "a.rb", comparator: :digest, value: "abc")]
       )
-      a = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: d1) { :a }
-      b = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: d2) { :b }
+      a = store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: d1) { :a }
+      b = store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: d2) { :b }
       expect(a).to eq(:a)
       expect(b).to eq(:b)
     end
 
     it "treats different producer_ids as different cache entries" do
-      a = store.fetch_or_compute(producer_id: "p1", params: {}, descriptor: descriptor) { :a }
-      b = store.fetch_or_compute(producer_id: "p2", params: {}, descriptor: descriptor) { :b }
+      a = store.fetch_or_compute(
+        producer_id: "p1", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :a }
+      b = store.fetch_or_compute(
+        producer_id: "p2", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :b }
       expect(a).to eq(:a)
       expect(b).to eq(:b)
     end
 
     it "round-trips Marshal-serialisable values" do
       payload = { strings: %w[a b], symbols: %i[x y], nested: { n: 1 } }
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { payload }
-      result = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :should_not_run }
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { payload }
+      result = store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :should_not_run }
       expect(result).to eq(payload)
     end
 
     it "rejects an invalid producer_id (only [a-z0-9._-] allowed)" do
       expect do
-        store.fetch_or_compute(producer_id: "Bad/Producer", params: {}, descriptor: descriptor) { :v }
+        store.fetch_or_compute(
+          producer_id: "Bad/Producer", generation_cap: :unbounded, params: {}, descriptor: descriptor
+        ) { :v }
       end.to raise_error(ArgumentError, /producer_id/)
     end
   end
@@ -80,20 +100,22 @@ RSpec.describe Rigor::Cache::Store do
   describe "on-disk layout" do
     it "writes a sharded path .rigor/cache/<producer-id>/<2-prefix>/<62-suffix>.entry" do
       key = descriptor.cache_key_for(producer_id: "p", params: { x: 1 })
-      store.fetch_or_compute(producer_id: "p", params: { x: 1 }, descriptor: descriptor) { :v }
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: { x: 1 }, descriptor: descriptor
+      ) { :v }
 
       expected = File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry")
       expect(File.exist?(expected)).to be true
     end
 
     it "writes a schema_version.txt marker at the cache root" do
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
+      store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
       marker = File.join(cache_root, "schema_version.txt")
       expect(File.read(marker).strip).to eq(described_class.schema_marker_value)
     end
 
     it "leaves no .tmp files behind on a successful write" do
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
+      store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
       stragglers = Dir.glob(File.join(cache_root, "**", "*.tmp.*"))
       expect(stragglers).to be_empty
     end
@@ -108,7 +130,9 @@ RSpec.describe Rigor::Cache::Store do
 
   describe "schema-version mismatch" do
     it "drops the cache directory when the marker disagrees with SCHEMA_VERSION" do
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :first }
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :first }
       File.write(File.join(cache_root, "schema_version.txt"), "999")
 
       # The disk-level schema-mismatch recovery applies on the disk-read path. A fresh `Store` (process restart / new
@@ -116,7 +140,9 @@ RSpec.describe Rigor::Cache::Store do
       # entirely.
       fresh_store = described_class.new(root: cache_root)
       called = 0
-      result = fresh_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = fresh_store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) do
         called += 1
         :second
       end
@@ -138,7 +164,9 @@ RSpec.describe Rigor::Cache::Store do
                  "#{Rigor::Cache::Descriptor::SCHEMA_VERSION}\n")
 
       described_class.new(root: cache_root)
-                     .fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :fresh }
+                     .fetch_or_compute(
+                       producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+                     ) { :fresh }
 
       expect(File.exist?(stale_entry)).to be(false)
       expect(File.read(File.join(cache_root, "schema_version.txt")).strip)
@@ -152,12 +180,12 @@ RSpec.describe Rigor::Cache::Store do
 
     it "round-trips through the supplied callables" do
       store.fetch_or_compute(
-        producer_id: "demo", params: {}, descriptor: descriptor,
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor,
         serialize: upcase_serialize, deserialize: downcase_deserialize
       ) { "hello" }
 
       result = store.fetch_or_compute(
-        producer_id: "demo", params: {}, descriptor: descriptor,
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor,
         serialize: upcase_serialize, deserialize: downcase_deserialize
       ) { :should_not_run }
 
@@ -173,7 +201,7 @@ RSpec.describe Rigor::Cache::Store do
         JSON.parse(bytes)
       }
       store.fetch_or_compute(
-        producer_id: "demo", params: {}, descriptor: descriptor,
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor,
         serialize: json_serialize, deserialize: json_deserialize
       ) { { "name" => "Alice", "age" => 30 } }
 
@@ -188,7 +216,7 @@ RSpec.describe Rigor::Cache::Store do
       # transparent at the contract layer). A fresh Store forces the disk read.
       fresh = described_class.new(root: cache_root)
       result = fresh.fetch_or_compute(
-        producer_id: "demo", params: {}, descriptor: descriptor,
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor,
         serialize: json_serialize, deserialize: json_deserialize
       ) { :should_not_run }
       expect(seen_bytes).to eq('{"name":"Alice","age":30}')
@@ -196,7 +224,9 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "treats a pre-compression (format v1) entry as a cache miss" do
-      store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :v2_value }
+      store.fetch_or_compute(
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :v2_value }
       key = descriptor.cache_key_for(producer_id: "demo", params: {})
       entry_path = File.join(cache_root, "demo", key[0, 2], "#{key[2..]}.entry")
       bytes = File.binread(entry_path).dup
@@ -206,7 +236,7 @@ RSpec.describe Rigor::Cache::Store do
 
       called = 0
       result = described_class.new(root: cache_root).fetch_or_compute(
-        producer_id: "demo", params: {}, descriptor: descriptor
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor
       ) do
         called += 1
         :recomputed
@@ -218,7 +248,9 @@ RSpec.describe Rigor::Cache::Store do
     it "raises TypeError when serialize returns a non-String" do
       bad = ->(_) { 42 }
       expect do
-        store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor, serialize: bad) { "x" }
+        store.fetch_or_compute(
+          producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor, serialize: bad
+        ) { "x" }
       end.to raise_error(TypeError, /serialize must return a String/)
     end
 
@@ -226,26 +258,30 @@ RSpec.describe Rigor::Cache::Store do
       identity = ->(v) { v }
       raising = ->(_) { raise "boom" }
       store.fetch_or_compute(
-        producer_id: "demo", params: {}, descriptor: descriptor,
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor,
         serialize: identity, deserialize: identity
       ) { "first" }
       # `Store#fetch_or_compute` memoises the produced value in-process; the disk-read deserialise path is exercised by
       # a fresh `Store` ("process restart" scenario).
       fresh_store = described_class.new(root: cache_root)
       result = fresh_store.fetch_or_compute(
-        producer_id: "demo", params: {}, descriptor: descriptor,
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor,
         serialize: identity, deserialize: raising
       ) { "second" }
       expect(result).to eq("second")
     end
 
     it "keeps the default Marshal path unchanged when serialize/deserialize are omitted" do
-      result = store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) do
+      result = store.fetch_or_compute(
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) do
         { complex: [1, "two", :three] }
       end
       expect(result).to eq(complex: [1, "two", :three])
 
-      hit = store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :should_not_run }
+      hit = store.fetch_or_compute(
+        producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :should_not_run }
       expect(hit).to eq(complex: [1, "two", :three])
     end
   end
@@ -260,7 +296,9 @@ RSpec.describe Rigor::Cache::Store do
 
     it "misses, runs the block, writes, and returns the produced value" do
       called = 0
-      result = store.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: { x: 1 }) do
+      result = store.fetch_or_validate(
+        producer_id: "p", generation_cap: :unbounded, key_descriptor: descriptor, params: { x: 1 }
+      ) do
         called += 1
         [{ v: 42 }, Rigor::Cache::Descriptor.new]
       end
@@ -280,14 +318,14 @@ RSpec.describe Rigor::Cache::Store do
       end
 
       first = described_class.new(root: cache_root).fetch_or_validate(
-        producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}, &produce
+        producer_id: "p", generation_cap: :unbounded, key_descriptor: Rigor::Cache::Descriptor.new, params: {}, &produce
       )
       expect(first).to eq("v1")
 
       called = 0
       second_store = described_class.new(root: cache_root)
       second = second_store.fetch_or_validate(
-        producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}
+        producer_id: "p", generation_cap: :unbounded, key_descriptor: Rigor::Cache::Descriptor.new, params: {}
       ) do
         called += 1
         ["should-not-run", Rigor::Cache::Descriptor.new]
@@ -302,7 +340,9 @@ RSpec.describe Rigor::Cache::Store do
       File.write(file, "v1")
 
       run = lambda do |s|
-        s.fetch_or_validate(producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}) do
+        s.fetch_or_validate(
+          producer_id: "p", generation_cap: :unbounded, key_descriptor: Rigor::Cache::Descriptor.new, params: {}
+        ) do
           content = File.read(file)
           [content, fresh_descriptor(file, content)]
         end
@@ -313,7 +353,7 @@ RSpec.describe Rigor::Cache::Store do
       File.write(file, "v2")
       called = 0
       result = described_class.new(root: cache_root).fetch_or_validate(
-        producer_id: "p", key_descriptor: Rigor::Cache::Descriptor.new, params: {}
+        producer_id: "p", generation_cap: :unbounded, key_descriptor: Rigor::Cache::Descriptor.new, params: {}
       ) do
         called += 1
         content = File.read(file)
@@ -326,13 +366,13 @@ RSpec.describe Rigor::Cache::Store do
     it "increments misses (and writes on success) on every miss, hits on a fresh re-read" do
       3.times do |i|
         described_class.new(root: cache_root).fetch_or_validate(
-          producer_id: "demo", key_descriptor: descriptor, params: { i: i }
+          producer_id: "demo", generation_cap: :unbounded, key_descriptor: descriptor, params: { i: i }
         ) { [i, Rigor::Cache::Descriptor.new] }
       end
       hit_store = described_class.new(root: cache_root)
       2.times do
         hit_store.fetch_or_validate(
-          producer_id: "demo", key_descriptor: descriptor, params: { i: 0 }
+          producer_id: "demo", generation_cap: :unbounded, key_descriptor: descriptor, params: { i: 0 }
         ) { [:unused, Rigor::Cache::Descriptor.new] }
       end
 
@@ -341,14 +381,18 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "treats a missing block as [nil, Descriptor.new] and does not raise" do
-      result = store.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: {})
+      result = store.fetch_or_validate(
+        producer_id: "p", generation_cap: :unbounded, key_descriptor: descriptor, params: {}
+      )
       expect(result).to be_nil
     end
 
     it "does not write to disk and does not raise when read_only" do
       ro = described_class.new(root: cache_root, read_only: true)
       called = 0
-      result = ro.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: {}) do
+      result = ro.fetch_or_validate(
+        producer_id: "p", generation_cap: :unbounded, key_descriptor: descriptor, params: {}
+      ) do
         called += 1
         [:v, Rigor::Cache::Descriptor.new]
       end
@@ -363,7 +407,9 @@ RSpec.describe Rigor::Cache::Store do
     it "raises TypeError when serialize returns a non-String (write-contract errors stay visible)" do
       bad = ->(_) { 42 }
       expect do
-        store.fetch_or_validate(producer_id: "p", key_descriptor: descriptor, params: {}, serialize: bad) do
+        store.fetch_or_validate(
+          producer_id: "p", generation_cap: :unbounded, key_descriptor: descriptor, params: {}, serialize: bad
+        ) do
           ["v", Rigor::Cache::Descriptor.new]
         end
       end.to raise_error(TypeError, /serialize must return a String/)
@@ -378,10 +424,16 @@ RSpec.describe Rigor::Cache::Store do
 
     it "increments misses and writes on a cache miss, hits on subsequent reads" do
       3.times do |i|
-        store.fetch_or_compute(producer_id: "demo", params: { i: i }, descriptor: descriptor) { i }
+        store.fetch_or_compute(
+          producer_id: "demo", generation_cap: :unbounded, params: { i: i }, descriptor: descriptor
+        ) { i }
       end
-      store.fetch_or_compute(producer_id: "demo", params: { i: 0 }, descriptor: descriptor) { :unused }
-      store.fetch_or_compute(producer_id: "demo", params: { i: 0 }, descriptor: descriptor) { :unused }
+      store.fetch_or_compute(
+        producer_id: "demo", generation_cap: :unbounded, params: { i: 0 }, descriptor: descriptor
+      ) { :unused }
+      store.fetch_or_compute(
+        producer_id: "demo", generation_cap: :unbounded, params: { i: 0 }, descriptor: descriptor
+      ) { :unused }
 
       stats = store.stats
       expect(stats).to include(misses: 3, writes: 3, hits: 2)
@@ -389,9 +441,13 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "tracks counters separately per producer" do
-      store.fetch_or_compute(producer_id: "alpha", params: {}, descriptor: descriptor) { :a }
-      store.fetch_or_compute(producer_id: "beta", params: {}, descriptor: descriptor) { :b }
-      store.fetch_or_compute(producer_id: "alpha", params: {}, descriptor: descriptor) { :unused }
+      store.fetch_or_compute(
+        producer_id: "alpha", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :a }
+      store.fetch_or_compute(producer_id: "beta", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :b }
+      store.fetch_or_compute(
+        producer_id: "alpha", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :unused }
 
       by_producer = store.stats.fetch(:by_producer)
       expect(by_producer.fetch("alpha")).to eq(hits: 1, misses: 1, writes: 1)
@@ -399,7 +455,7 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "returns a frozen snapshot so callers cannot mutate the live counters" do
-      store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :v }
+      store.fetch_or_compute(producer_id: "demo", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
       snapshot = store.stats
       expect(snapshot).to be_frozen
       expect(snapshot.fetch(:by_producer)).to be_frozen
@@ -416,9 +472,13 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "reports per-producer entry counts after writes" do
-      store.fetch_or_compute(producer_id: "alpha", params: { x: 1 }, descriptor: descriptor) { :a }
-      store.fetch_or_compute(producer_id: "alpha", params: { x: 2 }, descriptor: descriptor) { :b }
-      store.fetch_or_compute(producer_id: "beta", params: {}, descriptor: descriptor) { :c }
+      store.fetch_or_compute(
+        producer_id: "alpha", generation_cap: :unbounded, params: { x: 1 }, descriptor: descriptor
+      ) { :a }
+      store.fetch_or_compute(
+        producer_id: "alpha", generation_cap: :unbounded, params: { x: 2 }, descriptor: descriptor
+      ) { :b }
+      store.fetch_or_compute(producer_id: "beta", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :c }
 
       inv = described_class.disk_inventory(root: cache_root)
       expect(inv[:schema_version]).to eq(described_class.schema_marker_value)
@@ -437,7 +497,9 @@ RSpec.describe Rigor::Cache::Store do
     let(:entry_path) { File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry") }
 
     before do
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :first }
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :first }
     end
 
     # The corruption-tolerance cases simulate the disk being mutated externally (e.g. by a buggy editor or a crash
@@ -454,7 +516,7 @@ RSpec.describe Rigor::Cache::Store do
 
       called = 0
       result = fresh_store_after_corruption.fetch_or_compute(
-        producer_id: "p", params: {}, descriptor: descriptor
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
       ) do
         called += 1
         :second
@@ -468,7 +530,7 @@ RSpec.describe Rigor::Cache::Store do
 
       called = 0
       result = fresh_store_after_corruption.fetch_or_compute(
-        producer_id: "p", params: {}, descriptor: descriptor
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
       ) do
         called += 1
         :second
@@ -484,7 +546,7 @@ RSpec.describe Rigor::Cache::Store do
 
       called = 0
       result = fresh_store_after_corruption.fetch_or_compute(
-        producer_id: "p", params: {}, descriptor: descriptor
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
       ) do
         called += 1
         :second
@@ -496,7 +558,9 @@ RSpec.describe Rigor::Cache::Store do
 
   describe "atomic write (#write_entry / #atomically_replace)" do
     it "round-trips the exact written value and leaves no .tmp file behind" do
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { "the-value" }
+      store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { "the-value" }
       key = descriptor.cache_key_for(producer_id: "p", params: {})
       entry_path = File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry")
 
@@ -504,13 +568,15 @@ RSpec.describe Rigor::Cache::Store do
       expect(Dir.glob("#{entry_path}.tmp.*")).to be_empty
 
       fresh = described_class.new(root: cache_root)
-      result = fresh.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :should_not_run }
+      result = fresh.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) { :should_not_run }
       expect(result).to eq("the-value")
     end
 
     it "derives the temp filename's random suffix from SecureRandom.hex(4) (16 hex chars)" do
       allow(SecureRandom).to receive(:hex).and_call_original
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
+      store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
       expect(SecureRandom).to have_received(:hex).with(4)
     end
 
@@ -518,7 +584,7 @@ RSpec.describe Rigor::Cache::Store do
       allow(File).to receive(:rename).and_raise(Errno::ENOSPC)
 
       expect do
-        store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { "v" }
+        store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { "v" }
       end.not_to raise_error
 
       expect(Dir.glob(File.join(cache_root, "**", "*.tmp.*"))).to be_empty
@@ -531,7 +597,7 @@ RSpec.describe Rigor::Cache::Store do
       threads = Array.new(16) do |i|
         Thread.new do
           described_class.new(root: cache_root).fetch_or_compute(
-            producer_id: "p", params: {}, descriptor: descriptor
+            producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
           ) { "value-#{i}" }
         end
       end
@@ -542,7 +608,7 @@ RSpec.describe Rigor::Cache::Store do
       # in-flight temp file.
       expect(Dir.glob("#{entry_path}.tmp.*")).to be_empty
       final = described_class.new(root: cache_root).fetch_or_compute(
-        producer_id: "p", params: {}, descriptor: descriptor
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
       ) { :should_not_run }
       expect(final).to match(/\Avalue-\d+\z/)
     end
@@ -559,7 +625,7 @@ RSpec.describe Rigor::Cache::Store do
   describe "#evict! (ADR-6 LRU eviction)" do
     def write_entry(store, producer_id, key, value)
       store.fetch_or_compute(
-        producer_id: producer_id, params: { k: key },
+        producer_id: producer_id, generation_cap: :unbounded, params: { k: key },
         descriptor: Rigor::Cache::Descriptor.new
       ) { value }
     end
@@ -617,7 +683,7 @@ RSpec.describe Rigor::Cache::Store do
       sleep(0.05)
       fresh = described_class.new(root: cache_root, max_bytes: 10 * 1024 * 1024)
       fresh.fetch_or_compute(
-        producer_id: "evict.test", params: { k: "a" },
+        producer_id: "evict.test", generation_cap: :unbounded, params: { k: "a" },
         descriptor: Rigor::Cache::Descriptor.new
       ) { raise "should not be called" }
 
@@ -635,7 +701,9 @@ RSpec.describe Rigor::Cache::Store do
 
     it "runs the producer block on miss and returns its value without writing to disk" do
       called = 0
-      result = ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = ro_store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) do
         called += 1
         :produced
       end
@@ -647,17 +715,19 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "does not write the schema_version.txt marker even on a fresh root" do
-      ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
+      ro_store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
 
       expect(File.exist?(File.join(cache_root, "schema_version.txt"))).to be(false)
     end
 
     it "still serves hits from disk when an existing entry is present" do
       # Warm the cache with a write-enabled store.
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :warm }
+      store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :warm }
 
       called = 0
-      result = ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = ro_store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) do
         called += 1
         :should_not_run
       end
@@ -667,8 +737,10 @@ RSpec.describe Rigor::Cache::Store do
     end
 
     it "leaves the writes counter at zero (misses still recorded so callers can detect cold runs)" do
-      ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
-      ro_store.fetch_or_compute(producer_id: "p", params: { other: 1 }, descriptor: descriptor) { :w }
+      ro_store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :v }
+      ro_store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: { other: 1 }, descriptor: descriptor
+      ) { :w }
 
       stats = ro_store.stats
       expect(stats[:writes]).to eq(0)
@@ -678,7 +750,7 @@ RSpec.describe Rigor::Cache::Store do
     it "memoises within the same instance so repeated lookups skip the producer" do
       called = 0
       2.times do
-        ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+        ro_store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) do
           called += 1
           :v
         end
@@ -690,12 +762,12 @@ RSpec.describe Rigor::Cache::Store do
 
   describe "read-only marker gate (ABI safety)" do
     it "treats a stale marker as unavailable: no disk hit, no recompute writeback" do
-      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :warm }
+      store.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) { :warm }
       File.write(File.join(cache_root, "schema_version.txt"), "stale-marker\n")
 
       ro = described_class.new(root: cache_root, read_only: true)
       called = 0
-      result = ro.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = ro.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) do
         called += 1
         :recomputed
       end
@@ -711,7 +783,7 @@ RSpec.describe Rigor::Cache::Store do
 
       ro = described_class.new(root: cache_root, read_only: true)
       called = 0
-      result = ro.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = ro.fetch_or_compute(producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor) do
         called += 1
         :produced
       end
@@ -727,7 +799,9 @@ RSpec.describe Rigor::Cache::Store do
       allow(FileUtils).to receive(:mkdir_p).and_raise(Errno::EACCES)
 
       called = 0
-      result = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) do
         called += 1
         :produced
       end
@@ -736,7 +810,9 @@ RSpec.describe Rigor::Cache::Store do
 
       # Same instance, same lookup: served from the in-process memo, never re-attempts disk.
       called_again = 0
-      result_again = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result_again = store.fetch_or_compute(
+        producer_id: "p", generation_cap: :unbounded, params: {}, descriptor: descriptor
+      ) do
         called_again += 1
         :ignored
       end
@@ -745,40 +821,118 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
-  describe "#evict! (generation cap for whole-project producers, ADR-54 follow-up)" do
+  describe "#evict! (producer-declared generation cap, issue #151)" do
     def cache_key_path(producer_id, params)
       key = Rigor::Cache::Descriptor.new.cache_key_for(producer_id: producer_id, params: params)
       File.join(cache_root, producer_id, key[0, 2], "#{key[2..]}.entry")
     end
 
-    it "keeps only the cap for a listed producer, removing the oldest generations first, " \
-       "even when max_bytes is nil" do
-      st = described_class.new(root: cache_root, max_bytes: nil)
-      paths = Array.new(4) do |i|
-        st.fetch_or_compute(
-          producer_id: "rbs.environment", params: { i: i }, descriptor: Rigor::Cache::Descriptor.new
+    # Writes `count` generations of `producer_id` under `target`, forcing a deterministic write-order mtime
+    # (same-millisecond writes would otherwise tie), and returns the entry paths oldest-first.
+    def write_generations(target, producer_id, count, generation_cap:)
+      Array.new(count) do |i|
+        target.fetch_or_compute(
+          producer_id: producer_id, generation_cap: generation_cap,
+          params: { i: i }, descriptor: Rigor::Cache::Descriptor.new
         ) { i }
-        path = cache_key_path("rbs.environment", { i: i })
-        # Force a deterministic write-order mtime; same-millisecond writes would otherwise tie.
-        stamp = Time.now - (10 - i)
+        path = cache_key_path(producer_id, { i: i })
+        stamp = Time.now - (60 - i)
         File.utime(stamp, stamp, path)
         path
       end
+    end
+
+    it "keeps only the cap a producer declared, removing the oldest generations first, " \
+       "even when max_bytes is nil" do
+      st = described_class.new(root: cache_root, max_bytes: nil)
+      paths = write_generations(st, "whole.project", 4, generation_cap: 2)
 
       st.evict!
 
-      remaining = Dir.glob(File.join(cache_root, "rbs.environment", "**", "*.entry"))
+      remaining = Dir.glob(File.join(cache_root, "whole.project", "**", "*.entry"))
       expect(remaining.size).to eq(2)
       expect(remaining).to contain_exactly(paths[2], paths[3])
     end
 
-    it "does not cap a producer absent from the allow-list" do
+    it "leaves a producer that declared :unbounded alone (many entries live at once)" do
       st = described_class.new(root: cache_root, max_bytes: nil)
-      5.times { |i| st.fetch_or_compute(producer_id: "custom.thing", params: { i: i }, descriptor: descriptor) { i } }
+      write_generations(st, "custom.thing", 5, generation_cap: :unbounded)
 
       st.evict!
 
       expect(Dir.glob(File.join(cache_root, "custom.thing", "**", "*.entry")).size).to eq(5)
+    end
+
+    it "leaves a producer this Store never saw declared alone (errs toward under-evicting)" do
+      described_class.new(root: cache_root, max_bytes: nil)
+                     .then do |st|
+        write_generations(st, "whole.project", 4,
+                          generation_cap: 2)
+      end
+
+      # A second Store over the same root: nothing declared `whole.project` to IT, so its compaction pass
+      # has no cap to apply — the entries survive rather than being evicted on a guess.
+      described_class.new(root: cache_root, max_bytes: nil).evict!
+
+      expect(Dir.glob(File.join(cache_root, "whole.project", "**", "*.entry")).size).to eq(4)
+    end
+
+    it "rejects a fetch that declares no generation_cap at all" do
+      expect do
+        store.fetch_or_compute(producer_id: "whole.project", params: {}, descriptor: descriptor) { :v }
+      end.to raise_error(ArgumentError, /missing keyword: :generation_cap/)
+
+      expect do
+        store.fetch_or_validate(producer_id: "whole.project", key_descriptor: descriptor) { [:v, descriptor] }
+      end.to raise_error(ArgumentError, /missing keyword: :generation_cap/)
+    end
+
+    it "rejects a generation_cap that is neither a positive Integer nor :unbounded" do
+      [nil, 0, -1, "2", :whatever].each do |bad|
+        expect do
+          store.fetch_or_compute(
+            producer_id: "whole.project", generation_cap: bad, params: {}, descriptor: descriptor
+          ) { :v }
+        end.to raise_error(ArgumentError, /must declare generation_cap as a positive Integer/)
+      end
+    end
+
+    it "rejects two different caps for one producer id in one Store" do
+      store.fetch_or_compute(producer_id: "whole.project", generation_cap: 2, params: {}, descriptor: descriptor) { :v }
+
+      expect do
+        store.fetch_or_compute(
+          producer_id: "whole.project", generation_cap: 4, params: { other: 1 }, descriptor: descriptor
+        ) { :v }
+      end.to raise_error(ArgumentError, /must declare one cap/)
+    end
+
+    describe "the caps the bundled producers declare (pre-#151 parity)" do
+      it "matches the values the removed GENERATION_CAP_BY_PRODUCER allow-list carried" do
+        rbs_producers = [
+          Rigor::Cache::RbsEnvironment, Rigor::Cache::RbsKnownClassNames, Rigor::Cache::RbsConstantTable,
+          Rigor::Cache::RbsClassTypeParamNames, Rigor::Cache::RbsClassAncestorTable
+        ]
+        expect(rbs_producers.map { |p| [p::PRODUCER_ID, p.generation_cap] }).to contain_exactly(
+          ["rbs.environment", 2], ["rbs.known_class_names", 2], ["rbs.constant_type_table", 2],
+          ["rbs.class_type_param_names", 2], ["rbs.class_ancestor_table", 2]
+        )
+        expect(Rigor::Analysis::RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID).to eq("analysis.run-diagnostics")
+        expect(Rigor::Analysis::RunCacheKey::GENERATION_CAP).to eq(16)
+      end
+
+      it "caps a producer whose declared cap is inherited from RbsCacheProducer" do
+        st = described_class.new(root: cache_root, max_bytes: nil)
+        # A whole-project producer added later: it declares nothing of its own, and inherits the base's cap
+        # rather than silently escaping compaction.
+        cap = Class.new(Rigor::Cache::RbsCacheProducer).generation_cap
+        paths = write_generations(st, "rbs.environment", 4, generation_cap: cap)
+
+        st.evict!
+
+        expect(Dir.glob(File.join(cache_root, "rbs.environment", "**", "*.entry")))
+          .to contain_exactly(paths[2], paths[3])
+      end
     end
   end
 

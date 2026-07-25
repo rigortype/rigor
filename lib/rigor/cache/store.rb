@@ -37,18 +37,10 @@ module Rigor
       # blob whose class layout still happens to unmarshal.
       PAYLOAD_ABI_VERSION = Rigor::VERSION
 
-      # Whole-project producers are content-keyed, so dependency / signature churn writes a new entry and leaves
-      # the old generation unreachable. The global 256 MB cap is intentionally generous and often never fires on
-      # one project, so these producers get a small generation cap as a second compaction axis. Per-file / plugin
-      # producers are deliberately absent from this table: many current entries under one producer id can be live.
-      GENERATION_CAP_BY_PRODUCER = {
-        "analysis.run-diagnostics" => 16,
-        "rbs.class_ancestor_table" => 2,
-        "rbs.class_type_param_names" => 2,
-        "rbs.constant_type_table" => 2,
-        "rbs.environment" => 2,
-        "rbs.known_class_names" => 2
-      }.freeze
+      # The `generation_cap:` value declaring that a producer keeps MANY live entries under one id at once
+      # (per-file and per-plugin producers): a generation count is not a staleness proxy there, so the
+      # compaction pass in {#evict!} leaves the producer alone and only the size-based LRU pass can touch it.
+      UNBOUNDED_GENERATIONS = :unbounded
 
       STALE_TEMP_FILE_AGE_SECONDS = 60 * 60
 
@@ -76,6 +68,14 @@ module Rigor
         @misses = 0
         @writes = 0
         @by_producer = Hash.new { |h, k| h[k] = { hits: 0, misses: 0, writes: 0 } }
+        # `producer_id => generation cap`, populated from the `generation_cap:` every fetch call declares (see
+        # {#declare_generation_cap}). This is the bridge between the id STRINGS the fetch API takes and the
+        # directory names {#evict!} walks: a producer id the Store never saw declared stays uncapped, which
+        # errs toward under-evicting. Per-instance rather than process-global on purpose — a global mutable
+        # registry would be a `Ractor` shareability hazard for pool mode, and the Store instance that wrote a
+        # generation is the one whose `evict!` compacts it (`CLI::CheckCommand` calls
+        # `runner.cache_store&.evict!`).
+        @generation_caps = {}
         # Process-level in-memory layer keyed by `(producer_id, cache_key)`. Avoids the disk read +
         # `Marshal.load` cost (the dominant share of repeated cache-hit calls per stackprof) when many
         # short-lived `Analysis::Runner` instances share one `Store` — the spec process, the LSP daemon's
@@ -161,6 +161,12 @@ module Rigor
       private_class_method :collect_producers
 
       # @param producer_id [String] stable cache namespace; only `[a-z][a-z0-9._-]*` is accepted.
+      # @param generation_cap [Integer, Symbol] how many generations of this producer survive a compaction
+      #   pass — a positive `Integer` for a whole-project producer (one live entry, older ones unreachable),
+      #   or {UNBOUNDED_GENERATIONS} for a producer with many simultaneously-live entries. REQUIRED, and
+      #   sourced from the producer's own declaration (`RbsCacheProducer.generation_cap`,
+      #   `RunCacheKey::GENERATION_CAP`, `Plugin::Base.producer generation_cap:`) rather than invented at the
+      #   call site. See {#evict!}.
       # @param params [Hash] producer inputs; mixed into the cache key via {Descriptor#cache_key_for}.
       # @param descriptor [Rigor::Cache::Descriptor] the invalidation descriptor for the value being cached.
       # @param serialize [#call, nil] optional callable that turns the producer's return value into a binary
@@ -175,9 +181,10 @@ module Rigor
       #   path.
       # @yieldreturn the value to cache.
       # @return the cached value (loaded from disk on hit; produced by the block on miss).
-      def fetch_or_compute(producer_id:, params:, descriptor:,
+      def fetch_or_compute(producer_id:, params:, descriptor:, generation_cap:,
                            serialize: nil, deserialize: nil, &block)
         validate_producer_id!(producer_id)
+        declare_generation_cap(producer_id, generation_cap)
         disk = ensure_schema_version!
 
         key = descriptor.cache_key_for(producer_id: producer_id, params: params)
@@ -217,8 +224,12 @@ module Rigor
       #
       # The block MUST return `[value, dependency_descriptor]`. Disk reads are not in-process-memoised —
       # validation always re-checks the filesystem — but a single run only looks up once.
-      def fetch_or_validate(producer_id:, key_descriptor:, params: {}, serialize: nil, deserialize: nil)
+      #
+      # `generation_cap:` carries the same producer-declared compaction budget as {#fetch_or_compute}.
+      def fetch_or_validate(producer_id:, key_descriptor:, generation_cap:, params: {},
+                            serialize: nil, deserialize: nil)
         validate_producer_id!(producer_id)
+        declare_generation_cap(producer_id, generation_cap)
         disk = ensure_schema_version!
 
         key = key_descriptor.cache_key_for(producer_id: producer_id, params: params)
@@ -243,6 +254,9 @@ module Rigor
       # to serve a run's diagnostics WITHOUT loading the inference engine — it never runs a producer block, so
       # there is nothing to write. Records a hit (for `--cache-stats` parity) but never a miss (a probe miss
       # hands off to the full path, which records its own).
+      #
+      # Takes no `generation_cap:`: a pure read creates no generation, so a run that only ever peeks has
+      # nothing to compact. The write path for the same producer declares the cap.
       def peek_validated(producer_id:, key_descriptor:, params: {}, deserialize: nil)
         validate_producer_id!(producer_id)
         return nil unless ensure_schema_version!
@@ -256,8 +270,15 @@ module Rigor
         validated[0]
       end
 
-      # ADR-6 § "Eviction" — compaction pass over the on-disk cache. No-op when the store is read-only. Stale
-      # temp file cleanup and the whole-project generation cap run regardless of `max_bytes:` — they reclaim
+      # ADR-6 § "Eviction" — compaction pass over the on-disk cache. No-op when the store is read-only.
+      #
+      # The generation cap of pass 2 comes from what the producers themselves declared through this Store's
+      # fetch calls (`generation_cap:`), NOT from a maintained table of producer ids: a producer id this
+      # Store never saw is left alone. That is deliberately the safe direction — a producer that was not
+      # consulted this run also wrote no new generation, so the only entries this can skip are ones that were
+      # already sitting there.
+      #
+      # Stale temp file cleanup and the generation cap run regardless of `max_bytes:` — they reclaim
       # provably-dead bytes (leaked temp files, unreachable content-keyed generations) rather than enforcing a
       # size budget, so an explicitly unbounded store (`max_bytes: nil`) still benefits from them. The
       # size-based LRU pass below stays gated on `max_bytes:` being configured: it walks all remaining
@@ -318,6 +339,37 @@ module Rigor
 
         raise ArgumentError,
               "producer_id must match #{VALID_PRODUCER_ID.inspect}, got #{producer_id.inspect}"
+      end
+
+      # Records the producer's declared compaction budget for {#evict!}. Every fetch call carries it, so a
+      # producer cannot reach disk without stating one — the failure mode the previous hardcoded id table
+      # had (a new whole-project producer silently uncapped) is not expressible.
+      #
+      # Two DIFFERENT caps for one producer id in one process is a producer bug, not a policy: whichever the
+      # compaction pass picked would be arbitrary. It raises, consistent with the serializer-contract
+      # violations {#try_write_entry} deliberately lets through.
+      def declare_generation_cap(producer_id, generation_cap)
+        validate_generation_cap!(producer_id, generation_cap)
+        @monitor.synchronize do
+          previous = @generation_caps[producer_id]
+          if !previous.nil? && previous != generation_cap
+            raise ArgumentError,
+                  "producer #{producer_id.inspect} declared generation_cap #{generation_cap.inspect} after " \
+                  "#{previous.inspect}; one producer id must declare one cap"
+          end
+
+          @generation_caps[producer_id] = generation_cap
+        end
+      end
+
+      def validate_generation_cap!(producer_id, generation_cap)
+        return if generation_cap == UNBOUNDED_GENERATIONS
+        return if generation_cap.is_a?(Integer) && generation_cap.positive?
+
+        raise ArgumentError,
+              "producer #{producer_id.inspect} must declare generation_cap as a positive Integer (a " \
+              "whole-project producer: how many generations survive compaction) or " \
+              "#{UNBOUNDED_GENERATIONS.inspect} (many entries live at once), got #{generation_cap.inspect}"
       end
 
       def entry_path(producer_id, key)
@@ -550,9 +602,11 @@ module Rigor
       end
 
       def evict_excess_generations(entries)
+        caps = @monitor.synchronize { @generation_caps.dup }
         removed = {}
         entries.group_by { |entry| entry[:producer] }.each do |producer, producer_entries|
-          cap = GENERATION_CAP_BY_PRODUCER[producer]
+          cap = caps[producer]
+          cap = nil if cap == UNBOUNDED_GENERATIONS
           next if cap.nil? || producer_entries.size <= cap
 
           producer_entries.sort_by { |entry| [entry[:mtime], entry[:path]] }

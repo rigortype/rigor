@@ -36,6 +36,16 @@ module Rigor
 
       RUN_DIAGNOSTICS_PRODUCER_ID = "analysis.run-diagnostics"
 
+      # The run-result producer's declared compaction budget (`Cache::Store#evict!` pass 2). Whole-project,
+      # but unlike the `rbs.*` producers several generations can be live at once: the `paths` key slot means
+      # one entry per analyzed-path SET, so `rigor check` over the whole project, over `lib`, and over a
+      # single file are three separate live generations. 16 is a judgement call sized for that churn; it is
+      # a cap on GENERATIONS, not on correctness — over-evicting here costs a recompute, never a wrong
+      # answer. Measured 2026-07-25 against a real project's `.rigor/cache`: the cap does bind (60 distinct
+      # path-set generations observed, differing in the `paths` slot alone), with no evidence yet on how
+      # often an evicted generation is asked for again — see issue #151.
+      GENERATION_CAP = 16
+
       # @param rbs_config_entries [Array<Cache::Descriptor::ConfigEntry>] the RBS-derived config slots
       #   (`rbs.libraries` [+ `rbs.virtual_rbs`]). nil on any failure so a malformed key disables the cache.
       def descriptor(configuration:, files:, explain:, rbs_config_entries:)

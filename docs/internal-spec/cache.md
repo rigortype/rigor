@@ -201,7 +201,7 @@ and a writable store whose cache root cannot be read/repaired
 (permission error, disk full, deleted root, read-only mount) — neither
 of which may ever break an analysis run.
 
-### `store.fetch_or_compute(producer_id:, params:, descriptor:, serialize: nil, deserialize: nil) { ... } -> Object`
+### `store.fetch_or_compute(producer_id:, params:, descriptor:, generation_cap:, serialize: nil, deserialize: nil) { ... } -> Object`
 
 The compute-keyed producer entry point; `fetch_or_validate` below is
 the record-and-validate variant, and `peek_validated` its read-only
@@ -216,6 +216,10 @@ probe half.
   derive cache keys themselves.
 - `descriptor` ([`Rigor::Cache::Descriptor`](#rigorcachedescriptor-v008-slice-1))
   — the invalidation descriptor for the cached value.
+- `generation_cap` (Integer or `:unbounded`, **required**) — the
+  producer's own compaction budget, per § "Compaction (`#evict!`)"
+  below. Not optional: a producer that reaches disk has stated how
+  many of its generations may accumulate.
 - `serialize` (callable, optional) — turns the producer's return
   value into a binary `String`. Defaults to `Marshal.dump(value).b`.
   Producers whose return values are not `Marshal`-clean (RBS-
@@ -235,7 +239,7 @@ probe half.
 Returns the cached value (loaded from disk on hit; produced by
 the block on miss).
 
-### `store.fetch_or_validate(producer_id:, key_descriptor:, params: {}, serialize: nil, deserialize: nil) { ... } -> Object`
+### `store.fetch_or_validate(producer_id:, key_descriptor:, generation_cap:, params: {}, serialize: nil, deserialize: nil) { ... } -> Object`
 
 The record-and-validate variant ([ADR-45](../adr/45-unchanged-project-fast-path.md)).
 Unlike `fetch_or_compute` — which keys the entry on the descriptor of
@@ -420,23 +424,37 @@ passes, in order:
    never leaves one behind (see "Atomicity and locking" above); this
    is a backstop for a process that died between the temp-file
    write and the rename.
-2. **Whole-project generation cap.** Some producers are
+2. **Producer-declared generation cap.** Some producers are
    content-keyed (the cache key is a function of the value's
    dependencies, not a stable per-project key), so re-running with
    different inputs writes a new entry and leaves the old one
-   unreachable — but still on disk. A small hardcoded allow-list of
-   whole-project producer ids
-   (`rbs.environment`, `rbs.class_ancestor_table`,
-   `rbs.class_type_param_names`, `rbs.constant_type_table`,
-   `rbs.known_class_names`, `analysis.run-diagnostics`) caps how many
-   generations of each survive a compaction pass; beyond the cap the
-   oldest-by-mtime generations are unlinked first. Per-file and
-   per-plugin producers are deliberately absent from this table —
-   many current entries under one such producer id can be live at
-   once, so a generation count is not a meaningful proxy for
-   staleness there. The cap is presently a maintained constant, not
-   producer-declared metadata; a new whole-project producer must be
-   added to the list by hand to benefit.
+   unreachable — but still on disk. Every fetch call
+   (`#fetch_or_compute`, `#fetch_or_validate`) MUST carry a
+   `generation_cap:`, which is either a positive `Integer` (how many
+   generations of that producer survive a compaction pass) or
+   `Cache::Store::UNBOUNDED_GENERATIONS` (`:unbounded` — the producer
+   keeps many entries live at once, so a generation count is not a
+   staleness proxy and only pass 3 bounds it). Beyond the cap the
+   oldest-by-mtime generations are unlinked first. The keyword is
+   REQUIRED: omitting it is an `ArgumentError`, so a whole-project
+   producer added later cannot be silently uncapped — the failure the
+   pre-#151 hardcoded allow-list of producer ids invited.
+
+   The value is the producer's own declaration, not a call-site
+   judgement: `RbsCacheProducer.generation_cap` (2, inherited by every
+   `rbs.*` subclass), `Analysis::RunCacheKey::GENERATION_CAP` (16 for
+   `analysis.run-diagnostics`, one live generation per analyzed-path
+   SET), and `Plugin::Base.producer generation_cap:` (defaulting to
+   `:unbounded`) for plugin-side producers. The per-file
+   `plugin.source_rbs_synthesizer` producer declares `:unbounded`.
+
+   The Store records each declaration against the producer id as the
+   fetch calls arrive, and the compaction pass reads that record. A
+   producer id this Store instance never saw declared is therefore left
+   alone rather than compacted on a guess. That is the safe direction:
+   a producer not consulted during the run also wrote no new
+   generation, so the pass can only skip entries that were already
+   there, never evict a live one.
 3. **Size-based LRU pass.** Unchanged from prior releases: walks
    every remaining `.entry` file, sorts by mtime ascending, and
    unlinks from the oldest until the total is at or below
@@ -542,7 +560,7 @@ backstop for the whole mechanism.
 
 Every bundled RBS-derived producer documented below (`RbsConstantTable`, `RbsKnownClassNames`, `RbsClassAncestorTable`, `RbsClassTypeParamNames`, `RbsEnvironment`) satisfies one shape — a class object responding to `fetch(loader:, store:)` and returning the cached or freshly computed value. This is codified as the structural interface `_CacheProducer` in [`sig/rigor/cache.rbs`](../../sig/rigor/cache.rbs): a structural interface (the RBS/Go sense), not an ADR-28 protocol contract, and distinct from the plugin-side producer surface in [`plugin-cache-producers.md`](plugin-cache-producers.md).
 
-The `fetch` body is identical across producers: read the shared RBS descriptor (`loader.rbs_cache_descriptor`, the per-loader memo around `RbsDescriptor.build`), then call `store.fetch_or_compute(producer_id:, params: {}, descriptor:)` yielding to the producer's `compute(loader)`. Only the `PRODUCER_ID` constant and the `compute` body differ. That shared wiring lives on the `Rigor::Cache::RbsCacheProducer` base; a producer MUST subclass it and declare its own `PRODUCER_ID` and a (private) `self.compute(loader)`. The base reads `self::PRODUCER_ID` so the constant resolves on the concrete subclass. The per-producer sections below specify each producer's `PRODUCER_ID`, `compute` output type, and the `cache_store` consumer that reads it.
+The `fetch` body is identical across producers: read the shared RBS descriptor (`loader.rbs_cache_descriptor`, the per-loader memo around `RbsDescriptor.build`), then call `store.fetch_or_compute(producer_id:, params: {}, descriptor:, generation_cap:)` yielding to the producer's `compute(loader)`. Only the `PRODUCER_ID` constant and the `compute` body differ. That shared wiring lives on the `Rigor::Cache::RbsCacheProducer` base; a producer MUST subclass it and declare its own `PRODUCER_ID` and a (private) `self.compute(loader)`. The base also declares `self.generation_cap` (2 — see § "Compaction"), which a subclass inherits and may override; no `rbs.*` producer can therefore be added without a compaction budget. The base reads `self::PRODUCER_ID` so the constant resolves on the concrete subclass. The per-producer sections below specify each producer's `PRODUCER_ID`, `compute` output type, and the `cache_store` consumer that reads it.
 
 ## `Rigor::Cache::RbsConstantTable` (v0.0.8 slice 3)
 

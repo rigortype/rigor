@@ -38,7 +38,7 @@ ADR-7 § "Slice 6" pins three implementation choices:
 
 ## Public surface (drift-pinned)
 
-### `Rigor::Plugin::Base.producer(id, watch: nil, serialize: nil, deserialize: nil, &block)`
+### `Rigor::Plugin::Base.producer(id, watch: nil, serialize: nil, deserialize: nil, generation_cap: :unbounded, &block)`
 
 Class-level DSL that registers a producer. The block is the
 producer body; it runs through `instance_exec` so `self`
@@ -62,6 +62,18 @@ config) returning that Array. Each evaluated `(root, pattern)`
 becomes a `Cache::Descriptor::GlobEntry` row in the producer's
 dependency descriptor — one entry digests the whole glob, so a
 content change, an addition, or a removal all invalidate.
+
+`generation_cap:` declares how many generations of this
+producer's entries survive `Cache::Store#evict!`'s compaction
+pass (see [`cache.md`](cache.md) § "Compaction"). The default,
+`Cache::Store::UNBOUNDED_GENERATIONS`, suits the usual plugin
+producer — keyed per file or per discovered unit, with many
+entries live at once — and leaves it to the size-based LRU pass
+alone. A producer whose entries are whole-project and
+content-keyed (each run orphans the previous entry) declares a
+small positive `Integer` instead. Any other value raises
+`ArgumentError` at class-definition time, so a whole-project
+plugin producer cannot end up silently uncapped.
 
 `serialize:` / `deserialize:` apply to the producer's return
 **value** (the cache layer wraps them around the stored

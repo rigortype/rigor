@@ -109,15 +109,23 @@ small repos never trigger it — an audit of a real repository's
 (~1.77 MB each, ~16 MB cache total) that the byte cap had no reason to
 touch. The byte cap alone leaves orphan generations of a content-keyed
 whole-project producer sitting below the cap indefinitely. `Store#evict!`
-now runs a generation cap as a second, orthogonal compaction axis: a small
-hardcoded allow-list of whole-project producer ids keeps only their most
-recent N generations (2 for the RBS producers, 16 for
-`analysis.run-diagnostics`), independent of `max_bytes:` — it runs even
+now runs a generation cap as a second, orthogonal compaction axis: only the
+most recent N generations of a whole-project producer survive a compaction
+pass (2 for the RBS producers, 16 for `analysis.run-diagnostics`),
+independent of `max_bytes:` — it runs even
 when the store is unbounded (`max_bytes: nil`), since it reclaims
 provably-dead bytes rather than enforcing a size budget. See
 `docs/internal-spec/cache.md` § "Compaction (`#evict!`)" for the full
 mechanics, including the co-landed stale temp-file sweep and the
 `Rigor::VERSION`-carrying marker (payload ABI boundary on upgrade).
+
+*Addendum ([#151](https://github.com/rigortype/rigor/issues/151)):* the cap
+started as a hardcoded id→cap table inside `Cache::Store`, which meant a
+whole-project producer added later was uncapped until a maintainer
+remembered the table. Each producer now declares its own budget and every
+fetch call carries it (`generation_cap:`, required), so the omission is not
+expressible; the Store maps the id strings it is handed to the declarations
+it received.
 
 **WD4 (minor) — memoise `RbsDescriptor.build` per loader.** It runs once per
 producer fetch (7×/run, identical result). Measured 1.3 ms × 7 today —

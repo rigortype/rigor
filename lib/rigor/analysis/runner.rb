@@ -454,7 +454,8 @@ module Rigor
 
         computed = false
         diagnostics = @cache_store.fetch_or_validate(
-          producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID, key_descriptor: key_descriptor
+          producer_id: RunCacheKey::RUN_DIAGNOSTICS_PRODUCER_ID, key_descriptor: key_descriptor,
+          generation_cap: RunCacheKey::GENERATION_CAP
         ) do
           computed = true
           diags = assemble_run_diagnostics(expansion, environment: environment)

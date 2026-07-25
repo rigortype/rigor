@@ -242,6 +242,21 @@ module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curate
         end
       end
     RUBY
+    "recovered void value in each value slot (assignment, receiver, argument)" => <<~RUBY,
+      class VoidUses
+        CONST_SLOT = logger.void_call
+
+        def slots
+          local = logger.void_call
+          @ivar = logger.void_call
+          $global = logger.void_call
+          logger.void_call.inspect
+          store(logger.void_call)
+          logger.void_call
+          [1, 2].each { store(logger.void_call) }
+        end
+      end
+    RUBY
     "shadowed rescue chain via a namespaced project subclass (prefix-dependent)" => <<~RUBY
       module M
         class E < StandardError; end
@@ -259,6 +274,7 @@ module RuleWalkEquivalenceCases # rubocop:disable Metrics/ModuleLength -- curate
   # Every {RuleWalk}-hosted collector, in the order it is added to the shared walk. Each keeps its legacy `#collect`
   # walk as the oracle.
   HOSTED_COLLECTOR_CLASSES = [
+    Rigor::Analysis::CheckRules::VoidValueUseCollector,
     Rigor::Analysis::CheckRules::AlwaysTruthyConditionCollector,
     Rigor::Analysis::CheckRules::UnreachableClauseCollector,
     Rigor::Analysis::CheckRules::ShadowedRescueCollector,
@@ -275,7 +291,29 @@ RSpec.describe Rigor::Analysis::CheckRules::RuleWalk do
     return nil if parsed.errors.any?
 
     root = parsed.value
-    [root, Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)]
+    scope_index = Rigor::Inference::ScopeIndexer.index(root, default_scope: Rigor::Scope.empty)
+    seed_void_origins(root, scope_index)
+    [root, scope_index]
+  end
+
+  # {VoidValueUseCollector} reads `Scope#void_origins`, which only the return-typing tier populates during
+  # inference — a parse + `ScopeIndexer` harness can never fill it, so the collector would ride these cases
+  # vacuously. Seed the table the tier would have written for every call spelled `void_call`, which is what
+  # the curated "recovered void value in each value slot" case uses.
+  def seed_void_origins(root, scope_index)
+    origin = Rigor::Inference::VoidOrigin.new(class_name: "Logger", method_name: :log, kind: :instance)
+    each_node(root) do |node|
+      next unless node.is_a?(Prism::CallNode) && node.name == :void_call
+
+      scope_index[node]&.record_void_origin(node, origin)
+    end
+  end
+
+  def each_node(node, &block)
+    return unless node.is_a?(Prism::Node)
+
+    block.call(node)
+    node.compact_child_nodes.each { |child| each_node(child, &block) }
   end
 
   def legacy_results(root, scope_index)

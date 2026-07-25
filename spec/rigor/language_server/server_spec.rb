@@ -13,8 +13,9 @@ RSpec.describe Rigor::LanguageServer::Server do
 
       expect(server.state).to eq(:initialized)
       expect(result[:serverInfo]).to eq(name: "rigor-lsp", version: Rigor::VERSION)
-      # textDocumentSync: FULL (openClose + change: 1).
-      expect(result[:capabilities][:textDocumentSync]).to eq(openClose: true, change: 1)
+      # textDocumentSync: INCREMENTAL (openClose + change: 2), with the position encoding stated explicitly.
+      expect(result[:capabilities][:textDocumentSync]).to eq(openClose: true, change: 2)
+      expect(result[:capabilities][:positionEncoding]).to eq("utf-16")
     end
 
     it "accepts `shutdown` after `initialize` and transitions to :shutdown" do
@@ -93,6 +94,16 @@ RSpec.describe Rigor::LanguageServer::Server do
 
     before { server.dispatch("initialize", {}) }
 
+    def range_change(from_line, from_char, to_line, to_char, text)
+      {
+        range: {
+          start: { line: from_line, character: from_char },
+          end: { line: to_line, character: to_char }
+        },
+        text: text
+      }
+    end
+
     it "didOpen populates the BufferTable" do
       server.dispatch("textDocument/didOpen", {
                         textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x = 1\n" }
@@ -102,7 +113,7 @@ RSpec.describe Rigor::LanguageServer::Server do
       expect(server.buffer_table[uri].version).to eq(1)
     end
 
-    it "didChange replaces bytes under FULL sync" do
+    it "didChange with no range replaces the whole buffer (still legal under incremental sync)" do
       server.dispatch("textDocument/didOpen", {
                         textDocument: { uri: uri, languageId: "ruby", version: 1, text: "old\n" }
                       })
@@ -113,6 +124,56 @@ RSpec.describe Rigor::LanguageServer::Server do
 
       expect(server.buffer_table[uri].bytes).to eq("new\n")
       expect(server.buffer_table[uri].version).to eq(2)
+    end
+
+    it "didChange splices a range edit into the held buffer" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x = 1\ny = 2\n" }
+                      })
+      server.dispatch("textDocument/didChange", {
+                        textDocument: { uri: uri, version: 2 },
+                        contentChanges: [range_change(0, 4, 0, 5, "42")]
+                      })
+
+      expect(server.buffer_table[uri].bytes).to eq("x = 42\ny = 2\n")
+      expect(server.buffer_table[uri].version).to eq(2)
+    end
+
+    it "didChange applies several range edits in order" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x\n" }
+                      })
+      server.dispatch("textDocument/didChange", {
+                        textDocument: { uri: uri, version: 2 },
+                        contentChanges: [range_change(0, 1, 0, 1, "yz"), range_change(0, 3, 0, 3, " = 1")]
+                      })
+
+      expect(server.buffer_table[uri].bytes).to eq("xyz = 1\n")
+    end
+
+    it "didChange counts a non-BMP character as two UTF-16 code units" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: %(a = "🍣"\n) }
+                      })
+      server.dispatch("textDocument/didChange", {
+                        textDocument: { uri: uri, version: 2 },
+                        contentChanges: [range_change(0, 8, 0, 8, ".freeze")]
+                      })
+
+      expect(server.buffer_table[uri].bytes).to eq(%(a = "🍣".freeze\n))
+    end
+
+    it "didChange with an unappliable range keeps the buffer and flags it desynchronised" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x = 1\n" }
+                      })
+      server.dispatch("textDocument/didChange", {
+                        textDocument: { uri: uri, version: 2 },
+                        contentChanges: [{ range: { start: { line: 0 }, end: { line: 0, character: 0 } }, text: "!" }]
+                      })
+
+      expect(server.buffer_table[uri].bytes).to eq("x = 1\n")
+      expect(server.buffer_table.desynchronized?(uri)).to be(true)
     end
 
     it "didClose drops the entry from the BufferTable" do

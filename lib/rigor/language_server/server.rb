@@ -21,8 +21,15 @@ module Rigor
       ERROR_SERVER_NOT_INITIALIZED = -32_002
       ERROR_INVALID_REQUEST_AFTER_SHUTDOWN = -32_600
 
-      # `TextDocumentSyncKind::Full = 1`. Slice 10 (deferred) promotes to `Incremental = 2`.
-      TEXT_DOCUMENT_SYNC_FULL = 1
+      # `TextDocumentSyncKind::Incremental = 2`: `didChange` carries range edits, which `IncrementalSync`
+      # splices into the buffer the table already holds instead of re-sending — and re-parsing — the whole
+      # document on every keystroke. The full-text entry form (a `contentChanges` entry with no `range`) stays
+      # legal under this mode and is still handled.
+      TEXT_DOCUMENT_SYNC_INCREMENTAL = 2
+
+      # LSP `PositionEncodingKind`. UTF-16 is the protocol default and the encoding `IncrementalSync` does its
+      # offset arithmetic in; advertising it explicitly states the contract rather than leaving it implied.
+      POSITION_ENCODING_UTF16 = "utf-16"
 
       # Methods callable BEFORE `initialize`. Per LSP spec § 3 only `initialize` and `exit` are allowed
       # pre-initialization; every other request returns `ServerNotInitialized`. We also accept `shutdown` so a
@@ -151,9 +158,10 @@ module Rigor
 
       def advertised_capabilities
         caps = {
+          positionEncoding: POSITION_ENCODING_UTF16,
           textDocumentSync: {
             openClose: true,
-            change: TEXT_DOCUMENT_SYNC_FULL
+            change: TEXT_DOCUMENT_SYNC_INCREMENTAL
           }
         }
         caps[:hoverProvider] = true if @hover_provider
@@ -213,19 +221,21 @@ module Rigor
         nil
       end
 
-      # textDocument/didChange under FULL sync. Each `contentChanges` entry carries only `{ text: }`; the LAST
-      # entry is the new full document text. Per LSP spec § "FULL sync" the array MUST be exactly one entry in
-      # practice — we still take `.last` defensively for clients that pad. Triggers `publishDiagnostics`
-      # afterwards.
+      # textDocument/didChange under INCREMENTAL sync. Every `contentChanges` entry is applied in order, each
+      # against the result of the previous — an entry with a `range` splices that span, an entry without one is
+      # the full new document text. The application (and its UTF-16 offset arithmetic) lives in
+      # `IncrementalSync`; the table keeps the last known-good text and flags the URI when a change cannot be
+      # applied. Triggers `publishDiagnostics` either way: a desynchronised buffer publishes an EMPTY set,
+      # which clears the markers instead of leaving stale ones on screen.
       def handle_did_change(params)
         doc = params.fetch(:textDocument)
         changes = params.fetch(:contentChanges)
         return nil if changes.empty?
 
         uri = doc.fetch(:uri)
-        @buffer_table.change(
+        @buffer_table.apply_changes(
           uri: uri,
-          bytes: changes.last.fetch(:text),
+          changes: changes,
           version: doc.fetch(:version)
         )
         @publisher&.publish_for(uri)

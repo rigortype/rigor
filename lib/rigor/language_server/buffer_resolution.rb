@@ -13,12 +13,15 @@ module Rigor
     module BufferResolution
       private
 
-      # Resolves `[path, entry]` for the document `uri`, or nil when the uri has no file path or no open
-      # buffer. A caller that destructures `path, entry = buffer_for(uri)` can guard on `entry.nil?` to cover
-      # both misses (a nil return leaves both locals nil).
+      # Resolves `[path, entry]` for the document `uri`, or nil when the uri has no file path, no open buffer,
+      # or a buffer the server could not keep in sync with the editor (see `BufferTable#apply_changes`) — a
+      # position answered from text that has drifted from the editor's is worse than no answer. A caller that
+      # destructures `path, entry = buffer_for(uri)` can guard on `entry.nil?` to cover every miss (a nil
+      # return leaves both locals nil).
       def buffer_for(uri)
         path = Uri.to_path(uri)
         return nil if path.nil?
+        return nil if @buffer_table.desynchronized?(uri)
 
         entry = @buffer_table[uri]
         return nil if entry.nil?

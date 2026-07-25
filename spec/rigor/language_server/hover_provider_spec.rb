@@ -22,6 +22,19 @@ RSpec.describe Rigor::LanguageServer::HoverProvider do
       expect(provider.provide(uri: "file:///nope.rb", line: 0, character: 0)).to be_nil
     end
 
+    it "returns nil when the buffer is desynchronised from the editor" do
+      # An answer computed from text the editor no longer shows would point at the wrong span; the shared
+      # `BufferResolution` guard declines instead.
+      buffer_table.open(uri: uri, bytes: "42\n", version: 1)
+      buffer_table.apply_changes(
+        uri: uri,
+        changes: [{ range: { start: { line: 0 }, end: { line: 0, character: 0 } }, text: "x" }],
+        version: 2
+      )
+
+      expect(provider.provide(uri: uri, line: 0, character: 0)).to be_nil
+    end
+
     it "returns nil when the buffer has parse errors" do
       buffer_table.open(uri: uri, bytes: "def broken\n", version: 1)
       expect(provider.provide(uri: uri, line: 0, character: 0)).to be_nil

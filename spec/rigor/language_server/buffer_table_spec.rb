@@ -25,7 +25,7 @@ RSpec.describe Rigor::LanguageServer::BufferTable do
     end
   end
 
-  describe "#change (FULL sync)" do
+  describe "#change (full-text replacement)" do
     it "replaces the entry's bytes with the full new text" do
       table.open(uri: uri, bytes: "old\n", version: 1)
       table.change(uri: uri, bytes: "newer\n", version: 2)
@@ -39,6 +39,115 @@ RSpec.describe Rigor::LanguageServer::BufferTable do
 
       expect(table.open?(uri)).to be(true)
       expect(table[uri].bytes).to eq("spawned\n")
+    end
+  end
+
+  describe "#apply_changes (INCREMENTAL sync)" do
+    def edit(from_line, from_char, to_line, to_char, text)
+      {
+        range: {
+          start: { line: from_line, character: from_char },
+          end: { line: to_line, character: to_char }
+        },
+        text: text
+      }
+    end
+
+    it "splices a range edit into the held text and bumps the version" do
+      table.open(uri: uri, bytes: "x = 1\n", version: 1)
+      applied = table.apply_changes(uri: uri, changes: [edit(0, 4, 0, 5, "42")], version: 2)
+
+      expect(applied).to be(true)
+      expect(table[uri].bytes).to eq("x = 42\n")
+      expect(table[uri].version).to eq(2)
+      expect(table.desynchronized?(uri)).to be(false)
+    end
+
+    it "applies several changes in order, each against the previous result" do
+      table.open(uri: uri, bytes: "x\n", version: 1)
+      table.apply_changes(uri: uri, changes: [edit(0, 1, 0, 1, "yz"), edit(0, 3, 0, 3, " = 1")], version: 2)
+
+      expect(table[uri].bytes).to eq("xyz = 1\n")
+    end
+
+    it "keeps UTF-16 offsets straight after a non-BMP character" do
+      table.open(uri: uri, bytes: %(a = "🍣"\n), version: 1)
+      table.apply_changes(uri: uri, changes: [edit(0, 8, 0, 8, ".freeze")], version: 2)
+
+      expect(table[uri].bytes).to eq(%(a = "🍣".freeze\n))
+    end
+
+    it "accepts a no-range entry as the full new document text" do
+      table.open(uri: uri, bytes: "old\n", version: 1)
+      table.apply_changes(uri: uri, changes: [{ text: "new\n" }], version: 2)
+
+      expect(table[uri].bytes).to eq("new\n")
+    end
+
+    it "creates the entry from a no-range change even when no didOpen preceded it (defensive)" do
+      table.apply_changes(uri: uri, changes: [{ text: "spawned\n" }], version: 5)
+
+      expect(table[uri].bytes).to eq("spawned\n")
+    end
+  end
+
+  describe "#apply_changes — resync fallback" do
+    let(:bad_change) { { range: { start: { line: 0 }, end: { line: 0, character: 0 } }, text: "x" } }
+
+    it "keeps the last known-good text and marks the URI desynchronised" do
+      table.open(uri: uri, bytes: "x = 1\n", version: 1)
+      applied = table.apply_changes(uri: uri, changes: [bad_change], version: 2)
+
+      expect(applied).to be(false)
+      expect(table[uri].bytes).to eq("x = 1\n")
+      expect(table[uri].version).to eq(1)
+      expect(table.desynchronized?(uri)).to be(true)
+      expect(table.desynchronization_reason(uri)).to include("non-negative Integer")
+    end
+
+    it "marks a range edit for a URI with no held buffer desynchronised rather than inventing one" do
+      applied = table.apply_changes(
+        uri: uri,
+        changes: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, text: "x" }],
+        version: 1
+      )
+
+      expect(applied).to be(false)
+      expect(table.open?(uri)).to be(false)
+      expect(table.desynchronized?(uri)).to be(true)
+    end
+
+    it "leaves the earlier changes of a failing batch unapplied — the batch is all-or-nothing" do
+      table.open(uri: uri, bytes: "x = 1\n", version: 1)
+      good = { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, text: "y" }
+      table.apply_changes(uri: uri, changes: [good, bad_change], version: 2)
+
+      expect(table[uri].bytes).to eq("x = 1\n")
+    end
+
+    it "clears the mark on a full-text change" do
+      table.open(uri: uri, bytes: "x = 1\n", version: 1)
+      table.apply_changes(uri: uri, changes: [bad_change], version: 2)
+      table.apply_changes(uri: uri, changes: [{ text: "resynced\n" }], version: 3)
+
+      expect(table.desynchronized?(uri)).to be(false)
+      expect(table[uri].bytes).to eq("resynced\n")
+    end
+
+    it "clears the mark on a re-open" do
+      table.open(uri: uri, bytes: "x = 1\n", version: 1)
+      table.apply_changes(uri: uri, changes: [bad_change], version: 2)
+      table.open(uri: uri, bytes: "reopened\n", version: 3)
+
+      expect(table.desynchronized?(uri)).to be(false)
+    end
+
+    it "clears the mark on close" do
+      table.open(uri: uri, bytes: "x = 1\n", version: 1)
+      table.apply_changes(uri: uri, changes: [bad_change], version: 2)
+      table.close(uri: uri)
+
+      expect(table.desynchronized?(uri)).to be(false)
     end
   end
 

@@ -80,6 +80,10 @@ module Rigor
         # The buffer may have been closed during the debounce window — drop the publish; the empty
         # notification from didClose already cleared the markers.
         return if entry.nil?
+        # An incremental change the table could not apply: the held text no longer matches the editor's, so
+        # every span we could compute from it would be misplaced. Clear the markers and stay silent until a
+        # full-text change or a re-open re-establishes the buffer.
+        return notify(uri, []) if @buffer_table.desynchronized?(uri)
 
         diagnostics = run_analysis(path: path, bytes: entry.bytes)
         notify(uri, diagnostics)

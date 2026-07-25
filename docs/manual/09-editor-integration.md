@@ -18,6 +18,7 @@ design + capability matrix lives in
 
 | LSP method | Behaviour |
 |---|---|
+| `textDocument/didOpen` / `didChange` / `didClose` | Incremental sync (`TextDocumentSyncKind::Incremental`): a `didChange` carries range edits, which are spliced into the buffer the server already holds instead of re-sending and re-parsing the whole document on every keystroke. Positions are read as UTF-16 code-unit offsets (`positionEncoding: "utf-16"`), so an emoji or other non-BMP character counts as two. The full-text change form stays supported. |
 | `textDocument/publishDiagnostics` | Pushed on every `didChange`, 200ms debounced. Severity / rule / source map directly to Rigor's diagnostic taxonomy. |
 | `textDocument/hover` | Type-aware markdown. Per-node-class dispatch surfaces receiver type + RBS signature for method calls, FQN + singleton type + defined-in path for constants, narrowed type + bound-at for locals, canonical refinement names (`non-empty-string`, …) for `Refined` / `Difference` carriers. |
 | `textDocument/completion` | Method completion after `.` (driven by inferred receiver type), constant-path completion after `::`. Composite receivers (Union → intersection of methods, Tuple / HashShape → ancestor nominal, Refined → underlying nominal) handled. Parse-recovery sentinel makes mid-edit `obj.` / `Foo::` buffers work. |
@@ -234,8 +235,8 @@ Cold start is dominated by RBS environment build; warm starts
 
 LSP v1 + v2 landed in v0.1.6 and ship in the `0.1.x` line. Queued
 follow-ups (`textDocument/signatureHelp`, hash-key completion,
-`textDocument/definition`, incremental `didChange` sync, Ractor
-pool dispatch, codeAction / rename / semanticTokens / inlayHint)
+`textDocument/definition`, Ractor pool dispatch,
+codeAction / rename / semanticTokens / inlayHint)
 are demand-driven; the current queue is the open
 [`area:editor` issues](https://github.com/rigortype/rigor/issues?q=is%3Aissue+is%3Aopen+label%3Aarea%3Aeditor).
 

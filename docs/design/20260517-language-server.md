@@ -240,7 +240,7 @@ later.
 {
   textDocumentSync: {
     openClose: true,
-    change: TextDocumentSyncKind::FULL  # incremental queued
+    change: TextDocumentSyncKind::FULL  # now INCREMENTAL — see below
   },
   diagnosticProvider: {
     interFileDependencies: false,        # single-file scope
@@ -252,13 +252,20 @@ later.
 }
 ```
 
-`change: FULL` ships first because incremental change handling
+`change: FULL` shipped first because incremental change handling
 requires line/column tracking against UTF-16 code units — non-trivial
 correctness work. `FULL` resends the whole buffer on every keystroke;
 network is local stdio so the bandwidth is irrelevant, and the cost
 is in the runner, not in transport.
 
-Incremental change handling is queued for slice 9+.
+**Superseded**: the server now advertises
+`TextDocumentSyncKind::INCREMENTAL`, and `Rigor::LanguageServer::IncrementalSync`
+applies each `contentChanges` range edit to the held buffer in UTF-16
+code-unit space. The full-text entry form (a change with no `range`)
+stays legal and is still handled. A change that cannot be applied
+confidently leaves the buffer untouched and marks the URI
+desynchronised — diagnostics are cleared and providers decline until a
+full-text change or a re-open re-establishes it.
 
 ## Library choice
 
@@ -313,8 +320,9 @@ editor mode v1's seven-slice cut.
    `hover` / `documentSymbol` stay main-Ractor.
 9. **(deferred) `textDocument/definition`** — needs a
    `Reflection`-side symbol index keyed on FILE:LINE.
-10. **(deferred) Incremental `didChange`** — UTF-16 offset
-    bookkeeping + line/column conversion.
+10. **Incremental `didChange`** (landed) — UTF-16 offset
+    bookkeeping + line/column conversion, in
+    `Rigor::LanguageServer::IncrementalSync`.
 
 After slice 8 the v1 LSP is feature-complete for the
 "keystroke-fast linting + hover-type" loop that the editor mode
@@ -331,7 +339,7 @@ v1 already targets but at 10× the responsiveness.
 - `textDocument/inlayHint` (cosmetic, optional).
 - Multi-root workspaces (single-root only in v1).
 - TCP / socket transports.
-- Incremental sync (queued as slice 10).
+- Incremental sync (was queued as slice 10; landed since).
 - Cancellation finer than per-request (queued).
 
 ## Open questions

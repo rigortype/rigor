@@ -1,6 +1,8 @@
 # ADR-17 — Project-side monkey-patch pre-evaluation
 
-Status: **Accepted, 2026-05-16; implemented in v0.1.13.**
+Status: **Accepted, 2026-05-16; slices 1–4 implemented (slice 4, glob expansion, in the same
+week — `30bc2213`). Slices 5 (full-project 2-pass discovery) and 6 (plugin-API hook) remain
+open, tracked as [#129](https://github.com/rigortype/rigor/issues/129).**
 
 The
 `pre_eval:` config axis and the project-wide
@@ -277,9 +279,11 @@ Three arguments together:
    the failure mode (wrong files picked up) is harder to
    diagnose than "this list is wrong".
 
-Pattern-based discovery (slice 4) is the natural follow-up
-once users have lived with the explicit list for long enough
-to notice the maintenance cost.
+Pattern-based discovery (slice 4) **landed 2026-05-16** (`30bc2213`): a `pre_eval:`
+entry containing `*`, `?` or `[` is expanded through `Dir.glob`, so
+`pre_eval: [lib/core_ext/**/*.rb]` replaces an explicit file list. A glob that
+matches nothing degrades silently rather than erroring, keeping a
+forward-looking config valid.
 
 ### WD2 — Why a separate dispatcher tier (not blended with plugins)?
 
@@ -366,7 +370,8 @@ should write RBS for their patches.
 ## Alternatives considered
 
 - **Auto-discovery via syntactic patterns** (option B). Rejected
-  for the MVP per WD1. Tracked as slice 4.
+  for the MVP per WD1, tracked as slice 4 — **shipped 2026-05-16**
+  (`Configuration#expand_pre_eval_entries`).
 - **Full-project 2-pass discovery** (option C). Rejected for the
   MVP per WD4 (cost) and stays open for slice 5.
 - **Plugin-API hook** (option D). Useful but too heavy for the

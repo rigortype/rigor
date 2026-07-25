@@ -30,7 +30,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-14 | [RBS Sig Generation](14-rbs-sig-generation.md) | Accepted |
 | ADR-15 | [Ractor Concurrency](15-ractor-concurrency.md) | Accepted (fork backend active; Ractor pool deferred) |
 | ADR-16 | [Macro Expansion](16-macro-expansion.md) | Accepted |
-| ADR-17 | [Monkey Patch Pre-Evaluation](17-monkey-patch-pre-evaluation.md) | Accepted (implemented in v0.1.13) |
+| ADR-17 | [Monkey Patch Pre-Evaluation](17-monkey-patch-pre-evaluation.md) | Accepted (slices 1-4 implemented; 5-6 open) |
 | ADR-18 | [Substrate Per-Call-Site Return Type](18-substrate-per-call-site-return-type.md) | Accepted (implemented in v0.1.6) |
 | ADR-19 | [Language Server Packaging](19-language-server-packaging.md) | Accepted (LSP v1 implemented in v0.1.6; v2 + follow-ups across v0.1.x) |
 | ADR-20 | [Lightweight HKT](20-lightweight-hkt.md) | Accepted (partial implementation) |

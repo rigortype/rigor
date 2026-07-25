@@ -279,9 +279,7 @@ module Rigor
         return WriteResult.new(source_path: source_path, target_path: target, action: :noop) if decls.nil?
 
         state = MergeState.new(source: source, decls: decls, applied: [], skipped: [])
-        supers = merged_superclasses(candidates)
-        candidates.group_by(&:class_name).each { |class_name, methods| merge_class(state, class_name, methods, supers) }
-        merge_class_shells(state, collect_class_shells(candidates), merged_namespace_kinds(candidates))
+        merge_candidates(state, candidates)
 
         action = state.applied.empty? ? :noop : :updated
         unless action == :updated
@@ -304,31 +302,155 @@ module Rigor
                         action: action, applied: state.applied, skipped: state.skipped)
       end
 
+      # Applies every class group, then every requested shell, then normalises the layout the three steps
+      # leave behind. Each step mutates `state` in place and re-parses, so the next one sees current offsets.
+      def merge_candidates(state, candidates)
+        supers = merged_superclasses(candidates)
+        kinds = merged_namespace_kinds(candidates)
+        shells = collect_class_shells(candidates)
+        groups = candidates.group_by(&:class_name)
+        # Ancestors first, so `Foo` is created (or found) before `Foo::Bar` looks for a parent to nest under.
+        # A plain sort suffices: a name always sorts before every name it is a strict prefix of.
+        groups.keys.sort.each { |name| merge_class(state, name, groups.fetch(name), kinds, supers) }
+        merge_class_shells(state, shells, kinds, supers)
+        collapse_nested_declarations(state, groups.keys + shells.to_a)
+      end
+
       # ADR-14 gap-#3 (e): for every requested class shell that isn't already declared in the target file,
       # insert an empty `class Const\nend` block inside the nearest existing ancestor. Shells already covered by
       # an existing declaration are silently a no-op. The `applied` accumulator does NOT grow — shells are
       # structural declarations, not methods, so the action-count surface (`updated +N`) keeps reflecting method
       # changes only.
-      def merge_class_shells(state, shells, kinds)
+      def merge_class_shells(state, shells, kinds, supers)
         shells.each do |qualified|
           next if find_class_decl(state.decls, qualified)
 
-          insert_class_shell(state, qualified, kinds)
+          insert_namespace_chain(state, qualified, kinds, supers, [])
         end
       end
 
-      def insert_class_shell(state, qualified, kinds)
+      # Splices the missing part of `qualified`'s namespace chain into the nearest declaration the file
+      # already has for one of its ancestors, or at top level when it has none. `methods` land on the leaf
+      # node, so this is the single insertion path for both an empty class shell and a brand-new class.
+      def insert_namespace_chain(state, qualified, kinds, supers, methods)
         segments = qualified.split("::")
         anchor_segs, missing = split_at_existing_ancestor(state.decls, segments)
         anchor_decl = anchor_segs.empty? ? nil : find_class_decl(state.decls, anchor_segs.join("::"))
-        depth = anchor_decl ? anchor_decl_indent_depth(anchor_decl) : 0
-        snippet = build_shell_snippet(missing, anchor_segs, kinds, depth)
+        depth = anchor_decl ? member_indent_depth(anchor_decl) : 0
+        snippet = render_chain_snippet(missing, anchor_segs, kinds, supers, depth, methods)
         state.source = if anchor_decl
                          insert_before_end(state.source, anchor_decl, snippet)
                        else
                          append_top_level(state.source, snippet)
                        end
         state.decls = parse_signature(state.source) || state.decls
+      end
+
+      # ADR-14 gap-#3 follow-up (c), update half: the create path folds a strict-prefix pair into one nested
+      # tree, but a file written before that fix — or by hand — can still carry the flat sibling layout
+      # (`class Foo` next to a top-level `class Foo::Bar`). After merging, relocate each declaration this run
+      # touched underneath its parent's declaration when the same file holds both, so an update converges on
+      # the same canonical layout a fresh generation would produce.
+      #
+      # Scope is deliberately the touched names only: an unrelated flat pair elsewhere in the file is none of
+      # sig-gen's business, and rewriting it would be a layout change the user never asked for. Shallowest
+      # first, so `Foo::Bar` has already moved under `Foo` by the time `Foo::Bar::Baz` looks for its parent.
+      def collapse_nested_declarations(state, names)
+        names.uniq.sort.each { |name| relocate_under_parent(state, name) }
+      end
+
+      def relocate_under_parent(state, qualified)
+        segments = qualified.split("::")
+        return if segments.size < 2
+
+        parent_name = segments[0...-1].join("::")
+        parent = find_class_decl(state.decls, parent_name)
+        decl = parent && find_class_decl(state.decls, qualified)
+        return if decl.nil? || overlapping?(parent, decl)
+
+        region = decl_region(state.source, decl)
+        block = region && relocated_block(state.source, decl, parent, segments.last, region)
+        return if block.nil?
+
+        apply_relocation(state, region, parent_name, block)
+      end
+
+      # Cuts the declaration's region out, re-parses so the parent's byte range reflects the removal, and
+      # splices the re-indented block back in as the parent's last member. Any step that cannot be carried
+      # out cleanly (an unparseable intermediate, a parent that vanished) abandons the move and leaves the
+      # merged source exactly as it was — a flat layout is cosmetic, a mangled `.rbs` is not.
+      def apply_relocation(state, region, parent_name, block)
+        source = splice_out(state.source, region)
+        decls = parse_signature(source)
+        anchor = decls && find_class_decl(decls, parent_name)
+        return if anchor.nil?
+
+        state.source = insert_before_end(source, anchor, block)
+        state.decls = parse_signature(state.source) || state.decls
+      end
+
+      # True when the two declarations' source ranges are not disjoint — either one already nests the other,
+      # or the file's shape is one this pass does not understand. Both are reasons not to move anything.
+      def overlapping?(one, other)
+        one.location.start_pos < other.location.end_pos && other.location.start_pos < one.location.end_pos
+      end
+
+      # The declaration's full source region, extended to cover its leading comment and annotations and to
+      # end just past the newline that closes it. Returns `nil` when either edge shares a line with something
+      # else, because cutting there would move — or strand — text the declaration does not own.
+      def decl_region(source, decl)
+        start_pos = ([decl.location.start_pos] + leading_positions(decl)).min
+        line_start = line_start_index(source, start_pos)
+        return nil unless blank_range?(source, line_start, start_pos)
+
+        finish = decl.location.end_pos
+        line_end = source.index("\n", finish) || source.size
+        return nil unless blank_range?(source, finish, line_end)
+
+        line_start...(line_end < source.size ? line_end + 1 : line_end)
+      end
+
+      def leading_positions(decl)
+        positions = decl.annotations.filter_map { |a| a.location&.start_pos }
+        comment_location = decl.comment&.location
+        positions << comment_location.start_pos if comment_location
+        positions
+      end
+
+      # The moved text, with its compact `Foo::Bar` head shortened to `Bar` and every line pushed in to the
+      # parent's member depth. The name's own sub-location drives the rewrite, so a superclass, type
+      # parameters, and the whole body survive byte-for-byte.
+      def relocated_block(source, decl, parent, short_name, region)
+        name_location = decl.location[:name]
+        return nil if name_location.nil?
+
+        text = source[region].to_s
+        head = name_location.start_pos - region.begin
+        tail = name_location.end_pos - region.begin
+        renamed = text[0...head].to_s + short_name + text[tail..].to_s
+        reindent(renamed, member_indent_depth(parent) - decl_indent_depth(decl))
+      end
+
+      def reindent(text, delta)
+        return text unless delta.positive?
+
+        prefix = INDENT * delta
+        text.lines.map { |line| line.match?(/\A\s*\z/) ? line : prefix + line }.join
+      end
+
+      # Removes `region`, collapsing the newline run left behind at the seam so the cut never shows up as a
+      # widening gap (or a trailing blank line at EOF) in the file it edited. Spacing that was already fine
+      # is left exactly as the user wrote it.
+      def splice_out(source, region)
+        before = source[0...region.begin].to_s
+        after = source[region.end..].to_s
+        return after.sub(/\A\n+/, "") if before.match?(/\A\s*\z/)
+        return before.sub(/\n{2,}\z/, "\n") if after.match?(/\A\s*\z/)
+
+        seam = before[/\n+\z/].to_s.size + after[/\A\n+/].to_s.size
+        return before + after if seam <= 2
+
+        "#{before.sub(/\n+\z/, "\n\n")}#{after.sub(/\A\n+/, '')}"
       end
 
       def split_at_existing_ancestor(decls, segments)
@@ -339,37 +461,61 @@ module Rigor
         [[], segments]
       end
 
-      # Pulls the indent depth (in `INDENT` units) one level deeper than the anchor decl's own column.
-      # Pre-existing members might be missing (an empty `class Foo; end`) so the keyword column is the robust
-      # signal.
-      def anchor_decl_indent_depth(decl)
-        decl_column = decl.location[:keyword].start_column
-        (decl_column / INDENT.size) + 1
+      # The indent depth (in `INDENT` units) a member of `decl` sits at: one level deeper than the
+      # declaration's own keyword column. Pre-existing members might be missing (an empty `class Foo; end`)
+      # so the keyword column is the robust signal.
+      def member_indent_depth(decl)
+        decl_indent_depth(decl) + 1
       end
 
-      def build_shell_snippet(missing, anchor_segs, kinds, depth)
+      def decl_indent_depth(decl)
+        decl.location[:keyword].start_column / INDENT.size
+      end
+
+      # Renders the `missing` segment chain as one nested block, carrying `methods` on its leaf, by handing a
+      # synthesised tree node to the create path's renderer. Both paths therefore agree on the keyword, the
+      # superclass suffix, and the indentation of every level. A leaf with no methods is a class shell, which
+      # is exactly the create path's `shell:` node (gap-#3 (e)).
+      def render_chain_snippet(missing, anchor_segs, kinds, supers, depth, methods)
         return "" if missing.empty?
 
-        head, *rest = missing
-        qualified = (anchor_segs + [head]).join("::")
-        indent = INDENT * depth
-        if rest.empty?
-          keyword = kinds[qualified] || :class
-          "#{indent}#{keyword} #{head}\n#{indent}end\n"
-        else
-          inner = build_shell_snippet(rest, anchor_segs + [head], kinds, depth + 1)
-          keyword = kinds[qualified] || :module
-          "#{indent}#{keyword} #{head}\n#{inner}#{indent}end\n"
+        node = missing.reverse.each_with_index.inject(nil) do |child, (segment, index)|
+          { name: segment, children: child ? { child[:name] => child } : {},
+            methods: index.zero? ? methods : [], shell: index.zero? && methods.empty? }
         end
+        render_tree_node(node, kinds, supers, depth, anchor_segs)
       end
 
+      # Splices `snippet` in just before the declaration's closing `end`. When that `end` starts its own line
+      # the insertion point moves to the START of that line: the snippet carries its own indentation, and
+      # anchoring at the keyword would otherwise donate the `end`'s indent to the snippet's first line and
+      # strand the `end` in column zero.
       def insert_before_end(source, decl, snippet)
+        return source if snippet.empty?
+
         end_pos = decl.location[:end].start_pos
-        source[0...end_pos] + snippet + source[end_pos..]
+        line_start = line_start_index(source, end_pos)
+        return source[0...line_start] + snippet + source[line_start..] if blank_range?(source, line_start, end_pos)
+
+        "#{source[0...end_pos]}\n#{snippet}#{source[end_pos..]}"
       end
 
+      # Appends a top-level block, separated from whatever precedes it by exactly one blank line.
       def append_top_level(source, snippet)
-        ends_with_newline?(source) ? source + snippet : "#{source}\n#{snippet}"
+        return snippet if source.empty?
+
+        base = ends_with_newline?(source) ? source : "#{source}\n"
+        base.end_with?("\n\n") ? base + snippet : "#{base}\n#{snippet}"
+      end
+
+      def line_start_index(source, pos)
+        return 0 unless pos.positive?
+
+        (source.rindex("\n", pos - 1) || -1) + 1
+      end
+
+      def blank_range?(source, from, to)
+        source[from...to].to_s.match?(/\A[ \t]*\z/)
       end
 
       def parse_signature(source)
@@ -379,14 +525,15 @@ module Rigor
         nil
       end
 
-      def merge_class(state, class_name, methods, supers = {})
+      def merge_class(state, class_name, methods, kinds, supers)
         decl = find_class_decl(state.decls, class_name)
-        state.source = if decl.nil?
-                         append_new_class(state.source, class_name, methods, state.applied, supers[class_name])
-                       else
-                         merge_into_existing_class(state.source, decl, methods, state.applied, state.skipped)
-                       end
-        state.decls = parse_signature(state.source) || state.decls
+        if decl.nil?
+          state.applied.concat(methods)
+          insert_namespace_chain(state, class_name, kinds, supers, methods)
+        else
+          state.source = merge_into_existing_class(state.source, decl, methods, state.applied, state.skipped)
+          state.decls = parse_signature(state.source) || state.decls
+        end
       end
 
       # Walks the parsed decl tree recursively, tracking the enclosing module/class prefix, and returns the
@@ -409,16 +556,6 @@ module Rigor
           return nested if nested
         end
         nil
-      end
-
-      # Appends an entirely new `class Foo … end` block at the end of the file (with a leading blank line as
-      # separator).
-      def append_new_class(source, class_name, methods, applied, superclass = nil)
-        body = methods.map { |c| "#{INDENT}#{c.rbs}" }.join("\n")
-        header = superclass ? "class #{class_name} < #{superclass}" : "class #{class_name}"
-        snippet = "\n#{header}\n#{body}\nend\n"
-        applied.concat(methods)
-        ends_with_newline?(source) ? source + snippet : "#{source}\n#{snippet}"
       end
 
       def ends_with_newline?(source)
@@ -477,9 +614,8 @@ module Rigor
       def insert_into_class(source, decl, new_methods)
         return source if new_methods.empty?
 
-        end_pos = decl.location[:end].start_pos
-        addition = new_methods.map { |c| "#{INDENT}#{c.rbs}\n" }.join
-        source[0...end_pos] + addition + source[end_pos..]
+        indent = INDENT * member_indent_depth(decl)
+        insert_before_end(source, decl, new_methods.map { |c| "#{indent}#{c.rbs}\n" }.join)
       end
 
       # Walks the class's existing method declarations; for each replaceable candidate that matches a member

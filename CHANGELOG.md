@@ -20,6 +20,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 ### Changed
 
 - **[plugin API]** `Plugin::Base.producer` accepts a `generation_cap:` declaring how many generations of a producer's cache entries survive a compaction pass; it defaults to the previous behaviour (unbounded, reaped only by the `cache.max_bytes` LRU pass), so a whole-project producer that orphans its previous entry on every run can now keep its own cache slice from growing ([#151](https://github.com/rigortype/rigor/issues/151)).
+- **[playground]** The browser playground now shows inferred types on first load: the "Show types" overlay is on by default in both the hosted and WASM builds, and the toolbar button starts in its "Hide types" state so the toggle still turns it off.
 - **[plugin API]** *(breaking, unpinned surface)* `Cache::Store#fetch_or_compute` and `#fetch_or_validate` now require a `generation_cap:` argument. A plugin that reaches for the store directly rather than through `Plugin::Base.producer` must pass one — `:unbounded` reproduces the previous behaviour exactly. There is deliberately no default: a cache slice that silently grows without bound is the failure this argument exists to make unrepresentable, and no single default is right for both whole-project and per-file producers ([#151](https://github.com/rigortype/rigor/issues/151)).
 
 ### Performance

@@ -24,7 +24,8 @@ ADR references:
   rendering returned diagnostics as wavy underlines and an
   expandable list panel.
 - A "Show types" / "Hide types" toggle that overlays
-  per-expression type annotations via `POST /annotate-lines`.
+  per-expression type annotations via `POST /annotate-lines`,
+  on by default.
 - Dark / light / auto theme switching.
 
 ## Local development

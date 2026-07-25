@@ -300,7 +300,7 @@ module Rigor
         entries.each do |entry|
           break if total <= @max_bytes
 
-          total -= entry[:bytes] if unlink_entry(entry[:path])
+          total -= entry[:bytes] if unlink_entry_and_shard?(entry[:path])
         end
         nil
       rescue StandardError
@@ -593,7 +593,7 @@ module Rigor
           next unless File.file?(path)
           next if File.mtime(path) > cutoff
 
-          unlink_entry(path)
+          unlink_entry_and_shard?(path)
         rescue StandardError
           next
         end
@@ -609,11 +609,9 @@ module Rigor
           cap = nil if cap == UNBOUNDED_GENERATIONS
           next if cap.nil? || producer_entries.size <= cap
 
-          producer_entries.sort_by { |entry| [entry[:mtime], entry[:path]] }
-                          .first(producer_entries.size - cap)
-                          .each do |entry|
-            removed[entry[:path]] = true if unlink_entry(entry[:path])
-          end
+          excess = producer_entries.sort_by { |entry| [entry[:mtime], entry[:path]] }
+                                   .first(producer_entries.size - cap)
+          excess.each { |entry| removed[entry[:path]] = true if unlink_entry_and_shard?(entry[:path]) }
         end
         return entries if removed.empty?
 
@@ -625,6 +623,29 @@ module Rigor
         true
       rescue StandardError
         false
+      end
+
+      # {#unlink_entry} plus a best-effort {#rmdir_if_empty} of the shard directory the unlinked file left
+      # behind. Shared by every eviction/sweep pass so an emptied shard is cleaned up wherever an entry (or
+      # stale temp file) is removed, per the issue #216 fossil fix.
+      def unlink_entry_and_shard?(path)
+        return false unless unlink_entry(path)
+
+        rmdir_if_empty(File.dirname(path))
+        true
+      end
+
+      # Removes `dir` — a shard directory (`entry_path`'s `key[0, 2]` component) — when the unlink that
+      # just preceded this call was the one to empty it. Best-effort and rescued the same way
+      # {#unlink_entry} is: a concurrent writer's `FileUtils.mkdir_p` recreating the shard between the
+      # unlink and this call (`Errno::ENOTEMPTY`) or another pass already having removed it
+      # (`Errno::ENOENT`) are both benign outcomes, never a reason to break the eviction/sweep pass. This
+      # is purely cosmetic (inode reclaim) — it never decides which ENTRIES are evicted, only tidies the
+      # directory left behind once they are gone.
+      def rmdir_if_empty(dir)
+        Dir.rmdir(dir)
+      rescue StandardError
+        nil
       end
 
       # Returns an array of `{ path:, producer:, mtime:, bytes: }` hashes for every `.entry` file under the

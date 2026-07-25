@@ -177,9 +177,26 @@ analysis.
   `check` result and route on its error clusters (no new analysis, still
   side-effect-free); (b) a `rigor skill describe --deep` opt-in that runs
   a scoped check first (default stays pure). Criterion if pursued: never
-  make the *default* `describe` run `check`. **Deferred** — the landed
-  agent-prompt routing may suffice; revisit if the headline itself proves
-  to mislead in practice.
+  make the *default* `describe` run `check`.
+  **Settled as shape (b), landed 2026-07-25** ([#148](https://github.com/rigortype/rigor/issues/148)):
+  `rigor skill describe --deep` runs a real `rigor check` — with the
+  configured cache and workers, so it is slow and *does* write
+  `.rigor/cache` — and lets the result pick the headline. WD2 is
+  untouched: the un-flagged command is still presence-only and
+  side-effect-free, enforced by load boundary rather than by discipline
+  (`CLI::SkillDeepProbe` is the only file that runs an analysis, and
+  `CLI::SkillDescribe` requires it only under the flag, so a default
+  `describe` never loads the engine). The prerequisite named above landed
+  first as `CLI::CheckInvocation` — the shared "run check →
+  `Analysis::Result`" entry point `check`, `doctor`, and `describe
+  --deep` now all go through. Routing reuses the agent-prompt vocabulary
+  verbatim (empty RBS env / `configuration-error` → `rigor-doctor`;
+  `project_definition_site`-proven monkey-patches →
+  `rigor-monkeypatch-resolve`; remaining errors →
+  `rigor-baseline-reduce`), and deliberately declines the weaker
+  `Dynamic`-framework-call signal: a check that cannot run, or a signal
+  that is only a guess, degrades to the presence-only recommendation
+  rather than routing someone into the wrong workflow.
 - **`rbs-setup` priority softening.** The trial found the `rbs-setup`
   headline over-recommended. **Landed 2026-06-20:** a configured Rails
   project with no Rails plugins enabled now recommends `rigor-plugin-tune`

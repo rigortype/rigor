@@ -479,6 +479,7 @@ so a skill can never be shadowed by a verb.
 
 ```sh
 rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]
+rigor skill describe [--deep]
 ```
 
 | Form | Purpose |
@@ -488,6 +489,33 @@ rigor skill [<name>] [--full <name>] [--path <name>] [--list] [--describe]
 | `--full <name>` | Print the `SKILL.md` body **followed by every `references/*.md` inline** — the complete, version-current procedure in one call. This is what a skill's "First: load the version-current copy" directive points at, so a copy vendored into a project (e.g. via `npx skills add`) re-fetches its current steps from the installed gem instead of following a frozen copy. |
 | `--path <name>` | Print the single-line absolute `SKILL.md` path, suitable as input to a file-reading tool. |
 | `--describe` | Probe the project's state (config / baseline / `sig/` / CI — presence only, never runs `rigor check`) and recommend the next skill to run. Also spelled `describe`; surfaced top-level as [`rigor describe`](#rigor-describe) below. |
+| `describe --deep` | The same report, except it **runs `rigor check` first** and routes the headline recommendation on the result. Opt-in, because it costs a full analysis and writes `.rigor/cache` — the un-flagged form stays presence-only and side-effect-free. |
+
+### `describe --deep`
+
+By default the recommendation comes from a presence-only probe, so it can
+tell that a project *has* a config but not whether the analysis is
+healthy. `--deep` runs the check for you and lets the result pick the
+headline, using the same routing the `## For the agent` section already
+teaches:
+
+| Deep check result | Headline becomes |
+| --- | --- |
+| RBS environment built to 0 classes, or a `configuration-error` diagnostic | `rigor-doctor` — the analysis is hollow until the setup is fixed. |
+| Call sites resolving to the project's own definitions (reopened core / gem classes), as at least a third of the errors | `rigor-monkeypatch-resolve` — list them in `pre_eval:` and they clear wholesale. |
+| Any remaining error diagnostics | `rigor-baseline-reduce`. Proven monkey-patch sites below that share are still reported here, so the finding survives even when the headline stays on the larger problem. |
+| Clean, or the project has no config yet | Unchanged — the presence-only recommendation stands. |
+
+If the check **cannot run at all** (no config, an unloadable plugin, a
+malformed config) `--deep` does not fail and does not pretend the project
+is clean: it reports what went wrong, falls back to the presence-only
+recommendation, and points you at `rigor doctor`. It deliberately does
+*not* route on weaker signals — "framework calls typing as `Dynamic`" is
+still a judgement call left to you and your agent.
+
+```sh
+rigor skill describe --deep   # also: rigor describe --deep
+```
 
 The verb spellings `rigor skill list` / `print <name>` / `path <name>`
 were **removed in v0.3.0** — the positional slot is a skill name, so
@@ -510,6 +538,10 @@ It reports a presence-only project-state probe (does a `.rigor.yml`,
 `.rigor-baseline.yml`, `sig/` directory, or CI integration exist?) and a
 recommended next skill. It is read-only and side-effect-free — it never
 runs `rigor check`. Identical output to `rigor skill describe`.
+
+`rigor describe --deep` forwards to
+[`rigor skill describe --deep`](#rigor-skill), which opts into running the
+check first — slow, and it writes the cache.
 
 ## `rigor docs`
 

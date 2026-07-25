@@ -36,6 +36,13 @@ module Rigor
     #                                version-coupled guidance is frozen into
     #                                the SKILL. Also spelled `describe`, and
     #                                surfaced top-level as `rigor describe`.
+    # - `rigor skill describe --deep`
+    #                              — the same report, except it runs `rigor
+    #                                check` first and lets the result pick the
+    #                                headline. Opt-in because that is slow and
+    #                                writes the cache; the un-flagged form keeps
+    #                                WD2's presence-only, side-effect-free
+    #                                contract exactly (issue #148).
     #
     # `describe` is a no-argument action, not a name-slot verb, so it stays first-class alongside `--describe`.
     class SkillCommand < Command
@@ -51,6 +58,10 @@ module Rigor
           rigor skill --path <name>  Print the absolute path of the SKILL.md file for <name>
           rigor skill --list         List bundled skills (name + absolute path)
           rigor skill --describe     Report project state + recommend the next skill to run
+                                     (presence-only probe — never runs `rigor check`)
+          rigor skill describe --deep
+                                     Same, but run `rigor check` first and route the
+                                     recommendation on its result (slow; writes the cache)
 
         Examples:
           rigor skill
@@ -58,6 +69,7 @@ module Rigor
           rigor skill --full rigor-baseline-reduce
           rigor skill --path rigor-baseline-reduce
           rigor skill --describe        (also: rigor describe)
+          rigor skill describe --deep   (also: rigor describe --deep)
       USAGE
 
       # The bundled skills live at `<gem_root>/skills/`. From `lib/rigor/cli/skill_command.rb` that is three directories
@@ -159,10 +171,18 @@ module Rigor
       # probes the current project's state with cheap presence checks (it never runs `rigor check`), recommends the next
       # skill to run, and prints every bundled skill's current frontmatter description, so the `rigor-next-steps` SKILL
       # can route without copying any version-coupled guidance into itself.
+      #
+      # `--deep` is the one opt-in that breaks the "never runs `rigor check`" guarantee — and only for the invocation
+      # that asks for it (issue #148 / ADR-73 § "Field-trial follow-ups"). It runs a real check and lets the result
+      # pick the headline; the un-flagged command is unchanged, down to loading no analysis code at all.
       def run_describe
+        deep = !@argv.delete("--deep").nil?
+        unknown = @argv.first
+        return usage_error("unknown option for `describe`: #{unknown}") unless unknown.nil?
+
         require_relative "skill_describe"
 
-        @out.puts(SkillDescribe.new(skills: discover_skills).render)
+        @out.puts(SkillDescribe.new(skills: discover_skills, deep: deep).render)
         0
       end
 

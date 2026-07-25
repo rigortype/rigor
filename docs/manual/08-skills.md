@@ -106,6 +106,7 @@ source checkout. The `rigor skill` command surfaces them:
 
 ```sh
 rigor skill describe        # probe the project + recommend the next skill (alias: rigor describe)
+rigor skill describe --deep # same, but run `rigor check` first and route on its result
 rigor skill --list          # name + absolute path for each bundled skill
 rigor skill <name>          # print the SKILL.md body (with a references/ header)
 rigor skill --full <name>   # the body + every references/*.md inline (complete procedure)
@@ -113,7 +114,11 @@ rigor skill --path <name>   # one-line absolute SKILL.md path, for a file-readin
 ```
 
 `rigor skill describe` is the recommendation engine driven by
-`rigor-next-steps`; `rigor skill rigor-project-init` is the
+`rigor-next-steps`. It is a presence-only probe by default — cheap and
+side-effect-free; add `--deep` when you want the recommendation to come
+from a real analysis instead
+([CLI reference](02-cli-reference.md#describe---deep)).
+`rigor skill rigor-project-init` is the
 canonical way to hand an agent the onboarding workflow without pointing
 it at the repository. The `list` / `print` / `path` verb spellings are
 deprecated (removed in v0.3.0). See [CLI reference](02-cli-reference.md#rigor-skill).

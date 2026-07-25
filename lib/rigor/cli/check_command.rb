@@ -65,11 +65,12 @@ module Rigor
         special = dispatch_special_check_mode(configuration, options, cache_root)
         return special unless special.nil?
 
-        runner = build_check_runner(
+        invocation = invoke_check(
           configuration: configuration, options: options,
           buffer: buffer, cache_root: cache_root
         )
-        raw_result = runner.run(@argv.empty? ? configuration.paths : @argv)
+        runner = invocation.runner
+        raw_result = invocation.result
         result = apply_baseline_filter(raw_result, configuration, options)
 
         coverage = compute_coverage(runner, configuration, options)
@@ -383,11 +384,16 @@ module Rigor
         @err.puts("rigor: #{silenced_count} diagnostic(s) silenced by baseline #{baseline_path}")
       end
 
-      def build_check_runner(configuration:, options:, buffer:, cache_root:)
-        require_relative "check_runner_factory"
-        CheckRunnerFactory.build(
+      # The primary check run, routed through the shared {CheckInvocation} entry point so `rigor doctor` and
+      # `rigor skill describe --deep` reach a result through this exact path rather than re-deriving it (#148).
+      # Required lazily for the reason the old inline `CheckRunnerFactory.build` was: it pulls the inference engine,
+      # and ADR-87 WD4's cache-hit fast path must reach its verdict without it.
+      def invoke_check(configuration:, options:, buffer:, cache_root:)
+        require_relative "check_invocation"
+        CheckInvocation.run(
           configuration: configuration, options: options,
-          buffer: buffer, cache_root: cache_root
+          buffer: buffer, cache_root: cache_root,
+          paths: @argv.empty? ? nil : @argv
         )
       end
 

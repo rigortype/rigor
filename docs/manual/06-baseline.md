@@ -4,7 +4,11 @@ A **baseline** records the diagnostics a project already has,
 so `rigor check` can stay silent about them and surface only
 what is *new*. It is the pragmatic on-ramp for adopting Rigor
 on an existing codebase: you do not have to reach zero
-diagnostics before the check becomes useful in CI.
+diagnostics before the check becomes useful in CI. It is also
+what the [`rigor-project-init` skill](08-skills.md) snapshots
+for you at onboarding
+([ADR-22](../adr/22-baseline-and-project-onboarding.md) is the
+design).
 
 ## The baseline file
 
@@ -88,6 +92,36 @@ resurfaces as if new. `--match-mode=rule` keys only on
 unless you specifically need per-message discrimination, and
 expect to `regenerate` a `message`-mode baseline after upgrading
 Rigor.
+
+## The ad-hoc form — `rigor diff`
+
+A managed baseline is not the only way to fail CI on *new*
+diagnostics only. The lightweight alternative keeps a plain JSON
+snapshot in the repository and compares against it explicitly:
+
+```sh
+# Once: capture the current diagnostic surface.
+rigor check --format=json > rigor.baseline.json
+git add rigor.baseline.json
+
+# Per PR: compare against the committed snapshot.
+rigor diff rigor.baseline.json
+```
+
+[`rigor diff`](02-cli-reference.md#rigor-diff) prints a `+ NEW`
+row for every diagnostic absent from the snapshot and a
+`- FIXED` row for every one resolved since, and exits `1` when
+anything is new — so a PR that adds a violation fails while the
+recorded legacy ones stay quiet. `--format=json` is available
+for editor and dashboard integrations. Regenerate the snapshot
+with the same `rigor check --format=json` redirection whenever
+you fix a row, and the project tightens monotonically.
+
+The difference from a managed baseline is where the knowledge
+lives: `rigor diff` is a separate step your CI script has to
+run, while a `baseline:` file makes `rigor check` itself exit
+clean on recorded diagnostics. Prefer the managed form unless
+you specifically want the raw JSON snapshot.
 
 ## Working a baseline down
 

@@ -100,27 +100,24 @@ Rigor sees a tightening.
 
 ## The directive grammar
 
-`RBS::Extended` lives at
+There are seven per-method directives, and they divide by
+*when* the fact they carry becomes true: `return:` and `param:`
+retype the signature itself, `predicate-if-true` /
+`predicate-if-false` narrow a variable across the branches of a
+condition, and `assert` / `assert-if-true` / `assert-if-false`
+narrow one after the call returns. Each is one
+`%a{rigor:v1:…}` annotation above the `def` it refines; they
+stack, and order does not matter.
+
+The exhaustive table — every directive, its payload syntax, and
+what the `<type>` slot accepts (RBS class names, refinement
+payloads, the parameterised and bounded forms, and where `~T`
+negation is and is not allowed) — is
+[manual — RBS::Extended annotations](../manual/16-rbs-extended-annotations.md#per-method-directives);
+the normative rules for conflicts, merging and provenance are
 [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md).
-The per-method directives:
-
-| Directive | Says |
-| --- | --- |
-| `%a{rigor:v1:return: <type>}` | Tighten the method's return type. |
-| `%a{rigor:v1:param: <name> is <type>}` | Tighten a parameter's accepted type at the call site, AND narrow the local in the body. |
-| `%a{rigor:v1:assert <name> is <type>}` | After this method returns, the named local in the caller's scope is `<type>`. |
-| `%a{rigor:v1:predicate-if-true <name> is <type>}` | When this method returns truthy, the named local in the caller's scope is `<type>`. (Symmetric `predicate-if-false`.) |
-| `%a{rigor:v1:assert-if-true <name> is <type>}` | When this method returns a truthy value, the named local in the caller's scope is `<type>`. (Symmetric `assert-if-false` for `false` / `nil` returns.) |
-
-The `<type>` slot accepts:
-
-- **RBS class names** — `String`, `Integer`, `::Foo::Bar`.
-- **Imported refinement names** —
-  `non-empty-string`, `lowercase-string`, `numeric-string`,
-  `int<5, 10>`, `non-empty-array[Integer]`, `literal-string`,
-  …
-- **Negation `~T`** — `~lowercase-string` means
-  "non-lowercase-string."
+The rest of this chapter works through the directives one
+example at a time.
 
 ## Refinement names
 
@@ -140,9 +137,8 @@ A short reference:
 ## Declaring conformance — `conforms-to`
 
 The directives above attach to a `def`. One more attaches to a
-`class` / `module` declaration and asserts the whole class
-satisfies a named structural interface, as a checked design
-assertion — whether or not any call site exercises it:
+`class` / `module` declaration and asserts that the whole class
+satisfies a named structural interface:
 
 ```rbs
 %a{rigor:v1:conforms-to _RewindableStream}
@@ -153,13 +149,21 @@ end
 ```
 
 If `MyBuffer` is missing a method the `_RewindableStream`
-interface requires (or the signature is incompatible), Rigor
-reports `rbs_extended.unsatisfied-conformance`; a class that
-satisfies the interface is silent. Multiple `conforms-to`
-directives on one class combine like an intersection of
-interfaces. The directive is purely additive — implicit
-structural compatibility at call sites keeps working with or
-without it.
+interface requires, Rigor reports
+`rbs_extended.unsatisfied-conformance`; a class that satisfies
+the interface is silent.
+
+The reason to reach for this is that Rigor already checks
+structural compatibility *implicitly*, wherever a value flows
+into a position that needs a structural interface — so a class
+nobody currently passes anywhere is never checked at all.
+`conforms-to` turns the contract into a design assertion that
+holds whether or not a call site exercises it, which is what a
+library wants when the structural shape is the point. It is
+purely additive: nothing that type-checked before stops doing
+so because you added it. The stacking and diagnostic semantics
+are in
+[manual — `conforms-to`](../manual/16-rbs-extended-annotations.md#conforms-to--a-checked-structural-contract).
 
 ## Worked example: an assertion gate
 
@@ -180,6 +184,45 @@ end
 
 The runtime side is whatever `assert_non_empty` does (raise
 on empty, log, ...) — Rigor only reads the directive.
+
+## Worked example: asserting a negative
+
+An assertion payload can be negated with `~T`, which is how you
+model the "this is definitely not nil any more" helper every
+codebase grows:
+
+```rbs
+# sig/asserts.rbs
+class Asserts
+  %a{rigor:v1:assert x is ~nil}
+  def self.not_nil: (untyped x) -> void
+end
+```
+
+```ruby
+# lib/configure.rb
+def configure(maybe)
+  Asserts.not_nil(maybe)
+  # maybe: (~nil), so .upcase resolves on the narrowed type
+  maybe.upcase
+end
+```
+
+The target can also be the receiver itself — name it with
+`self`, and the fact lands on the object the method was called
+on:
+
+```rbs
+class Connection
+  %a{rigor:v1:assert self is Connected}
+  def assert_connected!: () -> void
+end
+```
+
+If PHPDoc's `@phpstan-assert` family is your mental model for
+all of this, the reading is nearly one-for-one; the mapping
+table is in
+[appendix: Coming from PHPStan](appendix-phpstan.md#the-phpstan-assert-family).
 
 ## Worked example: a type predicate
 
@@ -343,74 +386,6 @@ dynamic boundaries (deserialisation, `eval`, plugin entry
 points). The static analysis you lose is made up by the
 honesty of admitting "this could be anything."
 
-## Coming from PHPStan? The `@phpstan-assert` family
-
-If you are familiar with PHPStan's PHPDoc annotations,
-Rigor's `RBS::Extended` directives map directly onto the
-post-return / conditional narrowing primitives PHPStan calls
-"asserts" and "type-specifying functions." The behaviour is
-identical:
-
-> "After this method returns, the named argument is `T`."
-
-That is `@phpstan-assert` in PHPStan and
-`%a{rigor:v1:assert}` in Rigor.
-
-| PHPStan PHPDoc | Rigor RBS::Extended | Effect |
-| --- | --- | --- |
-| `@phpstan-assert T $x` | `%a{rigor:v1:assert x is T}` | After this method returns normally, the caller's `x` is `T`. |
-| `@phpstan-assert-if-true T $x` | `%a{rigor:v1:predicate-if-true x is T}` | If this method returns truthy, the caller's `x` is `T`. |
-| `@phpstan-assert-if-false T $x` | `%a{rigor:v1:predicate-if-false x is T}` | If this method returns falsey, the caller's `x` is `T`. |
-| `@phpstan-assert !T $x` | `%a{rigor:v1:assert x is ~T}` | After this method returns, the caller's `x` is **not** `T` (negation form). |
-| `@phpstan-assert-if-true !T $x` | `%a{rigor:v1:predicate-if-true x is ~T}` | Conditional negation. Symmetric with `predicate-if-false`. |
-
-Worked example — the canonical "assertNotNull" pattern from
-PHPStan's docs:
-
-```rbs
-# sig/asserts.rbs
-class Asserts
-  %a{rigor:v1:assert x is ~nil}
-  def self.not_nil: (untyped x) -> void
-end
-```
-
-```ruby
-# lib/configure.rb
-def configure(maybe)
-  Asserts.not_nil(maybe)
-  # maybe: (~nil), so .upcase resolves on the narrowed type
-  maybe.upcase
-end
-```
-
-Self-targeted forms are supported too — the PHPStan
-analogue would be a method on `$this` that narrows
-`$this`. Name the receiver with `self`:
-
-```rbs
-class Connection
-  %a{rigor:v1:assert self is Connected}
-  def assert_connected!: () -> void
-end
-```
-
-Rigor's directive grammar covers what PHPStan ships in the
-`@phpstan-assert*` family. The directives **only fire from
-RBS** (per ADR-5: strict on returns, lenient on parameters);
-in PHPStan-land you can also write `@phpstan-assert` in
-PHPDoc directly above the function — Rigor's equivalent is
-the same RBS file's `def` line.
-
-If you need plugin-side equivalents (when the assertion is
-recognised by **call shape** rather than by sig — PHPStan's
-"Type-Specifying Extensions"), see
-[Chapter 9](09-plugins.md). The plugin contract surfaces
-the same `Fact(target_kind: :self)` and
-`Fact(target_kind: :parameter)` carriers that the directives
-use, so a plugin author writes the equivalent of a PHPStan
-`StaticMethodTypeSpecifyingExtension` from Ruby.
-
 ## When RBS cannot help — the plugin escape hatch
 
 When a method's behaviour depends on the **shape of its
@@ -422,6 +397,6 @@ see [Chapter 9](09-plugins.md) and the
 
 ## What's next
 
-Chapter 8 covers the rule catalogue — what each diagnostic
-means, when it fires, and how to suppress it when it is wrong
-or noisy.
+Chapter 8 is about reading a diagnostic — what each rule
+family claims, why one fires when you did not expect it, and
+which layer to reach for when you want it quieter.

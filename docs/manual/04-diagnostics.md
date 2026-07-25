@@ -97,7 +97,21 @@ re-stamps it for the run. Three profiles, set with the
 | --- | --- |
 | `lenient` | Only proven diagnostics are errors; uncertain ones drop to `warning` / `info`. For incremental adoption on legacy code. |
 | `balanced` *(default)* | Most rules `error`; `dump.type` `info`; uncertain rules `warning`. |
-| `strict` | Nearly every rule is an `error` — the exceptions are `call.self-undefined-method` (stays `off`, opt-in only) and `flow.unreachable-clause` (`warning`, pending its false-positive gate). CI-friendly. |
+| `strict` | Nearly every rule is an `error`. The exceptions: `call.self-undefined-method` and `static.value-use.void` stay `off` (both opt-in only), `flow.unreachable-clause` stays `warning` pending its false-positive gate, and the three `suppression.*` rules stay `warning` — a stale suppression comment is worth telling you about, but it is not a reason to fail a build. CI-friendly. |
+
+Under `balanced`, the rules that do **not** emit as `error`
+are:
+
+| Severity | Rules |
+| --- | --- |
+| `warning` | `call.unresolved-toplevel`, `def.ivar-write-mismatch`, `def.return-type-mismatch`, `def.override-visibility-reduced`, `def.override-return-widened`, `def.override-param-narrowed`, `flow.unreachable-branch`, `flow.always-truthy-condition`, `flow.dead-assignment`, `flow.duplicate-hash-key`, `flow.return-in-ensure`, `flow.shadowed-rescue-clause`, `suppression.unknown-rule`, `suppression.empty`, `suppression.unknown-marker` |
+| `info` | `flow.unreachable-clause`, `dump.type` |
+| `off` | `call.self-undefined-method`, `static.value-use.void` |
+
+Everything else emits as `error`. For one rule under all three
+profiles, `rigor explain <rule>` prints `Authored severity:` and
+`Severity by profile:` — that output is generated from the rule
+catalogue itself, so it is the per-rule source of truth.
 
 For finer control, `severity_overrides:` maps a rule ID or a
 family to one of `error`, `warning`, `info`, or `off`:
@@ -109,7 +123,15 @@ severity_overrides:
   call: warning
 ```
 
-A rule-specific override beats a family override.
+A rule-specific override beats a family override. `off` drops
+the diagnostic from the result entirely, which makes
+`severity_overrides:` the lighter-touch sibling of `disable:`
+below — both silence a rule; the override reads as "this one
+rule, at this severity" alongside the rest of the profile.
+
+YAML reserves the bareword `off` as a boolean. If an override
+that names it seems not to apply, quote it — `"off"` — and the
+same for `on`.
 
 ## Machine-readable output (`--format json`)
 
@@ -198,7 +220,10 @@ config.merge(extra)  # rigor:disable call.undefined-method
 ```
 
 It accepts qualified IDs, family wildcards (`call`), a
-comma- or space-separated list, or `all`.
+comma- or space-separated list, or `all`. The comment must sit
+on the line the diagnostic points at; there is no
+`disable-block` form, so an expression spread over several
+lines needs the comment on each line that fires.
 
 A marker that cannot work is flagged rather than silently
 ignored: a token that names no known rule (a typo like
@@ -217,7 +242,14 @@ suppressible like any other rule.
 
 **In-source, whole file.** `# rigor:disable-file <rules>`
 anywhere in a file suppresses those rules for every line;
-`# rigor:disable-file all` silences the file.
+`# rigor:disable-file all` silences the file. Convention is to
+put it near the top — typically on a generated file, a fixture,
+or a vendored snippet — but every comment in the file is
+scanned, so any placement works.
+
+The three layers **compose**: a file-scope marker does not
+cancel a line-scope one, and a project-wide `disable:` still
+applies to a file that carries neither.
 
 **Project-wide.** The `disable:` config key turns rules off
 across the whole run:

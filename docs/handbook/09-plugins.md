@@ -9,9 +9,10 @@ It does **not** teach plugin *authoring*. That lives in
 [`examples/`](../../examples/README.md) — six tutorial
 walkthroughs, each spotlighting one extension surface.
 Ready-to-install gems for real frameworks live in
-[`plugins/`](../../plugins/README.md). Read on to decide
-whether you need a plugin; go to `examples/` once you want to
-write one, or `plugins/` to install an existing one.
+[`plugins/`](../../plugins/README.md), and activating one is
+[manual — Using plugins](../manual/07-plugins.md). Read on to
+decide whether you need a plugin; go to `examples/` once you
+want to write one.
 
 ## When you reach for a plugin
 
@@ -51,151 +52,60 @@ compares the six worked examples on architectural axes
 engine-collaboration via `Scope#type_of`, cross-plugin facts,
 return-type contributions, …) and recommends a reading order.
 
-## What a plugin can do today
+## Two authoring paths
 
 > Still here? Most readers should jump to
 > [Should you write one?](#should-you-write-one) first — the
 > answer is usually "no, RBS and `RBS::Extended` get you
-> there." The surfaces below are for when it is "yes."
+> there." What follows is for when it is "yes."
 
-The v0.1.0+ plugin contract — pinned at
-[`docs/internal-spec/plugin.md`](../internal-spec/plugin.md)
-and laid out across a handful of slice specs in the same
-directory — gives a plugin five primary surfaces:
+The decision that shapes everything else is *which* of the two
+authoring paths your DSL falls into.
 
-1. **`#diagnostics_for_file(path:, scope:, root:)`** — the
-   per-file emission hook. Walk the parsed AST, return an
-   array of `Rigor::Analysis::Diagnostic` rows. The runner
-   stamps each with `source_family: "plugin.<your-id>"`.
-2. **`dynamic_return(receivers:, methods:, file_methods:)` /
-   `narrowing_facts(methods:)`** — the per-call-site return-type
-   and flow-narrowing contribution surface (ADR-37 Slice 2).
-   A `dynamic_return` block names the inferred return type at a
-   matching call site; the analyzer's dispatcher merges the
-   contribution and uses it as if it were RBS-declared. A
-   `narrowing_facts` block contributes branch-narrowing facts.
-   (`narrowing_facts` was renamed from `type_specifier` in ADR-80;
-   `type_specifier` remains as a deprecating alias removed in 0.3.0,
-   so use `narrowing_facts` in new plugins.)
-   (These replaced the removed `flow_contribution_for` hook —
-   ADR-52 WD3; a plugin that still defines it raises at load.)
-3. **`Plugin::IoBoundary#read_file`** / **`#open_url`** —
-   sandboxed file and (since v0.1.2) HTTPS reads under the
-   active `TrustPolicy`. Use this when the plugin needs to
-   read project files (route tables, schemas, locale files)
-   or fetch a stable URL.
-4. **`Plugin::Base.producer` + `#cache_for`** — plugin-side
-   cache producers. Use these for parses / lookups expensive
-   enough to want cross-run caching. Auto-invalidates on
-   the digest of every file (and content hash of every URL)
-   the IoBoundary read while building the result.
-5. **`Plugin::FactStore` + `#prepare(services)`** — the
-   cross-plugin fact-publication surface (v0.1.1 Track 2,
-   ADR-9). Plugins publish facts in `prepare`; downstream
-   plugins consume them through `services.fact_store` so
-   producer-side parsing (e.g., `config/routes.rb`) can be
-   reused by every consumer (controller-side validators,
-   factory-side validators, …).
+**Declare it.** If the DSL is a class-level call with literal
+symbol arguments — a Rails-style `has_one_attached`, a
+dry-struct `attribute`, a Devise `devise :strategy`, a Sinatra
+`get "/foo" do … end` — the **macro-expansion substrate**
+([ADR-16](../adr/16-macro-expansion.md)) already knows that
+shape. You write a manifest entry describing the call, and the
+substrate does the literal-symbol extraction, the name
+interpolation and the per-method synthesis. The three bundled
+plugins on this path are 60–110 lines of declarative Ruby with
+no AST walking at all. The substrate also understands
+`ActiveSupport::Concern`'s deferred `included do … end` block,
+so a DSL call written inside a concern lands on the class that
+includes it rather than on the concern.
 
-Several worked examples (`rigor-lisp-eval`, `rigor-pattern`,
-`rigor-units`, `rigor-activerecord`) contribute a narrowed
-return type via `dynamic_return` rather than only emitting
-diagnostics, so chained calls on plugin-typed values resolve
-through the analyzer's normal dispatch rather than the
-RBS-level `untyped` envelope. See the per-plugin README for
-which surface each one demonstrates.
+**Walk it.** If the type depends on something the shape of the
+call cannot tell you — argument *values* (`Lisp.eval` above), a
+declaration made elsewhere in the project, or the contents of
+an external file such as a route table or a schema dump — you
+write a walker instead, and the plugin contract gives you the
+hooks for it: a per-file emission pass, per-call-site
+return-type and flow-narrowing contributions, sandboxed file
+and HTTPS reads under a trust policy, cached producers for
+expensive parses, and a cross-plugin fact store so one plugin's
+parse feeds another plugin's checks.
 
-## Macro / DSL expansion substrate (ADR-16)
+The two paths coexist — one plugin can declare substrate
+entries *and* walk files — and where you go next depends on
+which of them you need:
 
-A second authoring path was added on top of the hand-rolled
-walker contract above: the **macro expansion substrate**
-(ADR-16). For metaprogramming-heavy DSLs — Rails-style
-`has_one_attached`, dry-struct's `attribute`, Devise's
-`devise :strategy`, Sinatra's `get '/foo' do ... end` — the
-substrate lets a plugin author **declare** the call shape
-instead of walking the AST by hand. The plugin's body becomes
-a single manifest entry; the substrate handles literal-symbol
-extraction, name interpolation, registry lookup, and per-method
-synthesis.
-
-Four tier shapes are recognised. The
-[per-library survey](../notes/20260515-macro-expansion-library-survey.md)
-identifies which libraries fit each tier and which fall
-outside the substrate's scope.
-
-| Tier | Shape | Manifest declaration | Worked example |
-| --- | --- | --- | --- |
-| **A — block-as-method** | DSL call's block runs as an instance method on the receiver class (`Sinatra::Base#generate_method`) | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, method_names:)]` | [`rigor-sinatra`](../../plugins/rigor-sinatra/) |
-| **B — trait-inlining registry** | Class-level call enumerates symbols → bundled registry maps each to a module → substrate explodes the module's RBS methods onto the calling class | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../plugins/rigor-devise/) |
-| **C — heredoc template** | Class-level call interpolates a literal symbol into a method-name template; substrate emits synthetic readers | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../plugins/rigor-dry-struct/) |
-
-The three Tier-A/B/C plugins above are each ~60–110 LoC of
-**purely declarative** Ruby — no walker, no
-`diagnostics_for_file`, no plugin-side state. The substrate's
-pre-pass + dispatcher integration do the work.
-
-### Concern re-targeting
-
-`ActiveSupport::Concern.included do ... end` is a *deferred
-class_eval*: any DSL calls inside the block fire on whoever
-includes the concern, not on the concern module itself. The
-substrate's scanner handles this re-targeting automatically.
-For source like:
-
-```ruby
-module Auditable
-  extend ActiveSupport::Concern
-  included do
-    attribute :audited_at, Types::Time
-  end
-end
-
-class Address < Dry::Struct
-  include Auditable
-  attribute :city, Types::String
-end
-```
-
-`Address` gets BOTH `city` (direct) AND `audited_at` (re-targeted
-from `Auditable`) as synthetic readers. The same pattern works
-for Tier B traits (Devise modules included via Concerns).
-
-### Floor / ceiling
-
-Per ADR-16 § WD13, the **floor** is that synthetic methods emit
-by NAME so cross-file dispatch resolves (no more
-`call.undefined-method`). The common cases also recover precise
-return types: **Tier B** redispatches on the origin module's
-authored RBS (a Devise `valid_password?` resolves to `bool`,
-not `Dynamic[T]`), and **Tier C** resolves a plain class-name
-return to its `Nominal`. What still degrades to `Dynamic[T]` is
-the parameterised / utility-type-shaped Tier C return
-(`Array[String]`, `Pick<T, K>`); routing those through the
-[ADR-13](../adr/13-typenode-resolver-plugin.md) resolver chain
-is the **ceiling**, demand-driven. The substrate never
-*fabricates* precision per ADR-5 robustness.
-
-### Choosing between the substrate and a hand-rolled walker
-
-| If the DSL is… | Use the substrate | Use a hand-rolled walker |
-| --- | --- | --- |
-| `class-level call with literal symbol args + framework class_eval'd heredoc` | ✓ Tier C | — |
-| `class-level call with literal symbol args + registry-driven module include` | ✓ Tier B | — |
-| `class-level call with do…end block running as an instance method` | ✓ Tier A | — |
-| `external Ruby files instance_eval'd under a declared self` | ✓ Tier D (contract only as of v0.1.x) | — |
-| `domain DSL whose return type depends on argument shape` | — | `dynamic_return` ([`rigor-lisp-eval`](../../examples/rigor-lisp-eval/)) |
-| `cross-file validation (collect declarations, then validate uses)` | — | Two-pass walker ([`rigor-statesman`](../../plugins/rigor-statesman/)) |
-| `parsing an external project file (routes, schema, locale)` | — | `IoBoundary` + cache producer ([`rigor-routes`](../../examples/rigor-routes/)) |
-| `schema-graph recorder (GraphQL-Ruby-style)` | — | Schema-resolution pass (no plugin authored yet) |
-
-The substrate and the hand-rolled walker contract coexist —
-a plugin can mix `manifest`-declared substrate entries with a
-`diagnostics_for_file` walker. The
-[`skills/rigor-plugin-author/SKILL.md`](../../skills/rigor-plugin-author/SKILL.md)
-SKILL captures the decision flow in detail; the survey at
-[`docs/notes/20260515-macro-expansion-library-survey.md`](../notes/20260515-macro-expansion-library-survey.md)
-records which Ruby libraries the substrate covers and which
-fall outside.
+- [`examples/README.md`](../../examples/README.md) — the six
+  walkthroughs, each spotlighting one contract surface, with a
+  map of which example demonstrates which one.
+- [`docs/internal-spec/plugin.md`](../internal-spec/plugin.md)
+  — the binding plugin contract: manifest, hooks, services,
+  registry, load order. Its siblings
+  [`plugin-trust.md`](../internal-spec/plugin-trust.md) and
+  [`plugin-cache-producers.md`](../internal-spec/plugin-cache-producers.md)
+  cover the I/O and caching surfaces.
+- [`docs/internal-spec/macro-substrate.md`](../internal-spec/macro-substrate.md)
+  — the substrate's tiers, the manifest field each one
+  declares, and how much return-type precision each recovers.
+- [The macro-expansion library survey](../notes/20260515-macro-expansion-library-survey.md)
+  — which real Ruby libraries fit which tier, and which fall
+  outside the substrate entirely.
 
 ## Should you write one?
 

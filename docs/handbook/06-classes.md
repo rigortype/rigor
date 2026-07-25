@@ -97,7 +97,7 @@ both. The setter's argument type is whatever the call site
 provides. The `def.ivar-write-mismatch` rule (v0.1.2) checks
 that two writes to the same ivar in the same class body
 agree on the concrete class — see
-[Chapter 8 — Understanding errors](08-understanding-errors.md)
+[manual — Diagnostics](../manual/04-diagnostics.md)
 for the rule's exact contract; it lets you catch an
 accidental rebind from `String` to `Array` in the same class
 without authoring an explicit ivar type.

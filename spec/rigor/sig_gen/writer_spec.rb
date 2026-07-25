@@ -370,6 +370,107 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  # The create path has folded a strict-prefix pair into one nested tree since gap-#3 (c); the update path
+  # used to resolve every candidate independently and so kept (or produced) the flat sibling layout. These
+  # lock the two paths to the same canonical shape — without letting the update path rewrite anything the
+  # run did not touch.
+  describe "canonical nesting on update (gap #3 c, update path)" do
+    let(:nest_kinds) { { "Foo" => :class, "Foo::Bar" => :class } }
+
+    def nest_candidate(class_name, method_name, rbs, kinds: {})
+      Rigor::SigGen::MethodCandidate.new(
+        path: "lib/foo.rb", class_name: class_name, method_name: method_name, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD, rbs: rbs, namespace_kinds: kinds
+      )
+    end
+
+    def output
+      File.read(File.join(tmpdir, "sig/foo.rbs"))
+    end
+
+    it "nests a new child class inside the parent declaration the file already has" do
+      write_target("class Foo\n  def a: () -> Integer\nend\n")
+
+      writer.write("lib/foo.rb", [nest_candidate("Foo::Bar", :b, "def b: () -> String", kinds: nest_kinds)])
+
+      expect(output).to eq("class Foo\n  def a: () -> Integer\n  class Bar\n    def b: () -> String\n  end\nend\n")
+    end
+
+    it "collapses a pre-existing flat sibling pair into one nested tree" do
+      write_target("class Foo\nend\n\nclass Foo::Bar\nend\n")
+      candidates = [nest_candidate("Foo", :a, "def a: () -> Integer", kinds: nest_kinds),
+                    nest_candidate("Foo::Bar", :b, "def b: () -> String", kinds: nest_kinds)]
+
+      writer.write("lib/foo.rb", candidates)
+
+      expect(output).to eq("class Foo\n  def a: () -> Integer\n  class Bar\n    def b: () -> String\n  end\nend\n")
+    end
+
+    it "leaves an already-nested declaration alone rather than re-nesting or duplicating it" do
+      write_target("class Foo\n  class Bar\n  end\nend\n")
+
+      writer.write("lib/foo.rb", [nest_candidate("Foo::Bar", :b, "def b: () -> String", kinds: nest_kinds)])
+
+      expect(output).to eq("class Foo\n  class Bar\n    def b: () -> String\n  end\nend\n")
+      expect(output.scan(/class Bar\b/).size).to eq(1)
+    end
+
+    it "is idempotent: a second identical run leaves the file byte-identical" do
+      write_target("class Foo\nend\n\nclass Foo::Bar\nend\n")
+      candidates = [nest_candidate("Foo", :a, "def a: () -> Integer", kinds: nest_kinds),
+                    nest_candidate("Foo::Bar", :b, "def b: () -> String", kinds: nest_kinds)]
+
+      writer.write("lib/foo.rb", candidates)
+      first = output
+      writer.write("lib/foo.rb", candidates)
+
+      expect(output).to eq(first)
+    end
+
+    it "carries the relocated declaration's own comment and leaves unrelated declarations untouched" do
+      write_target(commented_flat_pair)
+
+      writer.write("lib/foo.rb", [nest_candidate("Foo::Bar", :b, "def b: () -> String", kinds: nest_kinds)])
+
+      expect(output).to include("# Foo is the parent.", "def old: () -> void")
+      expect(output).to match(/class Foo\n  # Bar does the work\.\n  class Bar\n/)
+      expect(output).to include("interface _Unrelated\n  def u: () -> void\nend\n")
+    end
+
+    it "leaves a flat sibling pair this run never touched exactly as the user wrote it" do
+      write_target("class Keep\nend\n\nclass Keep::Inner\nend\n\nclass Foo\nend\n")
+
+      writer.write("lib/foo.rb", [nest_candidate("Foo", :a, "def a: () -> Integer", kinds: nest_kinds)])
+
+      expect(output).to include("class Keep\nend\n\nclass Keep::Inner\nend\n")
+    end
+
+    it "indents a method inserted into a nested declaration at that declaration's depth" do
+      write_target("module Outer\n  class Inner\n  end\nend\n")
+
+      writer.write("lib/foo.rb", [nest_candidate("Outer::Inner", :m, "def m: () -> Integer")])
+
+      expect(output).to eq("module Outer\n  class Inner\n    def m: () -> Integer\n  end\nend\n")
+    end
+
+    def commented_flat_pair
+      <<~RBS
+        # Foo is the parent.
+        class Foo
+        end
+
+        # Bar does the work.
+        class Foo::Bar
+          def old: () -> void
+        end
+
+        interface _Unrelated
+          def u: () -> void
+        end
+      RBS
+    end
+  end
+
   describe "consolidated layout routing via LayoutIndex" do
     def write_consolidated(content)
       consolidated = File.join(tmpdir, "sig/all.rbs")

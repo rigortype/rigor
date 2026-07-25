@@ -455,8 +455,14 @@ serve. Each is a future library-user-facing plugin that consumes
 either the substrate (the rows naming a tier) or the regular ADR-2
 extension API (the "no substrate" rows). Authoring each is gated on
 user authorisation; the substrate enables them without committing to
-any particular one. Rows marked "authored" already exist under
-`examples/` and are candidates for migration onto the substrate.
+any particular one.
+
+The table records each candidate's **design** — which tier it would
+consume, what it depends on, why it is or is not a migration
+candidate. It deliberately does not say which rows have since been
+authored: that inventory drifts, and it is carried by
+[`plugins/README.md`](../../plugins/README.md), which is the single
+place it lives. Several rows below shipped after this ADR was written.
 
 **Interaction with the secondary heuristic** (§ Audience and purpose,
 WD11): when any row below is enabled in `.rigor.yml`'s `plugins:`,
@@ -465,22 +471,22 @@ that library's call sites. The dedicated plugin owns its claimed
 call shapes; the heuristic only fires on libraries where no
 dedicated plugin is configured.
 
-| Plugin | Tier(s) consumed | Survey reference | Status |
+| Plugin | Tier(s) consumed | Survey reference | Design notes |
 | --- | --- | --- | --- |
-| `rigor-sinatra` | A | Sinatra section | Not yet authored. **Substrate slice-1 validation target** (new plugin; no competing walker). |
-| `rigor-devise` | B (model side) + C (per-mapping controller helpers) | Devise section | Not yet authored. **Substrate slice-3 validation target.** Bundled module registry mirrors `lib/devise/modules.rb`. |
-| `rigor-aasm` | B (state / event method tables) | AASM section | Not yet authored. Sibling of `rigor-statesman`. |
-| `rigor-sequel` | B (associations + `plugin :name` registry) | Sequel section | Not yet authored. Column accessors deferred to a separate schema-oracle ADR. |
-| `rigor-activestorage` | — (migration deferred per WD13) | ActiveStorage section | Authored. **Stays on hand-rolled walker until substrate quality matches.** Survey identifies it as canonical Tier C, but migration would be a regression at substrate v1 (per WD13 floor / ceiling). |
-| `rigor-redmine-payloads` (working name) | D (external `instance_eval`'d Ruby files) | Redmine site E | Not yet authored. Substrate slice-5 validation target. tDiary's plugin loader is the sibling case. |
-| `rigor-redmine-settings` (working name) | C (YAML-driven name set + bundled triplet template) | Redmine site C | Not yet authored. Pairs with the project-side monkey-patch pre-evaluation memory note as a follow-up. |
-| `rigor-graphql` | None — does not consume the substrate | GraphQL-Ruby section | Not yet authored. Uses ADR-2 fact-contribution hooks; macro substrate does not apply (schema-graph recorder). Demand-driven. |
-| `rigor-factorybot` | None — does not consume the substrate | factory_bot section | Authored. Uses ADR-2 + ADR-9 (registry + dynamic return type). No substrate migration planned; the shape doesn't fit. |
-| `rigor-dry-types` | C (constant emit via bundled `core.rb` registry; tier C in `const_set` flavour) + ADR-2 dynamic-return-type for `Dry::Types[<literal>]` + carrier-algebra handling for `\|` `&` `>` `.optional` `.constrained` `.constructor` | dry-types section | Not yet authored. **Substrate slice-2 deliverable** (paired with `rigor-dry-struct`). Shared dependency of `rigor-dry-schema` and `rigor-dry-struct`, mirroring the gem dependency graph. Packaging strategy gated on ADR-12. |
-| `rigor-dry-struct` | C (`attribute :name, T` → 5-row emit table: reader / schema key / `to_h` row / `[:key]` access / `.new(name:)` kwarg) + Tier A for nested `attribute :x do … end` blocks | dry-struct section | Not yet authored. **Substrate slice-2 primary validation target** (textbook Tier C, no competing walker). **Consumes** `rigor-dry-types` for the per-attribute `T` carrier. |
-| `rigor-dry-schema` | A (block runs `instance_eval` on `Dry::Schema::DSL`; declare bareword surface — `required` / `optional` / `value` / `filled` / `maybe` / `each` / `array`) + AST recorder building `key → type` map + ADR-2 dynamic-return-type rule on `Processor#call(input) -> Result[T]` | dry-schema section | Not yet authored. **Consumes** `rigor-dry-types` for per-key type resolution. The schema-class itself is not method-extended; the value is in typing the processor's return shape. |
-| `rigor-activerecord` (existing) | — (migration deferred per WD13) | — | Authored. Stays on hand-rolled walker. Tier B migration is future work, not part of ADR-16's slicing. |
-| `rigor-statesman` (existing) | — (migration deferred per WD13) | — | Authored. Same. |
+| `rigor-sinatra` | A | Sinatra section | **Substrate slice-1 validation target** (new plugin; no competing walker). |
+| `rigor-devise` | B (model side) + C (per-mapping controller helpers) | Devise section | **Substrate slice-3 validation target.** Bundled module registry mirrors `lib/devise/modules.rb`. |
+| `rigor-aasm` | B (state / event method tables) | AASM section | Sibling of `rigor-statesman`. |
+| `rigor-sequel` | B (associations + `plugin :name` registry) | Sequel section | Column accessors deferred to a separate schema-oracle ADR. |
+| `rigor-activestorage` | — (migration deferred per WD13) | ActiveStorage section | **Stays on hand-rolled walker until substrate quality matches.** Survey identifies it as canonical Tier C, but migration would be a regression at substrate v1 (per WD13 floor / ceiling). |
+| `rigor-redmine-payloads` (working name) | D (external `instance_eval`'d Ruby files) | Redmine site E | Substrate slice-5 validation target. tDiary's plugin loader is the sibling case. |
+| `rigor-redmine-settings` (working name) | C (YAML-driven name set + bundled triplet template) | Redmine site C | Pairs with project-side monkey-patch pre-evaluation ([ADR-17](17-monkey-patch-pre-evaluation.md) `pre_eval:`) as a follow-up. |
+| `rigor-graphql` | None — does not consume the substrate | GraphQL-Ruby section | Uses ADR-2 fact-contribution hooks; macro substrate does not apply (schema-graph recorder). Demand-driven. |
+| `rigor-factorybot` | None — does not consume the substrate | factory_bot section | Uses ADR-2 + ADR-9 (registry + dynamic return type). No substrate migration planned; the shape doesn't fit. |
+| `rigor-dry-types` | C (constant emit via bundled `core.rb` registry; tier C in `const_set` flavour) + ADR-2 dynamic-return-type for `Dry::Types[<literal>]` + carrier-algebra handling for `\|` `&` `>` `.optional` `.constrained` `.constructor` | dry-types section | **Substrate slice-2 deliverable** (paired with `rigor-dry-struct`). Shared dependency of `rigor-dry-schema` and `rigor-dry-struct`, mirroring the gem dependency graph. Packaged per [ADR-12](12-dry-rb-packaging.md). |
+| `rigor-dry-struct` | C (`attribute :name, T` → 5-row emit table: reader / schema key / `to_h` row / `[:key]` access / `.new(name:)` kwarg) + Tier A for nested `attribute :x do … end` blocks | dry-struct section | **Substrate slice-2 primary validation target** (textbook Tier C, no competing walker). **Consumes** `rigor-dry-types` for the per-attribute `T` carrier. |
+| `rigor-dry-schema` | A (block runs `instance_eval` on `Dry::Schema::DSL`; declare bareword surface — `required` / `optional` / `value` / `filled` / `maybe` / `each` / `array`) + AST recorder building `key → type` map + ADR-2 dynamic-return-type rule on `Processor#call(input) -> Result[T]` | dry-schema section | **Consumes** `rigor-dry-types` for per-key type resolution. The schema-class itself is not method-extended; the value is in typing the processor's return shape. |
+| `rigor-activerecord` (existing) | — (migration deferred per WD13) | — | Stays on hand-rolled walker. Tier B migration is future work, not part of ADR-16's slicing. |
+| `rigor-statesman` (existing) | — (migration deferred per WD13) | — | Same. |
 
 Two facts the table makes explicit:
 
@@ -1222,3 +1228,16 @@ gracefully," not "fabricate precision."
   "accepted — floor + precision promotion landed (slices 1–7 +
   6a/6b), slice 5b + ADR-13 resolver-chain wiring for
   utility-type returns deferred to demand."
+- 2026-07-25 — the § Planned per-library plugins table's fourth
+  column, headed "Status", had rotted: eight of its twelve
+  "Not yet authored" rows had shipped (`rigor-sinatra`,
+  `rigor-devise`, `rigor-graphql`, and the whole dry-rb family),
+  and the ADR-12 packaging decision it called pending was accepted
+  on 2026-05-16. Renamed the column to "Design notes" and dropped
+  the authored / not-authored verdict from every row, keeping the
+  tier, dependency and migration-candidacy payload — the part that
+  does not drift. The live inventory is `plugins/README.md`, which
+  AGENTS.md § Repository Layout already names as its single home;
+  a second copy is what [ADR-97](97-adr-index-budgets.md) criterion
+  2 warns about, and this table is the same failure one document
+  over.

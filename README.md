@@ -108,7 +108,7 @@ Ready-made prompts — 日本語, 简体中文, 繁體中文, 한국어, Españo
 Português, Français, Deutsch, Italiano, Tiếng Việt, ภาษาไทย,
 Bahasa Indonesia, Polski, Українська, Русский, Română, Türkçe,
 العربية, فارسی — are in
-the [installation guide](https://rigor.typedduck.fail/reference/manual/01-installation/#set-up-in-your-language).
+the [installation guide](https://rigor.typedduck.fail/manual/01-installation/#set-up-in-your-language).
 
 **Manual install** — Rigor is a tool, not a library: install it
 independently, **not** in your project's `Gemfile`. Install it
@@ -123,8 +123,8 @@ mise use -g ruby@4.0 gem:rigortype     # or: gem install rigortype
 
 The gem is named `rigortype` (the name `rigor` was taken on RubyGems);
 the executable is `rigor`. `asdf`, dev containers, and CI templates are
-in the [installation guide](https://rigor.typedduck.fail/reference/manual/01-installation/)
-and [CI guide](https://rigor.typedduck.fail/reference/manual/11-ci/).
+in the [installation guide](https://rigor.typedduck.fail/manual/01-installation/)
+and [CI guide](https://rigor.typedduck.fail/manual/11-ci/).
 
 ### Daily commands
 
@@ -145,7 +145,7 @@ TeamCity).
 1. **Types are facts, not wishes.** Hand-written annotations drift the
    moment they are written. Rigor infers from the code itself — every
    type is derived from what your source actually produces. When you do
-   want RBS in `sig/`, [`rigor sig-gen`](https://rigor.typedduck.fail/reference/adr/14-rbs-sig-generation/)
+   want RBS in `sig/`, [`rigor sig-gen`](https://rigor.typedduck.fail/adr/14-rbs-sig-generation/)
    emits it from inference results so the written form starts in sync
    with reality.
 2. **A false positive is the worst bug.** Your program works; a
@@ -161,7 +161,7 @@ TeamCity).
    literal values, integer ranges, refinements like
    `non-empty-string`, and per-position tuple / hash shapes — and
    exposes a plugin API plus a
-   [macro / DSL expansion substrate](https://rigor.typedduck.fail/reference/adr/16-macro-expansion/)
+   [macro / DSL expansion substrate](https://rigor.typedduck.fail/adr/16-macro-expansion/)
    so Rails-shape DSLs become first-class type sources.
 
 ## Works with your stack
@@ -202,10 +202,10 @@ interop, so adopting Rigor is strictly additive. When you want to
 in `sig/` files tighten types while staying a no-op for ordinary RBS
 tools.
 
-The twelve-chapter [handbook](https://rigor.typedduck.fail/reference/handbook/)
+The twelve-chapter [handbook](https://rigor.typedduck.fail/handbook/)
 walks the whole type model; the
-[type specification](https://rigor.typedduck.fail/reference/type-specification/)
-and [user manual](https://rigor.typedduck.fail/reference/manual/) are
+[type specification](https://rigor.typedduck.fail/type-specification/)
+and [user manual](https://rigor.typedduck.fail/manual/) are
 the reference companions.
 
 **Stuck on Rigor — or just curious how it works? Ask your agent in
@@ -241,7 +241,7 @@ Mastodon, Redmine, and GitLab FOSS, and the deliberately conservative
 rule catalogue grows only as fast as the zero-false-positive bar
 allows. Release history: [`CHANGELOG.md`](CHANGELOG.md) ·
 forward-looking commitments:
-[Roadmap](https://rigor.typedduck.fail/reference/roadmap/).
+[Roadmap](https://github.com/rigortype/rigor/milestones).
 
 ## Contributing
 

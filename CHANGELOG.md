@@ -12,6 +12,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Fixed
+
+- **[docs]** Nine `README.md` links to the documentation site carried a stale `/reference/` path segment and 404'd; they now resolve ([#223](https://github.com/rigortype/rigor/pull/223), thank you @f440!).
+
 ## [0.3.1] - 2026-07-29
 
 v0.3.1 follows `rbs` 4.1.0. The upgrade is invisible in normal use, but 4.1's core-signature rewrite would otherwise have silenced two argument checks, and its new in-object hash cache would have made every core class read as undefined on a warm cache — so most of this release is keeping the analysis honest against it. The language server also moves to incremental document sync, plugins gain a `generation_cap:` for bounding their own cache slice, and the browser playground shows inferred types on first load.

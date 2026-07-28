@@ -5,10 +5,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   Anything that would outlive two sessions does not belong here: backlog → a GitHub issue
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
-- Verify a claim before carrying it forward. This cut's own lesson: two of the three issues picked up
-  this session had premises that did not survive contact with the filesystem. Check that the shape an
-  issue describes still exists before implementing against it — `ready-for-agent` labels the
-  readiness of the description, not of the premise.
+- Verify a claim before carrying it forward. This cut's own lesson: a green `make verify` proves the
+  pinned bundle works, not the supported range. Two of this session's three regressions were only
+  visible from outside the pin — the rbs 3.x CI job and `rbs -I sig validate`.
 -->
 
 # Current Work — Session Handoff
@@ -19,17 +18,25 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.3.0 is released** (2026-07-19); `CHANGELOG.md` `[Unreleased]` has since accumulated entries
-  under Changed / Fixed / Performance. No version bump is due — releases wait for an explicit ask.
-- **The 2026-07-25 session landed five PRs**, all merged: #210 (fold the last standalone rule walk),
-  #212 (ADR-92 WD6 gate), #213 (the internal-spec sweep, 31 findings), #214 (sig-gen nested update
-  path), #215 (producer-declared cache generation cap). Issues #151, #153, #163, #211 closed.
-- `make verify` (8,199 examples) / `make docs-check` clean on master.
+- **v0.3.1 is released** (2026-07-29): tag, RubyGems push, and GitHub Release all exist.
+  `[Unreleased]` is empty apart from one external docs fix. No version bump is due — releases wait
+  for an explicit ask.
+- **The 2026-07-29 session followed `rbs` 4.1.0** ([#225](https://github.com/rigortype/rigor/pull/225))
+  and cut the release ([#226](https://github.com/rigortype/rigor/pull/226)). It also landed
+  `sig/rigor/inference/void_origin.rbs` directly on `master` (e3b132a3) and merged
+  [#223](https://github.com/rigortype/rigor/pull/223), an external README link fix from @f440.
+- **The `0.2.x` cycle is archived** to `docs/CHANGELOG-0.2.x.md` — the archival rule fired at
+  `0.3.1`. `CHANGELOG.md` is back to 216 lines from 497.
+- Issue [#144](https://github.com/rigortype/rigor/issues/144) closed (it had outlived its work by a
+  release). Three new issues opened — **#227** / **#228** / **#229** — all from what the rbs bump
+  surfaced.
+- `make verify` (8,286 examples) and `make docs-check` clean at the release commit; the only change
+  on top of it is markdown.
 
 ## Next session
 
-Nothing is release-blocking. The two v0.4.x items that remain are **both `ready-for-human`** — they
-need a decision, not an implementation:
+Nothing is release-blocking. The two v0.4.x decision items are unchanged and still
+`ready-for-human` — they need a call, not an implementation:
 
 - **[#204](https://github.com/rigortype/rigor/issues/204)** (area:engine) — wire ADR-46 cross-file
   caller→callee-param edges so `parameter_inference:` composes with `--incremental` (lifts the WD6c
@@ -40,41 +47,46 @@ need a decision, not an implementation:
 
 Agent-ready work, effort-ordered:
 
-- **[#207](https://github.com/rigortype/rigor/issues/207)** (area:perf) — the scope has changed: the
-  traversal-sharing lever is exhausted (−0.49% was all of it), so what remains is **per-collector
-  allocation attribution** to find where the v0.3.0 +45.7% drift actually lives. It is the #101 rule
-  bodies and #102 Hash/Kernel typing doing real per-node work, not duplicated walks. An
+- **[#227](https://github.com/rigortype/rigor/issues/227)** (area:sig-gen) — `sig-gen` cannot read
+  `Const = Data.define(...)`: it emits the enclosing *module* as a `class`, drops the class name and
+  every member, and keeps only the block body's methods. Wrong output, not merely thin, and it is
+  what forced this session into hand-written RBS against the AGENTS.md policy. Bounded, with a
+  reproduction in the issue.
+- **[#207](https://github.com/rigortype/rigor/issues/207)** (area:perf) — unchanged from the last
+  handoff: the traversal-sharing lever is exhausted (−0.49% was all of it), so what remains is
+  **per-collector allocation attribution** to find where the v0.3.0 +45.7% drift lives. An
   investigation, not a refactor.
-- **[#216](https://github.com/rigortype/rigor/issues/216)** (area:perf) — `evict!` leaves empty shard
-  directories behind forever (57 dirs for 16 live entries in one real cache). One-line fix,
-  inode-only impact.
+- **[#229](https://github.com/rigortype/rigor/issues/229)** (area:plugins) — decide which inline-RBS
+  implementation Rigor speaks. `rigor-rbs-inline` is built on the `rbs-inline` gem, but rbs 4.1's
+  three new inline features (`def self.`, `module-self`, module-level ivar annotations) landed in
+  RBS's *built-in* `InlineParser`. ADR-93 default-wires the plugin, so this is the whole user base's
+  dialect, not an opt-in group's. The outcome belongs in an ADR-32 amendment.
+- **[#228](https://github.com/rigortype/rigor/issues/228)** (area:sig-gen) — evaluate `RBS::Rewriter`
+  (new in rbs 4.1) for the `sig-gen` writer's in-place update path. Explicitly an evaluation; "no,
+  because" is an acceptable answer, and the rbs-floor question is the crux.
 - **#121** — ongoing FP-safe builtin/stdlib folds (demand-gated).
-- The editor cluster (**#144** / **#142** / **#146** / **#147**) is the largest untouched
-  `ready-for-agent` block in the v0.4.x milestone.
+- The editor cluster is now **#142** / **#146** / **#147** (#144 shipped in v0.3.1) — still the
+  largest untouched `ready-for-agent` block in the v0.4.x milestone.
 
 ## What this session learned that is not in a commit
 
-- **An issue's premise is not evidence.** #207 said five rules ran standalone walks; four had been
-  `RuleWalk`-hosted since the day they landed. #163's ADR-92 class recurred once in fourteen
-  documents while a *different* class accounted for most of the findings. Ten minutes of
-  `git log --diff-filter=A` and `rg` answered both. Check first, then implement.
-- **A mechanical rename can invert prose.** ADR-80's `type_specifier` → `narrowing_facts` sweep
-  rewrote the parenthetical that named the *removed* surfaces, so `plugin.md` spent a release telling
-  plugin authors that the three live, drift-pinned APIs had been deleted. Search-and-replace cannot
-  distinguish a name being used from a name being quoted as removed — grep for a rename's old name in
-  prose afterwards, and read each hit.
-
-## Also open, lower priority
-
-- `static.value-use.top`, `static.incomplete-inference.*` (ADR-100 / ADR-41 / #158) stay reserved.
-- The next release (`0.3.1`) is the first to trigger the CHANGELOG archival rule — it moves the
-  `0.2.x` cycle into `docs/CHANGELOG-0.2.x.md` (the `rigor-release-prep` skill has the procedure).
-
-## Waiting on the user / external
-
-- The dependabot rubocop **PR #86** stays deliberately held (upstream autocorrect bug).
-- **Publish the staged `ruby/rbs` upstream fix** — branch `widen-strscan-resolv-stdlib-sigs` in
-  `references/rbs`; push + upstream PR are the user's action. Tracked as #159.
-- The upstream `rbs-inline` RDoc fix ([soutaro/rbs-inline#249](https://github.com/soutaro/rbs-inline/pull/249))
-  is open under the user's fork.
-- **rigor-rs:** `rigor_rs.ruby` reserved in our schema (ADR-99); harness re-pinned, battery clean.
+- **A green `make verify` only proves the pinned bundle.** The gemspec supports `rbs >= 3.0, < 5.0`,
+  and the `Elem` → `E` spec updates that made 4.1 pass broke the 3.x half of the `rbs-compat` CI job
+  — a failure `make verify` cannot see by construction. Reproduce that job locally (a
+  `Gemfile.rbs-compat` pinned to the other end of the range) *before* pushing a change to a
+  version-ranged dependency. The fix pattern is a support helper that reads the installed version
+  (`spec/support/rbs_core_type_params.rb`), never a name hard-coded from one side of the range.
+- **`rbs -I sig validate` is a gate nothing else runs.** `sig/rigor/scope.rbs` had referenced an
+  undeclared `Inference::VoidOrigin` since the `static.value-use.void` diagnostic landed, and
+  `make check` stayed green throughout because Rigor stubs a missing referenced type — our own
+  fail-soft was hiding a hole in our own `sig/`. Worth running after any `sig/` edit.
+- **A dependency that starts memoising an identity-ish value is a cache hazard.** rbs 4.1 cached
+  `TypeName#hash` in an ivar; the value derives from per-process-seeded `Array#hash`, and `Marshal`
+  carries ivars verbatim, so every cached type name came back `eql?` but unequal-hashing and every
+  `class_decls` lookup missed. Nothing raised. A same-process round-trip spec cannot reproduce it —
+  the guard has to poison the ivar to stand in for the writing process
+  (`spec/rigor/cache/rbs_environment_marshal_patch_spec.rb`).
+- **Spot-check a core-signature bump against a real project before cutting.** rbs 4.1 rewrote
+  `Array` / `Hash` / `Integer` / `String`. An A/B on Mastodon (same engine, `--no-baseline`) gave
+  **0 new diagnostics, 1 removed** — the removed one a genuine FP that ruby/rbs#2960 fixed upstream.
+  Ten minutes, and it is what turned "the suite is green" into "this is safe to ship".

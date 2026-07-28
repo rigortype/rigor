@@ -2,7 +2,7 @@
 #
 # --- StringScanner#[] ---
 #
-# The pinned `rbs` gem (4.0.2) declares `StringScanner#[]` as only:
+# `rbs` 4.0.x declares `StringScanner#[]` as only:
 #
 #   def []: (Integer) -> String?
 #
@@ -14,14 +14,15 @@
 #   scanner.skip(/(?<key>\w+)=/)
 #   scanner[:key]   # => the captured String, or nil
 #
-# Newer `ruby/rbs` already widens the signature to
-# `(Integer | String | Symbol) -> String?`; the pinned 4.0.2 gem lags.
 # Without the wider overload, a named-capture access such as Mastodon's
 # `scanner[:key]` false-fires `call.argument-type-mismatch` (the lone
 # overload rejects a `Symbol`).
 #
-# The overlay supplies the runtime-accurate overload; drop it once the
-# pinned `rbs` gem carries the wider signature.
+# `rbs` 4.1.0 widened the upstream signature to exactly this
+# (ruby/rbs#2959), so the overlay is redundant on the pinned gem and only
+# earns its keep for a consumer resolving an older `rbs` inside the
+# gemspec's `>= 3.0, < 5.0` range. It stays until that floor moves;
+# reopening with an identical overload costs nothing on 4.1.
 class StringScanner
   def []: (Integer | String | Symbol) -> String?
         | ...

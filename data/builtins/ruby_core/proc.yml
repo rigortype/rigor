@@ -22,20 +22,20 @@ purity_levels:
 classes:
   Proc:
     parent: Object
-    defined_at: references/ruby/proc.c:4553
+    defined_at: references/ruby/proc.c:4558
     includes: []
     constants: {}
     aliases:
       inspect:
         old: to_s
         source: c
-        defined_at: references/ruby/proc.c:4575
+        defined_at: references/ruby/proc.c:4580
     instance_methods:
       call:
         source: c
         cfunc: proc_call
         arity: -1
-        defined_at: references/ruby/proc.c:4563
+        defined_at: references/ruby/proc.c:4568
         c_body_at: references/ruby/proc.c:1104
         c_effects: []
         purity: leaf
@@ -46,7 +46,7 @@ classes:
         source: c
         cfunc: proc_call
         arity: -1
-        defined_at: references/ruby/proc.c:4564
+        defined_at: references/ruby/proc.c:4569
         c_body_at: references/ruby/proc.c:1104
         c_effects: []
         purity: leaf
@@ -54,7 +54,7 @@ classes:
         source: c
         cfunc: proc_call
         arity: -1
-        defined_at: references/ruby/proc.c:4565
+        defined_at: references/ruby/proc.c:4570
         c_body_at: references/ruby/proc.c:1104
         c_effects: []
         purity: leaf
@@ -62,7 +62,7 @@ classes:
         source: c
         cfunc: proc_call
         arity: -1
-        defined_at: references/ruby/proc.c:4566
+        defined_at: references/ruby/proc.c:4571
         c_body_at: references/ruby/proc.c:1104
         c_effects: []
         purity: leaf
@@ -70,8 +70,8 @@ classes:
         source: c
         cfunc: proc_to_proc
         arity: 0
-        defined_at: references/ruby/proc.c:4569
-        c_body_at: references/ruby/proc.c:1776
+        defined_at: references/ruby/proc.c:4574
+        c_body_at: references/ruby/proc.c:1781
         c_effects: []
         purity: leaf
         rbs:
@@ -81,8 +81,8 @@ classes:
         source: c
         cfunc: proc_arity
         arity: 0
-        defined_at: references/ruby/proc.c:4570
-        c_body_at: references/ruby/proc.c:1212
+        defined_at: references/ruby/proc.c:4575
+        c_body_at: references/ruby/proc.c:1217
         c_effects: []
         purity: leaf
         rbs:
@@ -92,7 +92,7 @@ classes:
         source: c
         cfunc: proc_clone
         arity: 0
-        defined_at: references/ruby/proc.c:4571
+        defined_at: references/ruby/proc.c:4576
         c_body_at: references/ruby/proc.c:127
         c_effects: []
         purity: leaf
@@ -103,7 +103,7 @@ classes:
         source: c
         cfunc: proc_dup
         arity: 0
-        defined_at: references/ruby/proc.c:4572
+        defined_at: references/ruby/proc.c:4577
         c_body_at: references/ruby/proc.c:135
         c_effects: []
         purity: leaf
@@ -111,8 +111,8 @@ classes:
         source: c
         cfunc: proc_hash
         arity: 0
-        defined_at: references/ruby/proc.c:4573
-        c_body_at: references/ruby/proc.c:1710
+        defined_at: references/ruby/proc.c:4578
+        c_body_at: references/ruby/proc.c:1715
         c_effects: []
         purity: leaf
         rbs:
@@ -122,8 +122,8 @@ classes:
         source: c
         cfunc: proc_to_s
         arity: 0
-        defined_at: references/ruby/proc.c:4574
-        c_body_at: references/ruby/proc.c:1760
+        defined_at: references/ruby/proc.c:4579
+        c_body_at: references/ruby/proc.c:1765
         c_effects: []
         purity: leaf
         rbs:
@@ -133,7 +133,7 @@ classes:
         source: c
         cfunc: rb_proc_lambda_p
         arity: 0
-        defined_at: references/ruby/proc.c:4576
+        defined_at: references/ruby/proc.c:4581
         c_body_at: references/ruby/proc.c:245
         c_effects: []
         purity: leaf
@@ -144,8 +144,8 @@ classes:
         source: c
         cfunc: proc_binding
         arity: 0
-        defined_at: references/ruby/proc.c:4577
-        c_body_at: references/ruby/proc.c:3683
+        defined_at: references/ruby/proc.c:4582
+        c_body_at: references/ruby/proc.c:3688
         c_effects:
         - raises
         purity: leaf
@@ -156,8 +156,8 @@ classes:
         source: c
         cfunc: proc_curry
         arity: -1
-        defined_at: references/ruby/proc.c:4578
-        c_body_at: references/ruby/proc.c:3841
+        defined_at: references/ruby/proc.c:4583
+        c_body_at: references/ruby/proc.c:3846
         c_effects: []
         purity: leaf
         rbs:
@@ -167,8 +167,8 @@ classes:
         source: c
         cfunc: proc_compose_to_left
         arity: 1
-        defined_at: references/ruby/proc.c:4579
-        c_body_at: references/ruby/proc.c:3946
+        defined_at: references/ruby/proc.c:4584
+        c_body_at: references/ruby/proc.c:3951
         c_effects: []
         purity: leaf
         rbs:
@@ -178,8 +178,8 @@ classes:
         source: c
         cfunc: proc_compose_to_right
         arity: 1
-        defined_at: references/ruby/proc.c:4580
-        c_body_at: references/ruby/proc.c:4005
+        defined_at: references/ruby/proc.c:4585
+        c_body_at: references/ruby/proc.c:4010
         c_effects: []
         purity: leaf
         rbs:
@@ -189,8 +189,8 @@ classes:
         source: c
         cfunc: proc_eq
         arity: 1
-        defined_at: references/ruby/proc.c:4581
-        c_body_at: references/ruby/proc.c:1449
+        defined_at: references/ruby/proc.c:4586
+        c_body_at: references/ruby/proc.c:1454
         c_effects: []
         purity: leaf
         rbs:
@@ -200,16 +200,16 @@ classes:
         source: c
         cfunc: proc_eq
         arity: 1
-        defined_at: references/ruby/proc.c:4582
-        c_body_at: references/ruby/proc.c:1449
+        defined_at: references/ruby/proc.c:4587
+        c_body_at: references/ruby/proc.c:1454
         c_effects: []
         purity: leaf
       source_location:
         source: c
         cfunc: rb_proc_location
         arity: 0
-        defined_at: references/ruby/proc.c:4583
-        c_body_at: references/ruby/proc.c:1545
+        defined_at: references/ruby/proc.c:4588
+        c_body_at: references/ruby/proc.c:1550
         c_effects: []
         purity: leaf
         rbs:
@@ -219,8 +219,8 @@ classes:
         source: c
         cfunc: rb_proc_parameters
         arity: -1
-        defined_at: references/ruby/proc.c:4584
-        c_body_at: references/ruby/proc.c:1588
+        defined_at: references/ruby/proc.c:4589
+        c_body_at: references/ruby/proc.c:1593
         c_effects: []
         purity: leaf
         rbs:
@@ -230,8 +230,8 @@ classes:
         source: c
         cfunc: proc_ruby2_keywords
         arity: 0
-        defined_at: references/ruby/proc.c:4585
-        c_body_at: references/ruby/proc.c:4110
+        defined_at: references/ruby/proc.c:4590
+        c_body_at: references/ruby/proc.c:4115
         c_effects:
         - mutate
         purity: mutates_self
@@ -243,7 +243,7 @@ classes:
         source: c
         cfunc: rb_proc_s_new
         arity: -1
-        defined_at: references/ruby/proc.c:4555
+        defined_at: references/ruby/proc.c:4560
         c_body_at: references/ruby/proc.c:974
         c_effects: []
         purity: leaf
@@ -253,7 +253,7 @@ classes:
     undefined: []
   LocalJumpError:
     parent: StandardError
-    defined_at: references/ruby/proc.c:4589
+    defined_at: references/ruby/proc.c:4594
     includes: []
     constants: {}
     aliases: {}
@@ -262,23 +262,23 @@ classes:
         source: c
         cfunc: localjump_xvalue
         arity: 0
-        defined_at: references/ruby/proc.c:4590
-        c_body_at: references/ruby/proc.c:3619
+        defined_at: references/ruby/proc.c:4595
+        c_body_at: references/ruby/proc.c:3624
         c_effects: []
         purity: leaf
       reason:
         source: c
         cfunc: localjump_reason
         arity: 0
-        defined_at: references/ruby/proc.c:4591
-        c_body_at: references/ruby/proc.c:3633
+        defined_at: references/ruby/proc.c:4596
+        c_body_at: references/ruby/proc.c:3638
         c_effects: []
         purity: leaf
     singleton_methods: {}
     undefined: []
   SystemStackError:
     parent: Exception
-    defined_at: references/ruby/proc.c:4593
+    defined_at: references/ruby/proc.c:4598
     includes: []
     constants: {}
     aliases: {}
@@ -287,7 +287,7 @@ classes:
     undefined: []
   Method:
     parent: Object
-    defined_at: references/ruby/proc.c:4601
+    defined_at: references/ruby/proc.c:4606
     includes: []
     constants: {}
     aliases: {}
@@ -296,8 +296,8 @@ classes:
         source: c
         cfunc: method_eq
         arity: 1
-        defined_at: references/ruby/proc.c:4604
-        c_body_at: references/ruby/proc.c:1983
+        defined_at: references/ruby/proc.c:4609
+        c_body_at: references/ruby/proc.c:1988
         c_effects: []
         purity: leaf
         rbs:
@@ -307,16 +307,16 @@ classes:
         source: c
         cfunc: method_eq
         arity: 1
-        defined_at: references/ruby/proc.c:4605
-        c_body_at: references/ruby/proc.c:1983
+        defined_at: references/ruby/proc.c:4610
+        c_body_at: references/ruby/proc.c:1988
         c_effects: []
         purity: leaf
       hash:
         source: c
         cfunc: method_hash
         arity: 0
-        defined_at: references/ruby/proc.c:4606
-        c_body_at: references/ruby/proc.c:2038
+        defined_at: references/ruby/proc.c:4611
+        c_body_at: references/ruby/proc.c:2043
         c_effects: []
         purity: leaf
         rbs:
@@ -326,8 +326,8 @@ classes:
         source: c
         cfunc: method_clone
         arity: 0
-        defined_at: references/ruby/proc.c:4607
-        c_body_at: references/ruby/proc.c:2613
+        defined_at: references/ruby/proc.c:4612
+        c_body_at: references/ruby/proc.c:2618
         c_effects: []
         purity: leaf
         rbs:
@@ -337,16 +337,16 @@ classes:
         source: c
         cfunc: method_dup
         arity: 0
-        defined_at: references/ruby/proc.c:4608
-        c_body_at: references/ruby/proc.c:2631
+        defined_at: references/ruby/proc.c:4613
+        c_body_at: references/ruby/proc.c:2636
         c_effects: []
         purity: leaf
       call:
         source: c
         cfunc: rb_method_call_pass_called_kw
         arity: -1
-        defined_at: references/ruby/proc.c:4609
-        c_body_at: references/ruby/proc.c:2672
+        defined_at: references/ruby/proc.c:4614
+        c_body_at: references/ruby/proc.c:2677
         c_effects: []
         purity: leaf
         rbs:
@@ -356,16 +356,16 @@ classes:
         source: c
         cfunc: rb_method_call_pass_called_kw
         arity: -1
-        defined_at: references/ruby/proc.c:4610
-        c_body_at: references/ruby/proc.c:2672
+        defined_at: references/ruby/proc.c:4615
+        c_body_at: references/ruby/proc.c:2677
         c_effects: []
         purity: leaf
       curry:
         source: c
         cfunc: rb_method_curry
         arity: -1
-        defined_at: references/ruby/proc.c:4611
-        c_body_at: references/ruby/proc.c:3892
+        defined_at: references/ruby/proc.c:4616
+        c_body_at: references/ruby/proc.c:3897
         c_effects: []
         purity: leaf
         rbs:
@@ -375,8 +375,8 @@ classes:
         source: c
         cfunc: rb_method_compose_to_left
         arity: 1
-        defined_at: references/ruby/proc.c:4612
-        c_body_at: references/ruby/proc.c:4047
+        defined_at: references/ruby/proc.c:4617
+        c_body_at: references/ruby/proc.c:4052
         c_effects: []
         purity: leaf
         rbs:
@@ -386,8 +386,8 @@ classes:
         source: c
         cfunc: rb_method_compose_to_right
         arity: 1
-        defined_at: references/ruby/proc.c:4613
-        c_body_at: references/ruby/proc.c:4070
+        defined_at: references/ruby/proc.c:4618
+        c_body_at: references/ruby/proc.c:4075
         c_effects: []
         purity: leaf
         rbs:
@@ -397,16 +397,16 @@ classes:
         source: c
         cfunc: rb_method_call_pass_called_kw
         arity: -1
-        defined_at: references/ruby/proc.c:4614
-        c_body_at: references/ruby/proc.c:2672
+        defined_at: references/ruby/proc.c:4619
+        c_body_at: references/ruby/proc.c:2677
         c_effects: []
         purity: leaf
       arity:
         source: c
         cfunc: method_arity_m
         arity: 0
-        defined_at: references/ruby/proc.c:4615
-        c_body_at: references/ruby/proc.c:3050
+        defined_at: references/ruby/proc.c:4620
+        c_body_at: references/ruby/proc.c:3055
         c_effects: []
         purity: leaf
         rbs:
@@ -416,8 +416,8 @@ classes:
         source: c
         cfunc: method_inspect
         arity: 0
-        defined_at: references/ruby/proc.c:4616
-        c_body_at: references/ruby/proc.c:3334
+        defined_at: references/ruby/proc.c:4621
+        c_body_at: references/ruby/proc.c:3339
         c_effects:
         - mutate
         - dispatch
@@ -429,8 +429,8 @@ classes:
         source: c
         cfunc: method_inspect
         arity: 0
-        defined_at: references/ruby/proc.c:4617
-        c_body_at: references/ruby/proc.c:3334
+        defined_at: references/ruby/proc.c:4622
+        c_body_at: references/ruby/proc.c:3339
         c_effects:
         - mutate
         - dispatch
@@ -439,8 +439,8 @@ classes:
         source: c
         cfunc: method_to_proc
         arity: 0
-        defined_at: references/ruby/proc.c:4618
-        c_body_at: references/ruby/proc.c:3556
+        defined_at: references/ruby/proc.c:4623
+        c_body_at: references/ruby/proc.c:3561
         c_effects:
         - block
         purity: block_dependent
@@ -451,8 +451,8 @@ classes:
         source: c
         cfunc: method_receiver
         arity: 0
-        defined_at: references/ruby/proc.c:4619
-        c_body_at: references/ruby/proc.c:2088
+        defined_at: references/ruby/proc.c:4624
+        c_body_at: references/ruby/proc.c:2093
         c_effects: []
         purity: leaf
         rbs:
@@ -462,8 +462,8 @@ classes:
         source: c
         cfunc: method_name
         arity: 0
-        defined_at: references/ruby/proc.c:4620
-        c_body_at: references/ruby/proc.c:2104
+        defined_at: references/ruby/proc.c:4625
+        c_body_at: references/ruby/proc.c:2109
         c_effects: []
         purity: leaf
         rbs:
@@ -473,8 +473,8 @@ classes:
         source: c
         cfunc: method_original_name
         arity: 0
-        defined_at: references/ruby/proc.c:4621
-        c_body_at: references/ruby/proc.c:2126
+        defined_at: references/ruby/proc.c:4626
+        c_body_at: references/ruby/proc.c:2131
         c_effects: []
         purity: leaf
         rbs:
@@ -484,8 +484,8 @@ classes:
         source: c
         cfunc: method_owner
         arity: 0
-        defined_at: references/ruby/proc.c:4622
-        c_body_at: references/ruby/proc.c:2153
+        defined_at: references/ruby/proc.c:4627
+        c_body_at: references/ruby/proc.c:2158
         c_effects: []
         purity: leaf
         rbs:
@@ -495,8 +495,8 @@ classes:
         source: c
         cfunc: method_unbind
         arity: 0
-        defined_at: references/ruby/proc.c:4623
-        c_body_at: references/ruby/proc.c:2061
+        defined_at: references/ruby/proc.c:4628
+        c_body_at: references/ruby/proc.c:2066
         c_effects: []
         purity: leaf
         rbs:
@@ -506,8 +506,8 @@ classes:
         source: c
         cfunc: rb_method_location
         arity: 0
-        defined_at: references/ruby/proc.c:4624
-        c_body_at: references/ruby/proc.c:3207
+        defined_at: references/ruby/proc.c:4629
+        c_body_at: references/ruby/proc.c:3212
         c_effects: []
         purity: leaf
         rbs:
@@ -517,8 +517,8 @@ classes:
         source: c
         cfunc: rb_method_parameters
         arity: 0
-        defined_at: references/ruby/proc.c:4625
-        c_body_at: references/ruby/proc.c:3295
+        defined_at: references/ruby/proc.c:4630
+        c_body_at: references/ruby/proc.c:3300
         c_effects: []
         purity: leaf
         rbs:
@@ -528,8 +528,8 @@ classes:
         source: c
         cfunc: method_super_method
         arity: 0
-        defined_at: references/ruby/proc.c:4626
-        c_body_at: references/ruby/proc.c:3587
+        defined_at: references/ruby/proc.c:4631
+        c_body_at: references/ruby/proc.c:3592
         c_effects: []
         purity: leaf
         rbs:
@@ -539,8 +539,8 @@ classes:
         source: c
         cfunc: method_box
         arity: 0
-        defined_at: references/ruby/proc.c:4631
-        c_body_at: references/ruby/proc.c:2167
+        defined_at: references/ruby/proc.c:4636
+        c_body_at: references/ruby/proc.c:2172
         c_effects:
         - raises
         purity: leaf
@@ -549,7 +549,7 @@ classes:
     - new
   UnboundMethod:
     parent: Object
-    defined_at: references/ruby/proc.c:4634
+    defined_at: references/ruby/proc.c:4639
     includes: []
     constants: {}
     aliases: {}
@@ -558,8 +558,8 @@ classes:
         source: c
         cfunc: unbound_method_eq
         arity: 1
-        defined_at: references/ruby/proc.c:4637
-        c_body_at: references/ruby/proc.c:1983
+        defined_at: references/ruby/proc.c:4642
+        c_body_at: references/ruby/proc.c:1988
         c_effects: []
         purity: leaf
         rbs:
@@ -569,16 +569,16 @@ classes:
         source: c
         cfunc: unbound_method_eq
         arity: 1
-        defined_at: references/ruby/proc.c:4638
-        c_body_at: references/ruby/proc.c:1983
+        defined_at: references/ruby/proc.c:4643
+        c_body_at: references/ruby/proc.c:1988
         c_effects: []
         purity: leaf
       hash:
         source: c
         cfunc: method_hash
         arity: 0
-        defined_at: references/ruby/proc.c:4639
-        c_body_at: references/ruby/proc.c:2038
+        defined_at: references/ruby/proc.c:4644
+        c_body_at: references/ruby/proc.c:2043
         c_effects: []
         purity: leaf
         rbs:
@@ -588,8 +588,8 @@ classes:
         source: c
         cfunc: method_clone
         arity: 0
-        defined_at: references/ruby/proc.c:4640
-        c_body_at: references/ruby/proc.c:2613
+        defined_at: references/ruby/proc.c:4645
+        c_body_at: references/ruby/proc.c:2618
         c_effects: []
         purity: leaf
         rbs:
@@ -599,16 +599,16 @@ classes:
         source: c
         cfunc: method_dup
         arity: 0
-        defined_at: references/ruby/proc.c:4641
-        c_body_at: references/ruby/proc.c:2631
+        defined_at: references/ruby/proc.c:4646
+        c_body_at: references/ruby/proc.c:2636
         c_effects: []
         purity: leaf
       arity:
         source: c
         cfunc: method_arity_m
         arity: 0
-        defined_at: references/ruby/proc.c:4642
-        c_body_at: references/ruby/proc.c:3050
+        defined_at: references/ruby/proc.c:4647
+        c_body_at: references/ruby/proc.c:3055
         c_effects: []
         purity: leaf
         rbs:
@@ -618,8 +618,8 @@ classes:
         source: c
         cfunc: method_inspect
         arity: 0
-        defined_at: references/ruby/proc.c:4643
-        c_body_at: references/ruby/proc.c:3334
+        defined_at: references/ruby/proc.c:4648
+        c_body_at: references/ruby/proc.c:3339
         c_effects:
         - mutate
         - dispatch
@@ -631,8 +631,8 @@ classes:
         source: c
         cfunc: method_inspect
         arity: 0
-        defined_at: references/ruby/proc.c:4644
-        c_body_at: references/ruby/proc.c:3334
+        defined_at: references/ruby/proc.c:4649
+        c_body_at: references/ruby/proc.c:3339
         c_effects:
         - mutate
         - dispatch
@@ -641,8 +641,8 @@ classes:
         source: c
         cfunc: method_name
         arity: 0
-        defined_at: references/ruby/proc.c:4645
-        c_body_at: references/ruby/proc.c:2104
+        defined_at: references/ruby/proc.c:4650
+        c_body_at: references/ruby/proc.c:2109
         c_effects: []
         purity: leaf
         rbs:
@@ -652,8 +652,8 @@ classes:
         source: c
         cfunc: method_original_name
         arity: 0
-        defined_at: references/ruby/proc.c:4646
-        c_body_at: references/ruby/proc.c:2126
+        defined_at: references/ruby/proc.c:4651
+        c_body_at: references/ruby/proc.c:2131
         c_effects: []
         purity: leaf
         rbs:
@@ -663,8 +663,8 @@ classes:
         source: c
         cfunc: method_owner
         arity: 0
-        defined_at: references/ruby/proc.c:4647
-        c_body_at: references/ruby/proc.c:2153
+        defined_at: references/ruby/proc.c:4652
+        c_body_at: references/ruby/proc.c:2158
         c_effects: []
         purity: leaf
         rbs:
@@ -674,8 +674,8 @@ classes:
         source: c
         cfunc: umethod_bind
         arity: 1
-        defined_at: references/ruby/proc.c:4648
-        c_body_at: references/ruby/proc.c:2870
+        defined_at: references/ruby/proc.c:4653
+        c_body_at: references/ruby/proc.c:2875
         c_effects: []
         purity: leaf
         rbs:
@@ -685,8 +685,8 @@ classes:
         source: c
         cfunc: umethod_bind_call
         arity: -1
-        defined_at: references/ruby/proc.c:4649
-        c_body_at: references/ruby/proc.c:2898
+        defined_at: references/ruby/proc.c:4654
+        c_body_at: references/ruby/proc.c:2903
         c_effects:
         - block
         purity: block_dependent
@@ -697,8 +697,8 @@ classes:
         source: c
         cfunc: rb_method_location
         arity: 0
-        defined_at: references/ruby/proc.c:4650
-        c_body_at: references/ruby/proc.c:3207
+        defined_at: references/ruby/proc.c:4655
+        c_body_at: references/ruby/proc.c:3212
         c_effects: []
         purity: leaf
         rbs:
@@ -708,8 +708,8 @@ classes:
         source: c
         cfunc: rb_method_parameters
         arity: 0
-        defined_at: references/ruby/proc.c:4651
-        c_body_at: references/ruby/proc.c:3295
+        defined_at: references/ruby/proc.c:4656
+        c_body_at: references/ruby/proc.c:3300
         c_effects: []
         purity: leaf
         rbs:
@@ -719,8 +719,8 @@ classes:
         source: c
         cfunc: method_super_method
         arity: 0
-        defined_at: references/ruby/proc.c:4652
-        c_body_at: references/ruby/proc.c:3587
+        defined_at: references/ruby/proc.c:4657
+        c_body_at: references/ruby/proc.c:3592
         c_effects: []
         purity: leaf
         rbs:

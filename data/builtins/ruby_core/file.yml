@@ -57,7 +57,7 @@ classes:
         purity: leaf
         rbs:
         - "() -> (File::Stat | nil)"
-        rbs_at: references/rbs/core/file.rbs:1951
+        rbs_at: references/rbs/core/file.rbs:1975
       atime:
         source: c
         cfunc: rb_file_atime
@@ -68,7 +68,7 @@ classes:
         purity: leaf
         rbs:
         - "() -> Time"
-        rbs_at: references/rbs/core/file.rbs:1848
+        rbs_at: references/rbs/core/file.rbs:1872
       mtime:
         source: c
         cfunc: rb_file_mtime
@@ -79,7 +79,7 @@ classes:
         purity: leaf
         rbs:
         - "() -> Time"
-        rbs_at: references/rbs/core/file.rbs:1961
+        rbs_at: references/rbs/core/file.rbs:1985
       ctime:
         source: c
         cfunc: rb_file_ctime
@@ -90,7 +90,7 @@ classes:
         purity: leaf
         rbs:
         - "() -> Time"
-        rbs_at: references/rbs/core/file.rbs:1901
+        rbs_at: references/rbs/core/file.rbs:1925
       birthtime:
         source: c
         cfunc: rb_file_birthtime
@@ -100,7 +100,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "() -> Time"
-        rbs_at: references/rbs/core/file.rbs:1860
+        rbs_at: references/rbs/core/file.rbs:1884
       size:
         source: c
         cfunc: file_size
@@ -111,7 +111,7 @@ classes:
         purity: leaf
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/file.rbs:1990
+        rbs_at: references/rbs/core/file.rbs:2014
       chmod:
         source: c
         cfunc: rb_file_chmod
@@ -122,7 +122,7 @@ classes:
         purity: leaf
         rbs:
         - "(int mode) -> (0 | nil)"
-        rbs_at: references/rbs/core/file.rbs:1874
+        rbs_at: references/rbs/core/file.rbs:1898
       chown:
         source: c
         cfunc: rb_file_chown
@@ -133,7 +133,7 @@ classes:
         purity: leaf
         rbs:
         - "(int? owner, int? group) -> (0 | nil)"
-        rbs_at: references/rbs/core/file.rbs:1888
+        rbs_at: references/rbs/core/file.rbs:1912
       truncate:
         source: c
         cfunc: rb_file_truncate
@@ -143,7 +143,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(int length) -> 0"
-        rbs_at: references/rbs/core/file.rbs:2020
+        rbs_at: references/rbs/core/file.rbs:2044
       flock:
         source: c
         cfunc: rb_file_flock
@@ -154,7 +154,7 @@ classes:
         purity: leaf
         rbs:
         - "(int locking_constant) -> (0 | false)"
-        rbs_at: references/rbs/core/file.rbs:1937
+        rbs_at: references/rbs/core/file.rbs:1961
     singleton_methods:
       stat:
         source: c
@@ -166,7 +166,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name) -> File::Stat"
-        rbs_at: references/rbs/core/file.rbs:1681
+        rbs_at: references/rbs/core/file.rbs:1705
       lstat:
         source: c
         cfunc: rb_file_s_lstat
@@ -177,7 +177,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name) -> File::Stat"
-        rbs_at: references/rbs/core/file.rbs:1387
+        rbs_at: references/rbs/core/file.rbs:1411
       ftype:
         source: c
         cfunc: rb_file_s_ftype
@@ -188,7 +188,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name) -> String"
-        rbs_at: references/rbs/core/file.rbs:1300
+        rbs_at: references/rbs/core/file.rbs:1324
       atime:
         source: c
         cfunc: rb_file_s_atime
@@ -199,7 +199,7 @@ classes:
         purity: leaf
         rbs:
         - "(path | IO file_name) -> Time"
-        rbs_at: references/rbs/core/file.rbs:910
+        rbs_at: references/rbs/core/file.rbs:934
       mtime:
         source: c
         cfunc: rb_file_s_mtime
@@ -210,7 +210,7 @@ classes:
         purity: leaf
         rbs:
         - "(path | IO file_name) -> Time"
-        rbs_at: references/rbs/core/file.rbs:1420
+        rbs_at: references/rbs/core/file.rbs:1444
       ctime:
         source: c
         cfunc: rb_file_s_ctime
@@ -221,7 +221,7 @@ classes:
         purity: leaf
         rbs:
         - "(path | IO file_name) -> Time"
-        rbs_at: references/rbs/core/file.rbs:1004
+        rbs_at: references/rbs/core/file.rbs:1028
       birthtime:
         source: c
         cfunc: rb_file_s_birthtime
@@ -231,7 +231,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(path | IO file_name) -> Time"
-        rbs_at: references/rbs/core/file.rbs:940
+        rbs_at: references/rbs/core/file.rbs:964
       utime:
         source: c
         cfunc: rb_file_s_utime
@@ -242,7 +242,7 @@ classes:
         purity: leaf
         rbs:
         - "(Time | Numeric atime, Time | Numeric mtime, *path file_name) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:1771
+        rbs_at: references/rbs/core/file.rbs:1795
       chmod:
         source: c
         cfunc: rb_file_s_chmod
@@ -253,7 +253,7 @@ classes:
         purity: leaf
         rbs:
         - "(int mode, *path file_name) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:975
+        rbs_at: references/rbs/core/file.rbs:999
       chown:
         source: c
         cfunc: rb_file_s_chown
@@ -264,7 +264,7 @@ classes:
         purity: leaf
         rbs:
         - "(int? owner, int? group, *path file_name) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:989
+        rbs_at: references/rbs/core/file.rbs:1013
       lchmod:
         source: c
         cfunc: rb_file_s_lchmod
@@ -274,7 +274,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(int mode, *path file_name) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:1351
+        rbs_at: references/rbs/core/file.rbs:1375
       lchown:
         source: c
         cfunc: rb_file_s_lchown
@@ -284,7 +284,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(int? owner, int? group, *path file_name) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:1361
+        rbs_at: references/rbs/core/file.rbs:1385
       lutime:
         source: c
         cfunc: rb_file_s_lutime
@@ -294,7 +294,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(Time | Numeric atime, Time | Numeric mtime, *path file_name) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:1398
+        rbs_at: references/rbs/core/file.rbs:1422
       link:
         source: c
         cfunc: rb_file_s_link
@@ -304,7 +304,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(path old_name, path new_name) -> 0"
-        rbs_at: references/rbs/core/file.rbs:1374
+        rbs_at: references/rbs/core/file.rbs:1398
       symlink:
         source: c
         cfunc: rb_file_s_symlink
@@ -314,7 +314,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(path old_name, path new_name) -> 0"
-        rbs_at: references/rbs/core/file.rbs:1703
+        rbs_at: references/rbs/core/file.rbs:1727
       readlink:
         source: c
         cfunc: rb_file_s_readlink
@@ -324,7 +324,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(path link_name) -> String"
-        rbs_at: references/rbs/core/file.rbs:1568
+        rbs_at: references/rbs/core/file.rbs:1592
       unlink:
         source: c
         cfunc: rb_file_s_unlink
@@ -335,7 +335,7 @@ classes:
         purity: leaf
         rbs:
         - "(*path file_name) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:1760
+        rbs_at: references/rbs/core/file.rbs:1784
       delete:
         source: c
         cfunc: rb_file_s_unlink
@@ -354,7 +354,7 @@ classes:
         purity: leaf
         rbs:
         - "(path old_name, path new_name) -> 0"
-        rbs_at: references/rbs/core/file.rbs:1607
+        rbs_at: references/rbs/core/file.rbs:1631
       umask:
         source: c
         cfunc: rb_file_s_umask
@@ -365,7 +365,7 @@ classes:
         purity: leaf
         rbs:
         - "(?int umask) -> Integer"
-        rbs_at: references/rbs/core/file.rbs:1745
+        rbs_at: references/rbs/core/file.rbs:1769
       truncate:
         source: c
         cfunc: rb_file_s_truncate
@@ -375,7 +375,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(path file_name, int length) -> 0"
-        rbs_at: references/rbs/core/file.rbs:1730
+        rbs_at: references/rbs/core/file.rbs:1754
       mkfifo:
         source: c
         cfunc: rb_file_s_mkfifo
@@ -385,7 +385,7 @@ classes:
         c_body_at: not_found
         rbs:
         - "(path file_name, ?int mode) -> 0"
-        rbs_at: references/rbs/core/file.rbs:1408
+        rbs_at: references/rbs/core/file.rbs:1432
       expand_path:
         source: c
         cfunc: s_expand_path
@@ -396,7 +396,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name, ?path dir_string) -> String"
-        rbs_at: references/rbs/core/file.rbs:1136
+        rbs_at: references/rbs/core/file.rbs:1160
       absolute_path:
         source: c
         cfunc: s_absolute_path
@@ -407,7 +407,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name, ?path dir_string) -> String"
-        rbs_at: references/rbs/core/file.rbs:888
+        rbs_at: references/rbs/core/file.rbs:912
       absolute_path?:
         source: c
         cfunc: s_absolute_path_p
@@ -418,7 +418,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name) -> bool"
-        rbs_at: references/rbs/core/file.rbs:898
+        rbs_at: references/rbs/core/file.rbs:922
       realpath:
         source: c
         cfunc: rb_file_s_realpath
@@ -429,7 +429,7 @@ classes:
         purity: leaf
         rbs:
         - "(path pathname, ?path dir_string) -> String"
-        rbs_at: references/rbs/core/file.rbs:1596
+        rbs_at: references/rbs/core/file.rbs:1620
       realdirpath:
         source: c
         cfunc: rb_file_s_realdirpath
@@ -440,7 +440,7 @@ classes:
         purity: leaf
         rbs:
         - "(path pathname, ?path dir_string) -> String"
-        rbs_at: references/rbs/core/file.rbs:1582
+        rbs_at: references/rbs/core/file.rbs:1606
       basename:
         source: c
         cfunc: rb_file_s_basename
@@ -451,7 +451,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name, ?string suffix) -> String"
-        rbs_at: references/rbs/core/file.rbs:926
+        rbs_at: references/rbs/core/file.rbs:950
       dirname:
         source: c
         cfunc: rb_file_s_dirname
@@ -462,7 +462,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name, ?Integer level) -> String"
-        rbs_at: references/rbs/core/file.rbs:1055
+        rbs_at: references/rbs/core/file.rbs:1079
       extname:
         source: c
         cfunc: rb_file_s_extname
@@ -473,7 +473,7 @@ classes:
         purity: leaf
         rbs:
         - "(path path) -> String"
-        rbs_at: references/rbs/core/file.rbs:1162
+        rbs_at: references/rbs/core/file.rbs:1186
       path:
         source: c
         cfunc: rb_file_s_path
@@ -484,7 +484,7 @@ classes:
         purity: leaf
         rbs:
         - "(path path) -> String"
-        rbs_at: references/rbs/core/file.rbs:1520
+        rbs_at: references/rbs/core/file.rbs:1544
       split:
         source: c
         cfunc: rb_file_s_split
@@ -495,7 +495,7 @@ classes:
         purity: leaf
         rbs:
         - "(path file_name) -> [ String, String ]"
-        rbs_at: references/rbs/core/file.rbs:1671
+        rbs_at: references/rbs/core/file.rbs:1695
       join:
         source: c
         cfunc: rb_file_s_join
@@ -506,5 +506,5 @@ classes:
         purity: leaf
         rbs:
         - "(*path) -> String"
-        rbs_at: references/rbs/core/file.rbs:1341
+        rbs_at: references/rbs/core/file.rbs:1365
     undefined: []

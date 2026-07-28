@@ -20,187 +20,187 @@ purity_levels:
 classes:
   Hash:
     parent: Object
-    defined_at: references/ruby/hash.c:7347
+    defined_at: references/ruby/hash.c:7350
     includes:
     - module: Enumerable
-      defined_at: references/ruby/hash.c:7349
+      defined_at: references/ruby/hash.c:7352
     constants: {}
     aliases:
       to_s:
         old: inspect
         source: c
-        defined_at: references/ruby/hash.c:7362
+        defined_at: references/ruby/hash.c:7365
     instance_methods:
       initialize_copy:
         source: c
         cfunc: rb_hash_replace
         arity: 1
-        defined_at: references/ruby/hash.c:7354
-        c_body_at: references/ruby/hash.c:2966
+        defined_at: references/ruby/hash.c:7357
+        c_body_at: references/ruby/hash.c:2969
         c_effects:
         - mutate
         - raises
         purity: mutates_self
-        rbs:
-        - "(self object) -> self"
-        rbs_at: references/rbs/core/hash.rbs:2166
       rehash:
         source: c
         cfunc: rb_hash_rehash
         arity: 0
-        defined_at: references/ruby/hash.c:7355
-        c_body_at: references/ruby/hash.c:1959
+        defined_at: references/ruby/hash.c:7358
+        c_body_at: references/ruby/hash.c:1962
         c_effects:
         - mutate
         - raises
         purity: mutates_self
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/hash.rbs:1545
+        rbs_at: references/rbs/core/hash.rbs:1572
       freeze:
         source: c
         cfunc: rb_hash_freeze
         arity: 0
-        defined_at: references/ruby/hash.c:7356
+        defined_at: references/ruby/hash.c:7359
         c_body_at: references/ruby/hash.c:104
         c_effects:
         - mutate
         purity: mutates_self
+        rbs:
+        - "() -> self"
+        rbs_at: references/rbs/core/hash.rbs:1574
       to_hash:
         source: c
         cfunc: rb_hash_to_hash
         arity: 0
-        defined_at: references/ruby/hash.c:7358
-        c_body_at: references/ruby/hash.c:3676
+        defined_at: references/ruby/hash.c:7361
+        c_body_at: references/ruby/hash.c:3679
         c_effects: []
         purity: leaf
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/hash.rbs:1759
+        rbs_at: references/rbs/core/hash.rbs:1777
       to_h:
         source: c
         cfunc: rb_hash_to_h
         arity: 0
-        defined_at: references/ruby/hash.c:7359
-        c_body_at: references/ruby/hash.c:3735
+        defined_at: references/ruby/hash.c:7362
+        c_body_at: references/ruby/hash.c:3738
         c_effects:
         - block
         purity: block_dependent
         rbs:
         - "() -> Hash[K, V]"
-        - "[A, B] () { (K, V) -> [ A, B ] } -> Hash[A, B]"
-        rbs_at: references/rbs/core/hash.rbs:1748
+        - "[A, B] () { (K key, V value) -> _Pair[A, B] } -> Hash[A, B]"
+        rbs_at: references/rbs/core/hash.rbs:1766
       to_a:
         source: c
         cfunc: rb_hash_to_a
         arity: 0
-        defined_at: references/ruby/hash.c:7360
-        c_body_at: references/ruby/hash.c:3559
+        defined_at: references/ruby/hash.c:7363
+        c_body_at: references/ruby/hash.c:3562
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Array[[ K, V ]]"
-        rbs_at: references/rbs/core/hash.rbs:1726
+        - "() -> Array[[ K, V ]]"
+        rbs_at: references/rbs/core/hash.rbs:1744
       inspect:
         source: c
         cfunc: rb_hash_inspect
         arity: 0
-        defined_at: references/ruby/hash.c:7361
-        c_body_at: references/ruby/hash.c:3660
+        defined_at: references/ruby/hash.c:7364
+        c_body_at: references/ruby/hash.c:3663
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> String"
-        rbs_at: references/rbs/core/hash.rbs:1325
+        rbs_at: references/rbs/core/hash.rbs:1349
       to_proc:
         source: c
         cfunc: rb_hash_to_proc
         arity: 0
-        defined_at: references/ruby/hash.c:7363
-        c_body_at: references/ruby/hash.c:5022
+        defined_at: references/ruby/hash.c:7366
+        c_body_at: references/ruby/hash.c:5025
         c_effects: []
         purity: leaf
         rbs:
         - "() -> ^(K) -> V?"
-        rbs_at: references/rbs/core/hash.rbs:1776
+        rbs_at: references/rbs/core/hash.rbs:1794
       "==":
         source: c
         cfunc: rb_hash_equal
         arity: 1
-        defined_at: references/ruby/hash.c:7365
-        c_body_at: references/ruby/hash.c:4005
+        defined_at: references/ruby/hash.c:7368
+        c_body_at: references/ruby/hash.c:4008
         c_effects: []
         purity: leaf
         rbs:
         - "(untyped other) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:608
+        rbs_at: references/rbs/core/hash.rbs:622
       "[]":
         source: c
         cfunc: rb_hash_aref
         arity: 1
-        defined_at: references/ruby/hash.c:7366
-        c_body_at: references/ruby/hash.c:2068
+        defined_at: references/ruby/hash.c:7369
+        c_body_at: references/ruby/hash.c:2071
         c_effects: []
         purity: leaf
         rbs:
-        - "(K arg0) -> V"
-        rbs_at: references/rbs/core/hash.rbs:674
+        - "(_Key key) -> V"
+        rbs_at: references/rbs/core/hash.rbs:688
       hash:
         source: c
         cfunc: rb_hash_hash
         arity: 0
-        defined_at: references/ruby/hash.c:7367
-        c_body_at: references/ruby/hash.c:4067
+        defined_at: references/ruby/hash.c:7370
+        c_body_at: references/ruby/hash.c:4070
         c_effects: []
         purity: leaf
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/hash.rbs:1298
+        rbs_at: references/rbs/core/hash.rbs:1322
       eql?:
         source: c
         cfunc: rb_hash_eql
         arity: 1
-        defined_at: references/ruby/hash.c:7368
-        c_body_at: references/ruby/hash.c:4032
+        defined_at: references/ruby/hash.c:7371
+        c_body_at: references/ruby/hash.c:4035
         c_effects: []
         purity: leaf
         rbs:
-        - "(untyped) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:1120
+        - "(untyped object) -> bool"
+        rbs_at: references/rbs/core/hash.rbs:1136
       fetch:
         source: c
         cfunc: rb_hash_fetch_m
         arity: -1
-        defined_at: references/ruby/hash.c:7369
-        c_body_at: references/ruby/hash.c:2126
+        defined_at: references/ruby/hash.c:7372
+        c_body_at: references/ruby/hash.c:2129
         c_effects:
         - block
         - dispatch
         purity: block_dependent
         rbs:
-        - "(K arg0) -> V"
-        - "[X] (K arg0, X arg1) -> (V | X)"
-        - "[X] (K arg0) { (K arg0) -> X } -> (V | X)"
-        rbs_at: references/rbs/core/hash.rbs:1164
+        - "(_Key key) -> V"
+        - "[X] (_Key key, X default_value) -> (V | X)"
+        - "[K2 < _Key, X] (K2 key) { (K2 key) -> X } -> (V | X)"
+        rbs_at: references/rbs/core/hash.rbs:1180
       "[]=":
         source: c
         cfunc: rb_hash_aset
         arity: 2
-        defined_at: references/ruby/hash.c:7370
-        c_body_at: references/ruby/hash.c:2929
+        defined_at: references/ruby/hash.c:7373
+        c_body_at: references/ruby/hash.c:2932
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(K arg0, V arg1) -> V"
-        rbs_at: references/rbs/core/hash.rbs:704
+        - "(K key, V value) -> V"
+        rbs_at: references/rbs/core/hash.rbs:718
       store:
         source: c
         cfunc: rb_hash_aset
         arity: 2
-        defined_at: references/ruby/hash.c:7371
-        c_body_at: references/ruby/hash.c:2929
+        defined_at: references/ruby/hash.c:7374
+        c_body_at: references/ruby/hash.c:2932
         c_effects:
         - mutate
         purity: mutates_self
@@ -208,411 +208,412 @@ classes:
         source: c
         cfunc: rb_hash_default
         arity: -1
-        defined_at: references/ruby/hash.c:7372
-        c_body_at: references/ruby/hash.c:2188
+        defined_at: references/ruby/hash.c:7375
+        c_body_at: references/ruby/hash.c:2191
         c_effects: []
         purity: leaf
         rbs:
-        - "(?K arg0) -> V?"
-        rbs_at: references/rbs/core/hash.rbs:869
+        - "(?_Key key) -> V?"
+        rbs_at: references/rbs/core/hash.rbs:883
       default=:
         source: c
         cfunc: rb_hash_set_default
         arity: 1
-        defined_at: references/ruby/hash.c:7373
-        c_body_at: references/ruby/hash.c:2215
+        defined_at: references/ruby/hash.c:7376
+        c_body_at: references/ruby/hash.c:2218
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(V arg0) -> V"
-        rbs_at: references/rbs/core/hash.rbs:883
+        - "(V default) -> V"
+        rbs_at: references/rbs/core/hash.rbs:897
       default_proc:
         source: c
         cfunc: rb_hash_default_proc
         arity: 0
-        defined_at: references/ruby/hash.c:7374
-        c_body_at: references/ruby/hash.c:2235
+        defined_at: references/ruby/hash.c:7377
+        c_body_at: references/ruby/hash.c:2238
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> (Proc | nil)"
-        rbs_at: references/rbs/core/hash.rbs:896
+        - "() -> (^(self, _Key key) -> V)?"
+        rbs_at: references/rbs/core/hash.rbs:910
       default_proc=:
         source: c
         cfunc: rb_hash_set_default_proc
         arity: 1
-        defined_at: references/ruby/hash.c:7375
-        c_body_at: references/ruby/hash.c:2258
+        defined_at: references/ruby/hash.c:7378
+        c_body_at: references/ruby/hash.c:2261
         c_effects:
         - mutate
         - raises
         purity: mutates_self
         rbs:
-        - "(Proc | _ToProc | nil) -> (Proc | _ToProc | nil)"
-        rbs_at: references/rbs/core/hash.rbs:911
+        - "(nil) -> nil"
+        - "(^(self, _Key key) -> V proc) -> ^(self, _Key) -> V"
+        - "(_ToProc proc) -> Proc"
+        rbs_at: references/rbs/core/hash.rbs:925
       key:
         source: c
         cfunc: rb_hash_key
         arity: 1
-        defined_at: references/ruby/hash.c:7376
-        c_body_at: references/ruby/hash.c:2307
+        defined_at: references/ruby/hash.c:7379
+        c_body_at: references/ruby/hash.c:2310
         c_effects: []
         purity: leaf
         rbs:
-        - "(V) -> K?"
-        rbs_at: references/rbs/core/hash.rbs:1382
+        - "(_Equals) -> K?"
+        rbs_at: references/rbs/core/hash.rbs:1406
       size:
         source: c
         cfunc: rb_hash_size
         arity: 0
-        defined_at: references/ruby/hash.c:7377
-        c_body_at: references/ruby/hash.c:3001
-        c_effects: []
-        purity: leaf
-      length:
-        source: c
-        cfunc: rb_hash_size
-        arity: 0
-        defined_at: references/ruby/hash.c:7378
-        c_body_at: references/ruby/hash.c:3001
+        defined_at: references/ruby/hash.c:7380
+        c_body_at: references/ruby/hash.c:3004
         c_effects: []
         purity: leaf
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/hash.rbs:1415
+        rbs_at: references/rbs/core/hash.rbs:1442
+      length:
+        source: c
+        cfunc: rb_hash_size
+        arity: 0
+        defined_at: references/ruby/hash.c:7381
+        c_body_at: references/ruby/hash.c:3004
+        c_effects: []
+        purity: leaf
       empty?:
         source: c
         cfunc: rb_hash_empty_p
         arity: 0
-        defined_at: references/ruby/hash.c:7379
-        c_body_at: references/ruby/hash.c:3025
+        defined_at: references/ruby/hash.c:7382
+        c_body_at: references/ruby/hash.c:3028
         c_effects: []
         purity: leaf
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/hash.rbs:1098
+        rbs_at: references/rbs/core/hash.rbs:1114
       each_value:
         source: c
         cfunc: rb_hash_each_value
         arity: 0
-        defined_at: references/ruby/hash.c:7381
-        c_body_at: references/ruby/hash.c:3058
+        defined_at: references/ruby/hash.c:7384
+        c_body_at: references/ruby/hash.c:3061
         c_effects: []
         purity: leaf
         rbs:
-        - "() { (V arg0) -> untyped } -> self"
-        - "() -> ::Enumerator[V, self]"
-        rbs_at: references/rbs/core/hash.rbs:1084
+        - "() -> Enumerator[V, self]"
+        - "() { (V value) -> void } -> self"
+        rbs_at: references/rbs/core/hash.rbs:1100
       each_key:
         source: c
         cfunc: rb_hash_each_key
         arity: 0
-        defined_at: references/ruby/hash.c:7382
-        c_body_at: references/ruby/hash.c:3092
+        defined_at: references/ruby/hash.c:7385
+        c_body_at: references/ruby/hash.c:3095
         c_effects: []
         purity: leaf
         rbs:
-        - "() { (K arg0) -> untyped } -> ::Hash[K, V]"
-        - "() -> ::Enumerator[K, self]"
-        rbs_at: references/rbs/core/hash.rbs:1040
+        - "() -> Enumerator[K, self]"
+        - "() { (K key) -> void } -> self"
+        rbs_at: references/rbs/core/hash.rbs:1056
       each_pair:
         source: c
         cfunc: rb_hash_each_pair
         arity: 0
-        defined_at: references/ruby/hash.c:7383
-        c_body_at: references/ruby/hash.c:3138
+        defined_at: references/ruby/hash.c:7386
+        c_body_at: references/ruby/hash.c:3141
         c_effects: []
         purity: leaf
       each:
         source: c
         cfunc: rb_hash_each_pair
         arity: 0
-        defined_at: references/ruby/hash.c:7384
-        c_body_at: references/ruby/hash.c:3138
+        defined_at: references/ruby/hash.c:7387
+        c_body_at: references/ruby/hash.c:3141
         c_effects: []
         purity: leaf
         rbs:
-        - "() { ([ K, V ] arg0) -> untyped } -> self"
-        - "() -> ::Enumerator[[ K, V ], self]"
-        rbs_at: references/rbs/core/hash.rbs:1018
+        - "() -> Enumerator[[ K, V ], self]"
+        - "() { ([ K, V ] pair) -> void } -> self"
+        rbs_at: references/rbs/core/hash.rbs:1034
       transform_keys:
         source: c
         cfunc: rb_hash_transform_keys
         arity: -1
-        defined_at: references/ruby/hash.c:7386
-        c_body_at: references/ruby/hash.c:3267
+        defined_at: references/ruby/hash.c:7389
+        c_body_at: references/ruby/hash.c:3270
         c_effects:
         - block
         purity: block_dependent
         rbs:
         - "() -> Enumerator[K, Hash[untyped, V]]"
-        - "[A] (Hash[K, A]) -> Hash[A, V]"
-        - "[A] () { (K) -> A } -> Hash[A, V]"
-        - "[A] (Hash[K, A]) { (K) -> A } -> Hash[A, V]"
-        rbs_at: references/rbs/core/hash.rbs:1872
+        - "[K2] (hash[_Key, K2] replacements) -> Hash[K | K2, V]"
+        - "[K2] (hash[_Key, K2] replacements) { (K old_key) -> K2 } -> Hash[K2, V]"
+        - "[K2] () { (K key) -> K2 } -> Hash[K2, V]"
+        rbs_at: references/rbs/core/hash.rbs:1890
       transform_keys!:
         source: c
         cfunc: rb_hash_transform_keys_bang
         arity: -1
-        defined_at: references/ruby/hash.c:7387
-        c_body_at: references/ruby/hash.c:3391
+        defined_at: references/ruby/hash.c:7390
+        c_body_at: references/ruby/hash.c:3394
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
         - "() -> Enumerator[K, self]"
-        - "(Hash[K, K]) -> self"
-        - "() { (K) -> K } -> self"
-        - "(Hash[K, K]) { (K) -> K } -> self"
-        rbs_at: references/rbs/core/hash.rbs:1967
+        - "(hash[K, K] replacements) ?{ (K key) -> K } -> self"
+        - "() { (K key) -> K } -> self"
+        rbs_at: references/rbs/core/hash.rbs:1985
       transform_values:
         source: c
         cfunc: rb_hash_transform_values
         arity: 0
-        defined_at: references/ruby/hash.c:7388
-        c_body_at: references/ruby/hash.c:3488
+        defined_at: references/ruby/hash.c:7391
+        c_body_at: references/ruby/hash.c:3491
         c_effects: []
         purity: leaf
         rbs:
         - "() -> Enumerator[V, Hash[K, untyped]]"
-        - "[A] () { (V) -> A } -> Hash[K, A]"
-        rbs_at: references/rbs/core/hash.rbs:1990
+        - "[V2] () { (V value) -> V2 } -> Hash[K, V2]"
+        rbs_at: references/rbs/core/hash.rbs:2007
       transform_values!:
         source: c
         cfunc: rb_hash_transform_values_bang
         arity: 0
-        defined_at: references/ruby/hash.c:7389
-        c_body_at: references/ruby/hash.c:3526
+        defined_at: references/ruby/hash.c:7392
+        c_body_at: references/ruby/hash.c:3529
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
         - "() -> Enumerator[V, self]"
-        - "() { (V) -> V } -> self"
-        rbs_at: references/rbs/core/hash.rbs:2013
+        - "() { (V value) -> V } -> self"
+        rbs_at: references/rbs/core/hash.rbs:2030
       keys:
         source: c
         cfunc: rb_hash_keys
         arity: 0
-        defined_at: references/ruby/hash.c:7391
-        c_body_at: references/ruby/hash.c:3767
+        defined_at: references/ruby/hash.c:7394
+        c_body_at: references/ruby/hash.c:3770
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() -> ::Array[K]"
-        rbs_at: references/rbs/core/hash.rbs:1406
+        - "() -> Array[K]"
+        rbs_at: references/rbs/core/hash.rbs:1430
       values:
         source: c
         cfunc: rb_hash_values
         arity: 0
-        defined_at: references/ruby/hash.c:7392
-        c_body_at: references/ruby/hash.c:3814
+        defined_at: references/ruby/hash.c:7395
+        c_body_at: references/ruby/hash.c:3817
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() -> ::Array[V]"
-        rbs_at: references/rbs/core/hash.rbs:2081
+        - "() -> Array[V]"
+        rbs_at: references/rbs/core/hash.rbs:2098
       values_at:
         source: c
         cfunc: rb_hash_values_at
         arity: -1
-        defined_at: references/ruby/hash.c:7393
-        c_body_at: references/ruby/hash.c:2686
+        defined_at: references/ruby/hash.c:7396
+        c_body_at: references/ruby/hash.c:2689
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(*K arg0) -> ::Array[V?]"
-        rbs_at: references/rbs/core/hash.rbs:2099
+        - "(*_Key arg0) -> Array[V?]"
+        rbs_at: references/rbs/core/hash.rbs:2116
       fetch_values:
         source: c
         cfunc: rb_hash_fetch_values
         arity: -1
-        defined_at: references/ruby/hash.c:7394
-        c_body_at: references/ruby/hash.c:2722
+        defined_at: references/ruby/hash.c:7397
+        c_body_at: references/ruby/hash.c:2725
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(*K) -> ::Array[V]"
-        - "[X] (*K) { (K) -> X } -> ::Array[V | X]"
-        rbs_at: references/rbs/core/hash.rbs:1189
+        - "(*_Key keys) -> Array[V]"
+        - "[K2 < _Key, T] (*K2 keys) { (K2 key) -> T } -> Array[V | T]"
+        rbs_at: references/rbs/core/hash.rbs:1205
       shift:
         source: c
         cfunc: rb_hash_shift
         arity: 0
-        defined_at: references/ruby/hash.c:7396
-        c_body_at: references/ruby/hash.c:2454
+        defined_at: references/ruby/hash.c:7399
+        c_body_at: references/ruby/hash.c:2457
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
         - "() -> [ K, V ]?"
-        rbs_at: references/rbs/core/hash.rbs:1659
+        rbs_at: references/rbs/core/hash.rbs:1680
       delete:
         source: c
         cfunc: rb_hash_delete_m
         arity: 1
-        defined_at: references/ruby/hash.c:7397
-        c_body_at: references/ruby/hash.c:2401
+        defined_at: references/ruby/hash.c:7400
+        c_body_at: references/ruby/hash.c:2404
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
-        - "(K arg0) -> V?"
-        - "[U] (K arg0) { (K arg0) -> U } -> (U | V)"
-        rbs_at: references/rbs/core/hash.rbs:945
+        - "(_Key key) -> V?"
+        - "[T, K2 < _Key] (K2 key) { (K2 key) -> T } -> (T | V)"
+        rbs_at: references/rbs/core/hash.rbs:961
       delete_if:
         source: c
         cfunc: rb_hash_delete_if
         arity: 0
-        defined_at: references/ruby/hash.c:7398
-        c_body_at: references/ruby/hash.c:2526
+        defined_at: references/ruby/hash.c:7401
+        c_body_at: references/ruby/hash.c:2529
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() { (K, V) -> boolish } -> self"
-        - "() -> ::Enumerator[[ K, V ], self]"
-        rbs_at: references/rbs/core/hash.rbs:963
+        - "() -> Enumerator[[ K, V ], self]"
+        - "() { (K key, V value) -> boolish } -> self"
+        rbs_at: references/rbs/core/hash.rbs:979
       keep_if:
         source: c
         cfunc: rb_hash_keep_if
         arity: 0
-        defined_at: references/ruby/hash.c:7399
-        c_body_at: references/ruby/hash.c:2825
+        defined_at: references/ruby/hash.c:7402
+        c_body_at: references/ruby/hash.c:2828
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() { (K, V) -> boolish } -> self"
-        - "() -> ::Enumerator[[ K, V ], self]"
-        rbs_at: references/rbs/core/hash.rbs:1364
+        - "() -> Enumerator[[ K, V ], self]"
+        - "() { (K key, V value) -> boolish } -> self"
+        rbs_at: references/rbs/core/hash.rbs:1388
       select:
         source: c
         cfunc: rb_hash_select
         arity: 0
-        defined_at: references/ruby/hash.c:7400
-        c_body_at: references/ruby/hash.c:2760
+        defined_at: references/ruby/hash.c:7403
+        c_body_at: references/ruby/hash.c:2763
         c_effects: []
         purity: leaf
+        rbs:
+        - "() -> Enumerator[[ K, V ], Hash[K, V]]"
+        - "() { (K key, V value) -> boolish } -> Hash[K, V]"
+        rbs_at: references/rbs/core/hash.rbs:1223
       select!:
         source: c
         cfunc: rb_hash_select_bang
         arity: 0
-        defined_at: references/ruby/hash.c:7401
-        c_body_at: references/ruby/hash.c:2794
+        defined_at: references/ruby/hash.c:7404
+        c_body_at: references/ruby/hash.c:2797
         c_effects:
         - mutate
         purity: mutates_self
+        rbs:
+        - "() -> Enumerator[[ K, V ], self?]"
+        - "() { (K key, V value) -> boolish } -> self?"
+        rbs_at: references/rbs/core/hash.rbs:1244
       filter:
         source: c
         cfunc: rb_hash_select
         arity: 0
-        defined_at: references/ruby/hash.c:7402
-        c_body_at: references/ruby/hash.c:2760
+        defined_at: references/ruby/hash.c:7405
+        c_body_at: references/ruby/hash.c:2763
         c_effects: []
         purity: leaf
-        rbs:
-        - "() { (K, V) -> boolish } -> ::Hash[K, V]"
-        - "() -> ::Enumerator[[ K, V ], ::Hash[K, V]]"
-        rbs_at: references/rbs/core/hash.rbs:1203
       filter!:
         source: c
         cfunc: rb_hash_select_bang
         arity: 0
-        defined_at: references/ruby/hash.c:7403
-        c_body_at: references/ruby/hash.c:2794
+        defined_at: references/ruby/hash.c:7406
+        c_body_at: references/ruby/hash.c:2797
         c_effects:
         - mutate
         purity: mutates_self
-        rbs:
-        - "() { (K, V) -> boolish } -> self?"
-        - "() -> ::Enumerator[[ K, V ], self?]"
-        rbs_at: references/rbs/core/hash.rbs:1220
       reject:
         source: c
         cfunc: rb_hash_reject
         arity: 0
-        defined_at: references/ruby/hash.c:7404
-        c_body_at: references/ruby/hash.c:2590
+        defined_at: references/ruby/hash.c:7407
+        c_body_at: references/ruby/hash.c:2593
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Enumerator[[ K, V ], ::Hash[K, V]]"
-        - "() { (K, V) -> boolish } -> ::Hash[K, V]"
-        rbs_at: references/rbs/core/hash.rbs:1564
+        - "() -> Enumerator[[ K, V ], Hash[K, V]]"
+        - "() { (K key, V value) -> boolish } -> Hash[K, V]"
+        rbs_at: references/rbs/core/hash.rbs:1593
       reject!:
         source: c
         cfunc: rb_hash_reject_bang
         arity: 0
-        defined_at: references/ruby/hash.c:7405
-        c_body_at: references/ruby/hash.c:2557
+        defined_at: references/ruby/hash.c:7408
+        c_body_at: references/ruby/hash.c:2560
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() -> ::Enumerator[[ K, V ], self?]"
-        - "() { (K, V) -> boolish } -> self?"
-        rbs_at: references/rbs/core/hash.rbs:1585
+        - "() -> Enumerator[[ K, V ], self?]"
+        - "() { (K key, V value) -> boolish } -> self?"
+        rbs_at: references/rbs/core/hash.rbs:1614
       slice:
         source: c
         cfunc: rb_hash_slice
         arity: -1
-        defined_at: references/ruby/hash.c:7406
-        c_body_at: references/ruby/hash.c:2617
+        defined_at: references/ruby/hash.c:7409
+        c_body_at: references/ruby/hash.c:2620
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(*K) -> ::Hash[K, V]"
-        rbs_at: references/rbs/core/hash.rbs:1685
+        - "[K2 < _Key] (*K2 keys) -> Hash[K2, V]"
+        rbs_at: references/rbs/core/hash.rbs:1703
       except:
         source: c
         cfunc: rb_hash_except
         arity: -1
-        defined_at: references/ruby/hash.c:7407
-        c_body_at: references/ruby/hash.c:2652
+        defined_at: references/ruby/hash.c:7410
+        c_body_at: references/ruby/hash.c:2655
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(*K) -> ::Hash[K, V]"
-        rbs_at: references/rbs/core/hash.rbs:1135
+        - "(*_Key keys) -> Hash[K, V]"
+        rbs_at: references/rbs/core/hash.rbs:1151
       clear:
         source: c
         cfunc: rb_hash_clear
         arity: 0
-        defined_at: references/ruby/hash.c:7408
-        c_body_at: references/ruby/hash.c:2851
+        defined_at: references/ruby/hash.c:7411
+        c_body_at: references/ruby/hash.c:2854
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/hash.rbs:769
+        rbs_at: references/rbs/core/hash.rbs:783
       invert:
         source: c
         cfunc: rb_hash_invert
         arity: 0
-        defined_at: references/ruby/hash.c:7409
-        c_body_at: references/ruby/hash.c:4106
+        defined_at: references/ruby/hash.c:7412
+        c_body_at: references/ruby/hash.c:4109
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Hash[V, K]"
-        rbs_at: references/rbs/core/hash.rbs:1346
+        - "() -> Hash[V, K]"
+        rbs_at: references/rbs/core/hash.rbs:1370
       update:
         source: c
         cfunc: rb_hash_update
         arity: -1
-        defined_at: references/ruby/hash.c:7410
-        c_body_at: references/ruby/hash.c:4229
+        defined_at: references/ruby/hash.c:7413
+        c_body_at: references/ruby/hash.c:4232
         c_effects:
         - block
         - mutate
@@ -621,259 +622,259 @@ classes:
         source: c
         cfunc: rb_hash_replace
         arity: 1
-        defined_at: references/ruby/hash.c:7411
-        c_body_at: references/ruby/hash.c:2966
+        defined_at: references/ruby/hash.c:7414
+        c_body_at: references/ruby/hash.c:2969
         c_effects:
         - mutate
         - raises
         purity: mutates_self
         rbs:
-        - "(Hash[K, V]) -> self"
-        rbs_at: references/rbs/core/hash.rbs:1605
+        - "(hash[K, V] other) -> self"
+        rbs_at: references/rbs/core/hash.rbs:1634
       merge!:
         source: c
         cfunc: rb_hash_update
         arity: -1
-        defined_at: references/ruby/hash.c:7412
-        c_body_at: references/ruby/hash.c:4229
+        defined_at: references/ruby/hash.c:7415
+        c_body_at: references/ruby/hash.c:4232
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
-        - "(*::Hash[K, V] other_hashes) -> self"
-        - "(*::Hash[K, V] other_hashes) { (K key, V oldval, V newval) -> V } -> self"
-        rbs_at: references/rbs/core/hash.rbs:1514
+        - "(*hash[K, V] other_hashes) -> self"
+        - "(*hash[K, V] other_hashes) { (K key, V oldval, V newval) -> V } -> self"
+        rbs_at: references/rbs/core/hash.rbs:1541
       merge:
         source: c
         cfunc: rb_hash_merge
         arity: -1
-        defined_at: references/ruby/hash.c:7413
-        c_body_at: references/ruby/hash.c:4340
+        defined_at: references/ruby/hash.c:7416
+        c_body_at: references/ruby/hash.c:4343
         c_effects: []
         purity: leaf
         rbs:
-        - "[A, B] (*::Hash[A, B] other_hashes) -> ::Hash[A | K, B | V]"
-        - "[A, B, C] (*::Hash[A, B] other_hashes) { (K key, V oldval, B newval) ->
-          C } -> ::Hash[A | K, B | V | C]"
-        rbs_at: references/rbs/core/hash.rbs:1470
+        - "[A, B] (*hash[A, B] other_hashes) -> Hash[A | K, B | V]"
+        - "[A, B, C] (*hash[A, B] other_hashes) { (K key, V oldval, B newval) -> C
+          } -> Hash[A | K, B | V | C]"
+        rbs_at: references/rbs/core/hash.rbs:1497
       assoc:
         source: c
         cfunc: rb_hash_assoc
         arity: 1
-        defined_at: references/ruby/hash.c:7414
-        c_body_at: references/ruby/hash.c:4393
+        defined_at: references/ruby/hash.c:7417
+        c_body_at: references/ruby/hash.c:4396
         c_effects: []
         purity: leaf
         rbs:
-        - "(K arg0) -> [ K, V ]?"
-        rbs_at: references/rbs/core/hash.rbs:759
+        - "(_Equals key) -> [ K, V ]?"
+        rbs_at: references/rbs/core/hash.rbs:773
       rassoc:
         source: c
         cfunc: rb_hash_rassoc
         arity: 1
-        defined_at: references/ruby/hash.c:7415
-        c_body_at: references/ruby/hash.c:4457
+        defined_at: references/ruby/hash.c:7418
+        c_body_at: references/ruby/hash.c:4460
         c_effects: []
         purity: leaf
         rbs:
-        - "(V) -> [ K, V ]?"
-        rbs_at: references/rbs/core/hash.rbs:1532
+        - "(_Equals value) -> [ K, V ]?"
+        rbs_at: references/rbs/core/hash.rbs:1559
       flatten:
         source: c
         cfunc: rb_hash_flatten
         arity: -1
-        defined_at: references/ruby/hash.c:7416
-        c_body_at: references/ruby/hash.c:4516
+        defined_at: references/ruby/hash.c:7419
+        c_body_at: references/ruby/hash.c:4519
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
-        - "() -> ::Array[K | V]"
-        - "(1 level) -> ::Array[K | V]"
-        - "(Integer level) -> Array[untyped]"
-        rbs_at: references/rbs/core/hash.rbs:1257
+        - "(?1 level) -> Array[K | V]"
+        - "(0 level) -> Array[[ K, V ]]"
+        - "(int level) -> Array[untyped]"
+        rbs_at: references/rbs/core/hash.rbs:1281
       compact:
         source: c
         cfunc: rb_hash_compact
         arity: 0
-        defined_at: references/ruby/hash.c:7417
-        c_body_at: references/ruby/hash.c:4570
+        defined_at: references/ruby/hash.c:7420
+        c_body_at: references/ruby/hash.c:4573
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Hash[K, V]"
-        rbs_at: references/rbs/core/hash.rbs:782
+        - "() -> instance"
+        rbs_at: references/rbs/core/hash.rbs:796
       compact!:
         source: c
         cfunc: rb_hash_compact_bang
         arity: 0
-        defined_at: references/ruby/hash.c:7418
-        c_body_at: references/ruby/hash.c:4600
+        defined_at: references/ruby/hash.c:7421
+        c_body_at: references/ruby/hash.c:4603
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
         - "() -> self?"
-        rbs_at: references/rbs/core/hash.rbs:798
+        rbs_at: references/rbs/core/hash.rbs:812
       include?:
         source: c
         cfunc: rb_hash_has_key
         arity: 1
-        defined_at: references/ruby/hash.c:7420
-        c_body_at: references/ruby/hash.c:3859
+        defined_at: references/ruby/hash.c:7423
+        c_body_at: references/ruby/hash.c:3862
         c_effects: []
         purity: leaf
       member?:
         source: c
         cfunc: rb_hash_has_key
         arity: 1
-        defined_at: references/ruby/hash.c:7421
-        c_body_at: references/ruby/hash.c:3859
+        defined_at: references/ruby/hash.c:7424
+        c_body_at: references/ruby/hash.c:3862
         c_effects: []
         purity: leaf
       has_key?:
         source: c
         cfunc: rb_hash_has_key
         arity: 1
-        defined_at: references/ruby/hash.c:7422
-        c_body_at: references/ruby/hash.c:3859
+        defined_at: references/ruby/hash.c:7425
+        c_body_at: references/ruby/hash.c:3862
         c_effects: []
         purity: leaf
         rbs:
-        - "(_Key) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:1270
+        - "(_Key key) -> bool"
+        rbs_at: references/rbs/core/hash.rbs:1294
       has_value?:
         source: c
         cfunc: rb_hash_has_value
         arity: 1
-        defined_at: references/ruby/hash.c:7423
-        c_body_at: references/ruby/hash.c:3886
+        defined_at: references/ruby/hash.c:7426
+        c_body_at: references/ruby/hash.c:3889
         c_effects: []
         purity: leaf
         rbs:
-        - "(top arg0) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:1280
+        - "(top value) -> bool"
+        rbs_at: references/rbs/core/hash.rbs:1304
       key?:
         source: c
         cfunc: rb_hash_has_key
         arity: 1
-        defined_at: references/ruby/hash.c:7424
-        c_body_at: references/ruby/hash.c:3859
+        defined_at: references/ruby/hash.c:7427
+        c_body_at: references/ruby/hash.c:3862
         c_effects: []
         purity: leaf
       value?:
         source: c
         cfunc: rb_hash_has_value
         arity: 1
-        defined_at: references/ruby/hash.c:7425
-        c_body_at: references/ruby/hash.c:3886
+        defined_at: references/ruby/hash.c:7428
+        c_body_at: references/ruby/hash.c:3889
         c_effects: []
         purity: leaf
       compare_by_identity:
         source: c
         cfunc: rb_hash_compare_by_id
         arity: 0
-        defined_at: references/ruby/hash.c:7427
-        c_body_at: references/ruby/hash.c:4640
+        defined_at: references/ruby/hash.c:7430
+        c_body_at: references/ruby/hash.c:4643
         c_effects:
         - mutate
         - raises
         purity: mutates_self
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/hash.rbs:825
+        rbs_at: references/rbs/core/hash.rbs:839
       compare_by_identity?:
         source: c
         cfunc: rb_hash_compare_by_id_p
         arity: 0
-        defined_at: references/ruby/hash.c:7428
-        c_body_at: references/ruby/hash.c:4695
+        defined_at: references/ruby/hash.c:7431
+        c_body_at: references/ruby/hash.c:4698
         c_effects: []
         purity: leaf
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/hash.rbs:841
+        rbs_at: references/rbs/core/hash.rbs:855
       any?:
         source: c
         cfunc: rb_hash_any_p
         arity: -1
-        defined_at: references/ruby/hash.c:7430
-        c_body_at: references/ruby/hash.c:4796
+        defined_at: references/ruby/hash.c:7433
+        c_body_at: references/ruby/hash.c:4799
         c_effects:
         - block
         purity: block_dependent
         rbs:
         - "() -> bool"
-        - "(untyped pattern) -> bool"
-        - "() { (K, V) -> boolish } -> bool"
-        rbs_at: references/rbs/core/hash.rbs:741
+        - "(Enumerable::_Pattern pattern) -> bool"
+        - "() { ([ K, V ] pair) -> boolish } -> bool"
+        rbs_at: references/rbs/core/hash.rbs:755
       dig:
         source: c
         cfunc: rb_hash_dig
         arity: -1
-        defined_at: references/ruby/hash.c:7431
-        c_body_at: references/ruby/hash.c:4860
+        defined_at: references/ruby/hash.c:7434
+        c_body_at: references/ruby/hash.c:4863
         c_effects: []
         purity: leaf
         rbs:
-        - "(K, *untyped) -> untyped"
-        rbs_at: references/rbs/core/hash.rbs:1000
+        - "(_Key key, *untyped identifiers) -> untyped"
+        rbs_at: references/rbs/core/hash.rbs:1016
       "<=":
         source: c
         cfunc: rb_hash_le
         arity: 1
-        defined_at: references/ruby/hash.c:7433
-        c_body_at: references/ruby/hash.c:4908
+        defined_at: references/ruby/hash.c:7436
+        c_body_at: references/ruby/hash.c:4911
         c_effects: []
         purity: leaf
         rbs:
-        - "[A, B] (::Hash[A, B]) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:580
+        - "(hash[untyped, untyped] other_hash) -> bool"
+        rbs_at: references/rbs/core/hash.rbs:594
       "<":
         source: c
         cfunc: rb_hash_lt
         arity: 1
-        defined_at: references/ruby/hash.c:7434
-        c_body_at: references/ruby/hash.c:4936
+        defined_at: references/ruby/hash.c:7437
+        c_body_at: references/ruby/hash.c:4939
         c_effects: []
         purity: leaf
         rbs:
-        - "[A, B] (::Hash[A, B]) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:559
+        - "(hash[untyped, untyped] other_hash) -> bool"
+        rbs_at: references/rbs/core/hash.rbs:573
       ">=":
         source: c
         cfunc: rb_hash_ge
         arity: 1
-        defined_at: references/ruby/hash.c:7435
-        c_body_at: references/ruby/hash.c:4963
+        defined_at: references/ruby/hash.c:7438
+        c_body_at: references/ruby/hash.c:4966
         c_effects: []
         purity: leaf
         rbs:
-        - "[A, B] (::Hash[A, B]) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:654
+        - "(hash[untyped, untyped] other_hash) -> bool"
+        rbs_at: references/rbs/core/hash.rbs:668
       ">":
         source: c
         cfunc: rb_hash_gt
         arity: 1
-        defined_at: references/ruby/hash.c:7436
-        c_body_at: references/ruby/hash.c:4992
+        defined_at: references/ruby/hash.c:7439
+        c_body_at: references/ruby/hash.c:4995
         c_effects: []
         purity: leaf
         rbs:
-        - "[A, B] (::Hash[A, B]) -> bool"
-        rbs_at: references/rbs/core/hash.rbs:632
+        - "(hash[untyped, untyped] other_hash) -> bool"
+        rbs_at: references/rbs/core/hash.rbs:646
       deconstruct_keys:
         source: c
         cfunc: rb_hash_deconstruct_keys
         arity: 1
-        defined_at: references/ruby/hash.c:7438
-        c_body_at: references/ruby/hash.c:5029
+        defined_at: references/ruby/hash.c:7441
+        c_body_at: references/ruby/hash.c:5032
         c_effects: []
         purity: leaf
         rbs:
-        - "(Array[K] | nil) -> self"
-        rbs_at: references/rbs/core/hash.rbs:848
+        - "(untyped) -> self"
+        rbs_at: references/rbs/core/hash.rbs:862
       initialize:
         source: prelude
         prelude_attrs: []
@@ -885,43 +886,42 @@ classes:
         cfunc:
         defined_at: references/ruby/hash.rb:37
         rbs:
-        - "(?capacity: int) -> void"
-        - "(V default, ?capacity: int) -> void"
-        - "(?capacity: int) { (Hash[K, V] hash, K key) -> V } -> void"
-        rbs_at: references/rbs/core/hash.rbs:2142
+        - "(?V default_value, ?capacity: int) -> void"
+        - "(?capacity: int) { (instance hash, _Key key) -> V } -> void"
+        rbs_at: references/rbs/core/hash.rbs:2159
     singleton_methods:
       "[]":
         source: c
         cfunc: rb_hash_s_create
         arity: -1
-        defined_at: references/ruby/hash.c:7352
+        defined_at: references/ruby/hash.c:7355
         c_body_at: references/ruby/hash.c:1787
         c_effects:
         - mutate
         - raises
         purity: mutates_self
         rbs:
-        - "[U, V] (_ToHash[U, V]) -> ::Hash[U, V]"
-        - "[U, V] (Array[[ U, V ]]) -> ::Hash[U, V]"
-        - "(*untyped) -> ::Hash[untyped, untyped]"
-        rbs_at: references/rbs/core/hash.rbs:517
+        - "[K, V] (hash[K, V] hash) -> instance"
+        - "[K, V] (array[_Pair[K, V]] two_element_arrays) -> instance"
+        - "[T] (*T objects) -> Hash[T, T]"
+        rbs_at: references/rbs/core/hash.rbs:531
       try_convert:
         source: c
         cfunc: rb_hash_s_try_convert
         arity: 1
-        defined_at: references/ruby/hash.c:7353
+        defined_at: references/ruby/hash.c:7356
         c_body_at: references/ruby/hash.c:1874
         c_effects: []
         purity: leaf
         rbs:
-        - "[U, V] (_ToHash[U, V]) -> ::Hash[U, V]"
-        - "(untyped) -> (::Hash[untyped, untyped] | nil)"
-        rbs_at: references/rbs/core/hash.rbs:534
+        - "[K, V] (hash[K, V] hash) -> Hash[K, V]"
+        - "(untyped) -> Hash[untyped, untyped]?"
+        rbs_at: references/rbs/core/hash.rbs:548
       ruby2_keywords_hash?:
         source: c
         cfunc: rb_hash_s_ruby2_keywords_hash_p
         arity: 1
-        defined_at: references/ruby/hash.c:7440
+        defined_at: references/ruby/hash.c:7443
         c_body_at: references/ruby/hash.c:1895
         c_effects: []
         purity: leaf
@@ -929,7 +929,7 @@ classes:
         source: c
         cfunc: rb_hash_s_ruby2_keywords_hash
         arity: 1
-        defined_at: references/ruby/hash.c:7441
+        defined_at: references/ruby/hash.c:7444
         c_body_at: references/ruby/hash.c:1917
         c_effects: []
         purity: leaf

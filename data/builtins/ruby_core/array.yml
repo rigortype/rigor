@@ -20,30 +20,30 @@ purity_levels:
 classes:
   Array:
     parent: Object
-    defined_at: references/ruby/array.c:8865
+    defined_at: references/ruby/array.c:8870
     includes:
     - module: Enumerable
-      defined_at: references/ruby/array.c:8866
+      defined_at: references/ruby/array.c:8871
     constants: {}
     aliases:
       to_s:
         old: inspect
         source: c
-        defined_at: references/ruby/array.c:8876
+        defined_at: references/ruby/array.c:8881
       append:
         old: push
         source: c
-        defined_at: references/ruby/array.c:8896
+        defined_at: references/ruby/array.c:8901
       prepend:
         old: unshift
         source: c
-        defined_at: references/ruby/array.c:8900
+        defined_at: references/ruby/array.c:8905
     instance_methods:
       initialize:
         source: c
         cfunc: rb_ary_initialize
         arity: -1
-        defined_at: references/ruby/array.c:8872
+        defined_at: references/ruby/array.c:8877
         c_body_at: references/ruby/array.c:1147
         c_effects:
         - block
@@ -52,51 +52,48 @@ classes:
         purity: block_dependent
         rbs:
         - "() -> void"
-        - "(::Array[Elem] ary) -> void"
-        - "(int size, ?Elem val) -> void"
-        - "(int size) { (::Integer index) -> Elem } -> void"
-        rbs_at: references/rbs/core/array.rbs:606
+        - "(array[E] array) -> void"
+        - "(int size, ?E default_value) -> void"
+        - "(int size) { (Integer index) -> E } -> void"
+        rbs_at: references/rbs/core/array.rbs:612
       initialize_copy:
         source: c
         cfunc: rb_ary_replace
         arity: 1
-        defined_at: references/ruby/array.c:8873
+        defined_at: references/ruby/array.c:8878
         c_body_at: references/ruby/array.c:4796
         c_effects:
         - mutate
         purity: mutates_self
-        rbs:
-        - "(self other_ary) -> void"
-        rbs_at: references/rbs/core/array.rbs:4133
       inspect:
         source: c
         cfunc: rb_ary_inspect
         arity: 0
-        defined_at: references/ruby/array.c:8875
+        defined_at: references/ruby/array.c:8880
         c_body_at: references/ruby/array.c:3118
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> String"
-        rbs_at: references/rbs/core/array.rbs:2296
+        rbs_at: references/rbs/core/array.rbs:2337
       to_a:
         source: c
         cfunc: rb_ary_to_a
         arity: 0
-        defined_at: references/ruby/array.c:8877
+        defined_at: references/ruby/array.c:8882
         c_body_at: references/ruby/array.c:3148
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3738
+        - "() -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3795
       to_h:
         source: c
         cfunc: rb_ary_to_h
         arity: 0
-        defined_at: references/ruby/array.c:8878
+        defined_at: references/ruby/array.c:8883
         c_body_at: references/ruby/array.c:3184
         c_effects:
         - block
@@ -105,296 +102,294 @@ classes:
         purity: block_dependent
         rbs:
         - "() -> Hash[untyped, untyped]"
-        - "[T, S] () { (Elem) -> [ T, S ] } -> Hash[T, S]"
-        rbs_at: references/rbs/core/array.rbs:3772
+        - "[K, V] () { (E element) -> Hash::_Pair[K, V] } -> Hash[K, V]"
+        rbs_at: references/rbs/core/array.rbs:3829
       to_ary:
         source: c
         cfunc: rb_ary_to_ary_m
         arity: 0
-        defined_at: references/ruby/array.c:8879
+        defined_at: references/ruby/array.c:8884
         c_body_at: references/ruby/array.c:3215
         c_effects: []
         purity: leaf
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/array.rbs:3746
+        rbs_at: references/rbs/core/array.rbs:3803
       "==":
         source: c
         cfunc: rb_ary_equal
         arity: 1
-        defined_at: references/ruby/array.c:8881
+        defined_at: references/ruby/array.c:8886
         c_body_at: references/ruby/array.c:5382
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(untyped other) -> bool"
-        rbs_at: references/rbs/core/array.rbs:797
+        rbs_at: references/rbs/core/array.rbs:805
       eql?:
         source: c
         cfunc: rb_ary_eql
         arity: 1
-        defined_at: references/ruby/array.c:8882
+        defined_at: references/ruby/array.c:8887
         c_body_at: references/ruby/array.c:5429
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(untyped other) -> bool"
-        rbs_at: references/rbs/core/array.rbs:1730
+        rbs_at: references/rbs/core/array.rbs:1755
       hash:
         source: c
         cfunc: rb_ary_hash
         arity: 0
-        defined_at: references/ruby/array.c:8883
+        defined_at: references/ruby/array.c:8888
         c_body_at: references/ruby/array.c:5481
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Integer"
-        rbs_at: references/rbs/core/array.rbs:2203
+        - "() -> Integer"
+        rbs_at: references/rbs/core/array.rbs:2244
       "[]":
         source: c
         cfunc: rb_ary_aref
         arity: -1
-        defined_at: references/ruby/array.c:8885
+        defined_at: references/ruby/array.c:8890
         c_body_at: references/ruby/array.c:1913
         c_effects: []
         purity: leaf
         rbs:
-        - "(int index) -> Elem"
-        - "(int start, int length) -> ::Array[Elem]?"
-        - "(::Range[::Integer?] range) -> ::Array[Elem]?"
-        rbs_at: references/rbs/core/array.rbs:921
+        - "(int index) -> E"
+        - "(int start, int length) -> Array[E]?"
+        - "(range[int] range) -> Array[E]?"
+        rbs_at: references/rbs/core/array.rbs:929
       "[]=":
         source: c
         cfunc: rb_ary_aset
         arity: -1
-        defined_at: references/ruby/array.c:8886
+        defined_at: references/ruby/array.c:8891
         c_body_at: references/ruby/array.c:2607
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(int index, Elem obj) -> Elem"
-        - "(int start, int length, Elem obj) -> Elem"
-        - "(int start, int length, ::Array[Elem]) -> ::Array[Elem]"
-        - "(int start, int length, nil) -> nil"
-        - "(::Range[::Integer?], Elem obj) -> Elem"
-        - "(::Range[::Integer?], ::Array[Elem]) -> ::Array[Elem]"
-        - "(::Range[::Integer?], nil) -> nil"
-        rbs_at: references/rbs/core/array.rbs:1071
+        - "(int index, E object) -> E"
+        - "[T < _ToAry[E]] (range[int?] range, T array) -> T"
+        - "(range[int?] range, E object) -> E"
+        - "[T < _ToAry[E]] (int start, int length, T array) -> T"
+        - "(int start, int length, E object) -> E"
+        rbs_at: references/rbs/core/array.rbs:1079
       at:
         source: c
         cfunc: rb_ary_at
         arity: 1
-        defined_at: references/ruby/array.c:8887
+        defined_at: references/ruby/array.c:8892
         c_body_at: references/ruby/array.c:1980
         c_effects: []
         purity: leaf
         rbs:
-        - "(int index) -> Elem"
-        rbs_at: references/rbs/core/array.rbs:1214
+        - "(int index) -> E"
+        rbs_at: references/rbs/core/array.rbs:1222
       fetch:
         source: c
         cfunc: rb_ary_fetch
         arity: -1
-        defined_at: references/ruby/array.c:8888
+        defined_at: references/ruby/array.c:8893
         c_body_at: references/ruby/array.c:2064
         c_effects:
         - block
         - raises
         purity: block_dependent
         rbs:
-        - "(int index) -> Elem"
-        - "[T] (int index, T default) -> (Elem | T)"
-        - "[T] (int index) { (int index) -> T } -> (Elem | T)"
-        rbs_at: references/rbs/core/array.rbs:1772
+        - "(int index) -> E"
+        - "[T] (int index, T default) -> (E | T)"
+        - "[I < _ToInt, T] (I index) { (I index) -> T } -> (E | T)"
+        rbs_at: references/rbs/core/array.rbs:1797
       concat:
         source: c
         cfunc: rb_ary_concat_multi
         arity: -1
-        defined_at: references/ruby/array.c:8889
+        defined_at: references/ruby/array.c:8894
         c_body_at: references/ruby/array.c:5171
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(*::Array[Elem] arrays) -> self"
-        rbs_at: references/rbs/core/array.rbs:1392
+        - "(*array[E] other_arrays) -> self"
+        rbs_at: references/rbs/core/array.rbs:1401
       union:
         source: c
         cfunc: rb_ary_union_multi
         arity: -1
-        defined_at: references/ruby/array.c:8890
+        defined_at: references/ruby/array.c:8895
         c_body_at: references/ruby/array.c:5938
         c_effects: []
         purity: leaf
         rbs:
-        - "[T] (*::Array[T] other_arys) -> ::Array[T | Elem]"
-        rbs_at: references/rbs/core/array.rbs:3823
+        - "[T] (*array[T] other_arrays) -> Array[T | E]"
+        rbs_at: references/rbs/core/array.rbs:3880
       difference:
         source: c
         cfunc: rb_ary_difference_multi
         arity: -1
-        defined_at: references/ruby/array.c:8891
+        defined_at: references/ruby/array.c:8896
         c_body_at: references/ruby/array.c:5721
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(*::Array[untyped] arrays) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:1571
+        - "(*array[untyped] other_arrays) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:1596
       intersection:
         source: c
         cfunc: rb_ary_intersection_multi
         arity: -1
-        defined_at: references/ruby/array.c:8892
+        defined_at: references/ruby/array.c:8897
         c_body_at: references/ruby/array.c:5837
         c_effects: []
         purity: leaf
         rbs:
-        - "(*::Array[untyped] | _ToAry[untyped] other_ary) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:2334
+        - "(*array[untyped] other_arrays) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:2375
       intersect?:
         source: c
         cfunc: rb_ary_intersect_p
         arity: 1
-        defined_at: references/ruby/array.c:8893
+        defined_at: references/ruby/array.c:8898
         c_body_at: references/ruby/array.c:5980
         c_effects: []
         purity: leaf
         rbs:
-        - "(_ToAry[untyped]) -> bool"
-        rbs_at: references/rbs/core/array.rbs:2312
+        - "(array[untyped] other_array) -> bool"
+        rbs_at: references/rbs/core/array.rbs:2353
       !!str '<<':
         source: c
         cfunc: rb_ary_push
         arity: 1
-        defined_at: references/ruby/array.c:8894
+        defined_at: references/ruby/array.c:8899
         c_body_at: references/ruby/array.c:1400
         c_effects: []
         purity: leaf
         rbs:
-        - "(Elem) -> self"
-        rbs_at: references/rbs/core/array.rbs:734
+        - "(E object) -> self"
+        rbs_at: references/rbs/core/array.rbs:742
       push:
         source: c
         cfunc: rb_ary_push_m
         arity: -1
-        defined_at: references/ruby/array.c:8895
+        defined_at: references/ruby/array.c:8900
         c_body_at: references/ruby/array.c:1441
         c_effects: []
         purity: leaf
         rbs:
-        - "(*Elem obj) -> self"
-        rbs_at: references/rbs/core/array.rbs:2828
+        - "(*E objects) -> self"
+        rbs_at: references/rbs/core/array.rbs:2885
       pop:
         source: c
         cfunc: rb_ary_pop_m
         arity: -1
-        defined_at: references/ruby/array.c:8897
+        defined_at: references/ruby/array.c:8902
         c_body_at: references/ruby/array.c:1498
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() -> Elem?"
-        - "(int n) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:2739
+        - "() -> E?"
+        - "(int count) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:2792
       shift:
         source: c
         cfunc: rb_ary_shift_m
         arity: -1
-        defined_at: references/ruby/array.c:8898
+        defined_at: references/ruby/array.c:8903
         c_body_at: references/ruby/array.c:1570
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() -> Elem"
-        - "(int n) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3294
+        - "() -> E"
+        - "(int count) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3351
       unshift:
         source: c
         cfunc: rb_ary_unshift_m
         arity: -1
-        defined_at: references/ruby/array.c:8899
+        defined_at: references/ruby/array.c:8904
         c_body_at: references/ruby/array.c:1720
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(*Elem obj) -> self"
-        rbs_at: references/rbs/core/array.rbs:3894
+        - "(*E objects) -> self"
+        rbs_at: references/rbs/core/array.rbs:3951
       insert:
         source: c
         cfunc: rb_ary_insert
         arity: -1
-        defined_at: references/ruby/array.c:8901
+        defined_at: references/ruby/array.c:8906
         c_body_at: references/ruby/array.c:2668
         c_effects:
         - mutate
         - raises
         purity: mutates_self
         rbs:
-        - "(int index, *Elem obj) -> self"
-        rbs_at: references/rbs/core/array.rbs:2281
+        - "(int index, *E objects) -> self"
+        rbs_at: references/rbs/core/array.rbs:2322
       each:
         source: c
         cfunc: rb_ary_each
         arity: 0
-        defined_at: references/ruby/array.c:8902
+        defined_at: references/ruby/array.c:8907
         c_body_at: references/ruby/array.c:2748
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() -> ::Enumerator[Elem, self]"
-        - "() { (Elem item) -> void } -> self"
-        rbs_at: references/rbs/core/array.rbs:1664
+        - "() { (E element) -> void } -> self"
+        - "() -> Enumerator[E, self]"
+        rbs_at: references/rbs/core/array.rbs:1689
       each_index:
         source: c
         cfunc: rb_ary_each_index
         arity: 0
-        defined_at: references/ruby/array.c:8903
+        defined_at: references/ruby/array.c:8908
         c_body_at: references/ruby/array.c:2794
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() { (::Integer index) -> void } -> self"
-        - "() -> ::Enumerator[::Integer, self]"
-        rbs_at: references/rbs/core/array.rbs:1699
+        - "() { (Integer index) -> void } -> self"
+        - "() -> Enumerator[Integer, self]"
+        rbs_at: references/rbs/core/array.rbs:1724
       reverse_each:
         source: c
         cfunc: rb_ary_reverse_each
         arity: 0
-        defined_at: references/ruby/array.c:8904
+        defined_at: references/ruby/array.c:8909
         c_body_at: references/ruby/array.c:2830
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() { (Elem item) -> void } -> self"
-        - "() -> ::Enumerator[Elem, self]"
-        rbs_at: references/rbs/core/array.rbs:3029
+        - "() { (E element) -> void } -> self"
+        - "() -> Enumerator[E, self]"
+        rbs_at: references/rbs/core/array.rbs:3086
       length:
         source: c
         cfunc: rb_ary_length
         arity: 0
-        defined_at: references/ruby/array.c:8905
+        defined_at: references/ruby/array.c:8910
         c_body_at: references/ruby/array.c:2692
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Integer"
-        rbs_at: references/rbs/core/array.rbs:2426
+        - "() -> Integer"
+        rbs_at: references/rbs/core/array.rbs:2467
       size:
         source: c
         cfunc: rb_ary_length
         arity: 0
-        defined_at: references/ruby/array.c:8906
+        defined_at: references/ruby/array.c:8911
         c_body_at: references/ruby/array.c:2692
         c_effects: []
         purity: leaf
@@ -402,35 +397,34 @@ classes:
         source: c
         cfunc: rb_ary_empty_p
         arity: 0
-        defined_at: references/ruby/array.c:8907
+        defined_at: references/ruby/array.c:8912
         c_body_at: references/ruby/array.c:2878
         c_effects: []
         purity: leaf
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/array.rbs:1710
+        rbs_at: references/rbs/core/array.rbs:1735
       find:
         source: c
         cfunc: rb_ary_find
         arity: -1
-        defined_at: references/ruby/array.c:8908
+        defined_at: references/ruby/array.c:8913
         c_body_at: references/ruby/array.c:2112
         c_effects:
         - block
         - dispatch
         purity: block_dependent
         rbs:
-        - "() { (Elem) -> boolish } -> Elem?"
-        - "() -> ::Enumerator[Elem, Elem?]"
-        - "[T] (Enumerable::_NotFound[T] ifnone) { (Elem) -> boolish } -> (Elem |
-          T)"
-        - "[T] (Enumerable::_NotFound[T] ifnone) -> ::Enumerator[Elem, Elem | T]"
-        rbs_at: references/rbs/core/array.rbs:2050
+        - "() { (E) -> boolish } -> E?"
+        - "() -> Enumerator[E, E?]"
+        - "[T] (Enumerable::_NotFound[T]? ifnone) { (E) -> boolish } -> (E | T)"
+        - "[T] (Enumerable::_NotFound[T]? ifnone) -> Enumerator[E, E | T]"
+        rbs_at: references/rbs/core/array.rbs:2073
       detect:
         source: c
         cfunc: rb_ary_find
         arity: -1
-        defined_at: references/ruby/array.c:8909
+        defined_at: references/ruby/array.c:8914
         c_body_at: references/ruby/array.c:2112
         c_effects:
         - block
@@ -440,39 +434,38 @@ classes:
         source: c
         cfunc: rb_ary_rfind
         arity: -1
-        defined_at: references/ruby/array.c:8910
+        defined_at: references/ruby/array.c:8915
         c_body_at: references/ruby/array.c:2155
         c_effects:
         - block
         - dispatch
         purity: block_dependent
         rbs:
-        - "() { (Elem) -> boolish } -> Elem?"
-        - "() -> ::Enumerator[Elem, Elem?]"
-        - "[T] (Enumerable::_NotFound[T] ifnone) { (Elem) -> boolish } -> (Elem |
-          T)"
-        - "[T] (Enumerable::_NotFound[T] ifnone) -> ::Enumerator[Elem, Elem | T]"
-        rbs_at: references/rbs/core/array.rbs:3052
+        - "() { (E) -> boolish } -> E?"
+        - "() -> Enumerator[E, E?]"
+        - "[T] (Enumerable::_NotFound[T]? ifnone) { (E) -> boolish } -> (E | T)"
+        - "[T] (Enumerable::_NotFound[T]? ifnone) -> Enumerator[E, E | T]"
+        rbs_at: references/rbs/core/array.rbs:3109
       find_index:
         source: c
         cfunc: rb_ary_index
         arity: -1
-        defined_at: references/ruby/array.c:8911
+        defined_at: references/ruby/array.c:8916
         c_body_at: references/ruby/array.c:2215
         c_effects:
         - block
         - dispatch
         purity: block_dependent
         rbs:
-        - "(untyped obj) -> ::Integer?"
-        - "() { (Elem item) -> boolish } -> ::Integer?"
-        - "() -> ::Enumerator[Elem, ::Integer?]"
-        rbs_at: references/rbs/core/array.rbs:2086
+        - "(untyped object) -> Integer?"
+        - "() { (E element) -> boolish } -> Integer?"
+        - "() -> Enumerator[E, Integer?]"
+        rbs_at: references/rbs/core/array.rbs:2109
       index:
         source: c
         cfunc: rb_ary_index
         arity: -1
-        defined_at: references/ruby/array.c:8912
+        defined_at: references/ruby/array.c:8917
         c_body_at: references/ruby/array.c:2215
         c_effects:
         - block
@@ -482,90 +475,91 @@ classes:
         source: c
         cfunc: rb_ary_rindex
         arity: -1
-        defined_at: references/ruby/array.c:8913
+        defined_at: references/ruby/array.c:8918
         c_body_at: references/ruby/array.c:2271
         c_effects:
         - block
         - dispatch
         purity: block_dependent
         rbs:
-        - "(untyped obj) -> ::Integer?"
-        - "() { (Elem item) -> boolish } -> ::Integer?"
-        - "() -> ::Enumerator[Elem, ::Integer?]"
-        rbs_at: references/rbs/core/array.rbs:3086
+        - "(untyped object) -> Integer?"
+        - "() { (E element) -> boolish } -> Integer?"
+        - "() -> Enumerator[E, Integer?]"
+        rbs_at: references/rbs/core/array.rbs:3143
       join:
         source: c
         cfunc: rb_ary_join_m
         arity: -1
-        defined_at: references/ruby/array.c:8914
+        defined_at: references/ruby/array.c:8919
         c_body_at: references/ruby/array.c:3071
         c_effects: []
         purity: leaf
         rbs:
-        - "(?string separator) -> String"
-        rbs_at: references/rbs/core/array.rbs:2366
+        - "(?string? separator) -> String"
+        rbs_at: references/rbs/core/array.rbs:2407
       reverse:
         source: c
         cfunc: rb_ary_reverse_m
         arity: 0
-        defined_at: references/ruby/array.c:8915
+        defined_at: references/ruby/array.c:8920
         c_body_at: references/ruby/array.c:3278
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:2991
+        - "() -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3048
       reverse!:
         source: c
         cfunc: rb_ary_reverse_bang
         arity: 0
-        defined_at: references/ruby/array.c:8916
+        defined_at: references/ruby/array.c:8921
         c_body_at: references/ruby/array.c:3261
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3005
+        - "() -> self"
+        rbs_at: references/rbs/core/array.rbs:3062
       rotate:
         source: c
         cfunc: rb_ary_rotate_m
         arity: -1
-        defined_at: references/ruby/array.c:8917
+        defined_at: references/ruby/array.c:8922
         c_body_at: references/ruby/array.c:3408
         c_effects: []
         purity: leaf
         rbs:
-        - "(?int count) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3123
+        - "(?int count) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3180
       rotate!:
         source: c
         cfunc: rb_ary_rotate_bang
         arity: -1
-        defined_at: references/ruby/array.c:8918
+        defined_at: references/ruby/array.c:8923
         c_body_at: references/ruby/array.c:3367
         c_effects: []
         purity: leaf
         rbs:
         - "(?int count) -> self"
-        rbs_at: references/rbs/core/array.rbs:3158
+        rbs_at: references/rbs/core/array.rbs:3215
       sort:
         source: c
         cfunc: rb_ary_sort
         arity: 0
-        defined_at: references/ruby/array.c:8919
+        defined_at: references/ruby/array.c:8924
         c_body_at: references/ruby/array.c:3601
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() -> ::Array[Elem]"
-        - "() { (Elem a, Elem b) -> ::Integer } -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3598
+        - "() -> Array[E]"
+        - "() { (E a, E b) -> Comparable::_CompareToZero } -> Array[E]"
+        - "() { (E a, E b) -> Comparable::_CompareToZero? } -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3653
       sort!:
         source: c
         cfunc: rb_ary_sort_bang
         arity: 0
-        defined_at: references/ruby/array.c:8920
+        defined_at: references/ruby/array.c:8925
         c_body_at: references/ruby/array.c:3506
         c_effects:
         - block
@@ -573,55 +567,57 @@ classes:
         purity: block_dependent
         rbs:
         - "() -> self"
-        - "() { (Elem a, Elem b) -> ::Integer } -> self"
-        rbs_at: references/rbs/core/array.rbs:3610
+        - "() { (E a, E b) -> Comparable::_CompareToZero } -> self"
+        - "() { (E a, E b) -> Comparable::_CompareToZero? } -> self"
+        rbs_at: references/rbs/core/array.rbs:3666
       sort_by!:
         source: c
         cfunc: rb_ary_sort_by_bang
         arity: 0
-        defined_at: references/ruby/array.c:8921
+        defined_at: references/ruby/array.c:8926
         c_body_at: references/ruby/array.c:3724
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
-        - "[U] () { (Elem obj) -> U } -> ::Array[Elem]"
-        - "() -> ::Enumerator[Elem, ::Array[Elem]]"
-        rbs_at: references/rbs/core/array.rbs:3634
+        - "() { (E element) -> Comparable::_WithSpaceshipOperator } -> self"
+        - "() { (E element) -> Comparable::_WithSpaceshipOperator? } -> self"
+        - "() -> Enumerator[E, self]"
+        rbs_at: references/rbs/core/array.rbs:3691
       collect:
         source: c
         cfunc: rb_ary_collect
         arity: 0
-        defined_at: references/ruby/array.c:8922
+        defined_at: references/ruby/array.c:8927
         c_body_at: references/ruby/array.c:3759
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
-        - "[U] () { (Elem item) -> U } -> ::Array[U]"
-        - "() -> ::Enumerator[Elem, ::Array[untyped]]"
-        rbs_at: references/rbs/core/array.rbs:1279
+        - "[T] () { (E item) -> T } -> Array[T]"
+        - "() -> Enumerator[E, Array[untyped]]"
+        rbs_at: references/rbs/core/array.rbs:1288
       collect!:
         source: c
         cfunc: rb_ary_collect_bang
         arity: 0
-        defined_at: references/ruby/array.c:8923
+        defined_at: references/ruby/array.c:8928
         c_body_at: references/ruby/array.c:3794
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
-        - "() { (Elem item) -> Elem } -> self"
-        - "() -> ::Enumerator[Elem, self]"
-        rbs_at: references/rbs/core/array.rbs:1300
+        - "() { (E element) -> E } -> self"
+        - "() -> Enumerator[E, self]"
+        rbs_at: references/rbs/core/array.rbs:1309
       map:
         source: c
         cfunc: rb_ary_collect
         arity: 0
-        defined_at: references/ruby/array.c:8924
+        defined_at: references/ruby/array.c:8929
         c_body_at: references/ruby/array.c:3759
         c_effects:
         - block
@@ -631,7 +627,7 @@ classes:
         source: c
         cfunc: rb_ary_collect_bang
         arity: 0
-        defined_at: references/ruby/array.c:8925
+        defined_at: references/ruby/array.c:8930
         c_body_at: references/ruby/array.c:3794
         c_effects:
         - block
@@ -641,84 +637,76 @@ classes:
         source: c
         cfunc: rb_ary_select
         arity: 0
-        defined_at: references/ruby/array.c:8926
+        defined_at: references/ruby/array.c:8931
         c_body_at: references/ruby/array.c:4000
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
-        - "() { (Elem item) -> boolish } -> ::Array[Elem]"
-        - "() -> ::Enumerator[Elem, ::Array[Elem]]"
-        rbs_at: references/rbs/core/array.rbs:3231
+        - "() { (E element) -> boolish } -> Array[E]"
+        - "() -> Enumerator[E, Array[E]]"
+        rbs_at: references/rbs/core/array.rbs:3288
       select!:
         source: c
         cfunc: rb_ary_select_bang
         arity: 0
-        defined_at: references/ruby/array.c:8927
+        defined_at: references/ruby/array.c:8932
         c_body_at: references/ruby/array.c:4083
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() { (Elem item) -> boolish } -> self?"
-        - "() -> ::Enumerator[Elem, self?]"
-        rbs_at: references/rbs/core/array.rbs:3255
+        - "() { (E element) -> boolish } -> self?"
+        - "() -> Enumerator[E, self?]"
+        rbs_at: references/rbs/core/array.rbs:3312
       filter:
         source: c
         cfunc: rb_ary_select
         arity: 0
-        defined_at: references/ruby/array.c:8928
+        defined_at: references/ruby/array.c:8933
         c_body_at: references/ruby/array.c:4000
         c_effects:
         - block
         - mutate
         purity: block_dependent
-        rbs:
-        - "() { (Elem item) -> boolish } -> ::Array[Elem]"
-        - "() -> ::Enumerator[Elem, ::Array[Elem]]"
-        rbs_at: references/rbs/core/array.rbs:2010
       filter!:
         source: c
         cfunc: rb_ary_select_bang
         arity: 0
-        defined_at: references/ruby/array.c:8929
+        defined_at: references/ruby/array.c:8934
         c_body_at: references/ruby/array.c:4083
         c_effects:
         - mutate
         purity: mutates_self
-        rbs:
-        - "() { (Elem item) -> boolish } -> self?"
-        - "() -> ::Enumerator[Elem, self?]"
-        rbs_at: references/rbs/core/array.rbs:2028
       keep_if:
         source: c
         cfunc: rb_ary_keep_if
         arity: 0
-        defined_at: references/ruby/array.c:8930
+        defined_at: references/ruby/array.c:8935
         c_body_at: references/ruby/array.c:4112
         c_effects: []
         purity: leaf
         rbs:
-        - "() { (Elem item) -> boolish } -> self"
-        - "() -> ::Enumerator[Elem, self]"
-        rbs_at: references/rbs/core/array.rbs:2383
+        - "() { (E element) -> boolish } -> self"
+        - "() -> Enumerator[E, self]"
+        rbs_at: references/rbs/core/array.rbs:2424
       values_at:
         source: c
         cfunc: rb_ary_values_at
         arity: -1
-        defined_at: references/ruby/array.c:8931
+        defined_at: references/ruby/array.c:8936
         c_body_at: references/ruby/array.c:3967
         c_effects: []
         purity: leaf
         rbs:
-        - "(*int | ::Range[::Integer] selector) -> ::Array[Elem?]"
-        rbs_at: references/rbs/core/array.rbs:4002
+        - "(*int | range[int?] selector) -> Array[E?]"
+        rbs_at: references/rbs/core/array.rbs:4059
       delete:
         source: c
         cfunc: rb_ary_delete
         arity: 1
-        defined_at: references/ruby/array.c:8932
+        defined_at: references/ruby/array.c:8937
         c_body_at: references/ruby/array.c:4170
         c_effects:
         - block
@@ -726,38 +714,38 @@ classes:
         - dispatch
         purity: block_dependent
         rbs:
-        - "(Elem obj) -> Elem?"
-        - "[S, T] (S obj) { (S) -> T } -> (Elem | T)"
-        rbs_at: references/rbs/core/array.rbs:1502
+        - "(untyped object) -> E?"
+        - "[S, T] (S object) { (S object) -> T } -> (E | T)"
+        rbs_at: references/rbs/core/array.rbs:1510
       delete_at:
         source: c
         cfunc: rb_ary_delete_at_m
         arity: 1
-        defined_at: references/ruby/array.c:8933
+        defined_at: references/ruby/array.c:8938
         c_body_at: references/ruby/array.c:4274
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(int index) -> Elem"
-        rbs_at: references/rbs/core/array.rbs:1533
+        - "(int index) -> E"
+        rbs_at: references/rbs/core/array.rbs:1541
       delete_if:
         source: c
         cfunc: rb_ary_delete_if
         arity: 0
-        defined_at: references/ruby/array.c:8934
+        defined_at: references/ruby/array.c:8939
         c_body_at: references/ruby/array.c:4551
         c_effects: []
         purity: leaf
         rbs:
-        - "() { (Elem item) -> boolish } -> self"
-        - "() -> ::Enumerator[Elem, self]"
-        rbs_at: references/rbs/core/array.rbs:1550
+        - "() { (E item) -> boolish } -> self"
+        - "() -> Enumerator[E, self]"
+        rbs_at: references/rbs/core/array.rbs:1558
       reject:
         source: c
         cfunc: rb_ary_reject
         arity: 0
-        defined_at: references/ruby/array.c:8935
+        defined_at: references/ruby/array.c:8940
         c_body_at: references/ruby/array.c:4523
         c_effects: []
         purity: leaf
@@ -765,74 +753,78 @@ classes:
         source: c
         cfunc: rb_ary_reject_bang
         arity: 0
-        defined_at: references/ruby/array.c:8936
+        defined_at: references/ruby/array.c:8941
         c_body_at: references/ruby/array.c:4498
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "() { (Elem item) -> boolish } -> self?"
-        - "() -> ::Enumerator[Elem, self?]"
-        rbs_at: references/rbs/core/array.rbs:2885
+        - "() { (E item) -> boolish } -> self?"
+        - "() -> Enumerator[E, self?]"
+        rbs_at: references/rbs/core/array.rbs:2942
       zip:
         source: c
         cfunc: rb_ary_zip
         arity: -1
-        defined_at: references/ruby/array.c:8937
+        defined_at: references/ruby/array.c:8942
         c_body_at: references/ruby/array.c:4680
         c_effects:
         - block
         - mutate
         purity: block_dependent
         rbs:
-        - "[U] (_Each[U] arg) -> Array[[ Elem, U? ]]"
-        - "(_Each[untyped] arg, *_Each[untyped] args) -> Array[Array[untyped]]"
-        - "[U] (_Each[U] arg) { ([ Elem, U? ]) -> void } -> nil"
-        - "(_Each[untyped] arg, *_Each[untyped] args) { (Array[untyped]) -> void }
-          -> nil"
-        rbs_at: references/rbs/core/array.rbs:4096
+        - "() -> Array[[ E ]]"
+        - "[X] (_Each[X] iterable) -> Array[[ E, X? ]]"
+        - "[X, Y] (_Each[X] iterable1, _Each[Y] iterable2) -> Array[[ E, X?, Y? ]]"
+        - "[U] (*_Each[U] iterables) -> Array[Array[E | U?]]"
+        - "() { ([ E ]) -> void } -> nil"
+        - "[X] (_Each[X] iterable) { ([ E, X? ]) -> void } -> nil"
+        - "[X, Y] (_Each[X] iterable1, _Each[Y] iterable2) { ([ E, X?, Y? ]) -> void
+          } -> nil"
+        - "[U] (*_Each[U] iterables) { (Array[E | U?]) -> void } -> nil"
+        rbs_at: references/rbs/core/array.rbs:4153
       transpose:
         source: c
         cfunc: rb_ary_transpose
         arity: 0
-        defined_at: references/ruby/array.c:8938
+        defined_at: references/ruby/array.c:8943
         c_body_at: references/ruby/array.c:4753
         c_effects:
         - mutate
         - raises
         purity: mutates_self
         rbs:
-        - "() -> ::Array[::Array[untyped]]"
-        rbs_at: references/rbs/core/array.rbs:3800
+        - "() -> Array[Array[untyped]]"
+        rbs_at: references/rbs/core/array.rbs:3857
       replace:
         source: c
         cfunc: rb_ary_replace
         arity: 1
-        defined_at: references/ruby/array.c:8939
+        defined_at: references/ruby/array.c:8944
         c_body_at: references/ruby/array.c:4796
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(::Array[Elem]) -> self"
-        rbs_at: references/rbs/core/array.rbs:2979
+        - "(array[E] other_array) -> self"
+        rbs_at: references/rbs/core/array.rbs:3036
       clear:
         source: c
         cfunc: rb_ary_clear
         arity: 0
-        defined_at: references/ruby/array.c:8940
+        defined_at: references/ruby/array.c:8945
         c_body_at: references/ruby/array.c:4853
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/array.rbs:1258
+        rbs_at: references/rbs/core/array.rbs:1267
       fill:
         source: c
         cfunc: rb_ary_fill
         arity: -1
-        defined_at: references/ruby/array.c:8941
+        defined_at: references/ruby/array.c:8946
         c_body_at: references/ruby/array.c:5052
         c_effects:
         - block
@@ -840,199 +832,207 @@ classes:
         - raises
         purity: block_dependent
         rbs:
-        - "(Elem obj) -> self"
-        - "(Elem obj, int? start, ?int? length) -> self"
-        - "(Elem obj, ::Range[::Integer] range) -> self"
-        - "(?int? start, ?int? length) { (::Integer index) -> Elem } -> self"
-        - "(::Range[::Integer] range) { (::Integer index) -> Elem } -> self"
-        rbs_at: references/rbs/core/array.rbs:1991
+        - "(E object, ?int? start, ?int? length) -> self"
+        - "(E object, range[int?] range) -> self"
+        - "(?int? start, ?int? length) { (Integer index) -> E } -> self"
+        - "(range[int?] range) { (Integer index) -> E } -> self"
+        rbs_at: references/rbs/core/array.rbs:2017
       include?:
         source: c
         cfunc: rb_ary_includes
         arity: 1
-        defined_at: references/ruby/array.c:8942
+        defined_at: references/ruby/array.c:8947
         c_body_at: references/ruby/array.c:5502
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
-        - "(top object) -> bool"
-        rbs_at: references/rbs/core/array.rbs:2218
+        - "(untyped object) -> bool"
+        rbs_at: references/rbs/core/array.rbs:2259
       "<=>":
         source: c
         cfunc: rb_ary_cmp
         arity: 1
-        defined_at: references/ruby/array.c:8943
+        defined_at: references/ruby/array.c:8948
         c_body_at: references/ruby/array.c:5590
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
-        - "(untyped) -> ::Integer?"
-        rbs_at: references/rbs/core/array.rbs:773
+        - "(untyped) -> Integer?"
+        rbs_at: references/rbs/core/array.rbs:781
       slice:
         source: c
         cfunc: rb_ary_aref
         arity: -1
-        defined_at: references/ruby/array.c:8945
+        defined_at: references/ruby/array.c:8950
         c_body_at: references/ruby/array.c:1913
         c_effects: []
         purity: leaf
-        rbs:
-        - "(int index) -> Elem"
-        - "(int start, int length) -> ::Array[Elem]?"
-        - "(::Range[::Integer] range) -> ::Array[Elem]?"
-        rbs_at: references/rbs/core/array.rbs:3467
       slice!:
         source: c
         cfunc: rb_ary_slice_bang
         arity: -1
-        defined_at: references/ruby/array.c:8946
+        defined_at: references/ruby/array.c:8951
         c_body_at: references/ruby/array.c:4402
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(int index) -> Elem"
-        - "(int start, int length) -> ::Array[Elem]?"
-        - "(::Range[::Integer] range) -> ::Array[Elem]?"
-        rbs_at: references/rbs/core/array.rbs:3561
+        - "(int index) -> E"
+        - "(int start, int length) -> Array[E]?"
+        - "(range[int?] range) -> Array[E]?"
+        rbs_at: references/rbs/core/array.rbs:3616
       assoc:
         source: c
         cfunc: rb_ary_assoc
         arity: 1
-        defined_at: references/ruby/array.c:8948
+        defined_at: references/ruby/array.c:8953
         c_body_at: references/ruby/array.c:5276
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
-        - "(untyped) -> ::Array[untyped]?"
-        rbs_at: references/rbs/core/array.rbs:1190
+        - "(untyped object) -> Array[untyped]?"
+        rbs_at: references/rbs/core/array.rbs:1198
       rassoc:
         source: c
         cfunc: rb_ary_rassoc
         arity: 1
-        defined_at: references/ruby/array.c:8949
+        defined_at: references/ruby/array.c:8954
         c_body_at: references/ruby/array.c:5308
         c_effects:
         - dispatch
         purity: dispatch
+        rbs:
+        - "(untyped object) -> Array[untyped]?"
+        rbs_at: references/rbs/core/array.rbs:2903
       "+":
         source: c
         cfunc: rb_ary_plus
         arity: 1
-        defined_at: references/ruby/array.c:8951
+        defined_at: references/ruby/array.c:8956
         c_body_at: references/ruby/array.c:5129
         c_effects: []
         purity: leaf
         rbs:
-        - "[U] (_ToAry[U]) -> ::Array[Elem | U]"
-        rbs_at: references/rbs/core/array.rbs:700
+        - "[U] (array[U] other_array) -> Array[E | U]"
+        rbs_at: references/rbs/core/array.rbs:708
       "*":
         source: c
         cfunc: rb_ary_times
         arity: 1
-        defined_at: references/ruby/array.c:8952
+        defined_at: references/ruby/array.c:8957
         c_body_at: references/ruby/array.c:5216
         c_effects:
         - dispatch
         - raises
         purity: dispatch
         rbs:
-        - "(string str) -> ::String"
-        - "(int int) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:685
+        - "(string string_separator) -> String"
+        - "(int n) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:693
       "-":
         source: c
         cfunc: rb_ary_diff
         arity: 1
-        defined_at: references/ruby/array.c:8954
+        defined_at: references/ruby/array.c:8959
         c_body_at: references/ruby/array.c:5673
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(_ToAry[untyped]) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:718
+        - "(array[untyped] other_array) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:726
       "&":
         source: c
         cfunc: rb_ary_and
         arity: 1
-        defined_at: references/ruby/array.c:8955
+        defined_at: references/ruby/array.c:8960
         c_body_at: references/ruby/array.c:5782
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(::Array[untyped] | _ToAry[untyped]) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:667
+        - "(array[untyped] other_array) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:675
       "|":
         source: c
         cfunc: rb_ary_or
         arity: 1
-        defined_at: references/ruby/array.c:8956
+        defined_at: references/ruby/array.c:8961
         c_body_at: references/ruby/array.c:5896
         c_effects: []
         purity: leaf
         rbs:
-        - "[T] (::Array[T] other_ary) -> ::Array[Elem | T]"
-        rbs_at: references/rbs/core/array.rbs:4114
+        - "[T] (array[T] other_array) -> Array[E | T]"
+        rbs_at: references/rbs/core/array.rbs:4175
       max:
         source: c
         cfunc: rb_ary_max
         arity: -1
-        defined_at: references/ruby/array.c:8958
+        defined_at: references/ruby/array.c:8963
         c_body_at: references/ruby/array.c:6157
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() -> Elem"
-        - "() { (Elem a, Elem b) -> ::Integer? } -> Elem"
-        - "(int n) -> ::Array[Elem]"
-        - "(int n) { (Elem a, Elem b) -> ::Integer? } -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:2505
+        - "() -> E"
+        - "() { (E a, E b) -> Comparable::_CompareToZero } -> E"
+        - "() { (E a, E b) -> Comparable::_CompareToZero? } -> E"
+        - "(int count) -> Array[E]"
+        - "(int count) { (E a, E b) -> Comparable::_CompareToZero } -> Array[E]"
+        - "(int count) { (E a, E b) -> Comparable::_CompareToZero? } -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:2546
       min:
         source: c
         cfunc: rb_ary_min
         arity: -1
-        defined_at: references/ruby/array.c:8959
+        defined_at: references/ruby/array.c:8964
         c_body_at: references/ruby/array.c:6334
         c_effects:
         - block
         purity: block_dependent
+        rbs:
+        - "() -> E"
+        - "() { (E a, E b) -> Comparable::_CompareToZero } -> E"
+        - "() { (E a, E b) -> Comparable::_CompareToZero? } -> E"
+        - "(int count) -> Array[E]"
+        - "(int count) { (E a, E b) -> Comparable::_CompareToZero } -> Array[E]"
+        - "(int count) { (E a, E b) -> Comparable::_CompareToZero? } -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:2601
       minmax:
         source: c
         cfunc: rb_ary_minmax
         arity: 0
-        defined_at: references/ruby/array.c:8960
+        defined_at: references/ruby/array.c:8965
         c_body_at: references/ruby/array.c:6396
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() -> [ Elem?, Elem? ]"
-        - "() { (Elem a, Elem b) -> ::Integer? } -> [ Elem?, Elem? ]"
-        rbs_at: references/rbs/core/array.rbs:2582
+        - "() -> [ E?, E? ]"
+        - "() { (E a, E b) -> Comparable::_CompareToZero } -> [ E?, E? ]"
+        - "() { (E a, E b) -> Comparable::_CompareToZero? } -> [ E?, E? ]"
+        rbs_at: references/rbs/core/array.rbs:2630
       uniq:
         source: c
         cfunc: rb_ary_uniq
         arity: 0
-        defined_at: references/ruby/array.c:8962
+        defined_at: references/ruby/array.c:8967
         c_body_at: references/ruby/array.c:6495
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() -> ::Array[Elem]"
-        - "() { (Elem item) -> untyped } -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3849
+        - "() -> Array[E]"
+        - "() { (E element) -> Hash::_Key } -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3906
       uniq!:
         source: c
         cfunc: rb_ary_uniq_bang
         arity: 0
-        defined_at: references/ruby/array.c:8963
+        defined_at: references/ruby/array.c:8968
         c_body_at: references/ruby/array.c:6439
         c_effects:
         - block
@@ -1040,139 +1040,138 @@ classes:
         purity: block_dependent
         rbs:
         - "() -> self?"
-        - "() { (Elem) -> untyped } -> self?"
-        rbs_at: references/rbs/core/array.rbs:3878
+        - "() { (E element) -> Hash::_Key } -> self?"
+        rbs_at: references/rbs/core/array.rbs:3935
       compact:
         source: c
         cfunc: rb_ary_compact
         arity: 0
-        defined_at: references/ruby/array.c:8964
+        defined_at: references/ruby/array.c:8969
         c_body_at: references/ruby/array.c:6569
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:1361
+        - "() -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:1370
       compact!:
         source: c
         cfunc: rb_ary_compact_bang
         arity: 0
-        defined_at: references/ruby/array.c:8965
+        defined_at: references/ruby/array.c:8970
         c_body_at: references/ruby/array.c:6532
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
         - "() -> self?"
-        rbs_at: references/rbs/core/array.rbs:1378
+        rbs_at: references/rbs/core/array.rbs:1387
       flatten:
         source: c
         cfunc: rb_ary_flatten
         arity: -1
-        defined_at: references/ruby/array.c:8966
+        defined_at: references/ruby/array.c:8971
         c_body_at: references/ruby/array.c:6811
         c_effects: []
         purity: leaf
         rbs:
-        - "(?int level) -> ::Array[untyped]"
-        rbs_at: references/rbs/core/array.rbs:2152
+        - "(?int? level) -> Array[untyped]"
+        rbs_at: references/rbs/core/array.rbs:2175
       flatten!:
         source: c
         cfunc: rb_ary_flatten_bang
         arity: -1
-        defined_at: references/ruby/array.c:8967
+        defined_at: references/ruby/array.c:8972
         c_body_at: references/ruby/array.c:6754
         c_effects:
         - mutate
         purity: mutates_self
         rbs:
-        - "(?int level) -> self?"
-        rbs_at: references/rbs/core/array.rbs:2188
+        - "(?int? level) -> self?"
+        rbs_at: references/rbs/core/array.rbs:2211
       count:
         source: c
         cfunc: rb_ary_count
         arity: -1
-        defined_at: references/ruby/array.c:8968
+        defined_at: references/ruby/array.c:8973
         c_body_at: references/ruby/array.c:6604
         c_effects:
         - block
         - dispatch
         purity: block_dependent
         rbs:
-        - "() -> ::Integer"
-        - "(Elem obj) -> ::Integer"
-        - "() { (Elem) -> boolish } -> ::Integer"
-        rbs_at: references/rbs/core/array.rbs:1421
+        - "() ?{ (E element) -> boolish } -> Integer"
+        - "(untyped object) -> Integer"
+        rbs_at: references/rbs/core/array.rbs:1430
       cycle:
         source: c
         cfunc: rb_ary_cycle
         arity: -1
-        defined_at: references/ruby/array.c:8969
+        defined_at: references/ruby/array.c:8974
         c_body_at: references/ruby/array.c:7060
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "(?int? n) { (Elem) -> void } -> nil"
-        - "(?int? n) -> ::Enumerator[Elem, nil]"
-        rbs_at: references/rbs/core/array.rbs:1457
+        - "(?int? n) { (E element) -> void } -> nil"
+        - "(?int? n) -> Enumerator[E, nil]"
+        rbs_at: references/rbs/core/array.rbs:1465
       permutation:
         source: c
         cfunc: rb_ary_permutation
         arity: -1
-        defined_at: references/ruby/array.c:8970
+        defined_at: references/ruby/array.c:8975
         c_body_at: references/ruby/array.c:7242
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "(?int n) -> ::Enumerator[::Array[Elem], ::Array[Elem]]"
-        - "(?int n) { (::Array[Elem] p) -> void } -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:2707
+        - "(?int? count) { (Array[E] permutation) -> void } -> self"
+        - "(?int? count) -> Enumerator[Array[E], self]"
+        rbs_at: references/rbs/core/array.rbs:2760
       combination:
         source: c
         cfunc: rb_ary_combination
         arity: 1
-        defined_at: references/ruby/array.c:8971
+        defined_at: references/ruby/array.c:8976
         c_body_at: references/ruby/array.c:7354
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "(int n) { (::Array[Elem]) -> void } -> self"
-        - "(int n) -> ::Enumerator[::Array[Elem], self]"
-        rbs_at: references/rbs/core/array.rbs:1345
+        - "(int count) { (Array[E] combination) -> void } -> self"
+        - "(int count) -> Enumerator[Array[E], self]"
+        rbs_at: references/rbs/core/array.rbs:1354
       repeated_permutation:
         source: c
         cfunc: rb_ary_repeated_permutation
         arity: 1
-        defined_at: references/ruby/array.c:8972
+        defined_at: references/ruby/array.c:8977
         c_body_at: references/ruby/array.c:7474
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "(int n) { (::Array[Elem] p) -> void } -> self"
-        - "(int n) -> ::Enumerator[::Array[Elem], self]"
-        rbs_at: references/rbs/core/array.rbs:2965
+        - "(int size) { (Array[E] permutation) -> void } -> self"
+        - "(int size) -> Enumerator[Array[E], self]"
+        rbs_at: references/rbs/core/array.rbs:3022
       repeated_combination:
         source: c
         cfunc: rb_ary_repeated_combination
         arity: 1
-        defined_at: references/ruby/array.c:8973
+        defined_at: references/ruby/array.c:8978
         c_body_at: references/ruby/array.c:7580
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "(int n) { (::Array[Elem] c) -> void } -> self"
-        - "(int n) -> ::Enumerator[::Array[Elem], self]"
-        rbs_at: references/rbs/core/array.rbs:2925
+        - "(int size) { (Array[E] combination) -> void } -> self"
+        - "(int size) -> Enumerator[Array[E], self]"
+        rbs_at: references/rbs/core/array.rbs:2982
       product:
         source: c
         cfunc: rb_ary_product
         arity: -1
-        defined_at: references/ruby/array.c:8974
+        defined_at: references/ruby/array.c:8979
         c_body_at: references/ruby/array.c:7668
         c_effects:
         - block
@@ -1180,80 +1179,84 @@ classes:
         - raises
         purity: block_dependent
         rbs:
-        - "() -> ::Array[[ Elem ]]"
-        - "[X] (::Array[X] other_ary) -> ::Array[[ Elem, X ]]"
-        - "[X, Y] (::Array[X] other_ary1, ::Array[Y] other_ary2) -> ::Array[[ Elem,
-          X, Y ]]"
-        - "[U] (*::Array[U] other_arys) -> ::Array[::Array[Elem | U]]"
-        rbs_at: references/rbs/core/array.rbs:2806
+        - "() -> Array[[ E ]]"
+        - "() { ([ E ] combination) -> void } -> self"
+        - "[X] (array[X] other_ary) -> Array[[ E, X ]]"
+        - "[X] (array[X] other_ary) { ([ E, X ] combination) -> void } -> self"
+        - "[X, Y] (array[X] other_ary1, array[Y] other_ary2) -> Array[[ E, X, Y ]]"
+        - "[X, Y] (array[X] other_ary1, array[Y] other_ary2) { ([ E, X, Y ] combination)
+          -> void } -> self"
+        - "[U] (*array[U] other_arys) -> Array[Array[E | U]]"
+        - "[U] (*array[U] other_arys) { (Array[E | U] combination) -> void } -> self"
+        rbs_at: references/rbs/core/array.rbs:2859
       take:
         source: c
         cfunc: rb_ary_take
         arity: 1
-        defined_at: references/ruby/array.c:8976
+        defined_at: references/ruby/array.c:8981
         c_body_at: references/ruby/array.c:7774
         c_effects:
         - raises
         purity: leaf
         rbs:
-        - "(int n) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3697
+        - "(int count) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3754
       take_while:
         source: c
         cfunc: rb_ary_take_while
         arity: 0
-        defined_at: references/ruby/array.c:8977
+        defined_at: references/ruby/array.c:8982
         c_body_at: references/ruby/array.c:7805
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() { (Elem obj) -> boolish } -> ::Array[Elem]"
-        - "() -> ::Enumerator[Elem, ::Array[Elem]]"
-        rbs_at: references/rbs/core/array.rbs:3719
+        - "() { (E element) -> boolish } -> Array[E]"
+        - "() -> Enumerator[E, Array[E]]"
+        rbs_at: references/rbs/core/array.rbs:3776
       drop:
         source: c
         cfunc: rb_ary_drop
         arity: 1
-        defined_at: references/ruby/array.c:8978
+        defined_at: references/ruby/array.c:8983
         c_body_at: references/ruby/array.c:7836
         c_effects:
         - raises
         purity: leaf
         rbs:
-        - "(int n) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:1611
+        - "(int count) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:1636
       drop_while:
         source: c
         cfunc: rb_ary_drop_while
         arity: 0
-        defined_at: references/ruby/array.c:8979
+        defined_at: references/ruby/array.c:8984
         c_body_at: references/ruby/array.c:7868
         c_effects:
         - block
         purity: block_dependent
         rbs:
-        - "() { (Elem obj) -> boolish } -> ::Array[Elem]"
-        - "() -> ::Enumerator[Elem, ::Array[Elem]]"
-        rbs_at: references/rbs/core/array.rbs:1630
+        - "() { (E element) -> boolish } -> Array[E]"
+        - "() -> Enumerator[E, Array[E]]"
+        rbs_at: references/rbs/core/array.rbs:1655
       bsearch:
         source: c
         cfunc: rb_ary_bsearch
         arity: 0
-        defined_at: references/ruby/array.c:8980
+        defined_at: references/ruby/array.c:8985
         c_body_at: references/ruby/array.c:3624
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> ::Enumerator[Elem, Elem?]"
-        - "() { (Elem) -> (true | false) } -> Elem?"
-        - "() { (Elem) -> ::Integer } -> Elem?"
-        rbs_at: references/rbs/core/array.rbs:1228
+        - "() { (E element) -> bool? } -> E?"
+        - "() { (E element) -> Numeric? } -> E?"
+        - "() -> Enumerator[E, E?]"
+        rbs_at: references/rbs/core/array.rbs:1236
       bsearch_index:
         source: c
         cfunc: rb_ary_bsearch_index
         arity: 0
-        defined_at: references/ruby/array.c:8981
+        defined_at: references/ruby/array.c:8986
         c_body_at: references/ruby/array.c:3648
         c_effects:
         - block
@@ -1261,24 +1264,30 @@ classes:
         - raises
         purity: block_dependent
         rbs:
-        - "() { (Elem) -> (true | false) } -> ::Integer?"
-        - "() { (Elem) -> ::Integer } -> ::Integer?"
-        rbs_at: references/rbs/core/array.rbs:1244
+        - "() { (E element) -> bool? } -> Integer?"
+        - "() { (E element) -> Numeric? } -> Integer?"
+        - "() -> Enumerator[E, Integer?]"
+        rbs_at: references/rbs/core/array.rbs:1252
       any?:
         source: c
         cfunc: rb_ary_any_p
         arity: -1
-        defined_at: references/ruby/array.c:8982
+        defined_at: references/ruby/array.c:8987
         c_body_at: references/ruby/array.c:7919
         c_effects:
         - block
         - dispatch
         purity: block_dependent
+        rbs:
+        - "() -> bool"
+        - "(RBS::Ops::_CaseEqual[E, boolish] pattern) -> bool"
+        - "() { (E element) -> boolish } -> bool"
+        rbs_at: references/rbs/core/array.rbs:1164
       all?:
         source: c
         cfunc: rb_ary_all_p
         arity: -1
-        defined_at: references/ruby/array.c:8983
+        defined_at: references/ruby/array.c:8988
         c_body_at: references/ruby/array.c:7986
         c_effects:
         - block
@@ -1286,75 +1295,87 @@ classes:
         purity: block_dependent
         rbs:
         - "() -> bool"
-        - "(_Pattern[Elem] pattern) -> bool"
-        - "() { (Elem obj) -> boolish } -> bool"
-        rbs_at: references/rbs/core/array.rbs:1116
+        - "(RBS::Ops::_CaseEqual[E, boolish] pattern) -> bool"
+        - "() { (E element) -> boolish } -> bool"
+        rbs_at: references/rbs/core/array.rbs:1122
       none?:
         source: c
         cfunc: rb_ary_none_p
         arity: -1
-        defined_at: references/ruby/array.c:8984
+        defined_at: references/ruby/array.c:8989
         c_body_at: references/ruby/array.c:8047
         c_effects:
         - block
         - dispatch
         purity: block_dependent
+        rbs:
+        - "() -> bool"
+        - "(RBS::Ops::_CaseEqual[E, boolish] pattern) -> bool"
+        - "() { (E element) -> boolish } -> bool"
+        rbs_at: references/rbs/core/array.rbs:2667
       one?:
         source: c
         cfunc: rb_ary_one_p
         arity: -1
-        defined_at: references/ruby/array.c:8985
+        defined_at: references/ruby/array.c:8990
         c_body_at: references/ruby/array.c:8111
         c_effects:
         - block
         - dispatch
         purity: block_dependent
+        rbs:
+        - "() -> bool"
+        - "(RBS::Ops::_CaseEqual[E, boolish] pattern) -> bool"
+        - "() { (E element) -> boolish } -> bool"
+        rbs_at: references/rbs/core/array.rbs:2706
       dig:
         source: c
         cfunc: rb_ary_dig
         arity: -1
-        defined_at: references/ruby/array.c:8986
+        defined_at: references/ruby/array.c:8991
         c_body_at: references/ruby/array.c:8169
         c_effects: []
         purity: leaf
         rbs:
-        - "(int idx) -> Elem?"
-        - "(int idx, untyped, *untyped) -> untyped"
-        rbs_at: references/rbs/core/array.rbs:1591
+        - "(int index) -> E?"
+        - "(int index, untyped, *untyped) -> untyped"
+        rbs_at: references/rbs/core/array.rbs:1616
       sum:
         source: c
         cfunc: rb_ary_sum
         arity: -1
-        defined_at: references/ruby/array.c:8987
+        defined_at: references/ruby/array.c:8992
         c_body_at: references/ruby/array.c:8234
         c_effects:
         - block
         - dispatch
         purity: block_dependent
         rbs:
-        - "(?untyped init) -> untyped"
-        - "(?untyped init) { (Elem e) -> untyped } -> untyped"
-        rbs_at: references/rbs/core/array.rbs:3679
+        - "(?untyped init) ?{ (E e) -> untyped } -> untyped"
+        rbs_at: references/rbs/core/array.rbs:3737
       freeze:
         source: c
         cfunc: rb_ary_freeze
         arity: 0
-        defined_at: references/ruby/array.c:8988
+        defined_at: references/ruby/array.c:8993
         c_body_at: references/ruby/array.c:652
         c_effects:
         - mutate
         purity: mutates_self
+        rbs:
+        - "() -> self"
+        rbs_at: references/rbs/core/array.rbs:2229
       deconstruct:
         source: c
         cfunc: rb_ary_deconstruct
         arity: 0
-        defined_at: references/ruby/array.c:8990
-        c_body_at: references/ruby/array.c:8352
+        defined_at: references/ruby/array.c:8995
+        c_body_at: references/ruby/array.c:8357
         c_effects: []
         purity: leaf
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/array.rbs:1465
+        rbs_at: references/rbs/core/array.rbs:1473
       shuffle!:
         source: prelude
         prelude_attrs: []
@@ -1366,8 +1387,8 @@ classes:
         cfunc:
         defined_at: references/ruby/array.rb:22
         rbs:
-        - "(?random: _Rand rng) -> self"
-        rbs_at: references/rbs/core/array.rbs:3343
+        - "(?random: _Rand) -> self"
+        rbs_at: references/rbs/core/array.rbs:3400
       shuffle:
         source: prelude
         prelude_attrs: []
@@ -1379,8 +1400,8 @@ classes:
         cfunc:
         defined_at: references/ruby/array.rb:45
         rbs:
-        - "(?random: _Rand rng) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3319
+        - "(?random: _Rand) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3376
       sample:
         source: prelude
         prelude_attrs: []
@@ -1392,9 +1413,9 @@ classes:
         cfunc:
         defined_at: references/ruby/array.rb:95
         rbs:
-        - "(?random: _Rand rng) -> Elem"
-        - "(int n, ?random: _Rand rng) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:3209
+        - "(?random: _Rand) -> E"
+        - "(int count, ?random: _Rand) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:3266
       first:
         source: prelude
         prelude_attrs: []
@@ -1406,9 +1427,9 @@ classes:
         cfunc:
         defined_at: references/ruby/array.rb:129
         rbs:
-        - "() -> Elem"
-        - "(int n) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:2116
+        - "() -> E"
+        - "(int count) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:2139
       last:
         source: prelude
         prelude_attrs: []
@@ -1420,9 +1441,9 @@ classes:
         cfunc:
         defined_at: references/ruby/array.rb:166
         rbs:
-        - "() -> Elem"
-        - "(int n) -> ::Array[Elem]"
-        rbs_at: references/rbs/core/array.rbs:2411
+        - "() -> E"
+        - "(int count) -> Array[E]"
+        rbs_at: references/rbs/core/array.rbs:2452
       fetch_values:
         source: prelude
         prelude_attrs: []
@@ -1434,14 +1455,15 @@ classes:
         cfunc:
         defined_at: references/ruby/array.rb:210
         rbs:
-        - "(*int indexes) -> self"
-        rbs_at: references/rbs/core/array.rbs:1811
+        - "(*int indexes) -> Array[E]"
+        - "[I < _ToInt, T] (*I indexes) { (I index) -> T } -> Array[E | T]"
+        rbs_at: references/rbs/core/array.rbs:1836
     singleton_methods:
       new:
         source: c
         cfunc: rb_ary_s_new
         arity: -1
-        defined_at: references/ruby/array.c:8869
+        defined_at: references/ruby/array.c:8874
         c_body_at: references/ruby/array.c:1073
         c_effects: []
         purity: leaf
@@ -1449,22 +1471,24 @@ classes:
         source: c
         cfunc: rb_ary_s_create
         arity: -1
-        defined_at: references/ruby/array.c:8870
+        defined_at: references/ruby/array.c:8875
         c_body_at: references/ruby/array.c:1211
         c_effects: []
         purity: leaf
         rbs:
-        - "[U] (*U) -> ::Array[U]"
-        rbs_at: references/rbs/core/array.rbs:624
+        - "[U] (*U) -> Array[U]"
+        rbs_at: references/rbs/core/array.rbs:630
       try_convert:
         source: c
         cfunc: rb_ary_s_try_convert
         arity: 1
-        defined_at: references/ruby/array.c:8871
+        defined_at: references/ruby/array.c:8876
         c_body_at: references/ruby/array.c:1066
         c_effects: []
         purity: leaf
         rbs:
-        - "[U] (untyped) -> ::Array[U]?"
-        rbs_at: references/rbs/core/array.rbs:643
+        - "[A < Array[U], U] (A array) -> A"
+        - "[U] (array[U] ary) -> Array[U]?"
+        - "(untyped) -> Array[untyped]?"
+        rbs_at: references/rbs/core/array.rbs:649
     undefined: []

@@ -329,8 +329,8 @@ RSpec.describe Rigor::Environment::RbsLoader do
   end
 
   describe "#class_type_param_names (Slice 4 phase 2d)" do
-    it "returns Array's [:Elem]" do
-      expect(loader.class_type_param_names("Array")).to eq([:Elem])
+    it "returns Array's single element type parameter" do
+      expect(loader.class_type_param_names("Array")).to eq([RbsCoreTypeParams.array_element])
     end
 
     it "returns Hash's [:K, :V]" do
@@ -695,7 +695,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
       cached = described_class.new(cache_store: cache_store)
       a = cached.class_type_param_names("Array")
       a << :Mutated
-      expect(cached.class_type_param_names("Array")).to eq([:Elem])
+      expect(cached.class_type_param_names("Array")).to eq([RbsCoreTypeParams.array_element])
     end
   end
 

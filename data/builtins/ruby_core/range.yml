@@ -37,7 +37,7 @@ classes:
         - mutate
         purity: mutates_self
         rbs:
-        - "(Elem from, Elem to, ?boolish exclude_end) -> void"
+        - "(E from, E to, ?boolish exclude_end) -> void"
         rbs_at: references/rbs/core/range.rbs:608
       initialize_copy:
         source: c
@@ -106,8 +106,8 @@ classes:
         - raises
         purity: block_dependent
         rbs:
-        - "() { (Elem arg0) -> untyped } -> self"
-        - "() -> ::Enumerator[Elem, self]"
+        - "() { (E arg0) -> untyped } -> self"
+        - "() -> ::Enumerator[E, self]"
         rbs_at: references/rbs/core/range.rbs:503
       step:
         source: c
@@ -121,10 +121,10 @@ classes:
         - raises
         purity: block_dependent
         rbs:
-        - "(?Numeric | int) -> Enumerator[Elem, self]"
-        - "(?Numeric | int) { (Elem element) -> void } -> self"
-        - "(untyped) -> Enumerator[Elem, self]"
-        - "(untyped) { (Elem element) -> void } -> self"
+        - "(?Numeric | int) -> Enumerator[E, self]"
+        - "(?Numeric | int) { (E element) -> void } -> self"
+        - "(untyped) -> Enumerator[E, self]"
+        - "(untyped) { (E element) -> void } -> self"
         rbs_at: references/rbs/core/range.rbs:1099
       "%":
         source: c
@@ -135,8 +135,8 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "(Numeric | int n) -> Enumerator[Elem, self]"
-        - "(Numeric | int n) { (Elem element) -> void } -> self"
+        - "(Numeric | int n) -> Enumerator[E, self]"
+        - "(Numeric | int n) { (E element) -> void } -> self"
         rbs_at: references/rbs/core/range.rbs:263
       reverse_each:
         source: c
@@ -148,8 +148,8 @@ classes:
         - raises
         purity: leaf
         rbs:
-        - "() { (Elem) -> void } -> self"
-        - "() -> ::Enumerator[Elem, self]"
+        - "() { (E) -> void } -> self"
+        - "() -> ::Enumerator[E, self]"
         rbs_at: references/rbs/core/range.rbs:961
       bsearch:
         source: c
@@ -162,9 +162,9 @@ classes:
         - raises
         purity: dispatch
         rbs:
-        - "() -> ::Enumerator[Elem, Elem?]"
-        - "() { (Elem) -> (true | false) } -> Elem?"
-        - "() { (Elem) -> ::Integer } -> Elem?"
+        - "() -> ::Enumerator[E, E?]"
+        - "() { (E) -> (true | false) } -> E?"
+        - "() { (E) -> ::Integer } -> E?"
         rbs_at: references/rbs/core/range.rbs:358
       begin:
         source: c
@@ -175,7 +175,7 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> Elem"
+        - "() -> E"
         rbs_at: references/rbs/core/range.rbs:348
       end:
         source: c
@@ -186,7 +186,7 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> Elem"
+        - "() -> E"
         rbs_at: references/rbs/core/range.rbs:518
       first:
         source: c
@@ -199,8 +199,8 @@ classes:
         - raises
         purity: block_dependent
         rbs:
-        - "() -> Elem"
-        - "(Integer n) -> ::Array[Elem]"
+        - "() -> E"
+        - "(Integer n) -> ::Array[E]"
         rbs_at: references/rbs/core/range.rbs:554
       last:
         source: c
@@ -213,8 +213,8 @@ classes:
         - raises
         purity: dispatch
         rbs:
-        - "() -> Elem"
-        - "(Integer n) -> ::Array[Elem]"
+        - "() -> E"
+        - "(Integer n) -> ::Array[E]"
         rbs_at: references/rbs/core/range.rbs:664
       min:
         source: c
@@ -372,7 +372,7 @@ classes:
         rbs:
         - "() -> (Integer | Float)"
         - "(untyped) -> Integer"
-        - "() { (Elem) -> boolish } -> Integer"
+        - "() { (E) -> boolish } -> Integer"
         rbs_at: references/rbs/core/range.rbs:1017
       overlap?:
         source: c

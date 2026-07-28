@@ -21,6 +21,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 - **[plugin API]** `Plugin::Base.producer` accepts a `generation_cap:` declaring how many generations of a producer's cache entries survive a compaction pass; it defaults to the previous behaviour (unbounded, reaped only by the `cache.max_bytes` LRU pass), so a whole-project producer that orphans its previous entry on every run can now keep its own cache slice from growing ([#151](https://github.com/rigortype/rigor/issues/151)).
 - **[playground]** The browser playground now shows inferred types on first load: the "Show types" overlay is on by default in both the hosted and WASM builds, and the toolbar button starts in its "Hide types" state so the toggle still turns it off.
+- **[dependencies]** Rigor now develops and tests against `rbs` 4.1.0. The supported range is unchanged (`>= 3.0, < 5.0`), but 4.1 renames the type parameters of several core generics — `Array[Elem]` is now `Array[E]`, `Enumerator[Elem, Return]` is now `Enumerator[E, R]` — so a project whose own `.rbs` reopens one of them by parameter name should follow the rename; positional binding means existing signatures keep working either way.
 - **[plugin API]** *(breaking, unpinned surface)* `Cache::Store#fetch_or_compute` and `#fetch_or_validate` now require a `generation_cap:` argument. A plugin that reaches for the store directly rather than through `Plugin::Base.producer` must pass one — `:unbounded` reproduces the previous behaviour exactly. There is deliberately no default: a cache slice that silently grows without bound is the failure this argument exists to make unrepresentable, and no single default is right for both whole-project and per-file producers ([#151](https://github.com/rigortype/rigor/issues/151)).
 
 ### Performance
@@ -29,6 +30,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cache]** With `rbs` 4.1 installed, a warm cache no longer makes every core class read as undefined. 4.1 caches each type name's hash inside the object, and that value is only meaningful in the process that computed it, so a cached environment reloaded by a later run answered lookups for `String`, `Array` and everything else with a miss — costing real diagnostics with no warning that anything was wrong. Cached type names are now rebuilt on load.
+- **[inference]** `rbs` 4.1 rewrote several core signatures to use a bounded method type parameter (`Array#fetch`'s block overload is now `[I < _ToInt, T] (I index) { … }`); the argument-type check now reads the bound, so `[1, 2, 3].fetch("x")` is still reported instead of silently passing.
+- **[inference]** `rbs` 4.1 rewrote `Array#[]`'s slicing overload to take the `range[T]` alias rather than a `Range`; overload selection now resolves that alias, so `a[1..2]` still types as `Array[E]?` rather than collapsing to the element type.
 - **[cache]** `rigor check` now removes a cache shard directory once its last entry is evicted, instead of leaving an empty directory behind permanently ([#216](https://github.com/rigortype/rigor/issues/216)).
 - **[sig-gen]** Updating an existing signature file now lands on the same nested layout a fresh generation would write — a class is placed inside its parent's block, and a flat `class Foo` / `class Foo::Bar` pair the file already carried is folded into one nested tree — so getting the canonical shape no longer means deleting the target `.rbs` and regenerating it ([#153](https://github.com/rigortype/rigor/issues/153)).
 

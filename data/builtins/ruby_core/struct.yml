@@ -108,7 +108,7 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> Array[Elem]"
+        - "() -> Array[E]"
         rbs_at: references/rbs/core/struct.rbs:365
       to_h:
         source: c
@@ -121,8 +121,8 @@ classes:
         - mutate
         purity: block_dependent
         rbs:
-        - "() -> Hash[Symbol, Elem]"
-        - "[K, V] () { (Symbol key, Elem value) -> [ K, V ] } -> Hash[K, V]"
+        - "() -> Hash[Symbol, E]"
+        - "[K, V] () { (Symbol key, E value) -> [ K, V ] } -> Hash[K, V]"
         rbs_at: references/rbs/core/struct.rbs:388
       values:
         source: c
@@ -161,8 +161,8 @@ classes:
         - block
         purity: block_dependent
         rbs:
-        - "() -> Enumerator[Elem, self]"
-        - "() { (Elem value) -> void } -> self"
+        - "() -> Enumerator[E, self]"
+        - "() { (E value) -> void } -> self"
         rbs_at: references/rbs/core/struct.rbs:444
       each_pair:
         source: c
@@ -174,8 +174,8 @@ classes:
         - block
         purity: block_dependent
         rbs:
-        - "() -> Enumerator[[ Symbol, Elem ], self]"
-        - "() { ([ Symbol, Elem ] key_value) -> void } -> self"
+        - "() -> Enumerator[[ Symbol, E ], self]"
+        - "() { ([ Symbol, E ] key_value) -> void } -> self"
         rbs_at: references/rbs/core/struct.rbs:468
       "[]":
         source: c
@@ -186,7 +186,7 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "(index name_or_position) -> Elem"
+        - "(index name_or_position) -> E"
         rbs_at: references/rbs/core/struct.rbs:495
       "[]=":
         source: c
@@ -198,7 +198,7 @@ classes:
         - mutate
         purity: mutates_self
         rbs:
-        - "(index name_or_position, Elem value) -> Elem"
+        - "(index name_or_position, E value) -> E"
         rbs_at: references/rbs/core/struct.rbs:524
       select:
         source: c
@@ -211,8 +211,8 @@ classes:
         - mutate
         purity: block_dependent
         rbs:
-        - "() -> Enumerator[Elem, Array[Elem]]"
-        - "() { (Elem value) -> boolish } -> Array[Elem]"
+        - "() -> Enumerator[E, Array[E]]"
+        - "() { (E value) -> boolish } -> Array[E]"
         rbs_at: references/rbs/core/struct.rbs:543
       filter:
         source: c
@@ -233,7 +233,7 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "(*int | range[int?] positions) -> Array[Elem]"
+        - "(*int | range[int?] positions) -> Array[E]"
         rbs_at: references/rbs/core/struct.rbs:594
       members:
         source: c
@@ -255,7 +255,7 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "(index name_or_position) -> Elem"
+        - "(index name_or_position) -> E"
         - "(index name_or_position, untyped, *untyped) -> untyped"
         rbs_at: references/rbs/core/struct.rbs:637
       deconstruct:
@@ -275,7 +275,7 @@ classes:
         c_effects: []
         purity: leaf
         rbs:
-        - "(Array[index & Hash::_Key]? indices) -> Hash[index & Hash::_Key, Elem]"
+        - "(Array[index & Hash::_Key]? indices) -> Hash[index & Hash::_Key, E]"
         rbs_at: references/rbs/core/struct.rbs:667
     singleton_methods:
       new:

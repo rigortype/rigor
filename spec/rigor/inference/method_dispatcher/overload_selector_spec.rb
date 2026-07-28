@@ -133,17 +133,23 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       #
       # Surfaced when self-analysing this repo: `Array#[]`
       # ships three overloads —
-      #   (::int) -> Elem
-      #   (::int, ::int) -> Array[Elem]?
-      #   (::Range[::Integer?]) -> Array[Elem]?
+      #   (::int) -> E
+      #   (::int, ::int) -> Array[E]?
+      #   (::range[::int]) -> Array[E]?
       # `int` is `RBS::Types::Alias`, which translates to
       # `Dynamic[Top]` and gradually accepts a Range. Without
       # the strict-first pass the first overload wins and the
-      # call resolves to `Elem` instead of `Array[Elem]?`.
-      it "prefers `(Range) -> Array[Elem]?` over `(int) -> Elem` for an Array#[](Range) call" do
+      # call resolves to `E` instead of `Array[E]?`.
+      #
+      # rbs 4.1 rewrote the slicing overload's param from the
+      # `Range[Integer?]` class instance to the `range[T]`
+      # alias, so BOTH candidates are now alias-typed and pass
+      # 1.5 (alias strict arms) is what separates them.
+      it "prefers `(range) -> Array[E]?` over `(int) -> E` for an Array#[](Range) call" do
         mt = select("Array", :[], [Rigor::Type::Combinator.nominal_of("Range")])
         expect(mt.type.required_positionals.size).to eq(1)
-        expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("Range")
+        expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("range")
+        expect(mt.type.return_type.to_s).to eq("::Array[E]?")
       end
 
       it "still picks the alias-typed overload when only it is arity-compatible (Array#[](Integer))" do

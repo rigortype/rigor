@@ -49,6 +49,8 @@ RSpec.describe "RBS name Marshal hooks (rbs_environment_marshal_patch)" do
     end
 
     it "round-trips through the flyweight interner, so the load is the canonical instance" do
+      skip "the flyweight interner arrived in rbs 4.1" unless RbsCoreTypeParams.renamed?
+
       expect(round_trip(foreign_type_name(RBS::Namespace.root, :String))).to be(RBS::TypeName.parse("::String"))
     end
 

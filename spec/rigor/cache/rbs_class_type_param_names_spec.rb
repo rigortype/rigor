@@ -26,7 +26,7 @@ RSpec.describe Rigor::Cache::RbsClassTypeParamNames do
 
     it "captures generic classes' type parameters (Array, Hash)" do
       table = described_class.fetch(loader: loader, store: store)
-      expect(table.fetch("Array")).to eq([:E])
+      expect(table.fetch("Array")).to eq([RbsCoreTypeParams.array_element])
       expect(table.fetch("Hash")).to eq(%i[K V])
     end
 
@@ -52,7 +52,7 @@ RSpec.describe Rigor::Cache::RbsClassTypeParamNames do
       table = described_class.fetch(loader: loader, store: store)
       blob = Marshal.dump(table)
       reloaded = Marshal.load(blob) # rubocop:disable Security/MarshalLoad
-      expect(reloaded.fetch("Array")).to eq([:E])
+      expect(reloaded.fetch("Array")).to eq([RbsCoreTypeParams.array_element])
     end
   end
 end

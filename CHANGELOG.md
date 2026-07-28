@@ -29,6 +29,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cache]** With `rbs` 4.1 installed, a warm cache no longer makes every core class read as undefined. 4.1 caches each type name's hash inside the object, and that value is only meaningful in the process that computed it, so a cached environment reloaded by a later run answered lookups for `String`, `Array` and everything else with a miss — costing real diagnostics with no warning that anything was wrong. Cached type names are now rebuilt on load.
 - **[cache]** `rigor check` now removes a cache shard directory once its last entry is evicted, instead of leaving an empty directory behind permanently ([#216](https://github.com/rigortype/rigor/issues/216)).
 - **[sig-gen]** Updating an existing signature file now lands on the same nested layout a fresh generation would write — a class is placed inside its parent's block, and a flat `class Foo` / `class Foo::Bar` pair the file already carried is folded into one nested tree — so getting the canonical shape no longer means deleting the target `.rbs` and regenerating it ([#153](https://github.com/rigortype/rigor/issues/153)).
 

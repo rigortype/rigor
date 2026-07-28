@@ -30,31 +30,31 @@ classes:
     undefined: []
   Regexp:
     parent: Object
-    defined_at: references/ruby/re.c:4825
+    defined_at: references/ruby/re.c:4830
     includes: []
     constants:
       IGNORECASE:
         c_expression: INT2FIX(ONIG_OPTION_IGNORECASE)
-        defined_at: references/ruby/re.c:4862
+        defined_at: references/ruby/re.c:4867
       EXTENDED:
         c_expression: INT2FIX(ONIG_OPTION_EXTEND)
-        defined_at: references/ruby/re.c:4864
+        defined_at: references/ruby/re.c:4869
       MULTILINE:
         c_expression: INT2FIX(ONIG_OPTION_MULTILINE)
-        defined_at: references/ruby/re.c:4866
+        defined_at: references/ruby/re.c:4871
       FIXEDENCODING:
         c_expression: INT2FIX(ARG_ENCODING_FIXED)
-        defined_at: references/ruby/re.c:4868
+        defined_at: references/ruby/re.c:4873
       NOENCODING:
         c_expression: INT2FIX(ARG_ENCODING_NONE)
-        defined_at: references/ruby/re.c:4870
+        defined_at: references/ruby/re.c:4875
     aliases: {}
     instance_methods:
       initialize:
         source: c
         cfunc: rb_reg_initialize_m
         arity: -1
-        defined_at: references/ruby/re.c:4835
+        defined_at: references/ruby/re.c:4840
         c_body_at: references/ruby/re.c:4030
         c_effects: []
         purity: leaf
@@ -67,7 +67,7 @@ classes:
         source: c
         cfunc: rb_reg_init_copy
         arity: 1
-        defined_at: references/ruby/re.c:4836
+        defined_at: references/ruby/re.c:4841
         c_body_at: references/ruby/re.c:4459
         c_effects: []
         purity: leaf
@@ -78,7 +78,7 @@ classes:
         source: c
         cfunc: rb_reg_hash
         arity: 0
-        defined_at: references/ruby/re.c:4837
+        defined_at: references/ruby/re.c:4842
         c_body_at: references/ruby/re.c:3526
         c_effects: []
         purity: leaf
@@ -89,7 +89,7 @@ classes:
         source: c
         cfunc: rb_reg_equal
         arity: 1
-        defined_at: references/ruby/re.c:4838
+        defined_at: references/ruby/re.c:4843
         c_body_at: references/ruby/re.c:3559
         c_effects: []
         purity: leaf
@@ -97,7 +97,7 @@ classes:
         source: c
         cfunc: rb_reg_equal
         arity: 1
-        defined_at: references/ruby/re.c:4839
+        defined_at: references/ruby/re.c:4844
         c_body_at: references/ruby/re.c:3559
         c_effects: []
         purity: leaf
@@ -108,7 +108,7 @@ classes:
         source: c
         cfunc: rb_reg_match
         arity: 1
-        defined_at: references/ruby/re.c:4840
+        defined_at: references/ruby/re.c:4845
         c_body_at: references/ruby/re.c:3720
         c_effects: []
         purity: leaf
@@ -120,7 +120,7 @@ classes:
         source: c
         cfunc: rb_reg_eqq
         arity: 1
-        defined_at: references/ruby/re.c:4841
+        defined_at: references/ruby/re.c:4846
         c_body_at: references/ruby/re.c:3749
         c_effects: []
         purity: leaf
@@ -131,7 +131,7 @@ classes:
         source: c
         cfunc: rb_reg_match2
         arity: 0
-        defined_at: references/ruby/re.c:4842
+        defined_at: references/ruby/re.c:4847
         c_body_at: references/ruby/re.c:3775
         c_effects: []
         purity: leaf
@@ -142,7 +142,7 @@ classes:
         source: c
         cfunc: rb_reg_match_m
         arity: -1
-        defined_at: references/ruby/re.c:4843
+        defined_at: references/ruby/re.c:4848
         c_body_at: references/ruby/re.c:3836
         c_effects:
         - block
@@ -156,7 +156,7 @@ classes:
         source: c
         cfunc: rb_reg_match_m_p
         arity: -1
-        defined_at: references/ruby/re.c:4844
+        defined_at: references/ruby/re.c:4849
         c_body_at: references/ruby/re.c:3877
         c_effects: []
         purity: leaf
@@ -168,7 +168,7 @@ classes:
         source: c
         cfunc: rb_reg_to_s
         arity: 0
-        defined_at: references/ruby/re.c:4845
+        defined_at: references/ruby/re.c:4850
         c_body_at: references/ruby/re.c:561
         c_effects: []
         purity: leaf
@@ -179,7 +179,7 @@ classes:
         source: c
         cfunc: rb_reg_inspect
         arity: 0
-        defined_at: references/ruby/re.c:4846
+        defined_at: references/ruby/re.c:4851
         c_body_at: references/ruby/re.c:523
         c_effects: []
         purity: leaf
@@ -190,7 +190,7 @@ classes:
         source: c
         cfunc: rb_reg_source
         arity: 0
-        defined_at: references/ruby/re.c:4847
+        defined_at: references/ruby/re.c:4852
         c_body_at: references/ruby/re.c:502
         c_effects: []
         purity: leaf
@@ -201,7 +201,7 @@ classes:
         source: c
         cfunc: rb_reg_casefold_p
         arity: 0
-        defined_at: references/ruby/re.c:4848
+        defined_at: references/ruby/re.c:4853
         c_body_at: references/ruby/re.c:741
         c_effects: []
         purity: leaf
@@ -212,7 +212,7 @@ classes:
         source: c
         cfunc: rb_reg_options_m
         arity: 0
-        defined_at: references/ruby/re.c:4849
+        defined_at: references/ruby/re.c:4854
         c_body_at: references/ruby/re.c:786
         c_effects: []
         purity: leaf
@@ -223,7 +223,7 @@ classes:
         source: c
         cfunc: rb_obj_encoding
         arity: 0
-        defined_at: references/ruby/re.c:4850
+        defined_at: references/ruby/re.c:4855
         purity: unknown
         c_body_at: not_found
         rbs:
@@ -233,7 +233,7 @@ classes:
         source: c
         cfunc: rb_reg_fixed_encoding_p
         arity: 0
-        defined_at: references/ruby/re.c:4851
+        defined_at: references/ruby/re.c:4856
         c_body_at: references/ruby/re.c:1562
         c_effects: []
         purity: leaf
@@ -244,7 +244,7 @@ classes:
         source: c
         cfunc: rb_reg_names
         arity: 0
-        defined_at: references/ruby/re.c:4852
+        defined_at: references/ruby/re.c:4857
         c_body_at: references/ruby/re.c:815
         c_effects: []
         purity: leaf
@@ -255,7 +255,7 @@ classes:
         source: c
         cfunc: rb_reg_named_captures
         arity: 0
-        defined_at: references/ruby/re.c:4853
+        defined_at: references/ruby/re.c:4858
         c_body_at: references/ruby/re.c:859
         c_effects: []
         purity: leaf
@@ -266,7 +266,7 @@ classes:
         source: c
         cfunc: rb_reg_timeout_get
         arity: 0
-        defined_at: references/ruby/re.c:4854
+        defined_at: references/ruby/re.c:4859
         c_body_at: references/ruby/re.c:4776
         c_effects: []
         purity: leaf
@@ -278,14 +278,14 @@ classes:
         source: c
         cfunc: rb_class_new_instance_pass_kw
         arity: -1
-        defined_at: references/ruby/re.c:4827
+        defined_at: references/ruby/re.c:4832
         purity: unknown
         c_body_at: not_found
       quote:
         source: c
         cfunc: rb_reg_s_quote
         arity: 1
-        defined_at: references/ruby/re.c:4828
+        defined_at: references/ruby/re.c:4833
         c_body_at: references/ruby/re.c:4217
         c_effects: []
         purity: leaf
@@ -293,7 +293,7 @@ classes:
         source: c
         cfunc: rb_reg_s_quote
         arity: 1
-        defined_at: references/ruby/re.c:4829
+        defined_at: references/ruby/re.c:4834
         c_body_at: references/ruby/re.c:4217
         c_effects: []
         purity: leaf
@@ -304,7 +304,7 @@ classes:
         source: c
         cfunc: rb_reg_s_union_m
         arity: -2
-        defined_at: references/ruby/re.c:4830
+        defined_at: references/ruby/re.c:4835
         c_body_at: references/ruby/re.c:4413
         c_effects: []
         purity: leaf
@@ -317,7 +317,7 @@ classes:
         source: c
         cfunc: rb_reg_s_last_match
         arity: -1
-        defined_at: references/ruby/re.c:4831
+        defined_at: references/ruby/re.c:4836
         c_body_at: references/ruby/re.c:4668
         c_effects: []
         purity: leaf
@@ -329,7 +329,7 @@ classes:
         source: c
         cfunc: rb_reg_s_try_convert
         arity: 1
-        defined_at: references/ruby/re.c:4832
+        defined_at: references/ruby/re.c:4837
         c_body_at: references/ruby/re.c:4259
         c_effects: []
         purity: leaf
@@ -341,7 +341,7 @@ classes:
         source: c
         cfunc: rb_reg_s_linear_time_p
         arity: -1
-        defined_at: references/ruby/re.c:4833
+        defined_at: references/ruby/re.c:4838
         c_body_at: references/ruby/re.c:4445
         c_effects: []
         purity: leaf
@@ -354,7 +354,7 @@ classes:
         source: c
         cfunc: rb_reg_s_timeout_get
         arity: 0
-        defined_at: references/ruby/re.c:4858
+        defined_at: references/ruby/re.c:4863
         c_body_at: references/ruby/re.c:4730
         c_effects: []
         purity: leaf
@@ -365,7 +365,7 @@ classes:
         source: c
         cfunc: rb_reg_s_timeout_set
         arity: 1
-        defined_at: references/ruby/re.c:4859
+        defined_at: references/ruby/re.c:4864
         c_body_at: references/ruby/re.c:4751
         c_effects: []
         purity: leaf
@@ -375,20 +375,20 @@ classes:
     undefined: []
   MatchData:
     parent: Object
-    defined_at: references/ruby/re.c:4874
+    defined_at: references/ruby/re.c:4879
     includes: []
     constants: {}
     aliases:
       deconstruct:
         old: captures
         source: c
-        defined_at: references/ruby/re.c:4895
+        defined_at: references/ruby/re.c:4900
     instance_methods:
       initialize_copy:
         source: c
         cfunc: match_init_copy
         arity: 1
-        defined_at: references/ruby/re.c:4879
+        defined_at: references/ruby/re.c:4884
         c_body_at: references/ruby/re.c:1085
         c_effects: []
         purity: leaf
@@ -399,7 +399,7 @@ classes:
         source: c
         cfunc: match_regexp
         arity: 0
-        defined_at: references/ruby/re.c:4880
+        defined_at: references/ruby/re.c:4885
         c_body_at: references/ruby/re.c:1124
         c_effects: []
         purity: leaf
@@ -410,7 +410,7 @@ classes:
         source: c
         cfunc: match_names
         arity: 0
-        defined_at: references/ruby/re.c:4881
+        defined_at: references/ruby/re.c:4886
         c_body_at: references/ruby/re.c:1159
         c_effects: []
         purity: leaf
@@ -421,7 +421,7 @@ classes:
         source: c
         cfunc: match_size
         arity: 0
-        defined_at: references/ruby/re.c:4882
+        defined_at: references/ruby/re.c:4887
         c_body_at: references/ruby/re.c:1180
         c_effects: []
         purity: leaf
@@ -432,7 +432,7 @@ classes:
         source: c
         cfunc: match_size
         arity: 0
-        defined_at: references/ruby/re.c:4883
+        defined_at: references/ruby/re.c:4888
         c_body_at: references/ruby/re.c:1180
         c_effects: []
         purity: leaf
@@ -440,7 +440,7 @@ classes:
         source: c
         cfunc: match_offset
         arity: 1
-        defined_at: references/ruby/re.c:4884
+        defined_at: references/ruby/re.c:4889
         c_body_at: references/ruby/re.c:1246
         c_effects: []
         purity: leaf
@@ -451,7 +451,7 @@ classes:
         source: c
         cfunc: match_byteoffset
         arity: 1
-        defined_at: references/ruby/re.c:4885
+        defined_at: references/ruby/re.c:4890
         c_body_at: references/ruby/re.c:1281
         c_effects: []
         purity: leaf
@@ -462,7 +462,7 @@ classes:
         source: c
         cfunc: match_bytebegin
         arity: 1
-        defined_at: references/ruby/re.c:4886
+        defined_at: references/ruby/re.c:4891
         c_body_at: references/ruby/re.c:1305
         c_effects: []
         purity: leaf
@@ -473,7 +473,7 @@ classes:
         source: c
         cfunc: match_byteend
         arity: 1
-        defined_at: references/ruby/re.c:4887
+        defined_at: references/ruby/re.c:4892
         c_body_at: references/ruby/re.c:1329
         c_effects: []
         purity: leaf
@@ -484,7 +484,7 @@ classes:
         source: c
         cfunc: match_begin
         arity: 1
-        defined_at: references/ruby/re.c:4888
+        defined_at: references/ruby/re.c:4893
         c_body_at: references/ruby/re.c:1353
         c_effects: []
         purity: leaf
@@ -495,7 +495,7 @@ classes:
         source: c
         cfunc: match_end
         arity: 1
-        defined_at: references/ruby/re.c:4889
+        defined_at: references/ruby/re.c:4894
         c_body_at: references/ruby/re.c:1379
         c_effects: []
         purity: leaf
@@ -506,7 +506,7 @@ classes:
         source: c
         cfunc: match_nth
         arity: 1
-        defined_at: references/ruby/re.c:4890
+        defined_at: references/ruby/re.c:4895
         c_body_at: references/ruby/re.c:1421
         c_effects: []
         purity: leaf
@@ -517,7 +517,7 @@ classes:
         source: c
         cfunc: match_nth_length
         arity: 1
-        defined_at: references/ruby/re.c:4891
+        defined_at: references/ruby/re.c:4896
         c_body_at: references/ruby/re.c:1465
         c_effects: []
         purity: leaf
@@ -528,7 +528,7 @@ classes:
         source: c
         cfunc: match_to_a
         arity: 0
-        defined_at: references/ruby/re.c:4892
+        defined_at: references/ruby/re.c:4897
         c_body_at: references/ruby/re.c:2118
         c_effects: []
         purity: leaf
@@ -539,12 +539,12 @@ classes:
         source: c
         cfunc: match_aref
         arity: -1
-        defined_at: references/ruby/re.c:4893
+        defined_at: references/ruby/re.c:4898
         c_body_at: references/ruby/re.c:2252
         c_effects: []
         purity: leaf
         rbs:
-        - "(capture backref, ?nil) -> String?"
+        - "(capture backref, ?nil) -> String"
         - "(int start, int length) -> Array[String?]"
         - "(range[int?] range) -> Array[String?]"
         rbs_at: references/rbs/core/match_data.rbs:95
@@ -552,7 +552,7 @@ classes:
         source: c
         cfunc: match_captures
         arity: 0
-        defined_at: references/ruby/re.c:4894
+        defined_at: references/ruby/re.c:4899
         c_body_at: references/ruby/re.c:2140
         c_effects: []
         purity: leaf
@@ -563,7 +563,7 @@ classes:
         source: c
         cfunc: match_named_captures
         arity: -1
-        defined_at: references/ruby/re.c:4896
+        defined_at: references/ruby/re.c:4901
         c_body_at: references/ruby/re.c:2442
         c_effects: []
         purity: leaf
@@ -576,7 +576,7 @@ classes:
         source: c
         cfunc: match_deconstruct_keys
         arity: 1
-        defined_at: references/ruby/re.c:4897
+        defined_at: references/ruby/re.c:4902
         c_body_at: references/ruby/re.c:2495
         c_effects:
         - mutate
@@ -588,7 +588,7 @@ classes:
         source: c
         cfunc: match_values_at
         arity: -1
-        defined_at: references/ruby/re.c:4898
+        defined_at: references/ruby/re.c:4903
         c_body_at: references/ruby/re.c:2321
         c_effects:
         - mutate
@@ -600,7 +600,7 @@ classes:
         source: c
         cfunc: rb_reg_match_pre
         arity: 0
-        defined_at: references/ruby/re.c:4899
+        defined_at: references/ruby/re.c:4904
         c_body_at: references/ruby/re.c:1971
         c_effects: []
         purity: leaf
@@ -611,7 +611,7 @@ classes:
         source: c
         cfunc: rb_reg_match_post
         arity: 0
-        defined_at: references/ruby/re.c:4900
+        defined_at: references/ruby/re.c:4905
         c_body_at: references/ruby/re.c:2004
         c_effects: []
         purity: leaf
@@ -622,7 +622,7 @@ classes:
         source: c
         cfunc: match_to_s
         arity: 0
-        defined_at: references/ruby/re.c:4901
+        defined_at: references/ruby/re.c:4906
         c_body_at: references/ruby/re.c:2366
         c_effects: []
         purity: leaf
@@ -633,7 +633,7 @@ classes:
         source: c
         cfunc: match_inspect
         arity: 0
-        defined_at: references/ruby/re.c:4902
+        defined_at: references/ruby/re.c:4907
         c_body_at: references/ruby/re.c:2608
         c_effects:
         - mutate
@@ -645,7 +645,7 @@ classes:
         source: c
         cfunc: match_string
         arity: 0
-        defined_at: references/ruby/re.c:4903
+        defined_at: references/ruby/re.c:4908
         c_body_at: references/ruby/re.c:2561
         c_effects: []
         purity: leaf
@@ -656,7 +656,7 @@ classes:
         source: c
         cfunc: match_hash
         arity: 0
-        defined_at: references/ruby/re.c:4904
+        defined_at: references/ruby/re.c:4909
         c_body_at: references/ruby/re.c:3583
         c_effects: []
         purity: leaf
@@ -667,7 +667,7 @@ classes:
         source: c
         cfunc: match_equal
         arity: 1
-        defined_at: references/ruby/re.c:4905
+        defined_at: references/ruby/re.c:4910
         c_body_at: references/ruby/re.c:3609
         c_effects: []
         purity: leaf
@@ -675,7 +675,7 @@ classes:
         source: c
         cfunc: match_equal
         arity: 1
-        defined_at: references/ruby/re.c:4906
+        defined_at: references/ruby/re.c:4911
         c_body_at: references/ruby/re.c:3609
         c_effects: []
         purity: leaf

@@ -55,7 +55,12 @@ module Rigor
           "::io" => ["IO"],
           "::encoding" => %w[Encoding String],
           "::path" => ["String"],
-          "::boolean" => %w[TrueClass FalseClass]
+          "::boolean" => %w[TrueClass FalseClass],
+          # `range[T] = Range[T] | _Range[T]`. Generic, unlike the others, but the strict arm is still a
+          # single nominal and the args are irrelevant to this pass. rbs 4.1 rewrote `Array#[]`'s slicing
+          # overload from `(::Range[::Integer?])` to `(range[int])`; without the entry both it and the
+          # `(int) -> E` overload look alias-typed, so `a[1..2]` resolved to the element type.
+          "::range" => ["Range"]
         }.freeze
         private_constant :ALIAS_STRICT_NOMINALS
 

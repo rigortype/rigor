@@ -193,7 +193,7 @@ RSpec.describe Rigor::Reflection do
   describe ".class_type_param_names" do
     it "returns the type parameter names for a generic class" do
       result = described_class.class_type_param_names("Array")
-      expect(result).to eq([:Elem])
+      expect(result).to eq([:E])
     end
 
     it "returns an empty array for a non-generic class" do

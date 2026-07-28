@@ -112,7 +112,7 @@ RSpec.describe Rigor::Environment::Reflection do
 
   describe "#class_type_param_names" do
     it "returns the declared type parameters of a generic class" do
-      expect(reflection.class_type_param_names("Array")).to eq([:Elem])
+      expect(reflection.class_type_param_names("Array")).to eq([:E])
       expect(reflection.class_type_param_names("Hash")).to eq(%i[K V])
     end
 

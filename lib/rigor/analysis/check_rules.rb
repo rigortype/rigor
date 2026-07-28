@@ -2119,7 +2119,7 @@ module Rigor
           arguments = call_node.arguments&.arguments || []
           arguments.each_with_index do |arg, index|
             arg_type = scope.type_of(arg)
-            params = overload_positional_params(functions, index)
+            params = overload_positional_params(method_types, index)
             next if params.nil? # arity divergence — some overload lacks a param here
 
             mismatch =
@@ -2154,9 +2154,28 @@ module Rigor
         # The matching positional RBS param across every overload, or nil when
         # any overload has no param at `index` (arity divergence — the
         # wrong-arity rule's concern, not this one's).
-        def overload_positional_params(functions, index)
-          params = functions.map { |function| (function.required_positionals + function.optional_positionals)[index] }
+        def overload_positional_params(method_types, index)
+          params = method_types.map do |method_type|
+            function = method_type.type
+            param = (function.required_positionals + function.optional_positionals)[index]
+            param && resolve_param_bounds(param, method_type)
+          end
           params.any?(&:nil?) ? nil : params
+        end
+
+        # Substitutes each bounded method-level type parameter for its bound, so
+        # `[I < _ToInt] (I index) -> …` is walked as `(_ToInt index) -> …`. A bare
+        # `Variable` is undecidable to the acceptance walk and admits everything,
+        # which silently disables both channels for the whole overload; the bound
+        # constrains the argument exactly as an ordinary param of that type would.
+        # Load-bearing since rbs 4.1 rewrote core signatures into this form
+        # (`Array#fetch`'s block overload is `[I < _ToInt, T] (I index) { … }`).
+        def resolve_param_bounds(param, method_type)
+          bounded = method_type.type_params.select(&:upper_bound)
+          return param if bounded.empty?
+
+          substitution = RBS::Substitution.build(bounded.map(&:name), bounded.map(&:upper_bound))
+          param.map_type { |type| type.sub(substitution) }
         end
 
         # The class names whose instances `nil` IS — `NilClass` and every

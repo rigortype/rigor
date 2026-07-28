@@ -22,7 +22,7 @@ purity_levels:
 classes:
   ZeroDivisionError:
     parent: StandardError
-    defined_at: references/ruby/numeric.c:6454
+    defined_at: references/ruby/numeric.c:6461
     includes: []
     constants: {}
     aliases: {}
@@ -31,7 +31,7 @@ classes:
     undefined: []
   FloatDomainError:
     parent: RangeError
-    defined_at: references/ruby/numeric.c:6455
+    defined_at: references/ruby/numeric.c:6462
     includes: []
     constants: {}
     aliases: {}
@@ -40,10 +40,10 @@ classes:
     undefined: []
   Numeric:
     parent: Object
-    defined_at: references/ruby/numeric.c:6456
+    defined_at: references/ruby/numeric.c:6463
     includes:
     - module: Comparable
-      defined_at: references/ruby/numeric.c:6459
+      defined_at: references/ruby/numeric.c:6466
     constants: {}
     aliases:
       imag:
@@ -59,8 +59,8 @@ classes:
         source: c
         cfunc: num_sadded
         arity: 1
-        defined_at: references/ruby/numeric.c:6458
-        c_body_at: references/ruby/numeric.c:521
+        defined_at: references/ruby/numeric.c:6465
+        c_body_at: references/ruby/numeric.c:523
         c_effects:
         - raises
         purity: leaf
@@ -68,161 +68,161 @@ classes:
         source: c
         cfunc: num_coerce
         arity: 1
-        defined_at: references/ruby/numeric.c:6460
-        c_body_at: references/ruby/numeric.c:431
+        defined_at: references/ruby/numeric.c:6467
+        c_body_at: references/ruby/numeric.c:433
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(Numeric) -> [ Numeric, Numeric ]"
-        rbs_at: references/rbs/core/numeric.rbs:319
+        rbs_at: references/rbs/core/numeric.rbs:322
       clone:
         source: c
         cfunc: num_clone
         arity: -1
-        defined_at: references/ruby/numeric.c:6461
+        defined_at: references/ruby/numeric.c:6468
         c_body_at: references/ruby/object.c:472
         c_effects: []
         purity: leaf
         rbs:
         - "(?freeze: true?) -> self"
-        rbs_at: references/rbs/core/numeric.rbs:828
+        rbs_at: references/rbs/core/numeric.rbs:831
       i:
         source: c
         cfunc: num_imaginary
         arity: 0
-        defined_at: references/ruby/numeric.c:6463
-        c_body_at: references/ruby/numeric.c:570
+        defined_at: references/ruby/numeric.c:6470
+        c_body_at: references/ruby/numeric.c:572
         c_effects: []
         purity: leaf
         rbs:
         - "() -> Complex"
-        rbs_at: references/rbs/core/numeric.rbs:455
+        rbs_at: references/rbs/core/numeric.rbs:458
       "-@":
         source: c
         cfunc: num_uminus
         arity: 0
-        defined_at: references/ruby/numeric.c:6464
-        c_body_at: references/ruby/numeric.c:583
+        defined_at: references/ruby/numeric.c:6471
+        c_body_at: references/ruby/numeric.c:585
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/numeric.rbs:219
+        rbs_at: references/rbs/core/numeric.rbs:222
       "<=>":
         source: c
         cfunc: num_cmp
         arity: 1
-        defined_at: references/ruby/numeric.c:6465
-        c_body_at: references/ruby/numeric.c:1485
+        defined_at: references/ruby/numeric.c:6472
+        c_body_at: references/ruby/numeric.c:1487
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric other) -> Integer"
-        rbs_at: references/rbs/core/numeric.rbs:237
+        rbs_at: references/rbs/core/numeric.rbs:240
       eql?:
         source: c
         cfunc: num_eql
         arity: 1
-        defined_at: references/ruby/numeric.c:6466
-        c_body_at: references/ruby/numeric.c:1456
+        defined_at: references/ruby/numeric.c:6473
+        c_body_at: references/ruby/numeric.c:1458
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(untyped) -> bool"
-        rbs_at: references/rbs/core/numeric.rbs:405
+        rbs_at: references/rbs/core/numeric.rbs:408
       fdiv:
         source: c
         cfunc: num_fdiv
         arity: 1
-        defined_at: references/ruby/numeric.c:6467
-        c_body_at: references/ruby/numeric.c:607
+        defined_at: references/ruby/numeric.c:6474
+        c_body_at: references/ruby/numeric.c:609
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(Numeric) -> Numeric"
-        rbs_at: references/rbs/core/numeric.rbs:418
+        rbs_at: references/rbs/core/numeric.rbs:421
       div:
         source: c
         cfunc: num_div
         arity: 1
-        defined_at: references/ruby/numeric.c:6468
-        c_body_at: references/ruby/numeric.c:626
+        defined_at: references/ruby/numeric.c:6475
+        c_body_at: references/ruby/numeric.c:628
         c_effects:
         - dispatch
         - raises
         purity: dispatch
         rbs:
         - "(Numeric) -> Integer"
-        rbs_at: references/rbs/core/numeric.rbs:355
+        rbs_at: references/rbs/core/numeric.rbs:358
       divmod:
         source: c
         cfunc: num_divmod
         arity: 1
-        defined_at: references/ruby/numeric.c:6469
-        c_body_at: references/ruby/numeric.c:757
+        defined_at: references/ruby/numeric.c:6476
+        c_body_at: references/ruby/numeric.c:759
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric) -> [ Numeric, Numeric ]"
-        rbs_at: references/rbs/core/numeric.rbs:384
+        rbs_at: references/rbs/core/numeric.rbs:387
       "%":
         source: c
         cfunc: num_modulo
         arity: 1
-        defined_at: references/ruby/numeric.c:6470
-        c_body_at: references/ruby/numeric.c:667
+        defined_at: references/ruby/numeric.c:6477
+        c_body_at: references/ruby/numeric.c:669
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(Numeric) -> Numeric"
-        rbs_at: references/rbs/core/numeric.rbs:193
+        rbs_at: references/rbs/core/numeric.rbs:196
       modulo:
         source: c
         cfunc: num_modulo
         arity: 1
-        defined_at: references/ruby/numeric.c:6471
-        c_body_at: references/ruby/numeric.c:667
+        defined_at: references/ruby/numeric.c:6478
+        c_body_at: references/ruby/numeric.c:669
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(Numeric) -> Numeric"
-        rbs_at: references/rbs/core/numeric.rbs:530
+        rbs_at: references/rbs/core/numeric.rbs:533
       remainder:
         source: c
         cfunc: num_remainder
         arity: 1
-        defined_at: references/ruby/numeric.c:6472
-        c_body_at: references/ruby/numeric.c:706
+        defined_at: references/ruby/numeric.c:6479
+        c_body_at: references/ruby/numeric.c:708
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(Numeric) -> Numeric"
-        rbs_at: references/rbs/core/numeric.rbs:656
+        rbs_at: references/rbs/core/numeric.rbs:659
       abs:
         source: c
         cfunc: num_abs
         arity: 0
-        defined_at: references/ruby/numeric.c:6473
-        c_body_at: references/ruby/numeric.c:775
+        defined_at: references/ruby/numeric.c:6480
+        c_body_at: references/ruby/numeric.c:777
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> Numeric"
-        rbs_at: references/rbs/core/numeric.rbs:249
+        rbs_at: references/rbs/core/numeric.rbs:252
       magnitude:
         source: c
         cfunc: num_abs
         arity: 0
-        defined_at: references/ruby/numeric.c:6474
-        c_body_at: references/ruby/numeric.c:775
+        defined_at: references/ruby/numeric.c:6481
+        c_body_at: references/ruby/numeric.c:777
         c_effects:
         - dispatch
         purity: dispatch
@@ -230,96 +230,96 @@ classes:
         source: c
         cfunc: num_to_int
         arity: 0
-        defined_at: references/ruby/numeric.c:6475
-        c_body_at: references/ruby/numeric.c:866
+        defined_at: references/ruby/numeric.c:6482
+        c_body_at: references/ruby/numeric.c:868
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/numeric.rbs:792
+        rbs_at: references/rbs/core/numeric.rbs:795
       zero?:
         source: c
         cfunc: num_zero_p
         arity: 0
-        defined_at: references/ruby/numeric.c:6477
-        c_body_at: references/ruby/numeric.c:795
+        defined_at: references/ruby/numeric.c:6484
+        c_body_at: references/ruby/numeric.c:797
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/numeric.rbs:816
+        rbs_at: references/rbs/core/numeric.rbs:819
       nonzero?:
         source: c
         cfunc: num_nonzero_p
         arity: 0
-        defined_at: references/ruby/numeric.c:6478
-        c_body_at: references/ruby/numeric.c:837
+        defined_at: references/ruby/numeric.c:6485
+        c_body_at: references/ruby/numeric.c:839
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> self?"
-        rbs_at: references/rbs/core/numeric.rbs:558
+        rbs_at: references/rbs/core/numeric.rbs:561
       floor:
         source: c
         cfunc: num_floor
         arity: -1
-        defined_at: references/ruby/numeric.c:6480
-        c_body_at: references/ruby/numeric.c:2624
+        defined_at: references/ruby/numeric.c:6487
+        c_body_at: references/ruby/numeric.c:2631
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> Integer"
         - "(Integer digits) -> Numeric"
-        rbs_at: references/rbs/core/numeric.rbs:440
+        rbs_at: references/rbs/core/numeric.rbs:443
       ceil:
         source: c
         cfunc: num_ceil
         arity: -1
-        defined_at: references/ruby/numeric.c:6481
-        c_body_at: references/ruby/numeric.c:2644
+        defined_at: references/ruby/numeric.c:6488
+        c_body_at: references/ruby/numeric.c:2651
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> Integer"
         - "(Integer digits) -> (Integer | Numeric)"
-        rbs_at: references/rbs/core/numeric.rbs:284
+        rbs_at: references/rbs/core/numeric.rbs:287
       round:
         source: c
         cfunc: num_round
         arity: -1
-        defined_at: references/ruby/numeric.c:6482
-        c_body_at: references/ruby/numeric.c:2661
+        defined_at: references/ruby/numeric.c:6489
+        c_body_at: references/ruby/numeric.c:2668
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> Integer"
         - "(Integer digits) -> Numeric"
-        rbs_at: references/rbs/core/numeric.rbs:668
+        rbs_at: references/rbs/core/numeric.rbs:671
       truncate:
         source: c
         cfunc: num_truncate
         arity: -1
-        defined_at: references/ruby/numeric.c:6483
-        c_body_at: references/ruby/numeric.c:2678
+        defined_at: references/ruby/numeric.c:6490
+        c_body_at: references/ruby/numeric.c:2685
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> Integer"
         - "(Integer ndigits) -> (Integer | Numeric)"
-        rbs_at: references/rbs/core/numeric.rbs:804
+        rbs_at: references/rbs/core/numeric.rbs:807
       step:
         source: c
         cfunc: num_step
         arity: -1
-        defined_at: references/ruby/numeric.c:6484
-        c_body_at: references/ruby/numeric.c:2998
+        defined_at: references/ruby/numeric.c:6491
+        c_body_at: references/ruby/numeric.c:3005
         c_effects:
         - block
         - dispatch
@@ -330,29 +330,29 @@ classes:
         - "(?Numeric limit, ?Numeric step) -> Enumerator::ArithmeticSequence"
         - "(?by: Numeric, ?to: Numeric) { (Numeric) -> void } -> self"
         - "(?by: Numeric, ?to: Numeric) -> Enumerator::ArithmeticSequence"
-        rbs_at: references/rbs/core/numeric.rbs:762
+        rbs_at: references/rbs/core/numeric.rbs:765
       positive?:
         source: c
         cfunc: num_positive_p
         arity: 0
-        defined_at: references/ruby/numeric.c:6485
-        c_body_at: references/ruby/numeric.c:880
+        defined_at: references/ruby/numeric.c:6492
+        c_body_at: references/ruby/numeric.c:882
         c_effects: []
         purity: leaf
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/numeric.rbs:587
+        rbs_at: references/rbs/core/numeric.rbs:590
       negative?:
         source: c
         cfunc: num_negative_p
         arity: 0
-        defined_at: references/ruby/numeric.c:6486
-        c_body_at: references/ruby/numeric.c:904
+        defined_at: references/ruby/numeric.c:6493
+        c_body_at: references/ruby/numeric.c:906
         c_effects: []
         purity: leaf
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/numeric.rbs:538
+        rbs_at: references/rbs/core/numeric.rbs:541
       dup:
         source: prelude
         prelude_attrs: []
@@ -375,7 +375,7 @@ classes:
         defined_at: references/ruby/numeric.rb:18
         rbs:
         - "() -> true"
-        rbs_at: references/rbs/core/numeric.rbs:612
+        rbs_at: references/rbs/core/numeric.rbs:615
       real:
         source: prelude
         prelude_attrs: []
@@ -388,7 +388,7 @@ classes:
         defined_at: references/ruby/numeric.rb:27
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/numeric.rbs:604
+        rbs_at: references/rbs/core/numeric.rbs:607
       integer?:
         source: prelude
         prelude_attrs: []
@@ -401,7 +401,7 @@ classes:
         defined_at: references/ruby/numeric.rb:39
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/numeric.rbs:490
+        rbs_at: references/rbs/core/numeric.rbs:493
       finite?:
         source: prelude
         prelude_attrs: []
@@ -414,7 +414,7 @@ classes:
         defined_at: references/ruby/numeric.rb:48
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/numeric.rbs:426
+        rbs_at: references/rbs/core/numeric.rbs:429
       infinite?:
         source: prelude
         prelude_attrs: []
@@ -427,7 +427,7 @@ classes:
         defined_at: references/ruby/numeric.rb:58
         rbs:
         - "() -> Integer?"
-        rbs_at: references/rbs/core/numeric.rbs:479
+        rbs_at: references/rbs/core/numeric.rbs:482
       imaginary:
         source: prelude
         prelude_attrs: []
@@ -440,7 +440,7 @@ classes:
         defined_at: references/ruby/numeric.rb:67
         rbs:
         - "() -> 0"
-        rbs_at: references/rbs/core/numeric.rbs:463
+        rbs_at: references/rbs/core/numeric.rbs:466
       conjugate:
         source: prelude
         prelude_attrs: []
@@ -453,7 +453,7 @@ classes:
         defined_at: references/ruby/numeric.rb:78
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/numeric.rbs:327
+        rbs_at: references/rbs/core/numeric.rbs:330
       "+@":
         source: prelude
         prelude_attrs: []
@@ -466,19 +466,19 @@ classes:
         defined_at: references/ruby/numeric.rb:89
         rbs:
         - "() -> self"
-        rbs_at: references/rbs/core/numeric.rbs:206
+        rbs_at: references/rbs/core/numeric.rbs:209
     singleton_methods: {}
     undefined: []
   Integer:
     parent: Numeric
-    defined_at: references/ruby/numeric.c:6488
+    defined_at: references/ruby/numeric.c:6495
     includes: []
     constants: {}
     aliases:
       inspect:
         old: to_s
         source: c
-        defined_at: references/ruby/numeric.c:6495
+        defined_at: references/ruby/numeric.c:6502
       magnitude:
         old: abs
         source: prelude
@@ -488,91 +488,55 @@ classes:
         source: c
         cfunc: rb_int_to_s
         arity: -1
-        defined_at: references/ruby/numeric.c:6494
-        c_body_at: references/ruby/numeric.c:4110
+        defined_at: references/ruby/numeric.c:6501
+        c_body_at: references/ruby/numeric.c:4117
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> String"
-        - "(2) -> String"
-        - "(3) -> String"
-        - "(4) -> String"
-        - "(5) -> String"
-        - "(6) -> String"
-        - "(7) -> String"
-        - "(8) -> String"
-        - "(9) -> String"
-        - "(10) -> String"
-        - "(11) -> String"
-        - "(12) -> String"
-        - "(13) -> String"
-        - "(14) -> String"
-        - "(15) -> String"
-        - "(16) -> String"
-        - "(17) -> String"
-        - "(18) -> String"
-        - "(19) -> String"
-        - "(20) -> String"
-        - "(21) -> String"
-        - "(22) -> String"
-        - "(23) -> String"
-        - "(24) -> String"
-        - "(25) -> String"
-        - "(26) -> String"
-        - "(27) -> String"
-        - "(28) -> String"
-        - "(29) -> String"
-        - "(30) -> String"
-        - "(31) -> String"
-        - "(32) -> String"
-        - "(33) -> String"
-        - "(34) -> String"
-        - "(35) -> String"
-        - "(36) -> String"
-        - "(int base) -> String"
+        - "(?int base) -> String"
         rbs_at: references/rbs/core/integer.rbs:1292
       allbits?:
         source: c
         cfunc: int_allbits_p
         arity: 1
-        defined_at: references/ruby/numeric.c:6496
-        c_body_at: references/ruby/numeric.c:3810
+        defined_at: references/ruby/numeric.c:6503
+        c_body_at: references/ruby/numeric.c:3817
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(int mask) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:580
+        rbs_at: references/rbs/core/integer.rbs:582
       anybits?:
         source: c
         cfunc: int_anybits_p
         arity: 1
-        defined_at: references/ruby/numeric.c:6497
-        c_body_at: references/ruby/numeric.c:3840
+        defined_at: references/ruby/numeric.c:6504
+        c_body_at: references/ruby/numeric.c:3847
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(int mask) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:603
+        rbs_at: references/rbs/core/integer.rbs:605
       nobits?:
         source: c
         cfunc: int_nobits_p
         arity: 1
-        defined_at: references/ruby/numeric.c:6498
-        c_body_at: references/ruby/numeric.c:3870
+        defined_at: references/ruby/numeric.c:6505
+        c_body_at: references/ruby/numeric.c:3877
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(int mask) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:1035
+        rbs_at: references/rbs/core/integer.rbs:1036
       upto:
         source: c
         cfunc: int_upto
         arity: 1
-        defined_at: references/ruby/numeric.c:6499
-        c_body_at: references/ruby/numeric.c:5818
+        defined_at: references/ruby/numeric.c:6506
+        c_body_at: references/ruby/numeric.c:5825
         c_effects:
         - block
         - dispatch
@@ -580,13 +544,13 @@ classes:
         rbs:
         - "(Numeric limit) { (Integer) -> void } -> Integer"
         - "(Numeric limit) -> ::Enumerator[Integer, self]"
-        rbs_at: references/rbs/core/integer.rbs:1372
+        rbs_at: references/rbs/core/integer.rbs:1335
       downto:
         source: c
         cfunc: int_downto
         arity: 1
-        defined_at: references/ruby/numeric.c:6500
-        c_body_at: references/ruby/numeric.c:5868
+        defined_at: references/ruby/numeric.c:6507
+        c_body_at: references/ruby/numeric.c:5875
         c_effects:
         - block
         - dispatch
@@ -595,13 +559,13 @@ classes:
         rbs:
         - "(Numeric limit) { (Integer) -> void } -> Integer"
         - "(Numeric limit) -> ::Enumerator[Integer, self]"
-        rbs_at: references/rbs/core/integer.rbs:834
+        rbs_at: references/rbs/core/integer.rbs:835
       succ:
         source: c
         cfunc: int_succ
         arity: 0
-        defined_at: references/ruby/numeric.c:6501
-        c_body_at: references/ruby/numeric.c:3889
+        defined_at: references/ruby/numeric.c:6508
+        c_body_at: references/ruby/numeric.c:3896
         c_effects:
         - dispatch
         purity: dispatch
@@ -612,44 +576,41 @@ classes:
         source: c
         cfunc: int_succ
         arity: 0
-        defined_at: references/ruby/numeric.c:6502
-        c_body_at: references/ruby/numeric.c:3889
+        defined_at: references/ruby/numeric.c:6509
+        c_body_at: references/ruby/numeric.c:3896
         c_effects:
         - dispatch
         purity: dispatch
-        rbs:
-        - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:1012
       pred:
         source: c
         cfunc: int_pred
         arity: 0
-        defined_at: references/ruby/numeric.c:6503
-        c_body_at: references/ruby/numeric.c:3917
+        defined_at: references/ruby/numeric.c:6510
+        c_body_at: references/ruby/numeric.c:3924
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:1092
+        rbs_at: references/rbs/core/integer.rbs:1093
       chr:
         source: c
         cfunc: int_chr
         arity: -1
-        defined_at: references/ruby/numeric.c:6504
-        c_body_at: references/ruby/numeric.c:3973
+        defined_at: references/ruby/numeric.c:6511
+        c_body_at: references/ruby/numeric.c:3980
         c_effects:
         - raises
         purity: leaf
         rbs:
-        - "(?encoding) -> String"
-        rbs_at: references/rbs/core/integer.rbs:729
+        - "(?encoding encoding) -> String"
+        rbs_at: references/rbs/core/integer.rbs:730
       to_f:
         source: c
         cfunc: int_to_f
         arity: 0
-        defined_at: references/ruby/numeric.c:6505
-        c_body_at: references/ruby/numeric.c:5586
+        defined_at: references/ruby/numeric.c:6512
+        c_body_at: references/ruby/numeric.c:5593
         c_effects:
         - raises
         purity: leaf
@@ -660,68 +621,65 @@ classes:
         source: c
         cfunc: int_floor
         arity: -1
-        defined_at: references/ruby/numeric.c:6506
-        c_body_at: references/ruby/numeric.c:6019
+        defined_at: references/ruby/numeric.c:6513
+        c_body_at: references/ruby/numeric.c:6026
         c_effects: []
         purity: leaf
         rbs:
         - "(?int digits) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:901
+        rbs_at: references/rbs/core/integer.rbs:902
       ceil:
         source: c
         cfunc: int_ceil
         arity: -1
-        defined_at: references/ruby/numeric.c:6507
-        c_body_at: references/ruby/numeric.c:6087
+        defined_at: references/ruby/numeric.c:6514
+        c_body_at: references/ruby/numeric.c:6094
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> Integer"
-        - "(int digits) -> (Integer | Float)"
-        rbs_at: references/rbs/core/integer.rbs:690
+        - "(?int digits) -> Integer"
+        rbs_at: references/rbs/core/integer.rbs:692
       truncate:
         source: c
         cfunc: int_truncate
         arity: -1
-        defined_at: references/ruby/numeric.c:6508
-        c_body_at: references/ruby/numeric.c:6123
+        defined_at: references/ruby/numeric.c:6515
+        c_body_at: references/ruby/numeric.c:6130
         c_effects: []
         purity: leaf
         rbs:
-        - "() -> Integer"
-        - "(int ndigits) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:1351
+        - "(?int ndigits) -> Integer"
+        rbs_at: references/rbs/core/integer.rbs:1315
       round:
         source: c
         cfunc: int_round
         arity: -1
-        defined_at: references/ruby/numeric.c:6509
-        c_body_at: references/ruby/numeric.c:5947
+        defined_at: references/ruby/numeric.c:6516
+        c_body_at: references/ruby/numeric.c:5954
         c_effects: []
         purity: leaf
         rbs:
-        - "(?half: :up | :down | :even) -> Integer"
-        - "(int digits, ?half: :up | :down | :even) -> (Integer | Float)"
-        rbs_at: references/rbs/core/integer.rbs:1183
+        - "(?int digits, ?half: Numeric::round_mode) -> Integer"
+        rbs_at: references/rbs/core/integer.rbs:1184
       "<=>":
         source: c
         cfunc: rb_int_cmp
         arity: 1
-        defined_at: references/ruby/numeric.c:6510
-        c_body_at: references/ruby/numeric.c:4926
+        defined_at: references/ruby/numeric.c:6517
+        c_body_at: references/ruby/numeric.c:4933
         c_effects:
         - raises
         purity: leaf
         rbs:
         - "(Integer | Rational) -> Integer"
         - "(untyped) -> Integer?"
-        rbs_at: references/rbs/core/integer.rbs:413
+        rbs_at: references/rbs/core/integer.rbs:415
       "+":
         source: c
         cfunc: rb_int_plus
         arity: 1
-        defined_at: references/ruby/numeric.c:6512
-        c_body_at: references/ruby/numeric.c:4179
+        defined_at: references/ruby/numeric.c:6519
+        c_body_at: references/ruby/numeric.c:4186
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -730,13 +688,13 @@ classes:
         - "(Float) -> Float"
         - "(Rational) -> Rational"
         - "(Complex) -> Complex"
-        rbs_at: references/rbs/core/integer.rbs:279
+        rbs_at: references/rbs/core/integer.rbs:281
       "-":
         source: c
         cfunc: rb_int_minus
         arity: 1
-        defined_at: references/ruby/numeric.c:6513
-        c_body_at: references/ruby/numeric.c:4224
+        defined_at: references/ruby/numeric.c:6520
+        c_body_at: references/ruby/numeric.c:4231
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -745,13 +703,13 @@ classes:
         - "(Float) -> Float"
         - "(Rational) -> Rational"
         - "(Complex) -> Complex"
-        rbs_at: references/rbs/core/integer.rbs:297
+        rbs_at: references/rbs/core/integer.rbs:299
       "*":
         source: c
         cfunc: rb_int_mul
         arity: 1
-        defined_at: references/ruby/numeric.c:6514
-        c_body_at: references/ruby/numeric.c:4280
+        defined_at: references/ruby/numeric.c:6521
+        c_body_at: references/ruby/numeric.c:4287
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -760,13 +718,13 @@ classes:
         - "(Rational) -> Rational"
         - "(Complex) -> Complex"
         - "(Integer) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:208
+        rbs_at: references/rbs/core/integer.rbs:210
       "/":
         source: c
         cfunc: rb_int_div
         arity: 1
-        defined_at: references/ruby/numeric.c:6515
-        c_body_at: references/ruby/numeric.c:4419
+        defined_at: references/ruby/numeric.c:6522
+        c_body_at: references/ruby/numeric.c:4426
         c_effects: []
         purity: leaf
         rbs:
@@ -774,24 +732,24 @@ classes:
         - "(Float) -> Float"
         - "(Rational) -> Rational"
         - "(Complex) -> Complex"
-        rbs_at: references/rbs/core/integer.rbs:333
+        rbs_at: references/rbs/core/integer.rbs:335
       div:
         source: c
         cfunc: rb_int_idiv
         arity: 1
-        defined_at: references/ruby/numeric.c:6516
-        c_body_at: references/ruby/numeric.c:4455
+        defined_at: references/ruby/numeric.c:6523
+        c_body_at: references/ruby/numeric.c:4462
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:785
+        rbs_at: references/rbs/core/integer.rbs:786
       "%":
         source: c
         cfunc: rb_int_modulo
         arity: 1
-        defined_at: references/ruby/numeric.c:6517
-        c_body_at: references/ruby/numeric.c:4514
+        defined_at: references/ruby/numeric.c:6524
+        c_body_at: references/ruby/numeric.c:4521
         c_effects: []
         purity: leaf
         rbs:
@@ -799,21 +757,21 @@ classes:
         - "(Rational) -> Rational"
         - "(Integer) -> Integer"
         - "(Numeric) -> Numeric"
-        rbs_at: references/rbs/core/integer.rbs:175
+        rbs_at: references/rbs/core/integer.rbs:177
       modulo:
         source: c
         cfunc: rb_int_modulo
         arity: 1
-        defined_at: references/ruby/numeric.c:6518
-        c_body_at: references/ruby/numeric.c:4514
+        defined_at: references/ruby/numeric.c:6525
+        c_body_at: references/ruby/numeric.c:4521
         c_effects: []
         purity: leaf
       remainder:
         source: c
         cfunc: int_remainder
         arity: 1
-        defined_at: references/ruby/numeric.c:6519
-        c_body_at: references/ruby/numeric.c:4549
+        defined_at: references/ruby/numeric.c:6526
+        c_body_at: references/ruby/numeric.c:4556
         c_effects: []
         purity: leaf
         rbs:
@@ -821,13 +779,13 @@ classes:
         - "(Float) -> Float"
         - "(Rational) -> Rational"
         - "(Numeric) -> Numeric"
-        rbs_at: references/rbs/core/integer.rbs:1132
+        rbs_at: references/rbs/core/integer.rbs:1133
       divmod:
         source: c
         cfunc: rb_int_divmod
         arity: 1
-        defined_at: references/ruby/numeric.c:6520
-        c_body_at: references/ruby/numeric.c:4625
+        defined_at: references/ruby/numeric.c:6527
+        c_body_at: references/ruby/numeric.c:4632
         c_effects: []
         purity: leaf
         rbs:
@@ -835,24 +793,24 @@ classes:
         - "(Float) -> [ Integer, Float ]"
         - "(Rational) -> [ Integer, Rational ]"
         - "(Numeric) -> [ Numeric, Numeric ]"
-        rbs_at: references/rbs/core/integer.rbs:811
+        rbs_at: references/rbs/core/integer.rbs:812
       fdiv:
         source: c
         cfunc: rb_int_fdiv
         arity: 1
-        defined_at: references/ruby/numeric.c:6521
-        c_body_at: references/ruby/numeric.c:4352
+        defined_at: references/ruby/numeric.c:6528
+        c_body_at: references/ruby/numeric.c:4359
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric) -> Float"
-        rbs_at: references/rbs/core/integer.rbs:859
+        rbs_at: references/rbs/core/integer.rbs:860
       "**":
         source: c
         cfunc: rb_int_pow
         arity: 1
-        defined_at: references/ruby/numeric.c:6522
-        c_body_at: references/ruby/numeric.c:4805
+        defined_at: references/ruby/numeric.c:6529
+        c_body_at: references/ruby/numeric.c:4812
         c_effects: []
         purity: leaf
         rbs:
@@ -860,12 +818,12 @@ classes:
         - "(Float) -> Numeric"
         - "(Rational) -> Numeric"
         - "(Complex) -> Complex"
-        rbs_at: references/rbs/core/integer.rbs:257
+        rbs_at: references/rbs/core/integer.rbs:259
       pow:
         source: c
         cfunc: rb_int_powm
         arity: -1
-        defined_at: references/ruby/numeric.c:6524
+        defined_at: references/ruby/numeric.c:6531
         c_body_at: references/ruby/bignum.c:7191
         c_effects:
         - raises
@@ -876,154 +834,151 @@ classes:
         - "(Float) -> (Float | Complex)"
         - "(Rational) -> (Float | Rational | Complex)"
         - "(Complex) -> Complex"
-        rbs_at: references/rbs/core/integer.rbs:1075
+        rbs_at: references/rbs/core/integer.rbs:1076
       "===":
         source: c
         cfunc: rb_int_equal
         arity: 1
-        defined_at: references/ruby/numeric.c:6526
-        c_body_at: references/ruby/numeric.c:4863
+        defined_at: references/ruby/numeric.c:6533
+        c_body_at: references/ruby/numeric.c:4870
         c_effects: []
         purity: leaf
-        rbs:
-        - "(untyped) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:437
       "==":
         source: c
         cfunc: rb_int_equal
         arity: 1
-        defined_at: references/ruby/numeric.c:6527
-        c_body_at: references/ruby/numeric.c:4863
+        defined_at: references/ruby/numeric.c:6534
+        c_body_at: references/ruby/numeric.c:4870
         c_effects: []
         purity: leaf
         rbs:
-        - "(untyped) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:424
+        - "(untyped other) -> bool"
+        rbs_at: references/rbs/core/integer.rbs:426
       ">":
         source: c
         cfunc: rb_int_gt
         arity: 1
-        defined_at: references/ruby/numeric.c:6528
-        c_body_at: references/ruby/numeric.c:4973
+        defined_at: references/ruby/numeric.c:6535
+        c_body_at: references/ruby/numeric.c:4980
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:453
+        rbs_at: references/rbs/core/integer.rbs:455
       ">=":
         source: c
         cfunc: rb_int_ge
         arity: 1
-        defined_at: references/ruby/numeric.c:6529
-        c_body_at: references/ruby/numeric.c:5020
+        defined_at: references/ruby/numeric.c:6536
+        c_body_at: references/ruby/numeric.c:5027
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:470
+        rbs_at: references/rbs/core/integer.rbs:472
       "<":
         source: c
         cfunc: int_lt
         arity: 1
-        defined_at: references/ruby/numeric.c:6530
-        c_body_at: references/ruby/numeric.c:5064
+        defined_at: references/ruby/numeric.c:6537
+        c_body_at: references/ruby/numeric.c:5071
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:351
+        rbs_at: references/rbs/core/integer.rbs:353
       "<=":
         source: c
         cfunc: int_le
         arity: 1
-        defined_at: references/ruby/numeric.c:6531
-        c_body_at: references/ruby/numeric.c:5111
+        defined_at: references/ruby/numeric.c:6538
+        c_body_at: references/ruby/numeric.c:5118
         c_effects: []
         purity: leaf
         rbs:
         - "(Numeric) -> bool"
-        rbs_at: references/rbs/core/integer.rbs:385
+        rbs_at: references/rbs/core/integer.rbs:387
       "&":
         source: c
         cfunc: rb_int_and
         arity: 1
-        defined_at: references/ruby/numeric.c:6533
-        c_body_at: references/ruby/numeric.c:5200
+        defined_at: references/ruby/numeric.c:6540
+        c_body_at: references/ruby/numeric.c:5207
         c_effects: []
         purity: leaf
         rbs:
         - "(Integer) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:193
+        rbs_at: references/rbs/core/integer.rbs:195
       "|":
         source: c
         cfunc: int_or
         arity: 1
-        defined_at: references/ruby/numeric.c:6534
-        c_body_at: references/ruby/numeric.c:5242
+        defined_at: references/ruby/numeric.c:6541
+        c_body_at: references/ruby/numeric.c:5249
         c_effects: []
         purity: leaf
         rbs:
         - "(Integer) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:1396
+        rbs_at: references/rbs/core/integer.rbs:1359
       "^":
         source: c
         cfunc: rb_int_xor
         arity: 1
-        defined_at: references/ruby/numeric.c:6535
-        c_body_at: references/ruby/numeric.c:5284
+        defined_at: references/ruby/numeric.c:6542
+        c_body_at: references/ruby/numeric.c:5291
         c_effects: []
         purity: leaf
         rbs:
         - "(Integer) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:545
+        rbs_at: references/rbs/core/integer.rbs:547
       "[]":
         source: c
         cfunc: int_aref
         arity: -1
-        defined_at: references/ruby/numeric.c:6536
-        c_body_at: references/ruby/numeric.c:5557
+        defined_at: references/ruby/numeric.c:6543
+        c_body_at: references/ruby/numeric.c:5564
         c_effects: []
         purity: leaf
         rbs:
         - "(int) -> Integer"
         - "(int i, int len) -> Integer"
         - "(Range[int]) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:528
+        rbs_at: references/rbs/core/integer.rbs:530
       !!str '<<':
         source: c
         cfunc: rb_int_lshift
         arity: 1
-        defined_at: references/ruby/numeric.c:6538
-        c_body_at: references/ruby/numeric.c:5339
+        defined_at: references/ruby/numeric.c:6545
+        c_body_at: references/ruby/numeric.c:5346
         c_effects: []
         purity: leaf
         rbs:
         - "(int) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:368
+        rbs_at: references/rbs/core/integer.rbs:370
       ">>":
         source: c
         cfunc: rb_int_rshift
         arity: 1
-        defined_at: references/ruby/numeric.c:6539
-        c_body_at: references/ruby/numeric.c:5395
+        defined_at: references/ruby/numeric.c:6546
+        c_body_at: references/ruby/numeric.c:5402
         c_effects: []
         purity: leaf
         rbs:
         - "(int) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:487
+        rbs_at: references/rbs/core/integer.rbs:489
       digits:
         source: c
         cfunc: rb_int_digits
         arity: -1
-        defined_at: references/ruby/numeric.c:6541
-        c_body_at: references/ruby/numeric.c:5758
+        defined_at: references/ruby/numeric.c:6548
+        c_body_at: references/ruby/numeric.c:5765
         c_effects:
         - dispatch
         - raises
         purity: dispatch
         rbs:
-        - "(?int base) -> ::Array[Integer]"
-        rbs_at: references/rbs/core/integer.rbs:767
+        - "(?int base) -> Array[Integer]"
+        rbs_at: references/rbs/core/integer.rbs:768
       "-@":
         source: prelude
         prelude_attrs:
@@ -1035,11 +990,11 @@ classes:
         arity: 0
         cfunc: rb_int_uminus
         defined_at: references/ruby/numeric.rb:104
-        c_body_at: references/ruby/numeric.c:4026
+        c_body_at: references/ruby/numeric.c:4033
         c_effects: []
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:312
+        rbs_at: references/rbs/core/integer.rbs:314
       "~":
         source: prelude
         prelude_attrs:
@@ -1051,11 +1006,11 @@ classes:
         arity: 0
         cfunc: rb_int_comp
         defined_at: references/ruby/numeric.rb:123
-        c_body_at: references/ruby/numeric.c:5129
+        c_body_at: references/ruby/numeric.c:5136
         c_effects: []
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:1410
+        rbs_at: references/rbs/core/integer.rbs:1373
       abs:
         source: prelude
         prelude_attrs:
@@ -1067,11 +1022,11 @@ classes:
         arity: 0
         cfunc: rb_int_abs
         defined_at: references/ruby/numeric.rb:137
-        c_body_at: references/ruby/numeric.c:5614
+        c_body_at: references/ruby/numeric.c:5621
         c_effects: []
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:557
+        rbs_at: references/rbs/core/integer.rbs:559
       bit_length:
         source: prelude
         prelude_attrs:
@@ -1083,11 +1038,11 @@ classes:
         arity: 0
         cfunc: rb_int_bit_length
         defined_at: references/ruby/numeric.rb:184
-        c_body_at: references/ruby/numeric.c:5653
+        c_body_at: references/ruby/numeric.c:5660
         c_effects: []
         rbs:
         - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:648
+        rbs_at: references/rbs/core/integer.rbs:650
       even?:
         source: prelude
         prelude_attrs:
@@ -1099,11 +1054,11 @@ classes:
         arity: 0
         cfunc: rb_int_even_p
         defined_at: references/ruby/numeric.rb:193
-        c_body_at: references/ruby/numeric.c:3781
+        c_body_at: references/ruby/numeric.c:3788
         c_effects: []
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/integer.rbs:843
+        rbs_at: references/rbs/core/integer.rbs:844
       integer?:
         source: prelude
         prelude_attrs: []
@@ -1116,7 +1071,7 @@ classes:
         defined_at: references/ruby/numeric.rb:202
         rbs:
         - "() -> true"
-        rbs_at: references/rbs/core/integer.rbs:953
+        rbs_at: references/rbs/core/integer.rbs:954
       odd?:
         source: prelude
         prelude_attrs:
@@ -1128,11 +1083,11 @@ classes:
         arity: 0
         cfunc: rb_int_odd_p
         defined_at: references/ruby/numeric.rb:212
-        c_body_at: references/ruby/numeric.c:3757
+        c_body_at: references/ruby/numeric.c:3764
         c_effects: []
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/integer.rbs:1051
+        rbs_at: references/rbs/core/integer.rbs:1052
       ord:
         source: prelude
         prelude_attrs: []
@@ -1144,8 +1099,8 @@ classes:
         cfunc:
         defined_at: references/ruby/numeric.rb:222
         rbs:
-        - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:1059
+        - "() -> self"
+        rbs_at: references/rbs/core/integer.rbs:1060
       size:
         source: prelude
         prelude_attrs:
@@ -1157,7 +1112,7 @@ classes:
         arity: 0
         cfunc: rb_int_size
         defined_at: references/ruby/numeric.rb:239
-        c_body_at: references/ruby/numeric.c:5632
+        c_body_at: references/ruby/numeric.c:5639
         c_effects: []
         rbs:
         - "() -> Integer"
@@ -1174,8 +1129,8 @@ classes:
         cfunc:
         defined_at: references/ruby/numeric.rb:255
         rbs:
-        - "() { (Integer) -> void } -> self"
-        - "() -> ::Enumerator[Integer, self]"
+        - "() { (Integer i) -> void } -> self"
+        - "() -> Enumerator[Integer, self]"
         rbs_at: references/rbs/core/integer.rbs:1229
       to_i:
         source: prelude
@@ -1188,7 +1143,7 @@ classes:
         cfunc:
         defined_at: references/ruby/numeric.rb:272
         rbs:
-        - "() -> Integer"
+        - "() -> self"
         rbs_at: references/rbs/core/integer.rbs:1254
       to_int:
         source: prelude
@@ -1211,11 +1166,11 @@ classes:
         arity: 0
         cfunc: rb_int_zero_p
         defined_at: references/ruby/numeric.rb:288
-        c_body_at: references/ruby/numeric.c:811
+        c_body_at: references/ruby/numeric.c:813
         c_effects: []
         rbs:
         - "() -> bool"
-        rbs_at: references/rbs/core/integer.rbs:1381
+        rbs_at: references/rbs/core/integer.rbs:1344
       ceildiv:
         source: prelude
         prelude_attrs: []
@@ -1228,7 +1183,7 @@ classes:
         defined_at: references/ruby/numeric.rb:308
         rbs:
         - "(Numeric other) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:709
+        rbs_at: references/rbs/core/integer.rbs:710
       numerator:
         source: prelude
         prelude_attrs: []
@@ -1240,8 +1195,8 @@ classes:
         cfunc:
         defined_at: references/ruby/numeric.rb:318
         rbs:
-        - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:1043
+        - "() -> self"
+        rbs_at: references/rbs/core/integer.rbs:1044
       denominator:
         source: prelude
         prelude_attrs: []
@@ -1253,81 +1208,81 @@ classes:
         cfunc:
         defined_at: references/ruby/numeric.rb:326
         rbs:
-        - "() -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:752
+        - "() -> 1"
+        rbs_at: references/rbs/core/integer.rbs:753
     singleton_methods:
       sqrt:
         source: c
         cfunc: rb_int_s_isqrt
         arity: 1
-        defined_at: references/ruby/numeric.c:6491
-        c_body_at: references/ruby/numeric.c:6213
+        defined_at: references/ruby/numeric.c:6498
+        c_body_at: references/ruby/numeric.c:6220
         c_effects:
         - dispatch
         purity: dispatch
         rbs:
         - "(int n) -> Integer"
-        rbs_at: references/rbs/core/integer.rbs:126
+        rbs_at: references/rbs/core/integer.rbs:128
       try_convert:
         source: c
         cfunc: int_s_try_convert
         arity: 1
-        defined_at: references/ruby/numeric.c:6492
-        c_body_at: references/ruby/numeric.c:6261
+        defined_at: references/ruby/numeric.c:6499
+        c_body_at: references/ruby/numeric.c:6268
         c_effects: []
         purity: leaf
         rbs:
         - "(int) -> Integer"
         - "(untyped) -> Integer?"
-        rbs_at: references/rbs/core/integer.rbs:145
+        rbs_at: references/rbs/core/integer.rbs:147
     undefined:
     - new
   Float:
     parent: Numeric
-    defined_at: references/ruby/numeric.c:6563
+    defined_at: references/ruby/numeric.c:6570
     includes: []
     constants:
       RADIX:
         c_expression: INT2FIX(FLT_RADIX)
-        defined_at: references/ruby/numeric.c:6574
+        defined_at: references/ruby/numeric.c:6581
       MANT_DIG:
         c_expression: INT2FIX(DBL_MANT_DIG)
-        defined_at: references/ruby/numeric.c:6580
+        defined_at: references/ruby/numeric.c:6587
       DIG:
         c_expression: INT2FIX(DBL_DIG)
-        defined_at: references/ruby/numeric.c:6587
+        defined_at: references/ruby/numeric.c:6594
       MIN_EXP:
         c_expression: INT2FIX(DBL_MIN_EXP)
-        defined_at: references/ruby/numeric.c:6594
+        defined_at: references/ruby/numeric.c:6601
       MAX_EXP:
         c_expression: INT2FIX(DBL_MAX_EXP)
-        defined_at: references/ruby/numeric.c:6601
+        defined_at: references/ruby/numeric.c:6608
       MIN_10_EXP:
         c_expression: INT2FIX(DBL_MIN_10_EXP)
-        defined_at: references/ruby/numeric.c:6608
+        defined_at: references/ruby/numeric.c:6615
       MAX_10_EXP:
         c_expression: INT2FIX(DBL_MAX_10_EXP)
-        defined_at: references/ruby/numeric.c:6615
+        defined_at: references/ruby/numeric.c:6622
       MIN:
         c_expression: DBL2NUM(DBL_MIN)
-        defined_at: references/ruby/numeric.c:6626
+        defined_at: references/ruby/numeric.c:6633
       MAX:
         c_expression: DBL2NUM(DBL_MAX)
-        defined_at: references/ruby/numeric.c:6632
+        defined_at: references/ruby/numeric.c:6639
       EPSILON:
         c_expression: DBL2NUM(DBL_EPSILON)
-        defined_at: references/ruby/numeric.c:6639
+        defined_at: references/ruby/numeric.c:6646
       INFINITY:
         c_expression: DBL2NUM(HUGE_VAL)
-        defined_at: references/ruby/numeric.c:6643
+        defined_at: references/ruby/numeric.c:6650
       NAN:
         c_expression: DBL2NUM(nan(""))
-        defined_at: references/ruby/numeric.c:6647
+        defined_at: references/ruby/numeric.c:6654
     aliases:
       inspect:
         old: to_s
         source: c
-        defined_at: references/ruby/numeric.c:6650
+        defined_at: references/ruby/numeric.c:6657
       magnitude:
         old: abs
         source: prelude
@@ -1337,8 +1292,8 @@ classes:
         source: c
         cfunc: flo_to_s
         arity: 0
-        defined_at: references/ruby/numeric.c:6649
-        c_body_at: references/ruby/numeric.c:949
+        defined_at: references/ruby/numeric.c:6656
+        c_body_at: references/ruby/numeric.c:951
         c_effects:
         - mutate
         purity: mutates_self
@@ -1349,8 +1304,8 @@ classes:
         source: c
         cfunc: flo_coerce
         arity: 1
-        defined_at: references/ruby/numeric.c:6651
-        c_body_at: references/ruby/numeric.c:1040
+        defined_at: references/ruby/numeric.c:6658
+        c_body_at: references/ruby/numeric.c:1042
         c_effects:
         - dispatch
         purity: dispatch
@@ -1361,8 +1316,8 @@ classes:
         source: c
         cfunc: rb_float_plus
         arity: 1
-        defined_at: references/ruby/numeric.c:6652
-        c_body_at: references/ruby/numeric.c:1072
+        defined_at: references/ruby/numeric.c:6659
+        c_body_at: references/ruby/numeric.c:1074
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1374,8 +1329,8 @@ classes:
         source: c
         cfunc: rb_float_minus
         arity: 1
-        defined_at: references/ruby/numeric.c:6653
-        c_body_at: references/ruby/numeric.c:1103
+        defined_at: references/ruby/numeric.c:6660
+        c_body_at: references/ruby/numeric.c:1105
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1387,8 +1342,8 @@ classes:
         source: c
         cfunc: rb_float_mul
         arity: 1
-        defined_at: references/ruby/numeric.c:6654
-        c_body_at: references/ruby/numeric.c:1134
+        defined_at: references/ruby/numeric.c:6661
+        c_body_at: references/ruby/numeric.c:1136
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1400,8 +1355,8 @@ classes:
         source: c
         cfunc: rb_float_div
         arity: 1
-        defined_at: references/ruby/numeric.c:6655
-        c_body_at: references/ruby/numeric.c:1189
+        defined_at: references/ruby/numeric.c:6662
+        c_body_at: references/ruby/numeric.c:1191
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1413,8 +1368,8 @@ classes:
         source: c
         cfunc: flo_quo
         arity: 1
-        defined_at: references/ruby/numeric.c:6656
-        c_body_at: references/ruby/numeric.c:1227
+        defined_at: references/ruby/numeric.c:6663
+        c_body_at: references/ruby/numeric.c:1229
         c_effects:
         - dispatch
         purity: dispatch
@@ -1426,8 +1381,8 @@ classes:
         source: c
         cfunc: flo_quo
         arity: 1
-        defined_at: references/ruby/numeric.c:6657
-        c_body_at: references/ruby/numeric.c:1227
+        defined_at: references/ruby/numeric.c:6664
+        c_body_at: references/ruby/numeric.c:1229
         c_effects:
         - dispatch
         purity: dispatch
@@ -1439,8 +1394,8 @@ classes:
         source: c
         cfunc: flo_mod
         arity: 1
-        defined_at: references/ruby/numeric.c:6658
-        c_body_at: references/ruby/numeric.c:1313
+        defined_at: references/ruby/numeric.c:6665
+        c_body_at: references/ruby/numeric.c:1315
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1454,8 +1409,8 @@ classes:
         source: c
         cfunc: flo_mod
         arity: 1
-        defined_at: references/ruby/numeric.c:6659
-        c_body_at: references/ruby/numeric.c:1313
+        defined_at: references/ruby/numeric.c:6666
+        c_body_at: references/ruby/numeric.c:1315
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1466,8 +1421,8 @@ classes:
         source: c
         cfunc: flo_divmod
         arity: 1
-        defined_at: references/ruby/numeric.c:6660
-        c_body_at: references/ruby/numeric.c:1368
+        defined_at: references/ruby/numeric.c:6667
+        c_body_at: references/ruby/numeric.c:1370
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1479,8 +1434,8 @@ classes:
         source: c
         cfunc: rb_float_pow
         arity: 1
-        defined_at: references/ruby/numeric.c:6661
-        c_body_at: references/ruby/numeric.c:1407
+        defined_at: references/ruby/numeric.c:6668
+        c_body_at: references/ruby/numeric.c:1409
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1492,8 +1447,8 @@ classes:
         source: c
         cfunc: flo_eq
         arity: 1
-        defined_at: references/ruby/numeric.c:6662
-        c_body_at: references/ruby/numeric.c:1518
+        defined_at: references/ruby/numeric.c:6669
+        c_body_at: references/ruby/numeric.c:1520
         c_effects: []
         purity: leaf
         rbs:
@@ -1503,8 +1458,8 @@ classes:
         source: c
         cfunc: flo_eq
         arity: 1
-        defined_at: references/ruby/numeric.c:6663
-        c_body_at: references/ruby/numeric.c:1518
+        defined_at: references/ruby/numeric.c:6670
+        c_body_at: references/ruby/numeric.c:1520
         c_effects: []
         purity: leaf
         rbs:
@@ -1514,8 +1469,8 @@ classes:
         source: c
         cfunc: flo_cmp
         arity: 1
-        defined_at: references/ruby/numeric.c:6664
-        c_body_at: references/ruby/numeric.c:1600
+        defined_at: references/ruby/numeric.c:6671
+        c_body_at: references/ruby/numeric.c:1602
         c_effects:
         - coerce_fallback
         - dispatch
@@ -1527,8 +1482,8 @@ classes:
         source: c
         cfunc: rb_float_gt
         arity: 1
-        defined_at: references/ruby/numeric.c:6665
-        c_body_at: references/ruby/numeric.c:1653
+        defined_at: references/ruby/numeric.c:6672
+        c_body_at: references/ruby/numeric.c:1655
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1539,8 +1494,8 @@ classes:
         source: c
         cfunc: flo_ge
         arity: 1
-        defined_at: references/ruby/numeric.c:6666
-        c_body_at: references/ruby/numeric.c:1690
+        defined_at: references/ruby/numeric.c:6673
+        c_body_at: references/ruby/numeric.c:1692
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1551,8 +1506,8 @@ classes:
         source: c
         cfunc: flo_lt
         arity: 1
-        defined_at: references/ruby/numeric.c:6667
-        c_body_at: references/ruby/numeric.c:1726
+        defined_at: references/ruby/numeric.c:6674
+        c_body_at: references/ruby/numeric.c:1728
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1563,8 +1518,8 @@ classes:
         source: c
         cfunc: flo_le
         arity: 1
-        defined_at: references/ruby/numeric.c:6668
-        c_body_at: references/ruby/numeric.c:1764
+        defined_at: references/ruby/numeric.c:6675
+        c_body_at: references/ruby/numeric.c:1766
         c_effects:
         - coerce_fallback
         purity: leaf_when_numeric
@@ -1575,8 +1530,8 @@ classes:
         source: c
         cfunc: flo_eql
         arity: 1
-        defined_at: references/ruby/numeric.c:6669
-        c_body_at: references/ruby/numeric.c:1803
+        defined_at: references/ruby/numeric.c:6676
+        c_body_at: references/ruby/numeric.c:1805
         c_effects: []
         purity: leaf
         rbs:
@@ -1586,8 +1541,8 @@ classes:
         source: c
         cfunc: flo_hash
         arity: 0
-        defined_at: references/ruby/numeric.c:6670
-        c_body_at: references/ruby/numeric.c:1548
+        defined_at: references/ruby/numeric.c:6677
+        c_body_at: references/ruby/numeric.c:1550
         c_effects: []
         purity: leaf
         rbs:
@@ -1597,8 +1552,8 @@ classes:
         source: c
         cfunc: flo_to_i
         arity: 0
-        defined_at: references/ruby/numeric.c:6672
-        c_body_at: references/ruby/numeric.c:2555
+        defined_at: references/ruby/numeric.c:6679
+        c_body_at: references/ruby/numeric.c:2562
         c_effects: []
         purity: leaf
         rbs:
@@ -1608,16 +1563,16 @@ classes:
         source: c
         cfunc: flo_to_i
         arity: 0
-        defined_at: references/ruby/numeric.c:6673
-        c_body_at: references/ruby/numeric.c:2555
+        defined_at: references/ruby/numeric.c:6680
+        c_body_at: references/ruby/numeric.c:2562
         c_effects: []
         purity: leaf
       floor:
         source: c
         cfunc: flo_floor
         arity: -1
-        defined_at: references/ruby/numeric.c:6674
-        c_body_at: references/ruby/numeric.c:2120
+        defined_at: references/ruby/numeric.c:6681
+        c_body_at: references/ruby/numeric.c:2125
         c_effects: []
         purity: leaf
         rbs:
@@ -1628,8 +1583,8 @@ classes:
         source: c
         cfunc: flo_ceil
         arity: -1
-        defined_at: references/ruby/numeric.c:6675
-        c_body_at: references/ruby/numeric.c:2205
+        defined_at: references/ruby/numeric.c:6682
+        c_body_at: references/ruby/numeric.c:2210
         c_effects: []
         purity: leaf
         rbs:
@@ -1640,8 +1595,8 @@ classes:
         source: c
         cfunc: flo_round
         arity: -1
-        defined_at: references/ruby/numeric.c:6676
-        c_body_at: references/ruby/numeric.c:2463
+        defined_at: references/ruby/numeric.c:6683
+        c_body_at: references/ruby/numeric.c:2471
         c_effects: []
         purity: leaf
         rbs:
@@ -1652,8 +1607,8 @@ classes:
         source: c
         cfunc: flo_truncate
         arity: -1
-        defined_at: references/ruby/numeric.c:6677
-        c_body_at: references/ruby/numeric.c:2601
+        defined_at: references/ruby/numeric.c:6684
+        c_body_at: references/ruby/numeric.c:2608
         c_effects: []
         purity: leaf
         rbs:
@@ -1664,8 +1619,8 @@ classes:
         source: c
         cfunc: flo_is_nan_p
         arity: 0
-        defined_at: references/ruby/numeric.c:6679
-        c_body_at: references/ruby/numeric.c:1835
+        defined_at: references/ruby/numeric.c:6686
+        c_body_at: references/ruby/numeric.c:1837
         c_effects: []
         purity: leaf
         rbs:
@@ -1675,8 +1630,8 @@ classes:
         source: c
         cfunc: rb_flo_is_infinite_p
         arity: 0
-        defined_at: references/ruby/numeric.c:6680
-        c_body_at: references/ruby/numeric.c:1866
+        defined_at: references/ruby/numeric.c:6687
+        c_body_at: references/ruby/numeric.c:1868
         c_effects: []
         purity: leaf
         rbs:
@@ -1686,8 +1641,8 @@ classes:
         source: c
         cfunc: rb_flo_is_finite_p
         arity: 0
-        defined_at: references/ruby/numeric.c:6681
-        c_body_at: references/ruby/numeric.c:1896
+        defined_at: references/ruby/numeric.c:6688
+        c_body_at: references/ruby/numeric.c:1898
         c_effects: []
         purity: leaf
         rbs:
@@ -1697,8 +1652,8 @@ classes:
         source: c
         cfunc: flo_next_float
         arity: 0
-        defined_at: references/ruby/numeric.c:6682
-        c_body_at: references/ruby/numeric.c:1957
+        defined_at: references/ruby/numeric.c:6689
+        c_body_at: references/ruby/numeric.c:1959
         c_effects: []
         purity: leaf
         rbs:
@@ -1708,8 +1663,8 @@ classes:
         source: c
         cfunc: flo_prev_float
         arity: 0
-        defined_at: references/ruby/numeric.c:6683
-        c_body_at: references/ruby/numeric.c:1998
+        defined_at: references/ruby/numeric.c:6690
+        c_body_at: references/ruby/numeric.c:2000
         c_effects: []
         purity: leaf
         rbs:
@@ -1739,7 +1694,7 @@ classes:
         arity: 0
         cfunc: rb_float_abs
         defined_at: references/ruby/numeric.rb:373
-        c_body_at: references/ruby/numeric.c:1816
+        c_body_at: references/ruby/numeric.c:1818
         c_effects: []
         rbs:
         - "() -> Float"
@@ -1755,7 +1710,7 @@ classes:
         arity: 0
         cfunc: rb_float_uminus
         defined_at: references/ruby/numeric.rb:389
-        c_body_at: references/ruby/numeric.c:1046
+        c_body_at: references/ruby/numeric.c:1048
         c_effects: []
         rbs:
         - "() -> Float"

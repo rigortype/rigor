@@ -20,83 +20,83 @@ purity_levels:
 classes:
   Set:
     parent: Object
-    defined_at: references/ruby/set.c:2222
+    defined_at: references/ruby/set.c:2237
     includes:
     - module: Enumerable
-      defined_at: references/ruby/set.c:2223
+      defined_at: references/ruby/set.c:2238
     constants: {}
     aliases:
       intersection:
         old: "&"
         source: c
-        defined_at: references/ruby/set.c:2240
+        defined_at: references/ruby/set.c:2255
       difference:
         old: "-"
         source: c
-        defined_at: references/ruby/set.c:2242
+        defined_at: references/ruby/set.c:2257
       "+":
         old: "|"
         source: c
-        defined_at: references/ruby/set.c:2245
+        defined_at: references/ruby/set.c:2260
       union:
         old: "|"
         source: c
-        defined_at: references/ruby/set.c:2246
+        defined_at: references/ruby/set.c:2261
       eql?:
         old: "=="
         source: c
-        defined_at: references/ruby/set.c:2249
+        defined_at: references/ruby/set.c:2264
       !!str '<<':
         old: add
         source: c
-        defined_at: references/ruby/set.c:2251
+        defined_at: references/ruby/set.c:2266
       map!:
         old: collect!
         source: c
-        defined_at: references/ruby/set.c:2256
+        defined_at: references/ruby/set.c:2271
       member?:
         old: include?
         source: c
-        defined_at: references/ruby/set.c:2270
+        defined_at: references/ruby/set.c:2285
       "===":
         old: include?
         source: c
-        defined_at: references/ruby/set.c:2271
+        defined_at: references/ruby/set.c:2286
       to_s:
         old: inspect
         source: c
-        defined_at: references/ruby/set.c:2273
+        defined_at: references/ruby/set.c:2288
       "<":
         old: proper_subset?
         source: c
-        defined_at: references/ruby/set.c:2279
+        defined_at: references/ruby/set.c:2294
       ">":
         old: proper_superset?
         source: c
-        defined_at: references/ruby/set.c:2281
+        defined_at: references/ruby/set.c:2296
       length:
         old: size
         source: c
-        defined_at: references/ruby/set.c:2286
+        defined_at: references/ruby/set.c:2301
       filter!:
         old: select!
         source: c
-        defined_at: references/ruby/set.c:2288
+        defined_at: references/ruby/set.c:2303
       "<=":
         old: subset?
         source: c
-        defined_at: references/ruby/set.c:2290
+        defined_at: references/ruby/set.c:2305
       ">=":
         old: superset?
         source: c
-        defined_at: references/ruby/set.c:2293
+        defined_at: references/ruby/set.c:2308
     instance_methods:
       initialize:
         source: c
         cfunc: set_i_initialize
         arity: -1
-        defined_at: references/ruby/set.c:2236
-        c_body_at: references/ruby/set.c:505
+        defined_at: references/ruby/set.c:2251
+        c_body_at: references/ruby/set.c:520
         c_effects:
         - block
         - raises
@@ -110,8 +110,8 @@ classes:
         source: c
         cfunc: set_i_initialize_copy
         arity: 1
-        defined_at: references/ruby/set.c:2237
-        c_body_at: references/ruby/set.c:538
+        defined_at: references/ruby/set.c:2252
+        c_body_at: references/ruby/set.c:553
         c_effects:
         - raises
         purity: leaf
@@ -119,8 +119,8 @@ classes:
         source: c
         cfunc: set_i_intersection
         arity: 1
-        defined_at: references/ruby/set.c:2239
-        c_body_at: references/ruby/set.c:1050
+        defined_at: references/ruby/set.c:2254
+        c_body_at: references/ruby/set.c:1065
         c_effects:
         - block
         purity: block_dependent
@@ -131,8 +131,8 @@ classes:
         source: c
         cfunc: set_i_difference
         arity: 1
-        defined_at: references/ruby/set.c:2241
-        c_body_at: references/ruby/set.c:1378
+        defined_at: references/ruby/set.c:2256
+        c_body_at: references/ruby/set.c:1393
         c_effects: []
         purity: leaf
         rbs:
@@ -142,8 +142,8 @@ classes:
         source: c
         cfunc: set_i_xor
         arity: 1
-        defined_at: references/ruby/set.c:2243
-        c_body_at: references/ruby/set.c:1292
+        defined_at: references/ruby/set.c:2258
+        c_body_at: references/ruby/set.c:1307
         c_effects: []
         purity: leaf
         rbs:
@@ -153,8 +153,8 @@ classes:
         source: c
         cfunc: set_i_union
         arity: 1
-        defined_at: references/ruby/set.c:2244
-        c_body_at: references/ruby/set.c:1319
+        defined_at: references/ruby/set.c:2259
+        c_body_at: references/ruby/set.c:1334
         c_effects: []
         purity: leaf
         rbs:
@@ -164,16 +164,16 @@ classes:
         source: c
         cfunc: set_i_compare
         arity: 1
-        defined_at: references/ruby/set.c:2247
-        c_body_at: references/ruby/set.c:1773
+        defined_at: references/ruby/set.c:2262
+        c_body_at: references/ruby/set.c:1788
         c_effects: []
         purity: leaf
       "==":
         source: c
         cfunc: set_i_eq
         arity: 1
-        defined_at: references/ruby/set.c:2248
-        c_body_at: references/ruby/set.c:1831
+        defined_at: references/ruby/set.c:2263
+        c_body_at: references/ruby/set.c:1846
         c_effects:
         - dispatch
         purity: dispatch
@@ -181,8 +181,8 @@ classes:
         source: c
         cfunc: set_i_add
         arity: 1
-        defined_at: references/ruby/set.c:2250
-        c_body_at: references/ruby/set.c:708
+        defined_at: references/ruby/set.c:2265
+        c_body_at: references/ruby/set.c:723
         c_effects:
         - mutate
         purity: mutates_self
@@ -193,8 +193,8 @@ classes:
         source: c
         cfunc: set_i_add_p
         arity: 1
-        defined_at: references/ruby/set.c:2252
-        c_body_at: references/ruby/set.c:734
+        defined_at: references/ruby/set.c:2267
+        c_body_at: references/ruby/set.c:749
         c_effects:
         - mutate
         purity: mutates_self
@@ -205,8 +205,8 @@ classes:
         source: c
         cfunc: set_i_classify
         arity: 0
-        defined_at: references/ruby/set.c:2253
-        c_body_at: references/ruby/set.c:866
+        defined_at: references/ruby/set.c:2268
+        c_body_at: references/ruby/set.c:881
         c_effects: []
         purity: leaf
         rbs:
@@ -216,8 +216,8 @@ classes:
         source: c
         cfunc: set_i_clear
         arity: 0
-        defined_at: references/ruby/set.c:2254
-        c_body_at: references/ruby/set.c:1001
+        defined_at: references/ruby/set.c:2269
+        c_body_at: references/ruby/set.c:1016
         c_effects:
         - mutate
         purity: mutates_self
@@ -228,8 +228,8 @@ classes:
         source: c
         cfunc: set_i_collect
         arity: 0
-        defined_at: references/ruby/set.c:2255
-        c_body_at: references/ruby/set.c:1423
+        defined_at: references/ruby/set.c:2270
+        c_body_at: references/ruby/set.c:1438
         c_effects:
         - mutate
         purity: mutates_self
@@ -240,8 +240,8 @@ classes:
         source: c
         cfunc: set_i_compare_by_identity
         arity: 0
-        defined_at: references/ruby/set.c:2257
-        c_body_at: references/ruby/set.c:1220
+        defined_at: references/ruby/set.c:2272
+        c_body_at: references/ruby/set.c:1235
         c_effects:
         - raises
         purity: leaf
@@ -252,8 +252,8 @@ classes:
         source: c
         cfunc: set_i_compare_by_identity_p
         arity: 0
-        defined_at: references/ruby/set.c:2258
-        c_body_at: references/ruby/set.c:1239
+        defined_at: references/ruby/set.c:2273
+        c_body_at: references/ruby/set.c:1254
         c_effects: []
         purity: leaf
         rbs:
@@ -263,8 +263,8 @@ classes:
         source: c
         cfunc: set_i_delete
         arity: 1
-        defined_at: references/ruby/set.c:2259
-        c_body_at: references/ruby/set.c:756
+        defined_at: references/ruby/set.c:2274
+        c_body_at: references/ruby/set.c:771
         c_effects:
         - mutate
         purity: mutates_self
@@ -275,8 +275,8 @@ classes:
         source: c
         cfunc: set_i_delete_p
         arity: 1
-        defined_at: references/ruby/set.c:2260
-        c_body_at: references/ruby/set.c:773
+        defined_at: references/ruby/set.c:2275
+        c_body_at: references/ruby/set.c:788
         c_effects:
         - mutate
         purity: mutates_self
@@ -287,8 +287,8 @@ classes:
         source: c
         cfunc: set_i_delete_if
         arity: 0
-        defined_at: references/ruby/set.c:2261
-        c_body_at: references/ruby/set.c:798
+        defined_at: references/ruby/set.c:2276
+        c_body_at: references/ruby/set.c:813
         c_effects:
         - mutate
         purity: mutates_self
@@ -299,8 +299,8 @@ classes:
         source: c
         cfunc: set_i_disjoint
         arity: 1
-        defined_at: references/ruby/set.c:2262
-        c_body_at: references/ruby/set.c:1759
+        defined_at: references/ruby/set.c:2277
+        c_body_at: references/ruby/set.c:1774
         c_effects: []
         purity: leaf
         rbs:
@@ -310,8 +310,8 @@ classes:
         source: c
         cfunc: set_i_divide
         arity: 0
-        defined_at: references/ruby/set.c:2263
-        c_body_at: references/ruby/set.c:970
+        defined_at: references/ruby/set.c:2278
+        c_body_at: references/ruby/set.c:985
         c_effects: []
         purity: leaf
         rbs:
@@ -322,8 +322,8 @@ classes:
         source: c
         cfunc: set_i_each
         arity: 0
-        defined_at: references/ruby/set.c:2264
-        c_body_at: references/ruby/set.c:1400
+        defined_at: references/ruby/set.c:2279
+        c_body_at: references/ruby/set.c:1415
         c_effects: []
         purity: leaf
         rbs:
@@ -334,8 +334,8 @@ classes:
         source: c
         cfunc: set_i_empty
         arity: 0
-        defined_at: references/ruby/set.c:2265
-        c_body_at: references/ruby/set.c:1263
+        defined_at: references/ruby/set.c:2280
+        c_body_at: references/ruby/set.c:1278
         c_effects: []
         purity: leaf
         rbs:
@@ -345,8 +345,8 @@ classes:
         source: c
         cfunc: set_i_flatten
         arity: 0
-        defined_at: references/ruby/set.c:2266
-        c_body_at: references/ruby/set.c:1579
+        defined_at: references/ruby/set.c:2281
+        c_body_at: references/ruby/set.c:1594
         c_effects: []
         purity: leaf
         rbs:
@@ -356,8 +356,8 @@ classes:
         source: c
         cfunc: set_i_flatten_bang
         arity: 0
-        defined_at: references/ruby/set.c:2267
-        c_body_at: references/ruby/set.c:1604
+        defined_at: references/ruby/set.c:2282
+        c_body_at: references/ruby/set.c:1619
         c_effects:
         - mutate
         purity: mutates_self
@@ -368,16 +368,16 @@ classes:
         source: c
         cfunc: set_i_hash
         arity: 0
-        defined_at: references/ruby/set.c:2268
-        c_body_at: references/ruby/set.c:1866
+        defined_at: references/ruby/set.c:2283
+        c_body_at: references/ruby/set.c:1881
         c_effects: []
         purity: leaf
       include?:
         source: c
         cfunc: set_i_include
         arity: 1
-        defined_at: references/ruby/set.c:2269
-        c_body_at: references/ruby/set.c:1108
+        defined_at: references/ruby/set.c:2284
+        c_body_at: references/ruby/set.c:1123
         c_effects: []
         purity: leaf
         rbs:
@@ -387,8 +387,8 @@ classes:
         source: c
         cfunc: set_i_inspect
         arity: 0
-        defined_at: references/ruby/set.c:2272
-        c_body_at: references/ruby/set.c:607
+        defined_at: references/ruby/set.c:2287
+        c_body_at: references/ruby/set.c:622
         c_effects:
         - dispatch
         purity: dispatch
@@ -396,8 +396,8 @@ classes:
         source: c
         cfunc: set_i_intersect
         arity: 1
-        defined_at: references/ruby/set.c:2274
-        c_body_at: references/ruby/set.c:1718
+        defined_at: references/ruby/set.c:2289
+        c_body_at: references/ruby/set.c:1733
         c_effects:
         - dispatch
         - raises
@@ -409,8 +409,8 @@ classes:
         source: c
         cfunc: set_i_join
         arity: -1
-        defined_at: references/ruby/set.c:2275
-        c_body_at: references/ruby/set.c:690
+        defined_at: references/ruby/set.c:2290
+        c_body_at: references/ruby/set.c:705
         c_effects: []
         purity: leaf
         rbs:
@@ -420,8 +420,8 @@ classes:
         source: c
         cfunc: set_i_keep_if
         arity: 0
-        defined_at: references/ruby/set.c:2276
-        c_body_at: references/ruby/set.c:1453
+        defined_at: references/ruby/set.c:2291
+        c_body_at: references/ruby/set.c:1468
         c_effects:
         - mutate
         purity: mutates_self
@@ -432,8 +432,8 @@ classes:
         source: c
         cfunc: set_i_merge
         arity: -1
-        defined_at: references/ruby/set.c:2277
-        c_body_at: references/ruby/set.c:1164
+        defined_at: references/ruby/set.c:2292
+        c_body_at: references/ruby/set.c:1179
         c_effects:
         - mutate
         - raises
@@ -445,8 +445,8 @@ classes:
         source: c
         cfunc: set_i_proper_subset
         arity: 1
-        defined_at: references/ruby/set.c:2278
-        c_body_at: references/ruby/set.c:1645
+        defined_at: references/ruby/set.c:2293
+        c_body_at: references/ruby/set.c:1660
         c_effects: []
         purity: leaf
         rbs:
@@ -456,8 +456,8 @@ classes:
         source: c
         cfunc: set_i_proper_superset
         arity: 1
-        defined_at: references/ruby/set.c:2280
-        c_body_at: references/ruby/set.c:1673
+        defined_at: references/ruby/set.c:2295
+        c_body_at: references/ruby/set.c:1688
         c_effects: []
         purity: leaf
         rbs:
@@ -467,8 +467,8 @@ classes:
         source: c
         cfunc: set_i_reject
         arity: 0
-        defined_at: references/ruby/set.c:2282
-        c_body_at: references/ruby/set.c:816
+        defined_at: references/ruby/set.c:2297
+        c_body_at: references/ruby/set.c:831
         c_effects:
         - mutate
         purity: mutates_self
@@ -479,8 +479,8 @@ classes:
         source: c
         cfunc: set_i_replace
         arity: 1
-        defined_at: references/ruby/set.c:2283
-        c_body_at: references/ruby/set.c:1496
+        defined_at: references/ruby/set.c:2298
+        c_body_at: references/ruby/set.c:1511
         c_effects:
         - mutate
         - raises
@@ -492,8 +492,8 @@ classes:
         source: c
         cfunc: set_i_reset
         arity: 0
-        defined_at: references/ruby/set.c:2284
-        c_body_at: references/ruby/set.c:1526
+        defined_at: references/ruby/set.c:2299
+        c_body_at: references/ruby/set.c:1541
         c_effects:
         - raises
         purity: leaf
@@ -504,8 +504,8 @@ classes:
         source: c
         cfunc: set_i_size
         arity: 0
-        defined_at: references/ruby/set.c:2285
-        c_body_at: references/ruby/set.c:1251
+        defined_at: references/ruby/set.c:2300
+        c_body_at: references/ruby/set.c:1266
         c_effects: []
         purity: leaf
         rbs:
@@ -515,8 +515,8 @@ classes:
         source: c
         cfunc: set_i_select
         arity: 0
-        defined_at: references/ruby/set.c:2287
-        c_body_at: references/ruby/set.c:1472
+        defined_at: references/ruby/set.c:2302
+        c_body_at: references/ruby/set.c:1487
         c_effects:
         - mutate
         purity: mutates_self
@@ -527,8 +527,8 @@ classes:
         source: c
         cfunc: set_i_subset
         arity: 1
-        defined_at: references/ruby/set.c:2289
-        c_body_at: references/ruby/set.c:1659
+        defined_at: references/ruby/set.c:2304
+        c_body_at: references/ruby/set.c:1674
         c_effects: []
         purity: leaf
         rbs:
@@ -538,8 +538,8 @@ classes:
         source: c
         cfunc: set_i_subtract
         arity: 1
-        defined_at: references/ruby/set.c:2291
-        c_body_at: references/ruby/set.c:1360
+        defined_at: references/ruby/set.c:2306
+        c_body_at: references/ruby/set.c:1375
         c_effects:
         - mutate
         purity: mutates_self
@@ -550,8 +550,8 @@ classes:
         source: c
         cfunc: set_i_superset
         arity: 1
-        defined_at: references/ruby/set.c:2292
-        c_body_at: references/ruby/set.c:1687
+        defined_at: references/ruby/set.c:2307
+        c_body_at: references/ruby/set.c:1702
         c_effects: []
         purity: leaf
         rbs:
@@ -561,8 +561,8 @@ classes:
         source: c
         cfunc: set_i_to_a
         arity: 0
-        defined_at: references/ruby/set.c:2294
-        c_body_at: references/ruby/set.c:629
+        defined_at: references/ruby/set.c:2309
+        c_body_at: references/ruby/set.c:644
         c_effects:
         - mutate
         purity: mutates_self
@@ -573,8 +573,8 @@ classes:
         source: c
         cfunc: set_i_to_set
         arity: -1
-        defined_at: references/ruby/set.c:2295
-        c_body_at: references/ruby/set.c:660
+        defined_at: references/ruby/set.c:2310
+        c_body_at: references/ruby/set.c:675
         c_effects:
         - block
         - dispatch
@@ -584,8 +584,8 @@ classes:
         source: c
         cfunc: set_s_create
         arity: -1
-        defined_at: references/ruby/set.c:2234
-        c_body_at: references/ruby/set.c:416
+        defined_at: references/ruby/set.c:2249
+        c_body_at: references/ruby/set.c:431
         c_effects: []
         purity: leaf
         rbs:

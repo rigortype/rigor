@@ -74,6 +74,12 @@ module Rigor
 
       def index_file(rbs_path, accumulator)
         source = rbs_path.read
+        # Pre-parser encoding guard (mirrors `Environment::RbsLoader.invalid_encoding?`): on rbs releases
+        # before 4.1 the C lexer could hang on an invalid UTF-8 byte, and a hang is the one failure the
+        # rescue below cannot absorb. Skipping is safe here for the same reason the rescue is — placement
+        # falls back as for any unparseable file, and the env loader's quarantine warning names the file.
+        return unless source.valid_encoding?
+
         _, _, decls = RBS::Parser.parse_signature(source)
         record_decls(decls, [], rbs_path, accumulator)
       rescue StandardError

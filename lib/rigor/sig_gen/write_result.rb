@@ -11,13 +11,15 @@ module Rigor
     # - `target_path` — `.rbs` file the writer was responsible for (`nil` when the source path falls outside
     #   the project signature tree, in which case `action` is `:skipped_outside_sig_root`).
     # - `action` — one of `:created` / `:updated` / `:noop` / `:skipped_outside_sig_root` /
-    #   `:skipped_invalid_rbs`.
+    #   `:skipped_invalid_rbs` / `:skipped_invalid_encoding`.
     # - `applied` — the {MethodCandidate}s that actually landed on disk.
     # - `skipped` — the {MethodCandidate}s the writer declined (e.g. tighter-return without `--overwrite`). Each
     #   entry pairs the candidate with a skip reason keyword (`:user_authored`).
-    # - `error` — the parse error, when `action` is `:skipped_invalid_rbs`: the file the writer assembled does
-    #   not parse, so it was NOT written (writing it would poison the project's sig tree — the consumer
-    #   quarantines an unparseable `.rbs`, taking every other type in that file down with it).
+    # - `error` — the refusal cause, when `action` is a refusal: for `:skipped_invalid_rbs` the file the writer
+    #   assembled does not parse, so it was NOT written (writing it would poison the project's sig tree — the
+    #   consumer quarantines an unparseable `.rbs`, taking every other type in that file down with it); for
+    #   `:skipped_invalid_encoding` the EXISTING target file is not valid UTF-8, so the writer refuses to merge
+    #   into content it cannot read faithfully.
     class WriteResult
       attr_reader :source_path, :target_path, :action, :applied, :skipped, :error
 

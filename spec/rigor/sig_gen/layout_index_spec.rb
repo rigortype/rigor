@@ -25,6 +25,18 @@ RSpec.describe Rigor::SigGen::LayoutIndex do
     expect(index(File.join(tmpdir, "sig")).file_for("Foo")).to eq(Pathname(path))
   end
 
+  it "skips an invalid-UTF-8 sig file before it reaches the parser, keeping its siblings indexed" do
+    # Pre-parser encoding guard: rbs releases before 4.1 could hang the C lexer on an invalid byte — a
+    # failure the index's rescue cannot absorb — so the file must be rejected on encoding alone. `\xE9` is a
+    # bare Latin-1 é, invalid in UTF-8; the declarations around it are well-formed.
+    good = write_sig("sig/foo.rbs", "class Foo\nend\n")
+    File.binwrite(File.join(tmpdir, "sig/broken.rbs"), "class Broken\nend\n# caf\xE9\n")
+    idx = index(File.join(tmpdir, "sig"))
+
+    expect(idx.file_for("Foo")).to eq(Pathname(good))
+    expect(idx.file_for("Broken")).to be_nil
+  end
+
   it "walks nested modules / classes and indexes fully-qualified names" do
     path = write_sig("sig/all.rbs", <<~RBS)
       module Outer

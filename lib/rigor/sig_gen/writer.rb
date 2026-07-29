@@ -275,6 +275,18 @@ module Rigor
 
       def update_existing(source_path, target, candidates)
         source = target.read
+        # Pre-parser encoding guard, mirroring `Environment::RbsLoader.invalid_encoding?`: handed invalid
+        # UTF-8, `RBS::Parser` raises a bare `ArgumentError` on rbs 4.1 (not the `ParsingError` that
+        # `parse_signature` below rescues) and could hang outright on the older releases the gemspec
+        # supports. The refusal is loud — unlike an unparseable file (`:noop`, surfaced by `rigor check`'s
+        # own quarantine warning), a mojibake file would otherwise fail with a stack trace naming neither
+        # the file nor the fix.
+        unless source.valid_encoding?
+          return WriteResult.new(source_path: source_path, target_path: target,
+                                 action: :skipped_invalid_encoding,
+                                 error: "#{target} is not valid UTF-8")
+        end
+
         decls = parse_signature(source)
         return WriteResult.new(source_path: source_path, target_path: target, action: :noop) if decls.nil?
 

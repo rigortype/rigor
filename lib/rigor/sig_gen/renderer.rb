@@ -127,6 +127,7 @@ module Rigor
           when :updated then render_write_updated(result)
           when :skipped_outside_sig_root then render_write_skipped(result)
           when :skipped_invalid_rbs then render_write_invalid(result)
+          when :skipped_invalid_encoding then render_write_invalid_encoding(result)
           end
         end
       end
@@ -151,6 +152,13 @@ module Rigor
         @out.puts("REFUSED #{result.target_path} — the generated RBS does not parse, so it was not written")
         @out.puts("  #{result.error}")
         @out.puts("  This is a bug in Rigor's RBS rendering, not in your code — please report it.")
+      end
+
+      # The EXISTING target file is not valid UTF-8, so the writer will not merge into it — the opposite
+      # attribution from {#render_write_invalid}: this one is the file's problem, and the fix is the user's.
+      def render_write_invalid_encoding(result)
+        @out.puts("REFUSED #{result.target_path} — the existing file is not valid UTF-8, so it was not updated")
+        @out.puts("  Re-save the file as UTF-8 and re-run; sig-gen never modifies a file it cannot read faithfully.")
       end
 
       def render_write_json(results)

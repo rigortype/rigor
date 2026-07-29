@@ -14,6 +14,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[inference]** `Resolv.new([Resolv::Hosts.new, ...])` no longer false-fires `call.argument-type-mismatch` when the installed `rbs` predates 4.1; a core overlay backports the array-of-resolvers overload upstream added in ruby/rbs#2960.
 - **[docs]** Nine `README.md` links to the documentation site carried a stale `/reference/` path segment and 404'd; they now resolve ([#223](https://github.com/rigortype/rigor/pull/223), thank you @f440!).
 
 ## [0.3.1] - 2026-07-29

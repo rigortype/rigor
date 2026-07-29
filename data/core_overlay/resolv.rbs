@@ -1,0 +1,26 @@
+# Rigor core overlay — supplemental core signatures.
+#
+# --- Resolv#initialize ---
+#
+# `rbs` before 4.1 declares `Resolv#initialize` as only:
+#
+#   def initialize: (?Resolv::Hosts | Resolv::DNS resolvers) -> untyped
+#
+# But `Resolv.new` takes an *array* of resolvers — the runtime default is
+# `[Hosts.new, DNS.new]`, and `each_address` iterates the argument — so the
+# documented, idiomatic call passes an Array:
+#
+#   Resolv.new([Resolv::Hosts.new, Resolv::DNS.new(nameserver: ...)])
+#
+# Against the pre-4.1 signature every overload rejects that Array and
+# `call.argument-type-mismatch` false-fires (measured on Mastodon's
+# `app/lib/request.rb`).
+#
+# `rbs` 4.1.0 fixed the signature upstream (ruby/rbs#2960); the overlay
+# backports that overload for the older releases the gemspec still supports
+# (`>= 3.0, < 5.0`). On 4.1 the appended overload duplicates the upstream
+# one, which costs nothing. Drop this file when the rbs floor reaches 4.1.
+class Resolv
+  def initialize: (?(Array[Resolv::Hosts | Resolv::DNS] | Hash[Symbol, untyped])? resolvers, ?use_ipv6: bool?) -> untyped
+                | ...
+end

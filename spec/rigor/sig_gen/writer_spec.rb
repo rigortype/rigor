@@ -67,6 +67,27 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  # Pre-parser encoding guard: handed invalid UTF-8, `RBS::Parser` raises a bare `ArgumentError` on rbs 4.1
+  # (escaping the writer's `ParsingError` rescue and crashing the whole `--write` run) and could hang the C
+  # lexer on the older releases the gemspec supports. The writer must refuse the file on encoding alone,
+  # loudly and byte-for-byte untouched.
+  describe "target-encoding guard" do
+    it "refuses to update an existing file that is not valid UTF-8, naming it" do
+      target = File.join(tmpdir, "sig/foo.rbs")
+      FileUtils.mkdir_p(File.dirname(target))
+      # `\xE9` is a bare Latin-1 é — invalid in UTF-8; the RBS around it is otherwise well-formed.
+      original = "class Foo\n  def existing: () -> String\nend\n# caf\xE9\n".b
+      File.binwrite(target, original)
+
+      result = writer.write("lib/foo.rb", [candidate(method_name: :h, rbs: "def h: () -> Integer")])
+
+      expect(result.action).to eq(:skipped_invalid_encoding)
+      expect(result.error).to include(target)
+      expect(result.error).to include("not valid UTF-8")
+      expect(File.binread(target)).to eq(original)
+    end
+  end
+
   describe "create new sig file" do
     it "writes a class declaration with the candidate methods when no target exists" do
       result = writer.write("lib/foo.rb", [candidate(method_name: :n, rbs: "def n: () -> Integer")])

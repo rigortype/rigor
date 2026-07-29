@@ -97,10 +97,11 @@ module Rigor
         results = writer.write_all(candidates)
 
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
-        # An assembled file that does not parse is refused rather than written. The user asked for a write and
-        # did not get one, so the command must not report success — a green `sig-gen --write` in CI would
-        # otherwise mean nothing.
-        results.any? { |result| result.action == :skipped_invalid_rbs } ? 1 : 0
+        # A refused write (an assembled file that does not parse, or an existing target that is not valid
+        # UTF-8) means the user asked for a write and did not get one, so the command must not report
+        # success — a green `sig-gen --write` in CI would otherwise mean nothing.
+        refusals = %i[skipped_invalid_rbs skipped_invalid_encoding]
+        results.any? { |result| refusals.include?(result.action) } ? 1 : 0
       end
 
       # Slice 3 — collect call-site argument observations when `--params=observed` is set. When `--observe=PATH` is not

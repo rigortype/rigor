@@ -494,6 +494,55 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "invalid-UTF-8 project signature quarantine (pre-parser guard)" do
+    # rbs 4.1 turned an invalid UTF-8 byte into a clean `ParsingError` (ruby/rbs#2983), but on the older
+    # releases the gemspec supports the C lexer could infinite-loop or abort on it (ruby/rbs#2973) — a hang
+    # the quarantine's rescue can never catch. Rigor therefore rejects the content BEFORE the parser on every
+    # rbs version; these specs pin the guard by asserting Rigor's own note, which no rbs-emitted message
+    # contains.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-encoding-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    before do
+      File.write(File.join(tmpdir, "good.rbs"),
+                 "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n")
+      # `\xE9` is a bare Latin-1 é — an invalid byte in UTF-8. The declarations around it are well-formed, so
+      # only the encoding (not the grammar) makes the file unusable.
+      File.binwrite(File.join(tmpdir, "bad_encoding.rbs"),
+                    "module Acme\n  class Broken\n    def size: () -> Integer\n  end\nend\n# caf\xE9\n")
+    end
+
+    it "keeps the valid sigs and skips the invalid-encoding file before it reaches the parser" do
+      loader = described_class.new(signature_paths: [tmpdir])
+      allow(loader).to receive(:warn)
+      expect(loader.send(:env)).not_to be_nil
+      expect(loader.class_decl_paths["::Acme::Widget"]).to eq(File.join(tmpdir, "good.rbs"))
+      expect(loader.class_known?("Acme::Broken")).to be(false)
+    end
+
+    it "warns once, naming the file and Rigor's pre-parser note" do
+      loader = described_class.new(signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      3.times { loader.send(:env) }
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("QUARANTINED")
+      expect(messages.first).to include(File.join(tmpdir, "bad_encoding.rbs"))
+      expect(messages.first).to include("skipped before reaching the RBS parser")
+    end
+
+    it "skips an invalid-encoding virtual RBS contribution without pulling the env down" do
+      bad_virtual = ["virtual:test:/app/lib/bad.rb", "module VirtualBad\nend\n# caf\xE9\n".b.force_encoding(Encoding::UTF_8)]
+      clean_virtual = ["virtual:test:/app/lib/ok.rb", "module VirtualOk\nend\n"]
+      loader = described_class.new(signature_paths: [tmpdir], virtual_rbs: [bad_virtual, clean_virtual])
+      allow(loader).to receive(:warn)
+      expect(loader.send(:env)).not_to be_nil
+      expect(loader.class_known?("VirtualOk")).to be(true)
+      expect(loader.class_known?("VirtualBad")).to be(false)
+    end
+  end
+
   describe "missing-namespace synthesis (ADR-5 robustness)" do
     # A project sig set that declares qualified names without ever declaring the enclosing namespace is invalid upstream
     # (`rbs validate` rejects it); pre-fix every method on every such class degraded to Dynamic[Top] because

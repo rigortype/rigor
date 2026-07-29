@@ -98,6 +98,11 @@ module Rigor
         # tell a collision-dropped virtual entry (parses, but absent from the env) from a parse-failed one
         # (the synthesizer's own WD6 skip, reported separately).
         def parseable_rbs?(content)
+          # Pre-parser encoding guard ({.invalid_encoding?}): invalid UTF-8 raises `ArgumentError` (not
+          # `ParsingError`) out of `RBS::Parser.magic_comment`'s regex on rbs 4.1, escaping the rescue below,
+          # and could hang the C lexer outright on the older releases the gemspec supports.
+          return false if invalid_encoding?(content)
+
           ::RBS::Parser.parse_signature(::RBS::Buffer.new(name: "(rigor: virtual parse check)", content: content))
           true
         rescue ::RBS::BaseError
@@ -240,25 +245,48 @@ module Rigor
           end
         end
 
+        # The quarantine note for a file rejected by {.invalid_encoding?} — worded to be distinct from any
+        # rbs-emitted parse error so specs (and users) can tell Rigor's pre-parser skip from the parser's own
+        # UTF-8 diagnostics.
+        INVALID_ENCODING_NOTE = "not valid UTF-8 — skipped before reaching the RBS parser"
+
+        # Pre-parser guard for content Rigor hands to `RBS::Parser`. On rbs 4.1+ an invalid UTF-8 byte is a
+        # clean `ParsingError` (ruby/rbs#2983), but on the older releases the gemspec supports (`>= 3.0,
+        # < 5.0`) the C lexer could infinite-loop or abort on it (fixed upstream in ruby/rbs#2973) — a hang no
+        # `rescue` can catch, and the one failure mode the quarantine's fail-soft rescues cannot absorb. So
+        # the check runs before the parser on every rbs version: uniform behaviour, and the quarantine note
+        # stays actionable ("fix the file's encoding") rather than version-dependent.
+        def invalid_encoding?(content)
+          !content.valid_encoding?
+        end
+
         # Parse one project `.rbs` into `[buffer, directives, decls]`, or nil when it is unparseable /
-        # unreadable. Mirrors `RBS::EnvironmentLoader#each_signature`'s per-file parse so the decls register
-        # identically to the loader's batch path.
+        # unreadable / not valid UTF-8. Mirrors `RBS::EnvironmentLoader#each_signature`'s per-file parse so
+        # the decls register identically to the loader's batch path.
         def parse_signature_file(file)
-          buffer = ::RBS::Buffer.new(name: file, content: File.read(file, encoding: "UTF-8"))
+          content = File.read(file, encoding: "UTF-8")
+          return nil if invalid_encoding?(content)
+
+          buffer = ::RBS::Buffer.new(name: file, content: content)
           _buffer, directives, decls = ::RBS::Parser.parse_signature(buffer)
           [buffer, directives, decls]
         rescue ::RBS::ParsingError, Errno::ENOENT, Errno::EISDIR, Errno::EACCES
           nil
         end
 
-        # The project `signature_paths:` files that FAIL to parse, as `[absolute_path, first_error_line]` pairs
-        # (sorted, deterministic). Detection is independent of {.add_project_signatures} so the warning fires
-        # even on a cache hit (where the env was already built with the file quarantined). Cheap: it only
-        # re-parses the user's own (usually small) `sig/` set, and returns empty immediately when there is no
-        # `signature_paths:`.
+        # The project `signature_paths:` files that FAIL to parse (or are not valid UTF-8), as
+        # `[absolute_path, first_error_line]` pairs (sorted, deterministic). Detection is independent of
+        # {.add_project_signatures} so the warning fires even on a cache hit (where the env was already built
+        # with the file quarantined). Cheap: it only re-parses the user's own (usually small) `sig/` set, and
+        # returns empty immediately when there is no `signature_paths:`.
         def quarantined_project_signatures(signature_paths)
           project_sig_files(signature_paths).sort.filter_map do |file|
-            buffer = ::RBS::Buffer.new(name: file, content: File.read(file, encoding: "UTF-8"))
+            # The note carries the path itself because the warn composer prints only this element — a
+            # `ParsingError` message embeds its `path:line:` prefix, so the composer never adds one.
+            content = File.read(file, encoding: "UTF-8")
+            next [file, "#{file}: #{INVALID_ENCODING_NOTE}"] if invalid_encoding?(content)
+
+            buffer = ::RBS::Buffer.new(name: file, content: content)
             ::RBS::Parser.parse_signature(buffer)
             nil
           rescue ::RBS::ParsingError => e
@@ -389,6 +417,9 @@ module Rigor
 
           virtual_rbs.each do |filename, content|
             next if content.nil? || content.empty?
+            # Same pre-parser guard as {.parse_signature_file}: a synthesizer echoing project bytes can carry
+            # invalid UTF-8, which pre-4.1 rbs lexers could hang on — and a hang escapes the rescue below.
+            next if invalid_encoding?(content.to_s)
 
             buffer = ::RBS::Buffer.new(name: filename.to_s, content: content.to_s)
             _, directives, decls = ::RBS::Parser.parse_signature(buffer)

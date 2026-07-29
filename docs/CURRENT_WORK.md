@@ -18,9 +18,15 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.3.1 is released** (2026-07-29): tag, RubyGems push, and GitHub Release all exist.
-  `[Unreleased]` is empty apart from one external docs fix. No version bump is due — releases wait
-  for an explicit ask.
+- **v0.3.1 is released** (2026-07-29): tag, RubyGems push, and GitHub Release all exist. No version
+  bump is due — releases wait for an explicit ask.
+- **[#230](https://github.com/rigortype/rigor/pull/230) landed the rbs-4.1 backports for the rest of
+  the supported range**: a `Resolv#initialize` core overlay (the Mastodon FP, ruby/rbs#2960) and an
+  invalid-UTF-8 quarantine ahead of the RBS parser. Writing the latter's spec surfaced that invalid
+  UTF-8 crashes the **pinned 4.1** too (bare `ArgumentError` out of `RBS::Parser.magic_comment`, no
+  `ParsingError` rescue catches it) — the guard is a live crash fix, not only a 3.x hang guard. The
+  same pattern is still missing from sig-gen's re-parse sites (`layout_index.rb:77` /
+  `writer.rb:522`); a task chip for it is pending with the user.
 - **The 2026-07-29 session followed `rbs` 4.1.0** ([#225](https://github.com/rigortype/rigor/pull/225))
   and cut the release ([#226](https://github.com/rigortype/rigor/pull/226)). It also landed
   `sig/rigor/inference/void_origin.rbs` directly on `master` (e3b132a3) and merged
@@ -29,7 +35,8 @@ this file is the one that is wrong.
   `0.3.1`. `CHANGELOG.md` is back to 216 lines from 497.
 - Issue [#144](https://github.com/rigortype/rigor/issues/144) closed (it had outlived its work by a
   release). Three new issues opened — **#227** / **#228** / **#229** — all from what the rbs bump
-  surfaced.
+  surfaced; #229 / #228 / #207 each carry a grounding comment (facts checked against the v4.1.0
+  tree and this codebase) so their evaluations start from evidence, not recall.
 - `make verify` (8,286 examples) and `make docs-check` clean at the release commit; the only change
   on top of it is markdown.
 

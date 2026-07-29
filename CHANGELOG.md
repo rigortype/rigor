@@ -14,7 +14,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
-- **[sig-gen]** `rigor sig-gen --write` now refuses, by name and with a non-zero exit, to update a signature file that is not valid UTF-8, instead of crashing with a stack trace.
+- **[sig-gen]** `rigor sig-gen --write` now refuses, by name and with a non-zero exit, to update a signature file that is not valid UTF-8, instead of crashing with a stack trace ([#231](https://github.com/rigortype/rigor/pull/231)).
 - **[engine]** A project `.rbs` file (or a plugin-synthesized inline-RBS contribution) that is not valid UTF-8 is now quarantined with a warning naming the file, instead of reaching the RBS parser — where it crashed `rigor check` with a bare `ArgumentError` on rbs 4.1, and could hang the process outright on older rbs releases ([#230](https://github.com/rigortype/rigor/pull/230)).
 - **[inference]** `Resolv.new([Resolv::Hosts.new, ...])` no longer false-fires `call.argument-type-mismatch` when the installed `rbs` predates 4.1; a core overlay backports the array-of-resolvers overload upstream added in ruby/rbs#2960 ([#230](https://github.com/rigortype/rigor/pull/230)).
 - **[docs]** Nine `README.md` links to the documentation site carried a stale `/reference/` path segment and 404'd; they now resolve ([#223](https://github.com/rigortype/rigor/pull/223), thank you @f440!).

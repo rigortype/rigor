@@ -20,6 +20,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[inference]** Under the opt-in `parameter_inference:`, `call.argument-type-mismatch` no longer fires when the *receiver's* type came from call-site parameter inference ([#205](https://github.com/rigortype/rigor/issues/205)).
+  - An inferred parameter type is a lower bound, so a method contract resolved through it is speculative; the guard already declined on inferred arguments but missed the receiver side. Surfaced by Rigor's own self-check, where the seeded receiver flagged a correct call against an upstream RBS signature stricter than its implementation.
 - **[sig-gen]** `rigor sig-gen` now reads a class built by `Data.define(...)` / `Struct.new(...)`, in both the `Point = Data.define(:x, :y)` and `class Point < Data.define(:x, :y)` forms ([#227](https://github.com/rigortype/rigor/issues/227)).
   - Previously the members, the constructors, and the `::Data` / `::Struct` ancestry were all absent, and a `do ... end` block's methods were reported against the enclosing namespace — which then printed as a `class` even when it was a `module`.
   - The generated declaration carries the member readers (plus writers, for a mutable Struct), a `.new` / `.[]` signature matching the constructor forms the class actually accepts, and the correct superclass. Under `--params=observed`, member types come from the `.new` call sites the observation scan sees.

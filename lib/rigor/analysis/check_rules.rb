@@ -2075,11 +2075,23 @@ module Rigor
           param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
           mismatch = argument_mismatch(method_def.method_types, call_node, scope, param_overrides)
           return nil if mismatch.nil?
-          # ADR-67 WD6b — the mismatching argument is an inferred-parameter local, whose type is an
-          # open-call-site lower bound; firing argument-type-mismatch against it is an FP by construction.
-          return nil if inferred_param_argument?(mismatch[:node], scope)
+          return nil if inferred_param_mismatch_verdict?(call_node, mismatch, scope)
 
           build_argument_type_diagnostic(path, call_node, class_name, mismatch)
+        end
+
+        # ADR-67 WD6b — an argument-type-mismatch verdict resting on an open-call-site lower bound, on
+        # either side of the call. The ARGUMENT side: the mismatching argument is an inferred-parameter
+        # local, so firing against it is an FP by construction. The RECEIVER side: when the receiver roots
+        # at an inferred parameter, the method whose parameter contract the argument was checked against
+        # was itself resolved through a lower-bound type, so the whole verdict is speculative. The 2026-07-30
+        # self-check surfaced the receiver half as a guard hole: seeding `env : RBS::Environment` activated
+        # this rule on `env.unload(culprits)` and flagged a correct Array argument against `unload`'s
+        # declared `Set[Pathname]` — an upstream signature stricter than its implementation, exactly the FP
+        # class WD6b exists to suppress. The other guarded rules already declined on a param-rooted
+        # receiver; this brings argument-type-mismatch in line.
+        def inferred_param_mismatch_verdict?(call_node, mismatch, scope)
+          inferred_param_argument?(mismatch[:node], scope) || inferred_param_receiver?(call_node, scope)
         end
 
         # Single overload → the exact per-argument acceptance (unchanged).

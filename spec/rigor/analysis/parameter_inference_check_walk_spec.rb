@@ -81,4 +81,43 @@ RSpec.describe "ADR-67 WD6 check-walk parameter inference" do
     call_rules = rules(run(param_source, parameter_inference: false)).select { |rule| rule.to_s.start_with?("call.") }
     expect(call_rules).to be_empty
   end
+
+  # WD6b, receiver side — argument-type-mismatch must decline when the RECEIVER roots at an inferred
+  # parameter: the method whose parameter contract the argument was checked against was resolved through a
+  # lower-bound type, so the verdict is speculative. Found by the 2026-07-30 self-check: seeding
+  # `env : RBS::Environment` flagged `env.unload(culprits)`'s Array argument against `unload`'s declared
+  # `Set[Pathname]` — a signature stricter than upstream's implementation, the FP class WD6b suppresses.
+  describe "argument-type-mismatch on an inferred-parameter receiver" do
+    let(:receiver_source) do
+      <<~RUBY
+        class Widget
+          def go
+            pick([1, 2])
+          end
+
+          def pick(items)
+            items.fetch("x")
+          end
+        end
+      RUBY
+    end
+
+    it "declines under the gate (the receiver's type is an open-call-site lower bound)" do
+      diagnostics = run(receiver_source, parameter_inference: true)
+      expect(rules(diagnostics)).not_to include("call.argument-type-mismatch")
+    end
+
+    it "is byte-identical to the gate-off run" do
+      on = run(receiver_source, parameter_inference: true).map(&:to_h)
+      off = run(receiver_source, parameter_inference: false).map(&:to_h)
+      expect(on).to eq(off)
+    end
+
+    # The positive control: the same bad argument on a directly-typed receiver DOES fire, so the silence
+    # above is the guard, not the rule being inert on Array#fetch.
+    it "still fires on a directly-typed receiver" do
+      direct = "class Widget\n  def go\n    [1, 2].fetch(\"x\")\n  end\nend\n"
+      expect(rules(run(direct, parameter_inference: true))).to include("call.argument-type-mismatch")
+    end
+  end
 end

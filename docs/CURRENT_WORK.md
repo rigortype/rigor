@@ -5,9 +5,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   Anything that would outlive two sessions does not belong here: backlog → a GitHub issue
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
-- Verify a claim before carrying it forward. This cut's own lesson: a green `make verify` proves the
-  pinned bundle works, not the supported range. Two of this session's three regressions were only
-  visible from outside the pin — the rbs 3.x CI job and `rbs -I sig validate`.
+- Verify a claim before carrying it forward. This session's own lesson: two of its three findings were
+  a *stale document*, not a bug — an issue whose premise had been disproven, and a note whose predicted
+  fix had already landed unremarked. Re-measure before implementing against a written number.
 -->
 
 # Current Work — Session Handoff
@@ -18,85 +18,76 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.3.1 is released** (2026-07-29): tag, RubyGems push, and GitHub Release all exist. No version
-  bump is due — releases wait for an explicit ask.
-- **[#230](https://github.com/rigortype/rigor/pull/230) landed the rbs-4.1 backports for the rest of
-  the supported range**: a `Resolv#initialize` core overlay (the Mastodon FP, ruby/rbs#2960) and an
-  invalid-UTF-8 quarantine ahead of the RBS parser. Writing the latter's spec surfaced that invalid
-  UTF-8 crashes the **pinned 4.1** too (bare `ArgumentError` out of `RBS::Parser.magic_comment`, no
-  `ParsingError` rescue catches it) — the guard is a live crash fix, not only a 3.x hang guard.
-- **[#231](https://github.com/rigortype/rigor/pull/231) closed the same bug class on the sig-gen
-  path**: `--write` against an invalid-UTF-8 target now refuses loudly (`:skipped_invalid_encoding`,
-  non-zero exit) instead of crashing, and the layout index skips such a file before the parser. Every
-  externally-controlled `RBS::Parser` entry point is now guarded; `RbsValidity` stays unguarded by
-  design (it parses sig-gen's own output).
-- **The 2026-07-29 session followed `rbs` 4.1.0** ([#225](https://github.com/rigortype/rigor/pull/225))
-  and cut the release ([#226](https://github.com/rigortype/rigor/pull/226)). It also landed
-  `sig/rigor/inference/void_origin.rbs` directly on `master` (e3b132a3) and merged
-  [#223](https://github.com/rigortype/rigor/pull/223), an external README link fix from @f440.
-- **The `0.2.x` cycle is archived** to `docs/CHANGELOG-0.2.x.md` — the archival rule fired at
-  `0.3.1`. `CHANGELOG.md` is back to 216 lines from 497.
-- Issue [#144](https://github.com/rigortype/rigor/issues/144) closed (it had outlived its work by a
-  release). Three new issues opened — **#227** / **#228** / **#229** — all from what the rbs bump
-  surfaced; #229 / #228 / #207 each carry a grounding comment (facts checked against the v4.1.0
-  tree and this codebase) so their evaluations start from evidence, not recall.
-- `make verify` (8,286 examples) and `make docs-check` clean at the release commit; the only change
-  on top of it is markdown.
+- **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
+- **[#232](https://github.com/rigortype/rigor/pull/232) closed [#227](https://github.com/rigortype/rigor/issues/227)**:
+  `sig-gen` reads `Data.define` / `Struct.new` classes, in the constant-assigned and the
+  `class X < Data.define(...)` forms. It now emits the member accessors, a `.new` / `.[]` pair matching
+  the constructor forms the class accepts, and the `::Data` / `::Struct[untyped]` ancestry — and it
+  attributes a `do ... end` block's defs to the constant instead of the enclosing namespace. The
+  implementation reads the ADR-48 member layouts `ScopeIndexer` already builds rather than
+  re-recognising the syntax, so the two views cannot drift again (they had).
+- **[#228](https://github.com/rigortype/rigor/issues/228) is closed "no"**: `RBS::Rewriter` is not
+  worth adopting. Evaluation in
+  [`docs/notes/20260730-rbs-rewriter-sig-gen-writer-evaluation.md`](notes/20260730-rbs-rewriter-sig-gen-writer-evaluation.md).
+- **[#233](https://github.com/rigortype/rigor/pull/233) recalibrates the perf baseline** from 32.40M to
+  23.52M `lib` allocations and teaches `make bench-perf` to say when its baseline has gone stale.
 
 ## Next session
 
-Nothing is release-blocking. The two v0.4.x decision items are unchanged and still
-`ready-for-human` — they need a call, not an implementation:
+Nothing is release-blocking. **[#233](https://github.com/rigortype/rigor/pull/233) is open** — merge it
+before trusting any perf number, since the committed baseline is 27% too high until it lands.
+
+The two v0.4.x decision items are unchanged and still `ready-for-human` — they need a call, not an
+implementation:
 
 - **[#204](https://github.com/rigortype/rigor/issues/204)** (area:engine) — wire ADR-46 cross-file
-  caller→callee-param edges so `parameter_inference:` composes with `--incremental` (lifts the WD6c
-  mutual exclusion). Needs the edge-recording design call.
+  caller→callee-param edges so `parameter_inference:` composes with `--incremental`. Needs the
+  edge-recording design call.
 - **[#205](https://github.com/rigortype/rigor/issues/205)** (area:engine) — decide whether to flip
-  `parameter_inference:` on by default (ADR-50 gate; needs accumulated protection evidence plus a
-  mutation-oracle honesty check on the WD6b guard). Not before the evidence exists.
+  `parameter_inference:` on by default. Not before the protection evidence exists.
 
 Agent-ready work, effort-ordered:
 
-- **[#227](https://github.com/rigortype/rigor/issues/227)** (area:sig-gen) — `sig-gen` cannot read
-  `Const = Data.define(...)`: it emits the enclosing *module* as a `class`, drops the class name and
-  every member, and keeps only the block body's methods. Wrong output, not merely thin, and it is
-  what forced this session into hand-written RBS against the AGENTS.md policy. Bounded, with a
-  reproduction in the issue.
-- **[#207](https://github.com/rigortype/rigor/issues/207)** (area:perf) — unchanged from the last
-  handoff: the traversal-sharing lever is exhausted (−0.49% was all of it), so what remains is
-  **per-collector allocation attribution** to find where the v0.3.0 +45.7% drift lives. An
-  investigation, not a refactor.
+- **[#207](https://github.com/rigortype/rigor/issues/207)** (area:perf) — **read the 2026-07-30 comment
+  first; the issue's title and body describe work that no longer exists.** The RuleWalk lever is closed
+  (all five #101 rules together are 0.24% of the run). What is left is `stub_missing_referenced_types`
+  **pass 1**: it builds every project class with a throwaway `RBS::DefinitionBuilder`, costs 7.84M
+  allocations — now **33% of the whole run** — and finds nothing once `sig/` is self-consistent. Two
+  unmeasured directions are in the comment; direction 2 (static reference detection) carries genuine FP
+  risk, because a false detection stubs a name that would have resolved and an empty stub shadowing a
+  real type is worse than the fail-soft miss ADR-5 tier 2 exists to prevent.
 - **[#229](https://github.com/rigortype/rigor/issues/229)** (area:plugins) — decide which inline-RBS
-  implementation Rigor speaks. `rigor-rbs-inline` is built on the `rbs-inline` gem, but rbs 4.1's
-  three new inline features (`def self.`, `module-self`, module-level ivar annotations) landed in
-  RBS's *built-in* `InlineParser`. ADR-93 default-wires the plugin, so this is the whole user base's
-  dialect, not an opt-in group's. The outcome belongs in an ADR-32 amendment.
-- **[#228](https://github.com/rigortype/rigor/issues/228)** (area:sig-gen) — evaluate `RBS::Rewriter`
-  (new in rbs 4.1) for the `sig-gen` writer's in-place update path. Explicitly an evaluation; "no,
-  because" is an acceptable answer, and the rbs-floor question is the crux.
+  implementation Rigor speaks. `rigor-rbs-inline` is built on the `rbs-inline` gem, but rbs 4.1's three
+  new inline features landed in RBS's *built-in* `InlineParser`. ADR-93 default-wires the plugin, so this
+  is the whole user base's dialect. Outcome belongs in an ADR-32 amendment. Note
+  [ADR-94](adr/94-rbs-inline-reader-and-the-rbs-3x-floor.md) already adjudicated the adjacent migration
+  against narrowing the rbs floor — this is the *dialect* question, not the floor question.
 - **#121** — ongoing FP-safe builtin/stdlib folds (demand-gated).
-- The editor cluster is now **#142** / **#146** / **#147** (#144 shipped in v0.3.1) — still the
-  largest untouched `ready-for-agent` block in the v0.4.x milestone.
+- The editor cluster **#142** / **#146** / **#147** — still the largest untouched `ready-for-agent`
+  block in the v0.4.x milestone.
 
 ## What this session learned that is not in a commit
 
-- **A green `make verify` only proves the pinned bundle.** The gemspec supports `rbs >= 3.0, < 5.0`,
-  and the `Elem` → `E` spec updates that made 4.1 pass broke the 3.x half of the `rbs-compat` CI job
-  — a failure `make verify` cannot see by construction. Reproduce that job locally (a
-  `Gemfile.rbs-compat` pinned to the other end of the range) *before* pushing a change to a
-  version-ranged dependency. The fix pattern is a support helper that reads the installed version
-  (`spec/support/rbs_core_type_params.rb`), never a name hard-coded from one side of the range.
-- **`rbs -I sig validate` is a gate nothing else runs.** `sig/rigor/scope.rbs` had referenced an
-  undeclared `Inference::VoidOrigin` since the `static.value-use.void` diagnostic landed, and
-  `make check` stayed green throughout because Rigor stubs a missing referenced type — our own
-  fail-soft was hiding a hole in our own `sig/`. Worth running after any `sig/` edit.
-- **A dependency that starts memoising an identity-ish value is a cache hazard.** rbs 4.1 cached
-  `TypeName#hash` in an ivar; the value derives from per-process-seeded `Array#hash`, and `Marshal`
-  carries ivars verbatim, so every cached type name came back `eql?` but unequal-hashing and every
-  `class_decls` lookup missed. Nothing raised. A same-process round-trip spec cannot reproduce it —
-  the guard has to poison the ivar to stand in for the writing process
-  (`spec/rigor/cache/rbs_environment_marshal_patch_spec.rb`).
-- **Spot-check a core-signature bump against a real project before cutting.** rbs 4.1 rewrote
-  `Array` / `Hash` / `Integer` / `String`. An A/B on Mastodon (same engine, `--no-baseline`) gave
-  **0 new diagnostics, 1 removed** — the removed one a genuine FP that ruby/rbs#2960 fixed upstream.
-  Ten minutes, and it is what turned "the suite is green" into "this is safe to ship".
+- **A stale document costs more than a missing one.** #207 was filed on a premise (five standalone rule
+  walks) that was already false when filed; the 2026-07-25 attribution note then predicted a −24.2%
+  drop from declaring `Inference::VoidOrigin` in `sig/`, that declaration landed four days later, and
+  nobody recalibrated. Two sessions of perf reasoning were anchored to a number that had moved. Re-run
+  the measurement before implementing against a written one.
+- **A one-sided gate loses its teeth without ever going red.** The band is a percentage of the
+  *baseline*, so an unrefreshed improvement widens the real ceiling: a 27% drop left the +5% allocations
+  band permitting +44% over the true cost, reported as `OK` on the release run. Any gate defined
+  relative to a committed number needs to notice drift in **both** directions.
+- **Check that a documented procedure actually runs.** `bench/baseline.json` told you to commit the
+  release-gate artifact's targets; `tool/bench.rb` only wrote that artifact when the baseline was
+  *uncalibrated*, i.e. never when a refresh was wanted, and `if-no-files-found: ignore` hid the gap.
+  The instruction had probably never worked.
+- **Probe RBS spellings against `rbs validate`, not against recall.** A bare `< ::Struct` raises
+  `InvalidTypeApplicationError` (`Struct[E]` is generic — arity 1 on both rbs 3.10 and 4.1, only the
+  parameter's name differs), while parenthesised unions in named-positional position and members named
+  `type` / `class` / `self` / `end` all validate. Cheap to check, and two of those were not what
+  reasoning predicted.
+- **Declaring a class narrows dispatch, which can manufacture false positives.** Going from no
+  declaration to `class Point < ::Data` moves the receiver from `Dynamic` to a nominal, so everything the
+  runtime synthesises but RBS does not declare starts reading as *missing*. `::Data.new` is `() -> bot`
+  and `.[]` is undeclared upstream — emitting them is FP prevention, not completeness. Worth asking of
+  any change that adds declarations.

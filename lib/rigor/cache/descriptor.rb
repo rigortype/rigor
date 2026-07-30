@@ -33,7 +33,12 @@ module Rigor
       # content digests. Old entries must read as misses so the first writable run rebuilds them in the new
       # format for a clean one-shot migration (the #57 marker discipline: the bump clears the root and
       # reclaims the unreadable bytes).
-      SCHEMA_VERSION = 5
+      # v6: #237 — `append_stub_declarations` now emits the declaration KIND each referenced-type stub needs
+      # (`interface` / `type` / `module` / `class`) and validates each declaration on its own, so a project
+      # whose RBS dangles an interface or type-alias reference gets stubs where an older Rigor discarded the
+      # whole batch and cached an env in which those signatures are inert. Same reasoning as v3: the
+      # marshalled env is the cached value, so it MUST be rebuilt for the fix to take effect.
+      SCHEMA_VERSION = 6
 
       # Per-slot entry value objects. Constructors validate enums / required fields and freeze the resulting
       # struct so no caller can mutate after the entry is in a Descriptor.

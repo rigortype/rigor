@@ -163,11 +163,20 @@ module Rigor
         def stub_missing_referenced_types(base_env, resolved, project_files)
           return resolved if project_files.empty?
 
+          previous = nil
           MAX_STUB_PASSES.times do
             missing = unresolved_referenced_types(resolved, project_files)
             break if missing.empty?
 
-            append_stub_declarations(base_env, missing)
+            # Bound the fixpoint by PROGRESS, not by the cap alone. A pass that appends no declaration, or
+            # that re-detects the set it already saw, cannot converge — and before this guard the cap was the
+            # only stop, so the pathological input paid the full detection sweep five times over (measured on
+            # herb: five passes, nothing synthesized). The cap stays as the backstop for a genuinely deepening
+            # chain of references.
+            current = missing.to_set
+            break if current == previous || !append_stub_declarations(base_env, missing)
+
+            previous = current
             resolved = base_env.resolve_type_names
           end
           resolved
@@ -364,9 +373,17 @@ module Rigor
         end
 
         # Adds empty stub declarations for the missing referenced types (and any enclosing namespace they
-        # need) to the pre-resolve env, tagged with {SYNTHETIC_STUB_BUFFER}. A name that is a prefix of
-        # another name is declared `module` (it is a namespace); a leaf is declared `class` (referenced types
-        # appear in instance position far more often than as mixins).
+        # need) to the pre-resolve env, tagged with {SYNTHETIC_STUB_BUFFER}. Returns true when at least one
+        # declaration landed, so {.stub_missing_referenced_types} can stop on a pass that made no progress.
+        #
+        # Each name gets the declaration kind its own syntax requires ({.stub_declaration_for}), and each
+        # declaration is validated ALONE before it joins the buffer. Declaring every name `class` — the shape
+        # before #237 — made a dangling interface (`_Foo`) or type-alias (`foo`) reference unparseable, and
+        # since the batch shares one buffer the `RBS::BaseError` rescue below then discarded every stub in it,
+        # well-formed ones included. Measured on herb, whose 74 missing names are all dangling type aliases:
+        # the pass synthesized nothing at all, leaving the project's 48 signature files inert, while still
+        # paying for the detection sweep. A per-declaration check costs one small parse per name and bounds
+        # the damage of one bad name to itself.
         #
         # Names already declared in `base_env` are skipped — exactly the `declared.include?` guard
         # {.collect_missing_namespaces} applies. Without it, stubbing a nested reference (`Foo::Bar::Baz`)
@@ -384,17 +401,45 @@ module Rigor
             (1...parts.length).each { |i| names << parts[0, i].join("::") }
           end
           names = names.reject { |name| declared.include?(name) }.to_set
-          return if names.empty?
+          return false if names.empty?
 
-          source = names.sort_by { |n| n.count(":") }.map do |name|
-            keyword = names.any? { |other| other != name && other.start_with?("#{name}::") } ? "module" : "class"
-            "#{keyword} #{name}\nend\n"
+          source = names.sort_by { |n| n.count(":") }.filter_map do |name|
+            declaration = stub_declaration_for(name, names)
+            declaration if parseable_rbs?(declaration)
           end.join
+          return false if source.empty?
+
           buffer = ::RBS::Buffer.new(name: SYNTHETIC_STUB_BUFFER, content: source)
           _, directives, decls = ::RBS::Parser.parse_signature(buffer)
           add_parsed_decls(base_env, buffer, directives, decls)
+          true
         rescue ::RBS::BaseError
-          nil
+          false
+        end
+
+        # The declaration one stubbed name needs, keyed on the syntax of its leaf:
+        #
+        # * a name other stubbed names nest inside is a namespace, so `module`;
+        # * an RBS interface name (`_Foo`) may only be declared `interface`;
+        # * a type-alias name (`foo`) may only be declared `type`, and aliases `untyped` so a value of that
+        #   type reads as `Dynamic[Top]` — the honest answer for a type Rigor invented;
+        # * anything else is `class` (referenced types appear in instance position far more often than as
+        #   mixins).
+        #
+        # The interface stub is FP-safe without joining {#synthesized_type_names}: {RbsTypeTranslator} maps
+        # every interface type to untyped, and the nil / non-nil acceptance guards in {Analysis::CheckRules}
+        # treat a method-less interface as accepting everything.
+        def stub_declaration_for(name, names)
+          leaf = name.split("::").last.to_s
+          if names.any? { |other| other != name && other.start_with?("#{name}::") }
+            "module #{name}\nend\n"
+          elsif leaf.start_with?("_")
+            "interface #{name}\nend\n"
+          elsif leaf.match?(/\A[a-z]/)
+            "type #{name} = untyped\n"
+          else
+            "class #{name}\nend\n"
+          end
         end
 
         # The `::`-stripped names of every class / module / class-alias declaration already present in
@@ -611,6 +656,11 @@ module Rigor
       # that mention them could build (e.g. an unavailable `DRb::DRbServer`, or a stale
       # `Textbringer::EditorError`). Recovered off the built env like {#synthesized_namespaces}, so it
       # survives the marshalled-env cache.
+      #
+      # Class / module stubs only — the `interface` and `type` stubs {.stub_declaration_for} also emits live in
+      # `interface_decls` / `type_alias_decls`, not `class_decls`. That is deliberate: this list exists to feed
+      # {#synthesized_type_names}, whose consumers key on a nominal receiver's class name, and both of those
+      # kinds already read as untyped through {Inference::RbsTypeTranslator}.
       def synthesized_stub_types
         names_synthesized_in(SYNTHETIC_STUB_BUFFER)
       end

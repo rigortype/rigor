@@ -168,6 +168,17 @@ emitting, so one bad name cannot poison the batch — measured on herb:
 
 FP-free (diagnostics unchanged), −30% allocations, and the project's own `sig/` starts contributing.
 
+## Correction from the implementation (2026-07-30, same day)
+
+The evaluation's parity scope included a walk over the project's own `interface_decls`. Implementing it
+([#240](https://github.com/rigortype/rigor/pull/240)) showed the builder does **not** report a dangling
+reference inside a project interface, even when a project class includes that interface —
+`validate_type_params` does not variance-walk the methods a class imports from one. The walk therefore
+excludes project interfaces, and the exclusion is pinned by spec. It costs no coverage on this corpus:
+re-reading the bucket tags, all 75 of herb's names came from `member_method`, and no name anywhere came
+only from `interface_method`. herb's one extra name over the builder is the first-error-per-class masking
+described above, not the interface walk.
+
 ## Verdict
 
 - **Static detection agrees with builder-based detection.** Parity-scoped, it reproduces the builder's

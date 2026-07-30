@@ -5,9 +5,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   Anything that would outlive two sessions does not belong here: backlog → a GitHub issue
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
-- Verify a claim before carrying it forward. This session's instance: the corpus said "both detectors
-  agree, zero missing names" on six of eight targets — and that agreement was vacuous until a fixture
-  proved the harness could report a name at all. The fixture is where both real defects came from.
+- Verify a claim before carrying it forward. This session's instance: the corpus reported "both detectors
+  agree, zero names" on six of eight targets, which reads as agreement and was no evidence at all. The
+  fixture built to force a positive is where both landed defects came from.
 -->
 
 # Current Work — Session Handoff
@@ -19,53 +19,44 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **[#207](https://github.com/rigortype/rigor/issues/207)'s open question is answered.** Static
-  dangling-reference detection **agrees** with the builder-based `unresolved_referenced_types` sweep
-  when scoped to the positions the builder actually validates: no detection lost on any of eight real
-  projects or three fixtures, diagnostics digests identical across arms on all ten targets, and pass 1
-  drops from **7,841,785 to 21,257 allocations — −32.8% of a cold `check lib`** (−83.6% on a
-  Rails-shaped project). Measurements:
-  [`docs/notes/20260730-stub-pass1-static-detection-evaluation.md`](notes/20260730-stub-pass1-static-detection-evaluation.md);
-  verdict and numbers also on the issue, which is retitled to the pass-1 scope.
-  - The scope is not a free parameter: applying the wider sweep (types appearing only in `initialize` /
-    a singleton method / an `@ivar:`) changes no diagnostic and costs **+11.3%** allocations on
-    binpacker. Restrict to the parity buckets.
-- **[#237](https://github.com/rigortype/rigor/issues/237) is new, and lands before #207.** The
-  evaluation surfaced two live defects in the stub *synthesis* half: `append_stub_declarations` emits
-  `class <name>` for every missing name in one buffer, so a dangling **interface** (`_Foo`) or
-  **type-alias** (`foo`) reference makes the parse fail and `rescue RBS::BaseError` drop the entire
-  batch — and the fixpoint then re-detects the same set until `MAX_STUB_PASSES` is exhausted. On
-  **herb** all 74 missing names are dangling type aliases, so the pass is a **complete no-op** while
-  costing +3.11M allocations (44% of its cold run). Fix shape is measured: −30.1% allocations, 5 → 2
-  passes, precise coverage 59.3% → 60.0%, diagnostics unchanged.
-- Earlier: [#204](https://github.com/rigortype/rigor/issues/204) /
-  [#205](https://github.com/rigortype/rigor/issues/205) resolved,
-  [#236](https://github.com/rigortype/rigor/pull/236) (WD6b receiver guard),
-  [#227](https://github.com/rigortype/rigor/issues/227),
-  [#228](https://github.com/rigortype/rigor/issues/228),
-  [#229](https://github.com/rigortype/rigor/issues/229),
-  [#233](https://github.com/rigortype/rigor/pull/233).
-- `make docs-check` green (310 examples). No code changed this session — the deliverable is the
-  evaluation, the note, and the two issue updates.
+- **[#237](https://github.com/rigortype/rigor/issues/237) landed** ([#238](https://github.com/rigortype/rigor/pull/238), merged). Referenced-type stubs are now
+  emitted in the declaration kind each name requires (`interface` / `type` / `module` / `class`) and
+  validated one at a time, so a dangling interface or type-alias reference no longer takes the whole stub
+  batch down with it; the fixpoint also stops on a pass that appends nothing. herb — 48 signature files,
+  74 dangling references, all type aliases — went from a **complete no-op** (byte-identical to stubbing
+  nothing) to 5 → 2 passes, −30.1% allocations, precise coverage 59.3% → 60.0%. Cache
+  `SCHEMA_VERSION` 5 → 6 so stale envs rebuild.
+- **[#207](https://github.com/rigortype/rigor/issues/207) is implemented and open for review in
+  [#240](https://github.com/rigortype/rigor/pull/240).** Detection reads the project declarations and
+  applies RBS's own membership test instead of building every project class: pass 1 falls from
+  **7,841,785 allocations / ~810ms to 24,661 / ~9ms**, the whole cold `check lib` from 23.81M to 16.03M
+  (**−32.7%**), conference-app −83.6%. The builder sweep survives in spec as the oracle the walk must keep
+  agreeing with. Diagnostic-identical with zero new firings across the eight RBS-shipping corpus projects.
+- Evaluation behind both:
+  [`docs/notes/20260730-stub-pass1-static-detection-evaluation.md`](notes/20260730-stub-pass1-static-detection-evaluation.md)
+  (carries a same-day correction: project interfaces are outside the implemented scope, because the
+  builder does not report their dangling references either).
+- **[#239](https://github.com/rigortype/rigor/issues/239) is a new FP**, surfaced by Rigor's own
+  `make check` while landing #207: on an **RBS-known** class whose method is not declared in `sig/`, an
+  instance method **masks a same-named `class << self` method**, so `self.class.helper(1)` reports a false
+  `call.undefined-method`. Minimal repro + a byte-identical control in the issue. #240 sidesteps it rather
+  than depending on the fix.
 
 ## Next session
 
-- **[#237](https://github.com/rigortype/rigor/issues/237)** (`bug`, `ready-for-agent`) — implement the
-  measured fix: per-name declaration kind (`interface` / `type` / `module` / `class`), per-declaration
-  validation so one bad name cannot poison the batch, and a loop break when a pass appends nothing.
-  Check whether the env cache's `SCHEMA_VERSION` needs a bump (the stub set rides in the cached env,
-  ADR-54). Corpus FP diff over the survey targets — the probe already showed all seven
-  diagnostics-identical, so a regression there is a real signal.
-- **[#207](https://github.com/rigortype/rigor/issues/207)** (area:perf) — then replace pass 1's builder
-  sweep with the parity-scoped static walk. The note's § "Method" names the exact rbs raise sites the
-  walk mirrors (`definition_builder.rb:219/237/283`, `variance_calculator.rb:158`, and the
-  `initialize` skip at `definition_builder.rb:529`), which is the specification for the implementation.
-  Keep the builder sweep as a spec-level oracle, not a runtime path.
+- **Review / merge [#240](https://github.com/rigortype/rigor/pull/240)**, then re-run
+  `make bench-perf` — the perf baseline was recalibrated on 2026-07-29 to 23.52M allocations for
+  `check lib` and this change takes ~7.8M off it, so the baseline needs a deliberate refresh (see
+  [#233](https://github.com/rigortype/rigor/pull/233) for the refresh path, and note the suggested-baseline
+  artifact is only produced for an *uncalibrated* baseline).
+- **[#239](https://github.com/rigortype/rigor/issues/239)** (`bug`, `ready-for-agent`) — a false
+  `call.undefined-method` on ordinary Ruby. Likely in whatever records `class << self` bodies into the
+  discovered-methods table, where the instance-side entry displaces the singleton-side one.
 - The editor cluster **[#142](https://github.com/rigortype/rigor/issues/142)** /
   **[#146](https://github.com/rigortype/rigor/issues/146)** /
-  **[#147](https://github.com/rigortype/rigor/issues/147)** — still the largest untouched
-  `ready-for-agent` block in v0.4.x. #146 is the one with user-visible value and no new machinery
-  (wire editor mode onto ADR-46's `dependents` index + per-file cache).
+  **[#147](https://github.com/rigortype/rigor/issues/147)** — the largest untouched `ready-for-agent`
+  block in v0.4.x. #146 has the user-visible value and needs no new machinery (wire editor mode onto
+  ADR-46's `dependents` index + per-file cache).
 - **#121** — ongoing FP-safe builtin/stdlib folds (demand-gated).
 - **Unfiled upstream report** (small, external): `rbs-inline`'s parser accepts
   `# @rbs module-self: Foo` and its writer then discards it — the defect behind ADR-32 WD12. Needs
@@ -73,21 +64,24 @@ this file is the one that is wrong.
 
 ## What this session learned that is not in a commit
 
-- **A clean corpus result can be a silent harness failure.** Six of eight targets reported "both
-  detectors found nothing", which reads as agreement and is actually no evidence at all. The 17-shape
-  fixture that forced a positive is what produced the shape matrix, the bucket attribution, *and* both
-  #237 defects. Build the positive control before running the corpus, not after it disagrees.
-- **`rescue RBS::BaseError; nil` around a batched synthesis is an availability bug.** Rigor's fail-soft
-  discipline is per-unit; `append_stub_declarations` batches N units into one parse, so the rescue
-  degrades all N for one bad input. Any fail-soft rescue wrapping a batch needs the batch split, or the
-  degradation is unbounded in the input.
-- **A fixpoint that cannot make progress still burns its whole budget.** `MAX_STUB_PASSES.times` has no
-  progress check, so the pathological case costs 5× the healthy one. Bound a fixpoint by *progress*,
-  and keep the iteration cap only as a backstop.
+- **A clean corpus result can be a silent harness failure.** Six of eight targets reported "both detectors
+  found nothing". The 17-shape fixture built to force a positive produced the shape matrix, the bucket
+  attribution, and both defects. Build the positive control before the corpus run, not after it disagrees.
+- **`rescue <Error>; nil` around a batched synthesis is an availability bug.** Rigor's fail-soft discipline
+  is per-unit, but `append_stub_declarations` batched N declarations into one parse, so the rescue degraded
+  all N for one bad input. Any fail-soft rescue wrapping a batch needs the batch split, or the degradation
+  is unbounded in the input.
+- **A fixpoint that cannot make progress still burns its whole budget.** `MAX_STUB_PASSES.times` had no
+  progress check, so the pathological input cost 5× the healthy one. Bound a fixpoint by progress and keep
+  the cap as a backstop.
+- **Read the raise sites, don't infer them.** The static walk is only equivalent because
+  `references/rbs` says exactly where `NoTypeFoundError` comes from: `validate_type_presence` on ancestor
+  type *args*, and `VarianceCalculator#type` on method types — which skips `initialize`, never runs for the
+  singleton side, and does not walk interface-imported methods. Three of those four exclusions were
+  invisible from the outside and each one would have been a scope error.
 - **`--config=PATH` resolves relative `paths:` against the config file's directory, not the cwd.** A
-  scratch config outside the target silently analyses nothing (0.03s, one bogus diagnostic). Use
-  absolute paths in a probe config.
-- **`Rigor.dump_type` is the right observation channel for env-build differences too.** For a class that
-  fails to build, the difference is `String` (from RBS) vs a body-inferred literal — visible in
-  `dump_type` output, invisible in the diagnostic count, since a fail-soft `Dynamic` merely produces
-  *fewer* diagnostics.
+  scratch config outside the target silently analyses nothing (0.03s, one bogus diagnostic). Use absolute
+  paths in a probe config.
+- **`Rigor.dump_type` observes env-build differences too.** For a class that fails to build, the difference
+  is `String` (from RBS) vs a body-inferred literal — visible in `dump_type`, invisible in the diagnostic
+  count, since a fail-soft `Dynamic` only produces *fewer* diagnostics.

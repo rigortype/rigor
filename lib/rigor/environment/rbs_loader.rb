@@ -153,11 +153,10 @@ module Rigor
         # calls to `Dynamic[Top]` instead (the same no-false-positive contract as the dependency-source
         # tier).
         #
-        # Detection re-uses RBS's own builder (correct by construction): build every PROJECT class and read
-        # the missing name out of the raised error. Bounded to `signature_paths` classes (stdlib / vendored
-        # RBS is well-formed) and to {MAX_STUB_PASSES} iterations — a fresh stub can expose a deeper
-        # reference the first build error hid, but empty stubs reference nothing, so the fixpoint converges
-        # quickly.
+        # Detection reads the PROJECT declarations and mirrors rbs's own membership test
+        # ({.unresolved_referenced_types}); it is bounded to `signature_paths` classes (stdlib / vendored RBS
+        # is well-formed) and to {MAX_STUB_PASSES} iterations — a fresh stub can expose a deeper reference the
+        # first pass could not see past, but empty stubs reference nothing, so the fixpoint converges quickly.
         MAX_STUB_PASSES = 5
 
         def stub_missing_referenced_types(base_env, resolved, project_files)
@@ -305,26 +304,122 @@ module Rigor
           end
         end
 
-        # Builds every project class (instance + singleton side) and returns the `::`-stripped names of the
-        # types whose absence raised `NoTypeFoundError`. Only the FIRST missing reference per class surfaces
-        # per build, which is why the caller loops.
+        # The `::`-stripped names of every type a PROJECT signature references that no loaded declaration
+        # provides — the input to {.append_stub_declarations}.
+        #
+        # Detection READS the declarations; it does not build them. Until #207 it built every project class
+        # instance- and singleton-side with a throwaway `RBS::DefinitionBuilder` and recovered the name from
+        # the raised `NoTypeFoundError` — correct by construction, and **7.84M allocations, a third of a cold
+        # `check lib`** on Rigor's own tree, to find nothing once `sig/` is self-consistent. The walk below
+        # costs ~21k.
+        #
+        # It mirrors rbs's raise sites, so the answer is the builder's:
+        #
+        # * `DefinitionBuilder#validate_type_presence` over the ARGS of a super class, a module `self` type,
+        #   and a mixin. The name itself is deliberately NOT checked: a missing super class or mixin raises
+        #   `NoSuperclassFoundError` / `NoMixinFoundError`, which this pass has never stubbed.
+        # * `VarianceCalculator#type` over every method type `validate_type_params` reaches, which raises for
+        #   `ClassInstance` / `Interface` / `Alias` only. It skips `initialize`, and it is not called for the
+        #   singleton side — so a name reachable only through `def initialize:` or `def self.x:` is not
+        #   reported here, exactly as the builder did not report it. Stubbing those names anyway cost
+        #   allocations on the corpus and changed no diagnostic.
+        #
+        # Membership is decided with the builder's own predicate ({.declared_reference?}), so a name reported
+        # here is one no declaration in the env provides. A resolvable name can never be reported, which is
+        # what keeps the stub safe: ADR-5 tier 2 trades precision for a fail-soft, and a stub for a name that
+        # WOULD have resolved would shadow a real type instead.
+        #
+        # One reduction in scope. The builder also walked each project class's ANCESTORS, so a dangling
+        # reference inside a *gem's* signature reachable from a project class was reported too; this walk
+        # reads project declarations only. No such name occurs across the eight RBS-shipping projects the
+        # change was measured on, and the cost of missing one is the fail-soft `Dynamic` ADR-5 tier 2 already
+        # accepts — not a false diagnostic. A project INTERFACE's own dangling reference is likewise not
+        # reported, and likewise was not by the builder (`validate_type_params` does not variance-walk the
+        # methods a class imports from an interface) — pinned by spec so the two stay together.
+        #
+        # Equivalence with the builder sweep is pinned by spec, which keeps the sweep as its oracle. Full
+        # evaluation: `docs/notes/20260730-stub-pass1-static-detection-evaluation.md`.
         def unresolved_referenced_types(env, project_files)
-          builder = ::RBS::DefinitionBuilder.new(env: env)
-          missing = []
-          env.class_decls.each do |type_name, entry|
+          missing = {}
+          checked = {}
+          env.class_decls.each_value do |entry|
             next unless project_entry?(entry, project_files)
 
-            %i[build_instance build_singleton].each do |build|
-              builder.public_send(build, type_name)
-            rescue ::RBS::NoTypeFoundError => e
-              name = e.message[/Could not find (\S+)/, 1]
-              missing << name.sub(/\A::/, "") if name
-            rescue ::RBS::BaseError
-              # Other build failures (duplicate decl, mixin cycle, ...) are not ours to repair here — leave
-              # them fail-soft.
+            entry_declarations(entry).each { |decl| collect_declaration_references(env, decl, missing, checked) }
+          end
+          missing.keys
+        end
+
+        # Decl-level references the builder validates: a super class's / module self type's / mixin's type
+        # ARGUMENTS, plus every member. `super_class` is a `Declarations::Class` accessor and `self_types` a
+        # `Declarations::Module` one, so both are reached behind a shape check.
+        def collect_declaration_references(env, decl, missing, checked)
+          if decl.respond_to?(:super_class)
+            decl.super_class&.args&.each { |arg| collect_type_references(env, arg, missing, checked) }
+          end
+          if decl.respond_to?(:self_types)
+            decl.self_types&.each do |self_type|
+              self_type.args.each { |arg| collect_type_references(env, arg, missing, checked) }
             end
           end
-          missing.uniq
+          collect_member_references(env, decl.members, missing, checked)
+        end
+
+        # Member-level references. `initialize` and the singleton side are skipped because
+        # `validate_type_params` never reaches them (see {.unresolved_referenced_types}); `:singleton_instance`
+        # (`def self?.x`) defines the instance side too, so it is NOT skipped.
+        def collect_member_references(env, members, missing, checked)
+          members.each do |member|
+            next if member.respond_to?(:kind) && member.kind == :singleton
+
+            case member
+            when ::RBS::AST::Members::MethodDefinition
+              next if member.name == :initialize
+
+              member.overloads.each do |overload|
+                collect_type_references(env, overload.method_type, missing, checked)
+              end
+            when ::RBS::AST::Members::AttrReader, ::RBS::AST::Members::AttrWriter,
+                 ::RBS::AST::Members::AttrAccessor
+              collect_type_references(env, member.type, missing, checked)
+            when ::RBS::AST::Members::Include, ::RBS::AST::Members::Extend,
+                 ::RBS::AST::Members::Prepend
+              member.args.each { |arg| collect_type_references(env, arg, missing, checked) }
+            end
+          end
+        end
+
+        # Walks one type (or method type) and appends the names no declaration provides. Only the three node
+        # classes `VarianceCalculator#type` raises for carry a checkable name; everything else is traversed for
+        # the types nested inside it.
+        def collect_type_references(env, type, missing, checked)
+          return if type.nil?
+
+          case type
+          when ::RBS::Types::ClassInstance, ::RBS::Types::Interface, ::RBS::Types::Alias
+            name = type.name
+            name = name.absolute! unless name.absolute?
+            missing[name.to_s.sub(/\A::/, "")] = true unless declared_reference?(env, name, checked)
+          end
+          return unless type.respond_to?(:each_type)
+
+          type.each_type do |nested|
+            collect_type_references(env, nested, missing, checked)
+          end
+        end
+
+        # `DefinitionBuilder#validate_type_name`'s membership test, memoised per env walk (a project's method
+        # signatures name the same handful of types over and over). A name whose normalization raises is
+        # treated as declared: repairing it is not this pass's job, and a wrong stub is the worse failure.
+        def declared_reference?(env, name, checked)
+          key = name.to_s
+          return checked[key] if checked.key?(key)
+
+          checked[key] = begin
+            env.type_name?(env.normalize_type_name(name))
+          rescue StandardError
+            true
+          end
         end
 
         # Normalises a `class_decls` entry's representative declaration across the gemspec's supported RBS
@@ -338,6 +433,24 @@ module Rigor
           elsif entry.respond_to?(:primary)
             primary = entry.primary
             primary.respond_to?(:decl) ? primary.decl : primary
+          end
+        end
+
+        # Collects the AST declaration nodes behind a `class_decls` entry across the supported RBS range (`rbs
+        # >= 3.0, < 5.0`). RBS 4's `ModuleEntry` / `ClassEntry` expose `each_decl` yielding bare AST
+        # declarations; RBS 3.x exposes `decls`, an array of `MultiEntry::D` wrappers whose `#decl` is the AST
+        # declaration. The single-`decl` shape is handled defensively so the loader survives an rbs-gem minor
+        # bump. Class-side because both the env-build detection walk and the instance-side
+        # `#names_synthesized_in` need it, and the guard must stay single-rooted.
+        def entry_declarations(entry)
+          if entry.respond_to?(:each_decl)
+            [].tap { |acc| entry.each_decl { |decl| acc << decl } }
+          elsif entry.respond_to?(:decls)
+            entry.decls.map { |d| d.respond_to?(:decl) ? d.decl : d }
+          elsif entry.respond_to?(:decl)
+            [entry.decl]
+          else
+            []
           end
         end
 
@@ -1044,30 +1157,13 @@ module Rigor
         return [] if e.nil?
 
         names = e.class_decls.filter_map do |type_name, entry|
-          decls = entry_declarations(entry)
+          decls = self.class.entry_declarations(entry)
           next if decls.empty?
           next unless decls.all? { |decl| synthetic_decl?(decl, buffer_name) }
 
           type_name.to_s.sub(/\A::/, "")
         end
         names.sort_by { |name| name.count("::") }
-      end
-
-      # Collects the AST declaration nodes behind a `class_decls` entry across the supported RBS range (`rbs
-      # >= 3.0, < 5.0`). RBS 4's `ModuleEntry` / `ClassEntry` expose `each_decl` yielding bare AST
-      # declarations; RBS 3.x exposes `decls`, an array of `MultiEntry::D` wrappers whose `#decl` is the AST
-      # declaration. The single-`decl` shape is handled defensively so the loader survives an rbs-gem minor
-      # bump.
-      def entry_declarations(entry)
-        if entry.respond_to?(:each_decl)
-          [].tap { |acc| entry.each_decl { |decl| acc << decl } }
-        elsif entry.respond_to?(:decls)
-          entry.decls.map { |d| d.respond_to?(:decl) ? d.decl : d }
-        elsif entry.respond_to?(:decl)
-          [entry.decl]
-        else
-          []
-        end
       end
 
       # True when an AST declaration was emitted into `buffer_name` (one of the synthetic-source sentinels)

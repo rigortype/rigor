@@ -20,6 +20,11 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - There are two inline-RBS implementations, and they spell `module-self` differently: Rigor reads `# @rbs module-self Foo`, while `rbs`'s own inline documentation shows `# @rbs module-self: Foo`. The second form previously contributed nothing, with the annotation comment still echoed into the generated RBS — so the omission was invisible. The rest of the file's annotations are unaffected, and the diagnostic says so.
   - The manual chapter now states which dialect Rigor reads and what differs.
 
+### Performance
+
+- **[rigor check]** A cold run on a project that ships RBS spends roughly a third fewer allocations: the signature scan that looks for references to undeclared types no longer builds every class in the project to find them ([#207](https://github.com/rigortype/rigor/issues/207)).
+  - It reads the declarations instead, applying the same membership test RBS itself applies, so the same names are found. On Rigor's own `lib` that scan falls from 7.84M allocations to 25k — 33% of the run to 0.15% — and on a Rails-shaped project the whole run drops 84%. Diagnostics are unchanged across the eight RBS-shipping projects the change was measured on.
+
 ### Fixed
 
 - **[inference]** Under the opt-in `parameter_inference:`, `call.argument-type-mismatch` no longer fires when the *receiver's* type came from call-site parameter inference ([#205](https://github.com/rigortype/rigor/issues/205)).

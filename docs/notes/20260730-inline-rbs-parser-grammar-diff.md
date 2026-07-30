@@ -43,8 +43,31 @@ Not "the gem lags upstream". Each accepts constructs the other does not.
 | **`# @rbs @ivar: T` under `class`/`module`** | **identical** |
 
 The last two matter for #229's framing: the issue lists them among rbs 4.1's new built-in features
-that "Rigor cannot ingest today". Measured, the gem handles both. Of the three cited features only
-**`module-self`** is genuinely built-in-only.
+that "Rigor cannot ingest today". Measured, the gem handles both.
+
+### `module-self` — the same feature, two incompatible spellings
+
+The third cited feature is not a feature gap at all. Both implementations support `module-self`; they
+disagree on how it is written, and the gem's failure mode is the silent one.
+
+| spelling | gem | built-in |
+| --- | --- | --- |
+| `# @rbs module-self: Comparable` — the built-in's `docs/inline.md` | **`self_types=[]`, no diagnostic** | ✅ `ModuleSelfMember` |
+| `# @rbs module-self Comparable` — the gem's own grammar (`# @rbs module-self [MODULE_SELF]`) | ✅ `self_types=["Comparable"]` | ❌ `AnnotationSyntaxError` |
+
+This is #229's stated worry made concrete, and it is worse than a missing feature: a user reading
+**upstream's** documentation writes the colon form, the gem's `AnnotationParser` does produce a
+`ModuleSelf` annotation from it, and the writer then emits no self-type — so Rigor honours nothing and
+says nothing. The comment is even echoed into the synthesised RBS, which makes the drop invisible on
+inspection too.
+
+That combination is also what makes it detectable, and cheaply: a parsed `ModuleSelf` annotation whose
+`self_types` is empty is exactly the signature of "the author wrote a spelling we do not honour". The
+plugin already runs `AnnotationParser` for its presence probe, so the check costs nothing new.
+
+This row was wrong in the first version of this note (recorded as "built-in only, gem silently
+ignores"), for the reason the Method section already warns about: the snippet was written in the
+built-in's dialect and tested against the gem. The same trap, twice, in one evaluation.
 
 ### Gem only — what switching would lose
 
@@ -60,7 +83,6 @@ that "Rigor cannot ingest today". Measured, the gem handles both. Of the three c
 
 | construct | built-in | gem |
 | --- | --- | --- |
-| `@rbs module-self: Comparable` | `module Sortable : Comparable` | silently ignored |
 | `include A, B` | `MixinMultipleArguments` diagnostic | silently accepted |
 | top-level `def` | two diagnostics naming the cause | silently drops |
 
@@ -70,8 +92,9 @@ typed `diagnostics` array, `type_fingerprint` per declaration, and the non-ASCII
 
 ## The `class << self` row is the one that decides it
 
-Every other divergence is a *rejection* — the annotation is dropped and, on the built-in side, a
-diagnostic says so. `class << self` is different:
+Most divergences are *rejections*: the annotation is dropped, and on the built-in side a diagnostic
+says so. Two are silent — the gem's handling of the colon `module-self` spelling above, and this one,
+which is the only case where a wrong declaration is produced rather than none:
 
 ```
 built-in member: DefMember name=name kind=instance singleton?=false
@@ -111,16 +134,24 @@ is not what stops the move.
 ## Recommendation
 
 **Stay on the gem, and do not treat the built-in as a future-proofing move yet.** The built-in is not a
-superset: it would trade generics, `@rbs!`, `inherits` and visibility for `module-self`, and would
-introduce one silent misattribution in a default-wired plugin.
+superset: it would trade generics, `@rbs!`, `inherits` and visibility for one spelling of
+`module-self`, and would introduce a silent misattribution in a default-wired plugin.
 
-What the issue's real worry — users writing against upstream's docs and having Rigor drop it — argues
-for is *not* switching but two cheaper things, neither of which needs a dialect decision:
+The issue's real worry — users writing against upstream's docs and having Rigor drop it — is confirmed,
+and `module-self`'s two spellings are exactly it. But the fix for that is not a switch, which would only
+move the silence to the four constructs above. Two cheaper things address it directly, and neither
+needs a dialect decision:
 
-1. Forward the parse failures the plugin currently swallows, so a dropped annotation is visible.
-   Today's ADR-32 WD6 path reports a synthesis *error*; an annotation the gem simply ignores
-   (`module-self`) reports nothing at all.
-2. Document which dialect Rigor reads, in the plugin's README, naming `module-self` as the known gap.
+1. **Report the colon `module-self` spelling as unhonoured.** A parsed `ModuleSelf` annotation with
+   empty `self_types` is a precise, low-false-positive signature for it. Today nothing is reported:
+   ADR-32 WD6 covers a synthesis *error*, and this is a successful synthesis that silently omits a
+   declaration the author asked for.
+2. **State the dialect in the plugin README**, naming the `module-self` spelling explicitly, since
+   upstream's own inline docs describe the form Rigor does not honour.
+
+Worth doing regardless of this decision: the gem parsing an annotation and its writer discarding it
+looks like an upstream `rbs-inline` defect rather than a deliberate limitation, and is worth reporting
+there — that would close the gap for every rbs-inline user, not only Rigor's.
 
 Re-open when the built-in parser gains generics, `@rbs!`, and correct `class << self` handling —
 that is the parity bar, and the third item is a correctness precondition rather than a feature.

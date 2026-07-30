@@ -352,6 +352,78 @@ RSpec.describe "plugins/rigor-rbs-inline" do
     end
   end
 
+  # ADR-32 WD12. The two inline-RBS dialects spell `module-self` differently, and the gem's response to the
+  # other spelling is to build the annotation and then contribute nothing from it — invisible without a report,
+  # since the annotation comment is echoed into the synthesised RBS either way.
+  describe "annotation parsed but not honoured (ADR-32 WD12)" do
+    def synthesizer_outcome(source)
+      Dir.mktmpdir("rigor-rbs-inline-wd12-") do |dir|
+        path = File.join(dir, "subject.rb")
+        File.write(path, source)
+        plugin = Rigor::Plugin::RbsInline.new(
+          services: Rigor::Plugin::Services.new(
+            reflection: Rigor::Reflection,
+            type: Rigor::Type::Combinator,
+            configuration: Rigor::Configuration.new
+          ),
+          config: { "require_magic_comment" => false }
+        )
+        plugin.manifest.source_rbs_synthesizer.call(path)
+      end
+    end
+
+    it "flags the rbs-built-in `module-self:` spelling and still returns the file's RBS" do
+      outcome = synthesizer_outcome(<<~RUBY)
+        # @rbs module-self: Comparable
+        module Sortable
+          # @rbs () -> Integer
+          def rank = 1
+        end
+      RUBY
+
+      expect(outcome).to be_an(Array)
+      kind, source, messages = outcome
+      expect(kind).to eq(:ok)
+      # The rest of the file is unaffected — that is the whole reason this is not routed through WD6.
+      expect(source).to include("def rank: () -> Integer")
+      expect(messages.first).to include("module-self")
+    end
+
+    # The gem's own spelling works, so the detector must stay silent on it. Without this the check would be a
+    # lint that fires on correct input.
+    it "stays silent on the rbs-inline spelling it does honour" do
+      outcome = synthesizer_outcome(<<~RUBY)
+        # @rbs module-self Comparable
+        module Sortable
+          # @rbs () -> Integer
+          def rank = 1
+        end
+      RUBY
+
+      expect(outcome).to be_a(String)
+      expect(outcome).to include("module Sortable : Comparable")
+    end
+
+    it "surfaces it as an info diagnostic without suppressing the file's other annotations" do
+      result = run_plugin(source: <<~RUBY)
+        # rbs_inline: enabled
+        # @rbs module-self: Comparable
+        module Sortable
+          # @rbs () -> Integer
+          def rank = 1
+        end
+      RUBY
+
+      not_honoured = result.diagnostics.select do |d|
+        d.qualified_rule == "source-rbs-annotation-not-honoured"
+      end
+      expect(not_honoured.size).to eq(1)
+      expect(not_honoured.first.severity).to eq(:info)
+      expect(not_honoured.first.message).to include("module-self")
+      expect(result.diagnostics.map(&:qualified_rule)).not_to include("source-rbs-synthesis-failed")
+    end
+  end
+
   describe "per-file cache (ADR-32 WD5)" do
     let(:cache_root) { Dir.mktmpdir("rigor-rbs-inline-cache-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: cache_root) }

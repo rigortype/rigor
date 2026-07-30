@@ -557,17 +557,35 @@ module Rigor
           return [] if @source_rbs_synthesis_reporter.empty?
 
           @source_rbs_synthesis_reporter.entries.map do |entry|
-            Diagnostic.new(
-              path: entry.path, line: 1, column: 1,
-              message: "plugin `#{entry.plugin_id}` failed to synthesise RBS from this file: " \
-                       "#{entry.message}. The file's analysis falls back to no inline-RBS " \
-                       "contribution. Fix the inline-RBS comment grammar or remove the " \
-                       "annotation to silence this diagnostic.",
-              severity: :info,
-              rule: "source-rbs-synthesis-failed",
-              source_family: :builtin
-            )
+            entry.kind == :not_honoured ? not_honoured_diagnostic(entry) : synthesis_failed_diagnostic(entry)
           end
+        end
+
+        def synthesis_failed_diagnostic(entry)
+          Diagnostic.new(
+            path: entry.path, line: 1, column: 1,
+            message: "plugin `#{entry.plugin_id}` failed to synthesise RBS from this file: " \
+                     "#{entry.message}. The file's analysis falls back to no inline-RBS " \
+                     "contribution. Fix the inline-RBS comment grammar or remove the " \
+                     "annotation to silence this diagnostic.",
+            severity: :info,
+            rule: "source-rbs-synthesis-failed",
+            source_family: :builtin
+          )
+        end
+
+        # ADR-32 WD12 — the synthesis SUCCEEDED; one annotation inside it was parsed and then contributed
+        # nothing. Distinct from the failure above in the only way that matters to the reader: the rest of
+        # the file's annotations ARE in effect, so the advice is to fix one comment, not to distrust the file.
+        def not_honoured_diagnostic(entry)
+          Diagnostic.new(
+            path: entry.path, line: 1, column: 1,
+            message: "plugin `#{entry.plugin_id}` parsed an inline-RBS annotation in this file but did " \
+                     "not honour it: #{entry.message} The file's other annotations are unaffected.",
+            severity: :info,
+            rule: "source-rbs-annotation-not-honoured",
+            source_family: :builtin
+          )
         end
 
         # ADR-10 slice 5c — drains the per-run {DependencySourceInference::BoundaryCrossReporter} into

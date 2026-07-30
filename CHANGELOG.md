@@ -12,6 +12,12 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ## [Unreleased]
 
+### Added
+
+- **[rigor-rbs-inline]** An inline-RBS annotation that Rigor parses but does not honour is now reported as `plugin.rbs-inline.source-rbs-annotation-not-honoured` (info) instead of being dropped in silence ([#229](https://github.com/rigortype/rigor/issues/229)).
+  - There are two inline-RBS implementations, and they spell `module-self` differently: Rigor reads `# @rbs module-self Foo`, while `rbs`'s own inline documentation shows `# @rbs module-self: Foo`. The second form previously contributed nothing, with the annotation comment still echoed into the generated RBS — so the omission was invisible. The rest of the file's annotations are unaffected, and the diagnostic says so.
+  - The manual chapter now states which dialect Rigor reads and what differs.
+
 ### Fixed
 
 - **[sig-gen]** `rigor sig-gen` now reads a class built by `Data.define(...)` / `Struct.new(...)`, in both the `Point = Data.define(:x, :y)` and `class Point < Data.define(:x, :y)` forms ([#227](https://github.com/rigortype/rigor/issues/227)).

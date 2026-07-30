@@ -16,17 +16,23 @@ module Rigor
     # single reporter across the run; entries are appended one at a time during env build (before any per-file
     # analysis runs), so no locking is needed.
     class SourceRbsSynthesisReporter
-      Entry = Data.define(:plugin_id, :path, :message)
+      # `kind` separates the two outcomes the Runner reports differently (ADR-32 WD12): `:failed` is a
+      # synthesis that raised or could not parse, `:not_honoured` a synthesis that SUCCEEDED while silently
+      # dropping an annotation it parsed. They are not the same news — the first says the file contributed
+      # nothing, the second that it contributed all but one thing — so they carry distinct diagnostic ids.
+      # Defaults to `:failed`, the pre-WD12 meaning, so an older caller records what it always did.
+      Entry = Data.define(:plugin_id, :path, :message, :kind)
 
       def initialize
         @entries = []
       end
 
-      def record(plugin_id:, path:, message:)
+      def record(plugin_id:, path:, message:, kind: :failed)
         @entries << Entry.new(
           plugin_id: plugin_id.to_s.dup.freeze,
           path: path.to_s.dup.freeze,
-          message: message.to_s.dup.freeze
+          message: message.to_s.dup.freeze,
+          kind: kind
         )
         nil
       end

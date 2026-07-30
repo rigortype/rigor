@@ -1541,7 +1541,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     it "declines when membership is undecidable or the argument is not a shape" do
       opaque = tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object"))
       expect(dispatch(receiver: opaque, method_name: :&, args: [tuple(constant(1))])).to be_nil
-      expect(dispatch(receiver: t, method_name: :&, args: [tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object"))])).to be_nil
+      opaque_arg = tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object"))
+      expect(dispatch(receiver: t, method_name: :&, args: [opaque_arg])).to be_nil
       # `Array#&` accepts anything with `to_ary`, which a non-Tuple shape cannot prove.
       expect(dispatch(receiver: t, method_name: :&, args: [Rigor::Type::Combinator.nominal_of("Array")])).to be_nil
       expect(dispatch(receiver: t, method_name: :&)).to be_nil

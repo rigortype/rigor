@@ -48,9 +48,6 @@ module Rigor
 
         configuration = load_check_configuration(options)
         configuration = apply_bleeding_edge_override(configuration, options)
-        conflict = parameter_inference_incremental_conflict(configuration, options)
-        return conflict unless conflict.nil?
-
         config_warnings = warn_unresolved_config(configuration)
         cache_root = configuration.cache_path
         handle_clear_cache(cache_root) if options.fetch(:clear_cache)
@@ -141,25 +138,6 @@ module Rigor
         exit_code = result.success? ? 0 : 1
         exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
         exit_code
-      end
-
-      # ADR-67 WD6c — `parameter_inference:` and the ADR-46 incremental modes are mutually exclusive in slice 1.
-      # The parameter table introduces cross-file edges (a caller's argument types drive a callee's body
-      # diagnostics) that the per-file dependency recorder does not yet carry, so a cached file whose parameter
-      # seeds changed would serve a stale result. Refuse with a message naming the ADR-46 gap rather than
-      # silently producing unsound incremental diagnostics; the edge wiring is the named follow-up. Returns the
-      # usage exit code on a conflict, or nil to proceed. `--verify-incremental` (the acceptance gate that runs
-      # incremental analysis) is caught here too.
-      def parameter_inference_incremental_conflict(configuration, options)
-        return nil unless configuration.parameter_inference
-        return nil unless options.fetch(:incremental) || options.fetch(:verify_incremental)
-
-        flag = options.fetch(:incremental) ? "--incremental" : "--verify-incremental"
-        @err.puts("rigor: parameter_inference: cannot combine with #{flag} — the call-site parameter table " \
-                  "introduces cross-file caller→callee edges the ADR-46 incremental dependency graph does not " \
-                  "yet record, so a cached file could serve a stale diagnostic. Run a full check (drop " \
-                  "#{flag}), or disable parameter_inference: for this run.")
-        CLI::EXIT_USAGE
       end
 
       # ADR-46 — the two incremental-analysis check modes both fully handle the run and return an exit code (so `run`

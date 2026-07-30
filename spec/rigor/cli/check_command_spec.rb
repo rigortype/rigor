@@ -44,15 +44,23 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(out).to include("error(s) in")
   end
 
-  # ADR-67 WD6c — `parameter_inference:` and the ADR-46 incremental modes are mutually exclusive in slice 1.
-  it "refuses parameter_inference: combined with --incremental (WD6c)" do
+  # ADR-67 WD6c lift — `parameter_inference:` composes with `--incremental`: the session diffs the
+  # freshly collected param table against the snapshot's copy and re-checks any callee whose seeds moved,
+  # so the earlier mutual-exclusion refusal (exit 64) is gone. The cross-run soundness property itself is
+  # asserted in `incremental_session_spec.rb`; this is the CLI wiring.
+  it "composes parameter_inference: with --incremental (WD6c lifted)" do
     File.write(".rigor.yml", "paths:\n  - clean.rb\nparameter_inference: true\n")
     File.write("clean.rb", "x = 1\n")
 
-    status, _out, err = run(["--no-cache", "--no-ci-detect", "--no-stats", "--incremental", "clean.rb"])
+    cold_status, cold_out, cold_err = run(["--no-ci-detect", "--no-stats", "--incremental", "clean.rb"])
+    warm_status, warm_out, warm_err = run(["--no-ci-detect", "--no-stats", "--incremental", "clean.rb"])
 
-    expect(status).to eq(Rigor::CLI::EXIT_USAGE)
-    expect(err).to include("parameter_inference: cannot combine with --incremental")
+    expect(cold_status).to eq(0)
+    expect(warm_status).to eq(0)
+    expect(cold_err).to include("--incremental cold")
+    expect(warm_err).to include("--incremental warm")
+    expect(cold_out).to include("No diagnostics")
+    expect(warm_out).to include("No diagnostics")
   end
 
   it "allows parameter_inference: on a full (non-incremental) check" do

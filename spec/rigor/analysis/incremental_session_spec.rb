@@ -1200,4 +1200,135 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       end
     end
   end
+
+  # ADR-67 WD6c lift — `parameter_inference:` composes with the incremental session. The collector pre-pass
+  # is whole-project by design, so each recheck recomputes the seed table and diffs it against the
+  # snapshot's copy: a changed entry re-checks the CALLEE file (whose own text never moved) and its symbol
+  # dependents. `Rigor.dump_type` on the seeded parameter makes the seed byte-visible in the diagnostics —
+  # the WD6b guard means a seed change never ADDS a negative diagnostic, so without it the full-run oracle
+  # comparison would be vacuous.
+  describe "parameter_inference composition (ADR-67 WD6c lift)" do
+    def pi_configuration(dir)
+      Rigor::Configuration.new("paths" => [dir], "parameter_inference" => true)
+    end
+
+    def pi_full_run(dir)
+      Rigor::Analysis::Runner.new(
+        configuration: pi_configuration(dir), cache_store: nil, environment: shared_environment
+      ).run.diagnostics
+    end
+
+    def pi_session(dir)
+      described_class.new(configuration: pi_configuration(dir), environment: shared_environment)
+    end
+
+    def write_callee(dir)
+      path = File.join(dir, "callee.rb")
+      write_once(path, <<~RUBY)
+        class Callee
+          def run(x)
+            Rigor.dump_type(x)
+          end
+        end
+      RUBY
+      path
+    end
+
+    def write_caller(dir, arg:, extra: nil)
+      path = File.join(dir, "caller.rb")
+      File.write(path, <<~RUBY)
+        class Caller
+          def go
+            #{extra}
+            Callee.new.run(#{arg})
+          end
+        end
+      RUBY
+      path
+    end
+
+    def dump_messages(diagnostics)
+      diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+    end
+
+    it "re-checks the callee when a caller's argument type changes (the callee's own text unchanged)" do
+      Dir.mktmpdir do |dir|
+        callee = write_callee(dir)
+        caller_path = write_caller(dir, arg: "1")
+        session = pi_session(dir)
+        baseline = session.baseline
+        expect(dump_messages(baseline)).to eq(["dump_type: Integer"])
+
+        write_caller(dir, arg: '"s"')
+        recheck = session.recheck
+
+        # The file-digest tier sees only the caller; the param-table diff is what pulls the callee in.
+        expect(recheck.changed).to eq(Set[caller_path])
+        expect(recheck.affected).to include(callee)
+        expect(dump_messages(recheck.diagnostics)).to eq(["dump_type: String"])
+        expect(sorted(recheck.diagnostics)).to eq(sorted(pi_full_run(dir)))
+      end
+    end
+
+    it "keeps the callee cached when a caller edit leaves the argument types unchanged" do
+      Dir.mktmpdir do |dir|
+        callee = write_callee(dir)
+        caller_path = write_caller(dir, arg: "1")
+        session = pi_session(dir)
+        session.baseline
+
+        write_caller(dir, arg: "1", extra: "@noise = :extra")
+        recheck = session.recheck
+
+        # Same seed table on both sides of the diff → no param invalidation; the callee is served from
+        # cache. This is the precision half — the diff must not degrade every caller edit into a
+        # whole-project re-check.
+        expect(recheck.affected).to eq(Set[caller_path])
+        expect(recheck.reused).to include(callee)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(pi_full_run(dir)))
+      end
+    end
+
+    it "invalidates across the persisted snapshot (the diff runs against Marshal-restored types)" do
+      Dir.mktmpdir do |dir|
+        callee = write_callee(dir)
+        write_caller(dir, arg: "1")
+        config = pi_configuration(dir)
+        fp = fingerprint(config, dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+
+        _cold, warm_first = described_class.new(configuration: config, environment: shared_environment)
+                                           .run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(warm_first).to be(false)
+
+        write_caller(dir, arg: '"s"')
+        session = described_class.new(configuration: config, environment: shared_environment)
+        diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fp)
+
+        expect(warm).to be(true)
+        expect(dump_messages(diagnostics)).to eq(["dump_type: String"])
+        expect(sorted(diagnostics)).to eq(sorted(pi_full_run(dir)))
+        expect(session.analyzed_files).to include(callee)
+      end
+    end
+
+    it "matches the full-run oracle on a no-edit warm recheck without re-collecting the table" do
+      Dir.mktmpdir do |dir|
+        write_callee(dir)
+        write_caller(dir, arg: "1")
+        session = pi_session(dir)
+        session.baseline
+        oracle = sorted(pi_full_run(dir)) # computed BEFORE the mock — the oracle's own collect is legitimate
+
+        # No file moved → the collector's inputs are unchanged, so the recheck must skip the whole-project
+        # re-collect (the ADR-87 null-recheck fast path) and still serve the exact baseline result.
+        allow(Rigor::Inference::ParameterInferenceCollector).to receive(:collect)
+        recheck = session.recheck
+
+        expect(Rigor::Inference::ParameterInferenceCollector).not_to have_received(:collect)
+        expect(recheck.affected).to be_empty
+        expect(sorted(recheck.diagnostics)).to eq(oracle)
+      end
+    end
+  end
 end

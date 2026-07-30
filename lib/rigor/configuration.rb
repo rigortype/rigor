@@ -61,7 +61,9 @@ module Rigor
       # seed, so an undeclared `def` / `initialize` / setter parameter is typed to the union of its resolved
       # call-site argument types (precision-additive only — the in-body negative rules decline on the inferred
       # lower bound, WD6b). `false` (the default, resolved off by every severity profile) keeps the table empty
-      # and the run byte-identical to today. Mutually exclusive with `--incremental` (WD6c).
+      # and the run byte-identical to today. Composes with `--incremental` (the WD6c mutual exclusion is
+      # lifted): the incremental session recomputes the table each run and diffs it against its snapshot,
+      # re-checking any callee whose seeds moved.
       "parameter_inference" => false,
       "cache" => {
         "path" => ".rigor/cache",

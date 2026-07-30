@@ -199,6 +199,128 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  # Issue #227. Before this, a `Const = Data.define(...) do ... end` assignment produced output that was WRONG,
+  # not merely thin: the block body's methods were attributed to the enclosing namespace (which then rendered as
+  # a `class` even when it was a `module`), and the members, the constructors, and the `::Data` ancestry were all
+  # absent — so the class the file actually defines never appeared.
+  describe "Data.define / Struct.new member and constructor emission (#227)" do
+    def run_for(source, **)
+      path = write_fixture("lib/shapes.rb", source)
+      generator(paths: [path], **).run
+    end
+
+    def rbs_for(candidates, class_name)
+      candidates.select { |c| c.class_name == class_name }.filter_map(&:rbs)
+    end
+
+    it "attributes a block body's defs to the constant, not the enclosing namespace" do
+      candidates = run_for(<<~RUBY)
+        module Outer
+          Shell = Data.define(:a) do
+            def label
+              "x"
+            end
+          end
+        end
+      RUBY
+
+      label = candidates.find { |c| c.method_name == :label }
+      expect(label.class_name).to eq("Outer::Shell")
+      expect(label.namespace_kinds["Outer"]).to eq(:module)
+    end
+
+    it "declares the members, both constructors, and the ::Data ancestry" do
+      candidates = run_for("module Outer\n  Shell = Data.define(:a, :b)\nend\n")
+
+      expect(rbs_for(candidates, "Outer::Shell")).to eq(
+        ["def a: () -> untyped",
+         "def b: () -> untyped",
+         "def self.new: (a: untyped, b: untyped) -> instance | (untyped a, untyped b) -> instance",
+         "def self.[]: (a: untyped, b: untyped) -> instance | (untyped a, untyped b) -> instance"]
+      )
+      expect(candidates.first.class_superclasses["Outer::Shell"]).to eq("::Data")
+    end
+
+    it "declares writers and optional constructor positions for a Struct" do
+      candidates = run_for("Point = Struct.new(:x)\n")
+
+      expect(rbs_for(candidates, "Point")).to eq(
+        ["def x: () -> untyped",
+         "def x=: (untyped) -> untyped",
+         "def self.new: (?x: untyped) -> instance | (?untyped x) -> instance",
+         "def self.[]: (?x: untyped) -> instance | (?untyped x) -> instance"]
+      )
+      expect(candidates.first.class_superclasses["Point"]).to eq("::Struct[untyped]")
+    end
+
+    it "drops the positional constructor form under keyword_init: true" do
+      candidates = run_for("Point = Struct.new(:x, keyword_init: true)\n")
+
+      expect(rbs_for(candidates, "Point")).to include("def self.new: (?x: untyped) -> instance")
+    end
+
+    # The named-subclass form already got its `class` keyword from the source; what it never got was the computed
+    # superclass (`record_superclass` refuses to guess at a CallNode) or the members.
+    it "covers the `class X < Data.define(...)` form too" do
+      candidates = run_for("class Named < Data.define(:id)\nend\n")
+
+      expect(rbs_for(candidates, "Named")).to include("def id: () -> untyped")
+      expect(candidates.first.class_superclasses["Named"]).to eq("::Data")
+    end
+
+    it "leaves a member the class itself already declares to the user" do
+      write_fixture("sig/shapes.rbs", <<~RBS)
+        class Point < ::Data
+          attr_reader x: Integer
+        end
+      RBS
+      candidates = run_for("Point = Data.define(:x, :y)\n", signature_paths: [File.join(tmpdir, "sig")])
+
+      expect(rbs_for(candidates, "Point")).to include("def y: () -> untyped")
+      expect(rbs_for(candidates, "Point")).not_to include("def x: () -> untyped")
+    end
+
+    # `::Data.new: () -> bot` answers the `.new` lookup for every value class. Deferring to it as if it were the
+    # user's own declaration is what would leave the arity false positive in place.
+    it "still declares .new when only the inherited ::Data one is visible" do
+      write_fixture("sig/shapes.rbs", "class Point < ::Data\nend\n")
+      candidates = run_for("Point = Data.define(:x)\n", signature_paths: [File.join(tmpdir, "sig")])
+
+      expect(rbs_for(candidates, "Point")).to include(
+        "def self.new: (x: untyped) -> instance | (untyped x) -> instance"
+      )
+    end
+
+    it "types members from `.new` observations under --params=observed" do
+      path = write_fixture("lib/shapes.rb", "Point = Data.define(:x, :y)\n")
+      observations = {
+        ["Point", :initialize] => [
+          Rigor::SigGen::ObservedCall.new(keyword: { x: Rigor::Type::Combinator.constant_of("a") }),
+          [Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(2)]
+        ]
+      }
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+
+      candidates = described_class.new(configuration: config, paths: [path], observations: observations).run
+
+      expect(candidates.select { |c| c.class_name == "Point" }.filter_map(&:rbs))
+        .to include('def x: () -> ("a" | 1)', "def y: () -> 2")
+    end
+
+    # A one-argument `Point.new(attrs)` shim must not type member 0 as that argument's type: the arities disagree,
+    # so the call site says nothing about which member each position feeds.
+    it "ignores positional observations whose arity does not cover the member list" do
+      path = write_fixture("lib/shapes.rb", "Point = Data.define(:x, :y)\n")
+      observations = { ["Point", :initialize] => [[Rigor::Type::Combinator.constant_of("attrs")]] }
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+
+      candidates = described_class.new(configuration: config, paths: [path], observations: observations).run
+
+      expect(candidates.select { |c| c.class_name == "Point" }.filter_map(&:rbs))
+        .to include("def x: () -> untyped")
+    end
+  end
+
   describe "superclass capture (ADR-14)" do
     it "records a plain-constant superclass on every candidate" do
       src = <<~RUBY
@@ -233,7 +355,23 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidate.class_superclasses["Scm::Adapters::GitAdapter"]).to eq("AbstractAdapter")
     end
 
-    it "does not record a computed superclass (Struct.new / Class.new)" do
+    # A computed superclass is un-representable in RBS and guessing would misfold. The `Data.define` / `Struct.new`
+    # pair is the exception the ADR-48 layouts let us resolve exactly (#227) — everything else stays unrecorded.
+    it "does not record a computed superclass it cannot resolve" do
+      src = <<~RUBY
+        Base = Class.new
+        class Point < Class.new(Base)
+          def norm; 1; end
+        end
+      RUBY
+      path = write_fixture("lib/point.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :norm }
+
+      expect(candidate.class_superclasses).not_to have_key("Point")
+    end
+
+    it "records the synthesised ancestry of a `class X < Struct.new(...)`" do
       src = <<~RUBY
         class Point < Struct.new(:x, :y)
           def norm; 1; end
@@ -243,7 +381,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :norm }
 
-      expect(candidate.class_superclasses).not_to have_key("Point")
+      expect(candidate.class_superclasses["Point"]).to eq("::Struct[untyped]")
     end
   end
 

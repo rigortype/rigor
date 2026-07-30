@@ -1,8 +1,8 @@
 module Rigor
   module Inference
-    # `VoidOrigin = Data.define(:class_name, :method_name, :kind)`. Declared as a `::Data` subclass because
-    # that is the shape the runtime actually builds; `sig-gen` cannot yet read a `Data.define` assignment
-    # (it reports the block body's `#label` against the enclosing namespace and drops the members).
+    # `VoidOrigin = Data.define(:class_name, :method_name, :kind)`. Declared as a `::Data` subclass because that
+    # is the shape the runtime actually builds. `sig-gen` reads this form since #227 and generates the same
+    # structure; the member types are hand-narrowed from the `untyped` only `--params=observed` could improve on.
     class VoidOrigin < ::Data
       attr_reader class_name: String
       attr_reader method_name: Symbol
@@ -10,6 +10,9 @@ module Rigor
 
       def self.new: (class_name: String, method_name: Symbol, kind: Symbol) -> instance
                   | (String class_name, Symbol method_name, Symbol kind) -> instance
+
+      def self.[]: (class_name: String, method_name: Symbol, kind: Symbol) -> instance
+                 | (String class_name, Symbol method_name, Symbol kind) -> instance
 
       # A human-facing `Class#method` / `Class.method` label for the diagnostic message.
       def label: () -> String

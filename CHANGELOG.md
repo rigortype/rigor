@@ -14,6 +14,9 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[sig-gen]** `rigor sig-gen` now reads a class built by `Data.define(...)` / `Struct.new(...)`, in both the `Point = Data.define(:x, :y)` and `class Point < Data.define(:x, :y)` forms ([#227](https://github.com/rigortype/rigor/issues/227)).
+  - Previously the members, the constructors, and the `::Data` / `::Struct` ancestry were all absent, and a `do ... end` block's methods were reported against the enclosing namespace — which then printed as a `class` even when it was a `module`.
+  - The generated declaration carries the member readers (plus writers, for a mutable Struct), a `.new` / `.[]` signature matching the constructor forms the class actually accepts, and the correct superclass. Under `--params=observed`, member types come from the `.new` call sites the observation scan sees.
 - **[sig-gen]** `rigor sig-gen --write` now refuses, by name and with a non-zero exit, to update a signature file that is not valid UTF-8, instead of crashing with a stack trace ([#231](https://github.com/rigortype/rigor/pull/231)).
 - **[engine]** A project `.rbs` file (or a plugin-synthesized inline-RBS contribution) that is not valid UTF-8 is now quarantined with a warning naming the file, instead of reaching the RBS parser — where it crashed `rigor check` with a bare `ArgumentError` on rbs 4.1, and could hang the process outright on older rbs releases ([#230](https://github.com/rigortype/rigor/pull/230)).
 - **[inference]** `Resolv.new([Resolv::Hosts.new, ...])` no longer false-fires `call.argument-type-mismatch` when the installed `rbs` predates 4.1; a core overlay backports the array-of-resolvers overload upstream added in ruby/rbs#2960 ([#230](https://github.com/rigortype/rigor/pull/230)).

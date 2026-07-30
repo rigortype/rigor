@@ -113,6 +113,7 @@ comparison) appears nowhere else in this index.
 | 2026-06-27 | [Corpus cold/warm re-profile — v0.2.6 new-bottleneck check](20260627-corpus-cold-warm-reprofile.md) |
 | 2026-07-18 | [CI テスト時間の伸び — 要因分解（instance gacha vs テスト増加 vs binpacker）、カテゴリ分割・有料runner の否定、md-only PR スキップの落としどころ](20260718-ci-test-time-growth-attribution.md) |
 | 2026-07-25 | [`rigor check lib` allocation attribution — 55% is a one-time RBS env build, the #101 rules are 0.24%](20260725-check-allocation-attribution.md) |
+| 2026-07-30 | [Referenced-type stub pass 1 — static detection agrees with the builder (−32.8% of a cold run), and two live stub-synthesis defects](20260730-stub-pass1-static-detection-evaluation.md) |
 
 ## Process & meta
 

@@ -97,6 +97,7 @@ comparison) appears nowhere else in this index.
 | 2026-05-28 | [Upstream `ruby/rbs` PR — `Resolv::DNS` typeclass-narrowed return](20260528-rbs-upstream-pr-resolv-typeclass.md) |
 | 2026-06-03 | [Typing plugin files against the `Plugin::Base` contract — spike findings](20260603-plugin-contract-self-typing-spike.md) |
 | 2026-06-03 | [Session report — typing the plugin contract (the 6-commit landing)](20260603-plugin-contract-typing-session-report.md) |
+| 2026-07-30 | [`RBS::Rewriter` for the sig-gen writer's update path — evaluation](20260730-rbs-rewriter-sig-gen-writer-evaluation.md) |
 
 ## Performance & profiling
 

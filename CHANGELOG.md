@@ -65,8 +65,6 @@ v0.3.1 follows `rbs` 4.1.0. The upgrade is invisible in normal use, but 4.1's co
   - A plugin that reaches for the store directly rather than through `Plugin::Base.producer` must pass one; `:unbounded` reproduces the previous behaviour exactly.
   - There is deliberately no default. A cache slice that silently grows without bound is the failure this argument exists to make unrepresentable, and no single default is right for both whole-project and per-file producers.
 
-### Performance
-
 - **[rigor check]** The `static.value-use.void` rule no longer costs a separate AST traversal per file, whether or not it is enabled ([#210](https://github.com/rigortype/rigor/pull/210), [#207](https://github.com/rigortype/rigor/issues/207)).
   - Its value-position scan now rides the shared per-node walk with the other built-in rules. Diagnostics are unchanged.
 
@@ -158,8 +156,6 @@ This release is dominated by a performance arc that makes repeat and incremental
   - Set `cache.validation: stat` explicitly on a CI runner that reuses its workspace.
 - **[cli]** `rigor doctor` no longer headlines "0 issue(s) found" on a run whose only findings are warnings; the summary counts warnings too.
 - **[skills]** The bundled onboarding skills (`rigor-project-init`, `rigor-next-steps`, `rigor-editor-setup`) gained guidance for non-interactive / agent-driven runs and several accuracy fixes, from an autonomous run against a real Rails app ([#108](https://github.com/rigortype/rigor/pull/108)).
-
-### Performance
 
 - **[perf]** `rigor check` and `rigor coverage` now enable YJIT once a run outlasts a short amortization deadline, cutting wall time on large projects with no penalty to quick runs ([#75](https://github.com/rigortype/rigor/pull/75)).
   - Enabling YJIT up front is a net loss on short runs (a ~4s run regressed ~20%), so Rigor arms a background thread that enables it only after 5s. Measured cold on Mastodon `app`+`lib`: 25.4s → 15.1s (1.7×), matching always-on YJIT; short-run cases stay at parity. The `rigor lsp` / `rigor mcp` servers enable YJIT at boot. Set `RIGOR_DISABLE_YJIT=1` to opt out, or `RIGOR_YJIT_DEADLINE=<seconds>` to tune.

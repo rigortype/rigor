@@ -47,7 +47,7 @@ The next release after `0.0.9` is `0.1.0` — single-digit version-component pol
 - **Public-API drift specs for `Rigor::Scope`, `Rigor::Environment`, `Rigor::Type::Combinator`, `Rigor::Reflection`.** Snapshot-style spec at `spec/rigor/public_api_drift_spec.rb` pins each namespace's instance + singleton method set so accidental signature changes show up as test failures, not silent breakage. The four namespaces are the v0.1.0 plugin-contract attachment points.
 - **`docs/internal-spec/public-api.md`.** Public/internal stability boundary declared explicitly: which namespaces are drift-pinned today (Scope / Environment / Type::Combinator / Reflection), which are public-shape but still in flux until v0.1.0 (FlowContribution, Diagnostic, Cache::Store#fetch_or_compute, RbsExtended directive readers), and which stay strictly internal (Inference::*, Analysis::FactStore / CheckRules / Runner, AST::* virtuals, Source / CLI / Configuration plumbing).
 
-### Internal
+### Changed
 
 - The cache layer's public read shape grows to cover all six producers in [`docs/internal-spec/cache.md`](docs/internal-spec/cache.md): `Descriptor`, `Store` (with the new `serialize:`/`deserialize:` kwargs and `Store#stats`), `RbsConstantTable`, `RbsKnownClassNames`, `RbsClassAncestorTable`, `RbsClassTypeParamNames`, `RbsEnvironment`, the shared `RbsDescriptor` builder, and the `RBS::Location` Marshal patch.
 - `Rigor::FlowContribution` documented in [`docs/internal-spec/flow-contribution.md`](docs/internal-spec/flow-contribution.md) with the slot table, equality / `to_h` / `empty?` semantics, `RbsExtended.read_flow_contribution` mapping (predicate-if-* → `truthy_facts` / `falsey_facts`, `assert*` → `post_return_facts`, `return:` → `return_type`), and the deferred element-list flattening note.
@@ -64,8 +64,6 @@ The eighth preview. Theme: **first cache-related code slice** — land the persi
 - **`rigor check --cache-stats`.** Prints an on-disk inventory at the end of the run (per-producer entry counts, total bytes, schema-version marker). Sourced from a new `Rigor::Cache::Store.disk_inventory(root:)` class method. Per-run hit/miss counters are deferred until production code wires the cache (no production caller in v0.0.8).
 - **`rigor check --clear-cache`.** Removes the `.rigor/cache` directory (CWD-relative) before the analysis run. Prints `Cleared cache: .rigor/cache` or `Cache already empty: .rigor/cache`. The check itself runs to completion regardless.
 - **Diagnostic source-family provenance.** `Rigor::Analysis::Diagnostic` gains a `source_family:` keyword (default `:builtin`) and a `qualified_rule` accessor returning `"#{source_family}.#{rule}"` for non-default families and just `rule` for builtin diagnostics. JSON output (`to_h`) carries both `source_family` and the bare `rule` side-by-side. Prepares ADR-2's plugin-observability story without committing to the plugin API itself; no production caller in v0.0.8 sets a non-default source family.
-
-### Internal
 
 - New normative spec [`docs/internal-spec/cache.md`](docs/internal-spec/cache.md) tracks the cache layer's public read shape (Descriptor API, Store API, file format, atomicity & locking, schema-version mismatch behaviour, disk inventory, diagnostic provenance).
 
@@ -1198,7 +1196,7 @@ The gem is published to RubyGems as **`rigortype`** (the
   / early-return narrowing / RBS::Extended predicates /
   user-defined method dispatch.
 
-### Known limitations (deferred to v0.0.2)
+**Known limitations** (deferred to v0.0.2):
 
 - Inter-procedural inference for user-defined methods. A
   helper like `def is_odd(n) = n.odd?` types correctly inside
@@ -1217,7 +1215,6 @@ The gem is published to RubyGems as **`rigortype`** (the
 - Per-rule severity is hard-coded to `:error` (with `:info`
   reserved for `dump_type`); per-rule configuration and
   suppression comments are deferred.
-
 
 [0.0.9]: https://github.com/rigortype/rigor/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/rigortype/rigor/compare/v0.0.7...v0.0.8

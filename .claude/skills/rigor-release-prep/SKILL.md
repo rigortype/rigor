@@ -251,7 +251,16 @@ release lands, the front page already names the version RubyGems serves.
   `Deprecated`, `Removed`, `Fixed`, `Security`. Do NOT inline a description
   into the heading (`### Added — feature X` is wrong; the heading is just
   `### Added`). Do NOT use `####` sub-headings inside a version block.
-- Group the same kinds of changes under the same heading.
+  **There is no `Performance` / `Internal` / `Documentation` section** — a
+  speed-up is `Changed`, a docs correction is `Fixed`. Say what it is in the
+  entry, not in a heading of your own invention. This rule was already written
+  here and drifted anyway (six `### Performance` sections accumulated across
+  four changelog files before 2026-07-30), so it is now gated by
+  `spec/docs/changelog_conformance_spec.rb` — the ADR-97 lesson, applied to the
+  changelog.
+- Group the same kinds of changes under the same heading — one section per type
+  per release, in the Keep a Changelog order above (`Added` first, `Security`
+  last). Both are gated.
 - Preserve the release date in every version heading and the Keep a Changelog /
   Semantic Versioning notes at the top of `CHANGELOG.md`.
 - Update the `[Unreleased]` compare link and add the new release link at the

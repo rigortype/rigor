@@ -82,6 +82,16 @@ module Rigor
           drop: :tuple_drop,
           rotate: :tuple_rotate,
           uniq: :tuple_uniq,
+          at: :tuple_at,
+          :& => :tuple_intersection,
+          intersection: :tuple_intersection,
+          :| => :tuple_union,
+          union: :tuple_union,
+          :- => :tuple_difference,
+          difference: :tuple_difference,
+          intersect?: :tuple_intersect?,
+          one?: :tuple_one?,
+          deconstruct: :shape_self,
           index: :tuple_find_index,
           find_index: :tuple_find_index,
           rindex: :tuple_rindex,
@@ -957,6 +967,88 @@ module Rigor
 
           # `tuple + other` — concatenates two Tuples. Both sides must be `Type::Tuple`. Returns a new
           # Tuple whose elements are those of the receiver followed by those of the argument.
+          # `at(n)` — the strict single-Integer accessor. Deliberately NOT an alias of {#tuple_index}: `[]`
+          # and `slice` accept a Range or a `(start, length)` pair, while `Array#at` raises `ArgumentError`
+          # on anything but one Integer, and a fold must never invent a value for a call that raises.
+          #
+          # An out-of-range index declines rather than folding to `Constant[nil]`, matching {#tuple_index}.
+          # Ruby really does return nil there, so the fold would be correct — but it would also turn a
+          # receiver the RBS tier types as `Elem?` into a proven nil, newly surfacing diagnostics on code
+          # that may be guarded in ways a shape cannot see. Precision that fires a new diagnostic is a
+          # separate decision from precision that removes a `Dynamic` (#121).
+          def tuple_at(tuple, _method_name, args)
+            return nil unless args.size == 1
+            return nil unless args.first.is_a?(Type::Constant) && args.first.value.is_a?(Integer)
+
+            tuple.elements[args.first.value]
+          end
+
+          # `a & b` / `a.intersection(b, ...)`, `a | b` / `a.union(...)`, `a - b` / `a.difference(...)`.
+          # Every set operation is evaluated by running Ruby's own operator over the unwrapped values, which
+          # is the only way to reproduce its `eql?` / `hash` semantics exactly — `[1] & [1.0]` is empty even
+          # though `1 == 1.0`, so an equality-based reimplementation would fold the wrong answer.
+          def tuple_intersection(tuple, _method_name, args)
+            set_operation(tuple, args) { |values, others| others.reduce(values, :&) }
+          end
+
+          def tuple_union(tuple, _method_name, args)
+            set_operation(tuple, args) { |values, others| others.reduce(values, :|) }
+          end
+
+          def tuple_difference(tuple, _method_name, args)
+            set_operation(tuple, args) { |values, others| others.reduce(values, :-) }
+          end
+
+          # `a.intersect?(b)` — the predicate form, `Constant[bool]`. `nil` is the decline signal every
+          # handler shares, not a boolean answer, so the predicate-return cop is disabled as it is for the
+          # other `?`-named handlers above.
+          # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
+          def tuple_intersect?(tuple, _method_name, args)
+            result = set_operation(tuple, args) { |values, others| others.reduce(values, :&) }
+            return nil if result.nil?
+
+            Type::Combinator.constant_of(!result.elements.empty?)
+          end
+
+          # Shared body for the set operations: unwrap the receiver and every Tuple argument, hand the raw
+          # values to `block`, and lift the result back. Declines unless every element on both sides is a
+          # `Constant` (an unknown element makes membership undecidable) and every argument is a `Tuple` —
+          # `Array#&` also accepts anything that responds to `to_ary`, which a shape cannot prove.
+          def set_operation(tuple, args)
+            return nil if args.empty? || args.size > MAX_SET_OPERATION_ARITY
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            others = args.map do |arg|
+              return nil unless arg.is_a?(Type::Tuple)
+
+              constant_values(arg.elements) || (return nil)
+            end
+            result = yield(values, others)
+            return nil if result.size > MAX_SET_OPERATION_SIZE
+
+            Type::Combinator.tuple_of(*result.map { |value| Type::Combinator.constant_of(value) })
+          end
+
+          # An argument list longer than this, or a result wider than this, declines to the RBS tier rather
+          # than materialising an unbounded Tuple — the same discipline as {MAX_ZIP_ARITY} / the join cap.
+          MAX_SET_OPERATION_ARITY = 8
+          MAX_SET_OPERATION_SIZE = 64
+          private_constant :MAX_SET_OPERATION_ARITY, :MAX_SET_OPERATION_SIZE
+
+          # `one?` with no block and no pattern — `Constant[bool]` of "exactly one truthy element". Only
+          # `Constant` elements have decidable truthiness, and the block / pattern forms defer.
+          def tuple_one?(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            Type::Combinator.constant_of(values.one? { |value| value })
+          end
+          # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
+
           def tuple_concat(tuple, _method_name, args)
             return nil unless args.size == 1
 

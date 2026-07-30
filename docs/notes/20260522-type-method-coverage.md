@@ -351,11 +351,19 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 
 ### 5-1. メソッド一覧
 
+> **2026-07-31 の再スイープ**: この文書の 🔲 は実装より古く、過大報告する（カタログの純粋関数経路が
+> 多くを自動的に畳むため）。`dispatch_precise_tiers` を直接叩く経験的スイープで String / Array / Hash /
+> Integer / Float / Symbol を再確認し、残っていた真の欠落は本節の集合演算群のみだった。以降この文書を
+> 実装の根拠にする前に、必ず同じ経験的プローブで確認すること。
+
 | メソッド | 状態 | 備考 |
 |----------|------|------|
 | `[]` / `fetch` | ✅ | `tuple_lookup` / `tuple_fetch` — 整数インデックスで位置別型を返す。 |
 | `+` (連結) | ✅ | `Tuple + Tuple` → 新しい Tuple。**高優先度。** `tuple_concat` 実装。 |
-| `-` (差集合) | 🔲 | 差集合 → 型が複雑。低優先度。 |
+| `at` | ✅ | `tuple_at` — 単一 Integer 形式のみ。`[]` / `slice` と違い範囲外は畳まず RBS に委ねる（証明された nil は新規診断を生むため、#121 の対象外）。 |
+| `intersect?` | ✅ | `tuple_intersect?` — `Constant[bool]`（#121, 2026-07-31）。 |
+| `one?`（ブロックなし） | ✅ | `tuple_one?` — 全要素 Constant なら真偽が決定可能（#121, 2026-07-31）。 |
+| `-` (差集合) | ✅ | `tuple_difference` — 全要素 Constant の Tuple 同士で Ruby の `-` を実行して畳む（#121, 2026-07-31）。 |
 | `*` (繰り返し) | 🔲 | `Tuple * n` → 繰り返し Tuple。低優先度。 |
 | `<<` / `push` / `append` | 🚫 | 破壊的変更（形状変化）。 |
 | `<=>` | 🔷 | RBS `Integer?` で十分。 |
@@ -370,7 +378,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `compact` | ✅ | `Constant[nil]` エントリを除去した Tuple。**高優先度。** `tuple_compact` 実装。 |
 | `count` | ✅ | `tuple_count` — ブロックなしで `Constant[Integer]`。 |
 | `cycle` | 🚫 | Enumerable。 |
-| `deconstruct` | 🔲 | パターンマッチ用 — `to_a` と等価。低優先度。 |
+| `deconstruct` | ✅ | `shape_self` — レシーバの Tuple をそのまま返す（#121, 2026-07-31）。 |
 | `delete` / `delete_at` / `delete_if` | 🚫 | 破壊的変更。 |
 | `detect` / `find` | ✅ | `PER_ELEMENT_TUPLE_METHODS` — ブロック毎要素で要素型を返す。 |
 | `dig` | ✅ | `tuple_dig` — 入れ子 Tuple / HashShape を掘る。 |
@@ -389,7 +397,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `include?` | ✅ | `tuple_include?` → `Constant[bool]`（Constant 引数のとき）。 |
 | `index` / `find_index` | ✅ | `PER_ELEMENT_TUPLE_METHODS` → `Constant[Integer\|nil]`。 |
 | `insert` | 🚫 | 破壊的変更。 |
-| `intersection` | 🔲 | 集合交差。低優先度。 |
+| `intersection` / `&` | ✅ | `tuple_intersection` — `eql?` 意味論を保つため Ruby の `&` をそのまま実行（#121, 2026-07-31）。 |
 | `join` | ✅ | `tuple_join` — すべて Constant のとき `Constant[String]`。全要素が `Constant[String]` かつセパレータが Constant/省略の場合は `LiteralStringFolding` が精密フォールドに道を譲る（2026-07-18）。 |
 | `keep_if` | 🚫 | 破壊的変更。 |
 | `last` | ✅ | `tuple_last` → 末尾 n 要素。 |
@@ -420,7 +428,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `to_a` | ✅ | `tuple_to_a` → self。 |
 | `to_h` | ✅ | `tuple_to_h` → HashShape（`Tuple[Tuple[K,V]…]` 形式）。 |
 | `transpose` | 🔲 | 2 次元 Tuple の行列転置。低優先度。 |
-| `union` | 🔲 | 集合和（dedup）。低優先度。 |
+| `union` / `\|` | ✅ | `tuple_union` — `tuple_intersection` と同じ経路（#121, 2026-07-31）。 |
 | `uniq` | ✅ | `tuple_uniq` → Constant 要素の重複除去 Tuple。 |
 | `values_at` | ✅ | `values_at(*indices)` → 位置指定 Tuple。**高優先度。** `tuple_values_at` 実装。 |
 | `zip` | ✅ | `tuple_zip` → 要素ペア Tuple。 |

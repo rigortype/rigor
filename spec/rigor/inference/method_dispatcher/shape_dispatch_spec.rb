@@ -1501,6 +1501,77 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
   end
 
+  # #121 — the Tuple carrier's set operations. Every one is evaluated by running Ruby's own operator over
+  # the unwrapped values, because `Array#&` / `#|` / `#-` use `eql?` / `hash` rather than `==`: `[1] & [1.0]`
+  # is empty though `1 == 1.0`, and an equality-based reimplementation folds the wrong answer.
+  describe "Tuple set operations (#121)" do
+    let(:t) { tuple(constant(1), constant(2), constant(3)) }
+
+    it "folds & / intersection, | / union, and - / difference" do
+      expect(dispatch(receiver: t, method_name: :&, args: [tuple(constant(2), constant(3), constant(4))]))
+        .to eq(tuple(constant(2), constant(3)))
+      expect(dispatch(receiver: t, method_name: :|, args: [tuple(constant(3), constant(4))]))
+        .to eq(tuple(constant(1), constant(2), constant(3), constant(4)))
+      expect(dispatch(receiver: t, method_name: :-, args: [tuple(constant(2))]))
+        .to eq(tuple(constant(1), constant(3)))
+      expect(dispatch(receiver: t, method_name: :intersection,
+                      args: [tuple(constant(1), constant(2)), tuple(constant(2), constant(3))]))
+        .to eq(tuple(constant(2)))
+      expect(dispatch(receiver: t, method_name: :difference,
+                      args: [tuple(constant(1)), tuple(constant(3))]))
+        .to eq(tuple(constant(2)))
+      expect(dispatch(receiver: t, method_name: :union, args: [tuple(constant(4))]))
+        .to eq(tuple(constant(1), constant(2), constant(3), constant(4)))
+    end
+
+    it "reproduces Ruby's eql? membership, not ==" do
+      expect(dispatch(receiver: tuple(constant(1)), method_name: :&, args: [tuple(constant(1.0))]))
+        .to eq(tuple)
+      expect([1] & [1.0]).to eq([])
+    end
+
+    it "folds intersect? and the no-block one?" do
+      expect(dispatch(receiver: t, method_name: :intersect?, args: [tuple(constant(2))])).to eq(constant(true))
+      expect(dispatch(receiver: t, method_name: :intersect?, args: [tuple(constant(9))])).to eq(constant(false))
+      expect(dispatch(receiver: t, method_name: :one?)).to eq(constant(false))
+      expect(dispatch(receiver: tuple(constant(1), constant(nil), constant(false)), method_name: :one?))
+        .to eq(constant(true))
+    end
+
+    it "declines when membership is undecidable or the argument is not a shape" do
+      opaque = tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object"))
+      expect(dispatch(receiver: opaque, method_name: :&, args: [tuple(constant(1))])).to be_nil
+      expect(dispatch(receiver: t, method_name: :&, args: [tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object"))])).to be_nil
+      # `Array#&` accepts anything with `to_ary`, which a non-Tuple shape cannot prove.
+      expect(dispatch(receiver: t, method_name: :&, args: [Rigor::Type::Combinator.nominal_of("Array")])).to be_nil
+      expect(dispatch(receiver: t, method_name: :&)).to be_nil
+      expect(dispatch(receiver: t, method_name: :one?, args: [constant(1)])).to be_nil
+    end
+  end
+
+  describe "Tuple#at (#121)" do
+    let(:t) { tuple(constant(1), constant(2), constant(3)) }
+
+    it "folds a single static index, including a negative one" do
+      expect(dispatch(receiver: t, method_name: :at, args: [constant(0)])).to eq(constant(1))
+      expect(dispatch(receiver: t, method_name: :at, args: [constant(-1)])).to eq(constant(3))
+    end
+
+    it "declines out of range, like `[]`, rather than proving a nil the RBS tier only calls optional" do
+      expect(dispatch(receiver: t, method_name: :at, args: [constant(3)])).to be_nil
+      expect(dispatch(receiver: t, method_name: :at, args: [constant(-4)])).to be_nil
+    end
+
+    it "declines the arities `Array#at` itself rejects, so no fold stands in for an ArgumentError" do
+      expect(dispatch(receiver: t, method_name: :at)).to be_nil
+      expect(dispatch(receiver: t, method_name: :at, args: [constant(0), constant(1)])).to be_nil
+      expect { [1, 2, 3].at(0, 1) }.to raise_error(ArgumentError)
+      # `[]` and `slice` DO take that pair, which is why `at` is not an alias of them.
+      expect(dispatch(receiver: t, method_name: :slice, args: [constant(0), constant(2)]))
+        .to eq(tuple(constant(1), constant(2)))
+    end
+  end
+
   describe "ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the shape carrier" do
     let(:t) { tuple(constant(1), constant(2), constant(3)) }
     let(:h) { hash_shape(reason: constant("boom")) }

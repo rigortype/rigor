@@ -23,6 +23,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - The edited file and its dependents are re-analysed; every other file is served from the incremental snapshot. It needs a snapshot to reuse — run `rigor check --incremental` once — and says so on stderr when there is none, analysing the buffer alone as before.
   - An editor-mode run never writes the snapshot, so the bytes in your editor can never be mistaken for the state of the file on disk.
 - **[rigor check]** `--verify-incremental` now refuses an editor buffer instead of silently comparing it against a full analysis of the files on disk.
+- **[inference]** Set operations on an array of known values now keep their precision: `%w[a b] & allowed`, `|`, `-`, `intersection`, `union`, `difference`, `intersect?`, plus `at(i)`, `one?` and `deconstruct` ([#121](https://github.com/rigortype/rigor/issues/121)).
+  - Each is evaluated with Ruby's own operator, so `eql?` membership decides exactly as it does at runtime — `[1] & [1.0]` folds to the empty array, not to `[1]`.
 
 ### Changed
 

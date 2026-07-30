@@ -399,23 +399,38 @@ module Rigor
         ) { invoke_synthesizer_safely(callable, path) || "" }
       end
 
-      # ADR-32 WD6 — route a synthesizer return value through the per-run failure reporter. The
+      # ADR-32 WD6 / WD12 — route a synthesizer return value through the per-run reporter. The
       # synthesizer's contract (declared in
-      # `plugins/rigor-rbs-inline/lib/rigor/plugin/rbs_inline.rb`) admits three return shapes:
-      #   - `String` (non-empty) → successful RBS source
-      #   - `nil` / `""`         → no contribution
-      #   - `[:error, message]`  → parse failed
+      # `plugins/rigor-rbs-inline/lib/rigor/plugin/rbs_inline.rb`) admits four return shapes:
+      #   - `String` (non-empty)         → successful RBS source
+      #   - `nil` / `""`                 → no contribution
+      #   - `[:error, message]`          → parse failed (WD6)
+      #   - `[:ok, source, [message…]]`  → synthesis SUCCEEDED, but an annotation was parsed and not
+      #                                    honoured (WD12)
       # The error tuple is converted into a reporter entry + treated as "no contribution" so the analysis
-      # pipeline continues. Reporter is `nil` for callers that don't care (legacy Environment.new, tests).
+      # pipeline continues. The WD12 tuple keeps its `source` — the file's other annotations are good, and
+      # dropping them to report one omission would be a strictly worse trade. Reporter is `nil` for callers
+      # that don't care (legacy Environment.new, tests).
+      #
+      # A cached entry written before WD12 is a bare `String`, which falls through the `is_a?(Array)` guard
+      # unchanged, so no cache-descriptor bump is needed for the new shape.
       def interpret_synthesizer_outcome(outcome, plugin, path, reporter)
-        return outcome unless outcome.is_a?(Array) && outcome[0] == :error
+        return outcome unless outcome.is_a?(Array)
 
-        reporter&.record(
-          plugin_id: plugin.manifest.id,
-          path: path,
-          message: outcome[1].to_s
-        )
-        nil
+        case outcome[0]
+        when :error
+          record_synthesis_entry(reporter, plugin, path, outcome[1], :failed)
+          nil
+        when :ok
+          Array(outcome[2]).each { |m| record_synthesis_entry(reporter, plugin, path, m, :not_honoured) }
+          outcome[1]
+        else
+          outcome
+        end
+      end
+
+      def record_synthesis_entry(reporter, plugin, path, message, kind)
+        reporter&.record(plugin_id: plugin.manifest.id, path: path, message: message.to_s, kind: kind)
       end
 
       SYNTHESIZER_CACHE_PRODUCER_ID = "plugin.source_rbs_synthesizer"

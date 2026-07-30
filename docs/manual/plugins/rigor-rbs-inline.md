@@ -45,6 +45,28 @@ plugin id/version + config), so an unchanged second run skips the parse.
 | Rule | Severity | Fires when |
 | --- | --- | --- |
 | `plugin.rbs-inline.source-rbs-synthesis-failed` | info | rbs-inline could not parse a file; analysis falls back to no inline-RBS contribution and the diagnostic carries the upstream error |
+| `plugin.rbs-inline.source-rbs-annotation-not-honoured` | info | an annotation parsed successfully but contributed nothing — the file's other annotations still apply. Today this means the `# @rbs module-self: Foo` spelling; see below |
+
+## Which inline-RBS dialect Rigor reads
+
+There are two implementations of inline RBS: the
+[`rbs-inline` gem](https://github.com/soutaro/rbs-inline), which this plugin
+runs, and the `RBS::InlineParser` built into `rbs` 4.x. **Rigor reads the
+gem's dialect** ([ADR-32](../../adr/32-rbs-inline-comment-ingestion.md) WD11).
+They overlap almost entirely — `#:`, `@rbs` method types, `def self.`,
+instance-variable annotations, `@rbs skip` all behave identically — but they
+are not the same grammar, and one difference bites in practice:
+
+| you write | Rigor honours it |
+| --- | --- |
+| `# @rbs module-self Comparable` | yes |
+| `# @rbs module-self: Comparable` | **no** — this is the spelling in rbs's own `docs/inline.md` |
+
+Rigor reports the second form as
+`plugin.rbs-inline.source-rbs-annotation-not-honoured` rather than dropping it
+in silence. Constructs the gem supports and the built-in parser does not —
+`@rbs generic T`, `@rbs!` embedded RBS blocks, `@rbs inherits`, method
+visibility — all work here.
 
 ## Configuration
 

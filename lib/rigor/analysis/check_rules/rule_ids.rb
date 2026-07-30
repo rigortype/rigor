@@ -119,6 +119,7 @@ module Rigor
       # the runner grows a new bare id.
       NON_CHECK_DIAGNOSTIC_IDS = %w[
         configuration-error load-error pool-degraded runtime-error source-rbs-synthesis-failed
+        source-rbs-annotation-not-honoured
       ].freeze
     end
   end

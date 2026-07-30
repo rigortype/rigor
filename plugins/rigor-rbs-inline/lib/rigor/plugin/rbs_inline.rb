@@ -60,9 +60,11 @@ module Rigor
         end
 
         # Return value contract:
-        # - `String` (non-empty)         → successful synthesis
-        # - `nil`                        → no contribution
-        # - `[:error, message_string]`   → parse failed, surface info diagnostic per ADR-32 WD6
+        # - `String` (non-empty)          → successful synthesis
+        # - `nil`                         → no contribution
+        # - `[:error, message_string]`    → parse failed, surface info diagnostic per ADR-32 WD6
+        # - `[:ok, source, [message, …]]` → synthesis succeeded, but an annotation was parsed and NOT
+        #                                   honoured; surface info diagnostics per ADR-32 WD12
         def call(source_file_path)
           return nil unless RBS_INLINE_AVAILABLE
           return nil unless File.file?(source_file_path)
@@ -83,7 +85,8 @@ module Rigor
           rendered = ::RBS::Inline::Writer.write(uses, decls, rbs_decls)
           return nil if rendered.nil? || rendered.strip.empty?
 
-          rendered
+          notices = unhonoured_annotations(result)
+          notices.empty? ? rendered : [:ok, rendered, notices]
         rescue ::StandardError => e
           # WD6 fail-soft — surface a structured error tuple so the engine's `Environment.for_project` can
           # emit a `source-rbs-synthesis-failed` info diagnostic naming the file + the upstream error
@@ -111,6 +114,33 @@ module Rigor
         def annotated?(prism_result)
           ::RBS::Inline::AnnotationParser.parse(prism_result.comments)
                                          .any? { |parsed| parsed.each_annotation.any? }
+        end
+
+        # ADR-32 WD12 — annotations upstream's parser ACCEPTS and its writer then contributes nothing from.
+        # These are invisible without a report: synthesis succeeds, and the annotation comment is even echoed
+        # into the generated RBS, so the omission shows up neither in the output nor at runtime.
+        #
+        # The one case today is `module-self`, where the two inline-RBS dialects disagree on spelling. rbs's
+        # own `docs/inline.md` documents `# @rbs module-self: Foo`; the rbs-inline gem's grammar is
+        # `# @rbs module-self Foo`, without the colon. Handed the colon form the gem still builds a
+        # `ModuleSelf` annotation but extracts no types from it, so an empty `self_types` on a parsed
+        # annotation is a precise signature for "the author asked for a constraint we did not apply".
+        # Measured both ways in `docs/notes/20260730-inline-rbs-parser-grammar-diff.md`.
+        #
+        # Deliberately narrow. A construct the gem's parser REJECTS already routes through WD6's error path,
+        # and one it never recognised at all is upstream's grammar to define (WD3) — guessing at those would
+        # make this a lint on comment prose, which is exactly the false-positive cost ADR-5 ranks first.
+        def unhonoured_annotations(prism_result)
+          ::RBS::Inline::AnnotationParser.parse(prism_result.comments).flat_map do |parsed|
+            parsed.each_annotation.filter_map do |annotation|
+              next unless annotation.is_a?(::RBS::Inline::AST::Annotations::ModuleSelf)
+              next unless annotation.self_types.empty?
+
+              "`@rbs module-self` contributed no self-type constraint. Rigor reads the " \
+                "`# @rbs module-self Foo` spelling; `# @rbs module-self: Foo` (the spelling in rbs's own " \
+                "inline documentation) is not honoured here."
+            end
+          end.uniq
         end
 
         # Rewrite every RDoc directive comment to its spaced spelling (`#:nodoc:` -> `# :nodoc:`) so

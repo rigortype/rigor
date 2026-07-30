@@ -17,3 +17,12 @@
 wall_pct: 20
 allocations_pct: 5
 rss_pct: 10
+
+# How far BELOW the baseline allocations may fall before the run prints a
+# staleness notice. Not a failure — an improvement is not a regression — but
+# an unrefreshed baseline silently widens the real ceiling, because the band
+# is a percentage of the baseline rather than of the current cost. A 27% drop
+# once left the +5% band permitting +44% over the real number, with nothing
+# saying so. Allocations only; wall and RSS drift with runner noise and would
+# make this fire spuriously.
+stale_pct: 15

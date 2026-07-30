@@ -9,7 +9,7 @@ run as an advisory job in the release gate
 |---|---|
 | `baseline.json` | The committed per-target baseline metrics (wall / allocations / peak-RSS). Ships **uncalibrated**; activate by committing a CI-measured baseline (see below). |
 | `thresholds.yml` | The tunable tolerance band — the reviewed knob for how much each metric may regress before the gate fails. |
-| `baseline.updated.json` | **Not committed** (gitignored). The suggested baseline `make bench-perf` writes when the committed baseline is uncalibrated, or for inspection. |
+| `baseline.updated.json` | **Not committed** (gitignored). The suggested baseline `make bench-perf` writes on **every** run — this is the file a refresh commits from. |
 
 The benchmark runs `rigor check --no-cache` in-process over a target (default
 `lib`) and measures wall time, `GC.stat(:total_allocated_objects)`, and peak
@@ -35,3 +35,11 @@ make bench-perf
 When a Rigor change legitimately shifts the numbers (a perf win, or an
 accepted cost), refresh the baseline the same way — deliberately, as a
 reviewed commit, never silently.
+
+Refreshing matters in **both** directions. The band is a percentage of the
+baseline, not of the current cost, so an improvement left unrefreshed widens
+the real ceiling instead of tightening it: after `lib` allocations fell 27%,
+the +5% band still permitted +44% over the true number. The gate only fails
+on regressions — an improvement is not one — so `make bench-perf` prints a
+`STALE` notice when allocations fall more than `stale_pct` below the
+baseline. Treat it as a request for a reviewed refresh, not a failure.

@@ -23,6 +23,17 @@ playground sets it to `false` so that any pasted snippet is
 analysed as inline-RBS without the user typing
 `# rbs_inline: enabled`.
 
+**Amended 2026-07-30** with WD11 and WD12, closing
+[#229](https://github.com/rigortype/rigor/issues/229). WD11 keeps
+the `rbs-inline` gem as the reader rather than migrating to the
+`RBS::InlineParser` built into rbs 4.x, and states the parity bar
+for revisiting: the built-in parser is not a superset, and it
+misattributes `class << self` silently. WD12 adds the rule that an
+annotation Rigor parses but does not honour is reported rather
+than swallowed — the case `module-self`'s two incompatible
+spellings exposed, which WD6's synthesis-error path does not
+cover.
+
 ## Context
 
 A Ruby file like
@@ -366,6 +377,93 @@ playground would still need a way to express the intent in
 its `.rigor.yml` to keep deployment configuration in one
 place. A plugin-config knob is both surfaces.
 
+### WD11 — The `rbs-inline` gem stays the reader; `RBS::InlineParser` is not yet a superset
+
+rbs 4.0 shipped `RBS::InlineParser` built into the `rbs` gem, and rbs 4.1
+moved it forward. WD3 chose the `rbs-inline` gem when it was the only
+implementation, so the choice is now a live one, and
+[ADR-93](93-default-rbs-inline-ingestion.md) default-wiring the plugin
+makes it the whole user base's dialect rather than an opt-in group's.
+
+**Decision: keep the gem.** The built-in parser is not a superset, and
+the gap that matters is a correctness one rather than a feature count.
+
+Grounded in the measured grammar diff,
+[`docs/notes/20260730-inline-rbs-parser-grammar-diff.md`](../notes/20260730-inline-rbs-parser-grammar-diff.md)
+(both parsers over one corpus, normalised to the declared
+`(class, kind, member, type)` tuples):
+
+- **`class << self` is misattributed, silently.** The built-in parser
+  declares the inner `def` as an **instance** method with zero
+  diagnostics. That is not a missing feature but a wrong fact injected
+  into the environment: calls to the real singleton method become
+  `call.undefined-method` false positives, and the fabricated instance
+  method suppresses genuine ones. [ADR-5](5-robustness-principle.md)
+  ranks false positives above worst-case static reading, and ADR-93's
+  default wiring means every user with `rbs-inline` resolvable would
+  carry it.
+- **Four constructs would be lost**: `@rbs generic T` (type params
+  dropped), `@rbs!` embedded RBS, `@rbs inherits`, and method
+  visibility. Each is rejected outright by the built-in parser.
+- **The features that prompted the question are not gaps.** `def self.`
+  singleton definitions and `# @rbs @ivar: T` under a `class`/`module`
+  are handled identically by both. `module-self` is supported by both,
+  in **incompatible spellings** — see WD12.
+- **The rbs floor is not the obstacle**, unlike
+  [ADR-94](94-rbs-inline-reader-and-the-rbs-3x-floor.md)'s adjacent
+  question: `rbs-inline` itself requires `rbs (~> 4.0)`, so every user
+  ADR-93's auto-wire can activate for is already on 4.x.
+- **A move would be a rewrite, not a swap.** The built-in parser has no
+  `opt_in:` magic-comment mode (so WD2 / WD10 have no counterpart), no
+  annotation-presence probe (so ADR-93's gating would be rebuilt — and
+  that gating is load-bearing: the ungated mode measured 26 → 42
+  diagnostics on mail), and no text writer, because it yields
+  declarations for `Environment#add_source` rather than RBS source. The
+  last is arguably better than this ADR's render-then-reparse path, but
+  it is a different integration entirely.
+
+**Parity bar for revisiting**: generics, `@rbs!`, and correct
+`class << self` handling in `RBS::InlineParser`. The third is a
+precondition rather than a feature — until it holds, adopting the
+built-in parser trades false negatives for false positives.
+
+Upstream's direction of travel is not in doubt (ADR-94 records soutaro
+calling the gem a prototype whose implementation would be merged into
+`rbs`); this working decision is about arrival, not direction.
+
+### WD12 — Report an inline annotation Rigor parses but does not honour
+
+`module-self` exposed a failure mode WD6 does not cover. WD6 is
+fail-soft on a synthesis **error**; this is a *successful* synthesis
+that silently omits a declaration the author asked for:
+
+| spelling | outcome |
+| --- | --- |
+| `# @rbs module-self Comparable` — the gem's grammar | honoured |
+| `# @rbs module-self: Comparable` — **upstream's `docs/inline.md`** | parsed into a `ModuleSelf` annotation, then emitted with no self-type, and nothing reported |
+
+A user following upstream's inline documentation writes the second form.
+The annotation comment is even echoed into the synthesised RBS, so the
+drop is invisible on inspection as well as at runtime.
+
+**Decision: an annotation that parses but contributes nothing is
+reported, not swallowed.** A parsed `ModuleSelf` annotation whose
+`self_types` is empty is a precise signature for it, and the plugin
+already runs `AnnotationParser` for its ADR-93 presence probe, so the
+check adds no pass. Severity is `:info` — the code is correct Ruby and
+the annotation is legal in the sibling dialect, so this is
+under-application of a type source, not an error in the user's program.
+
+The general rule this instantiates: **where the two dialects disagree on
+spelling, silence is the failure to avoid.** A rejected annotation the
+user can see is recoverable; one accepted by the parser and discarded by
+the writer is not.
+
+Reporting it downstream is a mitigation, not the fix. A parser that
+accepts an annotation its own writer discards is an upstream
+`rbs-inline` defect, and fixing it there would close the gap for every
+rbs-inline user rather than only Rigor's.
+
 ## Consequences
 
 ### Positive
@@ -493,3 +591,11 @@ place. A plugin-config knob is both surfaces.
   (`require_magic_comment: false`).
 - [`references/rbs-inline-wiki/Syntax-guide.md`](../../references/rbs-inline-wiki/Syntax-guide.md)
   — upstream rbs-inline grammar reference.
+- [ADR-93](93-default-rbs-inline-ingestion.md) — default-wires this
+  plugin, which is what makes WD11's choice the whole user base's
+  dialect rather than an opt-in group's.
+- [ADR-94](94-rbs-inline-reader-and-the-rbs-3x-floor.md) — the adjacent
+  migration question, declined on rbs-floor grounds. WD11 declines the
+  same migration on different grounds: here the floor does not bind.
+- [`docs/notes/20260730-inline-rbs-parser-grammar-diff.md`](../notes/20260730-inline-rbs-parser-grammar-diff.md)
+  — the measured grammar diff WD11 and WD12 rest on.

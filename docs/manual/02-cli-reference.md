@@ -48,10 +48,37 @@ the `paths:` list from the configuration file.
 | `--treat-all-as-inline-rbs` | Force-load `rigor-rbs-inline` with `require_magic_comment: false`, so every analysed file is treated as inline-RBS without the `# rbs_inline: enabled` comment (ADR-32). |
 | `--bleeding-edge[=ids]` | Adopt the bleeding-edge overlay for this run, overriding the configured [`bleeding_edge:`](03-configuration.md) selection (ADR-50 § WD2). Bare adopts every queued feature; `--bleeding-edge=a,b` adopts only the named feature ids. Inspect it with [`rigor show-bleedingedge`](#rigor-show-bleedingedge). |
 | `--no-bleeding-edge` | Ignore any configured `bleeding_edge:` selection for this run (adopt none). |
-| `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. |
+| `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. Alone, only the buffer's own file produces diagnostics; add `--incremental` for whole-project scope (see below). |
 
 Exit `0` when no error-severity diagnostics remain, `1` when
 any are reported, `64` on a usage error.
+
+### Editor mode scope
+
+`--tmp-file` / `--instead-of` on their own analyse **only** the
+buffer's file: fast, and blind to what the unsaved edit does to the
+rest of the project.
+
+Adding `--incremental` analyses the **whole project with the buffer
+substituted** — the edited file and the files that depend on it are
+re-analysed, everything else is served from the incremental snapshot.
+An unsaved change to a method's return type therefore surfaces in its
+callers, not just in the file being edited.
+
+Two things to know:
+
+- It needs a snapshot to reuse. Run `rigor check --incremental` once
+  (it is also what a normal terminal check should use) and every later
+  editor invocation gets whole-project scope. Without one, Rigor says
+  so on stderr and analyses the buffer alone.
+- An editor-mode run never writes the snapshot — the buffer's bytes
+  exist only in your editor, and recording them would make the next
+  ordinary run believe it had already analysed a file in a state it
+  was never in.
+
+`--verify-incremental` refuses a buffer: it compares against a full
+analysis of the files on disk, which a buffer contradicts by
+construction.
 
 ## `rigor init`
 

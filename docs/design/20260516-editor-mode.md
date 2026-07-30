@@ -162,9 +162,29 @@ Three viable shapes:
   the buffer's public surface (return type, constant value, exported
   module).
 
-**v1 ships (A).** It's the smallest cut that delivers the speed
+**v1 shipped (A).** It's the smallest cut that delivers the speed
 target, and it composes forward: when a per-file diagnostic cache
 exists, the same CLI shape upgrades to (B) with no flag rename.
+
+**(B) shipped in #146**, on ADR-46's snapshot: `--tmp-file` /
+`--instead-of` **plus `--incremental`**. The composition, rather than
+an automatic upgrade, is deliberate — silently widening scope when a
+snapshot happens to exist would make the same command emit different
+diagnostics on different machines. Three properties fix the design:
+
+- **The buffer is a changed file by definition.** Its recorded stat
+  entry describes the file on disk, so the logical path is never
+  stat-fresh and always re-analyses.
+- **The closure must be computed from the buffer's bytes.** The
+  symbol-fingerprint scan that decides which dependents re-analyse
+  reads through the binding; reading the logical path from disk
+  compares the snapshot against bytes the user already edited away,
+  and serves every dependent of the unsaved change from cache.
+- **The session never saves.** Its per-file cache and digests describe
+  bytes that exist only in the editor. That is also why a snapshot it
+  cannot reuse falls back to (A) rather than running a baseline: the
+  baseline could not be persisted, so it would repeat on every
+  keystroke.
 
 The editor extension can layer (C) on top of (A) by issuing multiple
 single-file invocations (one per affected file). Rigor doesn't owe

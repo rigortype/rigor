@@ -59,7 +59,7 @@ module Rigor
         return finalize_cache_hit(probed, configuration, options, config_warnings) unless probed.nil?
 
         load_check_dependencies
-        special = dispatch_special_check_mode(configuration, options, cache_root)
+        special = dispatch_special_check_mode(configuration, options, cache_root, buffer)
         return special unless special.nil?
 
         invocation = invoke_check(
@@ -142,9 +142,22 @@ module Rigor
 
       # ADR-46 — the two incremental-analysis check modes both fully handle the run and return an exit code (so `run`
       # short-circuits); returns nil for an ordinary check.
-      def dispatch_special_check_mode(configuration, options, cache_root)
-        return run_verify_incremental(configuration, options, cache_root) if options.fetch(:verify_incremental)
-        return run_incremental_check(configuration, options, cache_root) if options.fetch(:incremental)
+      # A nil return means "not a special mode" — `run` continues with the ordinary check. Editor mode option B
+      # also returns nil when it declines (no reusable snapshot), so the run falls back to single-file scope.
+      def dispatch_special_check_mode(configuration, options, cache_root, buffer)
+        if options.fetch(:verify_incremental)
+          # The gate compares an incremental recheck against a full-run oracle, and a buffer makes the two
+          # disagree by construction (the oracle reads the file on disk). Refusing beats the silent wrong
+          # answer both incremental modes gave a buffer before #146.
+          if buffer
+            @err.puts("rigor: --verify-incremental cannot run against an editor buffer " \
+                      "(--tmp-file / --instead-of); it compares against a full analysis of the files on disk.")
+            return CLI::EXIT_USAGE
+          end
+
+          return run_verify_incremental(configuration, options, cache_root)
+        end
+        return run_incremental_check(configuration, options, cache_root, buffer) if options.fetch(:incremental)
 
         nil
       end
@@ -190,7 +203,7 @@ module Rigor
       # run (plus their dependents), serving the rest from the snapshot; on a miss runs a full baseline. Persists the
       # updated snapshot for the next invocation. Diagnostics are identical to a full run (the `--verify-incremental`
       # gate enforces this); the win is skipping per-file inference for unchanged files.
-      def run_incremental_check(configuration, options, cache_root)
+      def run_incremental_check(configuration, options, cache_root, buffer = nil)
         require_relative "check_runner_factory"
         paths = @argv.empty? ? nil : @argv
         fingerprint = Cache::IncrementalSnapshot.fingerprint(
@@ -204,8 +217,11 @@ module Rigor
           # ADR-46 — thread the same worker-count precedence the standard `check` path uses
           # (CLI `--workers` > `RIGOR_RACTOR_WORKERS` > `parallel.workers:` > 0) so the recheck's closure
           # re-analysis parallelises; the fork pool marshals dependency records back so the graph is sound.
-          workers: CheckRunnerFactory.resolve_workers(options, configuration)
+          workers: CheckRunnerFactory.resolve_workers(options, configuration),
+          buffer: buffer
         )
+
+        return run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options) if buffer
 
         diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)
         # The banner's file count comes from the session's analyzed set (cold analyses all; a warm recheck's
@@ -220,6 +236,33 @@ module Rigor
                                        options)
         write_result(result, options.fetch(:format))
         result.success? ? 0 : 1
+      end
+
+      # Editor mode option B (#146) — `--incremental` plus an editor buffer. The whole project is in scope with
+      # the buffer substituted for one file: the buffer's logical path and its dependents re-analyse, every
+      # other file is served from the snapshot. Before this, the two flags together silently ignored the
+      # buffer and analysed the file on disk, which is a wrong answer rather than a missing feature.
+      #
+      # The session never saves — the buffer's bytes exist only in the editor — so there is no warm state to
+      # build up. That is why a snapshot it cannot reuse means falling back to option A (single-file scope,
+      # the pre-#146 behaviour) instead of running a baseline that would repeat on the next keystroke. The
+      # note tells the user how to get option B: warm the snapshot with a plain `rigor check --incremental`.
+      def run_editor_mode_option_b(session, snapshot, fingerprint, configuration, options)
+        result = session.run_buffer_recheck(snapshot: snapshot, fingerprint: fingerprint)
+        if result.nil?
+          @err.puts("rigor: --incremental has no reusable snapshot for this project; analysing the buffer " \
+                    "alone (run `rigor check --incremental` once to enable whole-project editor mode).")
+          return nil
+        end
+
+        @err.puts("rigor: --incremental editor mode — re-analysed #{result.affected.size} file(s), " \
+                  "#{result.reused.size} served from cache")
+        emit_incremental_fact_surface_notes(session)
+        filtered = apply_baseline_filter(
+          Analysis::Result.new(diagnostics: result.diagnostics, stats: nil), configuration, options
+        )
+        write_result(filtered, options.fetch(:format))
+        filtered.success? ? 0 : 1
       end
 
       # ADR-88 WD1 — a one-line stderr note when the plugin fact surface (an ADR-9 fact, an ADR-60 producer

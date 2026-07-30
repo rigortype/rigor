@@ -467,6 +467,143 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
   # faithful simulation of two `rigor check --incremental` processes, the established pundit /
   # cache-producer cross-process pattern: a fresh `Store` has an empty in-memory memo, so a hit is a real
   # disk read.
+  # #146 — editor mode option B: whole-project scope with the editor's buffer substituted for one file. Before
+  # this, `--incremental` plus a buffer silently analysed the file on disk.
+  describe "#run_buffer_recheck (editor mode option B)" do
+    # `other.rb` reads `Widget#name`'s return type, so a buffer that changes it must light up the DEPENDENT —
+    # the thing option A (single-file scope) structurally cannot report.
+    # The editor's temp file lives OUTSIDE the analysed tree, as a real editor's does — inside it, the buffer
+    # would be analysed as a second project file declaring the same class.
+    def write_editor_project(dir)
+      FileUtils.mkdir_p(File.join(dir, "lib"))
+      File.write(File.join(dir, "lib", "widget.rb"), "class Widget\n  def name\n    \"w\"\n  end\nend\n")
+      File.write(File.join(dir, "lib", "other.rb"),
+                 "class Other\n  def go\n    Widget.new.name.upcase\n  end\nend\n")
+      buffer = File.join(dir, "buffer_widget.rb")
+      File.write(buffer, "class Widget\n  def name\n    1\n  end\nend\n")
+      Rigor::Analysis::BufferBinding.new(
+        logical_path: File.join(dir, "lib", "widget.rb"), physical_path: buffer
+      )
+    end
+
+    def analysis_root(dir)
+      File.join(dir, "lib")
+    end
+
+    # The run-level gem-RBS info diagnostic is keyed on `.rigor.yml` and recomputed every run; it is not a
+    # per-file result and says nothing about scope.
+    def project_diagnostics(diagnostics)
+      diagnostics.reject { |diagnostic| diagnostic.path.to_s.end_with?(".rigor.yml") }
+    end
+
+    def buffer_session(config, dir, buffer)
+      described_class.new(configuration: config, paths: [analysis_root(dir)],
+                          environment: shared_environment, buffer: buffer)
+    end
+
+    def editor_config(dir)
+      Rigor::Configuration.new("paths" => [analysis_root(dir)])
+    end
+
+    def warm_snapshot(config, dir, snapshot, fingerprint)
+      session_for(config, paths: [analysis_root(dir)]).run_incremental(snapshot: snapshot, fingerprint: fingerprint)
+    end
+
+    it "reports a dependent's diagnostic caused by the unsaved buffer, and serves the rest from the snapshot" do
+      Dir.mktmpdir do |dir|
+        buffer = write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+
+        # Warm the snapshot from the files on disk: clean.
+        warm_snapshot(config, dir, snapshot, fp)
+        expect(project_diagnostics(full_run(analysis_root(dir)))).to be_empty
+
+        result = buffer_session(config, dir, buffer).run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+
+        expect(result.diagnostics.map(&:message)).to include(a_string_matching(/undefined method `upcase' for 1/))
+        # The diagnostic is attributed to the DEPENDENT, not the buffer, and the buffer reports under its
+        # logical path so the editor highlights the file the user is looking at.
+        expect(result.diagnostics.map(&:path)).to all(satisfy { |path| !path.to_s.include?("buffer_widget") })
+        expect(result.affected).to include(File.join(dir, "lib", "widget.rb"), File.join(dir, "lib", "other.rb"))
+      end
+    end
+
+    it "never persists the buffer's state — the next on-disk recheck is unaffected" do
+      Dir.mktmpdir do |dir|
+        buffer = write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+        warm_snapshot(config, dir, snapshot, fp)
+        before = File.binread(snapshot.path)
+
+        buffer_session(config, dir, buffer).run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+
+        expect(File.binread(snapshot.path)).to eq(before)
+        # And the on-disk truth is still what a full run says.
+        diags, warm = warm_snapshot(config, dir, snapshot, fp)
+        expect(warm).to be(true)
+        expect(sorted(diags)).to eq(sorted(full_run(analysis_root(dir))))
+      end
+    end
+
+    # The closure decision reads the CHANGED files to fingerprint their symbols. Reading the buffer's logical
+    # path from disk there looks harmless — the run itself substitutes correctly — but it compares the
+    # snapshot against bytes the user already edited away, so every dependent of the unsaved change is served
+    # from cache. Caught by this example while building #146; the CLI-level smoke test had passed by luck.
+    it "puts the dependents of the UNSAVED change in the closure, not just the buffer's own file" do
+      Dir.mktmpdir do |dir|
+        buffer = write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+        warm_snapshot(config, dir, snapshot, fp)
+
+        result = buffer_session(config, dir, buffer).run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+
+        expect(result.affected).to include(File.join(dir, "lib", "other.rb"))
+        expect(result.reused).not_to include(File.join(dir, "lib", "other.rb"))
+      end
+    end
+
+    it "declines (nil) when there is no reusable snapshot, so the caller can fall back to single-file scope" do
+      Dir.mktmpdir do |dir|
+        buffer = write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+
+        # Nothing written yet: a baseline here would repeat on every keystroke, since this session cannot save.
+        expect(buffer_session(config, dir, buffer)
+                 .run_buffer_recheck(snapshot: snapshot, fingerprint: fingerprint(config,
+                                                                                  analysis_root(dir)))).to be_nil
+      end
+    end
+
+    it "re-analyses the buffer even when its bytes match the file on disk" do
+      Dir.mktmpdir do |dir|
+        write_editor_project(dir)
+        config = editor_config(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, analysis_root(dir))
+        warm_snapshot(config, dir, snapshot, fp)
+
+        identical = File.join(dir, "identical_buffer.rb")
+        File.write(identical, File.read(File.join(dir, "lib", "widget.rb")))
+        binding_to_identical = Rigor::Analysis::BufferBinding.new(
+          logical_path: File.join(dir, "lib", "widget.rb"), physical_path: identical
+        )
+        result = buffer_session(config, dir, binding_to_identical)
+                 .run_buffer_recheck(snapshot: snapshot, fingerprint: fp)
+
+        # The stat tuple of the temp file says nothing about the logical path, so the buffer is always re-read.
+        expect(result.affected).to include(File.join(dir, "lib", "widget.rb"))
+        expect(project_diagnostics(result.diagnostics)).to be_empty
+      end
+    end
+  end
+
   describe "#run_incremental plugin-producer cache reuse (WD1)" do
     let(:probe_producer_id) { "plugin.wd1-cache-probe.probe" }
 

@@ -298,6 +298,52 @@ call-name pre-filter (skip any call whose name no discovered `def` declares — 
 Rails app — before typing its receiver) trimmed the residual and cut allocations ~8 %, table-identical.
 This cost is exactly why the gate stays off by default and default-on is deferred.
 
+## Addendum — the default-on decision: stays opt-in (#205, 2026-07-30)
+
+[#205](https://github.com/rigortype/rigor/issues/205) asked whether to flip
+`parameter_inference:` on by default, gated on evidence. The evidence, assembled:
+
+- **Perf, re-measured on current master** (Rigor's own `lib`, 347 files, YJIT off,
+  `--no-cache`, two runs per arm): gate off 23.65M allocations / ~8s wall; gate on
+  **35.01M (+48%) / ~15–19s (~+90% wall)**. Consistent with the WD6d mastodon figure
+  (+37% wall on `app/models`), and the composition is unchanged: ~98% of the pre-pass is
+  `ScopeIndexer.index`, irreducible without seed-sharing. [ADR-50](50-release-engineering-and-stability-strategy.md)'s
+  compatibility band for a default is ≤5% — this is an order of magnitude over, paid on
+  every run.
+- **Protection lift** (WD6d, unchanged): mastodon `app/models` +0.78pp (+46 sites),
+  redmine `app` +0.58pp (+110 sites). Real but modest — and slice 1 adds no new findings
+  by design (WD6b guards every negative rule), so default-on buys precision and
+  protection-metric closure, not new bugs caught.
+- **Guard honesty — the cautionary datum.** The same re-measurement surfaced a WD6b guard
+  hole on the *seventh* target the gate ever ran against (this repository): a seeded
+  receiver fired `call.argument-type-mismatch` against a correct call
+  ([#236](https://github.com/rigortype/rigor/pull/236) closes it — the receiver side of
+  the guard was missing). The corpus-clean result at landing did not generalise to the
+  next codebase tried. That is precisely the risk profile a default must not carry.
+- **Accumulated user-project evidence**: none yet — the gate shipped opt-in eleven days
+  before this decision. Nothing has accumulated, and nothing can be synthesized in its
+  place.
+
+**Decision: `parameter_inference:` stays opt-in.** The perf cost alone decides it; the
+guard-hole finding independently confirms the honesty check is not yet earned. The
+mutation-oracle run WD6b names is deliberately **not** performed here: it gates the "yes"
+path (un-guarding, default-on), and running the full self-mutation campaign to support a
+"no" already decided on cost would be evidence theatre. It remains the named precondition
+for any future flip.
+
+The [WD6c lift](https://github.com/rigortype/rigor/pull/235) (#204) does not change this
+calculus: it makes the *check walk* incremental under the gate; the pre-pass — the cost —
+is recomputed every run by design.
+
+**Re-evaluation triggers**, all three required:
+1. Seed-sharing (or equivalent) brings the pre-pass within the ADR-50 band on the
+   largest corpus target.
+2. The WD6b mutation-oracle honesty check runs clean, after the guard surface has been
+   exercised beyond the landing corpus (the #236 class of hole found by breadth, not by
+   the oracle).
+3. Accumulated opt-in usage shows the protection lift mattering on real projects — the
+   evidence #205 named and eleven days could not produce.
+
 ## Consequences
 
 - **Positive** — closes the dominant remaining protection hole on real applications;

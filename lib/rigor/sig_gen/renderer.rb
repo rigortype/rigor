@@ -66,7 +66,7 @@ module Rigor
 
       def render_classes(items)
         items.group_by(&:class_name).each do |class_name, methods|
-          @out.puts("class #{class_name}")
+          @out.puts(declaration_header(methods.first, class_name))
           methods.each do |candidate|
             tag = case candidate.classification
                   when Classification::NEW_METHOD then "[new]"
@@ -79,6 +79,17 @@ module Rigor
           end
           @out.puts("end")
         end
+      end
+
+      # The keyword and ancestry for a printed group, from the same per-file maps the `--write` path reads. Print
+      # mode used to hard-code `class`, which turned a module into a class the moment it held an emittable method —
+      # output that raises `RBS::DuplicatedDeclarationError` on load if the real `module` is declared anywhere else
+      # (#227). Defaulting to `class` when the map has no entry keeps the pre-existing spelling for a leaf class.
+      def declaration_header(candidate, class_name)
+        return "module #{class_name}" if candidate.namespace_kinds[class_name] == :module
+
+        superclass = candidate.class_superclasses[class_name]
+        superclass ? "class #{class_name} < #{superclass}" : "class #{class_name}"
       end
 
       def render_diff(candidates)

@@ -1243,6 +1243,28 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("sig-gen")
     end
 
+    # Issue #227: print mode hard-coded the `class` keyword, so a module holding an emittable method was printed as
+    # a class — RBS::DuplicatedDeclarationError once the real `module` declaration is loaded alongside it.
+    it "prints the source's own module / class keyword and a Data class's ancestry" do
+      path = write_fixture("lib/shapes.rb", <<~RUBY)
+        module Geometry
+          Pair = Data.define(:left)
+
+          def self.origin
+            "0,0"
+          end
+        end
+      RUBY
+
+      status, out, err = run_cli("sig-gen", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("module Geometry")
+      expect(out).to include("class Geometry::Pair < ::Data")
+      expect(out).not_to include("class Geometry\n")
+    end
+
     describe "--params=observed (slice 3)" do
       def write_observed_project
         config_path = File.join(tmpdir, ".rigor.yml")

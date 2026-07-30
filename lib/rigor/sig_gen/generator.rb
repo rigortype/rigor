@@ -12,6 +12,7 @@ require_relative "../source/node_children"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/rbs_type_translator"
+require_relative "meta_class_shape"
 require_relative "rbs_validity"
 
 module Rigor
@@ -61,6 +62,7 @@ module Rigor
         @module_function_methods = Set.new
         @class_shells = Set.new
         @class_superclasses = {}
+        @meta_layouts = {}
         # Whole-run, NOT per-file: a rendering defect is reported once at the end of the run.
         @unrenderable = []
       end
@@ -114,7 +116,13 @@ module Rigor
         @module_function_methods = Set.new
         @class_shells = Set.new
         @class_superclasses = {}
+        @meta_layouts = collect_meta_layouts(scope_index)
+        register_meta_classes
         defs = collect_method_definitions(parse_result.value)
+        # Candidate construction freezes the per-file maps above (see {#build_candidate}), so every registration
+        # pass has to be finished before the first `build_candidate` call. Meta members lead the RETURNED order —
+        # a value class's members and constructors read first, ahead of the methods its block body defines.
+        meta_candidates = collect_meta_member_candidates(path, scope_index)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           # An analyzer bug typing one def's body must cost only that def's candidate, never the whole
           # `rigor sig-gen` run. The `check` path recovers each *file* this way (worker_session.rb); sig-gen
@@ -125,7 +133,8 @@ module Rigor
           nil
         end
         obs_ivar_map = build_observed_ivar_map(parse_result.value)
-        candidates_from_defs + collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
+        meta_candidates + candidates_from_defs +
+          collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
       end
 
       # Walks the AST collecting `(def_node, class_name, kind)` tuples for every `def` Rigor can re-type. Slice 1
@@ -163,8 +172,11 @@ module Rigor
           collect_def_node(node, prefix, in_singleton_class, module_function_active, out)
           return
         when Prism::ConstantWriteNode
-          register_data_struct_shell(node, prefix)
-          # fall through to recurse into the RHS so a trailing `do ... end` block carrying defs is still walked.
+          body = meta_block_body(node, prefix)
+          if body
+            walk_defs(body, prefix + [node.name.to_s], false, false, out)
+            return
+          end
         when Prism::StatementsNode
           walk_statements(node, prefix, in_singleton_class, module_function_active, out)
           return
@@ -192,8 +204,8 @@ module Rigor
       # collapse the whole env (the 2026-07-04 redmine `GitAdapter < AbstractAdapter` crash). Only a plain
       # constant superclass is emittable: `class X < Foo` / `class X < Foo::Bar` yields the source token verbatim
       # (RBS resolves it relative to the emitted namespace, matching Ruby's lexical scope). A computed
-      # superclass (`Struct.new`, `Data.define`, `Class.new`, any `CallNode`) is left unrecorded — those flow
-      # through the {#register_data_struct_shell} shell path or are simply un-representable, and guessing would
+      # superclass (`Class.new`, any other `CallNode`) is left unrecorded — a `Data.define` / `Struct.new` one is
+      # already carried by {#register_meta_classes}, and the rest are un-representable, where guessing would
       # misfold.
       def record_superclass(node, full)
         return unless node.is_a?(Prism::ClassNode)
@@ -202,37 +214,60 @@ module Rigor
         @class_superclasses[full] = superclass if superclass
       end
 
-      # ADR-14 gap-#3 (e): recognises `Const = Data.define(...)` and `Const = Struct.new(...)` as class
-      # declarations. The runtime side stamps a brand-new anonymous class at the RHS and binds it to `Const`, so
-      # the generated RBS needs an explicit `class Const` declaration even though no `class Const ... end` block
-      # appears in source. Without it, references to `Const` in return types fail to resolve under Steep (the
-      # canonical case is `GemResolver::Resolved | GemResolver::Unresolvable` where
-      # `Unresolvable = Data.define(:gem_name, :reason)`).
-      #
-      # The walker records the fully-qualified constant name in `@class_shells` (carried through to every
-      # candidate so the writer's tree-builder picks it up) AND in `@namespace_kinds` so the leaf's `class`
-      # keyword wins over the intermediate-segment `module` default.
-      def register_data_struct_shell(node, prefix)
-        return unless data_or_struct_call?(node.value)
+      # The ADR-48 member layouts for this file, in one table keyed by qualified class name. Reading the engine's
+      # own tables instead of re-recognising `Data.define` / `Struct.new` here is what keeps sig-gen's view of a
+      # value class from drifting from the analyser's: the walker that populates them ({Inference::ScopeIndexer})
+      # already covers the constant-assigned form (`Point = Data.define(:x, :y)`), the named-subclass form
+      # (`class Point < Data.define(:x, :y)`), a `::Data` receiver, and the `keyword_init:` flag. sig-gen's earlier
+      # private recogniser covered none of the last three and was the reason #227's output was wrong rather than
+      # merely thin.
+      MetaLayout = Data.define(:kind, :member_names, :keyword_init)
+      private_constant :MetaLayout
 
-        full = (prefix + [node.name.to_s]).join("::")
-        @class_shells << full
-        @namespace_kinds[full] = :class
+      def collect_meta_layouts(scope_index)
+        scope = scope_index.each_value.first
+        return {} if scope.nil?
+
+        layouts = {}
+        scope.data_member_layouts.each do |name, members|
+          layouts[name] = MetaLayout.new(kind: :data, member_names: members, keyword_init: false)
+        end
+        scope.struct_member_layouts.each do |name, layout|
+          layouts[name] = MetaLayout.new(kind: :struct, member_names: layout[:members],
+                                         keyword_init: layout[:keyword_init])
+        end
+        layouts
       end
 
-      DATA_STRUCT_SHELL_HEADS = {
-        "Data" => :define,
-        "Struct" => :new
-      }.freeze
-      private_constant :DATA_STRUCT_SHELL_HEADS
+      # ADR-14 gap-#3 (e): a `Const = Data.define(...)` / `Const = Struct.new(...)` assignment declares a class the
+      # source never spells with a `class` keyword — the runtime stamps an anonymous class at the rvalue and binds
+      # it to `Const` — so the generated RBS needs an explicit `class Const` of its own. Without it, references to
+      # `Const` in a return type fail to resolve under Steep (the canonical case is
+      # `GemResolver::Resolved | GemResolver::Unresolvable`, where `Unresolvable = Data.define(:gem_name, :reason)`).
+      #
+      # Every layout-carrying class therefore gets the `class` keyword in `@namespace_kinds` (so the leaf wins over
+      # the intermediate-segment `module` default), its `::Data` / `::Struct[untyped]` ancestry, and a `@class_shells`
+      # entry so the writer declares it even when every member candidate is suppressed as already-declared. The
+      # named-subclass form is registered too: its `class` keyword is not in question, but its computed superclass
+      # is exactly what {#record_superclass} refuses to guess at.
+      def register_meta_classes
+        @meta_layouts.each do |class_name, layout|
+          @namespace_kinds[class_name] = :class
+          @class_shells << class_name
+          @class_superclasses[class_name] = MetaClassShape::SUPERCLASSES.fetch(layout.kind)
+        end
+      end
 
-      def data_or_struct_call?(value)
-        return false unless value.is_a?(Prism::CallNode)
+      # The `do ... end` body of a `Const = Data.define(...) do ... end` assignment, when `Const` carries a layout.
+      # Defs inside that block bind on `Const`, NOT on the enclosing namespace — the runtime `class_eval`s the block
+      # into the anonymous class it just stamped. Attributing them to the enclosing namespace is what made sig-gen
+      # report `VoidOrigin#label` against `Rigor::Inference` and then, because a method-bearing leaf defaults to the
+      # `class` keyword, redeclare that module as a class (#227).
+      def meta_block_body(node, prefix)
+        return nil unless node.value.is_a?(Prism::CallNode)
+        return nil unless @meta_layouts.key?((prefix + [node.name.to_s]).join("::"))
 
-        receiver = value.receiver
-        return false unless receiver.is_a?(Prism::ConstantReadNode)
-
-        DATA_STRUCT_SHELL_HEADS[receiver.name.to_s] == value.name
+        node.value.block&.body
       end
 
       # Module / class bodies are walked through the `walk_statements` path so `module_function` (no-args)
@@ -824,6 +859,12 @@ module Rigor
           # Skip method bodies — attr_* there would refer to whatever the method is doing dynamically, not a
           # class-level declaration.
           return
+        when Prism::ConstantWriteNode
+          body = meta_block_body(node, prefix)
+          if body
+            walk_attr_calls(body, prefix + [node.name.to_s], false, ctx)
+            return
+          end
         when Prism::CallNode
           collect_attr_call(node, prefix, in_singleton_class, ctx)
         end
@@ -1064,6 +1105,64 @@ module Rigor
         when :reader then "def #{method_name}: () -> #{wrapped}"
         when :writer then "def #{method_name}: (#{erased}) -> #{wrapped}"
         end
+      end
+
+      # One candidate per member accessor and constructor {MetaClassShape} renders for each layout-carrying class.
+      # These are the members no `def` or `attr_*` in the source declares, so nothing else in sig-gen can find them —
+      # and once `register_meta_classes` has declared the class, an undeclared member reads as a missing one.
+      def collect_meta_member_candidates(path, scope_index)
+        return [] if @meta_layouts.empty?
+
+        scope = scope_index.each_value.first
+        environment = scope&.environment
+        @meta_layouts.flat_map do |class_name, layout|
+          types = meta_member_types(class_name, layout.member_names)
+          shape = MetaClassShape.of(
+            kind: layout.kind, members: layout.member_names, keyword_init: layout.keyword_init,
+            member_types: types.transform_values { |type| paren_wrap_union(union_erase([type])) }
+          )
+          shape.member_decls.filter_map do |member|
+            meta_member_candidate(path, class_name, member, types, scope, environment)
+          end
+        end
+      end
+
+      def meta_member_candidate(path, class_name, member, types, scope, environment)
+        existing = lookup_existing_method(class_name, member.method_name, member.kind, environment, scope)
+        return nil if declared_on_class_itself?(existing, class_name)
+
+        build_candidate(
+          path: path, class_name: class_name, method_name: member.method_name, kind: member.kind,
+          classification: Classification::NEW_METHOD,
+          inferred_return: types[member.source_member] || Type::Combinator.untyped,
+          rbs: member.rbs
+        )
+      end
+
+      # Whether an RBS declaration found for a member is the user's own, i.e. sits on this very class. Inheritance
+      # is the whole point of the distinction: `::Data.new: () -> bot` and `::Struct.new`'s factory both answer the
+      # `.new` lookup for every value class, and deferring to them is what leaves the arity false positive in place.
+      def declared_on_class_itself?(method_def, class_name)
+        return false if method_def.nil?
+        return false unless method_def.respond_to?(:defined_in)
+
+        method_def.defined_in.to_s.delete_prefix("::") == class_name
+      end
+
+      # `--params=observed` member types. {ObservationCollector} routes `Point.new(...)` call sites to
+      # `[class_name, :initialize]`, so a keyword call site names its member directly, while a positional one is
+      # matched by index — and only from call sites whose arity covers the whole member list, so a one-argument
+      # `Point.new(attrs)` shim cannot type member 0 as `Hash`. Empty without `--params=observed`.
+      def meta_member_types(class_name, members)
+        observations = @observations[[class_name, :initialize]] || []
+        return {} if observations.empty?
+
+        full_arity = observations.select { |obs| obs.positional.size == members.size }
+        members.each_with_index.to_h do |member, index|
+          observed = observations.filter_map { |obs| obs.keyword[member] } +
+                     full_arity.filter_map { |obs| obs.positional[index] }
+          [member, observed.empty? ? nil : Type::Combinator.union(*observed)]
+        end.compact
       end
     end
   end

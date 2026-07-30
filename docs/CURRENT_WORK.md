@@ -19,39 +19,41 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **[#237](https://github.com/rigortype/rigor/issues/237) landed** ([#238](https://github.com/rigortype/rigor/pull/238), merged). Referenced-type stubs are now
-  emitted in the declaration kind each name requires (`interface` / `type` / `module` / `class`) and
-  validated one at a time, so a dangling interface or type-alias reference no longer takes the whole stub
-  batch down with it; the fixpoint also stops on a pass that appends nothing. herb — 48 signature files,
-  74 dangling references, all type aliases — went from a **complete no-op** (byte-identical to stubbing
-  nothing) to 5 → 2 passes, −30.1% allocations, precise coverage 59.3% → 60.0%. Cache
-  `SCHEMA_VERSION` 5 → 6 so stale envs rebuild.
-- **[#207](https://github.com/rigortype/rigor/issues/207) is implemented and open for review in
-  [#240](https://github.com/rigortype/rigor/pull/240).** Detection reads the project declarations and
-  applies RBS's own membership test instead of building every project class: pass 1 falls from
-  **7,841,785 allocations / ~810ms to 24,661 / ~9ms**, the whole cold `check lib` from 23.81M to 16.03M
-  (**−32.7%**), conference-app −83.6%. The builder sweep survives in spec as the oracle the walk must keep
-  agreeing with. Diagnostic-identical with zero new firings across the eight RBS-shipping corpus projects.
-- Evaluation behind both:
-  [`docs/notes/20260730-stub-pass1-static-detection-evaluation.md`](notes/20260730-stub-pass1-static-detection-evaluation.md)
-  (carries a same-day correction: project interfaces are outside the implemented scope, because the
-  builder does not report their dangling references either).
-- **[#239](https://github.com/rigortype/rigor/issues/239) is a new FP**, surfaced by Rigor's own
-  `make check` while landing #207: on an **RBS-known** class whose method is not declared in `sig/`, an
-  instance method **masks a same-named `class << self` method**, so `self.class.helper(1)` reports a false
-  `call.undefined-method`. Minimal repro + a byte-identical control in the issue. #240 sidesteps it rather
-  than depending on the fix.
+- **The referenced-type stub pass is rebuilt, both halves, and merged.**
+  - [#237](https://github.com/rigortype/rigor/issues/237) →
+    [#238](https://github.com/rigortype/rigor/pull/238): stubs are emitted in the declaration kind each
+    name requires (`interface` / `type` / `module` / `class`) and validated one at a time, so a dangling
+    interface or type-alias reference no longer takes the whole batch down; the fixpoint also stops on a
+    pass that appends nothing. herb — 74 dangling references, all type aliases — went from a **complete
+    no-op** to 5 → 2 passes, −30.1% allocations, precise coverage 59.3% → 60.0%. Cache
+    `SCHEMA_VERSION` 5 → 6.
+  - [#207](https://github.com/rigortype/rigor/issues/207) →
+    [#240](https://github.com/rigortype/rigor/pull/240): detection reads the project declarations and
+    applies RBS's own membership test instead of building every project class. Pass 1: **7,841,785
+    allocations / ~810ms → ~25k / ~9ms**. The builder sweep survives in spec as the oracle the walk must
+    keep agreeing with. Diagnostic-identical, zero new firings, across the eight RBS-shipping corpus
+    projects.
+  - Evaluation behind both:
+    [`docs/notes/20260730-stub-pass1-static-detection-evaluation.md`](notes/20260730-stub-pass1-static-detection-evaluation.md).
+- **Perf baseline refresh is open in [#242](https://github.com/rigortype/rigor/pull/242).** Linux CI on
+  merged master measures `check lib` at **15,769,515 allocations** (was 23,521,131, −33.0%), and the
+  #233 staleness notice fired on the first run after the merge — the stale target left the +5% band
+  permitting +57% over the real cost. Verified armed after the refresh, not merely quiet.
+- **The changelogs now conform to Keep a Changelog 1.1.0**
+  ([#241](https://github.com/rigortype/rigor/pull/241)). Six section types only, one per type per
+  release, in the format's order — gated by `spec/docs/changelog_conformance_spec.rb` over
+  `CHANGELOG.md` and every archive. There is **no `Performance` section**: a speed-up is `Changed`, a
+  docs correction is `Fixed`. The rule was already in the `rigor-release-prep` skill and drifted anyway,
+  which is why it is mechanical now.
+- `make verify` (13 groups) and `make docs-check` (324 examples) green on merged master.
 
 ## Next session
 
-- **Review / merge [#240](https://github.com/rigortype/rigor/pull/240)**, then re-run
-  `make bench-perf` — the perf baseline was recalibrated on 2026-07-29 to 23.52M allocations for
-  `check lib` and this change takes ~7.8M off it, so the baseline needs a deliberate refresh (see
-  [#233](https://github.com/rigortype/rigor/pull/233) for the refresh path, and note the suggested-baseline
-  artifact is only produced for an *uncalibrated* baseline).
-- **[#239](https://github.com/rigortype/rigor/issues/239)** (`bug`, `ready-for-agent`) — a false
-  `call.undefined-method` on ordinary Ruby. Likely in whatever records `class << self` bodies into the
-  discovered-methods table, where the instance-side entry displaces the singleton-side one.
+- **[#239](https://github.com/rigortype/rigor/issues/239)** (`bug`, `ready-for-agent`) — a **false**
+  `call.undefined-method`: on an RBS-known class whose method is not declared in `sig/`, an instance
+  method masks a same-named `class << self` method, so `self.class.helper(1)` reads as undefined. The
+  issue carries a minimal repro and a byte-identical control. False positives outrank everything else in
+  the queue (AGENTS.md § Implementation Guidelines), and #240 had to route around this one.
 - The editor cluster **[#142](https://github.com/rigortype/rigor/issues/142)** /
   **[#146](https://github.com/rigortype/rigor/issues/146)** /
   **[#147](https://github.com/rigortype/rigor/issues/147)** — the largest untouched `ready-for-agent`
@@ -64,24 +66,26 @@ this file is the one that is wrong.
 
 ## What this session learned that is not in a commit
 
-- **A clean corpus result can be a silent harness failure.** Six of eight targets reported "both detectors
-  found nothing". The 17-shape fixture built to force a positive produced the shape matrix, the bucket
-  attribution, and both defects. Build the positive control before the corpus run, not after it disagrees.
-- **`rescue <Error>; nil` around a batched synthesis is an availability bug.** Rigor's fail-soft discipline
-  is per-unit, but `append_stub_declarations` batched N declarations into one parse, so the rescue degraded
-  all N for one bad input. Any fail-soft rescue wrapping a batch needs the batch split, or the degradation
-  is unbounded in the input.
-- **A fixpoint that cannot make progress still burns its whole budget.** `MAX_STUB_PASSES.times` had no
-  progress check, so the pathological input cost 5× the healthy one. Bound a fixpoint by progress and keep
-  the cap as a backstop.
+- **A clean corpus result can be a silent harness failure.** Six of eight targets reported "both
+  detectors found nothing". The 17-shape fixture built to force a positive produced the shape matrix, the
+  bucket attribution, and both defects. Build the positive control before the corpus run, not after it
+  disagrees.
+- **`rescue <Error>; nil` around a batched synthesis is an availability bug.** Rigor's fail-soft
+  discipline is per-unit, but `append_stub_declarations` batched N declarations into one parse, so the
+  rescue degraded all N for one bad input. Any fail-soft rescue wrapping a batch needs the batch split,
+  or the degradation is unbounded in the input.
+- **A fixpoint that cannot make progress still burns its whole budget.** Bound it by progress; keep the
+  iteration cap as a backstop.
 - **Read the raise sites, don't infer them.** The static walk is only equivalent because
-  `references/rbs` says exactly where `NoTypeFoundError` comes from: `validate_type_presence` on ancestor
-  type *args*, and `VarianceCalculator#type` on method types — which skips `initialize`, never runs for the
-  singleton side, and does not walk interface-imported methods. Three of those four exclusions were
-  invisible from the outside and each one would have been a scope error.
+  `references/rbs` says exactly where `NoTypeFoundError` comes from — and three of the four resulting
+  exclusions (`initialize`, the singleton side, interface-imported methods) were invisible from the
+  outside. Each would have been a scope error.
+- **A written rule with no gate is a temporary state.** The Keep a Changelog vocabulary was already in
+  the release-prep skill and six `### Performance` sections accumulated anyway. Same shape as ADR-97's
+  index budgets; the fix is a spec, not a firmer sentence.
 - **`--config=PATH` resolves relative `paths:` against the config file's directory, not the cwd.** A
   scratch config outside the target silently analyses nothing (0.03s, one bogus diagnostic). Use absolute
   paths in a probe config.
-- **`Rigor.dump_type` observes env-build differences too.** For a class that fails to build, the difference
-  is `String` (from RBS) vs a body-inferred literal — visible in `dump_type`, invisible in the diagnostic
-  count, since a fail-soft `Dynamic` only produces *fewer* diagnostics.
+- **`Rigor.dump_type` observes env-build differences too.** For a class that fails to build, the
+  difference is `String` (from RBS) vs a body-inferred literal — visible in `dump_type`, invisible in the
+  diagnostic count, since a fail-soft `Dynamic` only produces *fewer* diagnostics.

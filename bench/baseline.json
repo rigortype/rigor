@@ -1,13 +1,13 @@
 {
   "calibrated": true,
-  "calibrated_at": "2026-07-19T00:00:00Z",
-  "calibrated_on": "ubuntu-latest (GitHub Actions), release/0.3.0 @ run 29688276809",
-  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here. Recalibrated for the v0.3.0 cut: the previous baseline was set mid-cycle after the performance arc (PRs #74-#82, allocations 22.24M), and ~54 merges landed after it. The `lib` self-check allocations rose to 32.40M (+45.7%) — legitimate default-on feature work added since that baseline, dominated by the five new AST-walking diagnostic rules (PR #101: flow.duplicate-hash-key, flow.return-in-ensure, flow.shadowed-rescue-clause, call.raise-non-exception, and the suppression rules) and the scalar-key HashShape + Kernel value typing (PR #102). The OSS-corpus (Mastodon) sweep stayed GREEN on the release run (no new false positives), so the rise is honest work, not a correctness regression; the targets are refreshed to the current cost so the 5% allocation band keeps its teeth. wall_s and peak_rss_kb moved with the same workload growth and are refreshed alongside. Follow-up (does not block this cut): the new rules run as standalone walks and are candidates for folding into the shared RuleWalk to recover some of the allocation cost.",
+  "calibrated_at": "2026-07-30T01:04:00Z",
+  "calibrated_on": "ubuntu-latest (GitHub Actions), master @ run 30504551099",
+  "note": "Linux CI measurements. wall_s is wider than local macOS (runner noise); allocations is the tight signal. Refresh by triggering release-gate.yml, downloading the bench-baseline-* artifact, and committing its targets here — that artifact is now produced on every run, not only an uncalibrated one, which is why this refresh was missable before. Recalibrated DOWN from the v0.3.0 cut's 32,403,338: `lib` self-check allocations fell to 23,521,131 (-27.4%) when e3b132a3 declared `Inference::VoidOrigin` in sig/. That single dangling reference was the tree's only unresolved type, and therefore the only reason `Environment::RbsLoader.stub_missing_referenced_types` ran a second confirmatory pass building all ~1,917 project classes; with sig/ self-consistent the fixpoint converges on pass 1 and the second pass is gone. This is a sig correctness fix, NOT a Rigor performance win — no other project benefits from it, and docs/notes/20260725-check-allocation-attribution.md predicted this exact figure before the fix landed. Refreshed so the 5% allocation band keeps its teeth: against the stale target it permitted 34,023,505, i.e. +44% over the real cost. wall_s and peak_rss_kb come from the same run.",
   "targets": {
     "lib": {
-      "wall_s": 16.927,
-      "allocations": 32403338,
-      "peak_rss_kb": 328108,
+      "wall_s": 15.015,
+      "allocations": 23521131,
+      "peak_rss_kb": 319612,
       "diagnostics": 1
     }
   }

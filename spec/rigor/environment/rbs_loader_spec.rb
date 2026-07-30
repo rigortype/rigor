@@ -665,6 +665,131 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.synthesized_stub_types).to include("Scm::GitAdapter::Revision")
     end
 
+    it "stubs a dangling type-alias reference as a `type` alias, not a class (#237)" do
+      # `type` and `interface` names are unparseable as `class <name>`, so the pre-#237 shape emitted a buffer
+      # RBS rejected — and because the batch shared one buffer, the fail-soft rescue discarded EVERY stub in
+      # it. herb ships 48 signature files whose 74 missing names are all dangling aliases, so the pass was a
+      # complete no-op there.
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        "class Acme::Widget\n  def serialize: () -> serialized_widget\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.instance_method(class_name: "Acme::Widget", method_name: :serialize)).not_to be_nil
+      alias_names = loader.send(:env).type_alias_decls.keys.map { |name| name.to_s.sub(/\A::/, "") }
+      expect(alias_names).to include("serialized_widget")
+    end
+
+    it "stubs a dangling interface reference as an `interface`" do
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        "class Acme::Widget\n  def sink: () -> _Writable\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.instance_method(class_name: "Acme::Widget", method_name: :sink)).not_to be_nil
+      interface_names = loader.send(:env).interface_decls.keys.map { |name| name.to_s.sub(/\A::/, "") }
+      expect(interface_names).to include("_Writable")
+    end
+
+    it "lands class, namespace, interface and alias stubs from one batch" do
+      # All four kinds in a single missing set — the shape that used to take the whole batch down with it,
+      # since one buffer carried every declaration.
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        <<~RBS
+          class Acme::Widget
+            def remote: () -> Net::FakeService
+            def sink: () -> _Writable
+            def serialize: () -> serialized_widget
+          end
+        RBS
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+      env = loader.send(:env)
+
+      expect(loader.synthesized_stub_types).to include("Net", "Net::FakeService")
+      expect(env.interface_decls.keys.map(&:to_s)).to include("::_Writable")
+      expect(env.type_alias_decls.keys.map(&:to_s)).to include("::serialized_widget")
+      # Every method still resolves: the class built.
+      %i[remote sink serialize].each do |method_name|
+        expect(loader.instance_method(class_name: "Acme::Widget", method_name: method_name)).not_to be_nil
+      end
+    end
+
+    it "keeps the rest of a batch when one declaration fails validation" do
+      # The per-declaration check is what bounds a bad declaration to itself. Every kind this synthesis emits
+      # parses today (qualified `type` / `interface` included), so the rejection is injected rather than
+      # spelled in RBS — the guard exists for a kind we get wrong, or an rbs grammar shift inside the
+      # supported `>= 3.0, < 5.0` range.
+      # Two classes, one missing name each, so both names reach the SAME batch (RBS surfaces only the first
+      # missing reference per class, so two references on one class would arrive in separate passes).
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        <<~RBS
+          class Acme::Widget
+            def sink: () -> _Writable
+          end
+
+          class Acme::Gadget
+            def remote: () -> Net::FakeService
+          end
+        RBS
+      )
+      allow(described_class).to receive(:parseable_rbs?).and_wrap_original do |original, source|
+        source.start_with?("interface") ? false : original.call(source)
+      end
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.synthesized_stub_types).to include("Net::FakeService")
+      expect(loader.send(:env).interface_decls.keys.map(&:to_s)).not_to include("::_Writable")
+    end
+
+    it "stops the fixpoint on a pass that appends nothing instead of burning MAX_STUB_PASSES" do
+      # With nothing landing, detection re-reports the identical set forever. Before #237 the iteration cap was
+      # the only stop, so the full detection sweep ran five times over (measured on herb, where every one of
+      # the 74 missing names was discarded).
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        "class Acme::Widget\n  def remote: () -> Net::FakeService\nend\n"
+      )
+      allow(described_class).to receive(:parseable_rbs?).and_return(false)
+      passes = 0
+      allow(described_class).to receive(:unresolved_referenced_types).and_wrap_original do |original, *args|
+        passes += 1
+        original.call(*args)
+      end
+      loader = described_class.new(signature_paths: [tmpdir])
+      loader.send(:env)
+
+      expect(passes).to eq(1)
+      expect(loader.synthesized_stub_types).to eq([])
+    end
+
+    it "still iterates when a stub exposes a deeper missing reference" do
+      # The progress guard must not cost the case MAX_STUB_PASSES exists for: RBS surfaces only the first
+      # missing reference per class per build, so a class with two of them needs a second pass.
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        <<~RBS
+          class Acme::Widget
+            def one: () -> Net::FakeService
+            def two: () -> Net::OtherService
+          end
+        RBS
+      )
+      passes = 0
+      allow(described_class).to receive(:unresolved_referenced_types).and_wrap_original do |original, *args|
+        passes += 1
+        original.call(*args)
+      end
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.synthesized_stub_types).to include("Net::FakeService", "Net::OtherService")
+      expect(passes).to be > 1
+    end
+
     it "does not re-stub a leaf whose namespace prefix is already a declared class" do
       # `append_stub_declarations` mirrors `collect_missing_namespaces`'s `declared.include?` guard: an enclosing prefix
       # already present in the env is never re-emitted.

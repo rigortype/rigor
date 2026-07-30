@@ -809,6 +809,157 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "referenced-type detection agrees with the builder sweep (#207)" do
+    # #207 replaced the detection half of the stub pass: it built every project class with a throwaway
+    # `RBS::DefinitionBuilder` (7.84M allocations, a third of a cold `check lib`) and read the missing name out
+    # of `NoTypeFoundError`. The sweep survives HERE, as the oracle the static walk must keep agreeing with —
+    # `docs/notes/20260730-stub-pass1-static-detection-evaluation.md` is the corpus-scale version of this test.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-detect-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    def builder_sweep(env, project_files)
+      builder = RBS::DefinitionBuilder.new(env: env)
+      missing = []
+      env.class_decls.each do |type_name, entry|
+        next unless described_class.send(:project_entry?, entry, project_files)
+
+        %i[build_instance build_singleton].each do |build|
+          builder.public_send(build, type_name)
+        rescue RBS::NoTypeFoundError => e
+          name = e.message[/Could not find (\S+)/, 1]
+          missing << name.sub(/\A::/, "") if name
+        rescue RBS::BaseError
+          nil # other build failures are not this pass's to repair
+        end
+      end
+      missing.uniq
+    end
+
+    # Both detectors, run against the FIRST pass's env (later passes see the stubs already appended). Each
+    # fixture class carries exactly one missing name, so the builder's one-error-per-class limit cannot hide a
+    # difference.
+    def detect_both(source)
+      File.write(File.join(tmpdir, "shapes.rbs"), source)
+      captured = nil
+      allow(described_class).to receive(:unresolved_referenced_types).and_wrap_original do |original, *args|
+        env, project_files = args
+        result = original.call(*args)
+        captured ||= { builder: builder_sweep(env, project_files).sort, static: result.sort }
+        result
+      end
+      described_class.new(signature_paths: [tmpdir]).send(:env)
+      captured
+    end
+
+    # Fixture sources live outside the examples so each one reads as a table of positions rather than a wall
+    # of heredoc.
+    def validated_positions
+      <<~RBS
+        class ShapeReturn
+          def x: () -> RigorGoneReturn
+        end
+
+        class ShapeParam
+          def x: (RigorGoneParam a) -> void
+        end
+
+        class ShapeNested
+          def x: () -> RigorGoneNested::Deep
+        end
+
+        class ShapeGenericArg
+          def x: () -> Array[RigorGoneGenericArg]
+        end
+
+        class ShapeAttr
+          attr_reader v: RigorGoneAttr
+        end
+
+        class ShapeBlockParam
+          def x: () { (RigorGoneBlockParam) -> void } -> void
+        end
+
+        class ShapeInterface
+          def x: () -> _RigorGoneInterface
+        end
+
+        class ShapeAlias
+          def x: () -> rigor_gone_alias
+        end
+
+        class ShapeSuperArgs < Array[RigorGoneSuperArg]
+        end
+
+        class ShapeMixinArgs
+          include Enumerable[RigorGoneMixinArg]
+        end
+
+        module ShapeSelfTypeArgs : Enumerable[RigorGoneSelfTypeArg]
+        end
+      RBS
+    end
+
+    # `validate_type_params` skips `initialize` and is never called for the singleton side, instance-variable
+    # types are imported without validation, a missing super-class / mixin NAME raises a different error this
+    # pass has never stubbed, and the methods a class imports from an interface are not variance-walked.
+    # Reporting these anyway cost allocations on the corpus and changed no diagnostic, so the walk stops
+    # exactly where the builder stopped.
+    def unvalidated_positions
+      <<~RBS
+        class ShapeInitializeOnly
+          def initialize: (RigorGoneInitialize a) -> void
+        end
+
+        class ShapeSingletonOnly
+          def self.x: () -> RigorGoneSingleton
+        end
+
+        class ShapeIvarOnly
+          @v: RigorGoneIvar
+        end
+
+        class ShapeSuperName < RigorGoneSuperName
+        end
+
+        class ShapeMixinName
+          include RigorGoneMixinName
+        end
+
+        class ShapeAliasBody
+          type body = RigorGoneAliasBody
+          def x: () -> body
+        end
+
+        interface _RigorProbe
+          def x: () -> RigorGoneFromInterface
+        end
+
+        class ShapeIncludesInterface
+          include _RigorProbe
+        end
+      RBS
+    end
+
+    it "reports the same names for every position the builder validates" do
+      result = detect_both(validated_positions)
+
+      expect(result[:static]).to eq(result[:builder])
+      expect(result[:static]).to include(
+        "RigorGoneReturn", "RigorGoneParam", "RigorGoneNested::Deep", "RigorGoneGenericArg", "RigorGoneAttr",
+        "RigorGoneBlockParam", "_RigorGoneInterface", "rigor_gone_alias", "RigorGoneSuperArg",
+        "RigorGoneMixinArg", "RigorGoneSelfTypeArg"
+      )
+    end
+
+    it "reports nothing for the positions the builder does not validate" do
+      result = detect_both(unvalidated_positions)
+
+      expect(result[:static]).to eq(result[:builder])
+      expect(result[:static]).to be_empty
+    end
+  end
+
   describe "env via cache_store (v0.0.9 C2)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-env-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

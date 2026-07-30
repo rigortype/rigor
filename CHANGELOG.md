@@ -27,6 +27,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** A class that defines the same method name on both sides — `def helper` plus a `class << self` (or `def self.helper`) twin — no longer draws a false `call.undefined-method` on the class-side call ([#239](https://github.com/rigortype/rigor/issues/239)).
+  - The in-source method table records one kind per name, so the second definition erased the first and the method Rigor could see in the source read as missing. It now records both, including when the two definitions live in different files. Real instance: `Haml::Compiler::ScriptCompiler.find_and_preserve` on the `haml` gem, which declares that name as both a class method and an instance method.
 - **[inference]** Under the opt-in `parameter_inference:`, `call.argument-type-mismatch` no longer fires when the *receiver's* type came from call-site parameter inference ([#205](https://github.com/rigortype/rigor/issues/205)).
   - An inferred parameter type is a lower bound, so a method contract resolved through it is speculative; the guard already declined on inferred arguments but missed the receiver side. Surfaced by Rigor's own self-check, where the seeded receiver flagged a correct call against an upstream RBS signature stricter than its implementation.
 - **[sig-gen]** `rigor sig-gen` now reads a class built by `Data.define(...)` / `Struct.new(...)`, in both the `Point = Data.define(:x, :y)` and `class Point < Data.define(:x, :y)` forms ([#227](https://github.com/rigortype/rigor/issues/227)).

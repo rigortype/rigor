@@ -226,5 +226,18 @@ RSpec.describe Rigor::Reflection do
       expect(described_class.discovered_method?("MyClass", :do_thing, scope: scope)).to be(true)
       expect(described_class.discovered_method?("MyClass", :unknown_method, scope: scope)).to be(false)
     end
+
+    it "reports a both-sides method under either kind (#239)" do
+      # One name may be defined on both sides of a class, and the table holds one value per name — so the writers
+      # record METHOD_KIND_BOTH instead of letting the second definition erase the first's kind.
+      index = Rigor::Scope::DiscoveryIndex::EMPTY.with(
+        discovered_methods: { "MyClass" => { helper: Rigor::Scope::DiscoveryIndex::METHOD_KIND_BOTH } }
+      )
+      both = Rigor::Scope.empty.with_discovery(index)
+
+      expect(described_class.discovered_method?("MyClass", :helper, kind: :instance, scope: both)).to be(true)
+      expect(described_class.discovered_method?("MyClass", :helper, kind: :singleton, scope: both)).to be(true)
+      expect(described_class.discovered_method?("MyClass", :other, kind: :singleton, scope: both)).to be(false)
+    end
   end
 end

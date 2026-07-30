@@ -57,7 +57,7 @@ The RBS-consulting methods accept **either** `scope:` **or** `environment:` (the
 ### Source-side discoveries
 
 - `Rigor::Reflection.discovered_class?(class_name, scope: Scope.empty)` — `true` when the analyzed source contains a class / module declaration. Does NOT consult the RBS loader (use `class_known?` for the union).
-- `Rigor::Reflection.discovered_method?(class_name, method_name, kind: :instance, scope: Scope.empty)` — `true` when `ScopeIndexer` recorded a `def` for the given method on the given class with the matching kind.
+- `Rigor::Reflection.discovered_method?(class_name, method_name, kind: :instance, scope: Scope.empty)` — `true` when `ScopeIndexer` recorded a `def` for the given method on the given class with the matching kind. The underlying table holds one value per method name, so a name defined on BOTH sides of a class (`def helper` plus a `class << self` twin) records `Scope::DiscoveryIndex::METHOD_KIND_BOTH` and MUST answer `true` for either kind — a writer that overwrites the other side's kind instead produces a false `call.undefined-method` on code that runs.
 
 ## Provenance
 

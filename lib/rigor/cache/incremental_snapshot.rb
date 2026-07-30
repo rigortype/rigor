@@ -38,8 +38,11 @@ module Rigor
       # bundle (the per-def parameter-shape / visibility / ancestry surface the declaration-stability gate
       # compares) and WD2 adds `return_summaries` (per-def observed-key return descriptors + mutation-effect
       # sets the behavioural-stability gate compares); a pre-10 blob mismatches the SCHEMA gate and loads as
-      # nil (a clean cold rebuild — no migration).
-      SCHEMA = 10
+      # nil (a clean cold rebuild — no migration). 11: ADR-67 WD6c lift adds `param_table` (the inferred-param
+      # seed table the run's diagnostics were computed under, diffed on the next recheck to invalidate a
+      # callee whose seeds moved because a caller changed); a pre-11 blob mismatches the SCHEMA gate and
+      # loads as nil (a clean cold rebuild — no migration).
+      SCHEMA = 11
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -68,10 +71,16 @@ module Rigor
       # (Marshal-clean type tuples), their `describe(:short)` return descriptors, and the content-mutated
       # parameter positions. A recheck re-evaluates a declaration-stable changed callee at these keys and,
       # when every return + the effects are unchanged, skips its symbol dependents.
+      # ADR-67 WD6c lift:
+      # `param_table` is the `parameter_inference:` seed table (`[class, method, kind] => {param => Type}`)
+      # the run that wrote the snapshot seeded its analysis from — `{}` when the gate is off. A recheck
+      # recomputes the table fresh (the pre-pass is whole-project by design) and diffs it against this copy;
+      # a changed entry invalidates the callee's file and its symbol dependents. The types are Marshal-clean
+      # by the session's per-entry filter; a dropped entry re-checks its callee, the conservative direction.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
                             :missing, :class_decls, :seed_bundles, :plugin_fact_digest,
-                            :return_summaries)
+                            :return_summaries, :param_table)
 
       # The global fingerprint that gates a snapshot load: a digest of the inputs whose change requires a full
       # rebuild — the engine version + schema, the resolved configuration, the analysis **roots** (the path
@@ -127,6 +136,12 @@ module Rigor
         data = Marshal.load(Zlib::Inflate.inflate(File.binread(@path))) # rubocop:disable Security/MarshalLoad
         return nil unless data.is_a?(Hash) && data[:schema] == SCHEMA && data[:fingerprint] == fingerprint
 
+        payload_from(data)
+      rescue StandardError
+        nil
+      end
+
+      def payload_from(data)
         Payload.new(
           cache: data[:cache], sources: data[:sources],
           digests: data[:digests], analyzed: data[:analyzed],
@@ -137,11 +152,11 @@ module Rigor
           class_decls: data[:class_decls] || {},
           seed_bundles: data[:seed_bundles] || {},
           plugin_fact_digest: data[:plugin_fact_digest],
-          return_summaries: data[:return_summaries] || {}
+          return_summaries: data[:return_summaries] || {},
+          param_table: data[:param_table] || {}
         )
-      rescue StandardError
-        nil
       end
+      private :payload_from
 
       # Persist `payload` under `fingerprint`. Writes via a temp file + atomic rename so a concurrent reader
       # never sees a half-written snapshot. Returns true on success, false on any failure (never raises).
@@ -158,7 +173,8 @@ module Rigor
           class_decls: payload.class_decls,
           seed_bundles: payload.seed_bundles,
           plugin_fact_digest: payload.plugin_fact_digest,
-          return_summaries: payload.return_summaries
+          return_summaries: payload.return_summaries,
+          param_table: payload.param_table
         )
         blob = Zlib::Deflate.deflate(raw)
         tmp = "#{@path}.#{Process.pid}.tmp"

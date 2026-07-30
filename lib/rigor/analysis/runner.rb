@@ -100,7 +100,7 @@ module Rigor
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
-                     seed_bundles: nil, collect_seed_bundles: false)
+                     seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -140,6 +140,12 @@ module Rigor
         @collect_seed_bundles = collect_seed_bundles
         @restored_seed_bundles = seed_bundles || {}
         @seed_bundles = {}.freeze
+        # ADR-67 WD6c lift — a precomputed inferred-param table. When the incremental session already ran the
+        # collector (it must, to diff the table against its snapshot BEFORE deciding the re-analyse closure),
+        # it hands the result here so `seed_parameter_inference` seeds without a second whole-project collect
+        # — and so the table the diff was decided on and the table this run seeds from are the SAME object,
+        # not merely an equal recomputation. nil (the default) keeps the runner self-sufficient.
+        @param_inferred_types_override = param_inferred_types
         @file_dependencies = {}
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
@@ -322,6 +328,32 @@ module Rigor
           files.each { |file| result[file] << class_name }
         end
         result.transform_values(&:freeze).freeze
+      end
+
+      # ADR-67 WD6c lift — the inferred-param table this run seeded from (frozen; empty when
+      # `parameter_inference:` is off or the pre-pass failed soft). The incremental session reads it back
+      # after a baseline so the snapshot records the seeds the cached diagnostics were computed under.
+      def param_inferred_types
+        @project_param_inferred_types
+      end
+
+      # ADR-67 WD6c lift — computes the whole-project inferred-param table without running an analysis.
+      # The incremental session calls this BEFORE deciding its re-analyse closure: the table's diff against
+      # the snapshot's stored table is what invalidates a callee whose seeds moved because a *caller* file
+      # changed. Same collector invocation as {#seed_parameter_inference} (one round, same workers), so the
+      # session-computed table and an in-run collect are byte-identical by construction. Fails soft to the
+      # empty table — which the caller's diff then treats as "every stored entry removed", the conservative
+      # direction (those callees re-check).
+      def collect_param_inference_table(files)
+        return {}.freeze unless @configuration.parameter_inference
+
+        environment = @pool_coordinator.resolve_sequential_environment(source_files: files)
+        Inference::ParameterInferenceCollector.collect(
+          files: files, environment: environment,
+          target_ruby: @configuration.target_ruby, max_rounds: 1, workers: @workers
+        )
+      rescue StandardError
+        {}.freeze
       end
 
       # ADR-89 WD2 — the per-method observed-key return summaries the run's ADR-84 return memo just captured.
@@ -510,6 +542,11 @@ module Rigor
       # error must never break a run, so the table stays empty and the run proceeds unseeded.
       def seed_parameter_inference(expansion, environment)
         return environment unless @configuration.parameter_inference
+
+        if @param_inferred_types_override
+          @project_param_inferred_types = @param_inferred_types_override
+          return environment
+        end
 
         files = expansion.fetch(:files)
         environment ||= @pool_coordinator.resolve_sequential_environment(source_files: files)

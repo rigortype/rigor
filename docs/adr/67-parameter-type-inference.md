@@ -238,6 +238,29 @@ this ADR always said must land with it. Four working decisions:
   carry; a cached file whose param seeds changed would serve stale results. Slice 1:
   `parameter_inference:` and `--incremental` are mutually exclusive (the gate refuses,
   with a message), and the edge wiring is the named follow-up before they compose.
+
+  *Lifted 2026-07-30 (#204) — by a table diff, not edge recording.* The pre-pass is
+  whole-project by design, so the incremental session recomputes the table each recheck
+  and diffs it against the snapshot's stored copy (`Type#==`, the same comparison the
+  collector's own fixpoint termination uses): a changed `[class, method, kind]` entry
+  re-analyses the callee's file and feeds its `[file, symbol]` pair into the ADR-46
+  slice-4 symbol fan-out — a seed change shifts the callee's inferred return exactly the
+  way a body edit does, so it reuses the same audited dependents machinery. A missing
+  invalidation edge is impossible by construction (the diff compares ground truth, not a
+  recorded approximation), which is why this shape won over the caller→callee edge
+  recording the follow-up first sketched: it also handles a caller *appearing* in a
+  previously-unrelated file, a caller vanishing, and the fail-soft empty table (every
+  stored entry reads as removed → those callees re-check) for free. A
+  `parameter_inference:` toggle re-fingerprints the snapshot (configuration is part of
+  the global fingerprint), so the gate state is constant across a snapshot's lifetime.
+  When no file moved, the collector's inputs are unchanged and the re-collect is skipped
+  — the ADR-87 null-recheck fast path stays collect-free. The table rides the snapshot
+  under the ADR-89 WD2 Marshal-clean filter (a dropped entry re-checks its callee), and
+  the diff's pairs deliberately bypass the WD2 behavioural-stability pruning, which
+  re-evaluates returns under the OLD seeds — the wrong oracle when the seeds are what
+  moved. Gate: the composition specs' full-run-oracle byte-identity plus
+  `--verify-incremental`, which now runs (and seeds the subset from the baseline's own
+  table).
 - **WD6d — the measurement gate (the WD4-of-ADR-93 pattern).** With the gate off: the
   corpus is byte-identical by construction (empty table no-op). With the gate on:
   (1) every diagnostic delta on mail/kramdown/haml/liquid + mastodon models + redmine app

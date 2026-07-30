@@ -14,6 +14,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[rigor check]** `parameter_inference:` now composes with `--incremental` instead of being refused with exit 64 ([#204](https://github.com/rigortype/rigor/issues/204)).
+  - An incremental run recomputes the call-site parameter table and re-checks any method whose inferred parameter types moved — so editing only a *caller* correctly refreshes the *callee's* diagnostics, the staleness the old mutual exclusion existed to prevent. `--verify-incremental` runs under the gate too.
 - **[rigor-rbs-inline]** An inline-RBS annotation that Rigor parses but does not honour is now reported as `plugin.rbs-inline.source-rbs-annotation-not-honoured` (info) instead of being dropped in silence ([#229](https://github.com/rigortype/rigor/issues/229)).
   - There are two inline-RBS implementations, and they spell `module-self` differently: Rigor reads `# @rbs module-self Foo`, while `rbs`'s own inline documentation shows `# @rbs module-self: Foo`. The second form previously contributed nothing, with the annotation comment still echoed into the generated RBS — so the omission was invisible. The rest of the file's annotations are unaffected, and the diagnostic says so.
   - The manual chapter now states which dialect Rigor reads and what differs.

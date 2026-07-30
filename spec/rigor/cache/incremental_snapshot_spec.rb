@@ -22,7 +22,9 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       class_decls: { "b.rb" => Set["Foo"] },
       seed_bundles: { "b.rb" => { digest: "sha-b", classes: { "Foo" => nil }, methods: {} } },
       plugin_fact_digest: "fact-digest-abc",
-      return_summaries: { ["b.rb", "Foo#bar"] => { keys: [], returns: ["Integer"], effects: [0] } }
+      return_summaries: { ["b.rb", "Foo#bar"] => { keys: [], returns: ["Integer"], effects: [0] } },
+      # ADR-67 WD6c lift — the inferred-param seed table the run's diagnostics were computed under.
+      param_table: { ["Foo", :bar, :instance] => { value: "Integer-stand-in" } }
     )
   end
 

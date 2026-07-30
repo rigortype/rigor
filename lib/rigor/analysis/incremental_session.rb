@@ -93,6 +93,13 @@ module Rigor
         # ADR-89 WD2 — per-def observed-key return summaries: [path, symbol] => { keys:, returns:, effects: }.
         # Harvested from the ADR-84 return memo after each run; drives the behavioural-stability gate.
         @return_summaries = {}
+        # ADR-67 WD6c lift — the `parameter_inference:` seed table the cached diagnostics were computed
+        # under (`{}` when the gate is off — the gate state is constant across a snapshot's lifetime because
+        # the configuration is part of the global fingerprint). A recheck recomputes the table fresh and
+        # diffs it against this: the pre-pass is whole-project by design, so the fresh table is ground truth
+        # and a missing invalidation edge is impossible by construction — the reason this is a table diff
+        # and not the caller→callee edge recording #204 first sketched.
+        @param_table = {}
         # ADR-88 WD1 — the plugin fact-surface digest computed for THIS invocation (nil until a
         # `#run_incremental` pass runs / a plugin-free project) and the reporting flags a caller (the CLI
         # banner + `--cache-stats`) reads after `#run_incremental`. `@last_runner` is the analysis runner the
@@ -120,6 +127,9 @@ module Rigor
         @seed_bundles = runner.seed_bundles # ADR-85 WD2 — the freshly built bundle set for the next run.
         absorb_dependency_graph(runner)
         @return_summaries = runner.return_summaries # ADR-89 WD2 — the full-run behavioural surface.
+        # ADR-67 WD6c lift — the seed table the runner's own pre-pass computed ({} when the gate is off).
+        # Reading it back, rather than computing it here, keeps the baseline single-collect.
+        @param_table = runner.param_inferred_types
         @cache = per_file(diagnostics)
         @digests = @analyzed.to_h { |path| [path, pack_digest(path)] }
         diagnostics
@@ -134,14 +144,24 @@ module Rigor
         added = current - previous
         removed = previous - current
         changed = changed_paths(current & previous)
-        affected = affected_closure(changed, added, removed)
+        # ADR-67 WD6c lift — recompute the whole-project inferred-param table BEFORE deciding the closure,
+        # and diff it against the snapshot's copy: an entry that moved (because a caller's argument type
+        # changed, a caller appeared, or one vanished) invalidates the CALLEE's file and its symbol
+        # dependents, none of which the file-digest tier can see (the callee's text is unchanged).
+        fresh_params = fresh_param_table(current, changed, added, removed)
+        param_files, param_pairs = param_seed_invalidation(fresh_params)
+        affected = affected_closure(changed, added, removed, param_files, param_pairs)
         analyze_set = affected & current
-        runner = build_runner(analyze_only: analyze_set, record_dependencies: true)
+        # The freshly collected table is handed to the runner so the run seeds from the SAME table the diff
+        # was decided on (and the collector runs once per recheck, not twice).
+        runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
+                              param_inferred_types: fresh_params)
         fresh = run_runner(runner).diagnostics
         @last_runner = runner # ADR-88 WD1 — the post-hoc fact-surface fingerprint reads this prepared registry.
         reused = (current & previous) - affected.to_a
         merged = fresh + reused.flat_map { |path| @cache[path] || [] }
         absorb(runner, fresh, current, analyze_set, removed)
+        @param_table = fresh_params
         Recheck.new(diagnostics: merged, changed: changed.to_set, added: added.to_set,
                     removed: removed.to_set, affected: affected, reused: reused.to_set)
       end
@@ -151,7 +171,15 @@ module Rigor
       # *appeared* in a changed OR added file (slice 3 — a now-defined `call.unresolved-toplevel` target or
       # `def.override-*` ancestor), and the consumers of every removed file (which now miss what it
       # provided). An added file has no before-state, so all its symbols / classes appear.
-      def affected_closure(changed, added, removed)
+      #
+      # ADR-67 WD6c lift — `param_files` / `param_pairs` are the callee files (and their `[file, symbol]`
+      # pairs) whose inferred-param seeds moved since the snapshot. Their text is unchanged, so they enter
+      # the closure here: the files themselves re-analyse (their in-body diagnostics were computed under the
+      # old seeds), and their pairs join the SYMBOL fan-out — a seed change shifts the callee's inferred
+      # return exactly the way a body edit does, so it reuses the same audited dependents machinery. The
+      # pairs join AFTER the ADR-89 WD2 behavioural-stability pruning: that gate re-evaluates returns under
+      # the snapshot's OLD seeds, which is the wrong oracle for a pair whose seeds are the thing that moved.
+      def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
         scan = changed + added
         # Parse the changed / added set ONCE for the per-symbol fingerprints, the class declarations, AND the
         # ADR-89 WD1 declaration signatures. They were separate `discovered_def_index_for_paths` passes over
@@ -176,11 +204,21 @@ module Rigor
         # previously-observed call key + content-mutation effects) is unchanged is behaviourally stable: its
         # symbol dependents' cached diagnostics stay valid, so drop them. `symbol_pairs` is `changed_pairs`
         # minus those stable pairs, and only it (not `changed_pairs`) drives the symbol-dependent fan-out.
-        symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index)
+        symbol_pairs = behaviourally_unstable_pairs(changed_pairs, unstable, scan_index) | param_pairs
         base = dependents_base(unstable, symbol_pairs)
         closure = base | changed.to_set | added.to_set | negative_affected(scan, new_fps, new_class_decls)
+        closure = param_seed_closure(closure, param_files)
         removed.each { |path| closure |= @dependents[path] || Set.new }
         closure.freeze
+      end
+
+      # ADR-67 WD6c lift — the seed-invalidated callees' own contribution to the closure: the files
+      # themselves, plus — on a pre-slice-4 snapshot with no symbol edges, where the pairs' symbol fan-out
+      # found nothing — their file-level dependents (wider, always sound).
+      def param_seed_closure(closure, param_files)
+        closure |= param_files
+        param_files.each { |path| closure |= @dependents[path] || Set.new } if @symbol_sources.empty?
+        closure
       end
 
       # The dependents contributed by the declaration-unstable changed files and the behaviourally-unstable
@@ -192,6 +230,47 @@ module Rigor
         else
           Incremental.affected(unstable, @dependents)
         end
+      end
+
+      # ADR-67 WD6c lift — the fresh whole-project inferred-param table for this recheck ({} when the gate
+      # is off). When NO file moved, the collector's inputs are unchanged — the project files are identical,
+      # and the env-side inputs (configuration, `sig/`, the gem set, the engine version) are constant under
+      # a matched snapshot fingerprint — so the stored table is provably identical and the whole-project
+      # re-collect is skipped (the ADR-87 null-recheck fast path stays collect-free).
+      def fresh_param_table(current, changed, added, removed)
+        return {} unless @configuration.parameter_inference
+        return @param_table if changed.empty? && added.empty? && removed.empty?
+
+        build_runner.collect_param_inference_table(current)
+      end
+
+      # ADR-67 WD6c lift — the `[files, pairs]` the fresh table invalidates. For every `[class, method,
+      # kind]` entry that differs from the snapshot's copy (added, removed, or value-changed — `Type#==`
+      # structural equality, the same comparison the collector's own fixpoint termination uses, already
+      # exercised across Marshal round-trips by its fork workers), every snapshot file defining that symbol
+      # re-analyses and its `[file, symbol]` pair joins the symbol fan-out. An entry attributable to NO
+      # snapshot file is a def that first appeared in this edit: its file is in the changed/added set (so it
+      # re-analyses anyway) and its prior callers are the negative-dependency closure's job — nothing is
+      # lost by skipping it here. The restored types are compared and then DISCARDED (the run seeds from the
+      # fresh table), so a cache-carried stale memo ivar can never poison a live lookup.
+      def param_seed_invalidation(fresh_params)
+        return [Set.new, Set.new] if fresh_params.equal?(@param_table) || @param_table == fresh_params
+
+        files = Set.new
+        pairs = Set.new
+        (@param_table.keys | fresh_params.keys).each do |key|
+          next if @param_table[key] == fresh_params[key]
+
+          class_name, method_name, kind = key
+          symbol = "#{class_name}#{kind == :singleton ? '.' : '#'}#{method_name}"
+          @symbol_fingerprints.each do |path, symbols|
+            next unless symbols.key?(symbol)
+
+            files << path
+            pairs << [path, symbol]
+          end
+        end
+        [files, pairs]
       end
 
       # ADR-89 WD2 — `changed_pairs` minus the behaviourally-STABLE pairs whose symbol dependents may be
@@ -266,7 +345,9 @@ module Rigor
       # mutating session state. Returns the merged diagnostics.
       def reanalyze_subset(subset)
         affected = subset.to_set
-        runner = build_runner(analyze_only: affected)
+        # ADR-67 WD6c lift — seed the subset run from the baseline's own table so the verification engine
+        # exercises the exact seeds the served cache entries were computed under (and skips a re-collect).
+        runner = build_runner(analyze_only: affected, param_inferred_types: @param_table)
         fresh = run_runner(runner).diagnostics
         reused = @analyzed - affected.to_a
         fresh + reused.flat_map { |path| @cache[path] || [] }
@@ -386,6 +467,7 @@ module Rigor
         @missing           = payload.missing || {}
         @class_decls       = payload.class_decls || {}
         @return_summaries  = payload.return_summaries || {}
+        @param_table       = payload.param_table || {} # ADR-67 WD6c lift — the seeds the cache was built under.
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
         @negative_dependents = Incremental.invert(@missing)
@@ -398,7 +480,8 @@ module Rigor
           symbol_fingerprints: @symbol_fingerprints, missing: @missing,
           class_decls: @class_decls, seed_bundles: @seed_bundles,
           plugin_fact_digest: @plugin_fact_digest,
-          return_summaries: marshal_safe_return_summaries
+          return_summaries: marshal_safe_return_summaries,
+          param_table: marshal_safe_param_table
         )
       end
 
@@ -411,6 +494,18 @@ module Rigor
         @return_summaries.each_with_object({}) do |(key, summary), safe|
           Marshal.dump(summary)
           safe[key] = summary
+        rescue StandardError
+          next
+        end
+      end
+
+      # ADR-67 WD6c lift — the param table filtered to Marshal-clean entries, the same guard (and reason) as
+      # {#marshal_safe_return_summaries} above. A dropped entry re-appears as "added" in the next recheck's
+      # diff, so its callee re-checks — the conservative direction.
+      def marshal_safe_param_table
+        @param_table.each_with_object({}) do |(key, params), safe|
+          Marshal.dump(params)
+          safe[key] = params
         rescue StandardError
           next
         end

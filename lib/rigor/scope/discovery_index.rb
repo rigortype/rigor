@@ -37,6 +37,15 @@ module Rigor
       EMPTY_TABLE = {}.freeze
       private_constant :EMPTY_NODE_TABLE, :EMPTY_TABLE
 
+      # The third value a `discovered_methods` entry can hold, beside `:instance` and `:singleton`. One name may
+      # legitimately be defined on both sides of the same class (`def helper` plus a `class << self` twin), and the
+      # table is keyed by name alone — so before this existed the second `def` overwrote the first's kind and
+      # `Scope#discovered_method?` answered false for a method that is right there in the source. That is a false
+      # `call.undefined-method` on ordinary Ruby (#239), which outranks any worst-case reading (AGENTS.md
+      # § "Implementation Guidelines"). Writers promote to this instead of clobbering; readers treat it as matching
+      # either kind.
+      METHOD_KIND_BOTH = :both
+
       # The shared all-empty index `Scope.empty` (and every scope that never sees a seeding pass) points at — one
       # allocation per process.
       EMPTY = new(

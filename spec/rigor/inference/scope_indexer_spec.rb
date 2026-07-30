@@ -790,6 +790,88 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
+  # #239 — the `discovered_methods` table is keyed by method NAME, so a class that defines one name on both sides
+  # (`def helper` plus a `class << self` twin) used to record whichever `def` the walk reached last and lose the
+  # other. `Scope#discovered_method?` then answered false for a method the source plainly defines, and the
+  # undefined-method rule fired on correct Ruby.
+  describe "a name defined on both the instance and singleton side" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write(name, body)
+      path = File.join(tmpdir, name)
+      File.write(path, body)
+      path
+    end
+
+    it "records both kinds for a `class << self` twin, whichever order they appear in" do
+      %w[singleton_first instance_first].each do |order|
+        singleton = "class << self\n    def helper(value) = value\n  end"
+        instance = "def helper(value) = value"
+        body = order == "singleton_first" ? [singleton, instance] : [instance, singleton]
+        program = parse("class Collides\n  #{body.join("\n  ")}\nend\n")
+        scope = described_class.index(program, default_scope: default_scope)[program]
+
+        expect(scope.discovered_method?("Collides", :helper, :instance)).to be(true), order
+        expect(scope.discovered_method?("Collides", :helper, :singleton)).to be(true), order
+      end
+    end
+
+    it "records both kinds for a `def self.` twin" do
+      program = parse(<<~RUBY)
+        class Collides
+          def helper(value) = value
+          def self.helper(value) = value
+        end
+      RUBY
+      scope = described_class.index(program, default_scope: default_scope)[program]
+
+      expect(scope.discovered_method?("Collides", :helper, :instance)).to be(true)
+      expect(scope.discovered_method?("Collides", :helper, :singleton)).to be(true)
+    end
+
+    it "records both kinds when an attr_accessor collides with a singleton def of the same name" do
+      program = parse(<<~RUBY)
+        class Collides
+          attr_accessor :helper
+          def self.helper = 1
+        end
+      RUBY
+      scope = described_class.index(program, default_scope: default_scope)[program]
+
+      expect(scope.discovered_method?("Collides", :helper, :instance)).to be(true)
+      expect(scope.discovered_method?("Collides", :helper, :singleton)).to be(true)
+    end
+
+    it "keeps a single kind for a name defined on one side only" do
+      program = parse("class Solo\n  def helper(value) = value\nend\n")
+      scope = described_class.index(program, default_scope: default_scope)[program]
+
+      expect(scope.discovered_method?("Solo", :helper, :instance)).to be(true)
+      expect(scope.discovered_method?("Solo", :helper, :singleton)).to be(false)
+    end
+
+    it "unions the two kinds across files in the cross-file index" do
+      # The cross-file table subtracts names that have an instance `def` (the ADR-17 monkey-patch contract), but the
+      # singleton half comes from a definition that rule never covered, so it must survive the subtraction.
+      paths = [
+        write("a.rb", "class Cross\n  def helper(value) = value\nend\n"),
+        write("b.rb", "class Cross\n  class << self\n    def helper(value) = value\n  end\nend\n")
+      ]
+      index = described_class.discovered_project_index_for_paths(paths)
+
+      expect(index[:def_index][:methods]["Cross"][:helper]).to eq(:singleton)
+    end
+
+    it "drops an instance-only name from the cross-file index, as before" do
+      paths = [write("a.rb", "class Solo\n  def helper(value) = value\nend\n")]
+      index = described_class.discovered_project_index_for_paths(paths)
+
+      expect(index[:def_index][:methods]["Solo"]).to be_nil
+    end
+  end
+
   describe "alias discovery" do
     it "registers the aliased name in discovered_methods" do
       program = parse(<<~RUBY)

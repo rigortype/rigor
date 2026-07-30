@@ -1275,14 +1275,38 @@ module Rigor
       end
 
       # Merges two `class_name => { method => kind }` tables, unioning the per-class method maps (so a seeded cross-file
-      # table and the current file's table combine instead of clobbering).
+      # table and the current file's table combine instead of clobbering). A name recorded on both sides — an instance
+      # `def` here and a `class << self` twin there — merges to {Scope::DiscoveryIndex::METHOD_KIND_BOTH} rather than
+      # letting the overlay's kind win (#239).
       def deep_merge_class_methods(base, overlay)
         return overlay if base.nil? || base.empty?
         return base if overlay.empty?
 
         base.merge(overlay) do |_class_name, base_methods, overlay_methods|
-          base_methods.merge(overlay_methods)
+          merge_method_kinds(base_methods, overlay_methods)
         end
+      end
+
+      # `{ method => kind }` union that promotes a kind disagreement to `METHOD_KIND_BOTH` instead of clobbering.
+      def merge_method_kinds(base_methods, overlay_methods)
+        base_methods.merge(overlay_methods) do |_method_name, base_kind, overlay_kind|
+          base_kind == overlay_kind ? base_kind : Scope::DiscoveryIndex::METHOD_KIND_BOTH
+        end
+      end
+
+      # The single write path into a `class_name => { method => kind }` existence table. Every recorder goes through
+      # it so a class that defines one name on both sides keeps both facts: the table is keyed by name alone, so a
+      # bare assignment silently replaced the other side's kind and `Scope#discovered_method?` then answered false for
+      # a method the source plainly defines (#239).
+      def record_method_kind(accumulator, class_name, method_name, kind)
+        table = (accumulator[class_name] ||= {})
+        recorded = table[method_name]
+        table[method_name] =
+          if recorded.nil? || recorded == kind
+            kind
+          else
+            Scope::DiscoveryIndex::METHOD_KIND_BOTH
+          end
       end
 
       # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
@@ -1393,8 +1417,7 @@ module Rigor
         return if members.empty?
 
         class_name = qualified_prefix.join("::")
-        table = (accumulator[class_name] ||= {})
-        members.each { |member| table[member] ||= :instance }
+        members.each { |member| record_method_kind(accumulator, class_name, member, :instance) }
       end
 
       # The Symbol member names of a `Data.define(*Symbol)` / `Struct.new(*Symbol [, keyword_init:])` call. For
@@ -1412,8 +1435,7 @@ module Rigor
         class_name = qualified_prefix.join("::")
         singleton = def_singleton?(def_node, qualified_prefix, in_singleton_class)
         kind = singleton ? :singleton : :instance
-        accumulator[class_name] ||= {}
-        accumulator[class_name][def_node.name] = kind
+        record_method_kind(accumulator, class_name, def_node.name, kind)
       end
 
       # `def Foo.bar` inside `module Foo` (or `def Meta.init` inside `module Meta`) is semantically equivalent to `def
@@ -1918,7 +1940,7 @@ module Rigor
         class_name = qualified_prefix.join("::")
         new_name = alias_node.new_name.unescaped.to_sym
         kind = in_singleton_class ? :singleton : :instance
-        (accumulator[class_name] ||= {})[new_name] = kind
+        record_method_kind(accumulator, class_name, new_name, kind)
       end
 
       # Post-pass over the `def_nodes` accumulator: for every `alias` declaration inside a class body, if the original
@@ -1981,8 +2003,7 @@ module Rigor
         return if method_name.nil?
 
         class_name = qualified_prefix.join("::")
-        accumulator[class_name] ||= {}
-        accumulator[class_name][method_name] = in_singleton_class ? :singleton : :instance
+        record_method_kind(accumulator, class_name, method_name, in_singleton_class ? :singleton : :instance)
       end
 
       # The `attr_*` accessor macros that introduce methods Rigor must treat as source-declared. Without this, a class
@@ -2005,9 +2026,8 @@ module Rigor
           base = literal_method_name(arg)
           next if base.nil?
 
-          accumulator[class_name] ||= {}
-          accumulator[class_name][base] = kind if reader
-          accumulator[class_name][:"#{base}="] = kind if writer
+          record_method_kind(accumulator, class_name, base, kind) if reader
+          record_method_kind(accumulator, class_name, :"#{base}=", kind) if writer
         end
       end
 
@@ -2352,7 +2372,7 @@ module Rigor
         file_index[:def_nodes].each { |cn, methods| (acc[:def_nodes][cn] ||= {}).merge!(methods) }
         file_index[:singleton_def_nodes].each { |cn, methods| (acc[:singleton_def_nodes][cn] ||= {}).merge!(methods) }
         file_index[:method_visibilities].each { |cn, table| (acc[:method_visibilities][cn] ||= {}).merge!(table) }
-        file_index[:methods].each { |cn, table| (acc[:methods][cn] ||= {}).merge!(table) }
+        file_index[:methods].each { |cn, table| acc[:methods][cn] = merge_method_kinds(acc[:methods][cn] || {}, table) }
         fold_def_sources(acc, :def_sources, file_index[:def_sources])
         fold_def_sources(acc, :singleton_def_sources, file_index[:singleton_def_sources])
       end
@@ -2468,10 +2488,18 @@ module Rigor
 
       # Removes, per class, the method names that have a project `def` node, leaving only
       # accessor/alias/define_method-introduced methods in the cross-file suppression table.
+      #
+      # `def_nodes` is the INSTANCE-side table, so a name recorded on both sides keeps its singleton half: that half
+      # comes from a `def self.x` / `class << self` definition this rule never covered, and dropping it whole would
+      # reintroduce #239's false `call.undefined-method` across files.
       def subtract_def_methods(methods, def_nodes)
         methods.each_with_object({}) do |(class_name, table), out|
           defs = def_nodes[class_name] || {}
-          kept = table.reject { |method_name, _kind| defs.key?(method_name) }
+          kept = table.each_with_object({}) do |(method_name, kind), acc|
+            next acc[method_name] = kind unless defs.key?(method_name)
+
+            acc[method_name] = :singleton if kind == Scope::DiscoveryIndex::METHOD_KIND_BOTH
+          end
           out[class_name] = kept unless kept.empty?
         end
       end
@@ -2517,7 +2545,7 @@ module Rigor
           (acc[:method_visibilities][class_name] ||= {}).merge!(table)
         end
         file_methods.each do |class_name, table|
-          (acc[:methods][class_name] ||= {}).merge!(table)
+          acc[:methods][class_name] = merge_method_kinds(acc[:methods][class_name] || {}, table)
         end
       end
 

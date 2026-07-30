@@ -394,11 +394,13 @@ module Rigor
     # recognised `define_method` invocation inside class/module bodies. The `rigor check` undefined-method and
     # wrong-arity rules consult this map to suppress diagnostics for methods the user has defined dynamically,
     # even when no RBS sig describes them.
+    # A name defined on both sides of one class records {DiscoveryIndex::METHOD_KIND_BOTH} and matches either kind.
     def discovered_method?(class_name, method_name, kind)
       table = @discovery.discovered_methods[class_name.to_s]
       return false unless table
 
-      table[method_name.to_sym] == kind
+      recorded = table[method_name.to_sym]
+      recorded == kind || recorded == DiscoveryIndex::METHOD_KIND_BOTH
     end
 
     # ADR-34 § "Decision" — predicate identifying a toplevel-shaped scope (no enclosing `class` / `module` body).

@@ -62,9 +62,14 @@ module Rigor
       #   pool records each worker's cross-file reads and marshals them back (PoolCoordinator), so the
       #   dependency graph a pooled recheck rebuilds equals the sequential one.
       def initialize(configuration:, paths: nil, environment: nil, cache_store: nil, plugin_requirer: nil,
-                     workers: 0)
+                     workers: 0, buffer: nil)
         @configuration = configuration
         @paths = paths
+        # Editor mode option B (#146) — the in-flight buffer, threaded into every internal Runner so the
+        # pre-passes and the closure re-analysis read the editor's bytes at the logical path. A session
+        # holding one MUST NOT persist its snapshot: its `@digests` and `@cache` describe bytes that exist
+        # only in the editor. {#run_buffer_recheck} is the only entry that honours that.
+        @buffer = buffer
         @environment = environment
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
@@ -166,6 +171,32 @@ module Rigor
                     removed: removed.to_set, affected: affected, reused: reused.to_set)
       end
 
+      # Editor mode option B (#146) — a whole-project recheck with the editor's buffer substituted for one
+      # file, for the CLI's `--incremental --tmp-file=X --instead-of=Y`. Returns the {Recheck} when the
+      # snapshot could be reused, or nil when it could not — the caller then falls back to option A
+      # (single-file scope) rather than paying a full baseline, because that baseline would repeat on every
+      # keystroke: this session MUST NOT save, so nothing it computes can warm the next invocation.
+      #
+      # Not saving is the whole safety story. `@digests` and `@cache` here describe the buffer's bytes, which
+      # exist only in the editor; persisting them would make the next `rigor check --incremental` believe the
+      # on-disk file was already analysed in a state it was never in.
+      def run_buffer_recheck(snapshot:, fingerprint:)
+        Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
+          restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+          break nil unless restored
+
+          restore(restored)
+          result = recheck
+          adopt_plugin_fact_fingerprint
+          # The ADR-88 gate applies unchanged: if the plugin fact surface moved, the cache-served files may be
+          # stale. A full baseline is the sound answer for `--incremental`, but in editor mode it is also the
+          # latency this mode exists to avoid, so decline and let the caller drop to single-file scope.
+          break nil unless @plugin_fact_reusable.reusable_against?(restored.plugin_fact_digest)
+
+          result
+        end
+      end
+
       # The frozen set of files a #recheck must re-analyse: the symbol/ancestry-granularity closure of the
       # changed files (slice 4), the added files themselves, the consumers of any symbol / class that
       # *appeared* in a changed OR added file (slice 3 — a now-defined `call.unresolved-toplevel` target or
@@ -185,7 +216,12 @@ module Rigor
         # ADR-89 WD1 declaration signatures. They were separate `discovered_def_index_for_paths` passes over
         # the same `scan` set — a duplicate re-parse of every changed file each recheck (recon §2 / the P6
         # recheck-floor audit).
-        summary = scan.empty? ? nil : Inference::ScopeIndexer.scan_summary_for_paths(scan)
+        # `buffer:` is load-bearing for editor mode option B (#146), not an optimisation: this scan decides
+        # the closure, so reading the buffer's logical path from DISK would compare the snapshot's symbol
+        # fingerprints against bytes the user has already edited away — every dependent of the unsaved change
+        # would then be served from cache, which is the stale answer whole-project editor scope exists to
+        # avoid. `ScopeIndexer.scan_summary_for_paths` resolves each path through the binding.
+        summary = scan.empty? ? nil : Inference::ScopeIndexer.scan_summary_for_paths(scan, buffer: @buffer)
         scan_index = summary && summary[:def_index]
         declaration_signatures = (summary && summary[:declaration_signatures]) || {}
         new_fps = symbol_fingerprints_from_index(scan_index)
@@ -764,7 +800,7 @@ module Rigor
         Runner.new(
           configuration: @configuration, cache_store: @cache_store, environment: @environment,
           plugin_requirer: @plugin_requirer, seed_bundles: @seed_bundles, collect_seed_bundles: true,
-          workers: @workers, **
+          workers: @workers, buffer: @buffer, **
         )
       end
 
@@ -791,10 +827,19 @@ module Rigor
         candidates.reject { |path| stat_fresh?(path) }
       end
 
+      # A bound buffer's logical path is never fresh: the bytes to analyse live in the editor's temp file, and
+      # the recorded entry describes the file on disk. Re-analysing it when the two happen to agree costs one
+      # file; trusting the stat tuple would serve the editor its own stale diagnostics.
+      def buffer_path?(path)
+        !@buffer.nil? && path == @buffer.logical_path
+      end
+
       # True when `path`'s recorded stat entry proves it unchanged since the last analysis. Any stat / parse
       # failure (missing entry, unreadable / vanished file) reads as NOT fresh (→ re-analyse), preserving the
       # prior `digest(path) != recorded` "changed" semantics for a file that cannot be validated.
       def stat_fresh?(path)
+        return false if buffer_path?(path)
+
         entry = @digests[path]
         return false if entry.nil?
 

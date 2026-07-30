@@ -794,11 +794,18 @@ module Rigor
       def target_files(expansion)
         files = expansion.fetch(:files)
         # ADR-46 slice 2 — restrict the analyzed set to the affected closure while the pre-pass (run
-        # separately over `expansion`'s full file list) keeps the cross-file index complete. Buffer mode
-        # takes precedence — its single logical path is the analyzed set.
-        files = files.select { |path| @analyze_only.include?(path) } if @analyze_only
+        # separately over `expansion`'s full file list) keeps the cross-file index complete.
+        if @analyze_only
+          # Editor mode option B (#146) — with BOTH set, the closure wins and the buffer is one member of it.
+          # The logical path joins even when it is not on disk under `paths:` (design § "Failure envelope"),
+          # the same allowance option A makes below.
+          files = files.select { |path| @analyze_only.include?(path) }
+          files |= [@buffer.logical_path] if @buffer && @analyze_only.include?(@buffer.logical_path)
+          return files
+        end
         return files if @buffer.nil?
 
+        # Editor mode option A — no closure, so the buffer's single logical path IS the analyzed set.
         [@buffer.logical_path]
       end
 

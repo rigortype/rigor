@@ -63,6 +63,71 @@ RSpec.describe Rigor::CLI::CheckCommand do
     expect(warm_out).to include("No diagnostics")
   end
 
+  # #146 — editor mode option B. `--incremental` plus a buffer used to ignore the buffer entirely and analyse
+  # the file on disk: a wrong answer, not a missing feature. It now analyses the whole project with the buffer
+  # substituted, and declines to single-file scope when there is no snapshot to reuse.
+  describe "editor mode with --incremental (option B)" do
+    def write_editor_project
+      FileUtils.mkdir_p("lib")
+      File.write(File.join("lib", "widget.rb"), "class Widget\n  def name\n    \"w\"\n  end\nend\n")
+      File.write(File.join("lib", "other.rb"), "class Other\n  def go\n    Widget.new.name.upcase\n  end\nend\n")
+      File.write("buffer_widget.rb", "class Widget\n  def name\n    1\n  end\nend\n")
+    end
+
+    def editor_argv
+      ["--no-ci-detect", "--no-stats", "--incremental",
+       "--tmp-file=buffer_widget.rb", "--instead-of=lib/widget.rb", "lib"]
+    end
+
+    it "falls back to single-file scope, with a note, when no snapshot exists yet" do
+      write_editor_project
+
+      status, out, err = run(editor_argv)
+
+      expect(err).to include("no reusable snapshot")
+      expect(err).to include("rigor check --incremental")
+      # Option A's answer: the buffer alone, so the dependent's diagnostic is absent.
+      expect(out).not_to include("lib/other.rb")
+      expect(status).to eq(0)
+    end
+
+    it "reports the unsaved buffer's effect on a dependent once a snapshot exists" do
+      write_editor_project
+      run(["--no-ci-detect", "--no-stats", "--incremental", "lib"]) # warm the snapshot from disk
+
+      status, out, err = run(editor_argv)
+
+      expect(err).to include("--incremental editor mode")
+      expect(out).to include("lib/other.rb")
+      expect(out).to include("undefined method `upcase'")
+      expect(status).to eq(1)
+    end
+
+    it "leaves the snapshot untouched, so the next on-disk run is unaffected" do
+      write_editor_project
+      run(["--no-ci-detect", "--no-stats", "--incremental", "lib"])
+      snapshot = File.join(".rigor", "cache", "incremental", "snapshot.bin")
+      before = File.binread(snapshot)
+
+      run(editor_argv)
+
+      expect(File.binread(snapshot)).to eq(before)
+      status, out, = run(["--no-ci-detect", "--no-stats", "--incremental", "lib"])
+      expect(out).to include("No diagnostics")
+      expect(status).to eq(0)
+    end
+
+    it "refuses --verify-incremental against a buffer instead of comparing against the wrong oracle" do
+      write_editor_project
+
+      status, _out, err = run(["--no-ci-detect", "--no-stats", "--verify-incremental",
+                               "--tmp-file=buffer_widget.rb", "--instead-of=lib/widget.rb", "lib"])
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("--verify-incremental cannot run against an editor buffer")
+    end
+  end
+
   it "allows parameter_inference: on a full (non-incremental) check" do
     File.write(".rigor.yml", "paths:\n  - clean.rb\nparameter_inference: true\n")
     File.write("clean.rb", "x = 1\n")

@@ -14,6 +14,10 @@ define *behaviour*.
   `try_dispatch`) is an **interface**, not a protocol.
 - **protocol** — reserved for [ADR-28](docs/adr/28-path-scoped-protocol-contracts.md)'s path-scoped
   *behavioural* method contract (a plugin-manifest field). Do not use it for structural typing.
+- **scope** — overloaded three ways, so never write it bare. `Rigor::Scope` is the inference
+  object (flow state + discovery index); **analysis scope** is which files one invocation produces
+  diagnostics for (editor mode's option A / option B); **publish set** is the LSP's notification
+  target. Qualify which one you mean on every use.
 - **budget** — the spec's configurable `budgets:` table is **not wired** (#123 tracks it); operative
   cutoffs today are three hard-coded guards plus ADR-10's `budget_per_gem`. Do not describe budget
   behaviour as configurable.
@@ -38,6 +42,9 @@ define *behaviour*.
   the taxonomy is `docs/type-specification/diagnostic-policy.md`.
 - **baseline** — `.rigor-baseline.yml`, the acknowledged pre-existing diagnostics a project starts
   from (ADR-22); only *new* findings surface.
+- **publish set** — the URIs one `textDocument/publishDiagnostics` round targets. Distinct from the
+  analysis scope that produced the diagnostics: a whole-project analysis can have a publish set of
+  one open buffer.
 - **protection coverage** — the user-facing "what fraction of call sites the types protect" metric
   (`rigor coverage --protection`, ADR-63/70).
 - **plugin contract** — the `Plugin::Base` manifest surface (`plugins/` production gems,

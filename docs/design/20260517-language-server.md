@@ -212,11 +212,70 @@ server publishes:
 - On `didClose` — empty diagnostic array for the URI (clears
   inline markers).
 
-Per-buffer scope: only the changed buffer gets a fresh publish.
-This matches editor mode v1's single-file scope. When a per-file
-diagnostic cache lands (queued, see ROADMAP § "Editor / IDE
-integration"), the LSP can promote to project-scope publishes
-cheaply.
+Per-buffer analysis scope on `didChange`: only the changed buffer
+gets a fresh publish. The whole-project promotion is decided below.
+
+### Whole-project publishes on save (decided 2026-08-01)
+
+Editor mode option B shipped for the CLI in #146, so the LSP can
+promote. Seven decisions fix the shape; "publish set" is the URIs one
+publish round targets, distinct from the analysis scope that produced
+the diagnostics (see `CONTEXT.md`, where **scope** is a trapped term).
+
+1. **Publish set = open buffers only.** Never a URI the client has not
+   opened. The clearing obligation then has a defined end (`didClose`),
+   where a set of unopened URIs the server published to would be owned
+   forever. It also keeps the server inside push-diagnostics semantics
+   instead of implying workspace diagnostics.
+2. **Every round publishes to the whole publish set**, not only the
+   affected files. One recheck already yields whole-project
+   diagnostics, so partitioning them by open URI is free — and a stale
+   marker becomes impossible by construction rather than by a
+   "what did I publish last time" ledger. Same reasoning as #204's
+   table diff.
+3. **A dirty buffer is excluded from the publish set except as itself.**
+   Only one buffer's bytes are ever bound, so publishing another dirty
+   buffer's diagnostics would report on its stale on-disk bytes — worse
+   than silence. Invariant: *each URI's markers come from the last
+   analysis that saw that URI's current bytes* — a dirty buffer's own
+   `didChange` publish, a clean buffer's latest save round.
+4. **The trigger is `didSave`, not `didChange`.** Phase attribution of
+   one CLI option-B invocation (mastodon `app/models`, 248 files, warm,
+   4-file closure) puts per-file analysis + merge at ~0.60s; boot,
+   RBS env and the pre-pass — the other ~0.73s — are already warm or
+   prebuilt in the LSP. That is 2-3x the `didChange` → publish p50
+   target below, on a project a fifth the size of the target profile.
+   Save is also where the user's mental model puts "the rest of the
+   project catches up". Consequence: the round reads bytes that are on
+   disk, so it needs **no `BufferBinding` at all**.
+5. **State is an in-process `IncrementalSession` on `ProjectContext`,
+   seeded from the on-disk snapshot when one exists, never written
+   back.** Not writing follows the existing `cache_store` decision
+   (read-only, so concurrent sessions never race on shared state); a
+   long-lived process gains little from persisting what it already
+   holds in memory. Seeding is one-directional: a terminal
+   `rigor check --incremental` warms the LSP, not the reverse.
+6. **The first round builds the baseline when no snapshot seeds it**,
+   on the existing `Debouncer` under one project-wide key. Nothing
+   blocks: the saved buffer was already published by its `didChange`,
+   and the other tabs update when the round lands. A round captures
+   `ProjectContext#generation` at entry and **discards its result if the
+   generation moved** — otherwise an invalidated world's diagnostics
+   get published.
+7. **Single-flight, no size cap.** The Debouncer cancels only tasks
+   that have not started, so two rounds can otherwise run concurrently
+   over one session's mutable state; a mutex plus a "re-run pending"
+   flag keeps exactly one round touching it and collapses a burst of
+   saves into at most one extra round. No cap on closure size:
+   re-analysing everything after an edit to a base class everything
+   includes is the work correctness requires, and a cap would make
+   whether other tabs update depend on dependency topology in a way
+   the user cannot observe — slowness is visible, silent staleness is
+   not.
+
+What this deliberately does not give: the effect of an **unsaved** edit
+on other files. That is the CLI's option B (which does bind a buffer);
+the LSP trades it for the p50 budget.
 
 Severity profile + per-rule overrides apply as in `rigor check`.
 LSP `DiagnosticSeverity` mapping:
@@ -242,10 +301,11 @@ later.
     openClose: true,
     change: TextDocumentSyncKind::FULL  # now INCREMENTAL — see below
   },
-  diagnosticProvider: {
-    interFileDependencies: false,        # single-file scope
-    workspaceDiagnostics: false
-  },
+  // NOTE: not advertised by the implementation — `diagnosticProvider`
+  // belongs to the PULL model (`textDocument/diagnostic`), which this
+  // server does not implement. Push `publishDiagnostics` needs no
+  // capability, which is why the save-round promotion above changes
+  // nothing here.
   hoverProvider: true,
   documentSymbolProvider: true,
   positionEncoding: "utf-16"             # LSP default; UTF-8 queued
@@ -366,11 +426,8 @@ v1 already targets but at 10× the responsiveness.
 - **`initializationOptions` shape.** v1 reads `config_path:` and
   `cache_path:` if present, both optional. The exact JSON-Schema
   for this is finalized when slice 1 lands.
-- **Single-buffer vs project-scope diagnostics.** The LSP inherits
-  editor mode v1's "option A" (single-file scope). Once a per-file
-  diagnostic cache lands (ROADMAP § "Editor / IDE integration"),
-  the LSP can publish project-wide diagnostics on file save. The
-  CLI shape is forward-compatible.
+- ~~**Single-buffer vs project-scope diagnostics.**~~ Resolved
+  2026-08-01 — see § "Whole-project publishes on save".
 
 ## Performance targets
 

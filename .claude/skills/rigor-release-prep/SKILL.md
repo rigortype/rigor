@@ -77,6 +77,10 @@ session writing an entry, not to every session. The rules:
 
 - **One sentence per top-level bullet.** One period, no em-dash clauses, no
   run-ons. Self-contained enough to understand without the body.
+- **One LINE per bullet, never column-wrapped.** This section is extracted
+  verbatim as the GitHub Release body, and GitHub renders a newline inside a
+  paragraph as `<br>` — a wrapped entry renders ragged. Same rule for any PR /
+  issue / comment / wiki text (`AGENTS.md` § "Commit and PR Etiquette").
 - **Subsystem label prefix**: `**[rigor check]**`, `**[engine]**`,
   `**[plugin contract]**`, `**[plugins/rigor-foo]**`, etc.
 - **User-facing only.** Cut internal implementation detail — class renames,

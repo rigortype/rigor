@@ -60,7 +60,13 @@ per-class blocklist entry, or a genuine plugin-contract misuse — **never disab
 ## Commit and PR Etiquette
 
 - Imperative subject in sentence case. **No** Conventional-Commits `type:` / `area:` prefixes.
-- Wrap the body at ~72 columns; explain the *why*, never the diff.
+- Wrap the COMMIT body at ~72 columns; explain the *why*, never the diff.
+- **Never wrap anything GitHub renders as Markdown** — a PR or issue body, a comment, a release body, a
+  wiki page. GitHub turns a single newline inside a paragraph into `<br>`, so column-wrapped prose renders
+  ragged. One line per paragraph and per list item, however long; tables, headings and fenced code keep
+  their own line breaks. This is the same reason `CHANGELOG.md` entries are single long lines: the release
+  section is extracted verbatim as the GitHub Release body. Wrapping is for commit messages, which are
+  shown as preformatted text, and for files in the repo tree, which render as ordinary Markdown.
 - Version bumps use the fixed form `Bump up version to x.y.z`.
 - **Markdown-only changes commit straight to `master`** — CI skips the suite for an all-`.md` push
   (`paths-ignore`), so a docs PR buys only a redundant run. Never open a PR whose only change is

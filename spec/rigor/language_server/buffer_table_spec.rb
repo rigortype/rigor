@@ -174,4 +174,45 @@ RSpec.describe Rigor::LanguageServer::BufferTable do
       expect(table.size).to eq(2)
     end
   end
+
+  # #246 — dirtiness is the protocol's notion ("changed and not yet saved"), not a byte comparison with disk.
+  # The publish set excludes a dirty buffer, so this flag is what keeps a save round from replacing a dirty
+  # buffer's correct markers with markers computed from the file on disk.
+  describe "#dirty? / #save" do
+    it "is clean on open, dirty after a change, clean again after a save" do
+      table.open(uri: "file:///a", bytes: "a", version: 1)
+      expect(table.dirty?("file:///a")).to be(false)
+
+      table.change(uri: "file:///a", bytes: "b", version: 2)
+      expect(table.dirty?("file:///a")).to be(true)
+
+      table.save(uri: "file:///a")
+      expect(table.dirty?("file:///a")).to be(false)
+    end
+
+    it "marks dirty on an incremental change too, applied or not" do
+      table.open(uri: "file:///a", bytes: "abc", version: 1)
+      table.apply_changes(
+        uri: "file:///a", version: 2,
+        changes: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, text: "z" }]
+      )
+      expect(table.dirty?("file:///a")).to be(true)
+    end
+
+    it "re-opening resets dirtiness — the payload carries the client's full text" do
+      table.open(uri: "file:///a", bytes: "a", version: 1)
+      table.change(uri: "file:///a", bytes: "b", version: 2)
+      table.open(uri: "file:///a", bytes: "c", version: 3)
+
+      expect(table.dirty?("file:///a")).to be(false)
+    end
+
+    it "forgets dirtiness when the buffer closes" do
+      table.open(uri: "file:///a", bytes: "a", version: 1)
+      table.change(uri: "file:///a", bytes: "b", version: 2)
+      table.close(uri: "file:///a")
+
+      expect(table.dirty?("file:///a")).to be(false)
+    end
+  end
 end

@@ -3,6 +3,8 @@
 require_relative "../environment"
 require_relative "../cache/store"
 require_relative "../analysis/runner"
+require_relative "../analysis/incremental_session"
+require_relative "../cache/incremental_snapshot"
 
 module Rigor
   module LanguageServer
@@ -34,6 +36,9 @@ module Rigor
     # watch fires → publish) refreshes automatically; the rare in-flight edit to a substrate-DSL file is the
     # documented edge case.
     class ProjectContext
+      # `generation` is the invalidation counter: a long-running save round (#246) captures it on entry and
+      # discards its result if it moved, so diagnostics computed against a world that has since been
+      # invalidated never reach the editor.
       attr_reader :configuration, :generation
 
       def initialize(configuration:)
@@ -42,6 +47,8 @@ module Rigor
         @environment = nil
         @cache_store = nil
         @project_scan = nil
+        @incremental_session = nil
+        @session_primed = false
       end
 
       # Returns the cached `Rigor::Environment` for this session, building it on first access. The build
@@ -90,6 +97,29 @@ module Rigor
         @project_scan ||= build_project_scan
       end
 
+      # Whole-project diagnostics for one save round (#246). The first call primes an in-process
+      # {Analysis::IncrementalSession} — seeded from the on-disk snapshot a terminal
+      # `rigor check --incremental` may have left, and otherwise from a full baseline; every later call is a
+      # recheck against what changed on disk since.
+      #
+      # The session is never persisted. Its state lives as long as this context, which is what a long-running
+      # server needs, and writing it would race exactly the way the read-only {#cache_store} exists to avoid.
+      # Seeding is therefore one-directional: the terminal warms the server, not the reverse.
+      def project_diagnostics
+        session = (@incremental_session ||= build_incremental_session)
+        return session.recheck.diagnostics if @session_primed
+
+        @session_primed = true
+        diagnostics, = session.run_incremental(
+          snapshot: Cache::IncrementalSnapshot.new(root: @configuration.cache_path),
+          fingerprint: Cache::IncrementalSnapshot.fingerprint(
+            configuration: @configuration, roots: @configuration.paths
+          ),
+          persist: false
+        )
+        diagnostics
+      end
+
       # Drops every cached collaborator and bumps the generation. The next reader rebuilds from scratch.
       # Triggered by `workspace/didChangeWatchedFiles` for project source files and by
       # `workspace/didChangeConfiguration`.
@@ -97,12 +127,27 @@ module Rigor
         @generation += 1
         @environment = nil
         @project_scan = nil
+        # The session's per-file cache was computed against the old environment / project scan, so it cannot
+        # outlive them. The next save round primes a fresh one.
+        @incremental_session = nil
+        @session_primed = false
         # Cache store stays — it's content-addressed; a stale env build won't be served because the file
         # digest mixed into the cache key has changed.
         nil
       end
 
       private
+
+      # The session shares this context's warm Environment, so a round does not rebuild the RBS universe. It
+      # deliberately does NOT share the prebuilt ProjectScan: a round runs after a save, i.e. after the file
+      # on disk moved, and the scan is what a changed file invalidates.
+      def build_incremental_session
+        Analysis::IncrementalSession.new(
+          configuration: @configuration,
+          environment: environment,
+          cache_store: cache_store
+        )
+      end
 
       def build_project_scan
         runner = Analysis::Runner.new(

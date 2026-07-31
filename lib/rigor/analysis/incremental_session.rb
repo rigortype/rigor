@@ -395,7 +395,12 @@ module Rigor
       # persist the updated snapshot for the next process. Returns `[diagnostics, warm]` — `warm` is true
       # when a snapshot was restored. A nil `fingerprint` (uncomputable inputs) disables persistence: a
       # plain full run.
-      def run_incremental(snapshot:, fingerprint:)
+      # `persist: false` runs the same restore / recheck / baseline decision without writing the snapshot
+      # back. The language server (#246) needs exactly that: it keeps its session in memory for the life of
+      # the process, and writing shared state would race the way its read-only cache store already declines
+      # to. Every soundness gate below — the fingerprint, the ADR-88 fact surface — is unchanged, so the
+      # decision to reuse is made identically whether or not the result is saved.
+      def run_incremental(snapshot:, fingerprint:, persist: true)
         # ADR-87 WD1 — install the per-run digest table + recording instant + strict flag for the whole
         # invocation so change-detection's stat-then-digest freshness (`#pack_digest` / `#stat_fresh?`) honours
         # `cache.validation: digest` (and `RIGOR_STRICT_VALIDATION`, which the env-only path already sees) and
@@ -437,7 +442,7 @@ module Rigor
             warm = false
             skip_save = false
           end
-          snapshot.save(fingerprint: fingerprint, payload: to_payload) if fingerprint && !skip_save
+          snapshot.save(fingerprint: fingerprint, payload: to_payload) if persist && fingerprint && !skip_save
           [diagnostics, warm]
         end
       end

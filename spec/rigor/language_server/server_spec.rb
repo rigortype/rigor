@@ -14,7 +14,10 @@ RSpec.describe Rigor::LanguageServer::Server do
       expect(server.state).to eq(:initialized)
       expect(result[:serverInfo]).to eq(name: "rigor-lsp", version: Rigor::VERSION)
       # textDocumentSync: INCREMENTAL (openClose + change: 2), with the position encoding stated explicitly.
-      expect(result[:capabilities][:textDocumentSync]).to eq(openClose: true, change: 2)
+      # `save` is advertised so the client sends didSave, which drives the whole-project publish round (#246);
+      # `includeText: false` because the round reads the file the client just wrote.
+      expect(result[:capabilities][:textDocumentSync])
+        .to eq(openClose: true, change: 2, save: { includeText: false })
       expect(result[:capabilities][:positionEncoding]).to eq("utf-16")
     end
 
@@ -333,6 +336,47 @@ RSpec.describe Rigor::LanguageServer::Server do
     it "both are notifications — dispatch returns nil" do
       expect(server.dispatch("workspace/didChangeWatchedFiles", { changes: [] })).to be_nil
       expect(server.dispatch("workspace/didChangeConfiguration", { settings: {} })).to be_nil
+    end
+  end
+
+  # #246 — didSave marks the buffer clean and starts the whole-project publish round.
+
+  describe "textDocument/didSave" do
+    let(:publisher) do
+      Class.new do
+        attr_reader :project_rounds, :buffer_publishes
+
+        def initialize
+          @project_rounds = []
+          @buffer_publishes = []
+        end
+
+        def publish_for(uri) = @buffer_publishes << uri
+        def publish_project(uri) = @project_rounds << uri
+        def publish_empty(_uri) = nil
+        def cancel_pending = nil
+      end.new
+    end
+
+    it "clears the buffer's dirty mark and starts one project round for the saved URI" do
+      table = Rigor::LanguageServer::BufferTable.new
+      server = described_class.new(buffer_table: table, publisher: publisher)
+      server.dispatch("initialize", { processId: 0, rootUri: nil, capabilities: {} })
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: "file:///a.rb", languageId: "ruby", version: 1, text: "x = 1\n" }
+                      })
+      server.dispatch("textDocument/didChange", {
+                        textDocument: { uri: "file:///a.rb", version: 2 },
+                        contentChanges: [{ text: "x = 2\n" }]
+                      })
+      expect(table.dirty?("file:///a.rb")).to be(true)
+
+      server.dispatch("textDocument/didSave", { textDocument: { uri: "file:///a.rb" } })
+
+      expect(table.dirty?("file:///a.rb")).to be(false)
+      expect(publisher.project_rounds).to eq(["file:///a.rb"])
+      # didChange's own publish path is untouched — the save round must not change the keystroke budget.
+      expect(publisher.buffer_publishes).to eq(["file:///a.rb", "file:///a.rb"])
     end
   end
 end

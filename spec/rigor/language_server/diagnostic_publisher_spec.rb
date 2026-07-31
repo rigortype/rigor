@@ -204,4 +204,111 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
                                     ])
     end
   end
+
+  # #246 — the save round. Analysis scope is the whole project; the PUBLISH SET is the open, clean buffers.
+  describe "#publish_project" do
+    # `widget.rb` returns a String and `other.rb` calls `upcase` on it — clean. Editing widget's return to an
+    # Integer makes the diagnostic appear in OTHER.rb, which is the whole point: a single-file publish for
+    # widget can never report it.
+    def write_project(dir, widget_body)
+      File.write(File.join(dir, "widget.rb"), "class Widget\n  def name\n    #{widget_body}\n  end\nend\n")
+      File.write(File.join(dir, "other.rb"), "class Other\n  def go\n    Widget.new.name.upcase\n  end\nend\n")
+    end
+
+    def context_for(dir)
+      Rigor::LanguageServer::ProjectContext.new(
+        configuration: Rigor::Configuration.new("paths" => [dir])
+      )
+    end
+
+    def publisher_for(context)
+      described_class.new(writer: writer, buffer_table: buffer_table, project_context: context)
+    end
+
+    def diagnostics_for(uri)
+      payload = writer.payloads.rfind { |p| p.dig(:params, :uri) == uri }
+      payload&.dig(:params, :diagnostics)
+    end
+
+    it "publishes a saved file's effect on a dependent that is open in another buffer" do
+      Dir.mktmpdir("rigor-lsp-round-") do |dir|
+        write_project(dir, "1")
+        widget = "file://#{File.join(dir, 'widget.rb')}"
+        other  = "file://#{File.join(dir, 'other.rb')}"
+        buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
+        buffer_table.open(uri: other, bytes: File.read(File.join(dir, "other.rb")), version: 1)
+
+        Dir.chdir(dir) { publisher_for(context_for(dir)).publish_project(widget) }
+
+        expect(diagnostics_for(other)).not_to be_empty
+        expect(diagnostics_for(other).first[:message]).to include("undefined method `upcase'")
+        # The saved buffer itself is clean, so it is published too — with its own (empty) slice.
+        expect(diagnostics_for(widget)).to eq([])
+      end
+    end
+
+    it "excludes a dirty buffer, whose markers only its own analysis may set" do
+      Dir.mktmpdir("rigor-lsp-round-dirty-") do |dir|
+        write_project(dir, "1")
+        widget = "file://#{File.join(dir, 'widget.rb')}"
+        other  = "file://#{File.join(dir, 'other.rb')}"
+        buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
+        buffer_table.open(uri: other, bytes: File.read(File.join(dir, "other.rb")), version: 1)
+        # The user is mid-edit in other.rb — this round analysed the file on DISK, so it may not speak for it.
+        buffer_table.change(uri: other, bytes: "class Other\nend\n", version: 2)
+
+        Dir.chdir(dir) { publisher_for(context_for(dir)).publish_project(widget) }
+
+        expect(diagnostics_for(other)).to be_nil
+        expect(diagnostics_for(widget)).to eq([])
+      end
+    end
+
+    it "publishes nothing when the context was invalidated while the round ran" do
+      Dir.mktmpdir("rigor-lsp-round-gen-") do |dir|
+        write_project(dir, "1")
+        widget = "file://#{File.join(dir, 'widget.rb')}"
+        buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
+        context = context_for(dir)
+        # A watched-file change lands mid-analysis: the world these diagnostics describe is gone.
+        allow(context).to receive(:project_diagnostics).and_wrap_original do |original, *args|
+          result = original.call(*args)
+          context.invalidate!
+          result
+        end
+
+        Dir.chdir(dir) { publisher_for(context).publish_project(widget) }
+
+        expect(writer.payloads).to be_empty
+      end
+    end
+
+    it "runs one round at a time and collapses a burst into one extra round" do
+      Dir.mktmpdir("rigor-lsp-round-flight-") do |dir|
+        write_project(dir, '"w"')
+        widget = "file://#{File.join(dir, 'widget.rb')}"
+        buffer_table.open(uri: widget, bytes: File.read(File.join(dir, "widget.rb")), version: 1)
+        context = context_for(dir)
+        publisher = publisher_for(context)
+        rounds = 0
+        concurrent = false
+        running = false
+        allow(context).to receive(:project_diagnostics).and_wrap_original do |original, *args|
+          concurrent ||= running
+          running = true
+          rounds += 1
+          # Re-entering while this round is in flight must NOT start a second one.
+          publisher.publish_project(widget) if rounds == 1
+          result = original.call(*args)
+          running = false
+          result
+        end
+
+        Dir.chdir(dir) { publisher.publish_project(widget) }
+
+        expect(concurrent).to be(false)
+        expect(rounds).to eq(2) # the in-flight round plus exactly one re-run for the save that arrived
+      end
+    end
+  end
 end

@@ -37,6 +37,10 @@ module Rigor
       #   debounced publish fires. 0 with a debouncer means
       #   "schedule on next-tick" (still async); without a
       #   debouncer the value is unused.
+      # The single Debouncer key every save round shares (#246). Per-URI keys would let two saves start two
+      # concurrent rounds; one key means a burst collapses into the last one.
+      PROJECT_ROUND_KEY = :__rigor_project_round__
+
       def initialize(writer:, buffer_table:, project_context:,
                      debouncer: nil, debounce_seconds: 0.2)
         @writer = writer
@@ -44,6 +48,9 @@ module Rigor
         @project_context = project_context
         @debouncer = debouncer
         @debounce_seconds = debounce_seconds
+        @round_lock = Mutex.new
+        @round_running = false
+        @round_pending = false
       end
 
       # Run analysis for the buffer at `uri` (looked up in the BufferTable) and push a
@@ -61,6 +68,23 @@ module Rigor
         end
       end
 
+      # Runs one whole-project save round and publishes to the publish set (#246). Called from `didSave`.
+      #
+      # Analysis scope is the whole project; the PUBLISH SET is the open buffers that are not dirty, plus the
+      # buffer that was just saved. A dirty buffer is excluded because only its own `didChange` analysis has
+      # seen its bytes — publishing this round's on-disk answer for it would replace correct markers with
+      # markers for a file the user has already changed.
+      #
+      # Scheduled through the same Debouncer the per-buffer path uses, under one project-wide key, so the
+      # dispatcher never blocks on it.
+      def publish_project(saved_uri)
+        if @debouncer
+          @debouncer.schedule(PROJECT_ROUND_KEY, delay: 0) { run_project_round(saved_uri) }
+        else
+          run_project_round(saved_uri)
+        end
+      end
+
       # Publishes an EMPTY diagnostic array for `uri`. The LSP-spec idiom for "clear inline markers" — called
       # from `didClose` so clients drop stale highlights when the user closes a buffer.
       def publish_empty(uri)
@@ -74,6 +98,73 @@ module Rigor
       end
 
       private
+
+      # Single-flight. The Debouncer only cancels a task that has not started, so without this two rounds
+      # could run concurrently over one session's mutable state. A save that arrives mid-round sets the
+      # pending flag instead of starting a second round, and the running one repeats once when it finishes —
+      # so a burst of saves costs at most one extra round, and the last save is always accounted for.
+      def run_project_round(saved_uri)
+        return unless claim_round
+
+        loop do
+          execute_project_round(saved_uri)
+          break unless consume_pending
+        end
+      end
+
+      # True when this call owns the round. A save arriving while one is in flight records itself as pending
+      # instead — the running round will pick it up.
+      def claim_round
+        @round_lock.synchronize do
+          if @round_running
+            @round_pending = true
+            next false
+          end
+
+          @round_running = true
+          true
+        end
+      end
+
+      # True when a save arrived mid-round and the loop should run once more. Releases ownership otherwise.
+      # `next`, not `break`: inside `Mutex#synchronize`'s block, `break` returns from the SYNCHRONIZE call, so
+      # a `break` written here would leave the caller's `loop` spinning forever — which is exactly what it did
+      # before this was split out.
+      def consume_pending
+        @round_lock.synchronize do
+          next(@round_running = false) unless @round_pending
+
+          @round_pending = false
+          true
+        end
+      end
+
+      # One round: analyse the project as it now stands on disk, then publish each target URI's slice.
+      # The generation captured before the analysis is re-read after it — a `didChangeWatchedFiles` or a
+      # configuration change during a long round invalidates the world these diagnostics describe, and
+      # publishing them would put an answer about a superseded project on the user's screen.
+      def execute_project_round(saved_uri)
+        generation = @project_context.generation
+        diagnostics = @project_context.project_diagnostics
+        return if generation != @project_context.generation
+
+        by_path = diagnostics.group_by(&:path)
+        publish_set(saved_uri).each do |uri|
+          path = Uri.to_path(uri)
+          next if path.nil?
+
+          notify(uri, (by_path[path] || []).filter_map { |diagnostic| to_lsp_diagnostic(diagnostic, path) })
+        end
+      end
+
+      # The URIs this round may speak for: every open buffer whose bytes are the ones on disk. The just-saved
+      # URI qualifies by definition (the client wrote it), and is named explicitly so a client that sends
+      # `didSave` without a preceding applied `didChange` still refreshes it.
+      def publish_set(saved_uri)
+        ([saved_uri] + @buffer_table.uris).uniq.select do |uri|
+          @buffer_table.open?(uri) && !@buffer_table.dirty?(uri) && !@buffer_table.desynchronized?(uri)
+        end
+      end
 
       def run_and_notify(uri, path)
         entry = @buffer_table[uri]

@@ -95,6 +95,7 @@ module Rigor
         when "exit"                   then handle_exit
         when "textDocument/didOpen"   then handle_did_open(params)
         when "textDocument/didChange" then handle_did_change(params)
+        when "textDocument/didSave"   then handle_did_save(params)
         when "textDocument/didClose"  then handle_did_close(params)
         when "textDocument/hover"               then handle_hover(params)
         when "textDocument/documentSymbol"      then handle_document_symbol(params)
@@ -161,7 +162,10 @@ module Rigor
           positionEncoding: POSITION_ENCODING_UTF16,
           textDocumentSync: {
             openClose: true,
-            change: TEXT_DOCUMENT_SYNC_INCREMENTAL
+            change: TEXT_DOCUMENT_SYNC_INCREMENTAL,
+            # `includeText: false` — the round reads the file the client just wrote, so the payload's copy
+            # would be redundant. See `handle_did_save`.
+            save: { includeText: false }
           }
         }
         caps[:hoverProvider] = true if @hover_provider
@@ -239,6 +243,21 @@ module Rigor
           version: doc.fetch(:version)
         )
         @publisher&.publish_for(uri)
+        nil
+      end
+
+      # textDocument/didSave notification. Marks the buffer clean — the client has written it, so the held
+      # text and the file on disk agree — and starts a whole-project publish round (#246).
+      #
+      # This is where whole-project scope lives, rather than on `didChange`: a round costs ~0.6s on a
+      # mid-sized project against a 250ms `didChange` p50 budget, and "the rest of the project catches up"
+      # is what saving means to the user. Because the saved bytes are the bytes on disk, the round needs no
+      # buffer binding at all. Design: `docs/design/20260517-language-server.md` § "Whole-project publishes
+      # on save".
+      def handle_did_save(params)
+        uri = params.fetch(:textDocument).fetch(:uri)
+        @buffer_table.save(uri: uri)
+        @publisher&.publish_project(uri)
         nil
       end
 

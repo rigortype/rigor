@@ -21,6 +21,7 @@ module Rigor
       def initialize
         @entries = {}
         @desynchronized = {}
+        @dirty = {}
       end
 
       # Records a `textDocument/didOpen` event. Replaces any existing entry (LSP clients may re-open a
@@ -28,6 +29,7 @@ module Rigor
       # payload carries the client's full text, so the two views agree again.
       def open(uri:, bytes:, version:)
         @desynchronized.delete(uri)
+        @dirty.delete(uri)
         @entries[uri] = Entry.new(uri: uri, bytes: bytes, version: version)
       end
 
@@ -36,6 +38,7 @@ module Rigor
       # created — defensive.
       def change(uri:, bytes:, version:)
         @desynchronized.delete(uri)
+        @dirty[uri] = true
         @entries[uri] = Entry.new(uri: uri, bytes: bytes, version: version)
       end
 
@@ -52,6 +55,7 @@ module Rigor
       def apply_changes(uri:, changes:, version:)
         text = IncrementalSync.apply_all(@entries[uri]&.bytes, changes)
         @desynchronized.delete(uri)
+        @dirty[uri] = true
         @entries[uri] = Entry.new(uri: uri, bytes: text, version: version)
         true
       rescue IncrementalSync::UnappliableChange => e
@@ -73,7 +77,25 @@ module Rigor
       # Records a `textDocument/didClose` event. The entry is removed. Subsequent reads via `#[]` return nil.
       def close(uri:)
         @desynchronized.delete(uri)
+        @dirty.delete(uri)
         @entries.delete(uri)
+      end
+
+      # Records a `textDocument/didSave`. The client has written the buffer, so the held text and the file on
+      # disk agree again and the URI stops being dirty.
+      #
+      # Dirtiness is the PROTOCOL's notion — "the client told us it changed and has not told us it saved" —
+      # not a byte comparison against disk. A comparison would look stricter and be weaker: it races with the
+      # editor's own write, and the server's truth is what the client notified.
+      def save(uri:)
+        @dirty.delete(uri)
+      end
+
+      # @return [Boolean] true when `uri` has unsaved changes. A buffer that is dirty may only be published
+      #   from an analysis that bound ITS bytes — see the publish-set invariant in
+      #   `docs/design/20260517-language-server.md`.
+      def dirty?(uri)
+        @dirty.key?(uri)
       end
 
       def [](uri)

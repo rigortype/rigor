@@ -272,6 +272,12 @@ RSpec.describe Rigor::Configuration do
         described_class.new(Rigor::Configuration::DEFAULTS.merge("bleeding_edge" => value))
       end
 
+      # A queued change that moves no severity — stubbed in rather than added to the shipped registry, which
+      # carries only what is actually queued for the next major.
+      let(:behaviour_feature) do
+        Rigor::BleedingEdge::Feature.new(id: "feat-b", summary: "count differently", kind: :behaviour)
+      end
+
       it "defaults to adopting nothing, with an empty severity map" do
         Dir.mktmpdir do |dir|
           configuration = described_class.load(File.join(dir, "missing.yml"))
@@ -346,6 +352,54 @@ RSpec.describe Rigor::Configuration do
           result = base.with_bleeding_edge(true)
           expect(result.paths).to equal(base.paths)
           expect(result.severity_profile).to eq(base.severity_profile)
+        end
+
+        # The regression this guards: `#with_bleeding_edge` re-sets ivars by hand, so an ivar `#initialize`
+        # derives from the selector and this method forgets is stale — and `--bleeding-edge` would then flip the
+        # severity map while leaving every behaviour feature reading its *configured* value.
+        it "recomputes the active-id set the behaviour predicate reads" do
+          stub_const("Rigor::BleedingEdge::FEATURES", [behaviour_feature].freeze)
+          config = config_with(false)
+
+          expect(config.bleeding_edge_active?("feat-b")).to be(false)
+          expect(config.with_bleeding_edge(true).bleeding_edge_active?("feat-b")).to be(true)
+          expect(config.with_bleeding_edge(%w[feat-b]).bleeding_edge_active?("feat-b")).to be(true)
+          expect(config.with_bleeding_edge("all" => true, "except" => %w[feat-b])
+                       .bleeding_edge_active?("feat-b")).to be(false)
+          expect(config.with_bleeding_edge(true).with_bleeding_edge(false).bleeding_edge_active?("feat-b"))
+            .to be(false)
+        end
+      end
+
+      # ADR-50 § WD2 — how a *behaviour* feature (one that moves no severity) reaches its call site.
+      describe "#bleeding_edge_active?" do
+        before { stub_const("Rigor::BleedingEdge::FEATURES", [behaviour_feature].freeze) }
+
+        it "answers per selector form" do
+          expect(config_with(false).bleeding_edge_active?("feat-b")).to be(false)
+          expect(config_with(true).bleeding_edge_active?("feat-b")).to be(true)
+          expect(config_with(%w[feat-b]).bleeding_edge_active?("feat-b")).to be(true)
+          expect(config_with(%w[other]).bleeding_edge_active?("feat-b")).to be(false)
+          expect(config_with("all" => true, "except" => %w[feat-b]).bleeding_edge_active?("feat-b")).to be(false)
+          expect(config_with("all" => true, "except" => %w[other]).bleeding_edge_active?("feat-b")).to be(true)
+        end
+
+        # An unknown id in a *config file* is inert (it may come from a newer gem); an unknown id at the query
+        # is a contributor's typo against the registry in this same checkout, and must not read as `false`.
+        it "raises on an id no known feature carries, while the config keeps ignoring one" do
+          expect { config_with(true).bleeding_edge_active?("ghost") }
+            .to raise_error(ArgumentError, /unknown bleeding-edge feature id "ghost"/)
+          expect(config_with(%w[ghost]).bleeding_edge).to eq("mode" => "list", "ids" => %w[ghost])
+          expect(config_with(%w[ghost]).bleeding_edge_severity_overrides).to eq({})
+        end
+
+        # ADR-50 § WD7 — graduation moves the id out of FEATURES; the behaviour is then on for everyone, so a
+        # call site that still asks keeps it rather than silently reverting.
+        it "answers true for a graduated id whatever the configuration selects" do
+          stub_const("Rigor::BleedingEdge::GRADUATED", ["feat-g"].freeze)
+          expect(config_with(false).bleeding_edge_active?("feat-g")).to be(true)
+          expect(config_with(%w[feat-b]).bleeding_edge_active?("feat-g")).to be(true)
+          expect(config_with("all" => true, "except" => %w[feat-g]).bleeding_edge_active?("feat-g")).to be(true)
         end
       end
     end

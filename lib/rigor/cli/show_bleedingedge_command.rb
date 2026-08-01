@@ -13,8 +13,9 @@ module Rigor
     #
     # Prints the bleeding-edge overlay — the Rigor-maintained set of the next major's queued changes
     # ({Rigor::BleedingEdge}) — as an explicit list, and reports which of them the project's `bleeding_edge:`
-    # configuration adopts. The overlay is empty in this release, so the command currently reports an empty set; it
-    # becomes the inspection surface ADR-50 describes once a feature is queued.
+    # configuration adopts. Each feature is rendered with its kind: a `severity` feature prints the rule → severity
+    # diff it imposes, and a `behaviour` feature has no such diff to print, so its summary carries the whole
+    # explanation. Ids that have already graduated to default-on (ADR-50 § WD7) are listed after the overlay.
     #
     # Read-only: it loads `.rigor.yml` to resolve the active selection but runs no analysis.
     class ShowBleedingedgeCommand < Command
@@ -62,7 +63,8 @@ module Rigor
                     "overlay" => BleedingEdge.features.map(&:to_h),
                     "selector" => configuration.to_h.fetch("bleeding_edge"),
                     "active" => BleedingEdge.active_features(selector).map(&:id),
-                    "unknown_selected" => BleedingEdge.unknown_selected_ids(selector)
+                    "unknown_selected" => BleedingEdge.unknown_selected_ids(selector),
+                    "graduated" => BleedingEdge::GRADUATED
                   ))
       end
 
@@ -74,6 +76,7 @@ module Rigor
         else
           render_overlay
         end
+        render_graduated
         @out.puts("")
         render_selection(configuration)
       end
@@ -88,12 +91,22 @@ module Rigor
         @out.puts("#{BleedingEdge.features.length} feature(s) queued for the next major:")
         @out.puts("")
         BleedingEdge.features.each do |feature|
-          @out.puts("  #{feature.id}")
+          @out.puts("  #{feature.id} [#{feature.kind}]")
           @out.puts("    #{feature.summary}")
           feature.severity_overrides.each do |rule, severity|
             @out.puts("    severity: #{rule} → :#{severity}")
           end
         end
+      end
+
+      # ADR-50 § WD7 — only printed when something has graduated, so a release with an empty list reads exactly
+      # as it did before graduation existed.
+      def render_graduated
+        return if BleedingEdge::GRADUATED.empty?
+
+        @out.puts("")
+        @out.puts("Graduated — on by default, no longer selectable:")
+        BleedingEdge::GRADUATED.each { |id| @out.puts("  #{id}") }
       end
 
       def render_selection(configuration)

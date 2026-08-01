@@ -605,7 +605,7 @@ pages from the installed gem with no HTTP request.
 ## `rigor show-bleedingedge`
 
 Print the **bleeding-edge overlay** — the Rigor-maintained set of
-the next major's queued diagnostic disciplines ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
+the next major's queued changes ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md)
 § WD2) — and report which of them the project's
 [`bleeding_edge:`](03-configuration.md) configuration adopts. Read-only:
 it loads `.rigor.yml` to resolve the active selection but runs no
@@ -620,16 +620,29 @@ rigor show-bleedingedge [--config PATH] [--format text|json]
 | `--config PATH` | Use this `.rigor.yml` instead of auto-discovery. |
 | `--format text\|json` | Output format. Default `text`. |
 
-Each queued feature appears with its stable id, the severity it imposes,
-and whether your configuration adopts it. See
-[`docs/compatibility.md`](../compatibility.md) for how bleeding-edge fits
-the stability model.
+Each queued feature appears with its stable id, its **kind** — `severity`
+or `behaviour` — and whether your configuration adopts it. A `severity`
+feature also prints the rule → severity diff it imposes; a `behaviour`
+feature changes a measurement, an algorithm, or a default without moving
+any rule's severity, so it has no such diff and its summary is the whole
+description. See [`docs/compatibility.md`](../compatibility.md) for how
+bleeding-edge fits the stability model.
 
 Queued today:
 
-| Feature id | What it changes |
-| --- | --- |
-| `reject-unparseable-signatures` | An unparseable `.rbs` under `signature_paths:` **fails the run** (`rbs.coverage.quarantined-signature` → `error`) instead of being skipped with a warning. |
+| Feature id | Kind | What it changes |
+| --- | --- | --- |
+| `reject-unparseable-signatures` | severity | An unparseable `.rbs` under `signature_paths:` **fails the run** (`rbs.coverage.quarantined-signature` → `error`) instead of being skipped with a warning. |
+| `use-of-void-value` | severity | Using a value recovered from an author-declared `-> void` return in value context is reported as `static.value-use.void` (`warning`). |
+
+Once a feature **graduates** — it becomes the default at a major
+([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD7)
+— it leaves the queued list and appears under `Graduated`, an
+acknowledgement that naming it in `bleeding_edge:` no longer does
+anything: the behaviour is on for everyone. The section is absent while
+nothing has graduated. In `--format json` the same information is the
+`graduated` array, alongside `overlay` (every queued feature, each with
+its `kind`), `active`, and `unknown_selected`.
 
 ## `rigor doctor`
 

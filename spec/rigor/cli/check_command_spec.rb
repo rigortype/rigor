@@ -386,6 +386,23 @@ RSpec.describe Rigor::CLI::CheckCommand do
         expect(result.bleeding_edge).to eq("mode" => "none")
         expect(configuration.bleeding_edge).to eq("mode" => "all")
       end
+
+      # ADR-50 § WD2 — a behaviour feature is read through `Configuration#bleeding_edge_active?`, so the flag
+      # has to reach that predicate too, not only the severity map.
+      it "carries the override through to the behaviour predicate" do
+        stub_const(
+          "Rigor::BleedingEdge::FEATURES",
+          [Rigor::BleedingEdge::Feature.new(id: "feat-b", summary: "s", kind: :behaviour)].freeze
+        )
+        config = Rigor::Configuration.new("bleeding_edge" => false)
+
+        expect(command.send(:apply_bleeding_edge_override, config, { bleeding_edge: true })
+                      .bleeding_edge_active?("feat-b")).to be(true)
+        expect(command.send(:apply_bleeding_edge_override, config, { bleeding_edge: %w[feat-b] })
+                      .bleeding_edge_active?("feat-b")).to be(true)
+        expect(command.send(:apply_bleeding_edge_override, config, { bleeding_edge: false })
+                      .bleeding_edge_active?("feat-b")).to be(false)
+      end
     end
   end
 end

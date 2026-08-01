@@ -230,6 +230,13 @@ config-file list path. **Not yet shipped:** the dedicated bleeding-edge
 CHANGELOG section (no entries to carry yet — it lands with the first
 queued feature).
 
+> **Kinds note (2026-08-01):** a `Feature` now declares a `kind:` —
+> `:severity` (the promotions above) or `:behaviour`, a queued change to a
+> measurement, an algorithm, or a default that moves no rule's severity and
+> is read at its call site through `Configuration#bleeding_edge_active?`;
+> a graduated id moves to `BleedingEdge::GRADUATED`, where that predicate
+> keeps answering `true` after § WD7 turns the feature on for everyone.
+
 ### WD3 — What counts as a breaking diagnostic change (the discipline test)
 
 The line between "allowed minor strengthening" and "BC-breaking new

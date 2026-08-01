@@ -96,8 +96,9 @@ module Rigor
       # ADR-50 § WD2 — bleeding-edge overlay opt-in. Selects which of the *next major's* queued changes
       # ({Rigor::BleedingEdge}) this project adopts early. Orthogonal to `severity_profile:`. Accepts `false`
       # (default — adopt none), `true` (adopt the whole overlay), a list of feature ids (adopt only those),
-      # or `{ all: true, except: [ids] }` (adopt all but the named). The overlay is empty today, so every
-      # form is currently a no-op; it becomes live when the first discipline is queued for a major.
+      # or `{ all: true, except: [ids] }` (adopt all but the named). A queued change is either a severity
+      # promotion (composed by {SeverityProfile.resolve}) or a behaviour switch (read at its call site
+      # through {#bleeding_edge_active?}); `bleeding_edge:` selects both kinds the same way.
       "bleeding_edge" => false,
       "dependencies" => {
         "source_inference" => [],
@@ -439,6 +440,7 @@ module Rigor
         data.fetch("bleeding_edge", DEFAULTS.fetch("bleeding_edge"))
       )
       @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
+      @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
       @dependencies = Dependencies.from_h(
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
@@ -517,6 +519,39 @@ module Rigor
       }
     end
 
+    # ADR-50 § WD2 — whether the bleeding-edge feature `id` is in force for this run.
+    #
+    # This is how a **behaviour** feature reaches its call site: a severity feature composes itself into
+    # `bleeding_edge_severity_overrides` and needs no engine code, but a queued change to a measurement, an
+    # algorithm, or a default has to be asked about where it happens. Answering from `Configuration` keeps
+    # the selection logic in one place and puts nothing but the id — already ADR-50 WD1 contract vocabulary
+    # — into engine code.
+    #
+    # Two deliberate asymmetries with the `bleeding_edge:` config key:
+    #
+    # - An id in {BleedingEdge::GRADUATED} answers `true` unconditionally. Graduation (§ WD7) turns a
+    #   feature on for everyone, so a gate that outlives it keeps the graduated behaviour rather than
+    #   silently reverting, and the call-site cleanup can land whenever it is convenient.
+    # - An id that is in neither {BleedingEdge::FEATURES} nor {BleedingEdge::GRADUATED} **raises**. An
+    #   unknown id in a *config file* stays inert on purpose (it may come from a newer gem — see
+    #   {#coerce_bleeding_edge}), but an id here is written by a Rigor contributor against the registry in
+    #   the same checkout: a typo is a bug, and reading it as `false` would ship the feature permanently off
+    #   with no signal.
+    #
+    # @param id [String] a feature id from {BleedingEdge::FEATURES} or {BleedingEdge::GRADUATED}.
+    # @return [Boolean]
+    # @raise [ArgumentError] if `id` names no known feature.
+    def bleeding_edge_active?(id)
+      return true if BleedingEdge.graduated?(id)
+      unless BleedingEdge.known_id?(id)
+        raise ArgumentError,
+              "unknown bleeding-edge feature id #{id.inspect}; known ids: " \
+              "#{(BleedingEdge.feature_ids + BleedingEdge::GRADUATED).inspect}"
+      end
+
+      @bleeding_edge_active_ids.include?(id)
+    end
+
     # ADR-50 § WD2 — returns a sibling Configuration whose bleeding-edge selection (and the derived
     # `bleeding_edge_severity_overrides` the two {SeverityProfile.resolve} sites consult) is replaced by
     # `value`, leaving every other field shared with the receiver. `value` takes the same forms as the
@@ -526,16 +561,18 @@ module Rigor
     #
     # The CLI's `--bleeding-edge[=ids]` / `--no-bleeding-edge` flag uses this to override the configured
     # selection for a single run (the same CLI-over-config precedence `--workers` and `--no-cache` follow).
-    # It is a frozen `dup` with the two bleeding-edge ivars re-set: `dup` returns an unfrozen shallow copy
-    # (every other ivar is the receiver's deeply-frozen value, safe to share read-only), the two replacements
+    # It is a frozen `dup` with the bleeding-edge ivars re-set: `dup` returns an unfrozen shallow copy
+    # (every other ivar is the receiver's deeply-frozen value, safe to share read-only), the replacements
     # are themselves deeply frozen, and the re-`freeze` keeps the result `Ractor.shareable?` for the worker
-    # path.
+    # path. **Every ivar `#initialize` derives from `@bleeding_edge` has to be re-derived here** — the
+    # selector, the severity map, and the active-id set the {#bleeding_edge_active?} predicate reads.
     def with_bleeding_edge(value)
       selector = coerce_bleeding_edge(value)
       copy = dup
       copy.instance_variable_set(:@bleeding_edge, selector)
       copy.instance_variable_set(:@bleeding_edge_severity_overrides,
                                  BleedingEdge.severity_overrides_for(selector))
+      copy.instance_variable_set(:@bleeding_edge_active_ids, BleedingEdge.active_ids_for(selector))
       copy.freeze
     end
 

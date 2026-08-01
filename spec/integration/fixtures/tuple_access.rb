@@ -19,6 +19,14 @@ assert_type("[20, 30]", xs.drop(1))
 assert_type("[20, 30, 10]", xs.rotate)
 assert_type("[30, 10, 20]", xs.rotate(2))
 
+# The 1-arg `first(n)` / `last(n)` forms lift to a sub-`Tuple`, the same
+# `take`/`drop` shape (bounded by the tuple's known arity, so a count past
+# the end just returns the full receiver).
+assert_type("[10, 20]", xs.first(2))
+assert_type("[20, 30]", xs.last(2))
+assert_type("[10, 20, 30]", xs.first(10))
+assert_type("[]", xs.first(0))
+
 # `slice` is an exact alias of `[]`, so it folds the same across the
 # index / start-length / Range forms.
 assert_type("20", xs.slice(1))

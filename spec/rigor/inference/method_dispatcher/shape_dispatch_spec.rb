@@ -123,10 +123,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: t, method_name: :weird_method)).to be_nil
     end
 
-    it "ignores arity mismatches by returning nil" do
-      # `tuple.first(2)` is the Slice-4 RBS overload; we let RbsDispatch handle it through the projection so the precise
-      # tier doesn't accidentally claim ownership.
-      expect(dispatch(receiver: t, method_name: :first, args: [constant(2)])).to be_nil
+    it "folds `tuple.first(n)` to the leading n-element sub-Tuple (the take/drop shape)" do
+      result = dispatch(receiver: t, method_name: :first, args: [constant(2)])
+      expect(result.elements.map(&:value)).to eq([1, 2])
     end
 
     describe "Tuple unary precision (v0.0.7)" do
@@ -369,6 +368,53 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
 
       it "falls through on a negative count (Array#drop raises)" do
         expect(dispatch(receiver: t, method_name: :drop, args: [constant(-1)])).to be_nil
+      end
+    end
+
+    describe "Tuple#first(n) / #last(n)" do
+      let(:t) { tuple(constant(1), constant(2), constant(3)) }
+
+      it "returns the leading n elements for first(n)" do
+        result = dispatch(receiver: t, method_name: :first, args: [constant(2)])
+        expect(result.elements.map(&:value)).to eq([1, 2])
+      end
+
+      it "returns the trailing n elements for last(n)" do
+        result = dispatch(receiver: t, method_name: :last, args: [constant(2)])
+        expect(result.elements.map(&:value)).to eq([2, 3])
+      end
+
+      it "returns the empty Tuple for n <= 0" do
+        expect(dispatch(receiver: t, method_name: :first, args: [constant(0)]).elements).to be_empty
+        expect(dispatch(receiver: t, method_name: :last, args: [constant(0)]).elements).to be_empty
+      end
+
+      it "returns the full Tuple when n >= size" do
+        expect(dispatch(receiver: t, method_name: :first, args: [constant(10)]).elements.map(&:value))
+          .to eq([1, 2, 3])
+        expect(dispatch(receiver: t, method_name: :last, args: [constant(10)]).elements.map(&:value))
+          .to eq([1, 2, 3])
+      end
+
+      it "falls through when the argument is non-static" do
+        dyn = Rigor::Type::Combinator.untyped
+        expect(dispatch(receiver: t, method_name: :first, args: [dyn])).to be_nil
+        expect(dispatch(receiver: t, method_name: :last, args: [dyn])).to be_nil
+      end
+
+      it "falls through on a negative count (Array#first/#last raise)" do
+        expect(dispatch(receiver: t, method_name: :first, args: [constant(-1)])).to be_nil
+        expect(dispatch(receiver: t, method_name: :last, args: [constant(-1)])).to be_nil
+      end
+
+      it "falls through on more than one argument" do
+        expect(dispatch(receiver: t, method_name: :first, args: [constant(1), constant(2)])).to be_nil
+        expect(dispatch(receiver: t, method_name: :last, args: [constant(1), constant(2)])).to be_nil
+      end
+
+      it "returns the empty Tuple for empty.first(n) / empty.last(n)" do
+        expect(dispatch(receiver: tuple, method_name: :first, args: [constant(2)]).elements).to be_empty
+        expect(dispatch(receiver: tuple, method_name: :last, args: [constant(2)]).elements).to be_empty
       end
     end
 

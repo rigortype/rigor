@@ -1650,13 +1650,16 @@ module Rigor
             Type::Combinator.hash_shape_of(shape.pairs.merge(other.pairs))
           end
 
-          # `shape[k]` and `shape.fetch(k)` for a value-pinned scalar key. Missing-key resolution depends
-          # on the method:
+          # `shape[k]` and `shape.fetch(k)` for a value-pinned scalar key. On a CLOSED shape a key outside
+          # `pairs` is provably missing, and the resolution depends on the method:
           #
           # - `[]` returns `nil` at runtime; we surface `Constant[nil]` so the carrier is visible to
           #   downstream narrowing.
           # - `fetch` (no default, no block) raises `KeyError`; we let the projection answer apply because
           #   the runtime would not produce a value.
+          #
+          # On an `:open` shape neither applies — the key is unknown rather than missing, so both methods
+          # answer the `untyped` step from {#hash_dig_step}.
           def hash_lookup(shape, method_name, args)
             return nil unless args.size == 1
 
@@ -1686,6 +1689,12 @@ module Rigor
           # Returns the per-step value type for a HashShape lookup (or `Constant[nil]` for a known-missing
           # key). Returns `nil` when the argument is not a value-pinned scalar key so the caller can fall
           # through to the projection answer.
+          #
+          # A key outside `pairs` only resolves to `Constant[nil]` on a CLOSED shape, where `pairs` is the
+          # whole key set and the runtime read provably returns nil. On an `:open` shape the key set is by
+          # definition not exhausted, so an undeclared key is *unknown*, not absent — it may hold a value
+          # of any type. Typing it `Constant[nil]` there would put `call.undefined-method` on the next line
+          # of correct code (`payload[:undeclared].upcase`), so the open case answers `untyped`.
           def hash_dig_step(shape, arg)
             return nil unless arg.is_a?(Type::Constant)
 
@@ -1699,6 +1708,8 @@ module Rigor
               return Type::Combinator.union(value, Type::Combinator.constant_of(nil))
             end
 
+            return Type::Combinator.untyped if shape.open?
+
             Type::Combinator.constant_of(nil)
           end
 
@@ -1708,8 +1719,13 @@ module Rigor
             shape.optional_key?(arg.value)
           end
 
+          # Whether the key is provably ABSENT — which only a closed shape can establish. An open shape
+          # permits keys outside `pairs`, so a key it does not declare is unknown rather than missing, and
+          # `fetch` must not be deferred on the theory that Ruby would raise `KeyError`: the key may well
+          # be there. {#hash_dig_step} has already answered `untyped` for that case.
           def missing_key_step?(shape, arg)
             return false unless arg.is_a?(Type::Constant)
+            return false if shape.open?
 
             !shape.pairs.key?(arg.value)
           end
@@ -1777,7 +1793,9 @@ module Rigor
 
           # Continues a `dig` chain after the first step. Tuple and HashShape members re-dispatch into the
           # catalogue; `Constant[nil]` short-circuits the chain (Hash#dig and Array#dig do the same at
-          # runtime); anything else falls through so the projection answer applies.
+          # runtime); an `untyped` step (an undeclared key on an open shape) keeps the whole chain
+          # `untyped`, since digging further into an unknown value cannot recover a bound; anything else
+          # falls through so the projection answer applies.
           def chain_dig(receiver, args)
             return receiver if args.empty?
 
@@ -1785,6 +1803,7 @@ module Rigor
             when Type::Tuple then tuple_dig(receiver, :dig, args)
             when Type::HashShape then hash_dig(receiver, :dig, args)
             when Type::Constant then receiver.value.nil? ? Type::Combinator.constant_of(nil) : nil
+            when Type::Dynamic then Type::Combinator.untyped
             end
           end
         end

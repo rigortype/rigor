@@ -391,7 +391,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `fill` | 🚫 | 破壊的変更。 |
 | `filter` / `select` | 🔷 | BlockFolding `FILTER_KEEP_ON_TRUTHY / FALSEY`。 |
 | `filter_map` | ✅ | `PER_ELEMENT_TUPLE_METHODS` → `nil` 除去後の Union Tuple。 |
-| `first` | ✅ | `tuple_first` → 先頭 n 要素 (Tuple または単一型)。 |
+| `first` | ✅ | `tuple_first` → 0引数は先頭要素、`first(n)` は先頭 n 要素の部分 Tuple（`take`/`drop` と同じ形、#121 2026-08-01）。 |
 | `flat_map` / `collect_concat` | ✅ | `PER_ELEMENT_TUPLE_METHODS` — 単一ネスト除去。 |
 | `flatten` | 🔲 | 入れ子 Tuple を再帰展開。中優先度。 |
 | `include?` | ✅ | `tuple_include?` → `Constant[bool]`（Constant 引数のとき）。 |
@@ -400,7 +400,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `intersection` / `&` | ✅ | `tuple_intersection` — `eql?` 意味論を保つため Ruby の `&` をそのまま実行（#121, 2026-07-31）。 |
 | `join` | ✅ | `tuple_join` — すべて Constant のとき `Constant[String]`。全要素が `Constant[String]` かつセパレータが Constant/省略の場合は `LiteralStringFolding` が精密フォールドに道を譲る（2026-07-18）。 |
 | `keep_if` | 🚫 | 破壊的変更。 |
-| `last` | ✅ | `tuple_last` → 末尾 n 要素。 |
+| `last` | ✅ | `tuple_last` → 0引数は末尾要素、`last(n)` は末尾 n 要素の部分 Tuple（#121 2026-08-01）。 |
 | `length` / `size` | ✅ | `tuple_size` → `Constant[Integer]`。 |
 | `max` / `min` | ✅ | `tuple_max` / `tuple_min` → 要素型の Union。 |
 | `max_by` / `min_by` | 🔲 | ブロックあり形式。BlockFolding 非対応。中優先度。 |

@@ -18,7 +18,8 @@ module Rigor
       #
       # Catalogue (Slice 5 phase 2):
       #
-      # - Tuple#`first`, Tuple#`last`, Tuple#`size`/`length`/`count`: no-arg, no-block.
+      # - Tuple#`first`, Tuple#`last` (no-arg, or a single `Constant[Integer]` count lifting to a
+      #   sub-`Tuple`, the `take`/`drop` shape), Tuple#`size`/`length`/`count`: no-block.
       # - Tuple#`[]`, Tuple#`fetch` with a single `Constant[Integer]` argument inside the tuple's bounds
       #   (negative indices are normalised by length). Tuple#`[]` also handles static Range and
       #   start-length slices, returning a sliced Tuple or `Constant[nil]` for statically nil slices.
@@ -682,21 +683,37 @@ module Rigor
             Type::Combinator.integer_range(min, max)
           end
 
-          # `first` (no arg) → the first element (or `Constant[nil]` when empty). The `first(n)` arg-form
-          # is deliberately left to RBS overload selection (see the overload-selection specs) — folding it
-          # here would change that documented `Array[Elem]` contract.
+          # `first` (no arg) → the first element (or `Constant[nil]` when empty). `first(n)` → a `Tuple` of
+          # the leading `n` elements, the same `take`/`drop` shape via `non_negative_count_arg` (`n >= size`
+          # returns the full receiver, a non-static or negative count declines to RBS).
           def tuple_first(tuple, _method_name, args)
-            return nil unless args.empty?
+            return tuple_first_n(tuple, args) unless args.empty?
             return Type::Combinator.constant_of(nil) if tuple.elements.empty?
 
             tuple.elements.first
           end
 
+          def tuple_first_n(tuple, args)
+            n = non_negative_count_arg(args)
+            return nil if n.nil?
+
+            Type::Combinator.tuple_of(*tuple.elements.first(n))
+          end
+
+          # `last` (no arg) → the last element (or `Constant[nil]` when empty). `last(n)` → a `Tuple` of the
+          # trailing `n` elements, mirroring `tuple_first_n`.
           def tuple_last(tuple, _method_name, args)
-            return nil unless args.empty?
+            return tuple_last_n(tuple, args) unless args.empty?
             return Type::Combinator.constant_of(nil) if tuple.elements.empty?
 
             tuple.elements.last
+          end
+
+          def tuple_last_n(tuple, args)
+            n = non_negative_count_arg(args)
+            return nil if n.nil?
+
+            Type::Combinator.tuple_of(*tuple.elements.last(n))
           end
 
           def tuple_size(tuple, _method_name, args)

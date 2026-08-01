@@ -805,12 +805,27 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   end
 
   describe "overload selection (Slice 4 phase 2c)" do
-    it "selects the 1-arg overload of Array#first based on arity" do
-      type = scope.type_of(parse_expression("[1, 2, 3].first(2)"))
+    it "selects the 1-arg overload of Array#first based on arity, on a non-Tuple receiver" do
+      # A genuine `Array[Elem]` receiver (not a literal Tuple carrier) still routes through
+      # `OverloadSelector`'s arity-based dispatch to the `(::int n) -> ::Array[Elem]` overload, which
+      # erases to `Nominal[Array]`. `ShapeDispatch` only claims `first(n)` for a `Type::Tuple` receiver
+      # (see the sibling example below), so a plain `Nominal[Array]` local still exercises this path.
+      array_int = Rigor::Type::Combinator.nominal_of(Array, type_args: [Rigor::Type::Combinator.nominal_of(Integer)])
+      bound = scope.with_local(:xs, array_int)
+      type = bound.type_of(parse_expression("xs.first(2)", scopes: [[:xs]]))
 
-      # `(::int n) -> ::Array[Elem]` — Array[Elem] erases to Nominal[Array].
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
+    end
+
+    it "folds `first(n)` on a literal Tuple to the precise sub-Tuple (#121) instead of the wide overload" do
+      # `[1, 2, 3]` is a `Tuple[Constant…]` carrier, so `ShapeDispatch` claims `first(n)` before
+      # `OverloadSelector` ever sees the call — see `tuple_first_n` in `shape_dispatch.rb`.
+      type = scope.type_of(parse_expression("[1, 2, 3].first(2)"))
+
+      expect(type).to eq(Rigor::Type::Combinator.tuple_of(
+                           Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(2)
+                         ))
     end
 
     it "still resolves the 0-arg overload of Array#first" do
@@ -874,8 +889,19 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
-    it "Array#first(n) returns Array carrying the same Elem (end-to-end)" do
-      type = scope.type_of(parse_expression("[1, 2, 3].first(2)"))
+    it "Array#first(n) returns Array carrying the same Elem (end-to-end), on a non-Tuple receiver" do
+      # As above: only a genuine `Nominal[Array]` receiver exercises the RBS overload path — a literal
+      # `Tuple` carrier now folds `first(n)` to a precise sub-Tuple instead (#121; see the dedicated
+      # example earlier in this describe block).
+      union_elem = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2),
+        Rigor::Type::Combinator.constant_of(3)
+      )
+      array_union = Rigor::Type::Combinator.nominal_of(Array, type_args: [union_elem])
+      bound = scope.with_local(:xs, array_union)
+      type = bound.type_of(parse_expression("xs.first(2)", scopes: [[:xs]]))
+
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
       expect(type.type_args.size).to eq(1)

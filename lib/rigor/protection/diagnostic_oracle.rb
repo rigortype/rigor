@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../analysis/runner"
+require_relative "kill_signature"
 
 module Rigor
   module Protection
@@ -31,12 +32,12 @@ module Rigor
       # The clean per-file baseline: the diagnostic signatures a mutant must add to count as killed. Computed
       # once per file by the caller.
       def baseline(source:, path:)
-        analyse(source, path).to_set { |d| sig(d) }
+        KillSignature.signatures_of(analyse(source, path))
       end
 
       # Killed iff the mutant introduces a diagnostic not in `baseline`.
       def killed?(mutant_source:, path:, baseline:)
-        analyse(mutant_source, path).any? { |d| !baseline.include?(sig(d)) }
+        analyse(mutant_source, path).any? { |d| !baseline.include?(KillSignature.of(d)) }
       end
 
       private
@@ -46,10 +47,6 @@ module Rigor
           configuration: @configuration, environment: @environment, prebuilt: @project_scan,
           cache_store: nil, collect_stats: false, discovery_seed: @discovery_seed
         ).run_source(source: source, path: path).diagnostics
-      end
-
-      def sig(diagnostic)
-        [diagnostic.rule, diagnostic.path, diagnostic.line, diagnostic.column, diagnostic.message]
       end
     end
   end

@@ -186,6 +186,106 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     end
   end
 
+  # Issue #254 — the `dependent-closure-kill-oracle` bleeding-edge feature. The kill oracle re-analyses the
+  # mutated file AND the files that depend on it, so a mutation whose damage shows up in a CALLER counts as
+  # the catch it is instead of as a survived breakage.
+  #
+  # The fixture's kill is cross-file by construction: the mutated argument decides what `Account.label`
+  # RETURNS, and the only diagnostic that produces (`upcase` on the changed return) lands in `service.rb`.
+  # Nothing at all is reported inside the mutated file, so the single-file oracle scores it a survivor.
+  describe "Tier 2 dependent-closure kill oracle (--protection --mutation)" do
+    def write_return_flow_fixture
+      FileUtils.mkdir_p("lib")
+      File.write(
+        "lib/account.rb",
+        "class Account\n  def self.label\n    Account.wrap(\"account\")\n  end\n\n  " \
+        "def self.wrap(value)\n    value\n  end\nend\n"
+      )
+      File.write("lib/service.rb", "def lookup\n  Account.label.upcase\nend\n")
+    end
+
+    def adopt(*ids)
+      File.write(".rigor.yml", "bleeding_edge:\n#{ids.map { |id| "  - #{id}\n" }.join}")
+    end
+
+    def report(json)
+      JSON.parse(json)
+    end
+
+    it "counts the mutant as killed once adopted, and as a survivor without it" do
+      write_return_flow_fixture
+      _, off, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+      adopt("dependent-closure-kill-oracle")
+      status, on, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+      expect(status).to eq(0)
+      # Non-vacuity: the site is in the denominator in BOTH arms (the feature adds no sites), and it is the
+      # kill count that moves — which it can only do through a diagnostic in the dependent file.
+      expect(report(off).fetch("killed")).to eq(0)
+      expect(report(off).fetch("survived")).to be >= 1
+      expect(report(on).fetch("killed")).to be >= 1
+      expect(report(on).fetch("killed") + report(on).fetch("survived"))
+        .to eq(report(off).fetch("killed") + report(off).fetch("survived"))
+    end
+
+    # The OFF arm must be byte-identical to master, so it is pinned against the literal pre-change report
+    # rather than against another post-change run.
+    it "reports exactly the pre-change payload when the feature is not adopted" do
+      write_return_flow_fixture
+      status, unconfigured, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+      File.write(".rigor.yml", "bleeding_edge: false\n")
+      _, declined, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+      expect(status).to eq(0)
+      expect(declined).to eq(unconfigured)
+      expect(JSON.parse(unconfigured)).to eq(
+        "mode" => "mutation", "killed" => 0, "survived" => 3, "effectiveness_ratio" => 0.0,
+        "files" => [
+          { "path" => "lib/account.rb", "killed" => 0, "survived" => 3, "ratio" => 0.0 },
+          { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0 }
+        ],
+        "add_a_type_here" => [
+          { "method" => "wrap", "count" => 3,
+            "examples" => ["lib/account.rb:3", "lib/account.rb:3", "lib/account.rb:3"] }
+        ],
+        "parse_errors" => []
+      )
+    end
+
+    # The two Tier-2 features are independent overlays and must compose: the discovery seed decides which
+    # sites are measured, the closure decides where a kill may land. With both on, the cross-file site the
+    # seed admits (`Account.label` in the caller) is measured AND the return-flow mutant is killed.
+    it "composes with the discovery seed when both features are adopted" do
+      write_return_flow_fixture
+      adopt("dependent-closure-kill-oracle")
+      _, closure_only, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+      adopt("discovery-seeded-mutation-sites", "dependent-closure-kill-oracle")
+      status, both, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+      expect(status).to eq(0)
+      measured = ->(json) { report(json).fetch("killed") + report(json).fetch("survived") }
+      expect(measured.call(both)).to be > measured.call(closure_only) # the seed's extra sites
+      expect(report(both).fetch("killed")).to be >= 1                 # the closure's extra kills
+    end
+
+    # The seed, the dependents map and the oracle are all built ONCE on the parent and copy-on-write inherited
+    # by {MutationForkScan}'s children; each child writes its mutants to its OWN temp file (the pid guard).
+    it "stays byte-identical across worker counts with the feature on" do
+      write_return_flow_fixture
+      2.times { |i| File.write("lib/reader#{i}.rb", "def read#{i}\n  Account.label.size\nend\n") }
+      adopt("dependent-closure-kill-oracle")
+
+      _, sequential, = run(["--protection", "--mutation", "--workers", "0", "--format", "json", "lib"])
+      _, forked, = run(["--protection", "--mutation", "--workers", "2", "--format", "json", "lib"])
+
+      expect(report(sequential).fetch("killed")).to be >= 1
+      expect(forked).to eq(sequential)
+    end
+  end
+
   it "reports nothing to measure when no paths are given and nothing changed" do
     # An empty git work tree → no changed Ruby files → vacuous success.
     system("git", "init", "--quiet", out: File::NULL, err: File::NULL)
@@ -446,6 +546,28 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(status).to eq(0)
       payload = JSON.parse(out)
       expect(payload.fetch("type_killed") + payload.fetch("test_killed")).to be >= 1
+    end
+
+    # Issue #254 — the fused path's TYPE half is the same measurement, so the closure oracle applies here too.
+    # A `--with-tests` run must not disagree with the plain run about what the type checker caught, or the
+    # "add a type OR add a test" verdict would depend on which command you ran: with the stub test oracle
+    # killing everything, the cross-file mutant must land in `type_killed`, not in `test_killed`.
+    it "uses the dependent-closure oracle on the fused path too when adopted" do
+      FileUtils.mkdir_p("lib")
+      File.write(".rigor.yml", "bleeding_edge:\n  - dependent-closure-kill-oracle\n")
+      File.write(
+        "lib/account.rb",
+        "class Account\n  def self.label\n    Account.wrap(\"account\")\n  end\n\n  " \
+        "def self.wrap(value)\n    value\n  end\nend\n"
+      )
+      File.write("lib/service.rb", "def lookup\n  Account.label.upcase\nend\n")
+      stub_oracle(green: true, kills: true)
+      allow(Rigor::CLI::MutationForkScan).to receive(:run).and_raise("the fused path must not fork")
+
+      status, out, = run(["--protection", "--mutation", "--with-tests", "--format", "json", "lib"])
+
+      expect(status).to eq(0)
+      expect(JSON.parse(out).fetch("type_killed")).to be >= 1
     end
   end
 

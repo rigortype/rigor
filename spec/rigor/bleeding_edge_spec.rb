@@ -42,6 +42,19 @@ RSpec.describe Rigor::BleedingEdge do
         .not_to have_key("discovery-seeded-mutation-sites")
       expect(described_class.active_ids_for({ "mode" => "none" })).not_to include(feature.id)
     end
+
+    # Issue #254 — the second Tier-2 behaviour feature. It is a separate id on purpose: it changes where a
+    # kill may LAND (the dependent closure), not which sites are measured, and the two compose in any
+    # combination — so a project adopting one must not be opted into the other.
+    it "ships the Tier-2 dependent-closure kill oracle as its own behaviour feature" do
+      feature = described_class.feature("dependent-closure-kill-oracle")
+      expect(feature.kind).to eq(:behaviour)
+      expect(feature.severity_overrides).to be_empty
+      expect(described_class.active_ids_for({ "mode" => "none" })).not_to include(feature.id)
+      expect(described_class.active_ids_for({ "mode" => "list", "ids" => ["discovery-seeded-mutation-sites"] }))
+        .not_to include(feature.id)
+      expect(described_class.active_ids_for({ "mode" => "all" })).to include(feature.id)
+    end
   end
 
   context "with a populated overlay (stubbed)" do

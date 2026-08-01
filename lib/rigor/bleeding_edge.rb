@@ -144,6 +144,21 @@ module Rigor
                  "goes DOWN on the same code — and `--threshold=RATIO` exits 1 when that ratio falls below a " \
                  "number pinned in CI. Off by default for that reason: it is a queued change for the next " \
                  "major, not a fix you should be opted into mid-release."
+      ),
+      Feature.new(
+        id: "dependent-closure-kill-oracle",
+        kind: :behaviour,
+        summary: "`rigor coverage --protection --mutation` (Tier 2) decides a breakage was caught when the " \
+                 "diagnostic appears anywhere in the mutated file OR the files that depend on it, instead of " \
+                 "in the mutated file alone. Changing what a method returns is caught in its *callers* — the " \
+                 "cross-file reach the analyzer exists for — and that catch is scored as a miss today. The " \
+                 "measurement re-analyses the dependent closure (ADR-46's dependency graph) against the " \
+                 "mutated bytes, so those catches count. It can only ADD kills, never remove one, so the " \
+                 "reported ratio moves up or not at all; a recorded ratio nonetheless stops being comparable " \
+                 "with one measured without it. It costs roughly a third more wall time per mutant, and on " \
+                 "the two corpora measured so far (Rigor's own `lib`, redmine `app/models`) it added no " \
+                 "kills — every surviving breakage there is one the analyzer reports nowhere at all, not one " \
+                 "it reports in a caller."
       )
     ].freeze
 

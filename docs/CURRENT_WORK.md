@@ -6,9 +6,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Verify a claim before carrying it forward — and verify it by the thing that decides, not by a
-  proxy. This cycle produced two examples: the #260 design assumed the seeded-survivor cluster was
-  oracle blindness (only half was — the other half is WD6b by construction), and #254's premise
-  ("the best catch is scored as a miss") measured out to ~zero on both available corpora.
+  proxy. This arc kept paying that rule: #260's cluster was only half blindness, #254's premise
+  measured out to zero even on the favorable corpus, and #264's "jitter" would not reproduce on a
+  quiet machine.
 -->
 
 # Current Work — Session Handoff
@@ -20,62 +20,58 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **The Tier-2 graduation cluster (#260 / #263 / #254) is fully decided and CLOSED** (2026-08-01,
-  one session; every PR: audited diff + CI fully green + parent-re-run `make verify` exit 0; the
-  user granted standing authorisation for autonomous PR merges mid-session, recorded in memory):
-  - [#262](https://github.com/rigortype/rigor/pull/262) (closes #260) — one
-    `Protection::DiscoverySeed` table set threaded to BOTH Tier-2 halves; opt-in
-    `Runner.new(discovery_seed:)` seam. The amended decision on #260 is the load-bearing document:
-    only the `discovered_classes` half of the unkillable cluster was oracle blindness; the
-    `param_inferred_types` half is ADR-67 WD6b *by construction* and its survivors are truth.
-  - [#265](https://github.com/rigortype/rigor/pull/265) (closes #263) — Tier 1 now reports
-    `lower_bound_typed` (WD6b-guarded sites) as a split WITHIN protected; headline untouched.
-    Rigor `lib`: 2,223 of 12,056 protected sites (~18.4%).
-  - [#266](https://github.com/rigortype/rigor/pull/266) (closes #254) — `dependent-closure-kill-oracle`
-    (behaviour feature, off): strictly additive closure oracle. **Empirical headline: the closure
-    adds ~zero kills on both corpora** (+2 on `lib`, none on redmine) — verified independently by
-    disk-written whole-project re-analysis of 21 survivors (zero diagnostics anywhere). Graduation
-    precondition recorded on #254: find a corpus where it bites (predicted shape: a `sig/`-shipping
-    project like textbringer, where a return-type mutation can produce a caller-side mismatch).
-  - Also merged: [#261](https://github.com/rigortype/rigor/pull/261) — Tuple `first(n)`/`last(n)`
-    precise sub-Tuple folds (#121 slice).
-- **Graduation-note numbers** (in #260's closing comments): Rigor `lib` ON 10,252/5,580/0.5443;
-  redmine `app/models` ON 2,762/464/0.1680, with 66.2% of redmine ON-survivors on project-class
-  singletons (the honest RBS-less-model gap). OFF arms reproduce #253 byte-identically.
+- **The whole Tier-2 measurement arc is closed** (2026-08-01/02, two sessions, six PRs merged —
+  #261 #262 #265 #266 #267 plus the #253 seed PR before them — and #260 #263 #254 #264 all closed;
+  every merge: audited diff + CI fully green + parent-re-run `make verify` exit 0; autonomous
+  merges are user-authorised, recorded in memory):
+  - The Tier-2 denominator, oracle knowledge, closure reach, Tier-1 over-claim annotation, and
+    harness-error visibility are all landed and measured. The load-bearing documents are #260's
+    amended decision and #254's two closing comments.
+  - **`dependent-closure-kill-oracle` is presumptively NON-graduating**: textbringer (52 RBS
+    files, dense fan-out — the predicted-favorable corpus) produced byte-identical OFF vs closure
+    arms. Structural reason, verified: the Mutator never mutates `def` signatures, and callers
+    read declarations when they exist — so body mutations are cross-file-invisible on RBS-typed
+    code by construction, and the inferred-return channel is worth +2 kills on Rigor lib / 0 on
+    redmine. Revival requires a signature-perturbing operator or an inferred-return-heavy corpus
+    (recorded on #254 with the retirement-evidence pointer).
+  - **#264's premise corrected at landing**: the ±3-site jitter was load-tied (six instrumented
+    quiet runs, zero rescued exceptions, byte-identical pairs); the blanket-rescue invisibility
+    was the real defect and is fixed (`harness_errors` bucket, ratio-excluded, JSON-unconditional,
+    stderr warning at floor 3, exit semantics untouched).
+  - Graduation numbers for `discovery-seeded-mutation-sites` (in #260's closing comments): Rigor
+    `lib` 10,252/5,580/0.5443; redmine `app/models` 2,762/464/0.1680 (66.2% of ON survivors on
+    project-class singletons). Tier-1 `lower_bound_typed` on `lib`: 2,223/12,056 (~18.4%).
 
 ## Next session
 
-- **[#264](https://github.com/rigortype/rigor/issues/264)** (site-total jitter: `classify` rescues
-  harness failures to `:invalid` silently, ±3 sites between identical runs) is the remaining
-  measurement-hygiene item — small, `ready-for-agent`, and now the only thing between the Tier-2
-  numbers and bit-stability.
-- **The `ready-for-agent` pool**: #134 slices 2-3 (ADR-46 forward-edge result cache + the
-  incremental==cold gate — the remaining Tier-2 *speed* work), #135, #137, #142, #147. #121 stays
-  open (remainder after #261: `Regexp.compile` alias, `Integer#rationalize`, `Integer`/`Float#abs2`;
-  Set projections audited closed).
-- **A textbringer Tier-2 run would answer #254's graduation precondition cheaply** — it ships its
-  own `sig/` (see the survey memory), so it is the predicted corpus where the closure oracle's
-  caller-side catches exist. One measurement, recorded on #254, settles whether the feature ever
-  graduates.
-- **The rbs-inline upstream report is ON HOLD by user decision** (2026-08-01: upstream movement not
-  expected; do not file without a fresh ask). Evidence chain if ever needed: ADR-32 WD12 +
-  `annotation_parser.rb:323-326` → `753-764` → rescue at `617-621` → `annotations.rb:527-536`; also
-  ADR-32's "upstream docs" citation actually points at rbs-core's built-in `RBS::InlineParser` doc,
-  not the rbs-inline gem's — a one-line ADR correction when next touching ADR-32.
+- **The `ready-for-agent` pool is the natural continuation**: #134 slices 2-3 (ADR-46
+  forward-edge result cache + incremental==cold gate — the remaining Tier-2 speed work, more
+  valuable now that the closure oracle costs ~+35% wall per mutant when adopted), #137
+  (dry-schema/validation ceiling slices), #147 (editor-mode throughput), #142 (LSP Ractor pool),
+  #135 (self-mutation giant-file tier), #121 remainder (`Regexp.compile` alias,
+  `Integer#rationalize`, `Integer`/`Float#abs2` — all probed small).
+- **`ready-for-human` items wanting a design pass**: #158 (inference budgets table — the spec's
+  `budgets:` is still unwired per memory), #152 (`&&`/`||` polarity gate beyond Constant), #159
+  (upstreaming staged ruby/rbs signature fixes — external publishing, needs the user's go).
+- **The rbs-inline upstream report stays ON HOLD by user decision** (2026-08-01; do not file
+  without a fresh ask). Evidence chain: ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764`
+  → rescue at `617-621` → `annotations.rb:527-536`; plus the pending one-line ADR-32 correction
+  (its "upstream docs" citation points at rbs-core's `RBS::InlineParser` doc, not the rbs-inline
+  gem's).
 
 ## What this session learned that is not in a commit
 
-- **The delegation pattern that survived contact**: fixed design in the brief ("do not relitigate")
-  + repo contract verbatim + gates by exit code + parent re-runs gates + **an explicit escape hatch
-  ("report contradictions, do not silently redesign")**. The hatch carried the session twice: #262's
-  agent overturned half the #260 design premise with an attribution measurement, and #266's agent
-  caught its own first design conflating two feature axes (it lost 11 kills on redmine and could
-  not attribute them) and corrected to the strictly-additive shape before opening the PR.
-- **Subagents stall by ending their turn on background waits** — three separate stalls in one
-  session, all recovered by a resume message. Put "run gates/measurements in the FOREGROUND with a
-  generous timeout; never end a turn while anything is pending" in every brief up front.
-- **The auto-mode permission classifier intermittently blocks complex one-liners** (awk pipelines,
-  multi-path `git diff`); read branch files directly instead of fancy diff extraction.
-- **Fixture lesson for oracle specs**: equalise the knowledge axis before comparing oracles (the
-  brute-force cross-check in #266 reported missing cross-file *knowledge* as a closure defect until
-  both features were adopted in the fixture).
+- **The delegation pattern is now settled**: fixed design in the brief + repo contract verbatim +
+  "report contradictions, do not silently redesign" + **"run every gate/measurement in the
+  FOREGROUND with a generous timeout; never end a turn while anything is pending"** (three
+  background-wait stalls on day 1, zero on day 2 once the rule moved into the brief). The
+  escape hatch overturned a premise on four consecutive tasks — treat a subagent's contradiction
+  report as the most valuable line in its output.
+- **Do not let a measurement agent borrow the main tree's `exe/rigor` while another agent edits
+  that tree** — a #264 diagnosis `warn` landed in `mutation_scanner.rb` mid-measurement of
+  textbringer. It was provably benign (warn-only, zero firings, deterministic reruns), but the
+  isolation was luck, not design: pin measurements to a clean checkout or sequence them.
+- **A "deliberate" old comment and a filed issue premise are both claims**: the Tuple `first(n)`
+  decline was stale, the #254 catch-in-callers example cannot exist under the body-only mutation
+  contract, and #264's jitter was environmental. The verify-by-the-thing-that-decides rule from
+  this header keeps being the highest-yield habit in the repo.

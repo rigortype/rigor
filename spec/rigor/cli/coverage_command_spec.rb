@@ -53,6 +53,20 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     expect(payload["killed"]).to be >= 1
   end
 
+  # Issue #134 slice 1 — the Tier 2 fork pool is a pure performance change, exactly as P3-10 was for Tier 1:
+  # the accumulator's per-file list and per-method examples are absorption-ordered, so the parent absorbs in
+  # original `paths` order and the JSON must come out byte-identical.
+  it "produces byte-identical mutation JSON under --workers as sequential (multi-file)" do
+    FileUtils.mkdir_p("lib")
+    4.times { |i| File.write("lib/f#{i}.rb", %(def m#{i}(x)\n  "hello#{i}".upcase\n  x.thing#{i}\nend\n)) }
+
+    _, sequential, = run(["--protection", "--mutation", "--workers", "0", "--format", "json", "lib"])
+    _, forked, = run(["--protection", "--mutation", "--workers", "4", "--format", "json", "lib"])
+
+    expect(JSON.parse(sequential)["killed"]).to be >= 1
+    expect(forked).to eq(sequential)
+  end
+
   it "reports nothing to measure when no paths are given and nothing changed" do
     # An empty git work tree → no changed Ruby files → vacuous success.
     system("git", "init", "--quiet", out: File::NULL, err: File::NULL)
@@ -210,6 +224,19 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(payload["mode"]).to eq("protection-fused")
       expect(payload).to have_key("protected_ratio")
       expect(payload["unprotected"]).to be >= 1
+    end
+
+    # Issue #134 slice 1 — the fused tier stays sequential (the suite oracle shells out; parallel runs would
+    # race), so an explicit --workers is announced as ignored rather than silently dropped.
+    it "keeps the fused path sequential and says so when --workers is given explicitly" do
+      File.write("joins.rb", %(def j\n  File.join("a", "b")\nend\n))
+      stub_oracle(green: true, kills: true)
+      allow(Rigor::CLI::MutationForkScan).to receive(:run).and_raise("the fused path must not fork")
+
+      status, _out, err = run(["--protection", "--mutation", "--with-tests", "--workers", "4", "joins.rb"])
+
+      expect(status).to eq(0)
+      expect(err).to include("--workers is ignored with --with-tests")
     end
 
     it "rejects --include-dynamic without --with-tests (usage error)" do

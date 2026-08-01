@@ -40,6 +40,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Changed
 
+- **[rigor coverage]** `--workers=N` now applies to the mutation tier (`--protection --mutation`), forking the per-file measurement across worker processes — Rigor's own `lib/rigor/analysis` falls from 35s to 23s at eight workers on a 12-core machine, with byte-identical output ([#134](https://github.com/rigortype/rigor/issues/134)).
+  - The flag was already accepted and documented on that path, but silently ignored; it now resolves the same way it does for `rigor check` (`--workers` › `RIGOR_RACTOR_WORKERS` › `parallel.workers:` › `0`). The whole-project pre-pass is still paid once, on the parent.
+  - The fused `--with-tests` tier deliberately stays sequential — its test hook shells out to your test runner, and concurrent runs would race over one working tree — and an explicit `--workers` there is now reported as ignored on stderr instead of being dropped.
+  - Any fork-parallel coverage scan also gets faster, `--protection` included: workers now re-arm deferred YJIT, which `fork` does not carry into a child. Without it a long parallel run was *slower* than the sequential one it replaced.
 - **[rigor check]** A cold run on a project that ships RBS spends roughly a third fewer allocations: the signature scan that looks for references to undeclared types no longer builds every class in the project to find them ([#207](https://github.com/rigortype/rigor/issues/207)).
   - It reads the declarations instead, applying the same membership test RBS itself applies, so the same names are found. On Rigor's own `lib` that scan falls from 7.84M allocations to 25k — 33% of the run to 0.15% — and on a Rails-shaped project the whole run drops 84%. Diagnostics are unchanged across the eight RBS-shipping projects the change was measured on.
 

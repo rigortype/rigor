@@ -499,6 +499,28 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       payload = JSON.parse(out)
       expect(payload.fetch("type_killed") + payload.fetch("test_killed")).to be >= 1
     end
+
+    # Issue #254 — the fused path's TYPE half is the same measurement, so the closure oracle applies here too.
+    # A `--with-tests` run must not disagree with the plain run about what the type checker caught, or the
+    # "add a type OR add a test" verdict would depend on which command you ran: with the stub test oracle
+    # killing everything, the cross-file mutant must land in `type_killed`, not in `test_killed`.
+    it "uses the dependent-closure oracle on the fused path too when adopted" do
+      FileUtils.mkdir_p("lib")
+      File.write(".rigor.yml", "bleeding_edge:\n  - dependent-closure-kill-oracle\n")
+      File.write(
+        "lib/account.rb",
+        "class Account\n  def self.label\n    Account.wrap(\"account\")\n  end\n\n  " \
+        "def self.wrap(value)\n    value\n  end\nend\n"
+      )
+      File.write("lib/service.rb", "def lookup\n  Account.label.upcase\nend\n")
+      stub_oracle(green: true, kills: true)
+      allow(Rigor::CLI::MutationForkScan).to receive(:run).and_raise("the fused path must not fork")
+
+      status, out, = run(["--protection", "--mutation", "--with-tests", "--format", "json", "lib"])
+
+      expect(status).to eq(0)
+      expect(JSON.parse(out).fetch("type_killed")).to be >= 1
+    end
   end
 
   it "samples under --limit and keeps JSON stdout clean (the note goes to stderr)" do

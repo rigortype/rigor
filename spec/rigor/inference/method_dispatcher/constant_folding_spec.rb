@@ -1459,4 +1459,37 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold("abc", :upcase)).not_to be_nil
     end
   end
+
+  describe "self-returners on a value-pinned receiver (#121)" do
+    # The `Type::Constant` counterpart of ShapeDispatch's `:shape_self`. `%w[a b].freeze` (a Tuple) and
+    # `"x".-@` (classified `purity: leaf`) already kept their value; `"x".freeze` did not, because the
+    # catalogue classifies it `purity: mutates_self` — true of the object's flags, irrelevant to a carrier
+    # that pins a value rather than an identity.
+    %i[freeze itself dup clone].each do |method_name|
+      it "returns the receiver carrier for ##{method_name}" do
+        type = fold("hello", method_name)
+        expect(type).to be_a(Rigor::Type::Constant)
+        expect(type.value).to eq("hello")
+      end
+    end
+
+    it "covers the scalar classes that no Object/Kernel catalogue owns" do
+      expect(fold(10, :freeze).value).to eq(10)
+      expect(fold(2.5, :freeze).value).to eq(2.5)
+      expect(fold(:sym, :freeze).value).to eq(:sym)
+      expect(fold(true, :freeze).value).to be(true)
+      expect(fold(nil, :itself).value).to be_nil
+    end
+
+    it "declines when the call carries an argument" do
+      # `clone(freeze: false)` is the shape that matters — its result is NOT the receiver's frozen state,
+      # and Rigor has no carrier bit to disagree about, so the fold steps aside rather than guess.
+      expect(fold("hello", :clone, [false])).to be_nil
+      expect(fold("hello", :dup, ["x"])).to be_nil
+    end
+
+    it "leaves a non-self-returning method to the catalogue" do
+      expect(fold("hello", :frozen?)).to be_nil
+    end
+  end
 end

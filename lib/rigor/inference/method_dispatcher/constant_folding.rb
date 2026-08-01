@@ -195,6 +195,11 @@ module Rigor
         # `flow.always-truthy-condition`.
         REFLECTIVE_SEND_METHODS = %i[public_send send __send__].to_set.freeze
 
+        # The self-returners, the `Type::Constant` counterpart of `ShapeDispatch`'s `:shape_self` handlers
+        # (ADR-76 WD2 / ADR-78 WD3). Each returns the receiver at run time, so the value-pinned carrier
+        # survives the call.
+        CONSTANT_SELF_RETURNERS = %i[freeze itself dup clone].to_set.freeze
+
         # @return [Rigor::Type::Constant, Rigor::Type::Union, Rigor::Type::IntegerRange, nil]
         def try_dispatch(context)
           receiver = context.receiver
@@ -205,6 +210,9 @@ module Rigor
             first_arg = args.first
             return nil unless first_arg.is_a?(Type::Constant) && first_arg.value.is_a?(Symbol)
           end
+          self_return = try_fold_self_return(receiver, method_name, args)
+          return self_return if self_return
+
           # v0.0.7 — `String#%` against a `Tuple` / `HashShape` argument runs Ruby's format-string engine
           # when both sides are statically constant. The standard `numeric_set_of` path bails on Tuple /
           # HashShape arguments because they are not scalar-Constant carriers, so the special-case sits
@@ -219,6 +227,32 @@ module Rigor
           return nil if arg_sets.any?(&:nil?)
 
           dispatch_by_arity(receiver_set, method_name, arg_sets)
+        end
+
+        # `freeze` / `itself` / `dup` / `clone` on a value-pinned receiver return the receiver carrier.
+        #
+        # This sits AHEAD of the catalogue path and deliberately bypasses its purity gate, because the gate
+        # asks a question that does not apply. `String#freeze` is classified `purity: mutates_self`
+        # (`data/builtins/ruby_core/string.yml`) — correctly, since the C body sets `FL_FREEZE` — and the
+        # gate then holds it back from the pure-invoke path. But nothing here is invoked: the receiver type
+        # is returned unchanged, and freezing mutates an object's flags, not its value. `Type::Constant`
+        # pins a value, not an identity, so the mutation it performs is invisible to the carrier.
+        #
+        # The gap this closes is `FOO = "bar".freeze`, the standard way to write a String constant in
+        # Ruby, which lost its value while `%w[a b].freeze` (a Tuple, via `:shape_self`) and `"bar".-@`
+        # (classified `purity: leaf`) both kept theirs. Integer / Float / Symbol had the same hole for a
+        # different reason — no `Object`/`Kernel` catalogue owns their self-returners at all.
+        #
+        # `dup` / `clone` return a NEW object at run time, so the carrier is right about the value and
+        # silent about the identity — the same trade `shape_self` already makes, and the same one the
+        # existing `"x".dup` fold (which reaches the invoke path, `dup` being `leaf`) already makes.
+        # A `clone(freeze: false)` carries an argument and declines here.
+        def try_fold_self_return(receiver, method_name, args)
+          return nil unless args.empty?
+          return nil unless CONSTANT_SELF_RETURNERS.include?(method_name)
+          return nil unless receiver.is_a?(Type::Constant)
+
+          receiver
         end
 
         # `Constant<String> % …` — runs the actual `String#%` operation when both sides are statically

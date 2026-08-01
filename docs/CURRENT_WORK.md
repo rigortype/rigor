@@ -42,14 +42,30 @@ this file is the one that is wrong.
     `lib` 10,252/5,580/0.5443; redmine `app/models` 2,762/464/0.1680 (66.2% of ON survivors on
     project-class singletons). Tier-1 `lower_bound_typed` on `lib`: 2,223/12,056 (~18.4%).
 
+- **2026-08-02 continuation, same audited-merge flow**: [#270](https://github.com/rigortype/rigor/pull/270)
+  closed #134 (per-file mutation-result cache on the ADR-46 forward edge — **warm/cold 0.011**
+  on `lib` (253.8s → 2.76s), leaf edit 3.05s, hub edit 21.5s; plus the `make check-mutation-cache`
+  warm==cold CI gate, non-vacuous by construction). [#268](https://github.com/rigortype/rigor/pull/268)
+  closed the #121 enumerated remainder (`Regexp.compile`, `Integer#rationalize` 0-arg,
+  `Integer`/`Float#abs2`; the `rationalize(eps)` surface deliberately stays declined —
+  catalog-import decision, not a fold tweak). Warm mutation runs REQUIRE a prior
+  `rigor check --incremental` snapshot; no snapshot = reported-disabled, cold behaviour.
+- **Filed**: [#269](https://github.com/rigortype/rigor/issues/269) (missing
+  `non_empty_refinement_mutation_widening` snapshot — two sessions tripped on the stray),
+  [#271](https://github.com/rigortype/rigor/issues/271) (engine FP: cross-file consumed factory
+  return resolves a nested `Result` Data to the parent namespace's sibling — found wiring PR #270,
+  worked around via `PluginFactFingerprint.key_digest`, root cause open, `area:engine`).
+
 ## Next session
 
-- **The `ready-for-agent` pool is the natural continuation**: #134 slices 2-3 (ADR-46
-  forward-edge result cache + incremental==cold gate — the remaining Tier-2 speed work, more
-  valuable now that the closure oracle costs ~+35% wall per mutant when adopted), #137
-  (dry-schema/validation ceiling slices), #147 (editor-mode throughput), #142 (LSP Ractor pool),
-  #135 (self-mutation giant-file tier), #121 remainder (`Regexp.compile` alias,
-  `Integer#rationalize`, `Integer`/`Float#abs2` — all probed small).
+- **[#271](https://github.com/rigortype/rigor/issues/271) is the sharpest open item** — an FP on
+  our own lib, the class the project weighs heaviest. Diagnosis entry point is in the issue
+  (revert the `key_digest` indirection locally, `rigor check lib`); the minimal repro attempt
+  failed, so start from the real file pair.
+- **The `ready-for-agent` pool**: #137 (dry-schema/validation ceiling slices), #147 (editor-mode
+  throughput), #142 (LSP Ractor pool), #135 (self-mutation giant-file tier), #269 (small snapshot
+  hygiene). #121 stays open as the P3 category — next slice starts by reconciling the stale
+  Regexp doc rows (`escape`/`quote` marked 🔲 but implemented) against `RegexpFolding`.
 - **`ready-for-human` items wanting a design pass**: #158 (inference budgets table — the spec's
   `budgets:` is still unwired per memory), #152 (`&&`/`||` polarity gate beyond Constant), #159
   (upstreaming staged ruby/rbs signature fixes — external publishing, needs the user's go).

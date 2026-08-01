@@ -130,6 +130,60 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(measured_sites(sequential)).to be >= 3
       expect(forked).to eq(sequential)
     end
+
+    # Issue #260 — the seed reaches the KILL ORACLE too, not just site selection. Before it did, an admitted
+    # cross-file site was unkillable by construction: the oracle re-analyses each mutant through
+    # `Runner.new(prebuilt:)`, whose discovery tables stay frozen-empty, so the sibling-class receiver read
+    # `Dynamic` and no mutation there could ever produce a diagnostic.
+    #
+    # The fixture makes the kill depend on knowledge that ONLY spans files: `Account.label`'s return type is
+    # inferred from a `def` in the other file, and the mutation renames the method called ON that return.
+    # (A rename of `label` itself is deliberately not the assertion: `call.undefined-method` has no teeth on
+    # an RBS-less project class, so that survivor is a real engine finding, not measurement blindness.)
+    describe "the kill oracle" do
+      def write_cross_file_return_fixture
+        FileUtils.mkdir_p("lib")
+        File.write("lib/account.rb", "class Account\n  def self.label\n    \"account\"\n  end\nend\n")
+        File.write("lib/service.rb", "def lookup\n  Account.label.upcase\nend\n")
+      end
+
+      def service_row(json)
+        JSON.parse(json).fetch("files").find { |f| f.fetch("path") == "lib/service.rb" }
+      end
+
+      it "kills an undefined_method mutation at a site only the seed admits" do
+        write_cross_file_return_fixture
+        _, off, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+        adopt_feature
+        _, on, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+        # Non-vacuity first: the denominator MOVED, so the site really was admitted rather than the kill
+        # count rising on sites that were already there.
+        expect(measured_sites(off)).to eq(0)
+        expect(measured_sites(on)).to be > 0
+        expect(service_row(on).fetch("killed")).to be >= 1
+        # …and the killed one is the `upcase` rename — the site whose receiver type is cross-file knowledge.
+        expect(JSON.parse(on).fetch("add_a_type_here").map { |m| m.fetch("method") }).not_to include("upcase")
+      end
+
+      # The OFF arm must be byte-identical to master, so it is pinned against the literal pre-change report
+      # rather than against another post-change run.
+      it "reports exactly the pre-change payload when the feature is not adopted" do
+        write_cross_file_return_fixture
+        status, off, = run(["--protection", "--mutation", "--format", "json", "lib"])
+
+        expect(status).to eq(0)
+        expect(JSON.parse(off)).to eq(
+          "mode" => "mutation", "killed" => 0, "survived" => 0, "effectiveness_ratio" => 1.0,
+          "files" => [
+            { "path" => "lib/account.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0 },
+            { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0 }
+          ],
+          "add_a_type_here" => [], "parse_errors" => []
+        )
+      end
+    end
   end
 
   it "reports nothing to measure when no paths are given and nothing changed" do

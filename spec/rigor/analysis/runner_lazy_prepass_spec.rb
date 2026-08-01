@@ -120,4 +120,43 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(Rigor::Inference::ScopeIndexer).not_to have_received(:discovered_project_index_for_paths)
     end
   end
+
+  # Issue #260 — the opt-in `discovery_seed:` seam. It is the ONE deliberate exception to "a prebuilt runner
+  # carries no cross-file discovery", so the default-nil case must stay exactly as inert as the test above
+  # asserts: the LSP builds a `Runner.new(prebuilt:)` per publish and relies on it.
+  describe "the opt-in discovery_seed: seam (prebuilt)" do
+    def prebuilt_runner(dir, **)
+      config = Rigor::Configuration.new("paths" => [File.join(dir, "lib")])
+      scan = Dir.chdir(dir) do
+        described_class.new(configuration: config, cache_store: nil, collect_stats: false).prepare_project_scan
+      end
+      described_class.new(configuration: config, cache_store: nil, collect_stats: false, prebuilt: scan, **)
+    end
+
+    it "defaults inert: a prebuilt runner with no seed carries no discovery table" do
+      Dir.mktmpdir("rigor-discovery-seed-off-") do |dir|
+        write_project(dir)
+        runner = prebuilt_runner(dir)
+        Dir.chdir(dir) { runner.run }
+
+        tables = runner.send(:project_scope_seed_tables)
+        expect(tables.keys.grep(/\Adiscovered_/)).to be_empty
+        expect(tables).not_to have_key(:param_inferred_types)
+      end
+    end
+
+    it "seeds the supplied tables onto every per-file scope without walking the project" do
+      Dir.mktmpdir("rigor-discovery-seed-on-") do |dir|
+        write_project(dir)
+        seed = { discovered_classes: { "Widget" => Rigor::Type::Combinator.singleton_of("Widget") }.freeze }.freeze
+        runner = prebuilt_runner(dir, discovery_seed: seed)
+        allow(Rigor::Inference::ScopeIndexer).to receive(:discovered_project_index_for_paths).and_call_original
+        Dir.chdir(dir) { runner.run }
+
+        expect(runner.send(:project_scope_seed_tables)).to include(discovered_classes: seed[:discovered_classes])
+        # The seam SUPPLIES knowledge; it never makes the prebuilt path go find its own.
+        expect(Rigor::Inference::ScopeIndexer).not_to have_received(:discovered_project_index_for_paths)
+      end
+    end
+  end
 end

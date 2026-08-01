@@ -69,10 +69,16 @@ module Rigor
       #   single-file empty scope. A caller that seeds cross-file discovery
       #   passes it here; this class stays free of {Rigor::Configuration} and of
       #   bleeding-edge feature ids, which live one layer up in the CLI.
+      # @param discovery_seed [Hash, nil] issue #260 — the SAME cross-file table
+      #   set `base_scope` was built from, threaded to the default
+      #   {DiagnosticOracle} so an admitted cross-file site is one the oracle can
+      #   also kill at. Pass both or neither: a `base_scope` without it measures
+      #   sites no mutation can ever break. Ignored when `oracle` is supplied
+      #   (that caller owns its oracle's knowledge).
       # rubocop:disable Metrics/ParameterLists -- every one is an independently-defaulted collaborator or knob;
       # bundling them into an options object would only move the list behind a name.
       def initialize(configuration:, environment:, project_scan:, limit: nil, seed: 1, oracle: nil,
-                     site_selector: :biteable, base_scope: nil)
+                     site_selector: :biteable, base_scope: nil, discovery_seed: nil)
         # rubocop:enable Metrics/ParameterLists
         @environment = environment
         @limit = limit
@@ -80,7 +86,8 @@ module Rigor
         @site_selector = site_selector
         @base_scope = base_scope
         @oracle = oracle || DiagnosticOracle.new(
-          configuration: configuration, environment: environment, project_scan: project_scan
+          configuration: configuration, environment: environment, project_scan: project_scan,
+          discovery_seed: discovery_seed
         )
       end
 

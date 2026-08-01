@@ -640,7 +640,7 @@ Queued today:
 | --- | --- | --- |
 | `reject-unparseable-signatures` | severity | An unparseable `.rbs` under `signature_paths:` **fails the run** (`rbs.coverage.quarantined-signature` → `error`) instead of being skipped with a warning. |
 | `use-of-void-value` | severity | Using a value recovered from an author-declared `-> void` return in value context is reported as `static.value-use.void` (`warning`). |
-| `discovery-seeded-mutation-sites` | behaviour | [`rigor coverage --protection --mutation`](15-type-protection-coverage.md) picks the sites it measures against the same cross-file project discovery Tier 1 already uses, so a call on a project class declared in a *sibling* file is measured instead of dropped. **Adds sites to the denominator, so the reported effectiveness ratio goes down** — check it against any `--threshold` you pin in CI before adopting. |
+| `discovery-seeded-mutation-sites` | behaviour | [`rigor coverage --protection --mutation`](15-type-protection-coverage.md) measures against the same cross-file project discovery Tier 1 already uses — both when picking the sites and when deciding whether a breakage was caught — so a call on a project class declared in a *sibling* file is measured instead of dropped, and a breakage there can actually be caught. **Adds sites to the denominator, so the reported effectiveness ratio moves** — check it against any `--threshold` you pin in CI before adopting. |
 
 Once a feature **graduates** — it becomes the default at a major
 ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD7)

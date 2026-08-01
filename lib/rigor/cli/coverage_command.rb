@@ -207,10 +207,10 @@ module Rigor
       # Both span the scanned `paths` only (no whole-project pre-pass) — a site that gains neither is classified exactly
       # as before.
       #
-      # Shared with Tier 2 (#253): {CoverageMutation#mutation_base_scope} calls this so mutation *site selection*
-      # judges a receiver by the same standard, behind the `discovery-seeded-mutation-sites` bleeding-edge feature.
-      # Tier 1 seeds unconditionally because it only reclassifies sites it already counted; Tier 2 adds sites to a
-      # denominator `--threshold` gates CI on, which is why only the latter is gated.
+      # Tier 2's analogue is {Protection::DiscoverySeed} (#253, #260): the same idea over a *fuller* table set,
+      # because Tier 2 must also let its kill oracle resolve the method on the receiver, not merely name its
+      # class. Tier 1 seeds unconditionally because it only reclassifies sites it already counted; Tier 2 adds
+      # sites to a denominator `--threshold` gates CI on, which is why only the latter is gated on a feature id.
       def scope_with_inferred_params(paths, configuration, environment, workers)
         base = Scope.empty(environment: environment)
         seed = {}

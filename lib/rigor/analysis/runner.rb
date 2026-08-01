@@ -95,12 +95,19 @@ module Rigor
       #   pass a shared env so per-publish work doesn't repeat the `Environment.for_project` build (bundler
       #   / lockfile / collection discovery, RbsLoader construction). Pool mode ignores the override — each
       #   worker continues to build its own Environment.
+      # @param discovery_seed [Hash, nil] issue #260 — opt-in cross-file discovery tables, keyed by
+      #   {Scope::DiscoveryIndex} slot name, seeded onto every per-file scope through
+      #   `project_scope_seed_tables`. The ONE deliberate exception to "a `prebuilt:` runner carries no
+      #   discovery tables": {Protection::DiagnosticOracle} threads the table set Tier 2's site filter already
+      #   judges anchors against, so a site admitted because a sibling-file class resolved is also a site the
+      #   oracle can kill at. nil (the default) leaves the prebuilt/LSP contract byte-identical.
       def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
                      record_dependencies: false, record_self_calls: false, analyze_only: nil,
-                     seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil)
+                     seed_bundles: nil, collect_seed_bundles: false, param_inferred_types: nil,
+                     discovery_seed: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -146,6 +153,10 @@ module Rigor
         # — and so the table the diff was decided on and the table this run seeds from are the SAME object,
         # not merely an equal recomputation. nil (the default) keeps the runner self-sufficient.
         @param_inferred_types_override = param_inferred_types
+        # Issue #260 — the opt-in cross-file discovery seed (see the `discovery_seed:` doc above). Frozen and
+        # never mutated; `project_scope_seed_tables` starts from a copy of it and lets any table this run
+        # actually computed win.
+        @discovery_seed = discovery_seed&.freeze
         @file_dependencies = {}
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
@@ -675,7 +686,9 @@ module Rigor
       # surface. The cross-file discovery tables are NOT carried here — `#run` (prebuilt-less) and
       # `adopt_prebuilt` both leave them at their frozen-empty constructor defaults, and the analysis path
       # fills them lazily via {#ensure_project_discovery}. The prebuilt (LSP) path never fills them, matching
-      # the original adopt behaviour that seeded an empty project scope.
+      # the original adopt behaviour that seeded an empty project scope — with ONE deliberate exception, the
+      # opt-in `discovery_seed:` constructor seam (issue #260), which bypasses the ivars entirely and rides
+      # `project_scope_seed_tables`. A prebuilt runner constructed without it is unchanged.
       def apply_pre_passes_result(result)
         @plugin_registry = result.plugin_registry
         @dependency_source_index = result.dependency_source_index
@@ -706,7 +719,9 @@ module Rigor
       # Internal: builds the deferred cross-file discovery tables at most once per run and adopts them.
       # Memoised on `@project_discovery_done` (reset at the start of `#run`). No-op under `@prebuilt` — the
       # LSP path deliberately seeds an empty project scope from a snapshot that carries no discovery tables,
-      # so forcing a build there would change that contract. Called eagerly from `#run` for the recording /
+      # so forcing a build there would change that contract. A caller that DOES want cross-file knowledge under
+      # `prebuilt:` supplies it explicitly through `discovery_seed:` (issue #260) rather than by re-walking the
+      # project here. Called eagerly from `#run` for the recording /
       # subset (ADR-46) modes and lazily from `#assemble_run_diagnostics` on the analysis path, so a warm
       # cache HIT (which never assembles) never pays the double parse.
       def ensure_project_discovery(expansion)
@@ -1067,8 +1082,12 @@ module Rigor
       # The cross-file pre-pass tables {#seed_project_scope} applies, as a plain Hash so the fork-pool path
       # can hand the same seed to its {WorkerSession} (whose per-file scopes would otherwise miss every
       # cross-file def — ADR-15 sequential-equivalence contract).
+      #
+      # Issue #260 — an opt-in `discovery_seed:` is the BASE of the result, so every table this run computed
+      # for itself still wins. Under `prebuilt:` (the only caller that passes one today) the run computes
+      # none, so the seed applies wholesale.
       def project_scope_seed_tables
-        tables = {}
+        tables = discovery_seed_base
         # ADR-84 WD2 — the run-scope token rides the same seed so the fork/Ractor `WorkerSession` scopes
         # bucket identically to the sequential path.
         tables[:run_generation] = @run_generation if @run_generation
@@ -1097,6 +1116,13 @@ module Rigor
           tables[:discovered_class_sources] = @project_discovered_class_sources
         end
         tables
+      end
+
+      # Issue #260 — the mutable starting point {#project_scope_seed_tables} fills in: a copy of the opt-in
+      # `discovery_seed:` when one was supplied, otherwise the empty Hash every other run has always started
+      # from. Extracted so the seed costs {#project_scope_seed_tables} no branch of its complexity budget.
+      def discovery_seed_base
+        @discovery_seed ? @discovery_seed.dup : {}
       end
 
       # ADR-46 — seed the instance + singleton `"path:line"` def-source tables (each only when non-empty).

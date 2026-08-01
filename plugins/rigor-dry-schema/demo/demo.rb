@@ -10,9 +10,9 @@
 # publishes the `:dry_schema_table` fact mapping each schema constant to its `{required: {...},
 # optional: {...}}` typed-key shape.
 #
-# At slice 1 the observable change is fact-publication only; the downstream uplift (typed `Contract#call
-# → Result.to_h` returns through rigor-dry-validation) lands in a later slice per
-# docs/design/20260517-dry-validation-slicing.md.
+# The table also backs the typed `SomeSchema.call(input).to_h` return the consumer below exercises. The
+# remaining uplift (typed `Contract#call → Result` payloads through rigor-dry-validation) lands in a
+# later slice per docs/design/20260517-dry-validation-slicing.md.
 
 module Types
   include Dry.Types()
@@ -30,3 +30,13 @@ ProductJSON = Dry::Schema.JSON do
   required(:sku).filled(:string)
   required(:price).value(:decimal)
 end
+
+# The typed `to_h` return. `Rigor.dump_type` prints the inferred type at each site:
+#
+#   { email: String, age: Integer, ?nickname: String, ... }
+#   String
+#   String?
+payload = NewUserSchema.call({}).to_h
+Rigor.dump_type(payload)
+Rigor.dump_type(payload[:email])
+Rigor.dump_type(payload[:nickname])

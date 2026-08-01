@@ -152,12 +152,13 @@ The slice-1 deliverable is the **floor**:
   alias resolution.
 - Publishes the table; no user-facing diagnostics yet.
 
+**Landed since**: **typed `result.to_h` returns**.
+`NewUserSchema.call(input).to_h` infers
+`{ email: String, age: Integer, ?nickname: String, ... }`
+instead of an untyped hash. See § "Typed `result.to_h`" below.
+
 The **ceiling** (future slices, demand-driven):
 
-- **Synthesise typed `result.to_h` returns** from each schema
-  via ADR-16 Tier C heredoc-template substrate — promotes
-  `NewUserSchema.call(input).to_h` from `Hash[Symbol, untyped]`
-  to `HashShape[{email: String, age: Integer}]`.
 - **Nested schemas** (`schema(do ... end)` inside another row).
 - **`predicates(:size?)` / per-row constraint walks**.
 - **`each { ... }` element-type recursion**.
@@ -169,10 +170,43 @@ The **ceiling** (future slices, demand-driven):
   declaration would consume `:dry_schema_table` for typed
   `Contract#call → Result` payloads.
 
+## Typed `result.to_h`
+
+`SomeSchema.call(input).to_h` returns the schema's own hash
+shape:
+
+```ruby
+payload = NewUserSchema.call(input).to_h
+#=> { email: String, age: Integer, ?nickname: String, ... }
+
+payload[:email]     #=> String
+payload[:nickname]  #=> String?
+```
+
+A `required` row becomes a required key and an `optional` row an
+optional one — the declaration's own vocabulary. That is
+deliberately *not* the worst case: `Result#to_h` returns the
+coerced input, so a failed validation can drop a required key
+too. Modelling that would type `payload[:email]` as `String?`
+even inside an `if result.success?` branch, and a false positive
+on correct code costs more here than a worst-case reading buys
+(`AGENTS.md` § Implementation Guidelines).
+
+The shape is **open**, and a key the scanner cannot type — a
+predicate outside the canonical vocabulary, a nested
+`schema do ... end` row, an unresolved alias — stays in the
+shape as `untyped` rather than being dropped. Dropping it would
+be worse than useless: a key absent from a hash shape reads as
+`nil`, so a *declared* key would type as nil for whoever reads
+it.
+
+The schema must be named by a constant as written at the call
+site (`NewUserSchema.call(x).to_h`). Reached through a local or
+by a relative constant path from inside the declaring module,
+the chain contributes nothing and `to_h` types as it did before.
+
 ## What the plugin does NOT do (yet)
 
-- Synthesise typed return shapes for schema-bearing methods
-  (`NewUserSchema.call(...)` is still `untyped` at this slice).
 - Emit diagnostics for unknown predicates / types / keys.
 - Round-trip the schema table through the cache descriptor —
   `prepare(services)` re-scans on every run. Add a glob-based

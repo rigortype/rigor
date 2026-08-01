@@ -26,6 +26,10 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
   - The edited file and its dependents are re-analysed; every other file is served from the incremental snapshot. It needs a snapshot to reuse — run `rigor check --incremental` once — and says so on stderr when there is none, analysing the buffer alone as before.
   - An editor-mode run never writes the snapshot, so the bytes in your editor can never be mistaken for the state of the file on disk.
 - **[rigor check]** `--verify-incremental` now refuses an editor buffer instead of silently comparing it against a full analysis of the files on disk.
+- **[rigor-dry-schema]** `SomeSchema.call(input).to_h` now returns the schema's own hash shape — `{ email: String, age: Integer, ?nickname: String, ... }` — instead of an untyped hash, so reading a key gives you the type the schema declares for it ([#137](https://github.com/rigortype/rigor/issues/137)).
+  - A `required` row becomes a required key and an `optional` row an optional one, following the declaration's own vocabulary rather than `to_h`'s worst case: a failed validation can drop a required key too, but typing every key as possibly-absent would put a nil error inside an `if result.success?` branch, on correct code.
+  - A key the plugin cannot type — a predicate outside the canonical vocabulary, a nested `schema do ... end` row, an alias no `rigor-dry-types` table resolves — stays in the shape as untyped rather than being dropped, because a key missing from a hash shape reads as `nil`.
+  - The schema must be named by a constant as written at the call site; reached through a local variable, the chain types as it did before.
 - **[inference]** Set operations on an array of known values now keep their precision: `%w[a b] & allowed`, `|`, `-`, `intersection`, `union`, `difference`, `intersect?`, plus `at(i)`, `one?` and `deconstruct` ([#121](https://github.com/rigortype/rigor/issues/121)).
   - Each is evaluated with Ruby's own operator, so `eql?` membership decides exactly as it does at runtime — `[1] & [1.0]` folds to the empty array, not to `[1]`.
 

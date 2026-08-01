@@ -123,14 +123,20 @@ module Rigor
         def collect_schema_shape(block_node, type_aliases)
           required = {}
           optional = {}
+          declared = { required: [], optional: [] }
           walk_block_body(block_node) do |kind, key, type_info|
+            declared[kind] << key
             (kind == :required ? required : optional)[key] = type_info if type_info
           end
 
           remap_aliases!(required, type_aliases)
           remap_aliases!(optional, type_aliases)
 
-          { required: required.freeze, optional: optional.freeze }.freeze
+          {
+            required: required.freeze,
+            optional: optional.freeze,
+            unmodelled: unmodelled_keys(declared, required, optional)
+          }.freeze
         end
         private_class_method :collect_schema_shape
 
@@ -212,6 +218,22 @@ module Rigor
           end
         end
         private_class_method :extract_type_from_predicate
+
+        # Keys the schema declares that this scanner saw but could not type — a predicate outside the
+        # canonical vocabulary (`filled(:not_a_type)`), a nested `schema do … end` row, or a constant
+        # alias no `:dry_type_aliases` fact resolved.
+        #
+        # They are recorded rather than forgotten because forgetting them is not neutral downstream: a key
+        # absent from the synthesized `to_h` HashShape reads as `nil`, not as `untyped`, so a *declared*
+        # key would type as nil for anyone who reads it. {ResultShape} puts these back as untyped entries.
+        # Consumers that only want typed keys read `:required` / `:optional` and are unaffected.
+        def unmodelled_keys(declared, required, optional)
+          {
+            required: (declared[:required] - required.keys).uniq.freeze,
+            optional: (declared[:optional] - optional.keys).uniq.freeze
+          }.freeze
+        end
+        private_class_method :unmodelled_keys
 
         # In-place: any value's `type:` slot in `bucket` that doesn't already match a canonical class
         # (e.g. `"Types::Email"`) gets resolved through the type_aliases fact. Unresolvable values drop

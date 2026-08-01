@@ -186,6 +186,162 @@ RSpec.describe "rigor-dry-schema integration" do
     expect(run_and_read_fact(demo: demo)).to be_nil
   end
 
+  # The typed `result.to_h` return — the first of the ceiling slices the plugin deferred to demand
+  # (issue #137, README § "Floor / ceiling").
+  describe "typed `SomeSchema.call(input).to_h`" do
+    it "yields the schema's own hash shape instead of an untyped hash" do
+      dump = dump_types(<<~RUBY).first
+        NewUserSchema = Dry::Schema.Params do
+          required(:email).filled(:string)
+          required(:age).value(:integer)
+        end
+
+        Rigor.dump_type(NewUserSchema.call({}).to_h)
+      RUBY
+      expect(dump).to include("email", "String", "age", "Integer")
+    end
+
+    it "keeps an `optional` row's key optional and a `required` row's key required" do
+      dump = dump_types(<<~RUBY).first
+        Schema = Dry::Schema.Params do
+          required(:email).filled(:string)
+          optional(:nickname).maybe(:string)
+        end
+
+        Rigor.dump_type(Schema.call({}).to_h)
+      RUBY
+      # The declaration's own vocabulary carries over: `optional` reads as possibly-absent, `required`
+      # does not. See ResultShape for why `to_h`'s worst case (a failed result drops required keys too)
+      # is deliberately not modelled.
+      expect(dump).to include("?nickname")
+      expect(dump).not_to include("?email")
+    end
+
+    it "types an `each(<Type>)` row as an Array of that type" do
+      dump = dump_types(<<~RUBY).first
+        Schema = Dry::Schema.Params do
+          required(:tags).each(:string)
+        end
+
+        Rigor.dump_type(Schema.call({}).to_h)
+      RUBY
+      expect(dump).to include("Array")
+      expect(dump).to include("String")
+    end
+
+    it "widens a `:bool` row back to the two-class union the fact cannot carry" do
+      # The published fact names one class per row, so `:bool` lands there as "TrueClass". A hash value
+      # typed TrueClass would false-fire on every `false`.
+      dump = dump_types(<<~RUBY).first
+        Schema = Dry::Schema.Params do
+          required(:admin).filled(:bool)
+        end
+
+        Rigor.dump_type(Schema.call({}).to_h)
+      RUBY
+      expect(dump).to include("FalseClass").or include("bool")
+    end
+
+    it "registers a schema declared under a namespace by its full constant path" do
+      dump = dump_types(<<~RUBY).first
+        module App
+          module Schemas
+            UserCreate = Dry::Schema.Params do
+              required(:email).filled(:string)
+            end
+          end
+        end
+
+        Rigor.dump_type(App::Schemas::UserCreate.call({}).to_h)
+      RUBY
+      expect(dump).to include("email", "String")
+    end
+
+    it "contributes nothing to a `to_h` that is not a schema-result chain" do
+      dumps = dump_types(<<~RUBY)
+        Schema = Dry::Schema.Params do
+          required(:email).filled(:string)
+        end
+
+        Rigor.dump_type(Schema.to_h)
+        Rigor.dump_type(NotASchema.call({}).to_h)
+        Rigor.dump_type({ a: 1 }.to_h)
+      RUBY
+      expect(dumps.size).to eq(3)
+      expect(dumps).to all(satisfy { |message| !message.include?("email") })
+    end
+
+    it "keeps a declared key the scanner cannot type in the shape, as untyped" do
+      # The decisive case. A key absent from a HashShape reads as `nil`, not as untyped — so dropping a
+      # row whose predicate is outside the canonical vocabulary would type `payload[:bogus]` as nil and
+      # put a diagnostic on the next line of correct code.
+      dumps = dump_types(<<~RUBY)
+        Schema = Dry::Schema.Params do
+          required(:email).filled(:string)
+          required(:bogus).filled(:not_a_type)
+          required(:address).schema do
+            required(:city).filled(:string)
+          end
+        end
+
+        payload = Schema.call({}).to_h
+        Rigor.dump_type(payload[:email])
+        Rigor.dump_type(payload[:bogus])
+        Rigor.dump_type(payload[:address])
+      RUBY
+      expect(dumps).to eq(["dump_type: String", "dump_type: Dynamic[top]", "dump_type: Dynamic[top]"])
+    end
+
+    it "contributes nothing for a schema that declares no key at all" do
+      dumps = dump_types(<<~RUBY)
+        Schema = Dry::Schema.Params do
+          config.validate_keys = true
+        end
+
+        Rigor.dump_type(Schema.call({}).to_h)
+      RUBY
+      expect(dumps.first).not_to include("=>")
+    end
+
+    it "draws no diagnostic on a consumer that reads an undeclared key" do
+      # The shape is open — dry-schema's key map only emits declared keys, but being wrong about that
+      # would turn an ordinary read into a diagnostic, and this project weighs that cost higher.
+      #
+      # Scoped to the consumer lines: the declaration block itself draws an unrelated pre-existing
+      # `required` diagnostic, because the fixture's RBS stub types the block parameter as untyped and
+      # the DSL calls read as implicit-self calls on main.
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:email).filled(:string)
+        end
+
+        payload = Schema.call({}).to_h
+        payload[:email]
+        payload[:undeclared]
+      RUBY
+      consumer_line = demo.lines.index { |line| line.start_with?("payload =") } + 1
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.line >= consumer_line }).to be_empty
+    end
+  end
+
+  # Runs the plugin against a single-file project and returns the `dump.type` messages, in source order.
+  def dump_types(demo)
+    run_demo(demo).diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+  end
+
+  def run_demo(demo, with_dry_types: false)
+    Rigor::Plugin.unregister!
+    plugin_entries = with_dry_types ? %w[rigor-dry-types rigor-dry-schema] : ["rigor-dry-schema"]
+
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "schema.rb"), demo)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "sig", "dry_schema.rbs"), dry_schema_rbs)
+      run_analysis(dir: dir, plugin_entries: plugin_entries)
+    end
+  end
+
   # Runs the plugin(s) against a single-file project and returns the `:dry_schema_table` fact value. Optionally
   # also loads rigor-dry-types (for the cross-plugin fact-resolution test).
   def run_and_read_fact(demo:, with_dry_types: false)

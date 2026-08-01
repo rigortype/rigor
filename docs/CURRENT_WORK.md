@@ -44,10 +44,19 @@ this file is the one that is wrong.
   [in the issue](https://github.com/rigortype/rigor/issues/134#issuecomment-5148902570) and the body
   now carries three slices. Slice 1 (fork-map the Tier-2 file loop; `--workers` is parsed but returns
   before `resolve_workers` on that path) is independent of the other two and the largest win per unit
-  of effort. **Two findings were deliberately left out of #134 and are unfiled:** a project-wide kill
-  oracle, and the Tier-2 site filter's bare `Scope.empty` where Tier 1 seeds `discovered_classes`.
-  Both would move the reported effectiveness number that `--threshold` gates CI on, so both need a
-  versioning decision rather than a perf PR.
+  of effort. The two findings kept out of #134 because they move the reported number rather than the
+  time to produce it are now [#253](https://github.com/rigortype/rigor/issues/253) (Tier-2 site
+  filter seeds discovery, as Tier 1 already does) and
+  [#254](https://github.com/rigortype/rigor/issues/254) (a kill counts when the diagnostic lands in a
+  dependent file).
+- **Both of those are blocked on [#252](https://github.com/rigortype/rigor/issues/252), which is the
+  one to start.** ADR-50 § WD2's bleeding-edge overlay is the project's vehicle for "queued for the
+  next major, opt in early" — but `BleedingEdge::Feature` carries only `severity_overrides`, and
+  neither #253 nor #254 moves any rule's severity; what moves is a measurement. Giving the overlay a
+  behaviour-feature kind is what lets both wait for a major behind a feature id instead of turning a
+  pinned `--threshold` build red. Left `ready-for-human` because how a call site asks "is feature
+  `<id>` active?" puts ADR-50 WD1 contract vocabulary into engine code — deliberate coupling, so it
+  wants a decision rather than a default.
 - **#121 is now enumerated rather than open-ended.** A probe sweep (positive controls on every tier)
   found the self-returner family as the one gap with real-world weight — that is #250. The remainder,
   ranked: Set element projections (`min`/`max`/`first`/`sort`/`sum`/`to_set` leak `Dynamic[top]` on a

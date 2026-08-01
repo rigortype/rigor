@@ -45,6 +45,41 @@ module Rigor
         tables.freeze
       end
 
+      # Issue #254 — the per-file discovery *bundles* (ADR-85 WD2) the closure kill oracle re-folds once per
+      # mutant. A bundle is one file's isolated contribution to the tables above, plus the content digest that
+      # decides whether it is still valid; folding the whole set reconstructs exactly what {#discovery_tables}
+      # builds. Built ONCE on the parent (before {CLI::MutationForkScan} forks, so children copy-on-write
+      # inherit it), and cheap: ≈0.36s over Rigor's own 349-file `lib`.
+      #
+      # @param paths [Array<String>] the measured file set, in canonical (caller) order.
+      # @return [Hash{String => Hash}] per-path bundles, the input {#tables_for_buffer} re-folds.
+      def bundles(paths:)
+        Inference::ScopeIndexer.discovered_project_index_incremental(paths, seed_bundles: {}).fetch(:bundles)
+      end
+
+      # Issue #254 — the seed tables for ONE mutant: every measured file's bundle folded back unchanged
+      # EXCEPT the file `buffer` binds, which is re-walked from the buffer's bytes.
+      #
+      # This is where the substitution reaches change detection rather than only the analysis. The
+      # incremental pass digests each path through the binding, so the mutated file's digest is the MUTANT's
+      # and never matches its cached bundle — it is re-walked, and every dependent then reads the mutated
+      # `def` bodies out of the seed instead of the ones still on disk. Without it a closure re-analysis
+      # would resolve the clean method, produce no new diagnostic anywhere but the mutated file itself, and
+      # report a plausible-looking effectiveness number that measured nothing new.
+      #
+      # ≈15ms over 349 files (one re-walk plus a whole-set fold), against ≈210ms for one mutant's analysis.
+      #
+      # @param paths [Array<String>] the measured file set, in the same order {#bundles} was built from.
+      # @param bundles [Hash{String => Hash}] that bundle set.
+      # @param buffer [Rigor::Analysis::BufferBinding] the mutant binding (logical path → mutant bytes).
+      # @return [Hash{Symbol => Object}] frozen seed tables.
+      def tables_for_buffer(paths:, bundles:, buffer:)
+        index = Inference::ScopeIndexer.discovered_project_index_incremental(
+          paths, seed_bundles: bundles, buffer: buffer
+        )
+        seed_tables(index).freeze
+      end
+
       # The whole-project discovery tables, from the single-walk combined pass (one parse per file, both
       # collectors driven over the same tree) that {Analysis::Runner::ProjectPrePasses#discover} uses. Empty
       # tables are dropped so an empty seed stays `{}` and every consumer's "seed nothing" branch keeps working.
@@ -53,7 +88,13 @@ module Rigor
       # recording (it is read by the ancestry accessors solely to record cross-file edges), and Tier 2 never
       # records.
       def discovery_tables(paths)
-        index = Inference::ScopeIndexer.discovered_project_index_for_paths(paths)
+        seed_tables(Inference::ScopeIndexer.discovered_project_index_for_paths(paths))
+      end
+
+      # Maps a `{ classes:, def_index: }` discovery index onto the {Scope::DiscoveryIndex} slot names both
+      # consumers take. Shared by the whole-walk ({#discovery_tables}) and bundle-fold ({#tables_for_buffer})
+      # producers so a mutant's seed and the parent's seed can never disagree about shape.
+      def seed_tables(index)
         def_index = index.fetch(:def_index)
         tables = { discovered_classes: index.fetch(:classes) }
         %i[

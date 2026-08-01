@@ -3,6 +3,8 @@
 require "English"
 require "prism"
 
+require_relative "../protection/closure_kill_oracle"
+require_relative "../protection/dependency_closure"
 require_relative "../protection/discovery_seed"
 
 module Rigor
@@ -16,6 +18,10 @@ module Rigor
       # than inlined at the call site: {Configuration#bleeding_edge_active?} raises on an id absent from the
       # registry, so the constant is the single place a rename has to reach.
       DISCOVERY_SEEDED_MUTATION_SITES = "discovery-seeded-mutation-sites"
+
+      # ADR-50 § WD2 — the bleeding-edge feature id gating the Tier-2 dependent-closure kill oracle (#254).
+      # Same reason as above for naming it here rather than inlining the string.
+      DEPENDENT_CLOSURE_KILL_ORACLE = "dependent-closure-kill-oracle"
 
       private
 
@@ -46,6 +52,39 @@ module Rigor
           paths: paths, environment: environment, target_ruby: configuration.target_ruby, workers: workers
         )
         seed.empty? ? nil : seed
+      end
+
+      # The kill oracle Tier 2 measures with — the #254 gate, and the only place that feature id is read.
+      #
+      # Returns nil (today's behaviour: {Protection::DiagnosticOracle}, which re-analyses the mutated file
+      # alone) unless the project has adopted `dependent-closure-kill-oracle`. With it adopted, returns the
+      # {Protection::ClosureKillOracle}, which counts a kill when a new diagnostic appears anywhere in the
+      # mutated file's dependent closure — so a mutation whose damage lands in a CALLER is scored as the
+      # catch it is.
+      #
+      # Why the feature is off by default: it moves the reported effectiveness ratio UP on unchanged code
+      # (kills rise, the denominator does not), so a number recorded under it is not comparable with one
+      # recorded without it — the ADR-50 WD2/WD7 reason for the overlay, even though the direction cannot
+      # turn a `--threshold` build red.
+      #
+      # Both of its inputs are built HERE, once, on the parent — the ADR-46 dependents map (one recording
+      # pass) and the per-file discovery bundles — so {MutationForkScan}'s children copy-on-write inherit
+      # them and no per-mutant work is repeated per worker. `seed` composes the two features: when
+      # `discovery-seeded-mutation-sites` is also adopted, its `param_inferred_types` table rides into the
+      # oracle so the knowledge admitting a site is the knowledge the oracle judges it with (issue #260).
+      def mutation_kill_oracle(paths, configuration, context, seed, workers)
+        return nil unless configuration.bleeding_edge_active?(DEPENDENT_CLOSURE_KILL_ORACLE)
+
+        Protection::ClosureKillOracle.new(
+          configuration: configuration, environment: context.environment, project_scan: context.project_scan,
+          paths: paths,
+          dependents: Protection::DependencyClosure.build(
+            paths: paths, configuration: configuration, environment: context.environment,
+            cache_store: context.cache_store, workers: workers
+          ),
+          seed_bundles: Protection::DiscoverySeed.bundles(paths: paths),
+          param_inferred_types: seed && seed[:param_inferred_types]
+        )
       end
 
       # The scope {Protection::Mutator} judges a mutation site's receiver against, derived from the same seed
@@ -110,7 +149,12 @@ module Rigor
           configuration: configuration, environment: context.environment, project_scan: context.project_scan,
           limit: options[:limit], seed: options[:seed],
           site_selector: options[:include_dynamic] ? :all : :biteable,
-          base_scope: mutation_base_scope(seed, context.environment), discovery_seed: seed
+          base_scope: mutation_base_scope(seed, context.environment), discovery_seed: seed,
+          # #254 — the type half of the fused measurement is the same measurement, so the closure oracle
+          # applies here too when adopted: a `--with-tests` run must not disagree with the plain run about
+          # which mutants the TYPE axis caught, or the "add a type OR a test" verdict would depend on which
+          # command you ran. Sequential like the rest of this path (`--workers` is warned about above).
+          oracle: mutation_kill_oracle(paths, configuration, context, seed, 0)
         )
         accumulator = FusedProtectionAccumulator.new
         paths.each { |path| scan_fused_one(path, scanner, accumulator, test_oracle, configuration) }
@@ -167,7 +211,8 @@ module Rigor
         scanner = Protection::MutationScanner.new(
           configuration: configuration, environment: context.environment, project_scan: context.project_scan,
           limit: options[:limit], seed: options[:seed],
-          base_scope: mutation_base_scope(seed, context.environment), discovery_seed: seed
+          base_scope: mutation_base_scope(seed, context.environment), discovery_seed: seed,
+          oracle: mutation_kill_oracle(paths, configuration, context, seed, workers)
         )
         accumulator = MutationProtectionAccumulator.new
 

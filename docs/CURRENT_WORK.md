@@ -6,8 +6,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Verify a claim before carrying it forward — and verify it by the thing that decides, not by a
-  proxy. Read exit codes, diff structured output. A previous session shipped a "make verify green"
-  claim read out of a grep that could not see "1 offense detected"; CI saw it.
+  proxy. Read exit codes, diff structured output, and treat a subagent's summary as a claim to
+  check, not a fact: this session caught one contradicting its own evidence and one citing a
+  memory slug as a repo path.
 -->
 
 # Current Work — Session Handoff
@@ -19,81 +20,66 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **Merged since the last handoff:**
-  - [#247](https://github.com/rigortype/rigor/pull/247) / #246 — the LSP publishes **whole-project**
-    diagnostics to every open buffer on `didSave`, from an in-process `IncrementalSession` seeded
-    from the snapshot and never written back. A dirty buffer is excluded except as itself. This was
-    the "unfiled, needs a design call" item the previous handoff pointed at; the seven decisions are
-    in `docs/design/20260517-language-server.md` § "Whole-project publishes on save".
-  - [#248](https://github.com/rigortype/rigor/pull/248) / #137 — `SomeSchema.call(input).to_h`
-    returns the schema's own `HashShape`. A `required` row becomes a required key and an `optional`
-    row an optional one — the declaration's vocabulary, not `to_h`'s worst case, because typing every
-    key as possibly-absent draws a nil error inside an `if result.success?` branch.
-  - [#249](https://github.com/rigortype/rigor/pull/249) — an undeclared key on an **open** `HashShape`
-    reads as `untyped` instead of `Constant[nil]`. The `extra_keys:` policy had only ever been
-    consulted in `Inference::Acceptance`, never on the element-read path.
-- **Open:** [#250](https://github.com/rigortype/rigor/pull/250) / #121 — `"widget".freeze` keeps its
-  value. Corpus-measured: twenty projects, 9,548 diagnostics, byte-identical, fold fires 295 times.
-- `make verify` and `make docs-check` green on `constant-self-returners` (checked by exit code).
+- **Merged this cycle** (2026-08-01, one session, all gates by exit code):
+  - [#255](https://github.com/rigortype/rigor/pull/255) / #252 — the bleeding-edge overlay carries
+    **behaviour features**: `Feature` has a `kind:`, call sites ask
+    `Configuration#bleeding_edge_active?(id)` (raises on an unregistered id — deliberate; config
+    stays inert), `GRADUATED` implements WD7. Plus a documented constraint: a behaviour feature
+    must not change `check` analysis output unless its id enters the cache identity — severity is
+    safe only because `SeverityStamp` resolves post-cache.
+  - [#256](https://github.com/rigortype/rigor/pull/256) — CI gains the standalone
+    `self-check-bleeding-edge` job (`check --bleeding-edge lib`, cold, required): WD2's "Rigor's
+    own CI exercises the overlay", and graduation insurance. Deliberately NOT a matrix axis.
+  - [#257](https://github.com/rigortype/rigor/pull/257) / #134 slice 1 — the Tier-2 mutation loop
+    fork-maps; `--workers` finally reaches it. The larger find: **`ForkMap` never re-armed YJIT
+    after fork** — the pool was a pessimization (67s at 8 workers vs 37s sequential) and Tier 1 +
+    parameter-inference carried the same latent deficit. 8-worker Tier-2: 23.2s.
+  - [#258](https://github.com/rigortype/rigor/pull/258) — `Jit.rearm_after_fork` carries the
+    parent's *remaining* deadline (monotonic, grandchild-inheriting). 8-worker: 21.3s.
+  - [#259](https://github.com/rigortype/rigor/pull/259) / #253 — Tier-2 site selection seeds
+    Tier 1's cross-file discovery, behind the `discovery-seeded-mutation-sites` behaviour feature
+    (off by default; the ratio `--threshold` pins would drop).
+- **Measurement record**: [#253's comment](https://github.com/rigortype/rigor/issues/253#issuecomment-5149563175)
+  (the seed's real effect), `docs/notes/20260801-tier1-protection-yjit-remeasure.md` (fresh
+  Mastodon Tier-1 reference: 0w 18.2s / 4w 15.3s / 8w 12.8s quiet, RSS 813→354 MB, sites
+  identical across worker counts).
 
 ## Next session
 
-- **[#134](https://github.com/rigortype/rigor/issues/134) is rewritten and ready.** Its original
-  premise was wrong — there is no whole-project cold re-scan per mutant, and ADR-46's `dependents`
-  index answers a question the current oracle never asks. The investigation is
-  [in the issue](https://github.com/rigortype/rigor/issues/134#issuecomment-5148902570) and the body
-  now carries three slices. Slice 1 (fork-map the Tier-2 file loop; `--workers` is parsed but returns
-  before `resolve_workers` on that path) is independent of the other two and the largest win per unit
-  of effort. The two findings kept out of #134 because they move the reported number rather than the
-  time to produce it are now [#253](https://github.com/rigortype/rigor/issues/253) (Tier-2 site
-  filter seeds discovery, as Tier 1 already does) and
-  [#254](https://github.com/rigortype/rigor/issues/254) (a kill counts when the diagnostic lands in a
-  dependent file).
-- **Both of those are blocked on [#252](https://github.com/rigortype/rigor/issues/252), which is the
-  one to start.** ADR-50 § WD2's bleeding-edge overlay is the project's vehicle for "queued for the
-  next major, opt in early" — but `BleedingEdge::Feature` carries only `severity_overrides`, and
-  neither #253 nor #254 moves any rule's severity; what moves is a measurement. Giving the overlay a
-  behaviour-feature kind is what lets both wait for a major behind a feature id instead of turning a
-  pinned `--threshold` build red. Left `ready-for-human` because how a call site asks "is feature
-  `<id>` active?" puts ADR-50 WD1 contract vocabulary into engine code — deliberate coupling, so it
-  wants a decision rather than a default.
-- **#121 is now enumerated rather than open-ended.** A probe sweep (positive controls on every tier)
-  found the self-returner family as the one gap with real-world weight — that is #250. The remainder,
-  ranked: Set element projections (`min`/`max`/`first`/`sort`/`sum`/`to_set` leak `Dynamic[top]` on a
-  carrier whose elements `to_a` already folds), `Tuple#first(n)`/`last(n)`/`sum(init)`/`count(obj)`
-  (~15 lines; `take`/`drop`/`min(n)` already do it), `Regexp.compile` (one symbol next to `:new`),
-  `abs2`/`rationalize` in the Integer/Float unary sets. **Predicate-shaped folds are disqualified** —
-  a bool fold newly surfaces `flow.always-truthy-condition`, demonstrated live.
-- **[#134](https://github.com/rigortype/rigor/issues/134) / [#135](https://github.com/rigortype/rigor/issues/135)**
-  (self-testing) and the rest of **[#137](https://github.com/rigortype/rigor/issues/137)** (three
-  dry-validation ceiling slices) are the `ready-for-agent` remainder.
-- **Still deliberately not queued:** [#147](https://github.com/rigortype/rigor/issues/147) and
-  [#142](https://github.com/rigortype/rigor/issues/142). Phase attribution says the remaining editor
-  levers are small; do not start #147 on its stated estimate.
-- **Unfiled upstream report** (small, external): `rbs-inline`'s parser accepts
-  `# @rbs module-self: Foo` and its writer then discards it — the defect behind ADR-32 WD12. Needs
-  maintainer sign-off because it is an external filing.
+- **[#260](https://github.com/rigortype/rigor/issues/260) is the sharpest open item.** #253's
+  measurement showed newly-admitted seeded sites are **structurally unkillable** (`lib`: +2,183
+  sites → +2,187 survivors): the seed provides class identity but not the cross-file method
+  table, so `Account.find` is measured and nothing can kill it. Two candidate fixes are in the
+  issue (seed the oracle's def index vs admit only oracle-actionable sites); the decision rides
+  *inside* the existing feature id while it is ungraduated. Settle it before quoting any
+  graduation number.
+- **Corrections to carry, not re-derive**: the #134 investigation's "+0.6% sites" was wrong by
+  ~40× (real: +27% Rigor lib, **+92%** redmine app/models; ratio −48% rel) — its probe modelled
+  only the constant-receiver arm and `param_inferred_types` contributes more. The ON arm is not a
+  strict superset of OFF (a seed can legitimately resolve an anchor to a Dynamic drop).
+- **[#254](https://github.com/rigortype/rigor/issues/254)** (project-wide kill oracle) is the
+  remaining member of the graduation cluster; #134 slices 2-3 (the ADR-46 forward-edge result
+  cache + the incremental==cold gate) are the remaining speed work, now cheaper to validate with
+  the loop fork-mapped.
+- **#134 / #135 / #137 (remaining slices)** are still the `ready-for-agent` pool; #121's
+  enumerated remainder (Set projections, Tuple `first(n)`-family, `Regexp.compile`,
+  `abs2`/`rationalize`) is unclaimed.
+- **Unfiled upstream report** (small, external, needs maintainer sign-off): `rbs-inline` parses
+  `# @rbs module-self: Foo` and discards it — the defect behind ADR-32 WD12.
 
 ## What this session learned that is not in a commit
 
-- **The coverage docs over-report, and now by name.** `20260522-stdlib-deterministic-module-coverage.md`
-  carries no staleness warning and its 🔲 rows are wrong for every CGI escape/unescape function, all
-  four URI `*_component` functions, and `Regexp.escape`/`quote` — all fold today. Math, CGI and
-  Shellwords are **complete** and can be marked so. `20260522-type-method-coverage.md`'s 2026-07-31
-  warning is scoped to §5 only; ~22 String rows above it are equally stale. Probe before implementing
-  against any of these.
-- **`rigor annotate` beats `type-of` for a coverage sweep** (one call types every line), and
-  **`type-scan` is useless for it** — it reports whether a node got *a* type, never whether that type
-  is precise.
-- **A fold's blast radius is not the method you changed.** Value-pinning a constant is only
-  interesting because of what becomes decidable downstream; the thing to measure is the *diagnostic*
-  set, not the folded site. The corpus zero for #250 rests on a condition worth remembering: the pin
-  does not survive a cross-file constant read (`Dynamic[top]` today). Same-file definition + predicate
-  does draw the warning.
-- **A subagent's confident summary can contradict its own evidence.** The #250 corpus report claimed
-  `CONST = <literal>.freeze` was "extinct — 0 hits in all 20 projects" while citing `haml`'s
-  `ID_KEY = 'id'.freeze` two sections earlier. The measurement was sound; the generalisation was not.
-  Take the numbers, re-derive the story.
-- **A PostToolUse formatter rubocop-autocorrects scratch fixtures written with the Write tool** —
-  it deleted a probe's `pc3 = 2 + 3` outright as a useless assignment. Write probe fixtures with a
-  Bash heredoc.
+- **Delegation pattern that worked**: fixed design decisions in the brief (marked "do not
+  relitigate"), the binding repo contract restated verbatim, gates by exit code, and the parent
+  re-running the gate independently before push. Two agents in parallel = one on the main tree +
+  one in a worktree (worktree needs the `vendor` symlink + `.bundle/config` copy; never commit
+  the symlink).
+- **A perf measurement taken while other agents run `make verify` is garbage** — queue it. And
+  when a load caveat is honest ("indicative, not clean"), the quiet re-run is cheap and upgrades
+  the note: this session's showed the load penalty lands almost entirely on the *sequential* arm,
+  flipping the apparent parallel ratio.
+- **`fork` copies only the calling thread.** Any deferred work armed on a background thread —
+  YJIT deadlines, timers — silently dies in every child. `PoolCoordinator` knew; `ForkMap`
+  didn't; grep for `Thread.new` near any new fork site.
+- **A required CI job asserting "clean under the queued overlay" must be preceded by proving the
+  tree is clean under it** — it was (exit 0), which is what made #256 a one-PR change.

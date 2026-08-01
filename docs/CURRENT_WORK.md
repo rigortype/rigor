@@ -6,9 +6,8 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Verify a claim before carrying it forward — and verify it by the thing that decides, not by a
-  proxy. Read exit codes, diff structured output, and treat a subagent's summary as a claim to
-  check, not a fact: this session caught one contradicting its own evidence and one citing a
-  memory slug as a repo path.
+  proxy. This cycle's example: the #260 design assumed the seeded-site survivor cluster was oracle
+  blindness; the implementation measurement split it, and only half was.
 -->
 
 # Current Work — Session Handoff
@@ -20,66 +19,67 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **Merged this cycle** (2026-08-01, one session, all gates by exit code):
-  - [#255](https://github.com/rigortype/rigor/pull/255) / #252 — the bleeding-edge overlay carries
-    **behaviour features**: `Feature` has a `kind:`, call sites ask
-    `Configuration#bleeding_edge_active?(id)` (raises on an unregistered id — deliberate; config
-    stays inert), `GRADUATED` implements WD7. Plus a documented constraint: a behaviour feature
-    must not change `check` analysis output unless its id enters the cache identity — severity is
-    safe only because `SeverityStamp` resolves post-cache.
-  - [#256](https://github.com/rigortype/rigor/pull/256) — CI gains the standalone
-    `self-check-bleeding-edge` job (`check --bleeding-edge lib`, cold, required): WD2's "Rigor's
-    own CI exercises the overlay", and graduation insurance. Deliberately NOT a matrix axis.
-  - [#257](https://github.com/rigortype/rigor/pull/257) / #134 slice 1 — the Tier-2 mutation loop
-    fork-maps; `--workers` finally reaches it. The larger find: **`ForkMap` never re-armed YJIT
-    after fork** — the pool was a pessimization (67s at 8 workers vs 37s sequential) and Tier 1 +
-    parameter-inference carried the same latent deficit. 8-worker Tier-2: 23.2s.
-  - [#258](https://github.com/rigortype/rigor/pull/258) — `Jit.rearm_after_fork` carries the
-    parent's *remaining* deadline (monotonic, grandchild-inheriting). 8-worker: 21.3s.
-  - [#259](https://github.com/rigortype/rigor/pull/259) / #253 — Tier-2 site selection seeds
-    Tier 1's cross-file discovery, behind the `discovery-seeded-mutation-sites` behaviour feature
-    (off by default; the ratio `--threshold` pins would drop).
-- **Measurement record**: [#253's comment](https://github.com/rigortype/rigor/issues/253#issuecomment-5149563175)
-  (the seed's real effect), `docs/notes/20260801-tier1-protection-yjit-remeasure.md` (fresh
-  Mastodon Tier-1 reference: 0w 18.2s / 4w 15.3s / 8w 12.8s quiet, RSS 813→354 MB, sites
-  identical across worker counts).
+- **Two audited PRs are OPEN and waiting for a human merge** (2026-08-01; each: parent re-ran
+  `make verify` → exit 0, `git diff --check` → exit 0, CI green or green-but-Tests-pending at last
+  check). The session's `gh pr merge` was blocked by the permission classifier — merging needs the
+  user, or a permission rule for `gh pr merge`:
+  - [#261](https://github.com/rigortype/rigor/pull/261) — Tuple `first(n)`/`last(n)` folds to the
+    precise sub-Tuple (the `take`/`drop` shape); closes the last asymmetry in that family (#121
+    slice). Two Slice-4 overload specs were legitimately rewritten onto `Nominal[Array]` locals so
+    the arity path stays exercised.
+  - [#262](https://github.com/rigortype/rigor/pull/262) — #260's fix: one `Protection::DiscoverySeed`
+    table set threaded to BOTH Tier-2 halves (site filter + a new opt-in
+    `Runner.new(discovery_seed:)` seam the `DiagnosticOracle` passes through). Default nil keeps
+    the prebuilt/LSP contract byte-identical; OFF arm untouched.
+- **#260 is decided and amended** — read both comments on the issue before touching Tier 2. The
+  short version: the unkillable-survivor cluster was only HALF measurement blindness
+  (`discovered_classes` — fixed by #262, +21 kills, spec-proven). The other half is ADR-67 WD6b
+  *by construction*: negative rules decline on inferred-param-rooted values (lower bound ⇒ FP), so
+  those survivors are TRUE "no teeth here" reports and stay in the denominator. Full seed stays in
+  the oracle (fidelity + no filter/oracle drift). Rigor `lib` graduation numbers: 10,252 sites /
+  5,580 killed / 0.5443.
+- **Filed this cycle**: [#263](https://github.com/rigortype/rigor/issues/263) (Tier 1 counts
+  WD6b-guarded sites as protected — the proxy over-claim #260's measurement exposed; wants ONE
+  shared predicate for both tiers), [#264](https://github.com/rigortype/rigor/issues/264) (Tier-2
+  site totals jitter: `classify` rescues harness failures to `:invalid` silently).
 
 ## Next session
 
-- **[#260](https://github.com/rigortype/rigor/issues/260) is the sharpest open item.** #253's
-  measurement showed newly-admitted seeded sites are **structurally unkillable** (`lib`: +2,183
-  sites → +2,187 survivors): the seed provides class identity but not the cross-file method
-  table, so `Account.find` is measured and nothing can kill it. Two candidate fixes are in the
-  issue (seed the oracle's def index vs admit only oracle-actionable sites); the decision rides
-  *inside* the existing feature id while it is ungraduated. Settle it before quoting any
-  graduation number.
-- **Corrections to carry, not re-derive**: the #134 investigation's "+0.6% sites" was wrong by
-  ~40× (real: +27% Rigor lib, **+92%** redmine app/models; ratio −48% rel) — its probe modelled
-  only the constant-receiver arm and `param_inferred_types` contributes more. The ON arm is not a
-  strict superset of OFF (a seed can legitimately resolve an anchor to a Dynamic drop).
-- **[#254](https://github.com/rigortype/rigor/issues/254)** (project-wide kill oracle) is the
-  remaining member of the graduation cluster; #134 slices 2-3 (the ADR-46 forward-edge result
-  cache + the incremental==cold gate) are the remaining speed work, now cheaper to validate with
-  the loop fork-mapped.
-- **#134 / #135 / #137 (remaining slices)** are still the `ready-for-agent` pool; #121's
-  enumerated remainder (Set projections, Tuple `first(n)`-family, `Regexp.compile`,
-  `abs2`/`rationalize`) is unclaimed.
-- **Unfiled upstream report** (small, external, needs maintainer sign-off): `rbs-inline` parses
-  `# @rbs module-self: Foo` and discards it — the defect behind ADR-32 WD12.
+- **Merge #261 and #262 first** (user action), then delete the worktree
+  `.claude/worktrees/agent-ac6545cbe4fcd600f` and prune branches.
+- **redmine `app/models` ON-arm re-measure** is the remaining #260 acceptance box and a graduation
+  precondition (survey-project setup: cwd=target + `BUNDLE_GEMFILE`; see the memory note on survey
+  projects).
+- **The graduation cluster is now #254 + #263** (both "what does the ratio mean" issues). #254's
+  design premise should be re-checked against #260's amendment: its "the most valuable catch is
+  scored as a miss" example (`Account.find` return-type change caught in callers) sits right next
+  to the empirical footnote that renaming `Account.find` is not killable even by whole-project
+  `check` on an RBS-less class — the dependent-closure oracle is still right, but the example
+  sites it will rescue are fewer than the issue implies. Audit seams already verified:
+  `IncrementalSession#buffer_path?` (a bound buffer is never stat-fresh) + `scan_summary_for_paths(buffer:)`
+  + ADR-46 `file_dependents`.
+- **An UNFILED draft upstream report is ready for user sign-off**: `rbs-inline` parses
+  `# @rbs module-self: Foo` (colon form) and silently drops the self-type — confirmed live against
+  the vendored 0.14.0 gem, no existing upstream issue, full discard path with file:line in the
+  draft. The draft was in the session scratchpad (regenerate cheaply if gone: the evidence chain is
+  ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764` → rescue at `617-621` →
+  `annotations.rb:527-536`). Side-finding: ADR-32's "upstream docs use the colon" citation actually
+  points at rbs-core's built-in `RBS::InlineParser` doc, not the rbs-inline gem's — worth a
+  one-line ADR correction when next touching ADR-32.
+- **#134 slices 2-3, #135, #137, #142, #147** remain the `ready-for-agent` pool; #121 stays open
+  (the remainder after #261: `Regexp.compile` alias, `Integer#rationalize`, `Integer`/`Float#abs2`
+  — all probed real but small; Set projections audited CLOSED, nothing bounded remains).
 
 ## What this session learned that is not in a commit
 
-- **Delegation pattern that worked**: fixed design decisions in the brief (marked "do not
-  relitigate"), the binding repo contract restated verbatim, gates by exit code, and the parent
-  re-running the gate independently before push. Two agents in parallel = one on the main tree +
-  one in a worktree (worktree needs the `vendor` symlink + `.bundle/config` copy; never commit
-  the symlink).
-- **A perf measurement taken while other agents run `make verify` is garbage** — queue it. And
-  when a load caveat is honest ("indicative, not clean"), the quiet re-run is cheap and upgrades
-  the note: this session's showed the load penalty lands almost entirely on the *sequential* arm,
-  flipping the apparent parallel ratio.
-- **`fork` copies only the calling thread.** Any deferred work armed on a background thread —
-  YJIT deadlines, timers — silently dies in every child. `PoolCoordinator` knew; `ForkMap`
-  didn't; grep for `Thread.new` near any new fork site.
-- **A required CI job asserting "clean under the queued overlay" must be preceded by proving the
-  tree is clean under it** — it was (exit 0), which is what made #256 a one-PR change.
+- **Delegation pattern, second confirmation**: fixed design decisions in the brief ("do not
+  relitigate") + the repo contract restated verbatim + gates by exit code + the parent re-running
+  gates independently worked again — AND the brief's escape hatch mattered: the #262 agent was told
+  to report contradictions rather than redesign, and its measurement overturned half the design
+  premise. Write that hatch into every brief.
+- **A subagent's "deliberately declined" comment can be stale**: the Tuple `first(n)` decline
+  predated `take`/`drop` landing the identical fold; the #261 agent correctly read it as historical
+  rather than binding. Check the sibling precedent before honouring an old "deliberate" comment.
+- **The auto-mode permission classifier blocks `gh pr merge` (and intermittently blocked complex
+  awk/git-diff one-liners)**: plan for PRs to end at "open + audited", and read branch files
+  directly instead of fancy diff extraction pipelines.

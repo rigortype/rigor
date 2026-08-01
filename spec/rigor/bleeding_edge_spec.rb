@@ -25,9 +25,22 @@ RSpec.describe Rigor::BleedingEdge do
       expect(described_class.severity_overrides_for({ "mode" => "none" })).to eq({})
     end
 
-    it "carries only severity features today, and has graduated nothing" do
-      expect(described_class::FEATURES.map(&:kind).uniq).to eq([:severity])
+    it "carries both kinds today, and has graduated nothing" do
+      expect(described_class::FEATURES.map(&:kind).uniq).to contain_exactly(:severity, :behaviour)
       expect(described_class::GRADUATED).to eq([])
+    end
+
+    # Issue #253 — the first shipped `:behaviour` feature. Its gate is `Configuration#bleeding_edge_active?`
+    # at one CLI call site, so the registry entry must carry no severity map at all: a queued change that also
+    # moved a rule's severity would be two changes wearing one id.
+    it "ships the Tier-2 discovery seed as a behaviour feature with no severity diff" do
+      feature = described_class.feature("discovery-seeded-mutation-sites")
+      expect(feature.kind).to eq(:behaviour)
+      expect(feature).to be_behaviour
+      expect(feature.severity_overrides).to be_empty
+      expect(described_class.severity_overrides_for({ "mode" => "all" }))
+        .not_to have_key("discovery-seeded-mutation-sites")
+      expect(described_class.active_ids_for({ "mode" => "none" })).not_to include(feature.id)
     end
   end
 

@@ -10,7 +10,34 @@ module Rigor
     # (using `@out` / `@err` / `@argv` / `collect_paths` / `determine_protection_exit` and the Protection +
     # LanguageServer collaborators the command requires).
     module CoverageMutation
+      # ADR-50 § WD2 — the bleeding-edge feature id gating the Tier-2 discovery seed (#253). Named here rather
+      # than inlined at the call site: {Configuration#bleeding_edge_active?} raises on an id absent from the
+      # registry, so the constant is the single place a rename has to reach.
+      DISCOVERY_SEEDED_MUTATION_SITES = "discovery-seeded-mutation-sites"
+
       private
+
+      # The scope Tier 2 judges a mutation site's receiver against — the #253 gate, and the ONLY place in this
+      # feature that knows a feature id exists.
+      #
+      # Returns nil (today's behaviour: {Protection::Mutator} builds a bare `Scope.empty` per file) unless the
+      # project has adopted `discovery-seeded-mutation-sites`. With it adopted, returns the same seeded scope
+      # Tier 1 has built since 2026-07-04 — `discovered_classes` so a receiver whose class is declared in a
+      # *sibling* file resolves instead of reading `Dynamic`, and `param_inferred_types` (ADR-67 WD3) so an
+      # inferred-parameter receiver does too. Both span the scanned `paths` only.
+      #
+      # Why it is off by default: an unseeded Tier 2 drops those sites from the denominator entirely, so seeding
+      # ADDS sites and the effectiveness ratio falls on unchanged code — and `--threshold=RATIO` exits 1 below a
+      # ratio users pin in CI. Turning it on by default would turn their build red with no change on their side.
+      #
+      # Built ONCE here, on the parent, so {MutationForkScan}'s children copy-on-write inherit it inside the
+      # scanner. Nothing crosses the marshal boundary: only the per-file results are marshaled back, and a Scope
+      # is not among them.
+      def mutation_base_scope(paths, configuration, environment, workers)
+        return nil unless configuration.bleeding_edge_active?(DISCOVERY_SEEDED_MUTATION_SITES)
+
+        scope_with_inferred_params(paths, configuration, environment, workers)
+      end
 
       # ADR-63 Tier 2 — the mutation-effectiveness deep dive. Builds the RBS environment + project pre-pass once (the
       # warm loop), then re-analyses each target file's mutants against its clean baseline. Defaults to the git-changed
@@ -59,7 +86,11 @@ module Rigor
         scanner = Protection::MutationScanner.new(
           configuration: configuration, environment: context.environment, project_scan: context.project_scan,
           limit: options[:limit], seed: options[:seed],
-          site_selector: options[:include_dynamic] ? :all : :biteable
+          site_selector: options[:include_dynamic] ? :all : :biteable,
+          # The fused path stays sequential end to end (`--workers` is warned about above), so the seed's own
+          # parameter-inference pre-pass runs sequentially too rather than quietly re-enabling the forking the
+          # warning just said was ignored.
+          base_scope: mutation_base_scope(paths, configuration, context.environment, 0)
         )
         accumulator = FusedProtectionAccumulator.new
         paths.each { |path| scan_fused_one(path, scanner, accumulator, test_oracle, configuration) }
@@ -111,15 +142,17 @@ module Rigor
       def scan_mutation_protection(paths, options)
         configuration = Configuration.load(options.fetch(:config))
         context = LanguageServer::ProjectContext.new(configuration: configuration)
+        workers = CheckRunnerFactory.resolve_workers(options, configuration)
         scanner = Protection::MutationScanner.new(
           configuration: configuration, environment: context.environment, project_scan: context.project_scan,
-          limit: options[:limit], seed: options[:seed]
+          limit: options[:limit], seed: options[:seed],
+          base_scope: mutation_base_scope(paths, configuration, context.environment, workers)
         )
         accumulator = MutationProtectionAccumulator.new
 
         results = MutationForkScan.run(
           paths: paths, scanner: scanner, environment: context.environment,
-          configuration: configuration, workers: CheckRunnerFactory.resolve_workers(options, configuration)
+          configuration: configuration, workers: workers
         )
         # `fetch`, never `[]`: a worker that died mid-slice must abort the run rather than quietly drop files
         # out of a ratio that `--threshold` gates CI on.

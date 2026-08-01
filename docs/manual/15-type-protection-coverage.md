@@ -85,6 +85,33 @@ always *effectiveness / where to add a type*, never "your code is
 broken": a surviving breakage at a `Dynamic` site is a place
 the type net does not reach.
 
+### Which sites Tier 2 measures
+
+Tier 2 only mutates a site where Rigor holds a *concrete* receiver
+type — at a `Dynamic` receiver the breakage would survive by
+construction, which measures nothing. Today it decides that from
+the file alone, so a call on a project class declared in a
+**sibling** file (`Post.where`, `Account.find`) reads `Dynamic` and
+the site is left out of the denominator entirely, even though Tier
+1 counts it.
+
+The [`discovery-seeded-mutation-sites`](02-cli-reference.md#rigor-show-bleedingedge)
+bleeding-edge feature closes that gap, giving Tier 2 the same
+cross-file view Tier 1 has:
+
+```yaml
+# .rigor.yml
+bleeding_edge:
+  - discovery-seeded-mutation-sites
+```
+
+It is **off by default and opt-in on purpose**. Those sites are
+mostly ones the type net does not yet catch, so admitting them
+*lowers* the reported effectiveness ratio on unchanged code — and
+`--threshold=RATIO` exits 1 below a ratio you pin in CI. Adopt it
+when you are ready to re-baseline that number; it is the intended
+default at a future major.
+
 What *does* reach it is your tests.
 
 ## The fused view — types **and** tests (`--with-tests`)

@@ -63,12 +63,22 @@ module Rigor
       #   Seam 2). `:biteable` (default) keeps only concrete-type sites Rigor can
       #   bite; `:all` also mutates Dynamic-receiver dispatch sites — use only
       #   with a {TestSuiteOracle} (the fused overlay), never the diagnostic path.
+      # @param base_scope [Rigor::Scope, nil] the scope site selection judges
+      #   anchor types against, built once by the caller (see
+      #   {Mutator#anchor_base_scope}). `nil` — the default — keeps the bare
+      #   single-file empty scope. A caller that seeds cross-file discovery
+      #   passes it here; this class stays free of {Rigor::Configuration} and of
+      #   bleeding-edge feature ids, which live one layer up in the CLI.
+      # rubocop:disable Metrics/ParameterLists -- every one is an independently-defaulted collaborator or knob;
+      # bundling them into an options object would only move the list behind a name.
       def initialize(configuration:, environment:, project_scan:, limit: nil, seed: 1, oracle: nil,
-                     site_selector: :biteable)
+                     site_selector: :biteable, base_scope: nil)
+        # rubocop:enable Metrics/ParameterLists
         @environment = environment
         @limit = limit
         @seed = seed
         @site_selector = site_selector
+        @base_scope = base_scope
         @oracle = oracle || DiagnosticOracle.new(
           configuration: configuration, environment: environment, project_scan: project_scan
         )
@@ -135,9 +145,9 @@ module Rigor
         muts = mutator.mutations
         kept =
           if @site_selector == :all
-            mutator.dispatch_site_mutations(muts, environment: @environment, path: path)
+            mutator.dispatch_site_mutations(muts, environment: @environment, path: path, base_scope: @base_scope)
           else
-            mutator.filter_by_type(muts, environment: @environment, path: path).first
+            mutator.filter_by_type(muts, environment: @environment, path: path, base_scope: @base_scope).first
           end
         sample(kept)
       end

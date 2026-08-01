@@ -117,7 +117,16 @@ module Rigor
           :succ, :pred, :next, :abs, :magnitude,
           :bit_length, :to_s, :to_i, :to_int, :to_f,
           :floor, :ceil, :round, :truncate, :chr,
-          :inspect, :-@, :+@, :~, :to_r, :to_c
+          :inspect, :-@, :+@, :~, :to_r, :to_c,
+          # `rationalize` (no-arg form) is the Integer sibling of the already-folded
+          # `Float#rationalize` / `Rational#rationalize` — pure, returns `Rational(self, 1)`. The
+          # optional-`eps` binary form is NOT mirrored here: unlike `Rational#rationalize` (which reaches
+          # `NUMERIC_BINARY`'s catalog fallback via `numeric.yml`'s `nurat_rationalize` leaf entry),
+          # `numeric.yml` carries no `rationalize` entry for Integer/Float, so the 1-arg call declines to
+          # the RBS tier exactly as it does today — this only closes the 0-arg gap.
+          # `abs2` (`self * self`, always a non-negative Integer) is the Integer sibling of the
+          # already-folded `Rational#abs2` / `Complex#abs2`.
+          :rationalize, :abs2
         ].freeze
         FLOAT_UNARY = Set[
           :zero?, :positive?, :negative?, :nonzero?,
@@ -135,7 +144,12 @@ module Rigor
           # `self >= 0`, `Math::PI` for `self < 0`. Pure sign test, deterministic; a NaN receiver yields NaN
           # which `foldable_constant_value?` declines.
           :arg, :angle, :phase,
-          :inspect, :-@, :+@
+          :inspect, :-@, :+@,
+          # `abs2` (`self * self`) is the Float sibling of the already-folded `Rational#abs2` /
+          # `Complex#abs2` / (now) `Integer#abs2`. A non-finite receiver (`Infinity`, `NaN`) still folds
+          # via `foldable_constant_value?`'s existing NaN guard — `Infinity.abs2` is `Infinity`
+          # (foldable), `NaN.abs2` is `NaN` (declined, same as every other NaN-producing Float unary op).
+          :abs2
         ].freeze
         STRING_UNARY = Set[
           :upcase, :downcase, :capitalize, :swapcase,

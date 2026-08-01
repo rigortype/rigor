@@ -153,7 +153,7 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 |----------|-----------|--------|------|------|
 | `escape(str)` | String → String | `Constant[String]` | 🔲 | 正規表現メタ文字エスケープ。**高優先度。** |
 | `quote(str)` | String → String | `Constant[String]` | 🔲 | `escape` の別名。同上。 |
-| `compile(pattern)` | String → Regexp | `Constant[Regexp]` | 🔲 | `Regexp.new` 別名。Constant[Regexp] への折りたたみ。低優先度（用途限定）。 |
+| `compile(pattern)` | String → Regexp | `Constant[Regexp]` | ✅ | `Regexp.new` 別名（`rb_reg_s_new` 同一 C エントリポイント）。`RegexpFolding::REGEXP_NEW_METHODS` に `:compile` を追加し `fold_new` を共有（#121 P3）。 |
 | `union(*patterns)` | String… → Regexp | `Regexp` | 🔲 | 可変引数・Regexp 型返却。低優先度。 |
 | `last_match` | → MatchData? | MatchData\|nil | 🚫 | グローバル `$~` に依存。実行時状態。 |
 | `linear_time?(pattern)` | String → bool | `Constant[bool]` | 🔲 | パターンが線形時間かを静的解析。低優先度。 |
@@ -167,7 +167,7 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 [ ] escape / quote → Constant[String] (Constant[String] 引数時)
 
 低優先度:
-[ ] compile → Constant[Regexp] (Constant[String] 引数時)
+[x] compile → Constant[Regexp] (Constant[String] 引数時) — #121 P3
 [ ] union   → Regexp (全引数 Constant[String] 時)
 ```
 

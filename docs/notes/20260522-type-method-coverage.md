@@ -215,7 +215,9 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `odd?` | ✅ | INTEGER_UNARY → `Constant[bool]`。 |
 | `pow` | 🔲 | `**` の別名（ただし `pow(exp, mod)` は剰余乗算）。低優先度。 |
 | `pred` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
-| `rationalize` / `to_r` | 🔲 | INTEGER_UNARY 追加で `Constant[Rational]`。低優先度。 |
+| `rationalize` (0 引数) | ✅ | INTEGER_UNARY に追加（#121 P3）。`Constant[Rational]`。`eps` 引数形式は catalog に `rationalize` エントリが無いため未対応（Float と同じ制約、意図的に非対応のまま）。 |
+| `to_r` | ✅ | INTEGER_UNARY → `Constant[Rational]`。 |
+| `abs2` | ✅ | INTEGER_UNARY に追加（#121 P3）。`Rational#abs2` / `Complex#abs2` の Integer 版。`Constant[Integer]`（`self * self`、常に非負）。 |
 | `round` | ✅ | INTEGER_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `size` | 🔲 | プラットフォーム依存バイト幅。低優先度。 |
 | `to_c` | 🔲 | INTEGER_UNARY 追加で `Constant[Complex]`。低優先度。 |
@@ -247,7 +249,9 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [x] allbits? / anybits? / nobits? → NUMERIC_BINARY → Constant[bool]
 
 低優先度:
-[ ] rationalize / to_r  → INTEGER_UNARY
+[x] rationalize (0 引数) → INTEGER_UNARY — #121 P3
+[x] to_r                 → INTEGER_UNARY（先行実装済み、本表未反映だった）
+[x] abs2                 → INTEGER_UNARY — #121 P3
 [x] gcdlcm              → try_fold_integer_array_binary → Tuple[Constant[Integer], Constant[Integer]]
 [ ] pow(exp, mod)       → 専用ハンドラ（3 引数形式）
 ```
@@ -270,6 +274,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `<=>`, `<`, `<=`, `>`, `>=`, `==`, `!=` | ✅ | NUMERIC_BINARY → `Constant[bool\|Integer]`。 |
 | `-@`, `+@` | ✅ | FLOAT_UNARY。 |
 | `abs` / `magnitude` | ✅ | FLOAT_UNARY → `Constant[Float]`。 |
+| `abs2` | ✅ | FLOAT_UNARY に追加（#121 P3）。`Rational#abs2` / `Complex#abs2` / (今回)`Integer#abs2` の Float 版。`Constant[Float]`（`self * self`）。 |
 | `between?` | ✅ | `try_fold_ternary`（catalog 経由）→ `Constant[bool]`。 |
 | `ceil` | ✅ | FLOAT_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `ceil(n)` | 🔲 | 小数点指定形式の専用ハンドラ → `Constant[Float]`。低優先度。 |
@@ -288,7 +293,7 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `negative?` / `positive?` / `zero?` | ✅ | FLOAT_UNARY → `Constant[bool]`。 |
 | `next_float` | ✅ | FLOAT_UNARY → `Constant[Float]`。 |
 | `prev_float` | ✅ | FLOAT_UNARY → `Constant[Float]`。 |
-| `rationalize` / `to_r` | 🔲 | FLOAT_UNARY 追加で `Constant[Rational]`。低優先度。 |
+| `rationalize` / `to_r` | ✅ | FLOAT_UNARY → `Constant[Rational]`。（先行実装済み、本表未反映だった。`eps` 引数形式は catalog に `rationalize` エントリが無いため未対応。） |
 | `round` | ✅ | FLOAT_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `round(n)` | 🔲 | 小数点指定形式 → `Constant[Float]`。低優先度。 |
 | `to_c` | 🔲 | FLOAT_UNARY 追加で `Constant[Complex]`。低優先度。 |
@@ -310,7 +315,9 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [ ] ceil(n) / floor(n) / round(n) → 小数点 n 指定形式専用ハンドラ
 [x] next_float / prev_float       → FLOAT_UNARY
 [x] fdiv                          → NUMERIC_BINARY
-[ ] rationalize / to_r / to_c    → FLOAT_UNARY
+[x] rationalize / to_r            → FLOAT_UNARY（先行実装済み、本表未反映だった）
+[x] abs2                          → FLOAT_UNARY — #121 P3
+[ ] to_c                          → FLOAT_UNARY
 ```
 
 実装ファイル: `constant_folding.rb` の `FLOAT_UNARY` 拡張 / `NUMERIC_BINARY` 追加。

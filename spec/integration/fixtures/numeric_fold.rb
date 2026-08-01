@@ -39,3 +39,19 @@ assert_type("2", 2.5.denominator)
 assert_type("0", 2.5.arg)
 assert_type("0", 2.5.angle)
 assert_type("3.141592653589793", -2.5.phase)
+
+# Integer#rationalize (0-arg) — the Integer sibling of the already-folded
+# Float#rationalize / Rational#rationalize. Returns Rational(self, 1).
+assert_type("(5/1)", 5.rationalize)
+
+# Integer#abs2 / Float#abs2 — the scalar siblings of the already-folded
+# Rational#abs2 / Complex#abs2 (self * self).
+assert_type("25", 5.abs2)
+assert_type("25", -5.abs2)
+assert_type("9.0", 3.0.abs2)
+
+# Non-constant receiver — declines to the RBS-widened class, same as every
+# other unary fold's fallback edge. `rand(10)` (unlike a ternary between two
+# Integer literals, which stays a foldable Union[Constant, Constant]) types
+# as the plain RBS `Integer`, so the receiver genuinely is not a Constant.
+assert_type("Integer", rand(10).abs2)

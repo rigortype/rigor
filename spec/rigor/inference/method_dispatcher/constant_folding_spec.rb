@@ -193,6 +193,32 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(1.5, :rationalize).value).to eq(Rational(3, 2))
     end
 
+    it "folds Integer#rationalize (0-arg) to the exact Rational" do
+      expect(fold(5, :rationalize).value).to eq(Rational(5, 1))
+      expect(fold(-3, :rationalize).value).to eq(Rational(-3, 1))
+    end
+
+    it "declines Integer#rationalize with an eps argument (unary-only, mirrors Float's argument surface)" do
+      # `numeric.yml` carries no `rationalize` catalog entry for Integer, unlike Rational's
+      # `nurat_rationalize` leaf entry — so the 1-arg form is NOT folded, only the 0-arg form.
+      expect(fold(5, :rationalize, [0.1])).to be_nil
+    end
+
+    it "folds Integer#abs2 / Float#abs2 to the exact squared magnitude" do
+      expect(fold(5, :abs2).value).to eq(25)
+      expect(fold(-5, :abs2).value).to eq(25)
+      expect(fold(0, :abs2).value).to eq(0)
+      expect(fold(3.0, :abs2).value).to eq(9.0)
+      expect(fold(-1.5, :abs2).value).to eq(2.25)
+    end
+
+    it "declines Integer#abs2 / Float#abs2 for a non-Constant (Dynamic/Nominal) receiver" do
+      dynamic_int = Rigor::Type::Combinator.nominal_of("Integer")
+      dynamic_float = Rigor::Type::Combinator.nominal_of("Float")
+      expect(described_class.try_dispatch(cc(receiver: dynamic_int, method_name: :abs2, args: []))).to be_nil
+      expect(described_class.try_dispatch(cc(receiver: dynamic_float, method_name: :abs2, args: []))).to be_nil
+    end
+
     it "folds String#casecmp / #casecmp? / #sum" do
       expect(fold("a", :casecmp, ["A"]).value).to eq(0)
       expect(fold("a", :casecmp?, ["A"]).value).to be(true)

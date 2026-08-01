@@ -44,9 +44,10 @@ this file is the one that is wrong.
 
 ## Next session
 
-- **redmine `app/models` ON-arm re-measure** is the remaining #260 acceptance box and a graduation
-  precondition (survey-project setup: cwd=target + `BUNDLE_GEMFILE`; see the memory note on survey
-  projects).
+- **#260 is CLOSED** — the redmine `app/models` re-measure landed on the issue (OFF byte-identical
+  to #253: 1,434/481/0.3354; ON post-#262: 2,762/464/0.1680; 66.2% of ON survivors are
+  project-class singletons = the honest RBS-less-model gap). Graduation-note numbers now live in
+  the closing comments of #260.
 - **The graduation cluster is now #254 + #263** (both "what does the ratio mean" issues). #254's
   design premise should be re-checked against #260's amendment: its "the most valuable catch is
   scored as a miss" example (`Account.find` return-type change caught in callers) sits right next

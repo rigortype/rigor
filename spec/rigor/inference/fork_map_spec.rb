@@ -54,17 +54,17 @@ RSpec.describe Rigor::Inference::ForkMap do
   # longer does, and the pool becomes SLOWER than sequential on a long run (`coverage --protection --mutation
   # lib/rigor/analysis`: 37s sequential vs 67s at eight workers, fixed to 23s). Driven in-process with `exit!`
   # stubbed, exactly as the check pool's equivalent is — a spy in the parent cannot observe a real child.
+  # `rearm_after_fork` owns the remaining-deadline arithmetic; this only asserts the worker calls it.
   describe "deferred YJIT in the fork worker" do
     it "re-arms deferred YJIT before running its slice" do
       Dir.mktmpdir do |dir|
         out_path = File.join(dir, "payload")
         allow(described_class).to receive(:exit!) # keep the worker body in-process
-        allow(Rigor::Runtime::Jit).to receive(:enable_after)
+        allow(Rigor::Runtime::Jit).to receive(:rearm_after_fork)
 
         described_class.run_worker([1, 2], ->(slice) { slice }, out_path)
 
-        expect(Rigor::Runtime::Jit)
-          .to have_received(:enable_after).with(Rigor::Runtime::Jit.deadline_seconds)
+        expect(Rigor::Runtime::Jit).to have_received(:rearm_after_fork)
       end
     end
   end

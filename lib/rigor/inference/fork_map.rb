@@ -59,14 +59,12 @@ module Rigor
       # the parent re-runs the slice in-process.
       def run_worker(slice, block, out_path)
         # Re-arm deferred YJIT in the child, exactly as the check fork pool does
-        # ({Analysis::Runner::PoolCoordinator#run_fork_worker}). The CLI armed `enable_after` on a background
-        # thread, but `fork` copies only the calling thread, so the sleeping deadline never fires in a worker
-        # — every child would run its whole slice un-JITted however long it takes, while the parent JITs the
-        # tail it no longer runs. Without this the pool is a *pessimization* on long runs: `coverage
-        # --protection --mutation lib/rigor/analysis` measured 37s sequential against 67s at eight workers,
-        # versus 42s at eight workers with YJIT off on both sides. A child forked after the parent already
-        # enabled YJIT inherits the enabled state and this is a no-op.
-        Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
+        # ({Analysis::Runner::PoolCoordinator#run_fork_worker}). The parent's deadline thread does not survive
+        # `fork`, so without this a worker runs its whole slice un-JITted while the parent JITs the tail it no
+        # longer runs — the pool was a *pessimization* on long runs (`coverage --protection --mutation
+        # lib/rigor/analysis`: 37s sequential against 67s at eight workers). The child picks up what is left of
+        # the parent's window rather than a fresh one; {Runtime::Jit.rearm_after_fork} carries the mechanism.
+        Runtime::Jit.rearm_after_fork
         File.binwrite(out_path, Marshal.dump(block.call(slice)))
         exit!(0)
       rescue StandardError

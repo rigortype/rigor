@@ -40,8 +40,21 @@ module Rigor
         @out.puts "Type-protection coverage (Tier 1 — dispatch-site receiver concreteness)"
         @out.puts "  protected dispatch sites: #{report.total_protected} / #{report.grand_total}  (#{pct}%)"
         @out.puts "  (protected = Rigor can catch a wrong call here; an upper bound on real protection)"
+        render_lower_bound_typed(report)
         render_untyped_calls(report)
         render_files(report)
+      end
+
+      # ADR-67 WD6b (issue #263) — a sub-bucket WITHIN `protected`, never a move out of it: these sites'
+      # receiver types are call-site lower bounds (an undeclared parameter seeded from its callers), so the
+      # negative in-body rules decline on them — no diagnostic actually fires here yet. Silent when zero, the
+      # normal `check` / unseeded-scope case.
+      def render_lower_bound_typed(report)
+        m = report.total_lower_bound_typed
+        return if m.zero?
+
+        @out.puts "  protected #{report.total_protected} (of which #{m} lower-bound-typed — " \
+                  "no negative-rule teeth, ADR-67 WD6b)"
       end
 
       def render_untyped_calls(report)

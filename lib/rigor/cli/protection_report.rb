@@ -8,7 +8,7 @@ module Rigor
     # the protected ratio, the per-file breakdown, and a ranked "add a type here" list keyed by the method called on an
     # unprotected (`Dynamic`) receiver — the highest-traffic untyped dispatches, where a receiver annotation buys the
     # most catching power.
-    FileProtection = Data.define(:path, :protected_count, :unprotected_count, :ratio)
+    FileProtection = Data.define(:path, :protected_count, :unprotected_count, :ratio, :lower_bound_typed)
     UntypedCall = Data.define(:method_name, :count, :examples, :dynamic_origin)
 
     ProtectionReport = Data.define(:files, :untyped_calls, :parse_errors, :cause_site_counts) do
@@ -16,6 +16,11 @@ module Rigor
       def total_unprotected = files.sum(&:unprotected_count)
       def grand_total = total_protected + total_unprotected
       def ratio = grand_total.zero? ? 1.0 : total_protected.to_f / grand_total
+
+      # ADR-67 WD6b (issue #263) — total count of `protected` sites that are additionally lower-bound-typed
+      # (a call-site-inferred, undeclared parameter): a sub-bucket WITHIN `total_protected`, never a move out
+      # of it. `total_protected` / `ratio` are unaffected by this count.
+      def total_lower_bound_typed = files.sum(&:lower_bound_typed)
 
       # ADR-73 P6 / ADR-82 — total dispatch-site count per tractability axis across the classified holes (those with a
       # recorded `dynamic_origin`), so a user sees at a glance how much of the untyped surface a type can actually close
@@ -43,11 +48,13 @@ module Rigor
           "protected" => total_protected,
           "unprotected" => total_unprotected,
           "protection_ratio" => ratio.round(4),
+          "lower_bound_typed" => total_lower_bound_typed,
           "tractability_summary" => tractability_summary.transform_keys(&:to_s),
           "cause_site_counts" => cause_site_totals,
           "files" => files.map do |f|
             { "path" => f.path, "protected" => f.protected_count,
-              "unprotected" => f.unprotected_count, "ratio" => f.ratio.round(4) }
+              "unprotected" => f.unprotected_count, "ratio" => f.ratio.round(4),
+              "lower_bound_typed" => f.lower_bound_typed }
           end,
           "add_a_type_here" => untyped_calls.map do |c|
             entry = { "method" => c.method_name, "count" => c.count, "examples" => c.examples }
@@ -74,7 +81,8 @@ module Rigor
       def absorb(path, file_result)
         @files << FileProtection.new(
           path: path, protected_count: file_result.protected_count,
-          unprotected_count: file_result.unprotected_count, ratio: file_result.ratio
+          unprotected_count: file_result.unprotected_count, ratio: file_result.ratio,
+          lower_bound_typed: file_result.lower_bound_typed
         )
         file_result.sites.each do |site|
           bucket = @calls[site.method_name]

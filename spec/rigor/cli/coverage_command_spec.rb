@@ -273,6 +273,54 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       expect(entry).not_to have_key("dynamic_origin")
     end
 
+    # ADR-67 WD6b (issue #263) — a two-file fixture: `Widget` in its own file, `Processor#process`'s
+    # `item` parameter typed ONLY by call-site inference (never declared), dispatching on that parameter.
+    # `scope_with_inferred_params` seeds the cross-file `param_inferred_types` table `rigor coverage
+    # --protection` always builds, so this exercises the exact CLI path (not a hand-built table).
+    it "counts a call-site-inferred parameter's receiver as protected AND lower-bound-typed" do
+      FileUtils.mkdir_p("lib")
+      File.write("lib/widget.rb", <<~RUBY)
+        class Widget
+          def name = "w"
+        end
+      RUBY
+      File.write("lib/processor.rb", <<~RUBY)
+        class Processor
+          def run = process(Widget.new)
+
+          def process(item)
+            item.name
+          end
+        end
+      RUBY
+
+      status, out, = run(["--protection", "--format", "json", "lib"])
+
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      # Headline invariance: `protected` counts the site exactly as it did before WD6b (an upper bound on
+      # what Rigor can catch), unaffected by the split.
+      expect(payload["protected"]).to be >= 1
+      expect(payload["lower_bound_typed"]).to eq(1)
+
+      text_status, text_out, = run(["--protection", "lib"])
+      expect(text_status).to eq(0)
+      expect(text_out).to include("of which 1 lower-bound-typed")
+    end
+
+    it "reports lower_bound_typed as 0 (present in JSON, absent from text) when nothing is call-site-inferred" do
+      File.write("greet.rb", %(def greet\n  "hello".upcase\nend\n))
+
+      text_status, text_out, = run(["--protection", "greet.rb"])
+      json_status, json_out, = run(["--protection", "--format", "json", "greet.rb"])
+
+      expect(text_status).to eq(0)
+      expect(json_status).to eq(0)
+      expect(text_out).not_to include("lower-bound-typed")
+      payload = JSON.parse(json_out)
+      expect(payload["lower_bound_typed"]).to eq(0)
+    end
+
     # P3-10 — the fork pool is a pure performance change: its output MUST be byte-identical to the
     # sequential path (the accumulator's per-method examples / per-file list are order-sensitive, so the
     # parent absorbs worker results in original path order).

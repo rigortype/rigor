@@ -44,6 +44,10 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     expect(result.protected_count).to eq(1)
     expect(result.unprotected_count).to eq(0)
     expect(result.ratio).to eq(1.0)
+    # ADR-67 WD6b (issue #263) — a literal receiver is not rooted at an inferred parameter, so it is never
+    # lower-bound-typed. This is the headline-invariance regression: the same protected_count/ratio as
+    # before the WD6b split, since a literal receiver was never eligible for the split.
+    expect(result.lower_bound_typed).to eq(0)
   end
 
   it "counts a call on an untyped receiver as unprotected and records the site" do
@@ -171,6 +175,7 @@ RSpec.describe Rigor::Inference::ProtectionScanner do
     result = scan(%("x".upcase.length\n))
     expect(result.protected_count).to eq(2)
     expect(result.unprotected_count).to eq(0)
+    expect(result.lower_bound_typed).to eq(0)
   end
 
   describe "safe_describe (private)" do

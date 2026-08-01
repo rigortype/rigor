@@ -3,6 +3,7 @@
 require_relative "scope_indexer"
 require_relative "origin_lookup"
 require_relative "../source/node_walker"
+require_relative "../analysis/check_rules/inferred_param_guard"
 
 module Rigor
   module Inference
@@ -20,7 +21,11 @@ module Rigor
       # A single unprotected call site.
       Site = Data.define(:line, :receiver, :method_name, :dynamic_origin)
 
-      FileResult = Data.define(:protected_count, :unprotected_count, :sites) do
+      # `lower_bound_typed` is a split WITHIN `protected_count`, never a move out of it (issue #263):
+      # a site whose receiver is concrete but rooted at a WD6b-marked inferred parameter (
+      # {Analysis::CheckRules::InferredParamGuard.rooted?}) is a lower-bound type — `protected_count`
+      # and `ratio` stay exactly as before, so `--threshold` never moves on unchanged code.
+      FileResult = Data.define(:protected_count, :unprotected_count, :lower_bound_typed, :sites) do
         def total = protected_count + unprotected_count
 
         # Protected ratio; a file with no dispatch sites is vacuously fully protected (nothing to get
@@ -37,6 +42,7 @@ module Rigor
       def scan(root)
         index = ScopeIndexer.index(root, default_scope: @scope)
         protected_count = 0
+        lower_bound_typed = 0
         sites = []
 
         Source::NodeWalker.each(root) do |node|
@@ -46,6 +52,7 @@ module Rigor
           receiver_type = scope.type_of(node.receiver)
           if concrete_receiver?(receiver_type)
             protected_count += 1
+            lower_bound_typed += 1 if lower_bound_typed?(node.receiver, scope)
           else
             origin = OriginLookup.origin_for(scope, node.receiver)
             sites << Site.new(
@@ -57,7 +64,8 @@ module Rigor
           end
         end
 
-        FileResult.new(protected_count: protected_count, unprotected_count: sites.size, sites: sites)
+        FileResult.new(protected_count: protected_count, unprotected_count: sites.size,
+                       lower_bound_typed: lower_bound_typed, sites: sites)
       end
 
       private
@@ -75,6 +83,14 @@ module Rigor
         when Type::Union then type.members.all? { |member| concrete_receiver?(member) }
         else true
         end
+      end
+
+      # ADR-67 WD6b (issue #263) — true when a concrete receiver is rooted at an inferred-but-undeclared
+      # parameter: the type is a call-site lower bound, so the negative in-body rules decline on it (no
+      # diagnostic can actually fire here yet). Delegates to the single-homed shared predicate every
+      # negative rule already consults — nothing is re-derived.
+      def lower_bound_typed?(receiver, scope)
+        Analysis::CheckRules::InferredParamGuard.rooted?(receiver, scope)
       end
 
       def safe_describe(type)

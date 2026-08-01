@@ -116,7 +116,22 @@ statically and may resolve at run time. The same findings appear in the
 | `severity_profile` | String | `"balanced"` | `lenient`, `balanced`, or `strict` — see [Diagnostics](04-diagnostics.md). |
 | `severity_overrides` | Hash | `{}` | Per-rule / per-family severity, e.g. `{ call: warning, flow.always-truthy-condition: off }`. |
 | `baseline` | String / `false` | `nil` | Path to a `.rigor-baseline.yml`, or `false` to disable an inherited one. See [Baselines](06-baseline.md). |
-| `bleeding_edge` | Boolean / Array / Hash | `false` | Adopt the next major's queued diagnostic disciplines early ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD2). `false` adopts none; `true` adopts the whole overlay; a list of feature ids adopts only those; `{ all: true, except: [ids] }` adopts all but the named. Orthogonal to `severity_profile`. Override it for a single run with [`rigor check --bleeding-edge[=ids]`](02-cli-reference.md#rigor-check) / `--no-bleeding-edge`. Inspect with [`rigor show-bleedingedge`](02-cli-reference.md#rigor-show-bleedingedge). |
+| `bleeding_edge` | Boolean / Array / Hash | `false` | Adopt the next major's queued changes early ([ADR-50](../adr/50-release-engineering-and-stability-strategy.md) § WD2). `false` adopts none; `true` adopts the whole overlay; a list of feature ids adopts only those; `{ all: true, except: [ids] }` adopts all but the named. Orthogonal to `severity_profile`. Override it for a single run with [`rigor check --bleeding-edge[=ids]`](02-cli-reference.md#rigor-check) / `--no-bleeding-edge`. Inspect with [`rigor show-bleedingedge`](02-cli-reference.md#rigor-show-bleedingedge). |
+
+A queued feature is one of two kinds, and `bleeding_edge:` selects both the
+same way:
+
+- A **severity** feature promotes one or more rules — a discipline Rigor
+  already reports quietly becomes an error or a warning. Its diff is a list
+  of rule ids, printed by `rigor show-bleedingedge`.
+- A **behaviour** feature changes a measurement, an algorithm, or a
+  default, and moves no rule's severity. There is no rule-id diff to read,
+  so its summary in `rigor show-bleedingedge` is the whole description of
+  what adopting it does.
+
+An id you name that this version of Rigor does not know is ignored rather
+than rejected, so a shared `.rigor.yml` can name a feature that only some
+of the versions in use have queued.
 
 ### Dependency RBS discovery
 

@@ -24,18 +24,22 @@ RSpec.describe Rigor::BleedingEdge do
       # Off by default — an existing green build must not turn red on upgrade.
       expect(described_class.severity_overrides_for({ "mode" => "none" })).to eq({})
     end
+
+    it "carries only severity features today, and has graduated nothing" do
+      expect(described_class::FEATURES.map(&:kind).uniq).to eq([:severity])
+      expect(described_class::GRADUATED).to eq([])
+    end
   end
 
   context "with a populated overlay (stubbed)" do
+    # Both kinds coexist: `feat-a` moves a severity, `feat-b` changes a measurement and moves none.
     let(:feature_a) do
       described_class::Feature.new(
-        id: "feat-a", summary: "promote flow.x", severity_overrides: { "flow.x" => :error }
+        id: "feat-a", summary: "promote flow.x", kind: :severity, severity_overrides: { "flow.x" => :error }
       )
     end
     let(:feature_b) do
-      described_class::Feature.new(
-        id: "feat-b", summary: "enable call.y", severity_overrides: { "call.y" => :warning }
-      )
+      described_class::Feature.new(id: "feat-b", summary: "count call.y differently", kind: :behaviour)
     end
 
     before { stub_const("Rigor::BleedingEdge::FEATURES", [feature_a, feature_b].freeze) }
@@ -43,24 +47,43 @@ RSpec.describe Rigor::BleedingEdge do
     it "adopts the whole overlay for mode all" do
       selector = { "mode" => "all" }
       expect(described_class.active_features(selector)).to contain_exactly(feature_a, feature_b)
-      expect(described_class.severity_overrides_for(selector)).to eq("flow.x" => :error, "call.y" => :warning)
+      expect(described_class.severity_overrides_for(selector)).to eq("flow.x" => :error)
+      expect(described_class.active_ids_for(selector)).to eq(Set["feat-a", "feat-b"])
     end
 
     it "honours an except list under mode all" do
       selector = { "mode" => "all", "except" => ["feat-a"] }
       expect(described_class.active_features(selector)).to contain_exactly(feature_b)
-      expect(described_class.severity_overrides_for(selector)).to eq("call.y" => :warning)
+      expect(described_class.severity_overrides_for(selector)).to eq({})
+      expect(described_class.active_ids_for(selector)).to eq(Set["feat-b"])
     end
 
     it "adopts only the named ids under mode list" do
       selector = { "mode" => "list", "ids" => ["feat-a"] }
       expect(described_class.active_features(selector)).to contain_exactly(feature_a)
       expect(described_class.severity_overrides_for(selector)).to eq("flow.x" => :error)
+      expect(described_class.active_ids_for(selector)).to eq(Set["feat-a"])
+    end
+
+    it "selects a behaviour feature by id under mode list" do
+      selector = { "mode" => "list", "ids" => ["feat-b"] }
+      expect(described_class.active_features(selector)).to contain_exactly(feature_b)
+      expect(described_class.active_ids_for(selector)).to eq(Set["feat-b"])
     end
 
     it "adopts nothing under mode none" do
       expect(described_class.active_features("mode" => "none")).to eq([])
       expect(described_class.severity_overrides_for("mode" => "none")).to eq({})
+      expect(described_class.active_ids_for("mode" => "none")).to be_empty
+    end
+
+    it "returns a frozen id set (Ractor-shareable)" do
+      expect(described_class.active_ids_for("mode" => "all")).to be_frozen
+    end
+
+    it "knows every queued id, and nothing else" do
+      expect(described_class.known_id?("feat-b")).to be(true)
+      expect(described_class.known_id?("ghost")).to be(false)
     end
 
     it "returns a frozen severity map (Ractor-shareable)" do
@@ -79,14 +102,46 @@ RSpec.describe Rigor::BleedingEdge do
     end
   end
 
-  describe "Feature#to_h" do
+  describe "Feature" do
     it "renders the contract-vocabulary shape with string severities" do
       feature = described_class::Feature.new(
-        id: "feat", summary: "s", severity_overrides: { "flow.x" => :error }
+        id: "feat", summary: "s", kind: :severity, severity_overrides: { "flow.x" => :error }
       )
       expect(feature.to_h).to eq(
-        "id" => "feat", "summary" => "s", "severity_overrides" => { "flow.x" => "error" }
+        "id" => "feat", "summary" => "s", "kind" => "severity", "severity_overrides" => { "flow.x" => "error" }
       )
+    end
+
+    it "renders a behaviour feature with an empty severity map" do
+      feature = described_class::Feature.new(id: "feat", summary: "s", kind: :behaviour)
+      expect(feature.to_h).to eq(
+        "id" => "feat", "summary" => "s", "kind" => "behaviour", "severity_overrides" => {}
+      )
+      expect(feature).to be_behaviour
+      expect(feature).not_to be_severity
+    end
+
+    # The invariants are what keep a feature id naming exactly one change: a severity feature that promotes
+    # nothing is inert, and a behaviour feature that also moves a severity is two changes under one id.
+    it "rejects a severity feature that overrides no rule" do
+      expect { described_class::Feature.new(id: "feat", summary: "s", kind: :severity) }
+        .to raise_error(ArgumentError, /:severity but overrides no rule/)
+      expect do
+        described_class::Feature.new(id: "feat", summary: "s", kind: :severity, severity_overrides: {})
+      end.to raise_error(ArgumentError, /:severity but overrides no rule/)
+    end
+
+    it "rejects a behaviour feature that carries severity overrides" do
+      expect do
+        described_class::Feature.new(
+          id: "feat", summary: "s", kind: :behaviour, severity_overrides: { "flow.x" => :error }
+        )
+      end.to raise_error(ArgumentError, /:behaviour but carries severity_overrides/)
+    end
+
+    it "rejects an unknown kind" do
+      expect { described_class::Feature.new(id: "feat", summary: "s", kind: :discipline) }
+        .to raise_error(ArgumentError, /kind must be one of/)
     end
   end
 end

@@ -14,6 +14,8 @@ module Rigor
       # * `new(str)` / `new(str, opts)` — constructs a Regexp at fold time when the pattern argument is a
       #   `Constant[String]`. The optional second argument may be a `Constant[Integer]` (flag bits), a
       #   `Constant[true/false]` (IGNORECASE shorthand), or absent. Returns `Constant[Regexp]`.
+      # * `compile(str)` / `compile(str, opts)` — `Regexp.compile` is a documented alias of `Regexp.new`
+      #   (same C entry point, `rb_reg_s_new`); shares `fold_new` verbatim.
       #
       # === Non-constant / unsupported cases
       #
@@ -25,6 +27,10 @@ module Rigor
         REGEXP_ESCAPE_METHODS = Set[:escape, :quote].freeze
         private_constant :REGEXP_ESCAPE_METHODS
 
+        # `.new` and `.compile` are the same C function under two names — both fold identically.
+        REGEXP_NEW_METHODS = Set[:new, :compile].freeze
+        private_constant :REGEXP_NEW_METHODS
+
         module_function
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
@@ -34,7 +40,7 @@ module Rigor
           args = context.args
           return nil unless SingletonFolding.receiver?(receiver, "Regexp")
           return fold_escape(args) if REGEXP_ESCAPE_METHODS.include?(method_name)
-          return fold_new(args) if method_name == :new
+          return fold_new(args) if REGEXP_NEW_METHODS.include?(method_name)
           return fold_last_match(context) if method_name == :last_match
 
           nil
@@ -111,9 +117,9 @@ module Rigor
         end
 
         # `Regexp.new(pattern)` / `Regexp.new(pattern, opts)` — constructs the pattern at inference time.
-        # Delegates to Ruby's real `Regexp.new` so all option forms (Integer flags, `true`/`false`, option
-        # strings) are handled without case-analysis; non-constant or invalid arguments decline through to
-        # the RBS tier.
+        # Also serves `Regexp.compile`, its documented alias (`REGEXP_NEW_METHODS`). Delegates to Ruby's
+        # real `Regexp.new` so all option forms (Integer flags, `true`/`false`, option strings) are handled
+        # without case-analysis; non-constant or invalid arguments decline through to the RBS tier.
         def fold_new(args)
           return nil if args.empty? || args.size > 2
 

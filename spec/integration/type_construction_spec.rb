@@ -1060,6 +1060,18 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(result).to be_a(Rigor::Type::Constant)
         expect(result.value).to eq(/world/i)
       end
+
+      it "folds Regexp.compile(pattern) to a Constant[Regexp] (documented alias of .new)" do
+        result = harness.local(:_regexp_compiled)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(/hello/)
+      end
+
+      it "folds Regexp.compile(pattern, flags) to a Constant[Regexp] with options" do
+        result = harness.local(:_regexp_compile_flags)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(/world/i)
+      end
     end
 
     describe "fixtures/set_constant_folding.rb — Set constant carrier" do

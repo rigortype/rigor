@@ -1,6 +1,8 @@
 ---
 locals:
   _encoded: '"hello+world"'
+  _regexp_compile_flags: "/world/i"
+  _regexp_compiled: "/hello/"
   _regexp_escaped: '"hello\\.world"'
   _regexp_new_flags: "/world/i"
   _regexp_plain: "/hello/"

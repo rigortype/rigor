@@ -62,7 +62,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
     end
 
     it "declines for an unsupported method" do
-      expect(fold(:compile, c("hello"))).to be_nil
+      expect(fold(:union, c("hello"))).to be_nil
     end
   end
 
@@ -114,6 +114,45 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
     it "returns nil gracefully for an invalid pattern rather than raising" do
       # Regexp.new with an unbalanced group should decline (rescue → nil)
       expect(fold(:new, c("(unclosed"))).to be_nil
+    end
+  end
+
+  describe "compile (Regexp.new alias)" do
+    it "folds a simple pattern with no options" do
+      result = fold(:compile, c("hello"))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(/hello/)
+    end
+
+    it "folds a pattern with integer flags" do
+      result = fold(:compile, c("hello"), c(Regexp::IGNORECASE))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(/hello/i)
+    end
+
+    it "behaves identically to new for the same arguments" do
+      expect(fold(:compile, c("hello"), c(true))).to eq(fold(:new, c("hello"), c(true)))
+    end
+
+    it "declines when the pattern is not a Constant" do
+      expect(fold(:compile, Rigor::Type::Combinator.nominal_of("String"))).to be_nil
+    end
+
+    it "declines when the pattern is a non-String Constant" do
+      expect(fold(:compile, c(42))).to be_nil
+    end
+
+    it "returns nil gracefully for an invalid pattern rather than raising" do
+      expect(fold(:compile, c("(unclosed"))).to be_nil
+    end
+
+    it "declines for a non-Singleton receiver" do
+      result = described_class.try_dispatch(cc(
+                                              receiver: c("Regexp"),
+                                              method_name: :compile,
+                                              args: [c("hello")]
+                                            ))
+      expect(result).to be_nil
     end
   end
 

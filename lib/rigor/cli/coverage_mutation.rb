@@ -69,9 +69,10 @@ module Rigor
       #
       # Both of its inputs are built HERE, once, on the parent — the ADR-46 dependents map (one recording
       # pass) and the per-file discovery bundles — so {MutationForkScan}'s children copy-on-write inherit
-      # them and no per-mutant work is repeated per worker. `seed` composes the two features: when
-      # `discovery-seeded-mutation-sites` is also adopted, its `param_inferred_types` table rides into the
-      # oracle so the knowledge admitting a site is the knowledge the oracle judges it with (issue #260).
+      # them and no per-mutant work is repeated per worker. `seed` composes the two features: it is handed
+      # to the closure oracle's delegated {Protection::DiagnosticOracle} verbatim, so the mutated file's
+      # verdict stays exactly the verdict the other feature's state produces, and this feature only ever
+      # ADDS the kills that land in a dependent.
       def mutation_kill_oracle(paths, configuration, context, seed, workers)
         return nil unless configuration.bleeding_edge_active?(DEPENDENT_CLOSURE_KILL_ORACLE)
 
@@ -83,7 +84,7 @@ module Rigor
             cache_store: context.cache_store, workers: workers
           ),
           seed_bundles: Protection::DiscoverySeed.bundles(paths: paths),
-          param_inferred_types: seed && seed[:param_inferred_types]
+          discovery_seed: seed
         )
       end
 

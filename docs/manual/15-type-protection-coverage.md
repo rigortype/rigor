@@ -137,12 +137,22 @@ bleeding_edge:
 
 It composes with the site seed above — one decides what is
 measured, the other where a catch may land — and either can be
-adopted alone. It moves the reported ratio **up** on unchanged
-code, so it cannot turn a `--threshold` build red, but a number
-recorded under it is not comparable with one recorded without it.
+adopted alone. The mutated file's verdict is unchanged, so this can
+only **add** kills: the ratio moves up or not at all, and it cannot
+turn a `--threshold` build red. A number recorded under it is still
+not comparable with one recorded without it.
+
 It costs more: each surviving breakage is re-analysed once per
 dependent file (the caught ones stop at the mutated file), and the
-dependency graph itself is one extra whole-project pass per run.
+dependency graph itself is one extra whole-project pass per run —
+about a third more wall time on Rigor's own `lib`.
+
+Worth knowing before you pay that: on the two codebases measured so
+far (Rigor's own `lib`, redmine's `app/models`) it added **no**
+kills. A breakage that survives there is one the analyzer reports
+*nowhere* — not one it reports in a caller — which is a statement
+about where the type net has teeth, and exactly what the
+unprotected-site list is telling you.
 
 What *does* reach it is your tests.
 

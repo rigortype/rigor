@@ -89,11 +89,21 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
   let(:configuration) { Rigor::Configuration.load(nil) }
   let(:context) { Rigor::LanguageServer::ProjectContext.new(configuration: configuration) }
 
-  def oracle_for(paths, dependents:)
+  # `discovery_seed:` is what `discovery-seeded-mutation-sites` supplies. nil (the default here) is the
+  # closure feature adopted ALONE: the mutated file's verdict is then the shipped single-file oracle's,
+  # unchanged, and the closure is the only thing this class adds.
+  def oracle_for(paths, dependents:, seeded: false)
     described_class.new(
       configuration: configuration, environment: context.environment, project_scan: context.project_scan,
       paths: paths, dependents: dependents,
-      seed_bundles: Rigor::Protection::DiscoverySeed.bundles(paths: paths)
+      seed_bundles: Rigor::Protection::DiscoverySeed.bundles(paths: paths),
+      discovery_seed: seeded ? discovery_seed_for(paths) : nil
+    )
+  end
+
+  def discovery_seed_for(paths)
+    Rigor::Protection::DiscoverySeed.build(
+      paths: paths, environment: context.environment, target_ruby: configuration.target_ruby
     )
   end
 
@@ -113,7 +123,10 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     oracle = oracle_for(paths, dependents: dependents)
     baseline = oracle.baseline(source: account_source, path: "lib/account.rb")
 
-    expect(baseline).to be_empty # the clean closure is diagnostic-free, so any new report is the mutant's
+    # The clean closure is diagnostic-free, so any new report is the mutant's. The two halves stay separate:
+    # a diagnostic the dependents' baseline carries must never mask a kill in the mutated file itself.
+    expect(baseline.own).to be_empty
+    expect(baseline.dependents).to be_empty
     expect(oracle.killed?(mutant_source: mutant_source, path: "lib/account.rb", baseline: baseline)).to be(true)
   end
 
@@ -167,13 +180,20 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
   # The acceptance criterion that proves the CLOSURE is the right set: for every mutation of every measured file,
   # the closure oracle's verdict must equal what a whole-project re-analysis says — no kill missed (a dependent
   # left out of the closure) and none invented (a diagnostic a real project run would not produce).
+  #
+  # Both features are adopted here, deliberately. A whole-project re-analysis differs from the shipped
+  # single-file oracle on TWO axes: what it knows (the discovery seed — #253/#260) and where a diagnostic may
+  # land (the closure — this issue). Comparing an unseeded closure oracle against it measures both at once and
+  # reports the knowledge gap as a closure defect: without the seed, renaming `upcase` in the *caller* is a
+  # kill the whole-project oracle sees and no per-file oracle can. Seeded, the knowledge axis is equalised and
+  # the comparison is about the closure alone.
   it "agrees with a brute-force whole-project oracle on every mutant" do
     write_fixture
     File.write("lib/registry.rb", "class Registry\n  def self.for(name)\n    name.to_s\n  end\nend\n")
     File.write("lib/report.rb", "def render\n  Registry.for(\"x\").size\nend\n")
     paths = %w[lib/account.rb lib/registry.rb lib/report.rb lib/service.rb]
 
-    oracle = oracle_for(paths, dependents: recorded_dependents(paths))
+    oracle = oracle_for(paths, dependents: recorded_dependents(paths), seeded: true)
     reference = BruteForceMutationOracle.new(
       paths: paths, configuration: configuration, environment: context.environment
     )

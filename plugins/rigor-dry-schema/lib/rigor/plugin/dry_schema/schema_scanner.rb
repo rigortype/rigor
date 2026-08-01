@@ -223,10 +223,11 @@ module Rigor
         # canonical vocabulary (`filled(:not_a_type)`), a nested `schema do … end` row, or a constant
         # alias no `:dry_type_aliases` fact resolved.
         #
-        # They are recorded rather than forgotten because forgetting them is not neutral downstream: a key
-        # absent from the synthesized `to_h` HashShape reads as `nil`, not as `untyped`, so a *declared*
-        # key would type as nil for anyone who reads it. {ResultShape} puts these back as untyped entries.
-        # Consumers that only want typed keys read `:required` / `:optional` and are unaffected.
+        # They are recorded rather than forgotten so the schema's declared key set survives the scan even
+        # where its types do not. {ResultShape} puts them back into the synthesized `to_h` shape as untyped
+        # entries, which is what makes a hover read `{ email: String, address: Dynamic[top], ... }` instead
+        # of a shape indistinguishable from one that never declared `address`. Consumers that only want
+        # typed keys read `:required` / `:optional` and are unaffected.
         def unmodelled_keys(declared, required, optional)
           {
             required: (declared[:required] - required.keys).uniq.freeze,

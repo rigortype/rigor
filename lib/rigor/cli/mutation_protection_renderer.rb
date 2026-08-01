@@ -30,8 +30,20 @@ module Rigor
         @out.puts "Type-protection effectiveness (Tier 2 — mutation kill rate)"
         @out.puts "  caught breakages: #{report.total_killed} / #{report.grand_total}  (#{pct}%)"
         @out.puts "  (effectiveness = when a type-visible bug was introduced, Rigor caught it)"
+        render_harness_errors(report)
         render_missed(report)
         render_files(report)
+      end
+
+      # #264 — surfaced only when non-zero: a harness-level failure is a defect in the measurement itself, not
+      # in the code being measured, and a clean run should not carry a permanent line about a bucket that is
+      # always empty.
+      def render_harness_errors(report)
+        count = report.total_harness_errors
+        return if count.zero?
+
+        @out.puts "  harness errors: #{count} mutant(s) failed inside the measurement harness " \
+                  "(excluded from the ratio — see --format=json's \"harness_errors\")"
       end
 
       def render_missed(report)

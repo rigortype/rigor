@@ -38,23 +38,16 @@ this file is the one that is wrong.
 
 ## Next session
 
-- **#248 left a now-redundant mechanism worth revisiting.** `SchemaScanner` records `unmodelled:`
-  keys and `ResultShape` puts them back as `untyped` entries, to stop a declared-but-untypable key
-  reading as `nil`. #249 fixed that at the engine level hours later, so the workaround is no longer
-  load-bearing. It still records the schema's declared surface (plausibly useful to
-  `rigor-dry-validation` slice 2), so this is a "decide, then either justify or delete" — not an
-  obvious removal.
-- **[#134](https://github.com/rigortype/rigor/issues/134)'s premise is wrong and the issue needs
-  rewriting before anyone starts it.** There is no whole-project cold re-scan per mutant: the project
-  scan happens once and is ~6% of a 45-file run. The cost is `Σ(1 + N_f)` single-file analyses with
-  every cache disabled (`DiagnosticOracle` passes `cache_store: nil`). And ADR-46's `dependents`
-  index answers a question the current oracle never asks — the oracle only ever looks at the mutated
-  file's own diagnostics. **The full survey with file:line evidence is not yet posted to the issue.**
-  Its three load-bearing findings: (1) the Tier-2 file loop is sequential while Tier 1 already
-  fork-maps, and `--workers` is parsed but never reaches the mutation path — the largest win
-  available and independent of everything else; (2) the right reuse is the ADR-46 *forward* edge as a
-  per-file cache key, not the inverted index; (3) a project-wide oracle would change the reported
-  effectiveness number and so needs its own versioning decision, not a perf PR.
+- **[#134](https://github.com/rigortype/rigor/issues/134) is rewritten and ready.** Its original
+  premise was wrong — there is no whole-project cold re-scan per mutant, and ADR-46's `dependents`
+  index answers a question the current oracle never asks. The investigation is
+  [in the issue](https://github.com/rigortype/rigor/issues/134#issuecomment-5148902570) and the body
+  now carries three slices. Slice 1 (fork-map the Tier-2 file loop; `--workers` is parsed but returns
+  before `resolve_workers` on that path) is independent of the other two and the largest win per unit
+  of effort. **Two findings were deliberately left out of #134 and are unfiled:** a project-wide kill
+  oracle, and the Tier-2 site filter's bare `Scope.empty` where Tier 1 seeds `discovered_classes`.
+  Both would move the reported effectiveness number that `--threshold` gates CI on, so both need a
+  versioning decision rather than a perf PR.
 - **#121 is now enumerated rather than open-ended.** A probe sweep (positive controls on every tier)
   found the self-returner family as the one gap with real-world weight — that is #250. The remainder,
   ranked: Set element projections (`min`/`max`/`first`/`sort`/`sum`/`to_set` leak `Dynamic[top]` on a

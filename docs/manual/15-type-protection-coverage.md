@@ -74,7 +74,13 @@ real "add a type here" site, surfaced with no guesswork.
 
 It runs many analyses, so it defaults to the **git-changed** `.rb`
 files (pass explicit paths to widen — whole-project is minutes) and
-is an opt-in CI deep-dive, not an interactive check. The framing is
+is an opt-in CI deep-dive, not an interactive check. `--workers=N`
+applies here too, and it is the main lever on a wide run: the
+whole-project pre-pass is paid once, then the per-file measurement —
+which is nearly all of the wall time — is fork-mapped across
+workers, byte-identically to a sequential run.
+
+The framing is
 always *effectiveness / where to add a type*, never "your code is
 broken": a surviving breakage at a `Dynamic` site is a place
 the type net does not reach.
@@ -236,6 +242,10 @@ them as a deep-dive, not a per-keystroke check:
   (suite runtime)`. A fast, well-scoped test command is the biggest
   lever.
 - **Cap with `--limit`** on `--include-dynamic` or large files.
+- **Spread with `--workers=N`** on `--mutation` (and Tier 1). The
+  fused `--with-tests` tier stays sequential — the suite hook shells
+  out, and concurrent runs would race — so widen it with scope and
+  `--limit` instead.
 
 ## In CI
 

@@ -27,6 +27,7 @@ require_relative "fused_protection_report"
 require_relative "fused_protection_renderer"
 require_relative "coverage_mutation"
 require_relative "protection_fork_scan"
+require_relative "mutation_fork_scan"
 require_relative "check_runner_factory"
 require_relative "command"
 
@@ -103,7 +104,8 @@ module Rigor
           options[:protection] = true
         end
         define_mutation_options(opts, options)
-        opts.on("--workers=N", Integer, "With --protection: fork N workers over the scanned files " \
+        opts.on("--workers=N", Integer, "With --protection (with or without --mutation, but not --with-tests, " \
+                                        "which must stay sequential): fork N workers over the scanned files " \
                                         "(default: config parallel.workers / RIGOR_RACTOR_WORKERS / 0)") do |v|
           options[:workers] = v
         end

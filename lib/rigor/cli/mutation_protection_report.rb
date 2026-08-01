@@ -56,7 +56,13 @@ module Rigor
       end
 
       def record_parse_error(path, errors)
-        @parse_errors << { "path" => path, "errors" => errors.size }
+        record_parse_error_count(path, errors.size)
+      end
+
+      # Count-based variant for the fork-pool path, where a worker carries only the marshalable error count
+      # (see {MutationForkScan::ParseError}), not the Prism error objects.
+      def record_parse_error_count(path, count)
+        @parse_errors << { "path" => path, "errors" => count }
       end
 
       def to_report

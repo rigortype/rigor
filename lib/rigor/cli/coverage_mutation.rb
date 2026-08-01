@@ -26,6 +26,8 @@ module Rigor
         end
 
         note_sampling(options)
+        # `--with-tests` deliberately does NOT take the fork path below: {Protection::TestSuiteOracle} shells
+        # out to the project's test runner, and concurrent suite invocations would race over one working tree.
         return run_fused_protection(target_files, options) if options[:with_tests]
 
         report = scan_mutation_protection(target_files, options)
@@ -49,6 +51,7 @@ module Rigor
       # mutant survived" is meaningless — abort with a clear message if not.
       def run_fused_protection(paths, options)
         configuration = Configuration.load(options.fetch(:config))
+        warn_workers_ignored_under_tests(options)
         test_oracle = Protection::TestSuiteOracle.new(command: options.fetch(:test_command))
         return suite_not_green_error(options) unless test_oracle.green?
 
@@ -63,6 +66,18 @@ module Rigor
         report = accumulator.to_report
         FusedProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_protection_exit(report, options)
+      end
+
+      # An explicit `--workers=N` on the fused path cannot be honoured, so say so rather than repeat the bug
+      # this slice fixed (a flag accepted and silently dropped). Only the explicit flag warns — a project-wide
+      # `parallel.workers:` or `RIGOR_RACTOR_WORKERS` default is not a request about *this* run.
+      def warn_workers_ignored_under_tests(options)
+        return unless options[:workers].to_i > 1
+
+        @err.puts(
+          "coverage: --workers is ignored with --with-tests — the test-suite oracle shells out to " \
+          "#{options.fetch(:test_command).join(' ')}, and parallel runs would race."
+        )
       end
 
       def scan_fused_one(path, scanner, accumulator, test_oracle, configuration)
@@ -89,6 +104,10 @@ module Rigor
         1
       end
 
+      # Builds the RBS environment + whole-project pre-pass ONCE (≈6% of a 45-file run), then fork-maps the
+      # per-file measurement — the ≈94% that is `Σ(1 + N_f)` single-file analyses — across the resolved worker
+      # count (#134 slice 1). {MutationForkScan} returns `{path => result}` and the parent absorbs in `paths`
+      # order, so the report is byte-identical to a sequential run whatever order the workers finished in.
       def scan_mutation_protection(paths, options)
         configuration = Configuration.load(options.fetch(:config))
         context = LanguageServer::ProjectContext.new(configuration: configuration)
@@ -98,19 +117,22 @@ module Rigor
         )
         accumulator = MutationProtectionAccumulator.new
 
-        paths.each { |path| scan_mutation_one(path, scanner, accumulator, configuration) }
+        results = MutationForkScan.run(
+          paths: paths, scanner: scanner, environment: context.environment,
+          configuration: configuration, workers: CheckRunnerFactory.resolve_workers(options, configuration)
+        )
+        # `fetch`, never `[]`: a worker that died mid-slice must abort the run rather than quietly drop files
+        # out of a ratio that `--threshold` gates CI on.
+        paths.each { |path| absorb_mutation_result(accumulator, path, results.fetch(path)) }
         accumulator.to_report
       end
 
-      def scan_mutation_one(path, scanner, accumulator, configuration)
-        source = File.read(path)
-        parse_result = Prism.parse(source, filepath: path, version: configuration.target_ruby)
-        if parse_result.errors.any?
-          accumulator.record_parse_error(path, parse_result.errors)
-          return
+      def absorb_mutation_result(accumulator, path, result)
+        if result.is_a?(MutationForkScan::ParseError)
+          accumulator.record_parse_error_count(path, result.count)
+        else
+          accumulator.absorb(result)
         end
-
-        accumulator.absorb(scanner.scan_file(path, source: source))
       end
 
       # The git-changed (modified / added / untracked) `.rb` files that exist on disk — the default Tier 2 scope.

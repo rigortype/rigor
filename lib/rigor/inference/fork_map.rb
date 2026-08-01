@@ -2,6 +2,8 @@
 
 require "tmpdir"
 
+require_relative "../runtime/jit"
+
 module Rigor
   module Inference
     # Generic fork-over-slices map for the embarrassingly-parallel per-file passes of the
@@ -56,6 +58,15 @@ module Rigor
       # (skipping `at_exit` / stdio flush — the payload is durable on disk). Any failure exits non-zero so
       # the parent re-runs the slice in-process.
       def run_worker(slice, block, out_path)
+        # Re-arm deferred YJIT in the child, exactly as the check fork pool does
+        # ({Analysis::Runner::PoolCoordinator#run_fork_worker}). The CLI armed `enable_after` on a background
+        # thread, but `fork` copies only the calling thread, so the sleeping deadline never fires in a worker
+        # — every child would run its whole slice un-JITted however long it takes, while the parent JITs the
+        # tail it no longer runs. Without this the pool is a *pessimization* on long runs: `coverage
+        # --protection --mutation lib/rigor/analysis` measured 37s sequential against 67s at eight workers,
+        # versus 42s at eight workers with YJIT off on both sides. A child forked after the parent already
+        # enabled YJIT inherits the enabled state and this is a no-op.
+        Runtime::Jit.enable_after(Runtime::Jit.deadline_seconds)
         File.binwrite(out_path, Marshal.dump(block.call(slice)))
         exit!(0)
       rescue StandardError

@@ -360,7 +360,10 @@ the effectiveness ratio and `--format=json` carries `mode`,
 `killed`, `survived`, `effectiveness_ratio`, per-file rows, and
 `add_a_type_here`. It is the truth tier behind the static
 `--protection` proxy, at the cost of many analyses — an opt-in CI
-deep-dive, not an interactive check.
+deep-dive, not an interactive check. `--workers=N` fork-parallelizes
+this tier too (the whole-project pre-pass is paid once on the parent
+and the per-file measurement is spread across workers), with the
+same precedence chain and the same byte-identical output.
 
 ```sh
 rigor coverage --protection --mutation [paths]
@@ -379,7 +382,10 @@ cost is proportional to the protection hole. `--format=json`
 carries `mode` (`protection-fused`), `type_killed`,
 `test_killed`, `unprotected`, `protected_ratio`, per-file rows,
 and `add_protection_here`; `--threshold` gates on the fused
-ratio.
+ratio. This tier is always sequential — the suite hook shells out
+to your test runner, and concurrent runs would race over one
+working tree — so `--workers` does not apply and an explicit one
+is reported as ignored on stderr.
 
 `--test-command=CMD` is the runner hook (default
 `bundle exec rake`). The suite must pass on clean code first, or

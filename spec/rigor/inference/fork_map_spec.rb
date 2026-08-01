@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "tmpdir"
+
 require "rigor/inference/fork_map"
 
 # P3-10 — the generic fork-over-slices map behind the coverage-protection scan and the parameter-inference rounds.
@@ -45,5 +47,25 @@ RSpec.describe Rigor::Inference::ForkMap do
 
   it "handles empty items without forking" do
     expect(described_class.call(items: [], workers: 4) { |slice| slice }).to eq([[]])
+  end
+
+  # `fork` copies only the calling thread, so the CLI's `Runtime::Jit.enable_after` sleeper never fires in a
+  # worker: without re-arming, every child runs its whole slice interpreted while the parent JITs work it no
+  # longer does, and the pool becomes SLOWER than sequential on a long run (`coverage --protection --mutation
+  # lib/rigor/analysis`: 37s sequential vs 67s at eight workers, fixed to 23s). Driven in-process with `exit!`
+  # stubbed, exactly as the check pool's equivalent is — a spy in the parent cannot observe a real child.
+  describe "deferred YJIT in the fork worker" do
+    it "re-arms deferred YJIT before running its slice" do
+      Dir.mktmpdir do |dir|
+        out_path = File.join(dir, "payload")
+        allow(described_class).to receive(:exit!) # keep the worker body in-process
+        allow(Rigor::Runtime::Jit).to receive(:enable_after)
+
+        described_class.run_worker([1, 2], ->(slice) { slice }, out_path)
+
+        expect(Rigor::Runtime::Jit)
+          .to have_received(:enable_after).with(Rigor::Runtime::Jit.deadline_seconds)
+      end
+    end
   end
 end

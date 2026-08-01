@@ -96,6 +96,37 @@ always *effectiveness / where to add a type*, never "your code is
 broken": a surviving breakage at a `Dynamic` site is a place
 the type net does not reach.
 
+### Re-running it is cheap
+
+Each file's measurement is cached and served back while nothing
+that could change it has moved — the file itself, any file it was
+recorded as reading from, the resolved configuration, your `sig/`,
+the gem set, the engine version, `--limit` / `--seed`, and which
+bleeding-edge features you have adopted. Edit one file and that
+file plus the files recorded as reading from it are re-measured;
+the rest are served. A one-line stderr report says what happened,
+so `--format=json` stdout stays clean:
+
+```
+coverage: mutation cache — re-measured 2 file(s), 350 served from cache.
+```
+
+The cache reads the cross-file dependency edges that a
+`rigor check --incremental` run records, so warm one once per
+project:
+
+```sh
+rigor check --incremental                    # records the edges
+rigor coverage --protection --mutation lib   # measures, then caches
+```
+
+Without that snapshot — or under `--no-cache`, or with
+`dependent-closure-kill-oracle` adopted, whose verdicts depend on
+*other* files' diagnostics and so cannot be validated per file —
+every file is re-measured and the stderr line names the reason. A
+file the snapshot does not know about is re-measured rather than
+served: the cache never guesses.
+
 ### Which sites Tier 2 measures
 
 Tier 2 only mutates a site where Rigor holds a *concrete* receiver

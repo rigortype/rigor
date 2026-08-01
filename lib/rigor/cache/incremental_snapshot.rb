@@ -133,13 +133,40 @@ module Rigor
       # The stored {Payload}, or nil when absent / unreadable / schema or fingerprint mismatch / corrupt.
       # Never raises.
       def load(fingerprint:)
-        data = Marshal.load(Zlib::Inflate.inflate(File.binread(@path))) # rubocop:disable Security/MarshalLoad
-        return nil unless data.is_a?(Hash) && data[:schema] == SCHEMA && data[:fingerprint] == fingerprint
+        data = read_data
+        return nil unless data && data[:fingerprint] == fingerprint
 
         payload_from(data)
+      end
+
+      # Issue #134 slice 2 — the same load against SEVERAL acceptable fingerprints, reading the blob once.
+      # A reader that did not itself write the snapshot cannot know which analysis ROOTS it was written under
+      # (`rigor check --incremental lib` and a bare `rigor check --incremental` produce different fingerprints
+      # for the same project), and `#load` would have to re-inflate + re-unmarshal the whole blob per candidate.
+      # The fingerprint that matched is returned alongside the payload so the caller can mix it into ITS own
+      # cache key — the snapshot's identity is exactly what "these dependency edges came from that world" means.
+      #
+      # @param fingerprints [Array<String>] candidates, most-specific first.
+      # @return [Array(String, Payload), nil] `[matched fingerprint, payload]`, or nil on any miss.
+      def load_any(fingerprints:)
+        data = read_data
+        return nil if data.nil?
+
+        matched = Array(fingerprints).compact.find { |candidate| data[:fingerprint] == candidate }
+        return nil if matched.nil?
+
+        [matched, payload_from(data)]
+      end
+
+      # The raw stored Hash when it is present, readable, and schema-current; nil otherwise. Never raises —
+      # a missing, corrupt, or stale-schema snapshot is a cold run, not an error (the ADR-45 invariant).
+      def read_data
+        data = Marshal.load(Zlib::Inflate.inflate(File.binread(@path))) # rubocop:disable Security/MarshalLoad
+        data.is_a?(Hash) && data[:schema] == SCHEMA ? data : nil
       rescue StandardError
         nil
       end
+      private :read_data
 
       def payload_from(data)
         Payload.new(

@@ -91,7 +91,7 @@ module Rigor
       def parse_options
         options = { format: "text", threshold: nil, config: nil, protection: false, mutation: false,
                     with_tests: false, test_command: DEFAULT_TEST_COMMAND, include_dynamic: false,
-                    limit: nil, seed: 1, workers: nil }
+                    limit: nil, seed: 1, workers: nil, no_cache: false }
         OptionParser.new { |opts| define_options(opts, options) }.parse!(@argv)
         options
       end
@@ -137,6 +137,12 @@ module Rigor
           options[:limit] = v
         end
         opts.on("--seed=N", Integer, "RNG seed for --limit sampling (default 1)") { |v| options[:seed] = v }
+        opts.on("--no-cache", "With --mutation: measure every file from scratch, neither reading nor writing " \
+                              "the per-file mutation-result cache (#134 slice 2). The cold arm of the " \
+                              "warm==cold gate; unrelated caches (RBS environment, plugin producers) are " \
+                              "untouched.") do
+          options[:no_cache] = true
+        end
       end
 
       def mutation_misuse_error

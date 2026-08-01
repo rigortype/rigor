@@ -3,9 +3,11 @@
 require "English"
 require "prism"
 
+require_relative "../cache/file_digest"
 require_relative "../protection/closure_kill_oracle"
 require_relative "../protection/dependency_closure"
 require_relative "../protection/discovery_seed"
+require_relative "../protection/mutation_cache"
 
 module Rigor
   class CLI
@@ -32,6 +34,12 @@ module Rigor
       # silently change semantics CI already depends on. A loud stderr warning (plus the unconditional JSON
       # field) is the visibility this issue asks for without redefining what "the build is red" means.
       HARNESS_ERROR_WARN_FLOOR = 3
+
+      # Issue #134 slice 2 — the bleeding-edge ids whose adoption changes what a Tier-2 measurement REPORTS,
+      # and which therefore enter the identity of anything cached about it (#255: a behaviour feature's id is
+      # part of the cache identity of everything it changes). Both are named above; this is the ordered set the
+      # cache key reads, so a feature added to Tier 2 later has exactly one place to register.
+      MUTATION_BEHAVIOUR_FEATURES = [DISCOVERY_SEEDED_MUTATION_SITES, DEPENDENT_CLOSURE_KILL_ORACLE].freeze
 
       private
 
@@ -229,6 +237,11 @@ module Rigor
       # per-file measurement — the ≈94% that is `Σ(1 + N_f)` single-file analyses — across the resolved worker
       # count (#134 slice 1). {MutationForkScan} returns `{path => result}` and the parent absorbs in `paths`
       # order, so the report is byte-identical to a sequential run whatever order the workers finished in.
+      #
+      # #134 slice 2 — the files whose measurement is still valid are served from {Protection::MutationCache}
+      # and never reach a worker at all; only the rest are forked over, and their fresh results are written
+      # back. The cache read + write both happen on the parent, so the workers stay the pure-read, store-free
+      # processes {MutationForkScan} documents.
       def scan_mutation_protection(paths, options)
         configuration = Configuration.load(options.fetch(:config))
         context = LanguageServer::ProjectContext.new(configuration: configuration)
@@ -240,16 +253,87 @@ module Rigor
           base_scope: mutation_base_scope(seed, context.environment), discovery_seed: seed,
           oracle: mutation_kill_oracle(paths, configuration, context, seed, workers)
         )
-        accumulator = MutationProtectionAccumulator.new
+        cache = mutation_result_cache(paths, options, configuration, context, seed)
+        measure_mutation_files(paths, cache: cache, scanner: scanner, context: context,
+                                      configuration: configuration, workers: workers)
+      end
 
-        results = MutationForkScan.run(
-          paths: paths, scanner: scanner, environment: context.environment,
-          configuration: configuration, workers: workers
-        )
+      # The cached / freshly-measured split, absorbed in `paths` order so the report is byte-identical however
+      # the two sets were assembled.
+      #
+      # The two cache phases each get their OWN {Cache::FileDigest.with_run} scope and the MEASUREMENT sits
+      # between them, deliberately: that scope installs a per-path digest memo, and {Protection::ClosureKillOracle}
+      # rewrites one process-private temp file per mutant and digests it through a buffer binding. A memo
+      # spanning the measurement would hand every mutant after the first the FIRST one's digest, the mutated
+      # file's discovery bundle would never be re-walked, and the run would report zero cross-file kills — a
+      # plausible-looking number rather than an error. The oracle's own comment states the same invariant from
+      # the other side. The cost of two scopes is one extra SHA-256 per cached file, against a measurement
+      # that is hundreds of analyses.
+      def measure_mutation_files(paths, cache:, scanner:, context:, configuration:, workers:)
+        cached = with_digest_run(configuration) { paths.to_h { |path| [path, cache.fetch(path)] }.compact }
+        pending = paths - cached.keys
+        fresh = if pending.empty?
+                  {}
+                else
+                  MutationForkScan.run(paths: pending, scanner: scanner, environment: context.environment,
+                                       configuration: configuration, workers: workers)
+                end
         # `fetch`, never `[]`: a worker that died mid-slice must abort the run rather than quietly drop files
         # out of a ratio that `--threshold` gates CI on.
-        paths.each { |path| absorb_mutation_result(accumulator, path, results.fetch(path)) }
+        with_digest_run(configuration) { pending.each { |path| cache.store(path, fresh.fetch(path)) } }
+        report_mutation_cache(cache, measured: pending.size, served: cached.size)
+        absorb_measured_files(paths, cached, fresh)
+      end
+
+      def absorb_measured_files(paths, cached, fresh)
+        accumulator = MutationProtectionAccumulator.new
+        paths.each do |path|
+          absorb_mutation_result(accumulator, path, cached.fetch(path) { fresh.fetch(path) })
+        end
         accumulator.to_report
+      end
+
+      # ADR-87 WD1's per-run digest scope, so the cache's own freshness checks honour `cache.validation:`
+      # (and `RIGOR_STRICT_VALIDATION`) exactly as every other record-and-validate cache does.
+      def with_digest_run(configuration, &)
+        Cache::FileDigest.with_run(strict: configuration.cache_validation_strict?, &)
+      end
+
+      # The per-file result cache (#134 slice 2), or a disabled one. Two callers-side bypasses are decided
+      # here rather than inside the cache: `--no-cache`, and the `dependent-closure-kill-oracle` overlay —
+      # under that oracle a file's verdict depends on its DEPENDENTS' diagnostics, so validity would need the
+      # dependencies of every dependent rather than `deps[A]`, and the feature is presumptively non-graduating
+      # (#254). A bypass is sound and honest; a key that pretended otherwise would not be.
+      def mutation_result_cache(paths, options, configuration, context, seed)
+        Protection::MutationCache.build(
+          configuration: configuration, roots: @argv, project_scan: context.project_scan,
+          sampling: Protection::MutationCache::Sampling.new(
+            limit: options[:limit], seed: options[:seed],
+            site_selector: options[:include_dynamic] ? :all : :biteable
+          ),
+          feature_ids: MUTATION_BEHAVIOUR_FEATURES.select { |id| configuration.bleeding_edge_active?(id) },
+          seed_inputs: seed.nil? ? nil : paths,
+          bypass_reason: mutation_cache_bypass(options, configuration)
+        )
+      end
+
+      def mutation_cache_bypass(options, configuration)
+        return "--no-cache" if options[:no_cache]
+        return DEPENDENT_CLOSURE_KILL_ORACLE if configuration.bleeding_edge_active?(DEPENDENT_CLOSURE_KILL_ORACLE)
+
+        nil
+      end
+
+      # One stderr line saying what the cache did — stdout stays clean for JSON. Always printed, because "the
+      # cache quietly stopped working" and "the cache quietly served a stale number" are indistinguishable
+      # from the outside otherwise; the slice-3 gate reads this line to prove itself non-vacuous.
+      def report_mutation_cache(cache, measured:, served:)
+        if cache.enabled?
+          @err.puts("coverage: mutation cache — re-measured #{measured} file(s), #{served} served from cache.")
+        else
+          @err.puts("coverage: mutation cache disabled (#{cache.reason}) — " \
+                    "re-measured #{measured} file(s).")
+        end
       end
 
       def absorb_mutation_result(accumulator, path, result)

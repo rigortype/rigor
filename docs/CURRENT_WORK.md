@@ -19,10 +19,9 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **Two audited PRs are OPEN and waiting for a human merge** (2026-08-01; each: parent re-ran
-  `make verify` → exit 0, `git diff --check` → exit 0, CI green or green-but-Tests-pending at last
-  check). The session's `gh pr merge` was blocked by the permission classifier — merging needs the
-  user, or a permission rule for `gh pr merge`:
+- **Merged this cycle** (2026-08-01; each: parent re-ran `make verify` → exit 0,
+  `git diff --check` → exit 0, CI fully green before merge; the user granted standing
+  authorisation for autonomous PR merges mid-session):
   - [#261](https://github.com/rigortype/rigor/pull/261) — Tuple `first(n)`/`last(n)` folds to the
     precise sub-Tuple (the `take`/`drop` shape); closes the last asymmetry in that family (#121
     slice). Two Slice-4 overload specs were legitimately rewritten onto `Nominal[Array]` locals so
@@ -45,8 +44,6 @@ this file is the one that is wrong.
 
 ## Next session
 
-- **Merge #261 and #262 first** (user action), then delete the worktree
-  `.claude/worktrees/agent-ac6545cbe4fcd600f` and prune branches.
 - **redmine `app/models` ON-arm re-measure** is the remaining #260 acceptance box and a graduation
   precondition (survey-project setup: cwd=target + `BUNDLE_GEMFILE`; see the memory note on survey
   projects).
@@ -58,7 +55,8 @@ this file is the one that is wrong.
   sites it will rescue are fewer than the issue implies. Audit seams already verified:
   `IncrementalSession#buffer_path?` (a bound buffer is never stat-fresh) + `scan_summary_for_paths(buffer:)`
   + ADR-46 `file_dependents`.
-- **An UNFILED draft upstream report is ready for user sign-off**: `rbs-inline` parses
+- **The rbs-inline upstream report is ON HOLD by user decision** (2026-08-01: upstream movement is
+  not expected, so filing is deferred — do not file without a fresh ask): `rbs-inline` parses
   `# @rbs module-self: Foo` (colon form) and silently drops the self-type — confirmed live against
   the vendored 0.14.0 gem, no existing upstream issue, full discard path with file:line in the
   draft. The draft was in the session scratchpad (regenerate cheaply if gone: the evidence chain is
@@ -80,6 +78,6 @@ this file is the one that is wrong.
 - **A subagent's "deliberately declined" comment can be stale**: the Tuple `first(n)` decline
   predated `take`/`drop` landing the identical fold; the #261 agent correctly read it as historical
   rather than binding. Check the sibling precedent before honouring an old "deliberate" comment.
-- **The auto-mode permission classifier blocks `gh pr merge` (and intermittently blocked complex
-  awk/git-diff one-liners)**: plan for PRs to end at "open + audited", and read branch files
-  directly instead of fancy diff extraction pipelines.
+- **The auto-mode permission classifier intermittently blocks complex one-liners** (awk pipelines,
+  multi-path `git diff`): read branch files directly instead of fancy diff extraction pipelines.
+  `gh pr merge` was blocked once, then user-authorised for autonomous use (recorded in memory).

@@ -6,8 +6,8 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Verify a claim before carrying it forward — and verify it by the thing that decides, not by a
-  proxy. This session shipped a "make verify green" claim read out of a grep for "offenses" that
-  could not see "1 offense detected". CI saw it. Read exit codes.
+  proxy. Read exit codes, diff structured output. A previous session shipped a "make verify green"
+  claim read out of a grep that could not see "1 offense detected"; CI saw it.
 -->
 
 # Current Work — Session Handoff
@@ -19,77 +19,79 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **Merged this cycle**, all with a corpus FP diff (eight RBS-shipping survey projects,
-  diagnostic-identical unless stated):
-  - [#238](https://github.com/rigortype/rigor/pull/238) / #237 — referenced-type stubs are emitted in
-    the declaration kind each name needs, validated one at a time, and the fixpoint stops on a pass
-    that appends nothing. herb went from a **complete no-op** to 5 → 2 passes, −30.1% allocations,
-    precise coverage 59.3% → 60.0%. Cache `SCHEMA_VERSION` 5 → 6.
-  - [#240](https://github.com/rigortype/rigor/pull/240) / #207 — dangling-reference detection reads
-    the declarations instead of building every project class: pass 1 **7,841,785 → ~25k allocations**,
-    −32.7% of a cold `check lib`. The builder sweep survives in spec as its oracle.
-  - [#242](https://github.com/rigortype/rigor/pull/242) — perf baseline refreshed to the post-#207
-    Linux CI measurement (15,769,515 allocations); the ceiling is 16.56M again instead of 24.70M.
-  - [#243](https://github.com/rigortype/rigor/pull/243) / #239 — an instance method no longer masks a
-    same-named `class << self` method, so `self.class.helper(1)` stops drawing a false
-    `call.undefined-method`. Removed one real diagnostic from the corpus (`haml`'s
-    `ScriptCompiler.find_and_preserve`) and added none.
-  - [#244](https://github.com/rigortype/rigor/pull/244) / #146 — editor mode gains whole-project scope:
-    `--tmp-file` / `--instead-of` **with `--incremental`** substitutes the buffer into an ADR-46
-    recheck, so an unsaved edit surfaces in its dependents. Never writes the snapshot; falls back to
-    single-file scope when there is none. `--verify-incremental` now refuses a buffer.
-  - [#241](https://github.com/rigortype/rigor/pull/241) — the changelogs conform to Keep a Changelog
-    1.1.0 (six section types, one per type per release, canonical order), gated by
-    `spec/docs/changelog_conformance_spec.rb`. **There is no `Performance` section**: a speed-up is
-    `Changed`, a docs fix is `Fixed`.
-  - [#245](https://github.com/rigortype/rigor/pull/245) / #121 — the Tuple carrier's set operations
-    fold (`&` `|` `-` `intersection` `union` `difference` `intersect?`, plus `at` / `one?` /
-    `deconstruct`), each by running Ruby's own operator so `eql?` membership decides.
-- `make verify` and `make docs-check` green on merged master (checked by exit code).
+- **Merged since the last handoff:**
+  - [#247](https://github.com/rigortype/rigor/pull/247) / #246 — the LSP publishes **whole-project**
+    diagnostics to every open buffer on `didSave`, from an in-process `IncrementalSession` seeded
+    from the snapshot and never written back. A dirty buffer is excluded except as itself. This was
+    the "unfiled, needs a design call" item the previous handoff pointed at; the seven decisions are
+    in `docs/design/20260517-language-server.md` § "Whole-project publishes on save".
+  - [#248](https://github.com/rigortype/rigor/pull/248) / #137 — `SomeSchema.call(input).to_h`
+    returns the schema's own `HashShape`. A `required` row becomes a required key and an `optional`
+    row an optional one — the declaration's vocabulary, not `to_h`'s worst case, because typing every
+    key as possibly-absent draws a nil error inside an `if result.success?` branch.
+  - [#249](https://github.com/rigortype/rigor/pull/249) — an undeclared key on an **open** `HashShape`
+    reads as `untyped` instead of `Constant[nil]`. The `extra_keys:` policy had only ever been
+    consulted in `Inference::Acceptance`, never on the element-read path.
+- **Open:** [#250](https://github.com/rigortype/rigor/pull/250) / #121 — `"widget".freeze` keeps its
+  value. Corpus-measured: twenty projects, 9,548 diagnostics, byte-identical, fold fires 295 times.
+- `make verify` and `make docs-check` green on `constant-self-returners` (checked by exit code).
 
 ## Next session
 
-- **The v0.4.x editor cluster is now a considered "not yet", not a queue item.** Phase attribution of
-  one editor-mode invocation on mastodon `app/models` (248 files, warm) says the remaining levers are
-  small: per-file analysis 0.60s, project pre-pass + plugin prepare **~0.24s**, RBS env 0.19s,
-  snapshot load and closure decision ~0.01s each, of ~2.5s wall. Recorded on
-  [#147](https://github.com/rigortype/rigor/issues/147#issuecomment-5132746607), which also notes that
-  option B subsumes its `--also` bullet. Do not start #147's five-phase pathway on its stated estimate.
-  [#142](https://github.com/rigortype/rigor/issues/142) needs a persistent pre-warmed worker pool and
-  pays off only for multi-dirty-buffer bursts.
-- **The LSP is the lever that measurement points at** — it has no process boot at all — and it still
-  publishes **single-file** scope (`DiagnosticPublisher#run_analysis` → `runner.run([path])`). Giving
-  it the option-B treatment (publish the dependents' diagnostics too, from an in-process
-  `IncrementalSession` that needs no snapshot) is unfiled and would be the natural continuation of
-  #146. It needs a design call first: publishing diagnostics for files the client never opened is
-  legitimate LSP but needs a clear-on-empty story.
-- **#121** stays open as the ongoing fold backlog, but its surface is thin: an empirical sweep across
-  String / Array / Hash / Integer / Float / Symbol found the set operations as the only genuine gaps,
-  and they are now landed. Re-sweep with the probe before assuming the audit doc's 🔲.
+- **#248 left a now-redundant mechanism worth revisiting.** `SchemaScanner` records `unmodelled:`
+  keys and `ResultShape` puts them back as `untyped` entries, to stop a declared-but-untypable key
+  reading as `nil`. #249 fixed that at the engine level hours later, so the workaround is no longer
+  load-bearing. It still records the schema's declared surface (plausibly useful to
+  `rigor-dry-validation` slice 2), so this is a "decide, then either justify or delete" — not an
+  obvious removal.
+- **[#134](https://github.com/rigortype/rigor/issues/134)'s premise is wrong and the issue needs
+  rewriting before anyone starts it.** There is no whole-project cold re-scan per mutant: the project
+  scan happens once and is ~6% of a 45-file run. The cost is `Σ(1 + N_f)` single-file analyses with
+  every cache disabled (`DiagnosticOracle` passes `cache_store: nil`). And ADR-46's `dependents`
+  index answers a question the current oracle never asks — the oracle only ever looks at the mutated
+  file's own diagnostics. **The full survey with file:line evidence is not yet posted to the issue.**
+  Its three load-bearing findings: (1) the Tier-2 file loop is sequential while Tier 1 already
+  fork-maps, and `--workers` is parsed but never reaches the mutation path — the largest win
+  available and independent of everything else; (2) the right reuse is the ADR-46 *forward* edge as a
+  per-file cache key, not the inverted index; (3) a project-wide oracle would change the reported
+  effectiveness number and so needs its own versioning decision, not a perf PR.
+- **#121 is now enumerated rather than open-ended.** A probe sweep (positive controls on every tier)
+  found the self-returner family as the one gap with real-world weight — that is #250. The remainder,
+  ranked: Set element projections (`min`/`max`/`first`/`sort`/`sum`/`to_set` leak `Dynamic[top]` on a
+  carrier whose elements `to_a` already folds), `Tuple#first(n)`/`last(n)`/`sum(init)`/`count(obj)`
+  (~15 lines; `take`/`drop`/`min(n)` already do it), `Regexp.compile` (one symbol next to `:new`),
+  `abs2`/`rationalize` in the Integer/Float unary sets. **Predicate-shaped folds are disqualified** —
+  a bool fold newly surfaces `flow.always-truthy-condition`, demonstrated live.
 - **[#134](https://github.com/rigortype/rigor/issues/134) / [#135](https://github.com/rigortype/rigor/issues/135)**
-  (self-testing) and **[#137](https://github.com/rigortype/rigor/issues/137)** (dry-rb ceiling slices)
-  are the untouched `ready-for-agent` remainder.
+  (self-testing) and the rest of **[#137](https://github.com/rigortype/rigor/issues/137)** (three
+  dry-validation ceiling slices) are the `ready-for-agent` remainder.
+- **Still deliberately not queued:** [#147](https://github.com/rigortype/rigor/issues/147) and
+  [#142](https://github.com/rigortype/rigor/issues/142). Phase attribution says the remaining editor
+  levers are small; do not start #147 on its stated estimate.
 - **Unfiled upstream report** (small, external): `rbs-inline`'s parser accepts
   `# @rbs module-self: Foo` and its writer then discards it — the defect behind ADR-32 WD12. Needs
   maintainer sign-off because it is an external filing.
 
 ## What this session learned that is not in a commit
 
-- **A clean corpus result can be a silent harness failure.** Six of eight targets reported "both
-  detectors found nothing"; the fixture built to force a positive is what produced the shape matrix and
-  both #237 defects. Build the positive control before the corpus run.
-- **Verify by the deciding signal, not a proxy for it.** `grep offenses` cannot see `1 offense
-  detected`. Read the exit code.
-- **`rescue <Error>; nil` around a batched synthesis is an availability bug** — the rescue degrades all
-  N units for one bad input. Split the batch.
-- **A fixpoint that cannot make progress still burns its whole budget.** Bound by progress; keep the
-  cap as a backstop.
-- **Read the raise sites, don't infer them.** The static walk in #207 is only equivalent because
-  `references/rbs` says exactly where `NoTypeFoundError` comes from; three of the four resulting
-  exclusions were invisible from outside.
-- **A written rule with no gate is a temporary state** — the Keep a Changelog vocabulary was already in
-  the release-prep skill and six `### Performance` sections accumulated anyway.
-- **A buffer changes what "changed" means.** #146's real bug was computing the invalidation closure
-  from disk bytes while analysing buffer bytes: the dependents of an unsaved edit were served from
-  cache. Any substituted-input mode must thread the substitution through change detection, not only
-  through the analysis.
+- **The coverage docs over-report, and now by name.** `20260522-stdlib-deterministic-module-coverage.md`
+  carries no staleness warning and its 🔲 rows are wrong for every CGI escape/unescape function, all
+  four URI `*_component` functions, and `Regexp.escape`/`quote` — all fold today. Math, CGI and
+  Shellwords are **complete** and can be marked so. `20260522-type-method-coverage.md`'s 2026-07-31
+  warning is scoped to §5 only; ~22 String rows above it are equally stale. Probe before implementing
+  against any of these.
+- **`rigor annotate` beats `type-of` for a coverage sweep** (one call types every line), and
+  **`type-scan` is useless for it** — it reports whether a node got *a* type, never whether that type
+  is precise.
+- **A fold's blast radius is not the method you changed.** Value-pinning a constant is only
+  interesting because of what becomes decidable downstream; the thing to measure is the *diagnostic*
+  set, not the folded site. The corpus zero for #250 rests on a condition worth remembering: the pin
+  does not survive a cross-file constant read (`Dynamic[top]` today). Same-file definition + predicate
+  does draw the warning.
+- **A subagent's confident summary can contradict its own evidence.** The #250 corpus report claimed
+  `CONST = <literal>.freeze` was "extinct — 0 hits in all 20 projects" while citing `haml`'s
+  `ID_KEY = 'id'.freeze` two sections earlier. The measurement was sound; the generalisation was not.
+  Take the numbers, re-derive the story.
+- **A PostToolUse formatter rubocop-autocorrects scratch fixtures written with the Write tool** —
+  it deleted a probe's `pc3 = 2 + 3` outright as a useless assignment. Write probe fixtures with a
+  Bash heredoc.

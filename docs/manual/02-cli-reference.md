@@ -411,6 +411,18 @@ to a deterministic sample of `N` mutations per file, bounding the
 cost on large files. Per-file ratios then become estimates, noted
 on stderr so `--format=json` stdout stays clean.
 
+A re-run is served from a per-file measurement cache while
+nothing that could change a file's number has moved: the file
+itself, any file it was recorded as reading from, the resolved
+configuration, `sig/`, the gem set, the engine version, `--limit`
+/ `--seed`, and the adopted bleeding-edge features. It reads the
+cross-file edges a `rigor check --incremental` run records, so
+warm one once per project; without a usable snapshot every file
+is measured, never silently served. `--no-cache` measures
+everything from scratch. A one-line stderr report says which of
+those happened — see
+[Type-protection coverage](15-type-protection-coverage.md).
+
 ```sh
 rigor coverage --protection --mutation --with-tests \
   --test-command "bundle exec rspec" --include-dynamic [paths]

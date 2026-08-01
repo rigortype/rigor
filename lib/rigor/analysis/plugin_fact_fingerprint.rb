@@ -71,6 +71,20 @@ module Rigor
         new.digest_registry(registry)
       end
 
+      # The fact surface reduced to the one String a cache KEY can carry, or nil when the surface cannot be
+      # seen at all (an opaque plugin — one that contributes call-site types while declaring none of the three
+      # fingerprint channels). A nil obliges the caller to decline caching entirely, which is the same
+      # conservative direction {Result#reusable_against?} takes for the incremental snapshot: a key that
+      # silently omitted an invisible input would serve a stale value rather than miss.
+      #
+      # Keeping the opaque decision here, rather than at each cache's call site, means a new consumer cannot
+      # key on `digest` while forgetting that an opaque surface makes it meaningless.
+      # @return [String, nil]
+      def self.key_digest(registry)
+        result = from_registry(registry)
+        result.opaque? ? nil : result.digest.to_s
+      end
+
       # Loads the plugins and runs every `#prepare` hook sequentially, returning the prepared registry (nil on
       # any failure → the caller treats it as "no fact surface").
       def self.prepared_registry(configuration:, cache_store:, plugin_requirer:)

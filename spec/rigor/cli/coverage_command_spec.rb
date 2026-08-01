@@ -5,6 +5,7 @@ require "json"
 require "stringio"
 require "tmpdir"
 
+require "rigor/cache/incremental_snapshot"
 require "rigor/cli/coverage_command"
 
 # Focused coverage for the `rigor coverage` command object: the ADR-63 Tier 2 mutation-effectiveness mode (`--protection
@@ -631,6 +632,74 @@ RSpec.describe Rigor::CLI::CoverageCommand do
       report.define_singleton_method(:parse_errors) { [] }
       report.define_singleton_method(:ratio) { 1.0 }
       report
+    end
+  end
+
+  # Issue #134 slice 2 — the per-file mutation-result cache, end to end through the command. The unit-level
+  # key semantics live in `spec/rigor/protection/mutation_cache_spec.rb`; what is asserted here is the wiring:
+  # a warm run's JSON is byte-identical to the cold one, only the edited file's closure is re-measured, and
+  # the stderr line reports what actually happened (the slice-3 gate reads that line).
+  describe "per-file mutation-result cache (--protection --mutation)" do
+    # The ADR-46 snapshot the cache reads its `deps[A]` edges from, written directly so the spec can state the
+    # edge it means (`a.rb` reads from `dep.rb`) rather than arrange a project that happens to produce it.
+    def save_snapshot(sources)
+      configuration = Rigor::Configuration.load(nil)
+      Rigor::Cache::IncrementalSnapshot.new(root: configuration.cache_path).save(
+        fingerprint: Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: configuration, roots: ["lib"]),
+        payload: Rigor::Cache::IncrementalSnapshot::Payload.new(
+          cache: {}, sources: sources, digests: {}, analyzed: sources.keys,
+          symbol_sources: {}, ancestry_sources: {}, symbol_fingerprints: {},
+          missing: {}, class_decls: {}, seed_bundles: {}, plugin_fact_digest: nil,
+          return_summaries: {}, param_table: {}
+        )
+      )
+    end
+
+    def write_measured_project
+      FileUtils.mkdir_p("lib")
+      File.write("lib/dep.rb", %(class Dep\n  def label\n    "dep"\n  end\nend\n))
+      File.write("lib/a.rb", %(def m(x)\n  "hello".upcase\n  x.thing\nend\n))
+      File.write("lib/b.rb", %(def n\n  "world".upcase\nend\n))
+      save_snapshot("lib/a.rb" => Set["lib/dep.rb"], "lib/b.rb" => Set.new, "lib/dep.rb" => Set.new)
+    end
+
+    def measure(*extra)
+      run(["--protection", "--mutation", "--format", "json", *extra, "lib"])
+    end
+
+    it "serves an unchanged re-run from cache, byte-identically to the cold measurement" do
+      write_measured_project
+      _, cold, cold_err = measure("--no-cache")
+      _, fill, fill_err = measure
+      _, warm, warm_err = measure
+
+      expect(cold_err).to include("mutation cache disabled (--no-cache)")
+      expect(fill_err).to include("re-measured 3 file(s), 0 served from cache")
+      expect(warm_err).to include("re-measured 0 file(s), 3 served from cache")
+      expect(JSON.parse(cold)["killed"]).to be >= 1 # non-vacuity: there is a number to get wrong
+      expect([fill, warm]).to all(eq(cold))
+    end
+
+    it "re-measures the edited file and its dependents, and nothing else" do
+      write_measured_project
+      measure
+      File.write("lib/dep.rb", %(class Dep\n  def label\n    "edited"\n  end\nend\n))
+      _, warm, warm_err = measure
+
+      # `dep.rb` itself and `a.rb` (which recorded a read of it); `b.rb` is untouched by either.
+      expect(warm_err).to include("re-measured 2 file(s), 1 served from cache")
+      expect(warm).to eq(measure("--no-cache")[1])
+    end
+
+    # #254 — under the dependent-closure oracle a file's verdict depends on its DEPENDENTS' diagnostics,
+    # which `deps[A]` cannot validate. The command bypasses the cache and says so.
+    it "runs uncached under the dependent-closure kill oracle" do
+      write_measured_project
+      File.write(".rigor.yml", "bleeding_edge:\n  - dependent-closure-kill-oracle\n")
+
+      _, _, err = measure
+
+      expect(err).to include("mutation cache disabled (dependent-closure-kill-oracle)")
     end
   end
 

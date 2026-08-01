@@ -1169,7 +1169,9 @@ module Rigor
         # so the proven-absent key reads `nil`. Returns the input unchanged when nothing
         # applies (caller detects "no narrowing"). Only an *optional* present key is removed: a
         # required key makes `key?` always true (the false edge is dead, leave the shape opaque)
-        # and a key absent from `pairs` already reads `nil`.
+        # and a key absent from `pairs` already reads `nil` on a closed shape. On an open shape an
+        # undeclared key keeps reading `untyped` on this edge — sound but imprecise, since the shape
+        # carries no per-key exclusion to record what the guard just proved absent.
         def narrow_hash_key_absent(type, key)
           case type
           when Type::HashShape

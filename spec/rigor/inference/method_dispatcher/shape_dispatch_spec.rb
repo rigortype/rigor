@@ -517,6 +517,51 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: string_shape, method_name: :[], args: [constant("k")])).to eq(constant(42))
     end
 
+    context "with an open shape, where an undeclared key is unknown rather than missing" do
+      let(:open_shape) do
+        Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+      end
+
+      let(:untyped) { Rigor::Type::Combinator.untyped }
+
+      it "still returns the precise value for a declared key" do
+        expect(dispatch(receiver: open_shape, method_name: :[], args: [constant(:a)])).to eq(constant(1))
+        expect(dispatch(receiver: open_shape, method_name: :fetch, args: [constant(:a)])).to eq(constant(1))
+      end
+
+      it "returns untyped — not Constant[nil] — for `[]` on an undeclared key" do
+        # `:open` means keys outside `pairs` are permitted, so the value is unknown. Typing it
+        # Constant[nil] would put call.undefined-method on `payload[:undeclared].upcase`.
+        expect(dispatch(receiver: open_shape, method_name: :[], args: [constant(:undeclared)])).to eq(untyped)
+      end
+
+      it "returns untyped for `dig` on an undeclared key" do
+        expect(dispatch(receiver: open_shape, method_name: :dig, args: [constant(:undeclared)])).to eq(untyped)
+      end
+
+      it "returns untyped for `fetch` on an undeclared key rather than deferring" do
+        # The closed-shape deferral exists because Ruby would raise KeyError. On an open shape the key
+        # may well be present, so there is no raise to model.
+        expect(dispatch(receiver: open_shape, method_name: :fetch, args: [constant(:undeclared)])).to eq(untyped)
+      end
+
+      it "keeps a multi-key `dig` chain untyped once it passes through an undeclared key" do
+        result = dispatch(receiver: open_shape, method_name: :dig, args: [constant(:undeclared), constant(:deeper)])
+        expect(result).to eq(untyped)
+      end
+
+      it "fills undeclared keys with untyped in `values_at`" do
+        result = dispatch(receiver: open_shape, method_name: :values_at, args: [constant(:a), constant(:undeclared)])
+        expect(result).to eq(Rigor::Type::Combinator.tuple_of(constant(1), untyped))
+      end
+
+      it "leaves the closed-shape answers untouched" do
+        closed = hash_shape(a: constant(1))
+        expect(dispatch(receiver: closed, method_name: :[], args: [constant(:undeclared)])).to eq(constant(nil))
+        expect(dispatch(receiver: closed, method_name: :fetch, args: [constant(:undeclared)])).to be_nil
+      end
+    end
+
     context "with non-(Symbol|String) scalar keys" do
       let(:numeric_shape) { hash_shape(1 => constant(2), 1.0 => constant(4)) }
 

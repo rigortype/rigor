@@ -6,8 +6,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Verify a claim before carrying it forward — and verify it by the thing that decides, not by a
-  proxy. This cycle's example: the #260 design assumed the seeded-site survivor cluster was oracle
-  blindness; the implementation measurement split it, and only half was.
+  proxy. This cycle produced two examples: the #260 design assumed the seeded-survivor cluster was
+  oracle blindness (only half was — the other half is WD6b by construction), and #254's premise
+  ("the best catch is scored as a miss") measured out to ~zero on both available corpora.
 -->
 
 # Current Work — Session Handoff
@@ -19,66 +20,62 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **Merged this cycle** (2026-08-01; each: parent re-ran `make verify` → exit 0,
-  `git diff --check` → exit 0, CI fully green before merge; the user granted standing
-  authorisation for autonomous PR merges mid-session):
-  - [#261](https://github.com/rigortype/rigor/pull/261) — Tuple `first(n)`/`last(n)` folds to the
-    precise sub-Tuple (the `take`/`drop` shape); closes the last asymmetry in that family (#121
-    slice). Two Slice-4 overload specs were legitimately rewritten onto `Nominal[Array]` locals so
-    the arity path stays exercised.
-  - [#262](https://github.com/rigortype/rigor/pull/262) — #260's fix: one `Protection::DiscoverySeed`
-    table set threaded to BOTH Tier-2 halves (site filter + a new opt-in
-    `Runner.new(discovery_seed:)` seam the `DiagnosticOracle` passes through). Default nil keeps
-    the prebuilt/LSP contract byte-identical; OFF arm untouched.
-- **#260 is decided and amended** — read both comments on the issue before touching Tier 2. The
-  short version: the unkillable-survivor cluster was only HALF measurement blindness
-  (`discovered_classes` — fixed by #262, +21 kills, spec-proven). The other half is ADR-67 WD6b
-  *by construction*: negative rules decline on inferred-param-rooted values (lower bound ⇒ FP), so
-  those survivors are TRUE "no teeth here" reports and stay in the denominator. Full seed stays in
-  the oracle (fidelity + no filter/oracle drift). Rigor `lib` graduation numbers: 10,252 sites /
-  5,580 killed / 0.5443.
-- **Filed this cycle**: [#263](https://github.com/rigortype/rigor/issues/263) (Tier 1 counts
-  WD6b-guarded sites as protected — the proxy over-claim #260's measurement exposed; wants ONE
-  shared predicate for both tiers), [#264](https://github.com/rigortype/rigor/issues/264) (Tier-2
-  site totals jitter: `classify` rescues harness failures to `:invalid` silently).
+- **The Tier-2 graduation cluster (#260 / #263 / #254) is fully decided and CLOSED** (2026-08-01,
+  one session; every PR: audited diff + CI fully green + parent-re-run `make verify` exit 0; the
+  user granted standing authorisation for autonomous PR merges mid-session, recorded in memory):
+  - [#262](https://github.com/rigortype/rigor/pull/262) (closes #260) — one
+    `Protection::DiscoverySeed` table set threaded to BOTH Tier-2 halves; opt-in
+    `Runner.new(discovery_seed:)` seam. The amended decision on #260 is the load-bearing document:
+    only the `discovered_classes` half of the unkillable cluster was oracle blindness; the
+    `param_inferred_types` half is ADR-67 WD6b *by construction* and its survivors are truth.
+  - [#265](https://github.com/rigortype/rigor/pull/265) (closes #263) — Tier 1 now reports
+    `lower_bound_typed` (WD6b-guarded sites) as a split WITHIN protected; headline untouched.
+    Rigor `lib`: 2,223 of 12,056 protected sites (~18.4%).
+  - [#266](https://github.com/rigortype/rigor/pull/266) (closes #254) — `dependent-closure-kill-oracle`
+    (behaviour feature, off): strictly additive closure oracle. **Empirical headline: the closure
+    adds ~zero kills on both corpora** (+2 on `lib`, none on redmine) — verified independently by
+    disk-written whole-project re-analysis of 21 survivors (zero diagnostics anywhere). Graduation
+    precondition recorded on #254: find a corpus where it bites (predicted shape: a `sig/`-shipping
+    project like textbringer, where a return-type mutation can produce a caller-side mismatch).
+  - Also merged: [#261](https://github.com/rigortype/rigor/pull/261) — Tuple `first(n)`/`last(n)`
+    precise sub-Tuple folds (#121 slice).
+- **Graduation-note numbers** (in #260's closing comments): Rigor `lib` ON 10,252/5,580/0.5443;
+  redmine `app/models` ON 2,762/464/0.1680, with 66.2% of redmine ON-survivors on project-class
+  singletons (the honest RBS-less-model gap). OFF arms reproduce #253 byte-identically.
 
 ## Next session
 
-- **#260 is CLOSED** — the redmine `app/models` re-measure landed on the issue (OFF byte-identical
-  to #253: 1,434/481/0.3354; ON post-#262: 2,762/464/0.1680; 66.2% of ON survivors are
-  project-class singletons = the honest RBS-less-model gap). Graduation-note numbers now live in
-  the closing comments of #260.
-- **The graduation cluster is now #254 + #263** (both "what does the ratio mean" issues). #254's
-  design premise should be re-checked against #260's amendment: its "the most valuable catch is
-  scored as a miss" example (`Account.find` return-type change caught in callers) sits right next
-  to the empirical footnote that renaming `Account.find` is not killable even by whole-project
-  `check` on an RBS-less class — the dependent-closure oracle is still right, but the example
-  sites it will rescue are fewer than the issue implies. Audit seams already verified:
-  `IncrementalSession#buffer_path?` (a bound buffer is never stat-fresh) + `scan_summary_for_paths(buffer:)`
-  + ADR-46 `file_dependents`.
-- **The rbs-inline upstream report is ON HOLD by user decision** (2026-08-01: upstream movement is
-  not expected, so filing is deferred — do not file without a fresh ask): `rbs-inline` parses
-  `# @rbs module-self: Foo` (colon form) and silently drops the self-type — confirmed live against
-  the vendored 0.14.0 gem, no existing upstream issue, full discard path with file:line in the
-  draft. The draft was in the session scratchpad (regenerate cheaply if gone: the evidence chain is
-  ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764` → rescue at `617-621` →
-  `annotations.rb:527-536`). Side-finding: ADR-32's "upstream docs use the colon" citation actually
-  points at rbs-core's built-in `RBS::InlineParser` doc, not the rbs-inline gem's — worth a
-  one-line ADR correction when next touching ADR-32.
-- **#134 slices 2-3, #135, #137, #142, #147** remain the `ready-for-agent` pool; #121 stays open
-  (the remainder after #261: `Regexp.compile` alias, `Integer#rationalize`, `Integer`/`Float#abs2`
-  — all probed real but small; Set projections audited CLOSED, nothing bounded remains).
+- **[#264](https://github.com/rigortype/rigor/issues/264)** (site-total jitter: `classify` rescues
+  harness failures to `:invalid` silently, ±3 sites between identical runs) is the remaining
+  measurement-hygiene item — small, `ready-for-agent`, and now the only thing between the Tier-2
+  numbers and bit-stability.
+- **The `ready-for-agent` pool**: #134 slices 2-3 (ADR-46 forward-edge result cache + the
+  incremental==cold gate — the remaining Tier-2 *speed* work), #135, #137, #142, #147. #121 stays
+  open (remainder after #261: `Regexp.compile` alias, `Integer#rationalize`, `Integer`/`Float#abs2`;
+  Set projections audited closed).
+- **A textbringer Tier-2 run would answer #254's graduation precondition cheaply** — it ships its
+  own `sig/` (see the survey memory), so it is the predicted corpus where the closure oracle's
+  caller-side catches exist. One measurement, recorded on #254, settles whether the feature ever
+  graduates.
+- **The rbs-inline upstream report is ON HOLD by user decision** (2026-08-01: upstream movement not
+  expected; do not file without a fresh ask). Evidence chain if ever needed: ADR-32 WD12 +
+  `annotation_parser.rb:323-326` → `753-764` → rescue at `617-621` → `annotations.rb:527-536`; also
+  ADR-32's "upstream docs" citation actually points at rbs-core's built-in `RBS::InlineParser` doc,
+  not the rbs-inline gem's — a one-line ADR correction when next touching ADR-32.
 
 ## What this session learned that is not in a commit
 
-- **Delegation pattern, second confirmation**: fixed design decisions in the brief ("do not
-  relitigate") + the repo contract restated verbatim + gates by exit code + the parent re-running
-  gates independently worked again — AND the brief's escape hatch mattered: the #262 agent was told
-  to report contradictions rather than redesign, and its measurement overturned half the design
-  premise. Write that hatch into every brief.
-- **A subagent's "deliberately declined" comment can be stale**: the Tuple `first(n)` decline
-  predated `take`/`drop` landing the identical fold; the #261 agent correctly read it as historical
-  rather than binding. Check the sibling precedent before honouring an old "deliberate" comment.
+- **The delegation pattern that survived contact**: fixed design in the brief ("do not relitigate")
+  + repo contract verbatim + gates by exit code + parent re-runs gates + **an explicit escape hatch
+  ("report contradictions, do not silently redesign")**. The hatch carried the session twice: #262's
+  agent overturned half the #260 design premise with an attribution measurement, and #266's agent
+  caught its own first design conflating two feature axes (it lost 11 kills on redmine and could
+  not attribute them) and corrected to the strictly-additive shape before opening the PR.
+- **Subagents stall by ending their turn on background waits** — three separate stalls in one
+  session, all recovered by a resume message. Put "run gates/measurements in the FOREGROUND with a
+  generous timeout; never end a turn while anything is pending" in every brief up front.
 - **The auto-mode permission classifier intermittently blocks complex one-liners** (awk pipelines,
-  multi-path `git diff`): read branch files directly instead of fancy diff extraction pipelines.
-  `gh pr merge` was blocked once, then user-authorised for autonomous use (recorded in memory).
+  multi-path `git diff`); read branch files directly instead of fancy diff extraction.
+- **Fixture lesson for oracle specs**: equalise the knowledge axis before comparing oracles (the
+  brute-force cross-check in #266 reported missing cross-file *knowledge* as a closure defect until
+  both features were adopted in the fixture).

@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-binpacker test-ractor-pool lint check check-plugins check-incremental docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-binpacker test-ractor-pool lint check check-plugins check-incremental check-mutation-cache docs-check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -134,6 +134,20 @@ check-plugins:
 check-incremental:
 	bundle exec exe/rigor check --verify-incremental --no-stats lib
 	bundle exec exe/rigor check --verify-incremental --no-stats plugins/*/lib examples/*/lib
+
+# Issue #134 slice 3 — the same obligation for the per-file MUTATION-result
+# cache: a warm `rigor coverage --protection --mutation --format json` run must
+# be byte-identical to the cold one over a corpus, and must actually have served
+# it from cache (the gate refuses a vacuous pass). Deliberately NOT in `verify`,
+# for the same reason `check-incremental` is not: three whole measurement passes
+# plus a snapshot warm-up. CI runs it on the cold self-check variant.
+#
+# The corpus is a bounded subtree with `--limit` rather than all of `lib`: the
+# gate is about warm==cold, and a 350-file measurement would cost minutes per
+# arm without making the equality any harder to violate. It writes an ADR-46
+# snapshot for those roots, replacing any whole-project one in `.rigor/cache`.
+check-mutation-cache:
+	bundle exec ruby tool/mutation_cache_gate.rb --limit 5 lib/rigor/protection lib/rigor/cache
 
 # Verify that docs/handbook/ executable snippets are accurate and that
 # docs/handbook/ + docs/manual/ relative links and doc↔code references are

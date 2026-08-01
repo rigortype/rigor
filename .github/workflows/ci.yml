@@ -356,6 +356,19 @@ jobs:
         if: matrix.cache == 'cold'
         run: make check-incremental
 
+      # Mutation-cache acceptance gate (#134 slice 3): the per-file
+      # mutation-result cache must serve a measurement byte-identical to
+      # the cold one. ADR-46 made that obligation mandatory for the
+      # incremental check path and a cached per-file MEASUREMENT inherits
+      # it — the number the cache serves is the number `--threshold` gates
+      # a build on. The gate also asserts the warm arm really was served
+      # from cache, so it cannot pass vacuously the day the cache disables
+      # itself. Cold variant only, like the gate above: deterministic, and
+      # it warms its own snapshot.
+      - name: Run mutation-cache gate
+        if: matrix.cache == 'cold'
+        run: make check-mutation-cache
+
   # ── 5. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
   # difference means the cache is altering analysis results — a bug.

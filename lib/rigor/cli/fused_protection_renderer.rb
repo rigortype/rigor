@@ -33,8 +33,18 @@ module Rigor
         @out.puts "    by type:  #{report.total_type_killed}"
         @out.puts "    by test:  #{report.total_test_killed}  (type-survivors a test caught)"
         @out.puts "  unprotected: #{report.total_unprotected}  (neither — add a type or a test)"
+        render_harness_errors(report)
         render_unprotected(report)
         render_files(report)
+      end
+
+      # #264 — see {MutationProtectionRenderer#render_harness_errors}; surfaced only when non-zero.
+      def render_harness_errors(report)
+        count = report.total_harness_errors
+        return if count.zero?
+
+        @out.puts "  harness errors: #{count} mutant(s) failed inside the measurement harness " \
+                  "(excluded from the ratio — see --format=json's \"harness_errors\")"
       end
 
       def render_unprotected(report)

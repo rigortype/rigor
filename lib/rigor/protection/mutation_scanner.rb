@@ -25,8 +25,17 @@ module Rigor
       # A surviving mutation site — a breakage Rigor did not catch.
       SurvivingSite = Data.define(:line, :receiver, :method_name, :operator)
 
-      FileResult = Data.define(:path, :killed, :survived, :sites) do
-        # Mutations actually analysed (parse-invalid mutants are not counted).
+      # `harness_errors` (#264) — mutants where the harness itself failed (an exception `classify` rescued),
+      # counted separately from a parse-invalid mutant. Defaults to 0 so every existing caller that builds a
+      # `FileResult` without the new keyword — including the early-return-on-empty path below and the fork-scan
+      # `ParseError` branch — keeps constructing one exactly as before.
+      FileResult = Data.define(:path, :killed, :survived, :sites, :harness_errors) do
+        def initialize(path:, killed:, survived:, sites:, harness_errors: 0)
+          super
+        end
+
+        # Mutations actually analysed (parse-invalid mutants are not counted; neither are harness_errors — a
+        # harness-level failure measures the harness, not the code, exactly like a parse-invalid mutant).
         def total = killed + survived
 
         # Effectiveness ratio; a file with no type-relevant mutation is vacuously fully effective (no breakage
@@ -42,7 +51,13 @@ module Rigor
       # "doubly-protected" bucket into `type_killed`: a mutant the type checker already kills never reaches the
       # suite, because the static net already suffices and re-running the suite to learn a test *would also*
       # catch it is wasted work. So the observed buckets are three.
-      FusedFileResult = Data.define(:path, :type_killed, :test_killed, :sites) do
+      # `harness_errors` (#264) — same bucket as {FileResult}, kept out of `total`/`ratio` exactly like a
+      # parse-invalid mutant. Defaults to 0 for the same backward-compatibility reason.
+      FusedFileResult = Data.define(:path, :type_killed, :test_killed, :sites, :harness_errors) do
+        def initialize(path:, type_killed:, test_killed:, sites:, harness_errors: 0)
+          super
+        end
+
         # The unprotected sites (neither a type nor a test caught the breakage).
         def unprotected = sites.size
         def total = type_killed + test_killed + unprotected
@@ -101,15 +116,17 @@ module Rigor
 
         baseline = @oracle.baseline(source: source, path: path)
         killed = 0
+        harness_errors = 0
         sites = []
         kept.each do |mut|
           case classify(source, path, mut, baseline)
           when :killed then killed += 1
           when :survived then sites << surviving_site(mut)
+          when :harness_error then harness_errors += 1
             # :invalid — a parse-broken mutant; not a measurement, skip it.
           end
         end
-        FileResult.new(path: path, killed: killed, survived: sites.size, sites: sites)
+        FileResult.new(path: path, killed: killed, survived: sites.size, sites: sites, harness_errors: harness_errors)
       end
 
       # ADR-70 — the fused static∪dynamic measurement. Runs the type pass (the {DiagnosticOracle}); for every
@@ -126,6 +143,7 @@ module Rigor
         baseline = @oracle.baseline(source: source, path: path)
         type_killed = 0
         test_killed = 0
+        harness_errors = 0
         sites = []
         kept.each do |mut|
           case classify(source, path, mut, baseline)
@@ -136,10 +154,12 @@ module Rigor
             else
               sites << fused_site(mut, :none)
             end
+          when :harness_error then harness_errors += 1
             # :invalid — a parse-broken mutant; not a measurement, skip it.
           end
         end
-        FusedFileResult.new(path: path, type_killed: type_killed, test_killed: test_killed, sites: sites)
+        FusedFileResult.new(path: path, type_killed: type_killed, test_killed: test_killed, sites: sites,
+                            harness_errors: harness_errors)
       end
 
       private
@@ -159,14 +179,21 @@ module Rigor
         sample(kept)
       end
 
+      # #264 — a parse-invalid mutant (`:invalid`, the mutation itself does not produce parseable Ruby) and a
+      # harness-level failure (`:harness_error`, an exception raised *while measuring* an otherwise-parseable
+      # mutant — e.g. the oracle's re-analysis blowing up) are different failure modes and MUST be told apart:
+      # only the latter is a harness defect worth counting and surfacing. Both stay OUT of `killed + survived`
+      # exactly as before (containment is unchanged) — #264 is about visibility, not about admitting either
+      # bucket into the denominator.
       def classify(source, path, mut, baseline)
         mutant_source = mut.apply(source)
         return :invalid unless Prism.parse(mutant_source).success?
 
         @oracle.killed?(mutant_source: mutant_source, path: path, baseline: baseline) ? :killed : :survived
       rescue StandardError
-        # A harness-level failure on one mutant must not abort the file.
-        :invalid
+        # A harness-level failure on one mutant must not abort the file — but it must not vanish either
+        # (#264): the caller counts this bucket separately and the CLI surfaces it.
+        :harness_error
       end
 
       def sample(mutations)

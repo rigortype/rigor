@@ -9,7 +9,12 @@ module Rigor
     #
     # Framing (ADR-63 / ADR-62 Criterion A, extended): the payload is the **attribution** — which protection axis is
     # missing — never raw survival. An unprotected site is "add protection here", never "your code is broken".
-    FusedFileProtection = Data.define(:path, :type_killed, :test_killed, :unprotected, :ratio)
+    # `harness_errors` (#264) — see {Rigor::CLI::FileEffectiveness}; defaults to 0 for the same reason.
+    FusedFileProtection = Data.define(:path, :type_killed, :test_killed, :unprotected, :ratio, :harness_errors) do
+      def initialize(path:, type_killed:, test_killed:, unprotected:, ratio:, harness_errors: 0)
+        super
+      end
+    end
     UnprotectedBreakage = Data.define(:method_name, :count, :examples)
 
     FusedProtectionReport = Data.define(:files, :unprotected, :parse_errors) do
@@ -20,6 +25,9 @@ module Rigor
       def protected_total = total_type_killed + total_test_killed
       def ratio = grand_total.zero? ? 1.0 : protected_total.to_f / grand_total
 
+      # #264 — stays OUT of `grand_total`/`ratio`, exactly like the plain mutation report.
+      def total_harness_errors = files.sum(&:harness_errors)
+
       def to_h
         {
           "mode" => "protection-fused",
@@ -27,9 +35,10 @@ module Rigor
           "test_killed" => total_test_killed,
           "unprotected" => total_unprotected,
           "protected_ratio" => ratio.round(4),
+          "harness_errors" => total_harness_errors,
           "files" => files.map do |f|
             { "path" => f.path, "type_killed" => f.type_killed, "test_killed" => f.test_killed,
-              "unprotected" => f.unprotected, "ratio" => f.ratio.round(4) }
+              "unprotected" => f.unprotected, "ratio" => f.ratio.round(4), "harness_errors" => f.harness_errors }
           end,
           "add_protection_here" => unprotected.map do |m|
             { "method" => m.method_name, "count" => m.count, "examples" => m.examples }
@@ -50,7 +59,7 @@ module Rigor
         @files << FusedFileProtection.new(
           path: file_result.path, type_killed: file_result.type_killed,
           test_killed: file_result.test_killed, unprotected: file_result.unprotected,
-          ratio: file_result.ratio
+          ratio: file_result.ratio, harness_errors: file_result.harness_errors
         )
         file_result.sites.each do |site|
           bucket = @unprotected[site.method_name]

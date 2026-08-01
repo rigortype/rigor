@@ -23,7 +23,30 @@ module Rigor
       # Same reason as above for naming it here rather than inlining the string.
       DEPENDENT_CLOSURE_KILL_ORACLE = "dependent-closure-kill-oracle"
 
+      # #264 — the "loud" threshold for a rescued-harness-failure count. Below it, a rescued mutant reads as
+      # the occasional transient this issue's `harness_errors` bucket exists to make VISIBLE, not to eliminate
+      # (see {Protection::MutationScanner#classify}); at or above it, the pattern looks less like noise and
+      # more like a harness defect worth stopping to investigate before trusting the ratio. Deliberately NOT
+      # the `determine_protection_exit` gate: a `--threshold` build is pinned to the killed/survived ratio
+      # today, and turning a harness-side symptom into a new way for that same command to exit non-zero would
+      # silently change semantics CI already depends on. A loud stderr warning (plus the unconditional JSON
+      # field) is the visibility this issue asks for without redefining what "the build is red" means.
+      HARNESS_ERROR_WARN_FLOOR = 3
+
       private
+
+      # @param report [MutationProtectionReport, FusedProtectionReport] — both expose `total_harness_errors`.
+      def warn_harness_errors(report)
+        count = report.total_harness_errors
+        return if count < HARNESS_ERROR_WARN_FLOOR
+
+        @err.puts(
+          "coverage: #{count} mutants failed inside the measurement harness (\"harness_errors\", " \
+          "at/above the #{HARNESS_ERROR_WARN_FLOOR}-mutant floor) — excluded from the ratio like a " \
+          "parse-invalid mutant, but this many suggests a harness defect rather than one-off noise. " \
+          "Investigate before trusting --threshold on this run."
+        )
+      end
 
       # The cross-file knowledge Tier 2 measures with — the #253 gate, and the ONLY place in this feature that
       # knows a feature id exists.
@@ -116,6 +139,7 @@ module Rigor
         return run_fused_protection(target_files, options) if options[:with_tests]
 
         report = scan_mutation_protection(target_files, options)
+        warn_harness_errors(report)
         MutationProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_protection_exit(report, options)
       end
@@ -160,6 +184,7 @@ module Rigor
         accumulator = FusedProtectionAccumulator.new
         paths.each { |path| scan_fused_one(path, scanner, accumulator, test_oracle, configuration) }
         report = accumulator.to_report
+        warn_harness_errors(report)
         FusedProtectionRenderer.new(out: @out).render(report, format: options.fetch(:format))
         determine_protection_exit(report, options)
       end

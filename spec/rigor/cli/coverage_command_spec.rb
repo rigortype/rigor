@@ -174,11 +174,14 @@ RSpec.describe Rigor::CLI::CoverageCommand do
         status, off, = run(["--protection", "--mutation", "--format", "json", "lib"])
 
         expect(status).to eq(0)
+        # #264 adds the always-present "harness_errors" field (0 on a clean run); everything else here is the
+        # literal pre-#264 payload.
         expect(JSON.parse(off)).to eq(
           "mode" => "mutation", "killed" => 0, "survived" => 0, "effectiveness_ratio" => 1.0,
+          "harness_errors" => 0,
           "files" => [
-            { "path" => "lib/account.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0 },
-            { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0 }
+            { "path" => "lib/account.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0, "harness_errors" => 0 },
+            { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0, "harness_errors" => 0 }
           ],
           "add_a_type_here" => [], "parse_errors" => []
         )
@@ -240,11 +243,14 @@ RSpec.describe Rigor::CLI::CoverageCommand do
 
       expect(status).to eq(0)
       expect(declined).to eq(unconfigured)
+      # #264 adds the always-present "harness_errors" field (0 on a clean run); everything else here is the
+      # literal pre-#264 payload.
       expect(JSON.parse(unconfigured)).to eq(
         "mode" => "mutation", "killed" => 0, "survived" => 3, "effectiveness_ratio" => 0.0,
+        "harness_errors" => 0,
         "files" => [
-          { "path" => "lib/account.rb", "killed" => 0, "survived" => 3, "ratio" => 0.0 },
-          { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0 }
+          { "path" => "lib/account.rb", "killed" => 0, "survived" => 3, "ratio" => 0.0, "harness_errors" => 0 },
+          { "path" => "lib/service.rb", "killed" => 0, "survived" => 0, "ratio" => 1.0, "harness_errors" => 0 }
         ],
         "add_a_type_here" => [
           { "method" => "wrap", "count" => 3,
@@ -579,6 +585,53 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     expect(status).to eq(0)
     expect { JSON.parse(out) }.not_to raise_error
     expect(err).to include("sampling at most 2 mutations")
+  end
+
+  # #264 — "make the leakage loud": a rescued-harness-failure count at/above the floor gets a stderr warning,
+  # deliberately WITHOUT changing `determine_protection_exit`'s exit code (a `--threshold` build must not start
+  # failing for a reason unrelated to the ratio it was pinned to check).
+  describe "#warn_harness_errors (#264)" do
+    def fake_report(count)
+      report = Object.new
+      report.define_singleton_method(:total_harness_errors) { count }
+      report
+    end
+
+    it "stays silent below the floor" do
+      err = StringIO.new
+      command = described_class.new(argv: [], err: err)
+
+      command.send(:warn_harness_errors, fake_report(described_class::HARNESS_ERROR_WARN_FLOOR - 1))
+
+      expect(err.string).to eq("")
+    end
+
+    it "warns loudly at/above the floor without touching the exit code" do
+      err = StringIO.new
+      command = described_class.new(argv: [], err: err)
+
+      command.send(:warn_harness_errors, fake_report(described_class::HARNESS_ERROR_WARN_FLOOR))
+
+      expect(err.string).to include("harness_errors")
+      expect(err.string).to include("harness")
+    end
+
+    it "does not change the exit code when the floor is exceeded (determine_protection_exit ignores harness_errors)" do
+      command = described_class.new(argv: [])
+      report = fake_protection_exit_report(harness_errors: described_class::HARNESS_ERROR_WARN_FLOOR + 1)
+
+      exit_code = command.send(:determine_protection_exit, report, { threshold: nil })
+
+      expect(exit_code).to eq(0) # unchanged: a loud warning, not a new way to fail the build
+    end
+
+    def fake_protection_exit_report(harness_errors:)
+      report = Object.new
+      report.define_singleton_method(:total_harness_errors) { harness_errors }
+      report.define_singleton_method(:parse_errors) { [] }
+      report.define_singleton_method(:ratio) { 1.0 }
+      report
+    end
   end
 
   describe "#changed_path (git porcelain line parsing)" do

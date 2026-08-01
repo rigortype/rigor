@@ -75,8 +75,11 @@ module Rigor
       # unresolved/probe-failed type KEEPS the mutation, so the filter never hides a kill it is unsure about — it
       # only removes provably-Dynamic sites. Returns [kept, dropped_count]. Builds the scope index from THIS
       # mutator's parse so anchor node identity matches the keys.
-      def filter_by_type(mutations, environment:, path:)
-        base = Rigor::Scope.empty(environment: environment, source_path: path)
+      #
+      # @param base_scope [Rigor::Scope, nil] a pre-seeded scope to judge anchors against (see
+      #   {#anchor_base_scope}); nil builds the bare empty scope, which is the shipped default.
+      def filter_by_type(mutations, environment:, path:, base_scope: nil)
+        base = anchor_base_scope(environment, path, base_scope)
         index = Rigor::Inference::ScopeIndexer.index(@parse.value, default_scope: base)
         cache = {}
         kept = mutations.select do |mut|
@@ -93,8 +96,8 @@ module Rigor
       # {#filter_by_type} hides exactly the Dynamic sites a test-suite consumer most wants to probe: where Rigor
       # cannot bite, a test is the only protection. Use only with a {TestSuiteOracle} — at a Dynamic site the
       # type pass can never kill, so without the test axis these are all noise.
-      def dispatch_site_mutations(mutations, environment:, path:)
-        base = Rigor::Scope.empty(environment: environment, source_path: path)
+      def dispatch_site_mutations(mutations, environment:, path:, base_scope: nil)
+        base = anchor_base_scope(environment, path, base_scope)
         index = Rigor::Inference::ScopeIndexer.index(@parse.value, default_scope: base)
         cache = {}
         mutations.select do |mut|
@@ -107,6 +110,25 @@ module Rigor
       end
 
       private
+
+      # The scope the anchor types are judged against.
+      #
+      # `base_scope` is nil on the shipped path, and the result is then the bare empty scope this file has always
+      # used: a single-file view in which a constant receiver declared in a *sibling* file reads `Dynamic`, so its
+      # dispatch site is dropped from the Tier-2 denominator. The caller may instead hand down a scope already
+      # carrying the cross-file discovery Tier 1 seeds (`discovered_classes` + `param_inferred_types`), in which
+      # case the same site resolves to the type it really has and is measured — `coverage --protection --mutation`
+      # does that behind the `discovery-seeded-mutation-sites` bleeding-edge feature (#253).
+      #
+      # Deliberately a plain parameter: this class knows nothing about {Rigor::Configuration} or feature ids. The
+      # gate lives in the CLI layer, which is the only layer that has a Configuration to ask.
+      #
+      # `source_path` is per-file, so a shared base scope is re-stamped here rather than rebuilt per path.
+      def anchor_base_scope(environment, path, base_scope)
+        return Rigor::Scope.empty(environment: environment, source_path: path) if base_scope.nil?
+
+        base_scope.with_source_path(path)
+      end
 
       def walk(node, &blk)
         return if node.nil?

@@ -129,6 +129,19 @@ module Rigor
         severity_overrides: {
           "static.value-use.void" => :warning
         }.freeze
+      ),
+      Feature.new(
+        id: "discovery-seeded-mutation-sites",
+        kind: :behaviour,
+        summary: "`rigor coverage --protection --mutation` (Tier 2) picks the sites it measures against the " \
+                 "same cross-file project discovery Tier 1 already seeds, instead of an empty scope. A call " \
+                 "whose receiver is a project class declared in a *sibling* file (`Post.where`, " \
+                 "`Rigor::Protection::Mutator.new`) then resolves to the type it really has rather than " \
+                 "`Dynamic`, so the site is measured instead of dropped. This makes the two tiers judge a site " \
+                 "by one standard, but it ADDS sites to the denominator, so the reported effectiveness ratio " \
+                 "goes DOWN on the same code — and `--threshold=RATIO` exits 1 when that ratio falls below a " \
+                 "number pinned in CI. Off by default for that reason: it is a queued change for the next " \
+                 "major, not a fix you should be opted into mid-release."
       )
     ].freeze
 

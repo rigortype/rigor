@@ -206,6 +206,11 @@ module Rigor
       #
       # Both span the scanned `paths` only (no whole-project pre-pass) — a site that gains neither is classified exactly
       # as before.
+      #
+      # Shared with Tier 2 (#253): {CoverageMutation#mutation_base_scope} calls this so mutation *site selection*
+      # judges a receiver by the same standard, behind the `discovery-seeded-mutation-sites` bleeding-edge feature.
+      # Tier 1 seeds unconditionally because it only reclassifies sites it already counted; Tier 2 adds sites to a
+      # denominator `--threshold` gates CI on, which is why only the latter is gated.
       def scope_with_inferred_params(paths, configuration, environment, workers)
         base = Scope.empty(environment: environment)
         seed = {}

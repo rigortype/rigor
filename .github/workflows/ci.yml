@@ -393,13 +393,49 @@ jobs:
             exit 1
           fi
 
+  # ── 6. Self-check under the bleeding-edge overlay ───────────────
+  # ADR-50 § WD2's "Rigor's own CI exercises the overlay" made real: `rigor
+  # check` under the WHOLE queued overlay (`--bleeding-edge` = adopt all)
+  # must stay clean on Rigor's own lib, because WD7 graduation flips a
+  # queued discipline default-on at a major, and lib drifting out of
+  # compliance with a queued discipline would otherwise surface only on
+  # graduation day.
+  #
+  # This exercises severity features only: a behaviour feature changes what
+  # a separate command measures, not what `check` analyses, and its on/off
+  # correctness is spec'd in the suite (byte-identity with the feature
+  # off), not exercised here.
+  #
+  # Runs cold on purpose — deterministic, no cache interplay: no cache
+  # restore and no JSON artifact, since the exit code is the whole
+  # assertion.
+  self-check-bleeding-edge:
+    name: Self-check (bleeding-edge)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Run rigor self-check under the bleeding-edge overlay
+        run: bundle exec exe/rigor check --bleeding-edge lib
+
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather
   # than each individual job. New jobs added above are automatically
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [changes, test, rbs-compat, lint, self-check, self-check-diff]
+    needs: [changes, test, rbs-compat, lint, self-check, self-check-diff, self-check-bleeding-edge]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -411,6 +447,7 @@ jobs:
           LINT_RESULT: ${{ needs.lint.result }}
           SELF_CHECK_RESULT: ${{ needs.self-check.result }}
           SELF_CHECK_DIFF_RESULT: ${{ needs.self-check-diff.result }}
+          SELF_CHECK_BLEEDING_EDGE_RESULT: ${{ needs.self-check-bleeding-edge.result }}
         run: |
           failed=0
           # Change detection must always succeed — it is what decides
@@ -421,7 +458,7 @@ jobs:
           fi
           # A gated job that was skipped (Markdown-only PR) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TEST_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT"; do
+          for job_result in "$TEST_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

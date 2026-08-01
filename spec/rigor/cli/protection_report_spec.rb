@@ -58,6 +58,39 @@ RSpec.describe Rigor::CLI::ProtectionReport do
     end
   end
 
+  describe "#to_h lower_bound_typed (ADR-67 WD6b / issue #263)" do
+    def file_protection(lower_bound_typed:, protected_count: 3, unprotected_count: 0, ratio: 1.0, path: "a.rb")
+      Rigor::CLI::FileProtection.new(path: path, protected_count: protected_count,
+                                     unprotected_count: unprotected_count, ratio: ratio,
+                                     lower_bound_typed: lower_bound_typed)
+    end
+
+    it "sums per-file lower_bound_typed into the report total and carries it in both places in JSON" do
+      files = [file_protection(lower_bound_typed: 2), file_protection(lower_bound_typed: 0, path: "b.rb")]
+      r = described_class.new(files: files, untyped_calls: [], parse_errors: [], cause_site_counts: {})
+
+      expect(r.total_lower_bound_typed).to eq(2)
+      expect(r.to_h["lower_bound_typed"]).to eq(2)
+      expect(r.to_h["files"].map { |f| f["lower_bound_typed"] }).to eq([2, 0])
+    end
+
+    it "carries lower_bound_typed as 0 (present, not omitted) when no site is lower-bound-typed" do
+      r = described_class.new(files: [file_protection(lower_bound_typed: 0)], untyped_calls: [],
+                              parse_errors: [], cause_site_counts: {})
+
+      expect(r.to_h).to have_key("lower_bound_typed")
+      expect(r.to_h["lower_bound_typed"]).to eq(0)
+    end
+
+    it "does not affect total_protected / ratio (headline invariance)" do
+      files = [file_protection(lower_bound_typed: 2, protected_count: 3, unprotected_count: 1, ratio: 0.75)]
+      r = described_class.new(files: files, untyped_calls: [], parse_errors: [], cause_site_counts: {})
+
+      expect(r.total_protected).to eq(3)
+      expect(r.ratio).to eq(0.75)
+    end
+  end
+
   describe "#cause_site_totals (ADR-82)" do
     it "reports an exact per-site cause tally including the causeless sites" do
       # A method group's dominant origin is lossy for a mixed group; the per-site tally is exact and is what

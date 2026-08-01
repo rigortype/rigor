@@ -30,6 +30,9 @@ RSpec.describe "ADR-67 WD3 inferred-parameter seeding" do
     RUBY
     expect(result.unprotected_count).to eq(0)
     expect(result.protected_count).to eq(1)
+    # ADR-67 WD6b (issue #263) — the seeded receiver is a call-site lower bound, so `lower_bound_typed`
+    # counts it as a sub-bucket WITHIN `protected_count` (still 1 above — the headline is unchanged).
+    expect(result.lower_bound_typed).to eq(1)
   end
 
   it "leaves the parameter untyped (unprotected) with no table entry" do
@@ -71,5 +74,52 @@ RSpec.describe "ADR-67 WD3 inferred-parameter seeding" do
     RUBY
     expect(result.unprotected_count).to eq(0)
     expect(result.protected_count).to eq(1)
+  end
+
+  # ADR-67 WD6b (issue #263) — `lower_bound_typed` split within `protected_count`.
+  describe "lower_bound_typed (ADR-67 WD6b, issue #263)" do
+    it "does not mark an RBS-declared parameter, even with a (misapplied) table entry for the same key" do
+      # `Integer#divmod`'s parameter binds from the real Integer RBS signature (a concrete union), not the
+      # untyped sentinel, so `seed_inferred_param_types` declines to override it — no WD6b mark is stamped —
+      # even though the table happens to carry an entry keyed to the same `[class, method, kind]` triple.
+      table = { ["Integer", :divmod, :instance] => { other: string_type } }
+      result = scan(<<~RUBY, table)
+        class Integer
+          def divmod(other)
+            other.to_s
+          end
+        end
+      RUBY
+      expect(result.protected_count).to eq(1)
+      expect(result.lower_bound_typed).to eq(0)
+    end
+
+    it "reports the same protected_count/ratio for a lower-bound-typed site as for a fully-declared one " \
+       "(headline invariance)" do
+      # Two single-dispatch-site fixtures, one seeded (lower-bound) and one RBS-declared (not lower-bound):
+      # both classify as ONE protected site with ratio 1.0 — `protected_count`/`ratio` reflect only the
+      # upper-bound "is the receiver concrete" question, never whether the concrete type is a lower bound.
+      # The WD6b split is purely additive information layered on top.
+      seeded_table = { ["Processor", :process, :instance] => { item: string_type } }
+      seeded = scan(<<~RUBY, seeded_table)
+        class Processor
+          def process(item)
+            item.upcase
+          end
+        end
+      RUBY
+      declared = scan(<<~RUBY, {})
+        class Integer
+          def divmod(other)
+            other.to_s
+          end
+        end
+      RUBY
+
+      expect(seeded.protected_count).to eq(declared.protected_count)
+      expect(seeded.ratio).to eq(declared.ratio)
+      expect(seeded.lower_bound_typed).to eq(1)
+      expect(declared.lower_bound_typed).to eq(0)
+    end
   end
 end

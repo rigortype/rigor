@@ -20,6 +20,16 @@ module Rigor
   # instead. It carries no severity map; its call sites ask
   # {Configuration#bleeding_edge_active?} whether the id is adopted for the run.
   #
+  # A `:behaviour` feature MUST NOT change the output of `rigor check` analysis unless its
+  # feature id is folded into the analysis-cache identity. Rationale, verified 2026-08-01:
+  # severity features are safe because severity is stamped POST-cache — {Analysis::SeverityStamp}
+  # (ADR-87 WD4) stores the authored severity and applies the profile + bleeding-edge overrides
+  # identically on the miss path and the warm-hit path, so a warm HIT re-resolves under the
+  # current selector. A behaviour feature that altered analysis results themselves would poison
+  # warm caches across selector changes, because the selector is not part of the cache key. The
+  # two queued consumers (#253, #254) change what a separate command measures, not what `check`
+  # analyses, so neither is affected.
+  #
   # Each feature carries a **stable feature id** — part of the ADR-50 WD1 contract
   # vocabulary: the config, the `show` command, and the eventual CHANGELOG migration note all
   # name the same id, and a feature graduates to default-on at a major (ADR-50 § WD7) by

@@ -194,11 +194,20 @@ on correct code costs more here than a worst-case reading buys
 
 The shape is **open**, and a key the scanner cannot type — a
 predicate outside the canonical vocabulary, a nested
-`schema do ... end` row, an unresolved alias — stays in the
-shape as `untyped` rather than being dropped. Dropping it would
-be worse than useless: a key absent from a hash shape reads as
-`nil`, so a *declared* key would type as nil for whoever reads
-it.
+`schema do ... end` row, an unresolved alias — is shown as
+`untyped` rather than omitted:
+
+```ruby
+NestedSchema.call(input).to_h
+#=> { email: String, address: Dynamic[top], ... }
+```
+
+Reads are unaffected either way (an undeclared key on an open
+shape already reads as `untyped`). What the entry buys is the
+rendering: hover and `dump_type` say the schema declares
+`address` and Rigor cannot type it, where omitting it would be
+indistinguishable from a schema that never mentioned the key —
+the trailing `...` only means "further keys are permitted".
 
 The schema must be named by a constant as written at the call
 site (`NewUserSchema.call(x).to_h`). Reached through a local or

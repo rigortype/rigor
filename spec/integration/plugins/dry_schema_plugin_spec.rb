@@ -272,9 +272,10 @@ RSpec.describe "rigor-dry-schema integration" do
     end
 
     it "keeps a declared key the scanner cannot type in the shape, as untyped" do
-      # The decisive case. A key absent from a HashShape reads as `nil`, not as untyped — so dropping a
-      # row whose predicate is outside the canonical vocabulary would type `payload[:bogus]` as nil and
-      # put a diagnostic on the next line of correct code.
+      # Asserted on the SHAPE, not on a read of it. Since #249 an undeclared key on an open shape already
+      # reads as untyped, so `payload[:bogus]` infers the same whether or not the key is in the shape —
+      # an assertion on the read would pass with this mechanism deleted. What it actually buys is that
+      # the rendered shape still names the key, which is what hover shows.
       dumps = dump_types(<<~RUBY)
         Schema = Dry::Schema.Params do
           required(:email).filled(:string)
@@ -285,11 +286,11 @@ RSpec.describe "rigor-dry-schema integration" do
         end
 
         payload = Schema.call({}).to_h
-        Rigor.dump_type(payload[:email])
+        Rigor.dump_type(payload)
         Rigor.dump_type(payload[:bogus])
-        Rigor.dump_type(payload[:address])
       RUBY
-      expect(dumps).to eq(["dump_type: String", "dump_type: Dynamic[top]", "dump_type: Dynamic[top]"])
+      expect(dumps.first).to eq("dump_type: { email: String, bogus: Dynamic[top], address: Dynamic[top], ... }")
+      expect(dumps.last).to eq("dump_type: Dynamic[top]")
     end
 
     it "contributes nothing for a schema that declares no key at all" do

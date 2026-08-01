@@ -55,9 +55,9 @@ module Rigor
           constant_name(inner.receiver)
         end
 
-        # The HashShape for one table entry, or nil when the schema declares no key at all. An empty shape
-        # is worse than no contribution: since a key outside a shape reads as `nil`, `{}` would type every
-        # read of that hash as nil.
+        # The HashShape for one table entry, or nil when the schema declares no key at all. An empty open
+        # shape would be a carrier that says nothing the bare `untyped` did not already say, so declining
+        # keeps the hash's type honest about how little is known.
         def build(entry)
           unmodelled = entry[:unmodelled] || {}
           required = pairs_for(entry[:required]).merge(untyped_pairs(unmodelled[:required]))
@@ -73,9 +73,19 @@ module Rigor
         end
 
         # A key the schema declares but the scanner could not type still belongs in the shape, as
-        # `untyped`. Leaving it out is not neutral: a key absent from a HashShape reads as `nil`, so
-        # dropping `required(:address).schema { … }` would type `payload[:address]` as nil and put a
-        # `call.undefined-method` on the next line of correct code.
+        # `untyped`.
+        #
+        # This costs nothing at a read and buys nothing at one either — measured: with and without these
+        # entries, `payload[:address]`, `payload.fetch(:address)` and every other read infer identically,
+        # because #249 made an undeclared key on an OPEN shape read as `untyped` rather than `nil`. What
+        # it buys is the rendered shape, which is what hover and `dump_type` show: `{ email: String,
+        # address: Dynamic[top], ... }` says the schema declares `address` and Rigor cannot type it, while
+        # `{ email: String, ... }` is indistinguishable from a schema that never mentioned it — the
+        # trailing `...` only ever means "keys beyond these are permitted".
+        #
+        # It was originally load-bearing for a different reason: before #249 a key outside the shape read
+        # as `nil`, so dropping `required(:address).schema { … }` put a `call.undefined-method` on the next
+        # line of correct code. That hazard is gone; the entries stay for the honesty of the rendering.
         def untyped_pairs(keys)
           (keys || []).to_h { |key| [key, Rigor::Type::Combinator.untyped] }
         end

@@ -28,7 +28,14 @@ module Rigor
     # Opt-out: `RIGOR_DISABLE_YJIT=1` makes every entry point a no-op (the pin
     # the byte-identical-diagnostics gate uses). If YJIT is already enabled (the
     # user passed `--yjit` / `RUBY_YJIT_ENABLE=1`) or is unavailable (a build
-    # without YJIT, or a non-MRI Ruby), both entry points are no-ops too.
+    # without YJIT, or a non-MRI Ruby), every entry point is a no-op too.
+    #
+    # `fork` copies only the calling thread, so the {enable_after} sleeper dies
+    # in every child of a fork pool — a worker would run its whole slice
+    # interpreted while the parent JITs work it no longer does. {rearm_after_fork}
+    # is the child-side entry point that repairs this, and it carries the
+    # *remaining* deadline rather than restarting the window; see its own
+    # comment for why that distinction is worth the bookkeeping.
     module Jit
       # Opt-out switch: `RIGOR_DISABLE_YJIT=1` disables both entry points.
       DISABLE_ENV = "RIGOR_DISABLE_YJIT"
@@ -90,6 +97,18 @@ module Rigor
         return nil if disabled?
         return nil if RubyVM::YJIT.enabled?
 
+        # Record when the window actually closes, so a child forked partway
+        # through it can re-arm with what is LEFT ({rearm_after_fork}) instead
+        # of restarting the wait. Monotonic, so a wall-clock adjustment mid-run
+        # cannot move the deadline; and monotonic time survives `fork`, so the
+        # value stays comparable in a child.
+        #
+        # Thread-safety: this is written on the arming thread before any `fork`
+        # and read only in children *after* the fork, each of which sees a
+        # private copy of the parent's memory. No reader and writer ever share a
+        # process, so the plain attribute needs no lock.
+        @deadline_at = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+
         thread = Thread.new do
           sleep(seconds)
           enable_now
@@ -100,6 +119,49 @@ module Rigor
         # could raise.
         thread.report_on_exception = false
         thread
+      end
+
+      # Re-arms the deferred-YJIT deadline inside a freshly forked child,
+      # carrying the *remaining* window rather than restarting it.
+      #
+      # `fork` copies only the calling thread, so the parent's {enable_after}
+      # sleeper never fires in a child: without re-arming, a worker runs its
+      # entire slice interpreted however long that takes, and a fork pool can be
+      # slower than sequential (measured: `coverage --protection --mutation
+      # lib/rigor/analysis` at 37s sequential against 67s at eight workers).
+      # Re-arming with a *fresh full* deadline fixes that but overshoots the
+      # other way — the parent has normally already burned part of the window
+      # before it forks, so every child sits out the whole window again. That is
+      # pure warm-up loss, and it is paid once per worker, so it grows with the
+      # worker count exactly where a pool is supposed to pay off.
+      #
+      # The remaining window is what the amortization contract actually says:
+      # the deadline exists to keep short *runs* off the JIT, and a child is a
+      # continuation of the parent's run, not a new one. When the deadline has
+      # already passed, the run has proven itself long — enable straight away.
+      #
+      # Re-arming goes through {enable_after}, so the child records the same
+      # absolute deadline it inherited and a grandchild fork carries it too.
+      #
+      # @return [Thread, nil] the child's deadline thread; nil when YJIT was
+      #   enabled immediately, and nil when the call is a no-op up front
+      #   (unavailable / opted out / already enabled — a child forked after the
+      #   parent enabled inherits the enabled state and has nothing to do).
+      def rearm_after_fork
+        return nil unless available?
+        return nil if disabled?
+        return nil if RubyVM::YJIT.enabled?
+
+        # No recorded deadline means nothing in this process ever armed one — a
+        # caller that forks without going through a CLI entry point, or a spec.
+        # Degrade to a fresh full window, never to no YJIT at all.
+        return enable_after(deadline_seconds) if @deadline_at.nil?
+
+        remaining = @deadline_at - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        return enable_after(remaining) if remaining.positive?
+
+        enable_now
+        nil
       end
 
       # The resolved {enable_after} deadline: {DEADLINE_ENV} when it parses to a

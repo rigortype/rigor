@@ -186,7 +186,9 @@ module Rigor
         # Translates a prebuilt {ProjectScan} snapshot supplied to `Runner.new(prebuilt: ...)` into a
         # {Result} the runner adopts the same way it adopts a fresh pre-pass run. The discovery tables are
         # not part of the snapshot (the LSP path seeds an empty project scope), and `Runner#ensure_project_discovery`
-        # is a no-op under `prebuilt`, so they stay at their frozen-empty constructor defaults.
+        # is a no-op under `prebuilt`, so they stay at their frozen-empty constructor defaults — unless the
+        # caller opted into `Runner.new(discovery_seed:)` (issue #260), which seeds the per-file scopes
+        # directly and leaves these ivars alone.
         def adopt_prebuilt(scan)
           Result.new(
             plugin_registry: scan.plugin_registry,

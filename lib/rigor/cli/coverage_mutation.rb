@@ -3,6 +3,8 @@
 require "English"
 require "prism"
 
+require_relative "../protection/discovery_seed"
+
 module Rigor
   class CLI
     # ADR-63 Tier 2 + ADR-70 — the mutation-effectiveness and fused static∪dynamic protection paths, factored out of
@@ -17,26 +19,42 @@ module Rigor
 
       private
 
-      # The scope Tier 2 judges a mutation site's receiver against — the #253 gate, and the ONLY place in this
-      # feature that knows a feature id exists.
+      # The cross-file knowledge Tier 2 measures with — the #253 gate, and the ONLY place in this feature that
+      # knows a feature id exists.
       #
-      # Returns nil (today's behaviour: {Protection::Mutator} builds a bare `Scope.empty` per file) unless the
-      # project has adopted `discovery-seeded-mutation-sites`. With it adopted, returns the same seeded scope
-      # Tier 1 has built since 2026-07-04 — `discovered_classes` so a receiver whose class is declared in a
-      # *sibling* file resolves instead of reading `Dynamic`, and `param_inferred_types` (ADR-67 WD3) so an
-      # inferred-parameter receiver does too. Both span the scanned `paths` only.
+      # Returns nil (today's behaviour: an unseeded per-file view on both halves of the measurement) unless the
+      # project has adopted `discovery-seeded-mutation-sites`. With it adopted, returns the table set
+      # {Protection::DiscoverySeed} builds over the scanned `paths` — class identity so a receiver whose class
+      # is declared in a *sibling* file resolves instead of reading `Dynamic`, the def / ancestry index so the
+      # method on it resolves too, and `param_inferred_types` (ADR-67 WD3) for an inferred-parameter receiver.
       #
-      # Why it is off by default: an unseeded Tier 2 drops those sites from the denominator entirely, so seeding
-      # ADDS sites and the effectiveness ratio falls on unchanged code — and `--threshold=RATIO` exits 1 below a
-      # ratio users pin in CI. Turning it on by default would turn their build red with no change on their side.
+      # One table set, two consumers, deliberately (issue #260): site selection admits a site and the kill
+      # oracle can act on it. Seeding only the first admitted sites no mutation could ever break.
+      #
+      # Why the feature is off by default: an unseeded Tier 2 drops those sites from the denominator entirely,
+      # so seeding ADDS sites and the effectiveness ratio moves on unchanged code — and `--threshold=RATIO`
+      # exits 1 below a ratio users pin in CI. Turning it on by default would turn their build red with no
+      # change on their side.
       #
       # Built ONCE here, on the parent, so {MutationForkScan}'s children copy-on-write inherit it inside the
-      # scanner. Nothing crosses the marshal boundary: only the per-file results are marshaled back, and a Scope
-      # is not among them.
-      def mutation_base_scope(paths, configuration, environment, workers)
+      # scanner. Nothing crosses the marshal boundary: only the per-file results are marshaled back, and
+      # neither a Scope nor a `Prism::Node` is among them.
+      def mutation_discovery_seed(paths, configuration, environment, workers)
         return nil unless configuration.bleeding_edge_active?(DISCOVERY_SEEDED_MUTATION_SITES)
 
-        scope_with_inferred_params(paths, configuration, environment, workers)
+        seed = Protection::DiscoverySeed.build(
+          paths: paths, environment: environment, target_ruby: configuration.target_ruby, workers: workers
+        )
+        seed.empty? ? nil : seed
+      end
+
+      # The scope {Protection::Mutator} judges a mutation site's receiver against, derived from the same seed
+      # the oracle gets. nil (the gate off, or an empty seed) keeps the bare `Scope.empty` per file.
+      def mutation_base_scope(seed, environment)
+        return nil if seed.nil?
+
+        base = Scope.empty(environment: environment)
+        base.with_discovery(base.discovery.with(**seed))
       end
 
       # ADR-63 Tier 2 — the mutation-effectiveness deep dive. Builds the RBS environment + project pre-pass once (the
@@ -83,14 +101,16 @@ module Rigor
         return suite_not_green_error(options) unless test_oracle.green?
 
         context = LanguageServer::ProjectContext.new(configuration: configuration)
+        # The fused path stays sequential end to end (`--workers` is warned about above), so the seed's own
+        # parameter-inference pre-pass runs sequentially too rather than quietly re-enabling the forking the
+        # warning just said was ignored. It is otherwise the same seed, threaded to the same two consumers, so
+        # `--with-tests` measures the same site set as the plain path.
+        seed = mutation_discovery_seed(paths, configuration, context.environment, 0)
         scanner = Protection::MutationScanner.new(
           configuration: configuration, environment: context.environment, project_scan: context.project_scan,
           limit: options[:limit], seed: options[:seed],
           site_selector: options[:include_dynamic] ? :all : :biteable,
-          # The fused path stays sequential end to end (`--workers` is warned about above), so the seed's own
-          # parameter-inference pre-pass runs sequentially too rather than quietly re-enabling the forking the
-          # warning just said was ignored.
-          base_scope: mutation_base_scope(paths, configuration, context.environment, 0)
+          base_scope: mutation_base_scope(seed, context.environment), discovery_seed: seed
         )
         accumulator = FusedProtectionAccumulator.new
         paths.each { |path| scan_fused_one(path, scanner, accumulator, test_oracle, configuration) }
@@ -143,10 +163,11 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         context = LanguageServer::ProjectContext.new(configuration: configuration)
         workers = CheckRunnerFactory.resolve_workers(options, configuration)
+        seed = mutation_discovery_seed(paths, configuration, context.environment, workers)
         scanner = Protection::MutationScanner.new(
           configuration: configuration, environment: context.environment, project_scan: context.project_scan,
           limit: options[:limit], seed: options[:seed],
-          base_scope: mutation_base_scope(paths, configuration, context.environment, workers)
+          base_scope: mutation_base_scope(seed, context.environment), discovery_seed: seed
         )
         accumulator = MutationProtectionAccumulator.new
 

@@ -97,7 +97,9 @@ the site is left out of the denominator entirely, even though Tier
 
 The [`discovery-seeded-mutation-sites`](02-cli-reference.md#rigor-show-bleedingedge)
 bleeding-edge feature closes that gap, giving Tier 2 the same
-cross-file view Tier 1 has:
+cross-file view Tier 1 has — on *both* halves of the measurement,
+site selection and the re-analysis that decides whether a mutation
+was caught, so an admitted site is one a breakage can really trip:
 
 ```yaml
 # .rigor.yml

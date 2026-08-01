@@ -15,10 +15,17 @@ module Rigor
     # disk write). Passing `prebuilt:` disables the run-result cache (whose key digests the *disk* file), so a
     # mutant is never served a stale clean hit.
     class DiagnosticOracle
-      def initialize(configuration:, environment:, project_scan:)
+      # @param discovery_seed [Hash, nil] issue #260 — the cross-file discovery tables (see {DiscoverySeed})
+      #   the per-mutant analysis is seeded with, threaded through to `Runner.new(discovery_seed:)`. Without
+      #   it the runner's `prebuilt:` path carries frozen-empty discovery tables, so a receiver whose class is
+      #   declared in a *sibling* file reads `Dynamic` and NO mutation at that site can produce a diagnostic —
+      #   a site the caller's site filter may nonetheless have admitted, and then measured as an unkillable
+      #   survivor. nil (the default) keeps the shipped single-file oracle.
+      def initialize(configuration:, environment:, project_scan:, discovery_seed: nil)
         @configuration = configuration
         @environment = environment
         @project_scan = project_scan
+        @discovery_seed = discovery_seed
       end
 
       # The clean per-file baseline: the diagnostic signatures a mutant must add to count as killed. Computed
@@ -37,7 +44,7 @@ module Rigor
       def analyse(source, path)
         Rigor::Analysis::Runner.new(
           configuration: @configuration, environment: @environment, prebuilt: @project_scan,
-          cache_store: nil, collect_stats: false
+          cache_store: nil, collect_stats: false, discovery_seed: @discovery_seed
         ).run_source(source: source, path: path).diagnostics
       end
 

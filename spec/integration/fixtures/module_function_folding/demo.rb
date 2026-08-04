@@ -27,6 +27,24 @@ assert_type("/hello/", _regexp_compiled)
 _regexp_compile_flags = Regexp.compile("world", 1)
 assert_type("/world/i", _regexp_compile_flags)
 
+# --- Regexp.union ---
+
+_regexp_union_splat = Regexp.union("a", "b")
+assert_type("/a|b/", _regexp_union_splat)
+_regexp_union_array = Regexp.union(%w[a b])
+assert_type("/a|b/", _regexp_union_array)
+_regexp_union_empty = Regexp.union
+assert_type("/(?!)/", _regexp_union_empty)
+_regexp_union_mixed = Regexp.union("a", /b/)
+assert_type("/a|(?-mix:b)/", _regexp_union_mixed)
+
+# --- Regexp.linear_time? ---
+
+_linear_time_str = Regexp.linear_time?("a.*b")
+assert_type("true", _linear_time_str)
+_linear_time_regexp = Regexp.linear_time?(/a.*b/)
+assert_type("true", _linear_time_regexp)
+
 # --- CGI.escapeHTML / h / unescapeHTML ---
 
 assert_type('"&lt;b&gt;"', CGI.escapeHTML("<b>"))
@@ -55,3 +73,5 @@ assert_type("String", Regexp.escape(str))
 assert_type("String", CGI.escapeHTML(str))
 assert_type("String", URI.encode_www_form_component(str))
 assert_type("Regexp", Regexp.compile(str))
+assert_type("Regexp", Regexp.union(str, "b"))
+assert_type("bool", Regexp.linear_time?(str))

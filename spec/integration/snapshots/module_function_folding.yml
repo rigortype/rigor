@@ -1,11 +1,17 @@
 ---
 locals:
   _encoded: '"hello+world"'
+  _linear_time_regexp: 'true'
+  _linear_time_str: 'true'
   _regexp_compile_flags: "/world/i"
   _regexp_compiled: "/hello/"
   _regexp_escaped: '"hello\\.world"'
   _regexp_new_flags: "/world/i"
   _regexp_plain: "/hello/"
   _regexp_quoted: '"\\[a\\-z\\]"'
+  _regexp_union_array: "/a|b/"
+  _regexp_union_empty: "/(?!)/"
+  _regexp_union_mixed: "/a|(?-mix:b)/"
+  _regexp_union_splat: "/a|b/"
   _uri_comp: '"hello%20world"'
   str: '"hello" | "world"'

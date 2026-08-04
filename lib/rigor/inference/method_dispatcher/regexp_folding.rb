@@ -16,12 +16,22 @@ module Rigor
       #   `Constant[true/false]` (IGNORECASE shorthand), or absent. Returns `Constant[Regexp]`.
       # * `compile(str)` / `compile(str, opts)` — `Regexp.compile` is a documented alias of `Regexp.new`
       #   (same C entry point, `rb_reg_s_new`); shares `fold_new` verbatim.
+      # * `union(*patterns)` / `union(array)` — builds the combined pattern at inference time when every
+      #   element is a `Constant[String]` or `Constant[Regexp]`. Delegates to the real `Regexp.union` so the
+      #   zero-arg (`/(?!)/`), single-array-argument, and pre-built-Regexp-argument forms all match Ruby's
+      #   own semantics without separate case analysis. Returns `Constant[Regexp]`.
+      # * `linear_time?(pattern)` — one `Constant[String]` or `Constant[Regexp]` argument. Returns
+      #   `Constant[bool]`.
       #
       # === Non-constant / unsupported cases
       #
       # Returns `nil` (deferring to the next dispatcher tier) when:
       # - the receiver is not `Singleton[Regexp]`,
-      # - the required pattern argument is not a `Constant[String]`,
+      # - the required pattern argument is not a `Constant[String]` (or, for `union`/`linear_time?`, not a
+      #   `Constant[String]`/`Constant[Regexp]`),
+      # - `union` is given more elements than `UNION_LIMIT` or any element fails the constant check,
+      # - `linear_time?` is given anything other than exactly one constant argument (a `timeout:` keyword
+      #   argument is rejected this way — it would land as a second positional slot),
       # - the method is not in the supported set.
       module RegexpFolding
         REGEXP_ESCAPE_METHODS = Set[:escape, :quote].freeze
@@ -30,6 +40,11 @@ module Rigor
         # `.new` and `.compile` are the same C function under two names — both fold identically.
         REGEXP_NEW_METHODS = Set[:new, :compile].freeze
         private_constant :REGEXP_NEW_METHODS
+
+        # `Regexp.union` element cap — same rationale as `SHELLWORDS_SPLIT_LIMIT` / `STRING_ARRAY_LIFT_LIMIT`:
+        # keep the fold's work bounded even though the source is a static literal.
+        UNION_LIMIT = 64
+        private_constant :UNION_LIMIT
 
         module_function
 
@@ -42,6 +57,8 @@ module Rigor
           return fold_escape(args) if REGEXP_ESCAPE_METHODS.include?(method_name)
           return fold_new(args) if REGEXP_NEW_METHODS.include?(method_name)
           return fold_last_match(context) if method_name == :last_match
+          return fold_union(args) if method_name == :union
+          return fold_linear_time(args) if method_name == :linear_time?
 
           nil
         end
@@ -137,6 +154,42 @@ module Rigor
 
         def constant_value_or_nil(type)
           type.is_a?(Type::Constant) ? type.value : nil
+        end
+
+        # `Regexp.union(*patterns)` / `Regexp.union(array)` — folds when every pattern element is a
+        # `Constant[String]` or `Constant[Regexp]`. A single `Tuple` argument is unpacked exactly like
+        # Ruby's own single-array-argument form (`Regexp.union(["a", "b"])`); anything else is treated as
+        # the splatted-arguments form, including zero arguments (`Regexp.union()` → `/(?!)/`). Delegates to
+        # the real `Regexp.union` so encoding handling, escaping of String elements, and pass-through of
+        # already-`Regexp` elements all match Ruby exactly; declines (rescues to `nil`) on an encoding
+        # conflict between elements rather than propagating the exception.
+        def fold_union(args)
+          pattern_args = args.size == 1 && args.first.is_a?(Type::Tuple) ? args.first.elements : args
+          return nil if pattern_args.size > UNION_LIMIT
+          return nil unless pattern_args.all? { |arg| union_element?(arg) }
+
+          Type::Combinator.constant_of(Regexp.union(*pattern_args.map(&:value)))
+        rescue StandardError
+          nil
+        end
+
+        def union_element?(arg)
+          arg.is_a?(Type::Constant) && (arg.value.is_a?(String) || arg.value.is_a?(Regexp))
+        end
+
+        # `Regexp.linear_time?(pattern)` — one `Constant[String]` or `Constant[Regexp]` argument. A second
+        # argument (the `timeout:` keyword, which lands as an extra positional slot) declines rather than
+        # being silently ignored. An invalid String pattern raises `RegexpError` when Ruby compiles it
+        # internally; rescued to `nil` like every other fold in this file.
+        def fold_linear_time(args)
+          return nil unless args.size == 1
+
+          arg = args.first
+          return nil unless union_element?(arg)
+
+          Type::Combinator.constant_of(Regexp.linear_time?(arg.value))
+        rescue StandardError
+          nil
         end
       end
     end

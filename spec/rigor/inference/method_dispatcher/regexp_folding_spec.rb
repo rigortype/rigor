@@ -62,7 +62,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
     end
 
     it "declines for an unsupported method" do
-      expect(fold(:union, c("hello"))).to be_nil
+      expect(fold(:try_convert, c("hello"))).to be_nil
     end
   end
 
@@ -213,6 +213,93 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
 
     it "declines when no scope is threaded through the context" do
       expect(fold(:last_match)).to be_nil
+    end
+  end
+
+  describe "union" do
+    def tuple_of(*elements) = Rigor::Type::Combinator.tuple_of(*elements)
+
+    it "folds the splatted-strings form" do
+      result = fold(:union, c("a"), c("b"))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(Regexp.union("a", "b"))
+    end
+
+    it "folds a single-array-argument form identically to the splatted form" do
+      expect(fold(:union, tuple_of(c("a"), c("b")))).to eq(fold(:union, c("a"), c("b")))
+    end
+
+    it "folds zero arguments to Ruby's never-match regexp" do
+      result = fold(:union)
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(Regexp.union)
+    end
+
+    it "folds a single already-Regexp argument unchanged" do
+      result = fold(:union, c(/a/))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(Regexp.union(/a/))
+    end
+
+    it "folds a mix of String and Regexp elements" do
+      result = fold(:union, c("a"), c(/b/))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(Regexp.union("a", /b/))
+    end
+
+    it "declines when a splatted element is not a Constant" do
+      expect(fold(:union, c("a"), Rigor::Type::Combinator.nominal_of("String"))).to be_nil
+    end
+
+    it "declines when a splatted element is a non-String, non-Regexp Constant" do
+      expect(fold(:union, c("a"), c(42))).to be_nil
+    end
+
+    it "declines when the sole array argument holds a non-constant element" do
+      expect(fold(:union, tuple_of(c("a"), Rigor::Type::Combinator.nominal_of("String")))).to be_nil
+    end
+
+    it "declines when the sole argument is a Dynamic array, not a Tuple" do
+      expect(fold(:union, Rigor::Type::Combinator.nominal_of("Array"))).to be_nil
+    end
+
+    it "declines when the element count exceeds the union cap" do
+      elements = Array.new(65) { |i| c(i.to_s) }
+      expect(fold(:union, *elements)).to be_nil
+    end
+  end
+
+  describe "linear_time?" do
+    it "folds a String pattern argument" do
+      result = fold(:linear_time?, c("a.*b"))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(Regexp.linear_time?("a.*b"))
+    end
+
+    it "folds a Regexp pattern argument" do
+      result = fold(:linear_time?, c(/a.*b/))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(Regexp.linear_time?(/a.*b/))
+    end
+
+    it "declines for a non-Constant argument" do
+      expect(fold(:linear_time?, Rigor::Type::Combinator.nominal_of("String"))).to be_nil
+    end
+
+    it "declines for a non-String, non-Regexp Constant" do
+      expect(fold(:linear_time?, c(42))).to be_nil
+    end
+
+    it "declines when given zero arguments" do
+      expect(fold(:linear_time?)).to be_nil
+    end
+
+    it "declines when given a second argument (e.g. the timeout: keyword slot)" do
+      expect(fold(:linear_time?, c("a.*b"), c(1))).to be_nil
+    end
+
+    it "returns nil gracefully for an invalid pattern rather than raising" do
+      expect(fold(:linear_time?, c("(unclosed"))).to be_nil
     end
   end
 end

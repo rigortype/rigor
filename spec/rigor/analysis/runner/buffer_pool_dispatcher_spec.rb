@@ -64,7 +64,22 @@ RSpec.describe Rigor::Analysis::Runner::BufferPoolDispatcher do
     Rigor::LanguageServer::ProjectContext.new(configuration: Rigor::Configuration.new("paths" => [dir]))
   end
 
-  def dispatcher_for(dir, context, workers:, cache_store: context.cache_store)
+  # `min_batch_size: 2` — most of this file's fixtures use small N (5-8 buffers) to keep specs fast, and
+  # exist to prove the fork path's CORRECTNESS (equivalence, buffer substitution), independent of where the
+  # size gate happens to sit. `#dispatcher_with_resolved_gate_for` (below) uses the REAL resolved default
+  # instead, specifically to test the gate itself.
+  def dispatcher_for(dir, context, workers:, cache_store: context.cache_store, min_batch_size: 2)
+    described_class.new(
+      configuration: context.configuration, cache_store: cache_store,
+      environment: Dir.chdir(dir) { context.environment }, prebuilt: Dir.chdir(dir) { context.project_scan },
+      workers: workers, min_batch_size: min_batch_size
+    )
+  end
+
+  # Omits `min_batch_size:` entirely so the constructor's own default (`resolve_min_batch_size`, reading
+  # `RIGOR_LSP_POOL_MIN_BATCH` / `DEFAULT_MIN_BATCH_SIZE`) applies — the shape production callers
+  # (`DiagnosticPublisher#publish_batch`) get.
+  def dispatcher_with_resolved_gate_for(dir, context, workers:, cache_store: context.cache_store)
     described_class.new(
       configuration: context.configuration, cache_store: cache_store,
       environment: Dir.chdir(dir) { context.environment }, prebuilt: Dir.chdir(dir) { context.project_scan },
@@ -184,6 +199,84 @@ RSpec.describe Rigor::Analysis::Runner::BufferPoolDispatcher do
 
         expect(dispatcher).not_to have_received(:fork)
         expect(result).to eq([])
+      end
+    end
+  end
+
+  # Reviewed and required for #142: an earlier version of this dispatcher forked for ANY `bindings.size > 1`,
+  # and a throwaway measurement against this repo's own `lib/rigor` showed that a net LOSS below roughly
+  # N=12-16 (fork + Marshal + `Process.waitpid2` overhead exceeding ~1-2ms/file real work once the
+  # environment is warm) — squarely the size of a realistic editor burst (a branch switch, a rename). See
+  # `DEFAULT_MIN_BATCH_SIZE`'s doc comment for the full table. The gate below fixes that: below the
+  # threshold, `#analyze` takes EXACTLY the sequential in-process path (proven here to be the SAME
+  # computation as `#run_one` per binding, not merely "no fork observed") — so it can never be slower than
+  # today, only slower than the pool it declines to use.
+  describe "size gate (DEFAULT_MIN_BATCH_SIZE)" do
+    it "does not fork below DEFAULT_MIN_BATCH_SIZE even with workers and cache_store available" do
+      Dir.mktmpdir do |dir|
+        context = context_for(dir)
+        bindings = write_buffer_fixture(dir, described_class::DEFAULT_MIN_BATCH_SIZE - 1)
+        dispatcher = dispatcher_with_resolved_gate_for(dir, context, workers: 8)
+
+        allow(dispatcher).to receive(:fork)
+        pool = Dir.chdir(dir) { dispatcher.analyze(bindings) }
+
+        expect(dispatcher).not_to have_received(:fork)
+        expect(pool.size).to eq(described_class::DEFAULT_MIN_BATCH_SIZE - 1)
+        expect(pool).to all(be_empty)
+      end
+    end
+
+    it "forks at DEFAULT_MIN_BATCH_SIZE" do
+      Dir.mktmpdir do |dir|
+        context = context_for(dir)
+        bindings = write_buffer_fixture(dir, described_class::DEFAULT_MIN_BATCH_SIZE)
+        dispatcher = dispatcher_with_resolved_gate_for(dir, context, workers: 8)
+
+        allow(dispatcher).to receive(:fork).and_call_original
+        pool = Dir.chdir(dir) { dispatcher.analyze(bindings) }
+
+        expect(dispatcher).to have_received(:fork).at_least(:once)
+        expect(pool.size).to eq(described_class::DEFAULT_MIN_BATCH_SIZE)
+        expect(pool).to all(be_empty)
+      end
+    end
+
+    it "below the gate, #analyze is the SAME computation #run_one would do per binding — never slower than " \
+       "today's sequential path, only slower than the pool it declines" do
+      Dir.mktmpdir do |dir|
+        context = context_for(dir)
+        bindings = write_buffer_fixture(dir, described_class::DEFAULT_MIN_BATCH_SIZE - 1)
+        dispatcher = dispatcher_with_resolved_gate_for(dir, context, workers: 8)
+
+        gated = Dir.chdir(dir) { dispatcher.analyze(bindings) }
+        direct = Dir.chdir(dir) { bindings.map { |binding| dispatcher.send(:run_one, binding) } }
+
+        gated.each_index { |i| expect(diag_keys(gated[i])).to eq(diag_keys(direct[i])) }
+      end
+    end
+
+    describe ".resolve_min_batch_size" do
+      around do |example|
+        original = ENV.fetch("RIGOR_LSP_POOL_MIN_BATCH", nil)
+        example.run
+      ensure
+        ENV["RIGOR_LSP_POOL_MIN_BATCH"] = original
+      end
+
+      it "defaults to DEFAULT_MIN_BATCH_SIZE when unset" do
+        ENV.delete("RIGOR_LSP_POOL_MIN_BATCH")
+        expect(described_class.resolve_min_batch_size).to eq(described_class::DEFAULT_MIN_BATCH_SIZE)
+      end
+
+      it "reads RIGOR_LSP_POOL_MIN_BATCH when set" do
+        ENV["RIGOR_LSP_POOL_MIN_BATCH"] = "3"
+        expect(described_class.resolve_min_batch_size).to eq(3)
+      end
+
+      it "falls back to the default for an empty value" do
+        ENV["RIGOR_LSP_POOL_MIN_BATCH"] = ""
+        expect(described_class.resolve_min_batch_size).to eq(described_class::DEFAULT_MIN_BATCH_SIZE)
       end
     end
   end

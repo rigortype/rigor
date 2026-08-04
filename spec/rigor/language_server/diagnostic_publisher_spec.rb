@@ -103,9 +103,9 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
   end
 
   # Issue #142 — N dirty buffers published across the fork-based worker pool in one dispatch instead of one
-  # Runner call at a time. `#publish_many` is the entry point `#enqueue_batch` drives once several buffers'
-  # debounce timers elapse close together (see the "batch coalescing" section below); it is also directly
-  # callable, which is how these specs exercise it deterministically.
+  # Runner call at a time. `#publish_many` is the entry point the `PublishBatcher` (`@batcher`) drives once
+  # several buffers' debounce timers elapse close together (see the "batch coalescing" section below); it is
+  # also directly callable, which is how these specs exercise it deterministically.
   describe "#publish_many" do
     def context_for(dir)
       Rigor::LanguageServer::ProjectContext.new(configuration: Rigor::Configuration.new("paths" => [dir]))
@@ -171,7 +171,11 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       end
     end
 
-    it "dispatches every eligible URI through ONE BufferPoolDispatcher, not N separate Runner calls" do
+    # BufferPoolDispatcher may still take its OWN sequential-in-process path internally below its size
+    # gate (`DEFAULT_MIN_BATCH_SIZE`) — that's a separate, dispatcher-level concern covered in
+    # `spec/rigor/analysis/runner/buffer_pool_dispatcher_spec.rb`. What THIS proves is the publisher-level
+    # claim: N eligible URIs become ONE dispatcher call, not N.
+    it "dispatches every eligible URI through ONE BufferPoolDispatcher call, not N separate ones" do
       Dir.mktmpdir("rigor-lsp-publish-many-dispatch-") do |dir|
         entries = write_multi_buffer_fixture(dir, 3)
         entries.each { |_path, uri, bytes| buffer_table.open(uri: uri, bytes: bytes, version: 1) }

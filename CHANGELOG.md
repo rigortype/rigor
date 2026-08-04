@@ -69,6 +69,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[engine]** Filling a collection through a receiver that *selects* between variables — `(kind == :required ? required : optional)[key] = value`, an `if`/`else`, or a `||` — now widens every variable the receiver can be, so a later `.empty?` on one of them no longer draws a false `flow.always-truthy-condition` ([#277](https://github.com/rigortype/rigor/issues/277)).
 - **[engine]** A nested `Result = Data.define(...)` (or `Struct.new(...)`) constant is now visible across files, so a call on a factory's return no longer draws a false `call.undefined-method` attributed to a same-named class in the parent namespace ([#271](https://github.com/rigortype/rigor/issues/271)).
 - **[engine]** A class that defines the same method name on both sides — `def helper` plus a `class << self` (or `def self.helper`) twin — no longer draws a false `call.undefined-method` on the class-side call ([#239](https://github.com/rigortype/rigor/issues/239)).
   - The in-source method table records one kind per name, so the second definition erased the first and the method Rigor could see in the source read as missing. It now records both, including when the two definitions live in different files. Real instance: `Haml::Compiler::ScriptCompiler.find_and_preserve` on the `haml` gem, which declares that name as both a class method and an instance method.

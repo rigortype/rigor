@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "../source/node_children"
+require_relative "receiver_alias"
 
 module Rigor
   module Inference
@@ -45,6 +46,10 @@ module Rigor
     #
     # - `arr.<mutator>(...)` where `arr` is a local variable.
     # - `@arr.<mutator>(...)` where `@arr` is an instance variable.
+    # - a receiver that *selects* among such variables rather than naming one —
+    #   `(kind == :required ? required : optional)[key] = info`, an `if`/`else`, `||` / `&&`. Every
+    #   variable the expression can evaluate to is a possible mutation target, so every one widens
+    #   (issue #277). See {ReceiverAlias}.
     #
     # Out of scope (left for a separate cycle):
     #
@@ -100,10 +105,10 @@ module Rigor
         PURE_SELF_RETURNERS.include?(method_name)
       end
 
-      # Returns a scope with the call's receiver widened, when the receiver is a
-      # local-/instance-variable read whose current binding is a literal-shape carrier
+      # Returns a scope with the call's receiver widened, for every variable the receiver expression
+      # can evaluate to ({ReceiverAlias.candidates}) whose current binding is a literal-shape carrier
       # (`Tuple` / `HashShape`) or an empty-witness refinement (`non-empty-array` /
-      # `non-empty-hash`) AND the call name is a known in-place mutator for that shape.
+      # `non-empty-hash`) AND whose call name is a known in-place mutator for that shape.
       # Returns `current_scope` unchanged otherwise.
       #
       # @param call_node     [Prism::CallNode]
@@ -115,13 +120,8 @@ module Rigor
         receiver = call_node.receiver
         return current_scope if receiver.nil?
 
-        case receiver
-        when Prism::LocalVariableReadNode
-          widen_local(call_node.name, receiver.name, current_scope)
-        when Prism::InstanceVariableReadNode
-          widen_ivar(call_node.name, receiver.name, current_scope)
-        else
-          current_scope
+        ReceiverAlias.candidates(receiver).reduce(current_scope) do |acc, read|
+          widen_alias_read(call_node.name, read, acc)
         end
       end
 
@@ -130,13 +130,13 @@ module Rigor
       # LOCALS are otherwise invisible to the post-call outer scope (ivars are handled correctly
       # already because they live in the method-body scope, not the block-local scope).
       #
-      # Walks the block AST for `<receiver>.<method>(...)` calls whose receiver is either a
-      # `LocalVariableReadNode` with `depth > 0` (a captured outer local — Prism's `depth`
-      # counts scope hops outward; `depth == 0` means a block-local) or an
-      # `InstanceVariableReadNode` (always method-scope), and applies `widen_after_call` for
-      # each one against the outer scope. The widening is always safe — it can only LOSE
-      # precision — so blindly propagating is sound regardless of whether the block actually
-      # runs.
+      # Walks the block AST for `<receiver>.<method>(...)` calls, resolves the receiver expression
+      # to the variables it can evaluate to ({ReceiverAlias.candidates}), and widens each one
+      # against the outer scope. A `LocalVariableReadNode` with `depth == 0` is skipped — Prism's
+      # `depth` counts scope hops outward, so `0` means a block-local, not a capture; an
+      # `InstanceVariableReadNode` is always method-scope and always applies. The widening is
+      # always safe — it can only LOSE precision — so blindly propagating is sound regardless of
+      # whether the block actually runs.
       #
       # Recurses into nested expression nodes so chained / nested forms (`arr << f(x); arr <<
       # g(y)`, `arr.push(x) if cond`) are all caught. Does NOT recurse into nested
@@ -174,15 +174,20 @@ module Rigor
         receiver = call_node.receiver
         return scope if receiver.nil?
 
-        case receiver
-        when Prism::LocalVariableReadNode
-          return scope if receiver.depth.zero?
+        ReceiverAlias.candidates(receiver).reduce(scope) do |acc, read|
+          # A block-local read (`depth == 0`) is not a capture of the outer scope, so widening its
+          # name against the OUTER scope would hit an unrelated same-named binding.
+          next acc if read.is_a?(Prism::LocalVariableReadNode) && read.depth.zero?
 
-          widen_local(call_node.name, receiver.name, scope)
-        when Prism::InstanceVariableReadNode
-          widen_ivar(call_node.name, receiver.name, scope)
-        else
-          scope
+          widen_alias_read(call_node.name, read, acc)
+        end
+      end
+
+      def widen_alias_read(method_name, read, scope)
+        case read
+        when Prism::LocalVariableReadNode then widen_local(method_name, read.name, scope)
+        when Prism::InstanceVariableReadNode then widen_ivar(method_name, read.name, scope)
+        else scope
         end
       end
 

@@ -260,6 +260,158 @@ RSpec.describe "rigor-dry-validation integration" do
     end
   end
 
+  # Per-Contract diagnostics (issue #137's remaining checkbox) — `dry-validation.rule-key-mismatch`.
+  describe "`dry-validation.rule-key-mismatch` diagnostic" do
+    it "fires when rule(:key) references a key absent from the Contract's params schema" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      issue = result.diagnostics.find { |d| d.rule == "dry-validation.rule-key-mismatch" }
+      expect(issue).not_to be_nil
+      expect(issue.severity).to eq(:error)
+      expect(issue.message).to include("nonexistent_key").and include("NewUserContract")
+    end
+
+    it "does NOT fire when every rule() key is declared" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            required(:age).value(:integer)
+          end
+
+          rule(:email, :age) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "does NOT fire for an unmodelled (untyped-but-declared) key" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            required(:weird).filled(:not_a_type)
+          end
+
+          rule(:weird) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "declines the WHOLE Contract when the params block has an unrecognised statement" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            %i[extra_a extra_b].each { |k| required(k).filled(:string) }
+          end
+
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "declines a rule() call with a splat argument" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          KEYS = [:nonexistent_key].freeze
+
+          rule(*KEYS) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "declines a rule() call with the nested-key Hash form" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:user).filled(:hash)
+          end
+
+          rule(user: [:nonexistent_key]) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "does NOT fire when rigor-dry-schema isn't loaded" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo, with_dry_schema: false)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "does NOT fire for a Contract with no params/json block at all" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "includes a did-you-mean suggestion for a close typo" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          rule(:emial) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      issue = result.diagnostics.find { |d| d.rule == "dry-validation.rule-key-mismatch" }
+      expect(issue.message).to include("did you mean `:email`?")
+    end
+  end
+
   # Runs the plugin(s) against a single-file project and returns the `dump.type` messages, in source order.
   def dump_types(demo, with_dry_schema: true)
     run_demo(demo, with_dry_schema: with_dry_schema).diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)

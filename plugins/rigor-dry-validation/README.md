@@ -15,7 +15,9 @@ With `rigor-dry-schema` also loaded, a Contract's `params { ... }` /
 `json { ... }` block — the SAME dry-schema DSL a top-level
 `Dry::Schema.X { ... }` body uses — refines `result.to_h` from the
 RBS overlay's generic `Hash[Symbol, untyped]` to the schema-typed
-`HashShape`. See § "params / json integration" below.
+`HashShape`, and a `rule(:key)` referencing a key absent from that
+schema draws `dry-validation.rule-key-mismatch`. See §§ "params /
+json integration" and "Diagnostics" below.
 
 > **Using this plugin?** The user guide lives in the manual at
 > [docs/manual/plugins/rigor-dry-validation.md](../../docs/manual/plugins/rigor-dry-validation.md).
@@ -144,6 +146,49 @@ shape. Without `rigor-dry-schema` loaded at all, this whole
 section is inert: the plugin ships no required/optional walker
 of its own.
 
+## Diagnostics
+
+`dry-validation.rule-key-mismatch` (`:error`) fires when a
+`rule(:key, ...) do ... end` call references a key the Contract's
+own `params`/`json` schema never declares:
+
+```ruby
+class NewUserContract < Dry::Validation::Contract
+  params do
+    required(:email).filled(:string)
+  end
+
+  rule(:handle) do   # :handle isn't a params key — typo for :email?
+    key.failure("nope")
+  end
+end
+# → error: rule(:handle) references a key not declared by
+#   `NewUserContract`'s params/json schema (did you mean `:email`?)
+#   [dry-validation.rule-key-mismatch]
+```
+
+It requires TWO independent all-or-nothing checks to pass before
+it fires at all, either of which silently declines the WHOLE
+Contract (not just the ambiguous part) rather than risk a false
+positive:
+
+1. **The Contract's key universe must be cleanly resolved.** Every
+   top-level statement in every `params`/`json` block must be a
+   recognised `required`/`optional` row (typed or not — an
+   unmodelled row is still a DECLARED key) or the inert
+   `config.<x> = <literal>` idiom. A loop building keys
+   dynamically, a splat, an `include`, or anything else the scanner
+   doesn't recognise makes the Contract's ENTIRE key set
+   untrustworthy, and no `rule()` call in it is checked.
+2. **The `rule(...)` call's own arguments must all be literal
+   Symbols.** A splat (`rule(*keys)`), a String, a local variable,
+   or the nested-key Hash form (`rule(user: [:name])`) makes that
+   WHOLE call unresolvable, and it is skipped rather than partially
+   validated.
+
+Without `rigor-dry-schema` loaded, this diagnostic never fires —
+there is no key universe to check a `rule()` call against.
+
 ## Floor / ceiling
 
 Slice 1 shipped the **floor**:
@@ -157,21 +202,22 @@ Slice 1 shipped the **floor**:
   `Result#to_h` returns `Hash[Symbol, untyped]`.
 - No user-facing diagnostics yet.
 
-**Landed since** (issue #137): **slices 2/3** — `params { ... }` /
-`json { ... }` integration with `rigor-dry-schema`, refining
-`result.to_h` per-Contract. See § "`params` / `json` integration"
-above.
+**Landed since** (issue #137):
 
-The **ceiling** (still open):
+- **Slices 2/3** — `params { ... }` / `json { ... }` integration
+  with `rigor-dry-schema`, refining `result.to_h` per-Contract.
+  See § "`params` / `json` integration" above.
+- **`dry-validation.rule-key-mismatch`.** See § "Diagnostics"
+  above.
 
-- **Per-Contract diagnostics.** E.g. `rule(:nonexistent_key)`
-  references a key not in the `params { ... }` schema → emit
-  `dry-validation.rule-key-mismatch`.
+This closes every checkbox issue #137 opened for this plugin; the
+ceiling is empty pending fresh demand.
 
-## What the plugin does NOT do (yet)
+## What the plugin does NOT do
 
-- Recognise `rule { ... }` blocks for key validation, or emit
-  any `dry-validation.*` diagnostic (see § "Floor / ceiling").
+- Recognise `rule { ... }` blocks for anything beyond the
+  flat-Symbol-arguments key-existence check above — no nested-key
+  form, no cross-rule reasoning, no business-logic evaluation.
 - Refine `result.errors` — it stays `untyped` regardless of
   whether `rigor-dry-schema` is loaded.
 - Recognise a `params(SomeSchema)` / `json(SomeSchema)` form

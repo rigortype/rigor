@@ -50,3 +50,15 @@ end
 #   { email: String, age: Integer, ... }
 # instead of the RBS overlay's generic `Hash[Symbol, untyped]`.
 Rigor.dump_type(NewUserContract.new.call(email: "alice@example.com", age: 17).to_h)
+
+# dry-validation.rule-key-mismatch (issue #137): `rule(:handle)` references a key that
+# NewUserContract's own `params { ... }` block never declares — `rigor check` reports it below.
+class TypoContract < Dry::Validation::Contract
+  params do
+    required(:email).filled(:string)
+  end
+
+  rule(:handle) do
+    key.failure("nope")
+  end
+end

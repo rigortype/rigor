@@ -29,13 +29,14 @@ module Rigor
     #   `NewUserContract.new.call(input).to_h` from the RBS overlay's generic `Hash[Symbol, untyped]` to
     #   the schema-typed `HashShape`. See {ContractScanner.scan_schema_blocks} + {ParamsShape}.
     # - **Slice 3** — `json { ... }` adapter parity with `params { ... }`. Same mechanism, same fact.
+    # - **`dry-validation.rule-key-mismatch`** — a `rule(:key)` referencing a key absent from the
+    #   Contract's own `params`/`json` block. Hard-gated: see {ContractScanner.rule_key_issues}'s doc for
+    #   the two all-or-nothing checks that keep it silent on anything not statically resolvable.
     #
     # Without `rigor-dry-schema` loaded, `result.to_h` still types per the RBS overlay's generic
-    # `Hash[Symbol, untyped]` — this plugin ships no required/optional walker of its own; it delegates to
-    # dry-schema's (see {ContractScanner}'s module doc for why that is a deliberate hard precondition, not
-    # a degrade-gracefully fallback).
-    #
-    # The next ceiling item — per-Contract `rule(:key)` diagnostics — is issue #137's remaining checkbox.
+    # `Hash[Symbol, untyped]` and `rule-key-mismatch` never fires — this plugin ships no required/optional
+    # walker of its own; it delegates to dry-schema's (see {ContractScanner}'s module doc for why that is
+    # a deliberate hard precondition, not a degrade-gracefully fallback).
     #
     # No ADR-3 amendment is needed for the validation surface itself; `Dry::Validation::Result` is a
     # generic class, not a sum type (the `success?` / `failure?` predicates narrow via existing bool flow
@@ -63,6 +64,33 @@ module Rigor
       # overlay's generic `Hash[Symbol, untyped]` stands.
       dynamic_return methods: [:to_h] do |call_node, _scope|
         result_shape_for(call_node)
+      end
+
+      # ADR-37 slice 1c two-pass — the "collect" half of `dry-validation.rule-key-mismatch`. Reads the
+      # SAME `:dry_type_aliases` fact `#prepare` does (a plain `services.fact_store.read`, not
+      # `#read_fact`'s memoised wrapper — `services` at collect time is the run-wide instance, so an
+      # in-block memo isn't needed here the way it is across many per-call `dynamic_return` invocations).
+      node_file_context do |root, _scope|
+        type_aliases = services.fact_store.read(plugin_id: "dry-types", name: :dry_type_aliases) || {}
+        ContractScanner.rule_key_issues(root, type_aliases)
+      end
+
+      # Fires once per file (see rigor-dry-schema's identical `Prism::ProgramNode` rule for why).
+      node_rule Prism::ProgramNode do |_node, _scope, path, issues|
+        next [] if issues.nil? || issues.empty?
+
+        issues.map do |issue|
+          hint = Rigor::Plugin::Base.suggest(issue[:key], issue[:known_keys])
+          suffix = hint ? " (did you mean `:#{hint}`?)" : ""
+          diagnostic(
+            issue[:node],
+            path: path,
+            message: "rule(:#{issue[:key]}) references a key not declared by " \
+                     "`#{issue[:contract_fqn]}`'s params/json schema#{suffix}",
+            severity: :error,
+            rule: "dry-validation.rule-key-mismatch"
+          )
+        end
       end
 
       def prepare(services)

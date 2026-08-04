@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
+require "fileutils"
+require "tmpdir"
+
 require "rigor/language_server"
 require "rigor/configuration"
 
 RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
   # In-memory writer collecting every payload pushed to it. Mirrors
   # `LanguageServer::Protocol::Transport::Io::Writer#write` but captures the raw Hash so specs can inspect the wire
-  # shape without re-parsing.
-  let(:writer) do
+  # shape without re-parsing. A method (not `let`) so a single example can build several independent writers —
+  # needed to compare a batched round against N sequential single-buffer rounds side by side.
+  def build_writer
     Class.new do
       attr_reader :payloads
 
@@ -20,6 +24,8 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
       end
     end.new
   end
+
+  let(:writer) { build_writer }
 
   let(:buffer_table) { Rigor::LanguageServer::BufferTable.new }
   let(:configuration) { Rigor::Configuration.new("paths" => []) }
@@ -96,6 +102,137 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
     end
   end
 
+  # Issue #142 — N dirty buffers published across the fork-based worker pool in one dispatch instead of one
+  # Runner call at a time. `#publish_many` is the entry point `#enqueue_batch` drives once several buffers'
+  # debounce timers elapse close together (see the "batch coalescing" section below); it is also directly
+  # callable, which is how these specs exercise it deterministically.
+  describe "#publish_many" do
+    def context_for(dir)
+      Rigor::LanguageServer::ProjectContext.new(configuration: Rigor::Configuration.new("paths" => [dir]))
+    end
+
+    def publisher_for(context, table = buffer_table, out_writer = writer)
+      described_class.new(writer: out_writer, buffer_table: table, project_context: context)
+    end
+
+    # Every file is BROKEN on disk (an undefined-method call unique to that file) and FIXED in its own
+    # buffer only. A worker that read the on-disk file instead of the buffer — the #142 buffer-substitution
+    # risk — would surface `call.undefined-method`; a worker fed a SIBLING'S buffer bytes would surface a
+    # DIFFERENT undefined-method name than its own path has ever produced. Either failure mode is visible.
+    def write_multi_buffer_fixture(dir, count)
+      Array.new(count) do |i|
+        path = File.join(dir, "f#{i}.rb")
+        File.write(path, "class F#{i}\n  def go\n    disk_only_undefined_#{i}\n  end\nend\n")
+        [path, "file://#{path}", "class F#{i}\n  def go\n    #{i}\n  end\nend\n"]
+      end
+    end
+
+    it "publishes N buffers' OWN diagnostics — none see the on-disk break, only their own buffer's fix" do
+      Dir.mktmpdir("rigor-lsp-publish-many-") do |dir|
+        entries = write_multi_buffer_fixture(dir, 4)
+        entries.each { |_path, uri, bytes| buffer_table.open(uri: uri, bytes: bytes, version: 1) }
+        uris = entries.map { |_path, uri, _bytes| uri }
+
+        Dir.chdir(dir) { publisher_for(context_for(dir)).publish_many(uris) }
+
+        uris.each do |uri|
+          payload = writer.payloads.find { |p| p.dig(:params, :uri) == uri }
+          expect(payload.dig(:params, :diagnostics)).to eq([]), "#{uri}: #{payload.inspect}"
+        end
+      end
+    end
+
+    it "matches publishing the same buffers one at a time, byte-for-byte" do
+      Dir.mktmpdir("rigor-lsp-publish-many-equiv-") do |dir|
+        entries = write_multi_buffer_fixture(dir, 4)
+        uris = entries.map { |_path, uri, _bytes| uri }
+        context = context_for(dir)
+
+        table_batched = Rigor::LanguageServer::BufferTable.new
+        table_sequential = Rigor::LanguageServer::BufferTable.new
+        entries.each do |_path, uri, bytes|
+          table_batched.open(uri: uri, bytes: bytes, version: 1)
+          table_sequential.open(uri: uri, bytes: bytes, version: 1)
+        end
+        writer_batched = build_writer
+        writer_sequential = build_writer
+
+        Dir.chdir(dir) { publisher_for(context, table_batched, writer_batched).publish_many(uris) }
+        Dir.chdir(dir) do
+          publisher = publisher_for(context, table_sequential, writer_sequential)
+          uris.each { |uri| publisher.publish_for(uri) }
+        end
+
+        uris.each do |uri|
+          batched = writer_batched.payloads.find { |p| p.dig(:params, :uri) == uri }&.dig(:params, :diagnostics)
+          sequential = writer_sequential.payloads.find { |p| p.dig(:params, :uri) == uri }&.dig(:params, :diagnostics)
+          expect(batched).to eq(sequential)
+        end
+      end
+    end
+
+    it "dispatches every eligible URI through ONE BufferPoolDispatcher, not N separate Runner calls" do
+      Dir.mktmpdir("rigor-lsp-publish-many-dispatch-") do |dir|
+        entries = write_multi_buffer_fixture(dir, 3)
+        entries.each { |_path, uri, bytes| buffer_table.open(uri: uri, bytes: bytes, version: 1) }
+        uris = entries.map { |_path, uri, _bytes| uri }
+
+        allow(Rigor::Analysis::Runner::BufferPoolDispatcher).to receive(:new).and_call_original
+
+        Dir.chdir(dir) { publisher_for(context_for(dir)).publish_many(uris) }
+
+        expect(Rigor::Analysis::Runner::BufferPoolDispatcher).to have_received(:new).once
+      end
+    end
+
+    it "degrades to the single-buffer path when only one URI is eligible after filtering" do
+      Dir.mktmpdir("rigor-lsp-publish-many-single-") do |dir|
+        entries = write_multi_buffer_fixture(dir, 2)
+        _path0, uri0, bytes0 = entries[0]
+        _path1, uri1, bytes1 = entries[1]
+        buffer_table.open(uri: uri0, bytes: bytes0, version: 1)
+        buffer_table.open(uri: uri1, bytes: bytes1, version: 1)
+        buffer_table.close(uri: uri1) # closed before the batch runs — only uri0 stays eligible
+
+        allow(Rigor::Analysis::Runner::BufferPoolDispatcher).to receive(:new)
+
+        Dir.chdir(dir) { publisher_for(context_for(dir)).publish_many([uri0, uri1]) }
+
+        expect(Rigor::Analysis::Runner::BufferPoolDispatcher).not_to have_received(:new)
+        payload = writer.payloads.find { |p| p.dig(:params, :uri) == uri0 }
+        expect(payload.dig(:params, :diagnostics)).to eq([])
+        expect(writer.payloads.any? { |p| p.dig(:params, :uri) == uri1 }).to be(false)
+      end
+    end
+
+    it "excludes a buffer closed during the debounce window and publishes an empty set for a desynchronised one" do
+      Dir.mktmpdir("rigor-lsp-publish-many-guards-") do |dir|
+        entries = write_multi_buffer_fixture(dir, 3)
+        entries.each { |_path, uri, bytes| buffer_table.open(uri: uri, bytes: bytes, version: 1) }
+        uris = entries.map { |_path, uri, _bytes| uri }
+        closed_uri = uris[0]
+        desync_uri = uris[1]
+        buffer_table.close(uri: closed_uri)
+        buffer_table.apply_changes(
+          uri: desync_uri,
+          changes: [{ range: { start: { line: 0 }, end: { line: 0, character: 0 } }, text: "x" }],
+          version: 2
+        )
+
+        Dir.chdir(dir) { publisher_for(context_for(dir)).publish_many(uris) }
+
+        expect(writer.payloads.any? { |p| p.dig(:params, :uri) == closed_uri }).to be(false)
+        desync_payload = writer.payloads.find { |p| p.dig(:params, :uri) == desync_uri }
+        expect(desync_payload.dig(:params, :diagnostics)).to eq([])
+      end
+    end
+
+    it "no-ops when every URI is ineligible" do
+      publisher.publish_many(["file:///not/in/table.rb", "untitled:foo"])
+      expect(writer.payloads).to be_empty
+    end
+  end
+
   describe "debouncer integration (slice 8)" do
     let(:debouncer) { Rigor::LanguageServer::Debouncer.new }
     let(:debounced_publisher) do
@@ -139,6 +276,80 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
         end
 
         expect(writer.payloads).to be_empty
+      end
+    end
+
+    # Issue #142 — a burst of `publish_for` calls for DIFFERENT URIs (a workspace-wide rename, a git branch
+    # switch that touches many open files) coalesces into batched `#publish_many` round(s) via the
+    # `PublishBatcher` each publisher owns, rather than firing N independent, GVL-serialized threads. The
+    # coalescing MECHANICS (single-flight, dedup, error recovery) are unit-tested independently in
+    # `spec/rigor/language_server/publish_batcher_spec.rb`; these specs cover the WIRING — that `publish_for`
+    # really does route through the batcher and really does end up calling `#publish_many`.
+    describe "batch coalescing across URIs" do
+      def context_for(dir)
+        Rigor::LanguageServer::ProjectContext.new(configuration: Rigor::Configuration.new("paths" => [dir]))
+      end
+
+      it "publishes every buffer in a burst of different-URI publish_for calls" do
+        Dir.mktmpdir("rigor-lsp-coalesce-") do |dir|
+          paths = Array.new(3) { |i| File.join(dir, "g#{i}.rb") }
+          uris = paths.map { |p| "file://#{p}" }
+          paths.each_with_index do |path, i|
+            File.write(path, "class G#{i}\n  def go\n    disk_only_undefined_#{i}\n  end\nend\n")
+          end
+          publisher = described_class.new(
+            writer: writer, buffer_table: buffer_table, project_context: context_for(dir),
+            debouncer: debouncer, debounce_seconds: 0
+          )
+          uris.each_with_index do |uri, i|
+            buffer_table.open(uri: uri, bytes: "class G#{i}\n  def go\n    #{i}\n  end\nend\n", version: 1)
+          end
+
+          Dir.chdir(dir) do
+            uris.each { |uri| publisher.publish_for(uri) }
+            debouncer.flush!
+          end
+
+          uris.each do |uri|
+            payload = writer.payloads.find { |p| p.dig(:params, :uri) == uri }
+            expect(payload.dig(:params, :diagnostics)).to eq([]), "#{uri}: #{payload.inspect}"
+          end
+        end
+      end
+
+      # Proves the WIRING: a URI whose debounce timer elapses drives the publisher's OWN `@batcher`, which in
+      # turn calls back into `#publish_many` — not some other code path. Driven directly (no real Debouncer
+      # thread) via the batcher's public `#enqueue`, matching how the debounced block in `#publish_for` calls
+      # it.
+      it "routes a ready URI through @batcher into #publish_many" do
+        uri = "file:///a.rb"
+        allow(debounced_publisher).to receive(:publish_many)
+
+        debounced_publisher.instance_variable_get(:@batcher).enqueue(uri)
+
+        expect(debounced_publisher).to have_received(:publish_many).with([uri])
+      end
+
+      it "a batch round that raises does not stop the NEXT publish from going through" do
+        Dir.mktmpdir("rigor-lsp-coalesce-rescue-") do |dir|
+          path = File.join(dir, "h.rb")
+          uri_a = "file:///does-not-matter-a.rb"
+          uri_b = "file://#{path}"
+          File.write(path, "x = 1\n")
+          allow(debounced_publisher).to receive(:publish_many).and_raise(StandardError, "boom")
+          allow(debounced_publisher).to receive(:warn)
+          batcher = debounced_publisher.instance_variable_get(:@batcher)
+
+          batcher.enqueue(uri_a)
+
+          expect(debounced_publisher).to have_received(:warn).with(a_string_including("boom"))
+
+          allow(debounced_publisher).to receive(:publish_many).and_call_original
+          buffer_table.open(uri: uri_b, bytes: "x = 1\n", version: 1)
+          Dir.chdir(dir) { batcher.enqueue(uri_b) }
+
+          expect(debounced_publisher).to have_received(:publish_many).with([uri_b])
+        end
       end
     end
   end

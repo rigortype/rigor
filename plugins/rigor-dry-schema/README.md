@@ -87,8 +87,58 @@ end
 three type-bearing predicates (`filled` / `value` / `maybe`)
 yield `list: false`. The `list:` slot is symmetric with
 `rigor-graphql`'s field-table shape so downstream cross-plugin
-consumers (a future `rigor-dry-validation` plugin) can reason
-about list-vs-scalar fields uniformly.
+consumers (`rigor-dry-validation`) can reason about
+list-vs-scalar fields uniformly.
+
+## `each do ... end` element-type recursion
+
+`each` also accepts a block instead of a type symbol, declaring
+an array of a NESTED schema rather than an array of a scalar:
+
+```ruby
+OrderSchema = Dry::Schema.Params do
+  required(:items).each do
+    required(:sku).filled(:string)
+    optional(:qty).value(:integer)
+  end
+end
+```
+
+The block is walked with the same required/optional algorithm a
+top-level `Dry::Schema.X { ... }` body uses (predicate
+vocabulary, cross-plugin alias resolution, the untyped-row
+fallback all apply identically at the nested level), and the
+row's `type:` slot becomes a nested shape rather than a class
+name:
+
+```ruby
+{
+  "OrderSchema" => {
+    required: {
+      items: {
+        type: { nested: { required: { sku: { type: "String", list: false } },
+                           optional: { qty: { type: "Integer", list: false } },
+                           unmodelled: { required: [], optional: [] } } },
+        list: true
+      }
+    },
+    optional: {}
+  }
+}
+```
+
+`each do schema do ... end end` — dry-schema's other spelling for
+the identical declaration — is recognised too; both unwrap to the
+same nested shape. `OrderSchema.call(input).to_h[:items]` types as
+`Array[{ sku: String, ?qty: Integer, ... }]`.
+
+The recursion caps at ONE level: an `each do ... end` found
+INSIDE another `each do ... end` is not modelled (the outer key
+falls back to `untyped`, the scanner's standard "declined, not
+wrong" posture for anything outside its recognised vocabulary).
+A block with no recognisable `required`/`optional` row at all — a
+bare per-element predicate like `each { int? }` — declines the
+same way.
 
 ## Predicate type recognition
 
@@ -152,23 +202,37 @@ The slice-1 deliverable is the **floor**:
   alias resolution.
 - Publishes the table; no user-facing diagnostics yet.
 
-**Landed since**: **typed `result.to_h` returns**.
-`NewUserSchema.call(input).to_h` infers
-`{ email: String, age: Integer, ?nickname: String, ... }`
-instead of an untyped hash. See § "Typed `result.to_h`" below.
+**Landed since**:
 
-The **ceiling** (future slices, demand-driven):
+- **Typed `result.to_h` returns**. `NewUserSchema.call(input).to_h`
+  infers `{ email: String, age: Integer, ?nickname: String, ... }`
+  instead of an untyped hash. See § "Typed `result.to_h`" below.
+- **`each do ... end` element-type recursion** (issue #137). See
+  § "`each do ... end` element-type recursion" above.
+- **`dry-schema.unknown-type` `:info` diagnostic** (issue #137).
+  See § "Diagnostics" below.
+- **`rigor-dry-validation` integration** (issue #137) — landed in
+  that plugin's own slices 2/3, not here: a Contract's inline
+  `params { ... }` / `json { ... }` block is walked with the
+  SAME DSL vocabulary this plugin defines, refining
+  `Contract#call(...).to_h`. See
+  [`rigor-dry-validation`'s README](../rigor-dry-validation/README.md).
 
-- **Nested schemas** (`schema(do ... end)` inside another row).
-- **`predicates(:size?)` / per-row constraint walks**.
-- **`each { ... }` element-type recursion**.
-- **Per-row diagnostics** — `dry-schema.unknown-predicate` /
-  `dry-schema.unknown-type` `:info` when a row's predicate or
-  type symbol isn't recognised.
-- **`rigor-dry-validation` integration** — Contract subclasses
-  whose `params { ... }` block delegates to a dry-schema
-  declaration would consume `:dry_schema_table` for typed
-  `Contract#call → Result` payloads.
+The **ceiling** (still open, demand-driven):
+
+- **Nested schemas outside `each`** (`required(:x).schema do ... end`
+  with no `each` in the chain) — the key stays untyped; only the
+  `each`-wrapped nested form (above) recurses.
+- **`predicates(:size?)` / other per-row constraint walks.**
+- **`dry-schema.unknown-predicate` diagnostic** — deliberately not
+  shipped. There's no reliable static signal that distinguishes a
+  genuinely-mistyped predicate name from one of dry-schema's many
+  legitimate fine-grained predicates (`size?` / `gt?` / `format?` /
+  `included_in?` / ...) this scanner doesn't model, and a bare
+  `required(:key)` with no type-bearing predicate at all is itself
+  valid dry-schema (a presence-only check). Guessing here would
+  flag correct code — the `AGENTS.md` "false positives outrank
+  worst-case reading" call, applied by declining.
 
 ## Typed `result.to_h`
 
@@ -214,9 +278,33 @@ site (`NewUserSchema.call(x).to_h`). Reached through a local or
 by a relative constant path from inside the declaring module,
 the chain contributes nothing and `to_h` types as it did before.
 
+## Diagnostics
+
+`dry-schema.unknown-type` (`:info`) fires when a type-bearing
+predicate (`filled` / `value` / `maybe` / `each`) receives a
+literal Symbol argument that is NOT one of the canonical dry-schema
+type symbols in the table above:
+
+```ruby
+Schema = Dry::Schema.Params do
+  required(:count).filled(:integr)   # typo for :integer
+end
+# → info: `count` uses `:integr`, which is not a recognised
+#   dry-schema canonical type symbol [dry-schema.unknown-type]
+```
+
+It does NOT fire for a Constant argument
+(`value(Types::Email)`) — an unresolved alias already has the
+silent fallback described above, and flagging it would misfire on
+every entirely-correct row in a project that simply doesn't have
+`rigor-dry-types` loaded. It recurses into an `each do ... end`
+nested row too, so a bad symbol on a nested key is caught at its
+own position.
+
 ## What the plugin does NOT do (yet)
 
-- Emit diagnostics for unknown predicates / types / keys.
+- Emit `dry-schema.unknown-predicate` (see § "Floor / ceiling"
+  for why) or any per-row key-existence diagnostic.
 - Round-trip the schema table through the cache descriptor —
   `prepare(services)` re-scans on every run. Add a glob-based
   `Cache::Descriptor::FileEntry` when scan cost becomes

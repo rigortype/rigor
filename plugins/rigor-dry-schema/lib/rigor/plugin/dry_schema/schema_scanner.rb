@@ -67,6 +67,84 @@ module Rigor
         end
         private_class_method :scan_file
 
+        # Per-row `dry-schema.unknown-type` diagnostics (ceiling slice, issue #137). Walks an
+        # ALREADY-PARSED file's root node — the engine parses every analysed file once, so this reuses
+        # that AST rather than re-reading and re-parsing the file — collecting `{node:, key:, symbol:}`
+        # issues for a `required(:key).<verb>(:sym)` / `optional(:key).<verb>(:sym)` row whose
+        # type-bearing predicate (`filled` / `value` / `maybe` / `each`) receives a literal Symbol argument
+        # OUTSIDE `CANONICAL_TYPES`. Recurses into `each do ... end` nested rows (mirrors
+        # {#each_block_type_info}) so a nested row's bad symbol is caught too.
+        #
+        # A Constant argument (`value(Types::Email)`) is never flagged: an unresolved alias already has a
+        # silent, deliberate fallback (no `:dry_type_aliases` fact, or a name the fact doesn't know) per
+        # the existing slice-1 "drops constant-type references..." behaviour, and this diagnostic firing
+        # on it would misfire on every entirely-correct `value(Types::Email)` row in a project that simply
+        # doesn't have `rigor-dry-types` loaded.
+        #
+        # `dry-schema.unknown-predicate` (the OTHER ceiling diagnostic the README named) is deliberately
+        # NOT implemented: distinguishing a genuinely-unrecognised predicate NAME from one of dry-schema's
+        # many legitimate fine-grained predicates (`size?`, `gt?`, `format?`, `included_in?`, ...) that
+        # this scanner simply doesn't model would need a complete predicate registry this plugin doesn't
+        # have, and a `required(:key)` row with NO type-bearing predicate at all is itself entirely
+        # legitimate dry-schema (a presence-only check). Guessing here risks flagging correct code — the
+        # AGENTS.md "false positives outrank worst-case reading" call, applied by declining.
+        def unknown_type_issues(root)
+          issues = []
+          walk_for_unknown_type(root, issues)
+          issues
+        end
+
+        def walk_for_unknown_type(node, issues)
+          return if node.nil?
+
+          if node.is_a?(Prism::CallNode) && schema_entry_call?(node) && node.block
+            collect_row_issues(node.block, issues)
+          end
+          node.compact_child_nodes.each { |child| walk_for_unknown_type(child, issues) }
+        end
+        private_class_method :walk_for_unknown_type
+
+        def collect_row_issues(block_node, issues)
+          body = block_node.body
+          return if body.nil?
+
+          children = body.is_a?(Prism::StatementsNode) ? body.body : [body]
+          children.each { |child| visit_chain_for_issues(child, issues) }
+        end
+        private_class_method :collect_row_issues
+
+        def visit_chain_for_issues(node, issues)
+          return unless node.is_a?(Prism::CallNode)
+
+          key, = extract_key_and_kind(node)
+          return if key.nil?
+
+          current = node
+          while current.is_a?(Prism::CallNode)
+            if current.name == :each && current.block
+              collect_row_issues(nested_block_body(current.block), issues)
+              return
+            end
+            if TYPE_BEARING_PREDICATES.include?(current.name)
+              record_unknown_type_issue(current, key, issues)
+              return
+            end
+            current = current.receiver
+          end
+        end
+        private_class_method :visit_chain_for_issues
+
+        def record_unknown_type_issue(call_node, key, issues)
+          arg = call_node.arguments&.arguments&.first
+          return unless arg.is_a?(Prism::SymbolNode)
+
+          symbol = arg.unescaped.to_sym
+          return if CANONICAL_TYPES.key?(symbol)
+
+          issues << { node: call_node, key: key, symbol: symbol }
+        end
+        private_class_method :record_unknown_type_issue
+
         # Walks the AST collecting `<Const> = Dry::Schema.X { ... }` assignments at any nesting level.
         # Tracks the enclosing constant chain so a class-level `class Foo; SCHEMA = Dry::Schema.Params
         # { ... }; end` registers as `"Foo::SCHEMA"`.
@@ -102,7 +180,7 @@ module Rigor
           return {} unless rhs.is_a?(Prism::CallNode) && rhs.block
 
           schema_const = (qualified_prefix + [node.name.to_s]).join("::")
-          shape = collect_schema_shape(rhs.block, type_aliases)
+          shape = collect_schema_shape(rhs.block, type_aliases, nested: false)
           { schema_const => shape }
         end
         private_class_method :collect_schema_assignment
@@ -120,11 +198,18 @@ module Rigor
         end
         private_class_method :schema_entry_call?
 
-        def collect_schema_shape(block_node, type_aliases)
+        # `nested:` is false at the top-level `Dry::Schema.X { ... }` body and true inside an `each do
+        # ... end` row's own recursive call (see {#each_block_type_info}). It caps the recursion at ONE
+        # level deep: with `nested: true`, {#walk_predicate_chain} declines a FURTHER `each do ... end`
+        # rather than recursing again (issue #137 deliberately does not model doubly-nested arrays of
+        # arrays). This also keeps `collect_schema_shape` from calling itself — {#each_block_type_info}
+        # is the only caller that ever passes `nested: true}` — so the call graph has no cycle for the
+        # engine's return-type inference to approximate through.
+        def collect_schema_shape(block_node, type_aliases, nested:)
           required = {}
           optional = {}
           declared = { required: [], optional: [] }
-          walk_block_body(block_node) do |kind, key, type_info|
+          walk_block_body(block_node, type_aliases, nested) do |kind, key, type_info|
             declared[kind] << key
             (kind == :required ? required : optional)[key] = type_info if type_info
           end
@@ -142,13 +227,15 @@ module Rigor
 
         # Walks every top-level `required(:key).<predicate>(...)` / `optional(:key).<predicate>(...)`
         # chain in the block body. The block's body is either a `Prism::StatementsNode` (multi-statement)
-        # or a single expression node.
-        def walk_block_body(block_node, &)
+        # or a single expression node. `type_aliases` threads down to a nested `each do ... end` row's own
+        # recursive {#collect_schema_shape} call (slice 2's alias resolution applies at every nesting
+        # depth, not just the top level).
+        def walk_block_body(block_node, type_aliases, nested, &)
           body = block_node.body
           return if body.nil?
 
           children = body.is_a?(Prism::StatementsNode) ? body.body : [body]
-          children.each { |child| visit_chain(child, &) }
+          children.each { |child| visit_chain(child, type_aliases, nested, &) }
         end
         private_class_method :walk_block_body
 
@@ -157,13 +244,13 @@ module Rigor
         # the chain's tail. The `each(<Type>)` predicate yields a list-of-element type info (`{type: <T>,
         # list: true}`); other type-bearing predicates (`filled`/`value`/`maybe`) yield scalar info
         # (`{type: <T>, list: false}`).
-        def visit_chain(node, &block)
+        def visit_chain(node, type_aliases, nested, &block)
           return unless node.is_a?(Prism::CallNode)
 
           key, kind = extract_key_and_kind(node)
           return if key.nil?
 
-          type_info = walk_predicate_chain(node)
+          type_info = walk_predicate_chain(node, type_aliases, nested)
           block.call(kind, key, type_info)
         end
         private_class_method :visit_chain
@@ -189,9 +276,19 @@ module Rigor
         # Walks the call chain finding the first type-bearing predicate (`filled` / `value` / `maybe` /
         # `each`) and extracts its argument type. Returns a `{type:, list:}` tuple (`each` is the only
         # verb that produces a list) or nil when no recognisable type sits on the chain.
-        def walk_predicate_chain(node)
+        #
+        # `each do ... end` (a block instead of a type-symbol argument) is the ceiling's element-type
+        # recursion (issue #137): the block is itself a nested schema declaration, walked with the SAME
+        # algorithm as a top-level `Dry::Schema.X { ... }` body via {#each_block_type_info}. Already
+        # `nested` (i.e. this chain is itself inside another `each do ... end`) declines a FURTHER each —
+        # see {#collect_schema_shape}'s `nested:` doc for why the recursion caps at one level.
+        def walk_predicate_chain(node, type_aliases, nested)
           current = node
           while current.is_a?(Prism::CallNode)
+            if current.name == :each && current.block
+              return nested ? nil : each_block_type_info(current.block, type_aliases)
+            end
+
             if TYPE_BEARING_PREDICATES.include?(current.name)
               underlying = extract_type_from_predicate(current)
               return { type: underlying, list: current.name == :each } if underlying
@@ -201,6 +298,40 @@ module Rigor
           nil
         end
         private_class_method :walk_predicate_chain
+
+        # `required(:key).each do ... end` — recurses into the each-block using {#collect_schema_shape},
+        # the identical row-collection algorithm a top-level schema body uses, so a nested `required` /
+        # `optional` row gets the same predicate vocabulary, alias resolution, and untyped-row fallback as
+        # the outer schema. Two spellings are recognised: the bare `each do required(:x)...; end` form, and
+        # `each do schema do required(:x)...; end end` (dry-schema's alternate nested-hash spelling) via
+        # {#nested_block_body}.
+        #
+        # A block that yields no row at all — a bare per-element predicate like `each { int? }`, which
+        # this scanner does not model — declines (nil) rather than returning an empty nested shape: the key
+        # falls through to {#unmodelled_keys} and renders `untyped`, the same "declined, not wrong" posture
+        # every other unresolvable row already gets.
+        def each_block_type_info(each_block, type_aliases)
+          nested_shape = collect_schema_shape(nested_block_body(each_block), type_aliases, nested: true)
+          return nil if nested_shape[:required].empty? && nested_shape[:optional].empty?
+
+          { type: { nested: nested_shape }, list: true }
+        end
+        private_class_method :each_block_type_info
+
+        # Unwraps the `each do schema do ... end end` spelling to the inner `schema` block; the bare
+        # `each do required(...); ...; end` spelling passes the each-block through unchanged. Both declare
+        # the same nested key set, just at a different literal nesting depth.
+        def nested_block_body(each_block)
+          body = each_block.body
+          return each_block if body.nil?
+
+          children = body.is_a?(Prism::StatementsNode) ? body.body : [body]
+          return each_block unless children.size == 1
+
+          single = children.first
+          single.is_a?(Prism::CallNode) && single.name == :schema && single.block ? single.block : each_block
+        end
+        private_class_method :nested_block_body
 
         # Reads the first positional argument of a `filled(:string)` / `value(:integer)` /
         # `maybe(Types::Email)` call. Returns either the canonical-type-symbol's underlying class
@@ -240,11 +371,15 @@ module Rigor
         # (e.g. `"Types::Email"`) gets resolved through the type_aliases fact. Unresolvable values drop
         # from the bucket (no fact contribution rather than misleading data). The `list:` slot rides along
         # unchanged.
+        #
+        # A nested-shape row (`type: {nested: {...}}`, from an `each do ... end` element-type recursion)
+        # is already fully resolved by its own recursive {#collect_schema_shape} call — its `type:` slot is
+        # a Hash, not a class-name String, and is skipped here rather than treated as an unresolvable alias.
         def remap_aliases!(bucket, type_aliases)
           canonical_set = CANONICAL_TYPES.values.to_set
           bucket.each_pair.to_a.each do |key, info|
             type_name = info.fetch(:type)
-            next if canonical_set.include?(type_name)
+            next if type_name.is_a?(Hash) || canonical_set.include?(type_name)
 
             resolved = type_aliases[type_name]
             if resolved

@@ -14,6 +14,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[plugins]** `rigor-dry-schema` now recurses `required(:key).each do ... end` into a nested `HashShape` (an array of a nested schema, not just an array of a scalar) and reports `dry-schema.unknown-type` (info) when a `filled`/`value`/`maybe`/`each` predicate's Symbol argument isn't a recognised dry-schema type ([#137](https://github.com/rigortype/rigor/issues/137)).
 - **[engine]** `Array#first(n)` and `Array#last(n)` on a literal array now fold to the precise sub-array element types instead of the widened `Array[Elem]`, closing the last gap in the `take`/`drop`/`first`/`last` family ([#121](https://github.com/rigortype/rigor/issues/121)).
 - **[engine]** `Regexp.compile` on a constant pattern now folds to the precise `Constant[Regexp]` the same way `Regexp.new` already does, since it is a documented alias of the same C entry point ([#121](https://github.com/rigortype/rigor/issues/121)).
 - **[engine]** `Integer#rationalize` (no-argument form) and `Integer#abs2` / `Float#abs2` on a constant receiver now fold to the exact `Rational` / squared-magnitude result instead of the widened class, closing two more small gaps in the deterministic builtin-fold backlog ([#121](https://github.com/rigortype/rigor/issues/121)).

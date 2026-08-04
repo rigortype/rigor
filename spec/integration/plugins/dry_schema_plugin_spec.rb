@@ -177,6 +177,139 @@ RSpec.describe "rigor-dry-schema integration" do
     expect(shape.fetch(:optional)).to eq(authors: { type: "String", list: true })
   end
 
+  # `each do ... end` element-type recursion — the ceiling slice issue #137 named for rigor-dry-schema.
+  describe "`each do ... end` element-type recursion" do
+    it "recurses a bare nested block into a nested required/optional shape" do
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:items).each do
+            required(:sku).filled(:string)
+            optional(:qty).value(:integer)
+          end
+        end
+      RUBY
+      shape = run_and_read_fact(demo: demo).fetch("Schema")
+      row = shape.fetch(:required).fetch(:items)
+      expect(row.fetch(:list)).to be(true)
+      nested = row.fetch(:type).fetch(:nested)
+      expect(nested.fetch(:required)).to eq(sku: { type: "String", list: false })
+      expect(nested.fetch(:optional)).to eq(qty: { type: "Integer", list: false })
+    end
+
+    it "recurses the `each do schema do ... end end` spelling identically" do
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:items).each do
+            schema do
+              required(:sku).filled(:string)
+            end
+          end
+        end
+      RUBY
+      shape = run_and_read_fact(demo: demo).fetch("Schema")
+      nested = shape.fetch(:required).fetch(:items).fetch(:type).fetch(:nested)
+      expect(nested.fetch(:required)).to eq(sku: { type: "String", list: false })
+    end
+
+    it "declines (untyped) a block with no recognisable required/optional row" do
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:known).filled(:string)
+          required(:tags).each do
+            int?
+          end
+        end
+      RUBY
+      shape = run_and_read_fact(demo: demo).fetch("Schema")
+      expect(shape.fetch(:required)).to eq(known: { type: "String", list: false })
+      expect(shape.fetch(:unmodelled)).to eq(required: [:tags], optional: [])
+    end
+
+    it "types `Schema.call(input).to_h` with a nested HashShape wrapped in Array" do
+      dump = dump_types(<<~RUBY).first
+        Schema = Dry::Schema.Params do
+          required(:items).each do
+            required(:sku).filled(:string)
+          end
+        end
+
+        Rigor.dump_type(Schema.call({}).to_h)
+      RUBY
+      expect(dump).to include("items", "Array", "sku", "String")
+    end
+
+    it "resolves a nested row's constant type reference through :dry_type_aliases too" do
+      demo = <<~RUBY
+        module Types
+          include Dry.Types()
+
+          Email = String.constrained(format: /@/)
+        end
+
+        ContactBook = Dry::Schema.Params do
+          required(:contacts).each do
+            required(:email).value(Types::Email)
+          end
+        end
+      RUBY
+      shape = run_and_read_fact(demo: demo, with_dry_types: true).fetch("ContactBook")
+      nested = shape.fetch(:required).fetch(:contacts).fetch(:type).fetch(:nested)
+      expect(nested.fetch(:required)).to eq(email: { type: "String", list: false })
+    end
+  end
+
+  # The `dry-schema.unknown-type` per-row diagnostic — the other ceiling slice issue #137 named.
+  describe "`dry-schema.unknown-type` diagnostic" do
+    it "fires :info for a type-bearing predicate's unrecognised Symbol argument" do
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:known).filled(:string)
+          required(:bogus).filled(:not_a_type)
+        end
+      RUBY
+      result = run_demo(demo)
+      issue = result.diagnostics.find { |d| d.rule == "dry-schema.unknown-type" }
+      expect(issue).not_to be_nil
+      expect(issue.severity).to eq(:info)
+      expect(issue.message).to include("bogus").or include(":not_a_type")
+    end
+
+    it "does NOT fire for a Constant argument even when rigor-dry-types isn't loaded" do
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:email).value(Types::Email)
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-schema.unknown-type" }).to be_empty
+    end
+
+    it "does NOT fire for a recognised canonical type symbol" do
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:email).filled(:string)
+          required(:age).value(:integer)
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-schema.unknown-type" }).to be_empty
+    end
+
+    it "recurses into an `each do ... end` nested row's own bad symbol" do
+      demo = <<~RUBY
+        Schema = Dry::Schema.Params do
+          required(:items).each do
+            required(:sku).filled(:not_a_type_either)
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      issue = result.diagnostics.find { |d| d.rule == "dry-schema.unknown-type" }
+      expect(issue).not_to be_nil
+      expect(issue.message).to include("not_a_type_either")
+    end
+  end
+
   it "does NOT publish the fact when no `Dry::Schema.X` declaration is present" do
     demo = <<~RUBY
       class Foo

@@ -98,10 +98,20 @@ module Rigor
         end
 
         def row_type(row)
-          element = class_type(row[:type])
+          element = element_type(row[:type])
           return nil if element.nil?
 
           row[:list] ? Rigor::Type::Combinator.nominal_of("Array", type_args: [element]) : element
+        end
+
+        # `type` is either a class-name String (the scalar case) or a `{nested: <shape>}` Hash — an
+        # `each do ... end` element-type recursion (issue #137's ceiling slice): {SchemaScanner} already
+        # collected the nested block with the same `collect_schema_shape` algorithm a top-level schema
+        # body uses, so building its HashShape is just a recursive {.build} call.
+        def element_type(type)
+          return build(type[:nested]) if type.is_a?(Hash)
+
+          class_type(type)
         end
 
         def class_type(class_name)

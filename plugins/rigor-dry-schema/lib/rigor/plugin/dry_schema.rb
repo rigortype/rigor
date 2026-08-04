@@ -63,12 +63,18 @@ module Rigor
     # ADR-16 Tier C substrate the README originally projected — Tier C synthesises methods on a class
     # from a class-level DSL call, and this is a return type for a call chain off a constant.
     #
-    # The **ceiling** (slice 2+):
+    # Landed since (issue #137): `each do ... end` element-type recursion ({SchemaScanner#each_block_type_info})
+    # and the `dry-schema.unknown-type` `:info` diagnostic ({SchemaScanner#unknown_type_issues}), wired
+    # below via {.node_file_context} + {.node_rule}.
     #
-    # - Nested schemas (`schema(do ... end)` inside another row) — the key is currently kept as untyped.
-    # - `predicates(:size?)` / `each { ... }` recursion.
-    # - Per-row `dry-schema.unknown-predicate` / `dry-schema.unknown-type` `:info` diagnostics when a
-    #   row's predicate or type symbol isn't recognised.
+    # The **ceiling** (still open):
+    #
+    # - Nested schemas OUTSIDE an `each` (`required(:x).schema do ... end` with no `each` in the chain) —
+    #   the key is still kept as untyped; only the `each`-wrapped nested form recurses.
+    # - `predicates(:size?)` / other fine-grained predicate constraint walks.
+    # - `dry-schema.unknown-predicate` — deliberately NOT shipped; see {SchemaScanner.unknown_type_issues}
+    #   for why (no reliable static signal without a full predicate registry; risks flagging correct code).
+    # - `rigor-dry-validation` integration — landed separately in that plugin's own slices 2/3 (issue #137).
     class DrySchema < Rigor::Plugin::Base
       manifest(
         id: "dry-schema",
@@ -91,6 +97,32 @@ module Rigor
       # first act rejects any chain that is not `<Const>.call(...).to_h` before the table is touched.
       dynamic_return methods: [:to_h] do |call_node, _scope|
         result_shape_for(call_node)
+      end
+
+      # ADR-37 slice 1c two-pass: the "collect" half of `dry-schema.unknown-type` (issue #137's ceiling
+      # diagnostic). Walks the already-parsed file root once via {SchemaScanner.unknown_type_issues}; the
+      # `node_rule` below is the "validate" half that turns each collected issue into a Diagnostic.
+      node_file_context do |root, _scope|
+        SchemaScanner.unknown_type_issues(root)
+      end
+
+      # Fires exactly once per file: `Prism::ProgramNode` is the AST root, and the engine's node walker
+      # visits the root itself before descending (see `Source::NodeWalker#walk_with_ancestors`). Cheaper
+      # than a `Prism::CallNode` rule re-matching every call site in the file — the collect pass already
+      # did the real walk.
+      node_rule Prism::ProgramNode do |_node, _scope, path, issues|
+        next [] if issues.nil? || issues.empty?
+
+        issues.map do |issue|
+          diagnostic(
+            issue[:node],
+            path: path,
+            message: "`#{issue[:key]}` uses `:#{issue[:symbol]}`, which is not a recognised dry-schema " \
+                     "canonical type symbol (see the plugin README's predicate type table)",
+            severity: :info,
+            rule: "dry-schema.unknown-type"
+          )
+        end
       end
 
       # Walks every project file once during `prepare(services)` to build the schema table, then publishes

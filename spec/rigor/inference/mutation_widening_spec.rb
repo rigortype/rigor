@@ -226,6 +226,41 @@ RSpec.describe Rigor::Inference::MutationWidening do
                                          "expected #{meth} not to widen the HashShape, but it did"
       end
     end
+
+    # Issue #277 — the receiver may SELECT among variables instead of naming one. Every candidate the
+    # expression can evaluate to is the mutation's possible target, so every candidate must widen.
+    it "widens both arms of a ternary receiver under `[]=`" do
+      shape = Rigor::Type::HashShape.new(a: Rigor::Type::Combinator.nominal_of("Integer"))
+      seeded = scope.with_local(:required, shape).with_local(:optional, shape)
+      call = parse_call("required = {}; optional = {}; (flag ? required : optional)[key] = value")
+      result = described_class.widen_after_call(call_node: call, current_scope: seeded)
+
+      expect(result.local(:required).class_name).to eq("Hash")
+      expect(result.local(:optional).class_name).to eq("Hash")
+    end
+
+    it "widens both arms of an `if`/`else` receiver and of a short-circuit receiver" do
+      tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String"))
+      seeded = scope.with_local(:head, tuple).with_local(:tail, tuple)
+
+      if_call = parse_call("head = []; tail = []; (if flag then head else tail end) << x")
+      if_result = described_class.widen_after_call(call_node: if_call, current_scope: seeded)
+      expect(if_result.local(:head).class_name).to eq("Array")
+      expect(if_result.local(:tail).class_name).to eq("Array")
+
+      or_call = parse_call("head = []; tail = []; (head || tail) << x")
+      or_result = described_class.widen_after_call(call_node: or_call, current_scope: seeded)
+      expect(or_result.local(:head).class_name).to eq("Array")
+      expect(or_result.local(:tail).class_name).to eq("Array")
+    end
+
+    it "declines for a receiver that names no binding — an index read is not an alias" do
+      shape = Rigor::Type::HashShape.new(required: Rigor::Type::Combinator.tuple_of)
+      seeded = scope.with_local(:declared, shape)
+      call = parse_call("declared = {}; declared[kind] << key")
+
+      expect(described_class.widen_after_call(call_node: call, current_scope: seeded)).to equal(seeded)
+    end
   end
 
   describe ".widen_after_block" do
@@ -326,6 +361,40 @@ RSpec.describe Rigor::Inference::MutationWidening do
       seeded = Rigor::Scope.empty.with_local(:arr, tuple)
       result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
       expect(result.local(:arr)).to equal(tuple)
+    end
+
+    # Issue #277's exact shape: the block routes the mutation through a ternary over two captured hashes.
+    it "widens every captured arm of a selection receiver inside a block body" do
+      call = parse_each_call(<<~RUBY)
+        required = {}
+        optional = {}
+        rows.each do |kind, key, info|
+          (kind == :required ? required : optional)[key] = info
+        end
+      RUBY
+      shape = Rigor::Type::HashShape.new(a: Rigor::Type::Combinator.nominal_of("Integer"))
+      seeded = Rigor::Scope.empty.with_local(:required, shape).with_local(:optional, shape)
+      result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
+
+      expect(result.local(:required).class_name).to eq("Hash")
+      expect(result.local(:optional).class_name).to eq("Hash")
+    end
+
+    # The depth-0 skip applies per candidate, not per receiver expression: a selection mixing an outer capture
+    # with a block-local shadow widens only the capture.
+    it "skips a block-local arm of a selection receiver while widening the captured arm" do
+      call = parse_each_call(<<~RUBY)
+        arr = [1]
+        other = [1]
+        items.each do |arr|
+          (flag ? arr : other) << 1
+        end
+      RUBY
+      seeded = Rigor::Scope.empty.with_local(:arr, tuple).with_local(:other, tuple)
+      result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
+
+      expect(result.local(:arr)).to equal(tuple)
+      expect(result.local(:other).class_name).to eq("Array")
     end
   end
 

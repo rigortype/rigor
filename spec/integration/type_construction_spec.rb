@@ -179,6 +179,25 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/aliased_mutation_receiver.rb — issue #277 selection-receiver mutation widening" do
+    let(:harness) { harness_for("aliased_mutation_receiver") }
+
+    # `(kind == :required ? required : optional)[key] = info` mutates whichever hash the ternary picked, so
+    # BOTH forget their empty-`HashShape` seed. The recursive collector's return union therefore stays open
+    # across the recursive edge (`required` / `optional` are `Hash`, not `{}`).
+    it "keeps the recursive return union open across the recursive edge" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    # The caller's `shape[:required].empty? && shape[:optional].empty?` is live for every input carrying a
+    # row; before the fix it folded to `Constant[true]` and fired a `flow.always-truthy-condition`.
+    it "fires no flow.always-truthy-condition on the recursive collector's emptiness guard" do
+      flow_constants = harness.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+      expect(flow_constants).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

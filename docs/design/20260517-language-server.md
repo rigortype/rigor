@@ -142,27 +142,76 @@ entry is dropped.
 
 ## Concurrency
 
-- The LSP boots one Ractor pool sized N (`parallel.workers:` /
-  `RIGOR_RACTOR_WORKERS`, mirroring `rigor check`).
-- Workers are pre-warmed with `Environment` + plugins at
-  `initialize` time, NOT lazily on first request. The session is
-  long-lived (minutes to hours), so the cold-start tax is paid
-  exactly once.
-- Each `publishDiagnostics` request dispatches to one worker. The
-  pool's existing per-worker reporters and FactStore continue to
-  work as in `rigor check` pool mode.
-- `hover` / `documentSymbol` requests can run inline on the main
-  Ractor (cheap; no per-buffer inference).
-- Cancellation: LSP `$/cancelRequest` is honored in v1 by setting
-  a per-request cancel flag the worker checks between scope-index
-  build steps. Granularity is coarse (one cancellation point per
-  request mid-flight) — fine-grained AST-walk cancellation is
-  deferred.
+**Superseded (issue #142, landed):** this section originally specified
+a Ractor pool booted once at `initialize` and reused across every
+request. That shape does not fit what actually landed, for two
+reasons discovered while implementing it, and the text below
+describes the real mechanism instead of silently drifting from what
+ships.
 
-Editor mode v1 forces `workers: 0` because per-buffer one-shot
-costs are dominated by pool warm-up. The LSP inverts that: the
-pool warms once and stays alive, so the per-request cost lands
-where it belongs (inference only).
+1. The active pool backend everywhere else in Rigor is **fork**, not
+   Ractor (ADR-15 Amendment; the Ractor pool is preserved only behind
+   `RIGOR_POOL_BACKEND=ractor` — see § "Library choice" and
+   `Rigor::Analysis::Runner::PoolCoordinator`). The LSP pool follows
+   suit rather than being the one caller left on the abandoned
+   backend.
+2. `Rigor::Analysis::Runner` and `Rigor::LanguageServer::ProjectContext`
+   already gave `DiagnosticPublisher#run_analysis` a **persistent,
+   shared `Environment` + `ProjectScan`** before #142 (slice 7): every
+   single-buffer publish already reuses one warm `Environment.for_project`
+   build and one warm plugin-`#prepare` pass, never rebuilding either
+   per request. There was no separate "pool warm-up" cost left to hide
+   behind an `initialize`-time boot — the expensive part was already
+   amortized. What #142 needed was purely a **dispatch-side** change:
+   run several buffers' analyses in parallel instead of one at a time.
+
+The mechanism that landed:
+
+- `Rigor::Analysis::Runner::BufferPoolDispatcher` (a sibling of
+  `PoolCoordinator`, not a Ractor pool object) runs one independent
+  `Runner#run` per dirty buffer, `fork`ing N children that
+  copy-on-write inherit the PARENT process's already-warm `Environment`
+  + `ProjectScan` — so a batch pays **zero** extra RBS-env-build or
+  plugin-`#prepare` cost over today's sequential path; only the
+  per-file inference itself moves off the main process. There is no
+  live pool sitting idle between publishes: each batch forks fresh
+  child processes and they exit when done, which is the right shape
+  for a bursty, debounced workload (steady stream of single-buffer
+  publishes, occasional bursts) rather than a saturated one.
+- `DiagnosticPublisher#enqueue_batch` coalesces `publish_for` calls
+  whose per-URI debounce timers elapse close together (a
+  workspace-wide rename, a git branch switch touching many open
+  files) into ONE `#publish_many` round dispatched through
+  `BufferPoolDispatcher`, single-flighted the same way the #246 save
+  round already is. A lone edit still takes exactly today's
+  single-buffer path (`#run_and_notify`) — the batch layer is a
+  no-op for N=1.
+- Pool size N resolves from `parallel.workers:` / `RIGOR_RACTOR_WORKERS`,
+  mirroring `rigor check`, exactly as originally specified.
+- `hover` / `documentSymbol` still run inline on the main process
+  (cheap; no per-buffer inference) — unchanged from the original text.
+- `$/cancelRequest` is **not** wired to the buffer pool. It was never
+  implemented for the single-buffer path either (the "Out of scope
+  for v1" list already queues cancellation finer than per-request);
+  the sentence about a per-request cancel flag above described an
+  aspiration this landing did not need to satisfy and was removed
+  rather than left to imply otherwise.
+- Buffer substitution is per-JOB, not per-session: each dirty buffer
+  carries its OWN `BufferBinding` (logical path → its own editor
+  tempfile) all the way into its fork child, so a worker never reads
+  the file as it sits on disk nor a sibling buffer's bytes even when
+  several are dispatched together — the risk `PoolCoordinator`'s
+  existing single-session `@buffer` slot does not generalize to
+  (editor mode there forces sequential specifically because it has
+  only one buffer binding per run).
+
+Editor mode v1 still forces `workers: 0` for the CLI's one-shot
+`--tmp-file` path, where pool warm-up genuinely would dominate a
+single invocation — that trade-off is unchanged. The LSP differs
+because the process itself is long-lived and the warm state
+(`Environment` + `ProjectScan`) is already shared across requests
+independent of this issue, so a batch dispatch has nothing left to
+amortize except the inference work itself.
 
 ## Project context refresh
 
@@ -375,9 +424,13 @@ editor mode v1's seven-slice cut.
 7. **`workspace/didChangeWatchedFiles` + ProjectContext invalidation.**
    File-system events drop the affected index slice; pre-passes
    rebuild incrementally.
-8. **Ractor pool integration.** LSP boots a pool at
-   `initialize`; per-request diagnostics dispatch into the pool.
-   `hover` / `documentSymbol` stay main-Ractor.
+8. **Worker-pool dispatch for multi-buffer publishes (landed, issue
+   #142 — as fork, not Ractor; see the "Concurrency" section's
+   "Superseded" note for why).** A burst of buffers whose debounce
+   timers elapse together publishes through ONE
+   `Rigor::Analysis::Runner::BufferPoolDispatcher` round instead of N
+   sequential `Runner` calls. `hover` / `documentSymbol` stay
+   main-process, as originally specified.
 9. **(deferred) `textDocument/definition`** — needs a
    `Reflection`-side symbol index keyed on FILE:LINE.
 10. **Incremental `didChange`** (landed) — UTF-16 offset

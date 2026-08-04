@@ -3,6 +3,7 @@
 require "tempfile"
 
 require_relative "uri"
+require_relative "publish_batcher"
 require_relative "../analysis/runner"
 require_relative "../analysis/buffer_binding"
 
@@ -14,8 +15,10 @@ module Rigor
     # the Runner, and pushes the resulting LSP `Diagnostic[]` through the writer.
     #
     # Debouncing is wired via an optional `Debouncer` injected at construction (delay defaults to 200ms
-    # quiet-time); without a debouncer each call blocks synchronously (primarily for specs). Ractor-pool
-    # dispatch is queued.
+    # quiet-time); without a debouncer each call blocks synchronously (primarily for specs). When several
+    # buffers' debounce timers elapse around the same moment, the `PublishBatcher` coalesces them into one
+    # `#publish_many` round dispatched across the fork-based worker pool (issue #142) instead of N
+    # independent, GVL-serialized `Runner` calls.
     class DiagnosticPublisher
       # Maps Rigor severity symbols to LSP DiagnosticSeverity
       # integers per spec § "Diagnostic":
@@ -51,21 +54,50 @@ module Rigor
         @round_lock = Mutex.new
         @round_running = false
         @round_pending = false
+        # Issue #142 — coalesces buffers whose OWN debounce timers elapse close together into one
+        # `#publish_many` round instead of N independent GVL-serialized `Runner` calls. Separate from
+        # `@round_lock` above, which single-flights the whole-project SAVE round; this single-flights the
+        # per-buffer DIDCHANGE batch instead. See `PublishBatcher` for the coalescing mechanics.
+        @batcher = PublishBatcher.new(
+          on_batch: ->(uris) { publish_many(uris) },
+          on_error: ->(e) { warn "DiagnosticPublisher batch round: #{e.class}: #{e.message}" }
+        )
       end
 
       # Run analysis for the buffer at `uri` (looked up in the BufferTable) and push a
       # `textDocument/publishDiagnostics` notification. No-op when the URI isn't a `file://` form or the
       # buffer isn't currently open. When a Debouncer is wired, the analysis is scheduled async per the
-      # configured `debounce_seconds`; otherwise it runs inline.
+      # configured `debounce_seconds` and joins the batch coalescing layer (`PublishBatcher`) once its own
+      # quiet-time elapses; otherwise it runs inline (primarily for specs).
       def publish_for(uri)
         path = Uri.to_path(uri)
         return if path.nil?
 
         if @debouncer
-          @debouncer.schedule(uri, delay: @debounce_seconds) { run_and_notify(uri, path) }
+          @debouncer.schedule(uri, delay: @debounce_seconds) { @batcher.enqueue(uri) }
         else
           run_and_notify(uri, path)
         end
+      end
+
+      # Issue #142 — publishes N dirty buffers' diagnostics through ONE dispatch across the fork-based
+      # worker pool (`Analysis::Runner::BufferPoolDispatcher`) instead of N independent, GVL-serialized
+      # `Runner` calls. Each URI's OWN `BufferBinding` (its logical path bound to its OWN editor tempfile)
+      # travels with it, so a worker analyses that buffer's in-flight bytes — never the file as it sits on
+      # disk — even when several buffers are dispatched in the same round.
+      #
+      # Degrades to `#run_and_notify`'s existing single-buffer path when only one URI is eligible after
+      # filtering (a buffer closed mid-debounce-window is dropped; a desynchronised one publishes empty
+      # immediately) — a lone edit takes exactly the path it takes today. The dispatcher itself degrades to
+      # sequential in-process execution for any other precondition (see
+      # `BufferPoolDispatcher#dispatchable?`), so a pool that cannot start never fails a publish, only slows
+      # it back down to today's wall time.
+      def publish_many(uris)
+        eligible = uris.uniq.filter_map { |uri| eligible_job(uri) }
+        return if eligible.empty?
+        return run_and_notify(eligible.first.fetch(:uri), eligible.first.fetch(:path)) if eligible.size == 1
+
+        publish_batch(eligible)
       end
 
       # Runs one whole-project save round and publishes to the publish set (#246). Called from `didSave`.
@@ -180,6 +212,60 @@ module Rigor
         notify(uri, diagnostics)
       end
 
+      # @return [Hash, nil] `{ uri:, path:, bytes: }` when `uri` is eligible for the batch, or nil to
+      #   exclude it. Mirrors `#run_and_notify`'s own guards: a buffer closed during the debounce window is
+      #   dropped silently (its didClose empty publish already cleared the markers); a desynchronised buffer
+      #   publishes an EMPTY set immediately (same as the single-buffer path) rather than joining the batch.
+      def eligible_job(uri)
+        entry = @buffer_table[uri]
+        return nil if entry.nil?
+
+        path = Uri.to_path(uri)
+        return nil if path.nil?
+
+        if @buffer_table.desynchronized?(uri)
+          notify(uri, [])
+          return nil
+        end
+
+        { uri: uri, path: path, bytes: entry.bytes }
+      end
+
+      # Materialises one tempfile + `BufferBinding` per job, dispatches all of them through
+      # `BufferPoolDispatcher#analyze` in ONE call, and publishes each job's own slice. `dispatcher.analyze`
+      # returns diagnostics IN INPUT ORDER, so `jobs`/`bindings`/the result array stay index-aligned — the
+      # parent absorbs worker results in this stable order, so two runs of the same dirty set publish
+      # byte-identical results.
+      def publish_batch(jobs)
+        with_tempfiles(jobs) do |bound_jobs|
+          bindings = bound_jobs.map { |job| job.fetch(:binding) }
+          dispatcher = Analysis::Runner::BufferPoolDispatcher.new(
+            configuration: @project_context.configuration,
+            cache_store: @project_context.cache_store,
+            environment: @project_context.environment,
+            prebuilt: @project_context.project_scan,
+            workers: worker_count
+          )
+          diagnostics_per_binding = dispatcher.analyze(bindings)
+          bound_jobs.each_with_index do |job, index|
+            diagnostics = diagnostics_per_binding.fetch(index, []).filter_map do |diagnostic|
+              to_lsp_diagnostic(diagnostic, job.fetch(:path))
+            end
+            notify(job.fetch(:uri), diagnostics)
+          end
+        end
+      end
+
+      # Worker-pool size, mirroring `rigor check`'s own precedence minus the CLI flag the LSP does not have:
+      # env `RIGOR_RACTOR_WORKERS` (if set and non-empty) wins, else `.rigor.yml` `parallel.workers:` (0 —
+      # sequential — by default). See `docs/design/20260517-language-server.md` § "Concurrency".
+      def worker_count
+        env_value = ENV.fetch("RIGOR_RACTOR_WORKERS", nil)
+        return [Integer(env_value), 0].max if env_value && !env_value.empty?
+
+        @project_context.configuration.parallel_workers
+      end
+
       # Runs `Analysis::Runner` with a `BufferBinding` so the buffer bytes (instead of the on-disk file) drive
       # the parse. The `Rigor::Analysis::ProjectScan` cached on the ProjectContext is passed through
       # `prebuilt:` so plugin `#prepare`, the dependency-source walker, and the synthetic-method /
@@ -210,6 +296,28 @@ module Rigor
       ensure
         tmp&.close
         tmp&.unlink
+      end
+
+      # Plural form of `#with_tempfile` for `#publish_batch` — writes one tempfile per job up front, yields
+      # each job Hash augmented with its own `binding:` (a `BufferBinding` pairing the job's logical path
+      # with ITS OWN physical tempfile), and unlinks every tempfile afterward regardless of how the block
+      # exits.
+      def with_tempfiles(jobs)
+        tempfiles = []
+        bound_jobs = jobs.map do |job|
+          tmp = Tempfile.new(["rigor-lsp-buffer-", ".rb"])
+          tmp.write(job.fetch(:bytes))
+          tmp.flush
+          tempfiles << tmp
+          binding = Analysis::BufferBinding.new(logical_path: job.fetch(:path), physical_path: tmp.path)
+          job.merge(binding: binding)
+        end
+        yield bound_jobs
+      ensure
+        tempfiles.each do |tmp|
+          tmp.close
+          tmp.unlink
+        end
       end
 
       # @return [Hash, nil] the LSP `Diagnostic` Hash, or nil to

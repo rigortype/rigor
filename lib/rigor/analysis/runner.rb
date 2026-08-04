@@ -40,6 +40,7 @@ require_relative "runner/run_snapshots"
 require_relative "runner/project_pre_passes"
 require_relative "runner/pool_coordinator"
 require_relative "runner/diagnostic_aggregator"
+require_relative "runner/buffer_pool_dispatcher"
 
 module Rigor
   module Analysis

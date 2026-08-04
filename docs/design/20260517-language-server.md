@@ -178,14 +178,25 @@ The mechanism that landed:
   child processes and they exit when done, which is the right shape
   for a bursty, debounced workload (steady stream of single-buffer
   publishes, occasional bursts) rather than a saturated one.
-- `DiagnosticPublisher#enqueue_batch` coalesces `publish_for` calls
-  whose per-URI debounce timers elapse close together (a
+- `Rigor::LanguageServer::PublishBatcher` coalesces `publish_for`
+  calls whose per-URI debounce timers elapse close together (a
   workspace-wide rename, a git branch switch touching many open
   files) into ONE `#publish_many` round dispatched through
   `BufferPoolDispatcher`, single-flighted the same way the #246 save
   round already is. A lone edit still takes exactly today's
   single-buffer path (`#run_and_notify`) — the batch layer is a
   no-op for N=1.
+- **Size gate, added on review:** below `BufferPoolDispatcher::DEFAULT_MIN_BATCH_SIZE`
+  (16; override via `RIGOR_LSP_POOL_MIN_BATCH`), `#analyze` takes the
+  sequential in-process path even when the pool is otherwise
+  available. A measurement against this repo's own `lib/rigor`
+  showed `fork` + `Marshal` + `Process.waitpid2` overhead exceeding
+  the parallelism win below roughly N=12 — squarely the size of a
+  realistic burst — and only paying off cleanly from N=16 up; see
+  `BufferPoolDispatcher`'s own doc comment for the full table. The
+  gate's fallback is the exact same computation the sequential path
+  already runs, so it is never slower than today, only slower than
+  the pool it declines to use below the threshold.
 - Pool size N resolves from `parallel.workers:` / `RIGOR_RACTOR_WORKERS`,
   mirroring `rigor check`, exactly as originally specified.
 - `hover` / `documentSymbol` still run inline on the main process

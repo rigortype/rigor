@@ -2,6 +2,7 @@ paths:
   - demo.rb
 
 plugins:
+  - rigor-dry-schema
   - rigor-dry-validation
 
 signature_paths:

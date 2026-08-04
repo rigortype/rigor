@@ -9,6 +9,16 @@ DRY_VALIDATION_PLUGIN_LIB = File.expand_path("../../../plugins/rigor-dry-validat
 $LOAD_PATH.unshift(DRY_VALIDATION_PLUGIN_LIB) unless $LOAD_PATH.include?(DRY_VALIDATION_PLUGIN_LIB)
 require "rigor-dry-validation"
 
+DRY_SCHEMA_PLUGIN_LIB_FOR_VALIDATION = File.expand_path("../../../plugins/rigor-dry-schema/lib", __dir__)
+unless $LOAD_PATH.include?(DRY_SCHEMA_PLUGIN_LIB_FOR_VALIDATION)
+  $LOAD_PATH.unshift(DRY_SCHEMA_PLUGIN_LIB_FOR_VALIDATION)
+end
+require "rigor-dry-schema"
+
+DRY_TYPES_PLUGIN_LIB_FOR_VALIDATION = File.expand_path("../../../plugins/rigor-dry-types/lib", __dir__)
+$LOAD_PATH.unshift(DRY_TYPES_PLUGIN_LIB_FOR_VALIDATION) unless $LOAD_PATH.include?(DRY_TYPES_PLUGIN_LIB_FOR_VALIDATION)
+require "rigor-dry-types"
+
 RSpec.describe "rigor-dry-validation integration" do
   let(:plugin_class) { Rigor::Plugin::DryValidation }
 
@@ -119,6 +129,357 @@ RSpec.describe "rigor-dry-validation integration" do
       expect(contents).to include("def call:")
       expect(contents).to include("class Result")
       expect(contents).to include("def to_h:")
+    end
+  end
+
+  # Slices 2/3 (issue #137) — `params { ... }` / `json { ... }` integration with rigor-dry-schema.
+  describe "params/json schema integration (slices 2/3)" do
+    it "publishes :dry_validation_params for a Contract's `params { ... }` block" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            required(:age).value(:integer)
+          end
+        end
+      RUBY
+      table = run_and_read_params_fact(demo: demo)
+      entry = table.fetch("NewUserContract")
+      expect(entry.fetch(:params).fetch(:required)).to eq(
+        email: { type: "String", list: false },
+        age: { type: "Integer", list: false }
+      )
+    end
+
+    it "publishes :dry_validation_params for a Contract's `json { ... }` block" do
+      demo = <<~RUBY
+        class ImportContract < Dry::Validation::Contract
+          json do
+            required(:sku).filled(:string)
+          end
+        end
+      RUBY
+      table = run_and_read_params_fact(demo: demo)
+      expect(table.fetch("ImportContract").fetch(:json).fetch(:required)).to eq(
+        sku: { type: "String", list: false }
+      )
+    end
+
+    it "does NOT publish :dry_validation_params when rigor-dry-schema isn't loaded" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+        end
+      RUBY
+      expect(run_and_read_params_fact(demo: demo, with_dry_schema: false)).to be_nil
+    end
+
+    it "does NOT capture a `params { ... }` call that isn't a direct top-level class-body statement" do
+      demo = <<~RUBY
+        class ConditionalContract < Dry::Validation::Contract
+          if true
+            params do
+              required(:email).filled(:string)
+            end
+          end
+        end
+      RUBY
+      expect(run_and_read_params_fact(demo: demo)).to be_nil
+    end
+
+    it "refines `Contract.new.call(input).to_h` to the params schema's HashShape" do
+      dump = dump_types(<<~RUBY).first
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            required(:age).value(:integer)
+          end
+        end
+
+        Rigor.dump_type(NewUserContract.new.call({}).to_h)
+      RUBY
+      expect(dump).to include("email", "String", "age", "Integer")
+    end
+
+    it "refines `Contract.new.call(input).to_h` to the json schema's HashShape" do
+      dump = dump_types(<<~RUBY).first
+        class ImportContract < Dry::Validation::Contract
+          json do
+            required(:sku).filled(:string)
+          end
+        end
+
+        Rigor.dump_type(ImportContract.new.call({}).to_h)
+      RUBY
+      expect(dump).to include("sku", "String")
+    end
+
+    it "keeps the generic Hash[Symbol, untyped] shape when rigor-dry-schema isn't loaded" do
+      dump = dump_types(<<~RUBY, with_dry_schema: false).first
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+        end
+
+        Rigor.dump_type(NewUserContract.new.call({}).to_h)
+      RUBY
+      expect(dump).not_to include("email")
+    end
+
+    it "contributes nothing for a Contract with no params/json block at all" do
+      dumps = dump_types(<<~RUBY)
+        class EmptyContract < Dry::Validation::Contract
+        end
+
+        Rigor.dump_type(EmptyContract.new.call({}).to_h)
+      RUBY
+      expect(dumps.first).not_to include("=>")
+    end
+
+    it "resolves a params row's constant type reference through :dry_type_aliases too" do
+      demo = <<~RUBY
+        module Types
+          include Dry.Types()
+
+          Email = String.constrained(format: /@/)
+        end
+
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).value(Types::Email)
+          end
+        end
+      RUBY
+      table = run_and_read_params_fact(demo: demo, with_dry_types: true)
+      expect(table.fetch("NewUserContract").fetch(:params).fetch(:required)).to eq(
+        email: { type: "String", list: false }
+      )
+    end
+  end
+
+  # Per-Contract diagnostics (issue #137's remaining checkbox) — `dry-validation.rule-key-mismatch`.
+  describe "`dry-validation.rule-key-mismatch` diagnostic" do
+    it "fires when rule(:key) references a key absent from the Contract's params schema" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      issue = result.diagnostics.find { |d| d.rule == "dry-validation.rule-key-mismatch" }
+      expect(issue).not_to be_nil
+      expect(issue.severity).to eq(:error)
+      expect(issue.message).to include("nonexistent_key").and include("NewUserContract")
+    end
+
+    it "does NOT fire when every rule() key is declared" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            required(:age).value(:integer)
+          end
+
+          rule(:email, :age) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "does NOT fire for an unmodelled (untyped-but-declared) key" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            required(:weird).filled(:not_a_type)
+          end
+
+          rule(:weird) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "declines the WHOLE Contract when the params block has an unrecognised statement" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+            %i[extra_a extra_b].each { |k| required(k).filled(:string) }
+          end
+
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "declines a rule() call with a splat argument" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          KEYS = [:nonexistent_key].freeze
+
+          rule(*KEYS) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "declines a rule() call with the nested-key Hash form" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:user).filled(:hash)
+          end
+
+          rule(user: [:nonexistent_key]) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "does NOT fire when rigor-dry-schema isn't loaded" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo, with_dry_schema: false)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "does NOT fire for a Contract with no params/json block at all" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          rule(:nonexistent_key) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      expect(result.diagnostics.select { |d| d.rule == "dry-validation.rule-key-mismatch" }).to be_empty
+    end
+
+    it "includes a did-you-mean suggestion for a close typo" do
+      demo = <<~RUBY
+        class NewUserContract < Dry::Validation::Contract
+          params do
+            required(:email).filled(:string)
+          end
+
+          rule(:emial) do
+            key.failure("nope")
+          end
+        end
+      RUBY
+      result = run_demo(demo)
+      issue = result.diagnostics.find { |d| d.rule == "dry-validation.rule-key-mismatch" }
+      expect(issue.message).to include("did you mean `:email`?")
+    end
+  end
+
+  # Runs the plugin(s) against a single-file project and returns the `dump.type` messages, in source order.
+  def dump_types(demo, with_dry_schema: true)
+    run_demo(demo, with_dry_schema: with_dry_schema).diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+  end
+
+  def run_demo(demo, with_dry_schema: true, with_dry_types: false)
+    plugin_entries = ["rigor-dry-validation"]
+    plugin_entries << "rigor-dry-schema" if with_dry_schema
+    plugin_entries << "rigor-dry-types" if with_dry_types
+
+    Rigor::Plugin.unregister!
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "contracts.rb"), demo)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "sig", "dry_validation.rbs"), dry_validation_rbs)
+      run_analysis(dir: dir, plugin_entries: plugin_entries)
+    end
+  end
+
+  # Runs the plugin(s) against a single-file project and returns the `:dry_validation_params` fact value.
+  def run_and_read_params_fact(demo:, with_dry_schema: true, with_dry_types: false)
+    plugin_entries = ["rigor-dry-validation"]
+    plugin_entries << "rigor-dry-schema" if with_dry_schema
+    plugin_entries << "rigor-dry-types" if with_dry_types
+
+    Rigor::Plugin.unregister!
+    captured_store = capture_fact_store!
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "contracts.rb"), demo)
+      FileUtils.mkdir_p(File.join(dir, "sig"))
+      File.write(File.join(dir, "sig", "dry_validation.rbs"), dry_validation_rbs)
+      run_analysis(dir: dir, plugin_entries: plugin_entries)
+    end
+    captured_store.call&.read(plugin_id: "dry-validation", name: :dry_validation_params)
+  end
+
+  def capture_fact_store!
+    captured = nil
+    allow(Rigor::Plugin::Services).to receive(:new).and_wrap_original do |original, **kwargs|
+      services = original.call(**kwargs)
+      captured = services.fact_store
+      services
+    end
+    -> { captured }
+  end
+
+  def run_analysis(dir:, plugin_entries:)
+    configuration = Rigor::Configuration.new(
+      Rigor::Configuration::DEFAULTS.merge(
+        "paths" => [File.join(dir, "contracts.rb")],
+        "plugins" => plugin_entries
+      )
+    )
+
+    Dir.chdir(dir) do
+      Rigor::Analysis::Runner.new(
+        configuration: configuration, cache_store: nil,
+        plugin_requirer: lambda do |name|
+          # #194 slice 2 — a bundled plugin arrives as its engine-anchored absolute path; basename
+          # recovers the gem name (a bare name passes through unchanged).
+          case File.basename(name, ".rb")
+          when "rigor-dry-types" then Rigor::Plugin.register(Rigor::Plugin::DryTypes)
+          when "rigor-dry-schema" then Rigor::Plugin.register(Rigor::Plugin::DrySchema)
+          when "rigor-dry-validation" then Rigor::Plugin.register(Rigor::Plugin::DryValidation)
+          end
+          true
+        end
+      ).run
     end
   end
 

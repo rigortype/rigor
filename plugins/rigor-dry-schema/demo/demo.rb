@@ -40,3 +40,21 @@ payload = NewUserSchema.call({}).to_h
 Rigor.dump_type(payload)
 Rigor.dump_type(payload[:email])
 Rigor.dump_type(payload[:nickname])
+
+# `each do ... end` element-type recursion (issue #137's ceiling): the nested block is walked with the
+# same required/optional algorithm as a top-level schema body, so `items` types as an Array of the
+# nested HashShape rather than untyped.
+OrderSchema = Dry::Schema.Params do
+  required(:items).each do
+    required(:sku).filled(:string)
+    optional(:qty).value(:integer)
+  end
+end
+
+Rigor.dump_type(OrderSchema.call({}).to_h)
+
+# `dry-schema.unknown-type` — an `:info` diagnostic for a type-bearing predicate's Symbol argument
+# outside the canonical vocabulary. A typo, most likely — `rigor check` reports it below.
+TypoSchema = Dry::Schema.Params do
+  required(:count).filled(:integr)
+end

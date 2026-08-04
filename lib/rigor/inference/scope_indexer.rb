@@ -2598,24 +2598,47 @@ module Rigor
         node.rigor_each_child { |child| collect_class_decls(child, qualified_prefix, accumulator) }
       end
 
-      # T1 (template-corpora survey) — record a `Const = Class.new(Super)` (and the bare `Class.new` / `Module.new`)
-      # class-creating constant in the cross-file discovery table so a reference to `Const` from ANOTHER file under the
-      # same namespace resolves to the project class instead of falling through to a core same-named class
+      # T1 (template-corpora survey) — record a class-creating constant write (`Const = Class.new(Super)`, the bare
+      # `Class.new` / `Module.new`, and the `Data.define(*sym)` / `Struct.new(*sym)` forms, each with or without a
+      # block) in the cross-file discovery table so a reference to `Const` from ANOTHER file under the same namespace
+      # resolves to the project class instead of falling through to a same-named class elsewhere
       # (`Liquid::SyntaxError = Class.new(Error)` referenced in a sibling file's `rescue SyntaxError => e`, which
       # otherwise resolved to core `::SyntaxError`). Mirrors the single-file `in_source_constants` answer, which types
-      # `Class.new(Super)` as `Singleton[Super]` (the constructed class answers method lookups through Super's chain).
-      # The superclass name is resolved lexically against the enclosing prefix; a bare `Class.new` with no superclass
-      # (or `Module.new`) types as `Singleton[Const]` itself. The block form is left to the existing
-      # `meta_new_block_body` machinery — only the plain `Class.new(Super)` constant (the namespaced-sibling-error
-      # idiom) is added here.
+      # `Class.new(Super)` as `Singleton[Super]` (the constructed class answers method lookups through Super's chain)
+      # and every other recognised form as `Singleton[Const]`.
+      #
+      # #271 — the Data/Struct forms are here because their absence was an ACTIVE false positive, not merely a missed
+      # resolution: a nested `Const = Data.define(...)` invisible cross-file lets Ruby's lexical walk continue to the
+      # PARENT namespace's same-named sibling, so `Analysis::PluginFactFingerprint.from_registry(...).opaque?` typed
+      # its receiver as the unrelated `Rigor::Analysis::Result` and reported `call.undefined-method` on correct code.
+      # Nested `Result` / `Entry` / `Config` Data constants shadowing a sibling are ordinary Ruby, and only the
+      # DEFINING file's `in_source_constants` (never part of the project seed) knew about them.
       def record_class_new_constant_decl(node, qualified_prefix, accumulator)
         rvalue = node.value
-        return unless class_new_call?(rvalue) || module_new_call?(rvalue)
-        return if rvalue.block # block form: handled by meta_new_block_body walks
+        return unless meta_new_constant_rvalue?(rvalue)
 
         full = (qualified_prefix + [node.name.to_s]).join("::")
-        super_name = class_new_superclass_name(rvalue, qualified_prefix, accumulator)
-        accumulator[full] = Type::Combinator.singleton_of(super_name || full)
+        accumulator[full] = Type::Combinator.singleton_of(
+          meta_new_constant_decl_name(rvalue, full, qualified_prefix, accumulator)
+        )
+      end
+
+      # The four recognised class-creating rvalue shapes at constant-write position — the same set
+      # {#meta_new_block_body} recognises, so the cross-file table and the per-file block-as-method walk agree on what
+      # counts as a declaration.
+      def meta_new_constant_rvalue?(rvalue)
+        class_new_call?(rvalue) || module_new_call?(rvalue) ||
+          data_define_call?(rvalue) || struct_new_call?(rvalue)
+      end
+
+      # The name the constant's `Singleton[...]` carries. Only a block-less `Class.new(Super)` borrows its superclass's
+      # name (the constructed class answers lookups through `Super`'s chain and declares nothing of its own); every
+      # other form — Data/Struct members, any block body — owns methods under its OWN qualified name, which is exactly
+      # what the per-file `meta_new_constant_type` answers.
+      def meta_new_constant_decl_name(rvalue, full, qualified_prefix, accumulator)
+        return full if rvalue.block || data_define_call?(rvalue) || struct_new_call?(rvalue)
+
+        class_new_superclass_name(rvalue, qualified_prefix, accumulator) || full
       end
 
       # Lexically-qualified name of a `Class.new(Super)` superclass argument, or nil when there is no positional

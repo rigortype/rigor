@@ -198,6 +198,14 @@ module Rigor
         end
         private_class_method :schema_entry_call?
 
+        # PUBLIC reuse surface (issue #137 slices 2/3): `rigor-dry-validation`'s `params { ... }` /
+        # `json { ... }` block body is the SAME dry-schema DSL a top-level `Dry::Schema.X { ... }` body
+        # is, so that plugin delegates here instead of duplicating the required/optional walk — the
+        # `docs/design/20260517-dry-validation-slicing.md` slicing note's own "delegate to
+        # rigor-dry-schema's walker" option. Only reachable from another plugin when `rigor-dry-schema`
+        # is registered (the caller checks `Rigor::Plugin.registered_for("dry-schema")` first — that is
+        # also what makes THIS class already loaded/defined for the caller to reference).
+        #
         # `nested:` is false at the top-level `Dry::Schema.X { ... }` body and true inside an `each do
         # ... end` row's own recursive call (see {#each_block_type_info}). It caps the recursion at ONE
         # level deep: with `nested: true`, {#walk_predicate_chain} declines a FURTHER `each do ... end`
@@ -223,7 +231,6 @@ module Rigor
             unmodelled: unmodelled_keys(declared, required, optional)
           }.freeze
         end
-        private_class_method :collect_schema_shape
 
         # Walks every top-level `required(:key).<predicate>(...)` / `optional(:key).<predicate>(...)`
         # chain in the block body. The block's body is either a `Prism::StatementsNode` (multi-statement)

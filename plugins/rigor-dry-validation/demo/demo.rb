@@ -3,7 +3,7 @@
 # rigor-dry-validation demo. Run from this directory:
 #
 #   cp .rigor.dist.yml .rigor.yml
-#   RUBYLIB=$PWD/../lib bundle exec rigor check
+#   RUBYLIB=$PWD/../lib:$PWD/../../rigor-dry-schema/lib bundle exec rigor check
 #
 # The canonical Dry::Validation::Contract subclass shapes: fully-qualified and lexical-Dry-nested. With
 # the plugin enabled, rigor's `prepare(services)` hook scans this file, sees both subclasses, and
@@ -12,6 +12,10 @@
 # The shipped RBS overlay (sig/dry_validation.rbs, wired via the `signature_paths:` config) types
 # `contract.call(input)` as returning `Dry::Validation::Result`, so the chained `.success?` / `.to_h`
 # queries below resolve cleanly.
+#
+# With rigor-dry-schema ALSO loaded (this demo's `.rigor.dist.yml` lists both), slices 2/3 (issue #137)
+# refine `result.to_h` further: instead of the RBS overlay's generic `Hash[Symbol, untyped]`, it types
+# per this Contract's own `params { ... }` block.
 
 class NewUserContract < Dry::Validation::Contract
   params do
@@ -41,3 +45,8 @@ if result.success?
 else
   puts result.errors.inspect
 end
+
+# Slices 2/3 (issue #137): `Rigor.dump_type` shows the refined shape —
+#   { email: String, age: Integer, ... }
+# instead of the RBS overlay's generic `Hash[Symbol, untyped]`.
+Rigor.dump_type(NewUserContract.new.call(email: "alice@example.com", age: 17).to_h)

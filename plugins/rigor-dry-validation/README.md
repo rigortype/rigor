@@ -11,6 +11,12 @@ cross-plugin fact. Ships an RBS overlay typing
 `Contract#call` / `Result#success?` / `Result#failure?` /
 `Result#to_h` / `Result#errors` / `Result#[]`.
 
+With `rigor-dry-schema` also loaded, a Contract's `params { ... }` /
+`json { ... }` block — the SAME dry-schema DSL a top-level
+`Dry::Schema.X { ... }` body uses — refines `result.to_h` from the
+RBS overlay's generic `Hash[Symbol, untyped]` to the schema-typed
+`HashShape`. See § "params / json integration" below.
+
 > **Using this plugin?** The user guide lives in the manual at
 > [docs/manual/plugins/rigor-dry-validation.md](../../docs/manual/plugins/rigor-dry-validation.md).
 > This README covers the plugin's internals.
@@ -71,13 +77,76 @@ With the overlay loaded:
 ```ruby
 result = NewUserContract.new.call(input)  # Dry::Validation::Result
 result.success?                            # bool
-result.to_h                                # Hash[Symbol, untyped]
-result.errors                              # untyped (refined in slice 2)
+result.to_h                                # Hash[Symbol, untyped] — refined below, with rigor-dry-schema
+result.errors                              # untyped (still — no ceiling slice targets this)
 ```
+
+## `params` / `json` integration (slices 2/3)
+
+With `rigor-dry-schema` also loaded, `prepare(services)` walks
+every recognised Contract's class body for a TOP-LEVEL, bare
+`params do ... end` and/or `json do ... end` call — a direct
+class-body statement, no receiver, no positional/keyword
+arguments, exactly one block. The block is the SAME dry-schema
+DSL a top-level `Dry::Schema.X { ... }` body uses (`required` /
+`optional` / `filled` / `value` / `maybe` / `each`), so this
+plugin delegates the actual walk to
+`Rigor::Plugin::DrySchema::SchemaScanner.collect_schema_shape`
+rather than duplicating it — the
+[slicing plan](../../docs/design/20260517-dry-validation-slicing.md)'s
+own "delegate to rigor-dry-schema's walker" option.
+
+```ruby
+class NewUserContract < Dry::Validation::Contract
+  params do
+    required(:email).filled(:string)
+    required(:age).value(:integer)
+  end
+end
+```
+
+publishes the `:dry_validation_params` fact:
+
+```ruby
+{
+  "NewUserContract" => {
+    params: {
+      required: { email: { type: "String", list: false },
+                  age:   { type: "Integer", list: false } },
+      optional: {},
+      unmodelled: { required: [], optional: [] }
+    }
+  }
+}
+```
+
+and refines `NewUserContract.new.call(input).to_h` from the RBS
+overlay's generic `Hash[Symbol, untyped]` to
+`{ email: String, age: Integer, ... }` — the identical
+required/optional-preserving, open-shape HashShape build
+rigor-dry-schema's own `ResultShape.build` uses (delegated to,
+not duplicated). `json { ... }` works identically under a
+`json:` key; a Contract with BOTH blocks (unusual) prefers
+`params` for the `to_h` refinement.
+
+The chain recognised is `<Const>.new.call(...).to_h` — the
+Contract must be named by a constant as written at the call
+site, matching rigor-dry-schema's own floor for `SomeSchema.call(x).to_h`.
+Reached through a local, the chain contributes nothing and
+`to_h` types per the RBS overlay as before.
+
+A `params { ... }` / `json { ... }` call that ISN'T a bare,
+top-level class-body statement — wrapped in a conditional, built
+via a method call, given positional arguments — is not
+recognised; the Contract simply has no entry in
+`:dry_validation_params` and `to_h` keeps the generic overlay
+shape. Without `rigor-dry-schema` loaded at all, this whole
+section is inert: the plugin ships no required/optional walker
+of its own.
 
 ## Floor / ceiling
 
-Slice 1 ships the **floor**:
+Slice 1 shipped the **floor**:
 
 - Contract subclass recognition (full-path
   `Dry::Validation::Contract` AND lexical-Dry path
@@ -88,34 +157,34 @@ Slice 1 ships the **floor**:
   `Result#to_h` returns `Hash[Symbol, untyped]`.
 - No user-facing diagnostics yet.
 
-The **ceiling** (deferred to demand):
+**Landed since** (issue #137): **slices 2/3** — `params { ... }` /
+`json { ... }` integration with `rigor-dry-schema`, refining
+`result.to_h` per-Contract. See § "`params` / `json` integration"
+above.
 
-- **Slice 2 — params block integration with dry-schema.**
-  When `rigor-dry-schema` is loaded and a Contract's
-  `params { ... }` block delegates to a schema, refine
-  `result.to_h` to the typed `HashShape[{email: String,
-  age: Integer}]` per the schema's published fact
-  (`:dry_schema_table`). Today's RBS overlay's generic
-  `Hash[Symbol, untyped]` becomes the schema-typed shape.
-- **Slice 3 — `json { ... }` adapter parity.** Same shape as
-  slice 2 but for the `json` block adapter.
+The **ceiling** (still open):
+
 - **Per-Contract diagnostics.** E.g. `rule(:nonexistent_key)`
   references a key not in the `params { ... }` schema → emit
   `dry-validation.rule-key-mismatch`.
 
 ## What the plugin does NOT do (yet)
 
-- Synthesise typed `result.to_h` shapes per Contract
-  (deferred to slice 2; needs dry-schema integration).
-- Recognise `rule { ... }` blocks for key validation.
-- Emit `dry-validation.*` diagnostics.
-- Round-trip the contract list through the cache descriptor —
+- Recognise `rule { ... }` blocks for key validation, or emit
+  any `dry-validation.*` diagnostic (see § "Floor / ceiling").
+- Refine `result.errors` — it stays `untyped` regardless of
+  whether `rigor-dry-schema` is loaded.
+- Recognise a `params(SomeSchema)` / `json(SomeSchema)` form
+  that delegates to an EXTERNALLY-declared schema by reference
+  — only the inline block form is recognised.
+- Round-trip either fact through the cache descriptor —
   `prepare(services)` re-scans on every run.
 
 ## Configuration
 
 ```yaml
 plugins:
+  - rigor-dry-schema       # optional; enables the params/json → to_h refinement
   - rigor-dry-validation
 ```
 
@@ -136,7 +205,8 @@ entry's `.rb` files looking for the Contract subclass shape.
 - [`rigor-dry-types`](../rigor-dry-types/) — Tier A foundation
   publishing `:dry_type_aliases`.
 - [`rigor-dry-schema`](../rigor-dry-schema/) — Tier A publishing
-  `:dry_schema_table`; future consumer for slice 2's per-Contract
-  `result.to_h` typing.
+  `:dry_schema_table`; slices 2/3 delegate to its
+  `SchemaScanner.collect_schema_shape` / `ResultShape.build` for
+  the per-Contract `result.to_h` typing above.
 - [`rigor-dry-struct`](../rigor-dry-struct/) — the first dry-rb
   consumer plugin (Tier C macro substrate).

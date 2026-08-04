@@ -14,6 +14,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Added
 
+- **[plugins]** `rigor-dry-validation` now refines `Contract.new.call(input).to_h` from the generic `Hash[Symbol, untyped]` RBS overlay to the Contract's own schema shape, for a Contract whose `params { ... }` or `json { ... }` block is a plain dry-schema declaration and `rigor-dry-schema` is also loaded ([#137](https://github.com/rigortype/rigor/issues/137)).
 - **[plugins]** `rigor-dry-schema` now recurses `required(:key).each do ... end` into a nested `HashShape` (an array of a nested schema, not just an array of a scalar) and reports `dry-schema.unknown-type` (info) when a `filled`/`value`/`maybe`/`each` predicate's Symbol argument isn't a recognised dry-schema type ([#137](https://github.com/rigortype/rigor/issues/137)).
 - **[engine]** `Array#first(n)` and `Array#last(n)` on a literal array now fold to the precise sub-array element types instead of the widened `Array[Elem]`, closing the last gap in the `take`/`drop`/`first`/`last` family ([#121](https://github.com/rigortype/rigor/issues/121)).
 - **[engine]** `Regexp.compile` on a constant pattern now folds to the precise `Constant[Regexp]` the same way `Regexp.new` already does, since it is a documented alias of the same C entry point ([#121](https://github.com/rigortype/rigor/issues/121)).

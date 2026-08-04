@@ -1091,6 +1091,41 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(result).to be_a(Rigor::Type::Constant)
         expect(result.value).to eq(/world/i)
       end
+
+      it "folds Regexp.union(*patterns) to a Constant[Regexp]" do
+        result = harness.local(:_regexp_union_splat)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(Regexp.union("a", "b"))
+      end
+
+      it "folds Regexp.union(array) identically to the splatted form" do
+        result = harness.local(:_regexp_union_array)
+        expect(result).to eq(harness.local(:_regexp_union_splat))
+      end
+
+      it "folds Regexp.union() (no arguments) to Ruby's never-match regexp" do
+        result = harness.local(:_regexp_union_empty)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(Regexp.union)
+      end
+
+      it "folds Regexp.union with a mix of String and Regexp elements" do
+        result = harness.local(:_regexp_union_mixed)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(Regexp.union("a", /b/))
+      end
+
+      it "folds Regexp.linear_time?(str) to a Constant[bool]" do
+        result = harness.local(:_linear_time_str)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(Regexp.linear_time?("a.*b"))
+      end
+
+      it "folds Regexp.linear_time?(regexp) to a Constant[bool]" do
+        result = harness.local(:_linear_time_regexp)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(Regexp.linear_time?(/a.*b/))
+      end
     end
 
     describe "fixtures/set_constant_folding.rb — Set constant carrier" do

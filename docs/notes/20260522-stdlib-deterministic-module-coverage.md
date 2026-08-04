@@ -149,26 +149,36 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 
 `Regexp.methods - Class.methods` → `:compile, :escape, :last_match, :linear_time?, :quote, :timeout, :timeout=, :try_convert, :union`
 
+**2026-08-05 reconciliation** (this slice): every row below was re-probed empirically with
+`rigor type-of` against `lib/rigor/inference/method_dispatcher/regexp_folding.rb` on `master` —
+neither the table nor the source alone was trusted. Two rows were stale in the "doc under-reports"
+direction (`escape` / `quote` marked 🔲 while already folded) and one in the "doc mis-categorizes"
+direction (`last_match` marked 🚫 — out of scope — while a real, narrowing-based fold exists). Both
+directions are now fixed. `union` and `linear_time?` were confirmed live gaps (wide `Regexp` / `bool`
+on an all-constant call site) and closed in this slice.
+
 | メソッド | シグネチャ | 返却型 | 状態 | 備考 |
 |----------|-----------|--------|------|------|
-| `escape(str)` | String → String | `Constant[String]` | 🔲 | 正規表現メタ文字エスケープ。**高優先度。** |
-| `quote(str)` | String → String | `Constant[String]` | 🔲 | `escape` の別名。同上。 |
+| `escape(str)` | String → String | `Constant[String]` | ✅ | `RegexpFolding#fold_escape`（`REGEXP_ESCAPE_METHODS`）。ドキュメントが 🔲 のまま古くなっていた — 実装は既に存在（2026-08-05 訂正）。 |
+| `quote(str)` | String → String | `Constant[String]` | ✅ | `escape` の別名。同一ハンドラを共有。ドキュメントが 🔲 のまま古くなっていた（2026-08-05 訂正）。 |
 | `compile(pattern)` | String → Regexp | `Constant[Regexp]` | ✅ | `Regexp.new` 別名（`rb_reg_s_new` 同一 C エントリポイント）。`RegexpFolding::REGEXP_NEW_METHODS` に `:compile` を追加し `fold_new` を共有（#121 P3）。 |
-| `union(*patterns)` | String… → Regexp | `Regexp` | 🔲 | 可変引数・Regexp 型返却。低優先度。 |
-| `last_match` | → MatchData? | MatchData\|nil | 🚫 | グローバル `$~` に依存。実行時状態。 |
-| `linear_time?(pattern)` | String → bool | `Constant[bool]` | 🔲 | パターンが線形時間かを静的解析。低優先度。 |
-| `timeout` / `timeout=` | — | — | 🚫 | グローバル設定。 |
-| `try_convert(obj)` | Object → Regexp? | — | 🚫 | ダックタイプ変換。 |
+| `union(*patterns)` / `union(array)` | String\|Regexp… → Regexp | `Constant[Regexp]` | ✅ | `RegexpFolding#fold_union`。可変引数・単一配列引数・既存 Regexp 要素・0 引数（`/(?!)/`）のいずれも実 `Regexp.union` へ委譲して Ruby の挙動をそのまま再現（2026-08-05, #121 P3）。 |
+| `last_match` | → MatchData? | `MatchData` / `String` / `String?` | ✅ | グローバル `$~` 依存だが、証明済みマッチ辺 (`Narrowing#regex_match_predicate_scopes` が narrow した scope) では `RegexpFolding#fold_last_match` が非 nil `MatchData` / キャプチャ群の `String` へ絞り込む。証明されない辺では RBS の `MatchData?` に委譲。単純な定数畳み込みではなく narrowing ベースなので純粋な「引数が定数なら畳み込む」パターンとは異なるが、実装は存在する — ドキュメントが 🚫（対象外）のまま古くなっていた（2026-08-05 訂正）。 |
+| `linear_time?(pattern)` | String\|Regexp → bool | `Constant[bool]` | ✅ | `RegexpFolding#fold_linear_time`。第 2 引数（`timeout:` キーワードが positional slot に落ちるケース）がある場合は明示的に RBS へ委譲（2026-08-05, #121 P3）。 |
+| `timeout` / `timeout=` | — | — | 🚫 | グローバル設定の読み書き。副作用 / 実行時状態で畳み込み対象外。 |
+| `try_convert(obj)` | Object → Regexp? | — | 🚫 | ダックタイプ変換（`to_regexp` 等）。任意オブジェクトを受理するため静的に判定不能。 |
 
 ### 3-1. 実装チェックリスト
 
 ```
 高優先度:
-[ ] escape / quote → Constant[String] (Constant[String] 引数時)
+[x] escape / quote → Constant[String] (Constant[String] 引数時) — 既存実装、ドキュメントのみ訂正（2026-08-05）
 
 低優先度:
-[x] compile → Constant[Regexp] (Constant[String] 引数時) — #121 P3
-[ ] union   → Regexp (全引数 Constant[String] 時)
+[x] compile      → Constant[Regexp] (Constant[String] 引数時) — #121 P3
+[x] union        → Constant[Regexp] (全要素が Constant[String|Regexp] 時、0 引数含む) — #121 P3 (2026-08-05)
+[x] linear_time? → Constant[bool] (Constant[String|Regexp] 単一引数時) — #121 P3 (2026-08-05)
+[x] last_match   → 証明済みマッチ辺での narrowing、既存実装。ドキュメントのみ訂正（2026-08-05）
 ```
 
 ---
@@ -177,39 +187,41 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 
 `CGI.methods - Module.methods` → エスケープ関係 16 メソッド（実体 4 機能 + CamelCase / snake_case / エイリアス）。
 
+**2026-08-05 reconciliation**: every row below was stale — all eight were marked 🔲 despite
+`lib/rigor/inference/method_dispatcher/cgi_folding.rb` (`CGIFolding`, a Tier D module distinct from
+the `constant_folding.rb` location this section originally proposed) already folding every one of
+them, confirmed empirically with `rigor type-of` (`CGI.escape("hello world")` →
+`Constant["hello+world"]`, `CGI.escapeElement("<BR><A HREF=\"url\"></A>", "A", "IMG")` →
+`Constant["<BR>&lt;A HREF=&quot;url&quot;&gt;&lt;/A&gt;"]`, etc. — all eight forms checked). This
+whole section is done; no further CGI work is queued.
+
 | 機能 | CamelCase | snake_case | エイリアス | 返却型 | 状態 |
 |------|-----------|-----------|-----------|--------|------|
-| URL エスケープ | `CGI.escape` | — | — | `Constant[String]` | 🔲 |
-| URL アンエスケープ | `CGI.unescape` | — | — | `Constant[String]` | 🔲 |
-| HTML エスケープ | `CGI.escapeHTML` | `CGI.escape_html` | `CGI.h` | `Constant[String]` | 🔲 |
-| HTML アンエスケープ | `CGI.unescapeHTML` | `CGI.unescape_html` | — | `Constant[String]` | 🔲 |
-| 要素エスケープ | `CGI.escapeElement` | `CGI.escape_element` | — | `Constant[String]` | 🔲 |
-| 要素アンエスケープ | `CGI.unescapeElement` | `CGI.unescape_element` | — | `Constant[String]` | 🔲 |
-| URI コンポーネントエスケープ | `CGI.escapeURIComponent` | `CGI.escape_uri_component` | — | `Constant[String]` | 🔲 |
-| URI コンポーネントアンエスケープ | `CGI.unescapeURIComponent` | `CGI.unescape_uri_component` | — | `Constant[String]` | 🔲 |
-
-**優先度:** `escapeHTML` / `unescapeHTML` / `h` が最頻用途。`escape` / `unescape` (URL) が次点。
+| URL エスケープ | `CGI.escape` | — | — | `Constant[String]` | ✅ |
+| URL アンエスケープ | `CGI.unescape` | — | — | `Constant[String]` | ✅ |
+| HTML エスケープ | `CGI.escapeHTML` | `CGI.escape_html` | `CGI.h` | `Constant[String]` | ✅ |
+| HTML アンエスケープ | `CGI.unescapeHTML` | `CGI.unescape_html` | — | `Constant[String]` | ✅ |
+| 要素エスケープ | `CGI.escapeElement` | `CGI.escape_element` | — | `Constant[String]` | ✅ |
+| 要素アンエスケープ | `CGI.unescapeElement` | `CGI.unescape_element` | — | `Constant[String]` | ✅ |
+| URI コンポーネントエスケープ | `CGI.escapeURIComponent` | `CGI.escape_uri_component` | — | `Constant[String]` | ✅ |
+| URI コンポーネントアンエスケープ | `CGI.unescapeURIComponent` | `CGI.unescape_uri_component` | — | `Constant[String]` | ✅ |
 
 ### 4-1. 実装チェックリスト
 
 ```
-高優先度:
-[ ] escapeHTML / escape_html / h  → Constant[String]
-[ ] unescapeHTML / unescape_html  → Constant[String]
-
-中優先度:
-[ ] escape (URL)   → Constant[String]
-[ ] unescape (URL) → Constant[String]
-[ ] escapeURIComponent / escape_uri_component   → Constant[String]
-[ ] unescapeURIComponent / unescape_uri_component → Constant[String]
-
-低優先度:
-[ ] escapeElement / escape_element   → Constant[String]
-[ ] unescapeElement / unescape_element → Constant[String]
+[x] escapeHTML / escape_html / h                  → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] unescapeHTML / unescape_html                  → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] escape (URL) / unescape (URL)                 → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] escapeURIComponent / escape_uri_component     → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] unescapeURIComponent / unescape_uri_component → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] escapeElement / escape_element                → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] unescapeElement / unescape_element            → Constant[String] — ドキュメントのみ訂正（2026-08-05）
 ```
 
-実装ファイル: `constant_folding.rb` に `try_fold_cgi` メソッド。  
-エイリアスは同じハンドラから分岐（1 メソッドに集約）。
+実装ファイル: `lib/rigor/inference/method_dispatcher/cgi_folding.rb`（`CGIFolding` モジュール、
+Tier D）。エイリアスは `fold_cgi_call` / `fold_cgi_element` の 2 ハンドラに集約。
+テスト: `spec/integration/fixtures/module_function_folding/demo.rb` +
+`type_construction_spec.rb`「fixtures/module_function_folding.rb」ブロック。
 
 ---
 
@@ -217,17 +229,23 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 
 `URI.methods - Module.methods` → 16 メソッド。精度向上対象は encode/decode 系のみ。
 
+**2026-08-05 reconciliation**: the four component encode/decode rows were stale — marked 🔲 despite
+`lib/rigor/inference/method_dispatcher/uri_folding.rb` (`URIFolding`, Tier D) already folding all
+four, confirmed empirically with `rigor type-of`. The remaining rows (`encode_www_form` /
+`decode_www_form` / `parse` / `join` / `extract`) were re-checked and are genuine, still-open gaps —
+left as-is.
+
 | メソッド | シグネチャ | 返却型 | 状態 | 備考 |
 |----------|-----------|--------|------|------|
-| `encode_www_form_component(str)` | String → String | `Constant[String]` | 🔲 | **高優先度。** RFC 3986 パーセントエンコード。 |
-| `decode_www_form_component(str)` | String → String | `Constant[String]` | 🔲 | 高優先度。 |
-| `encode_uri_component(str)` | String → String | `Constant[String]` | 🔲 | 高優先度（Ruby 3.2+）。 |
-| `decode_uri_component(str)` | String → String | `Constant[String]` | 🔲 | 高優先度。 |
-| `encode_www_form(arr)` | Array/Hash → String | `Constant[String]` | 🔲 | Tuple / HashShape 引数時に折りたためる。中優先度。 |
-| `decode_www_form(str)` | String → Array | `Tuple[Tuple[Str,Str]…]` | 🔲 | 中優先度。 |
-| `parse(str)` | String → URI | URI オブジェクト | 🔲 | RBS で十分。`Constant[URI]` は複雑。低優先度。 |
-| `join(base, *paths)` | String… → URI | URI オブジェクト | 🔲 | 低優先度。 |
-| `extract(str)` | String → Array[String] | Tuple? | 🔲 | 低優先度。 |
+| `encode_www_form_component(str)` | String → String | `Constant[String]` | ✅ | RFC 3986 パーセントエンコード。ドキュメントのみ訂正（2026-08-05）。 |
+| `decode_www_form_component(str)` | String → String | `Constant[String]` | ✅ | ドキュメントのみ訂正（2026-08-05）。 |
+| `encode_uri_component(str)` | String → String | `Constant[String]` | ✅ | Ruby 3.2+。ドキュメントのみ訂正（2026-08-05）。 |
+| `decode_uri_component(str)` | String → String | `Constant[String]` | ✅ | ドキュメントのみ訂正（2026-08-05）。 |
+| `encode_www_form(arr)` | Array/Hash → String | `Constant[String]` | 🔲 | Tuple / HashShape 引数時に折りたためる。中優先度。未実装（再確認済み）。 |
+| `decode_www_form(str)` | String → Array | `Tuple[Tuple[Str,Str]…]` | 🔲 | 中優先度。未実装（再確認済み）。 |
+| `parse(str)` | String → URI | URI オブジェクト | 🔲 | RBS で十分。`Constant[URI]` は複雑。低優先度。未実装（再確認済み）。 |
+| `join(base, *paths)` | String… → URI | URI オブジェクト | 🔲 | 低優先度。未実装（再確認済み）。 |
+| `extract(str)` | String → Array[String] | Tuple? | 🔲 | 低優先度。未実装（再確認済み）。 |
 | `split(str)` | String → Array[String?] | — | 🔷 | RBS `Array[String?]` で十分。 |
 | `for(scheme, …)` | — | URI | 🚫 | オブジェクト生成。 |
 | `regexp` / `scheme_list` etc. | — | — | 🚫 | 設定 / メタ情報。 |
@@ -236,17 +254,19 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 
 ```
 高優先度:
-[ ] encode_www_form_component → Constant[String]
-[ ] decode_www_form_component → Constant[String]
-[ ] encode_uri_component      → Constant[String]
-[ ] decode_uri_component      → Constant[String]
+[x] encode_www_form_component → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] decode_www_form_component → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] encode_uri_component      → Constant[String] — ドキュメントのみ訂正（2026-08-05）
+[x] decode_uri_component      → Constant[String] — ドキュメントのみ訂正（2026-08-05）
 
-中優先度:
+中優先度（未実装、次スライス候補）:
 [ ] encode_www_form → Constant[String] (Tuple / HashShape 引数時)
 [ ] decode_www_form → Tuple[Tuple[Constant[String], Constant[String]]…]
 ```
 
-実装ファイル: `constant_folding.rb` に `try_fold_uri` メソッド。
+実装ファイル: `lib/rigor/inference/method_dispatcher/uri_folding.rb`（`URIFolding` モジュール、Tier
+D）。テスト: `spec/integration/fixtures/module_function_folding/demo.rb` +
+`type_construction_spec.rb`「fixtures/module_function_folding.rb」ブロック。
 
 ---
 
@@ -266,12 +286,14 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 
 | 優先度 | モジュール・メソッド | 期待する精度向上 |
 |--------|---------------------|-----------------|
-| 🔴 高 | `Regexp.escape` / `quote` | `Constant[String]` |
+| ✅ 済 | `Regexp.escape` / `quote` | `Constant[String]`（ドキュメントのみ 2026-08-05 訂正、実装は既存） |
 | ✅ 済 | `Shellwords.escape` / `shellescape` / `split` / `shellsplit` / `join` / `shelljoin` | `Constant[String]` / `Tuple[Constant[String]…]` |
-| 🔴 高 | `CGI.escapeHTML` / `h` | `Constant[String]` |
-| 🔴 高 | `URI.encode_www_form_component` / `decode_www_form_component` | `Constant[String]` |
+| ✅ 済 | `CGI.escapeHTML` / `h` / 全 8 系統（`CGIFolding`） | `Constant[String]`（ドキュメントのみ 2026-08-05 訂正、実装は既存） |
+| ✅ 済 | `URI.encode_www_form_component` / `decode_www_form_component` / `encode_uri_component` / `decode_uri_component` | `Constant[String]`（ドキュメントのみ 2026-08-05 訂正、実装は既存） |
 | ✅ 済 | `Math.sqrt` / `exp` / `log` / `sin` / `cos` ほか | `Constant[Float]` |
 | ✅ 済 | `Math.atan2` / `hypot` / `frexp` / `lgamma` | `Constant[Float]` / `Tuple` |
-| 🟡 中 | `CGI.escape` / `unescape` (URL) | `Constant[String]` |
+| ✅ 済 | `CGI.escape` / `unescape` (URL) | `Constant[String]`（ドキュメントのみ 2026-08-05 訂正、実装は既存） |
 | ✅ 済 | Math 全 28 関数（`MathFolding`） | `Constant[Float]` / `Tuple` |
-| 🟢 低 | `URI.encode_www_form` / `decode_www_form` | `Constant[String]` / Tuple |
+| 🟢 低 | `URI.encode_www_form` / `decode_www_form` | `Constant[String]` / Tuple（未実装、再確認済み） |
+| ✅ 済 | `Regexp.union` / `linear_time?` | `Constant[Regexp]` / `Constant[bool]`（#121 P3, 2026-08-05） |
+| ✅ 済 | `Regexp.last_match` | 証明済みマッチ辺での narrowing（ドキュメントのみ 2026-08-05 訂正、実装は既存） |

@@ -6,9 +6,9 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
   (docs/agents/issue-tracker.md), operational pitfalls → the workflow's skill, decisions → an ADR,
   measurements → docs/notes/, shipped → CHANGELOG.md.
 - Verify a claim before carrying it forward — and verify it by the thing that decides, not by a
-  proxy. This arc kept paying that rule: #260's cluster was only half blindness, #254's premise
-  measured out to zero even on the favorable corpus, and #264's "jitter" would not reproduce on a
-  quiet machine.
+  proxy. Every arc this week paid that rule: #260's cluster was only half blindness, #254's premise
+  measured out to zero on its own favourable corpus, #264's "jitter" would not reproduce quiet, and
+  #271's minimal repro was missing a third ingredient nobody had guessed.
 -->
 
 # Current Work — Session Handoff
@@ -20,74 +20,69 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-- **The whole Tier-2 measurement arc is closed** (2026-08-01/02, two sessions, six PRs merged —
-  #261 #262 #265 #266 #267 plus the #253 seed PR before them — and #260 #263 #254 #264 all closed;
-  every merge: audited diff + CI fully green + parent-re-run `make verify` exit 0; autonomous
-  merges are user-authorised, recorded in memory):
-  - The Tier-2 denominator, oracle knowledge, closure reach, Tier-1 over-claim annotation, and
-    harness-error visibility are all landed and measured. The load-bearing documents are #260's
-    amended decision and #254's two closing comments.
-  - **`dependent-closure-kill-oracle` is presumptively NON-graduating**: textbringer (52 RBS
-    files, dense fan-out — the predicted-favorable corpus) produced byte-identical OFF vs closure
-    arms. Structural reason, verified: the Mutator never mutates `def` signatures, and callers
-    read declarations when they exist — so body mutations are cross-file-invisible on RBS-typed
-    code by construction, and the inferred-return channel is worth +2 kills on Rigor lib / 0 on
-    redmine. Revival requires a signature-perturbing operator or an inferred-return-heavy corpus
-    (recorded on #254 with the retirement-evidence pointer).
-  - **#264's premise corrected at landing**: the ±3-site jitter was load-tied (six instrumented
-    quiet runs, zero rescued exceptions, byte-identical pairs); the blanket-rescue invisibility
-    was the real defect and is fixed (`harness_errors` bucket, ratio-excluded, JSON-unconditional,
-    stderr warning at floor 3, exit semantics untouched).
-  - Graduation numbers for `discovery-seeded-mutation-sites` (in #260's closing comments): Rigor
-    `lib` 10,252/5,580/0.5443; redmine `app/models` 2,762/464/0.1680 (66.2% of ON survivors on
-    project-class singletons). Tier-1 `lower_bound_typed` on `lib`: 2,223/12,056 (~18.4%).
-
-- **2026-08-02 continuation, same audited-merge flow**: [#270](https://github.com/rigortype/rigor/pull/270)
-  closed #134 (per-file mutation-result cache on the ADR-46 forward edge — **warm/cold 0.011**
-  on `lib` (253.8s → 2.76s), leaf edit 3.05s, hub edit 21.5s; plus the `make check-mutation-cache`
-  warm==cold CI gate, non-vacuous by construction). [#268](https://github.com/rigortype/rigor/pull/268)
-  closed the #121 enumerated remainder (`Regexp.compile`, `Integer#rationalize` 0-arg,
-  `Integer`/`Float#abs2`; the `rationalize(eps)` surface deliberately stays declined —
-  catalog-import decision, not a fold tweak). Warm mutation runs REQUIRE a prior
-  `rigor check --incremental` snapshot; no snapshot = reported-disabled, cold behaviour.
-- **Filed**: [#269](https://github.com/rigortype/rigor/issues/269) (missing
-  `non_empty_refinement_mutation_widening` snapshot — two sessions tripped on the stray),
-  [#271](https://github.com/rigortype/rigor/issues/271) (engine FP: cross-file consumed factory
-  return resolves a nested `Result` Data to the parent namespace's sibling — found wiring PR #270,
-  worked around via `PluginFactFingerprint.key_digest`, root cause open, `area:engine`).
+- **The Tier-2 measurement arc is closed** (#260 #263 #254 #264 #134, PRs #261 #262 #265 #266 #267
+  #270). Load-bearing records live on the issues: #260's amended decision (only the
+  `discovered_classes` half of the unkillable cluster was blindness; the `param_inferred_types`
+  half is ADR-67 WD6b *by construction*), and #254's two closing comments
+  (`dependent-closure-kill-oracle` is **presumptively non-graduating** — the Mutator never mutates
+  `def` signatures and callers read declarations, so body mutations are cross-file-invisible on
+  RBS-typed code; textbringer, the favourable corpus, gave byte-identical arms).
+- **Graduation numbers** (in #260's closing comments): `discovery-seeded-mutation-sites` on Rigor
+  `lib` 10,252/5,580/0.5443; redmine `app/models` 2,762/464/0.1680. Tier-1 `lower_bound_typed` on
+  `lib`: 2,223/12,056 (~18.4%). Mutation cache: warm/cold **0.011** on `lib` (253.8s → 2.76s) —
+  but the warm path REQUIRES a prior `rigor check --incremental` snapshot for those roots,
+  otherwise the cache reports itself disabled and the run is simply cold.
+- **Landed 2026-08-02 after that**: #271 (PR #275) — the engine FP where a nested
+  `Const = Data.define(...)` never entered the cross-file `discovered_classes` table, so a
+  consumer's lexical walk fell through to the parent namespace's same-named, RBS-declared (=closed)
+  sibling and reported `call.undefined-method` on correct code. The trigger needs THREE ingredients
+  at once (nested Data constant + same-named parent-namespace sibling + RBS for that sibling),
+  which is why the first minimal repro stayed silent. #137 (PR #276) — all four dry-rb ceiling
+  checkboxes, including the `dry-validation.rule-key-mismatch` `:error` behind two all-or-nothing
+  FP gates (2 firing specs against 7 decline specs). #269 (PR #274) — the missing precision
+  snapshot; the fixture had been running under a silent `skip`, not a vacuous pass.
+- **Open follow-ups filed from that work**: [#277](https://github.com/rigortype/rigor/issues/277)
+  (a self-recursive method narrows its inferred return, making a live condition read as
+  always-truthy — same FP class as #271, worked around in PR #276 with a `nested:` flag).
 
 ## Next session
 
-- **[#271](https://github.com/rigortype/rigor/issues/271) is the sharpest open item** — an FP on
-  our own lib, the class the project weighs heaviest. Diagnosis entry point is in the issue
-  (revert the `key_digest` indirection locally, `rigor check lib`); the minimal repro attempt
-  failed, so start from the real file pair.
-- **The `ready-for-agent` pool**: #137 (dry-schema/validation ceiling slices), #147 (editor-mode
-  throughput), #142 (LSP Ractor pool), #135 (self-mutation giant-file tier), #269 (small snapshot
-  hygiene). #121 stays open as the P3 category — next slice starts by reconciling the stale
-  Regexp doc rows (`escape`/`quote` marked 🔲 but implemented) against `RegexpFolding`.
-- **`ready-for-human` items wanting a design pass**: #158 (inference budgets table — the spec's
-  `budgets:` is still unwired per memory), #152 (`&&`/`||` polarity gate beyond Constant), #159
-  (upstreaming staged ruby/rbs signature fixes — external publishing, needs the user's go).
+- **In flight when this was written** (three agents, results not yet audited): #277 (engine
+  diagnosis, main tree), #142 (LSP pool dispatch — its brief starts with an empirical check that
+  the "needs a persistent Environment" precondition may ALREADY be met), #135 checkbox 1 (the
+  giant-file self-mutation tier, newly affordable thanks to #257 + #270). If they landed, the
+  issues carry the records; if not, their branches are named in the PR list.
+- **Remaining `ready-for-agent`**: #147 (CLI editor-mode throughput: snapshot cache, `--also`,
+  multi-buffer — note it overlaps #142's buffer machinery, so sequence them rather than running
+  both at once), #135's four remaining checkboxes, #121 as the ongoing P3 fold category (next
+  slice starts by reconciling the stale Regexp doc rows — `escape`/`quote` marked 🔲 though
+  implemented — against `RegexpFolding`).
+- **`ready-for-human` wanting a design pass**: #158 (the spec's `budgets:` table is still unwired),
+  #152 (`&&`/`||` polarity gate beyond Constant-only), #159 (upstreaming staged ruby/rbs signature
+  fixes — external publishing, needs the user's go).
 - **The rbs-inline upstream report stays ON HOLD by user decision** (2026-08-01; do not file
   without a fresh ask). Evidence chain: ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764`
-  → rescue at `617-621` → `annotations.rb:527-536`; plus the pending one-line ADR-32 correction
-  (its "upstream docs" citation points at rbs-core's `RBS::InlineParser` doc, not the rbs-inline
-  gem's).
+  → rescue at `617-621` → `annotations.rb:527-536`; plus a pending one-line ADR-32 correction (its
+  "upstream docs" citation points at rbs-core's `RBS::InlineParser` doc, not the rbs-inline gem's).
 
-## What this session learned that is not in a commit
+## What these sessions learned that is not in a commit
 
-- **The delegation pattern is now settled**: fixed design in the brief + repo contract verbatim +
-  "report contradictions, do not silently redesign" + **"run every gate/measurement in the
-  FOREGROUND with a generous timeout; never end a turn while anything is pending"** (three
-  background-wait stalls on day 1, zero on day 2 once the rule moved into the brief). The
-  escape hatch overturned a premise on four consecutive tasks — treat a subagent's contradiction
-  report as the most valuable line in its output.
+- **The delegation brief that works**: fixed design ("do not relitigate") + repo contract verbatim
+  + gates by exit code + parent re-runs the gates independently + **"report contradictions, do not
+  silently redesign"** + **"run every gate/measurement in the FOREGROUND; never end a turn while
+  anything is pending"** (three background-wait stalls before that line was added; none after).
+  The contradiction hatch overturned a premise on five separate tasks — it is the highest-value
+  sentence in the brief.
+- **For an engine FP, add "diagnose and report the root cause even if you also fix it; retreat
+  rather than land a half-understood fix"** — that is what produced #271's three-ingredient
+  finding instead of a plausible patch.
+- **Two FPs on our own code were found by writing ordinary code, not by looking for FPs** (#271
+  while wiring a cache key, #277 while writing a plugin walker). Dogfooding surfaces the class the
+  project weighs heaviest; treat "I had to work around the checker" in any agent report as a
+  finding to file, not an aside.
 - **Do not let a measurement agent borrow the main tree's `exe/rigor` while another agent edits
-  that tree** — a #264 diagnosis `warn` landed in `mutation_scanner.rb` mid-measurement of
-  textbringer. It was provably benign (warn-only, zero firings, deterministic reruns), but the
-  isolation was luck, not design: pin measurements to a clean checkout or sequence them.
-- **A "deliberate" old comment and a filed issue premise are both claims**: the Tuple `first(n)`
-  decline was stale, the #254 catch-in-callers example cannot exist under the body-only mutation
-  contract, and #264's jitter was environmental. The verify-by-the-thing-that-decides rule from
-  this header keeps being the highest-yield habit in the repo.
+  that tree** — a diagnostic `warn` landed mid-measurement during the textbringer run. Provably
+  benign that time; the isolation was luck. Pin measurements to a clean checkout or sequence them.
+- **Fixture lesson for oracle specs**: equalise the knowledge axis before comparing two oracles —
+  #266's brute-force cross-check reported missing cross-file *knowledge* as a closure defect until
+  both features were adopted in the fixture.

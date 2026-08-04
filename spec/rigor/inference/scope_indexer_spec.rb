@@ -1691,10 +1691,47 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
-    it "leaves the block form to the existing meta-new machinery (no flat record)" do
+    it "records the block form under the constant's OWN name, not its superclass's" do
       with_files({ "a.rb" => "module M\n  Blk = Class.new(Object) do\n    def x; end\n  end\nend\n" }) do |discovered|
-        # block form is not flat-recorded here; it does not type as Singleton[Object]
-        expect(discovered["M::Blk"]).not_to eq(Rigor::Type::Combinator.singleton_of("Object"))
+        # A block body declares methods of its own, so the constant cannot borrow `Object`'s identity the way a
+        # block-less `Class.new(Super)` does — the same answer the per-file `meta_new_constant_type` gives.
+        expect(discovered["M::Blk"]).to eq(Rigor::Type::Combinator.singleton_of("M::Blk"))
+      end
+    end
+
+    # Issue #271 — the Data/Struct constant-write forms belong in the SAME table. Left out, a nested `Result` was
+    # invisible cross-file and Ruby's lexical walk continued to the parent namespace's same-named sibling, which is a
+    # `call.undefined-method` false positive when that sibling is RBS-known (see
+    # spec/rigor/analysis/nested_data_constant_cross_file_spec.rb).
+    it "records a Const = Data.define(*sym) under its own qualified name" do
+      with_files({ "a.rb" => "module M\n  class F\n    Result = Data.define(:digest)\n  end\nend\n" }) do |discovered|
+        expect(discovered["M::F::Result"]).to eq(Rigor::Type::Combinator.singleton_of("M::F::Result"))
+      end
+    end
+
+    it "records the Data.define block form, so a nested Result outranks a parent-namespace sibling" do
+      files = {
+        "a.rb" => <<~RUBY
+          module M
+            class Result; end
+
+            class F
+              Result = Data.define(:digest) do
+                def opaque? = digest.nil?
+              end
+            end
+          end
+        RUBY
+      }
+      with_files(files) do |discovered|
+        expect(discovered["M::F::Result"]).to eq(Rigor::Type::Combinator.singleton_of("M::F::Result"))
+        expect(discovered["M::Result"]).to eq(Rigor::Type::Combinator.singleton_of("M::Result"))
+      end
+    end
+
+    it "records a Const = Struct.new(*sym) under its own qualified name" do
+      with_files({ "a.rb" => "module M\n  Row = Struct.new(:a, :b)\nend\n" }) do |discovered|
+        expect(discovered["M::Row"]).to eq(Rigor::Type::Combinator.singleton_of("M::Row"))
       end
     end
   end

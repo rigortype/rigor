@@ -1,6 +1,6 @@
 # Cache Layer — `Rigor::Cache`
 
-Status: **Stable (introduced v0.0.8; current descriptor schema v5).**
+Status: **Stable (introduced v0.0.8; current descriptor schema v6).**
 This document tracks the cache layer's public read shape. The
 slices below all landed and are stable across v0.1.x; the descriptor
 `SCHEMA_VERSION` was bumped to `2` for the ADR-10 per-gem-version
@@ -9,9 +9,13 @@ synthesizing missing `signature_paths:` namespaces (so an RBS env
 marshalled by an older Rigor — which would leave those signatures
 inert — is rebuilt), to `4` when [ADR-60](../adr/60-pre-freeze-plugin-contract-consolidation.md)
 WD3 added the `globs` slot (`GlobEntry`) for the record-and-validate
-plugin-producer cache, and to `5` when [ADR-87](../adr/87-null-build-floor.md)
+plugin-producer cache, to `5` when [ADR-87](../adr/87-null-build-floor.md)
 WD1 added the `:stat` `FileEntry` comparator (stat-then-digest
-validation). All five v0.0.8 slices landed:
+validation), and to `6` when `append_stub_declarations` began emitting
+the declaration kind each referenced-type stub needs and validating each
+declaration on its own (so an env cached by an older Rigor — which
+discarded the whole stub batch on a dangling `interface` or type-alias
+reference — is rebuilt). All five v0.0.8 slices landed:
 `Rigor::Cache::Descriptor` (slice 1 — the substrate every cached
 value attaches to), `Rigor::Cache::Store` (slice 2 — the
 filesystem-backed storage that consumes a descriptor + producer +
@@ -125,13 +129,17 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `5` — v2 added the
+1. `Descriptor::SCHEMA_VERSION` (currently `6` — v2 added the
    `dependencies` slot for the ADR-10 per-gem-version cache slice;
    v3 invalidates RBS envs marshalled before `build_env_for` began
    synthesizing missing `signature_paths:` namespaces; v4 added the
    `globs` slot for the ADR-60 WD3 record-and-validate plugin-producer
    cache; v5 added the `:stat` `FileEntry` comparator for ADR-87 WD1
-   stat-then-digest validation). Bumping this constant invalidates every
+   stat-then-digest validation; v6 invalidates RBS envs marshalled
+   before `append_stub_declarations` emitted the declaration kind each
+   referenced-type stub needs and validated each declaration on its own,
+   so a dangling `interface` or type-alias reference no longer discards
+   the whole stub batch (#237)). Bumping this constant invalidates every
    cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
@@ -877,7 +885,7 @@ counters from the runner's `Cache::Store`. Output sample:
 
 ```
 Cache (root: .rigor/cache)
-  schema_version: 0.3.0.5.2
+  schema_version: 0.3.1.6.2
   3 entries, 12.4 KiB
     rbs.constant_type_table: 1 entries, 11.0 KiB
     rbs.environment: 2 entries, 1.4 KiB
@@ -889,7 +897,7 @@ The `schema_version` line is not a fixed literal — it is
 `Store.schema_marker_value`, i.e.
 `"<PAYLOAD_ABI_VERSION>.<Descriptor::SCHEMA_VERSION>.<Store::FORMAT_VERSION>"`,
 where `PAYLOAD_ABI_VERSION` is `Rigor::VERSION`. The sample above
-is what that composes to as of this writing (`0.3.0` + schema `5`
+is what that composes to as of this writing (`0.3.1` + schema `6`
 + format `2`); read a mismatch against your installed release as
 this sample being stale, not as a fault.
 

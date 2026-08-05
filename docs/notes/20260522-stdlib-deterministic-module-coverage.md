@@ -232,8 +232,14 @@ Tier D）。エイリアスは `fold_cgi_call` / `fold_cgi_element` の 2 ハン
 **2026-08-05 reconciliation**: the four component encode/decode rows were stale — marked 🔲 despite
 `lib/rigor/inference/method_dispatcher/uri_folding.rb` (`URIFolding`, Tier D) already folding all
 four, confirmed empirically with `rigor type-of`. The remaining rows (`encode_www_form` /
-`decode_www_form` / `parse` / `join` / `extract`) were re-checked and are genuine, still-open gaps —
-left as-is.
+`decode_www_form` / `parse` / `join` / `extract`) were re-checked and were genuine, still-open gaps.
+
+**2026-08-05 follow-up**: `encode_www_form` / `decode_www_form` are now implemented (#121). `parse`
+and `join` were re-classified 🔲 → 🚫: they are not pending work but out of this category by the
+repo's own rule, since a URI object has no `Constant[…]` representation, and the one genuinely
+valuable move (narrowing `parse`'s ten-arm return union to the scheme class a constant string
+selects) can surface a diagnostic that does not fire today — bucket-3 / P0, not an FP-safe fold.
+`extract` remains a real, unclaimed gap.
 
 | メソッド | シグネチャ | 返却型 | 状態 | 備考 |
 |----------|-----------|--------|------|------|
@@ -241,10 +247,10 @@ left as-is.
 | `decode_www_form_component(str)` | String → String | `Constant[String]` | ✅ | ドキュメントのみ訂正（2026-08-05）。 |
 | `encode_uri_component(str)` | String → String | `Constant[String]` | ✅ | Ruby 3.2+。ドキュメントのみ訂正（2026-08-05）。 |
 | `decode_uri_component(str)` | String → String | `Constant[String]` | ✅ | ドキュメントのみ訂正（2026-08-05）。 |
-| `encode_www_form(arr)` | Array/Hash → String | `Constant[String]` | 🔲 | Tuple / HashShape 引数時に折りたためる。中優先度。未実装（再確認済み）。 |
-| `decode_www_form(str)` | String → Array | `Tuple[Tuple[Str,Str]…]` | 🔲 | 中優先度。未実装（再確認済み）。 |
-| `parse(str)` | String → URI | URI オブジェクト | 🔲 | RBS で十分。`Constant[URI]` は複雑。低優先度。未実装（再確認済み）。 |
-| `join(base, *paths)` | String… → URI | URI オブジェクト | 🔲 | 低優先度。未実装（再確認済み）。 |
+| `encode_www_form(arr)` | Array/Hash → String | `Constant[String]` | ✅ | Tuple（`[k, v]` の Tuple 列）または閉じた HashShape の全要素が Constant のとき折りたたむ。64 ペア上限（#121, 2026-08-05）。 |
+| `decode_www_form(str)` | String → Array | `Tuple[Tuple[Str,Str]…]` | ✅ | Constant[String] 引数を精密 Tuple に持ち上げる（#121, 2026-08-05）。 |
+| `parse(str)` | String → URI | URI オブジェクト | 🚫 | **カテゴリ外**（🔲 ではない）。`URI::Generic` 系は `ConstantFolding::FOLDABLE_CONSTANT_CLASSES` に無いため `Constant[URI]` は作れない。10 アームの返却 union を scheme クラスへ絞る案は精度上の利得はあるが、gradually-valid な dispatch を精密化して新規診断を surface し得る = bucket-3/P0 であり、FP-safe fold カテゴリ（#121）の範囲外。 |
+| `join(base, *paths)` | String… → URI | URI オブジェクト | 🚫 | `parse` と同じ理由（URI オブジェクトに Constant が無い）。 |
 | `extract(str)` | String → Array[String] | Tuple? | 🔲 | 低優先度。未実装（再確認済み）。 |
 | `split(str)` | String → Array[String?] | — | 🔷 | RBS `Array[String?]` で十分。 |
 | `for(scheme, …)` | — | URI | 🚫 | オブジェクト生成。 |
@@ -294,6 +300,6 @@ D）。テスト: `spec/integration/fixtures/module_function_folding/demo.rb` +
 | ✅ 済 | `Math.atan2` / `hypot` / `frexp` / `lgamma` | `Constant[Float]` / `Tuple` |
 | ✅ 済 | `CGI.escape` / `unescape` (URL) | `Constant[String]`（ドキュメントのみ 2026-08-05 訂正、実装は既存） |
 | ✅ 済 | Math 全 28 関数（`MathFolding`） | `Constant[Float]` / `Tuple` |
-| 🟢 低 | `URI.encode_www_form` / `decode_www_form` | `Constant[String]` / Tuple（未実装、再確認済み） |
+| ✅ 済 | `URI.encode_www_form` / `decode_www_form` | `Constant[String]` / 精密 Tuple（#121 P3, 2026-08-05） |
 | ✅ 済 | `Regexp.union` / `linear_time?` | `Constant[Regexp]` / `Constant[bool]`（#121 P3, 2026-08-05） |
 | ✅ 済 | `Regexp.last_match` | 証明済みマッチ辺での narrowing（ドキュメントのみ 2026-08-05 訂正、実装は既存） |

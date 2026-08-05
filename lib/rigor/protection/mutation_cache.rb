@@ -32,7 +32,10 @@ module Rigor
     #   pre-edit kill counts back, which is the exact failure a mutation score exists to detect.
     # - The {Cache::IncrementalSnapshot} fingerprint the dependency edges came from — itself a digest of the
     #   resolved configuration, the analysis roots, `Gemfile.lock`, `rbs_collection.lock.yaml`, and the
-    #   project's own `sig/` contents. This is how a config or `sig/` edit invalidates the measurement.
+    #   project's own `sig/` contents. This is how a config or `sig/` edit invalidates the measurement. Since
+    #   #289 that fingerprint carries the engine-source digest too, which makes the slot above redundant on
+    #   paper — keep it anyway: this key states its own soundness rather than inheriting it from how another
+    #   cache happens to compose its key today, and a memoised digest costs nothing to repeat.
     # - `--limit` / `--seed` / the site selector: the report is already an estimate under a sample, and without
     #   them a `--limit 20` run would silently serve a `--limit 5` result.
     # - The sorted set of ADOPTED bleeding-edge feature ids that change this measurement (#255's principle: a
@@ -100,6 +103,7 @@ module Rigor
         def build(configuration:, roots:, project_scan:, sampling:, feature_ids:, seed_inputs: nil,
                   bypass_reason: nil)
           return disabled(bypass_reason) if bypass_reason
+          return disabled(UNIDENTIFIED_ENGINE) unless engine_identifiable?
 
           matched = load_snapshot(configuration: configuration, roots: roots)
           return disabled(NO_SNAPSHOT) if matched.nil?
@@ -180,8 +184,21 @@ module Rigor
         # `Unavailable` rescue above and disables the cache, which is the only sound reading of a key slot
         # that could not be computed.
         def engine_source_entries
-          identity = Cache::EngineSource.identity
+          identity = Cache::EngineSource.process_identity
           identity.nil? ? [] : [config_entry("engine-source", identity)]
+        end
+
+        # Probed BEFORE the snapshot load, for the reason string rather than for soundness. Since #289
+        # {Cache::IncrementalSnapshot.fingerprint} folds the same digest in and answers a bare nil when it
+        # cannot, so an unidentifiable engine already reaches the user as a disabled cache — but as
+        # {NO_SNAPSHOT}, which tells them to run `rigor check --incremental`, a fix for a different problem.
+        # The {Cache::EngineSource::Unavailable} rescue in {key_configs} stays as the backstop for a tree
+        # that becomes unreadable between here and there.
+        def engine_identifiable?
+          Cache::EngineSource.process_identity
+          true
+        rescue Cache::EngineSource::Unavailable
+          false
         end
 
         def config_entry(key, payload)

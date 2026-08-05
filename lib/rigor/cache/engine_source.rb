@@ -80,6 +80,41 @@ module Rigor
         digest_tree(root)
       end
 
+      # {.identity} for THIS process's engine, computed once. Every production caller wants this; the
+      # uncached {.identity} stays the computation, and the seam a spec relocates.
+      #
+      # A memo, not a per-call walk, on two grounds.
+      #
+      # Cost. #285 could afford the walk because the two callers it wired reached it at most twice per
+      # process. Adding {IncrementalSnapshot.fingerprint} (#289) breaks that: {Protection::MutationCache}
+      # builds a fingerprint per snapshot-root candidate, so one `rigor coverage --protection --mutation
+      # PATH` reaches this five times — 90 ms of walking for a value that cannot differ between the calls.
+      #
+      # Correctness, which is the stronger reason. The digest exists to identify the engine that COMPUTED a
+      # cached value, and that engine is fixed when the process finishes requiring — nothing an edit does to
+      # `lib/` mid-run changes the code already running. Re-reading the tree would eventually key values
+      # against source that never produced them, so the memo is the more faithful answer, not merely the
+      # cheaper one. That is also why a fork-pool worker inheriting it is right: `PoolCoordinator` builds one
+      # session on the parent and forks children that copy-on-write inherit its image, so parent and child
+      # run the same engine by construction — and the fingerprints are computed on the parent before a pool
+      # exists at all. The same reading covers the long-running `rigor lsp` process.
+      #
+      # {Unavailable} propagates and is deliberately NOT memoised: the ivar is only assigned on success.
+      def process_identity
+        return @process_identity if defined?(@process_identity)
+
+        @process_identity = identity
+      end
+
+      # Discards the {.process_identity} memo; production code MUST NOT call this — a run that recomputed
+      # mid-flight would key cached values against source that did not compute them, which is the whole
+      # argument for the memo. It exists because a spec process is many logical "processes", and a memo that
+      # outlived one example would silently ignore the next one's stub of {.root} / {.identity} and pass for
+      # the wrong reason. `spec_helper` calls it before every example so no spec has to know it is here.
+      def reset_process_identity!
+        remove_instance_variable(:@process_identity) if defined?(@process_identity)
+      end
+
       # True when `Rigor::VERSION` already pins this tree's bytes: an immutable RubyGems install, laid out
       # as `…/gems/rigortype-<VERSION>`. The `.git` probe is the belt to that braces — a working tree that
       # somehow occupies a release-shaped path is still a working tree.
@@ -93,9 +128,8 @@ module Rigor
       # A SHA-256 over every engine `.rb` file: its ROOT-RELATIVE path (so the digest survives moving or
       # re-cloning the checkout) followed by its bytes, in sorted path order.
       #
-      # Not memoised: {Analysis::RunCacheKey.descriptor} is reached at most twice per process (the
-      # boot-slimming probe, then the runner on a miss), so a memo would save one walk on the path that
-      # already pays for a full analysis while adding state that a fork-pool worker would inherit.
+      # The walk itself is not memoised — {.process_identity} is where a production caller gets the
+      # once-per-process value, and this stays the computation so a spec can point it at another tree.
       def digest_tree(root)
         unless File.directory?(File.join(root, REQUIRED_DIRECTORY))
           raise Unavailable, "#{root} has no #{REQUIRED_DIRECTORY}/ to identify the engine by"

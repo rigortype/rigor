@@ -168,10 +168,11 @@ affected files in parallel just as a full run does.
 
 The snapshot lives under the cache directory (`.rigor/cache`)
 and is keyed by a fingerprint of your configuration, your locked
-gems, your project's own `sig/` RBS, and the Rigor version.
-Change any of those and the snapshot is dropped and the next run
-is a full one, so an incremental run can never serve a stale
-result. (The fingerprint keys on the analysis *roots* — e.g.
+gems, your project's own `sig/` RBS, the Rigor version, and — if
+you run Rigor from a checkout — the content of Rigor's own
+source. Change any of those and the snapshot is dropped and the
+next run is a full one, so an incremental run can never serve a
+stale result. (The fingerprint keys on the analysis *roots* — e.g.
 `["lib"]` — not the expanded file list, so adding or removing a
 file *under* those roots does **not** drop the snapshot: the
 incremental session re-analyzes the added files and the

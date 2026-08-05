@@ -118,6 +118,57 @@ RSpec.describe Rigor::Cache::EngineSource do
     end
   end
 
+  # Issue #289 — the once-per-process value every production caller reads. The memo is not an optimisation
+  # bolted onto {.identity}: it is the claim that the engine which COMPUTED a cached value is fixed when
+  # requiring finishes, so re-reading `lib/` mid-run would key values against source that never ran them.
+  describe ".process_identity" do
+    it "computes once and keeps answering, even after the engine source underneath it moves" do
+      Dir.mktmpdir("rigor-engine-source-") do |dir|
+        root = write_engine(File.join(dir, "checkout"), "# v1\n")
+        allow(described_class).to receive(:root).and_return(root)
+        first = described_class.process_identity
+
+        File.write(File.join(root, "lib", "rigor", "inference", "narrowing.rb"), "# v2\n")
+
+        expect(described_class.process_identity).to eq(first)
+        # …and the uncached computation still sees the edit, so the memo is the only thing pinning it.
+        expect(described_class.identity(root)).not_to eq(first)
+      end
+    end
+
+    it "walks the tree once across repeated reads — the point of wiring it into three cache keys" do
+      allow(described_class).to receive(:identity).and_call_original
+
+      5.times { described_class.process_identity }
+
+      expect(described_class).to have_received(:identity).once
+    end
+
+    it "memoises nil for a version-pinned tree rather than re-walking to rediscover it" do
+      Dir.mktmpdir("rigor-engine-source-") do |dir|
+        root = write_engine(File.join(dir, "gems", "#{described_class::GEM_NAME}-#{Rigor::VERSION}"), "# v1\n")
+        allow(described_class).to receive(:root).and_return(root)
+        allow(described_class).to receive(:identity).and_call_original
+
+        expect(described_class.process_identity).to be_nil
+        expect(described_class.process_identity).to be_nil
+        expect(described_class).to have_received(:identity).once
+      end
+    end
+
+    # An unidentifiable engine must keep raising: a memoised failure that decayed into a `nil` would read as
+    # "version-pinned, add no slot", which is precisely the weaker key {Unavailable} exists to prevent.
+    it "does not memoise a failure — every read re-raises rather than degrading to nil" do
+      Dir.mktmpdir("rigor-engine-source-") do |dir|
+        allow(described_class).to receive(:root).and_return(File.join(dir, "nowhere"))
+
+        2.times do
+          expect { described_class.process_identity }.to raise_error(described_class::Unavailable)
+        end
+      end
+    end
+  end
+
   # The examples above all relocate the tree; this one pins the DEFAULT, so the seam they use cannot hide a
   # root that points somewhere absurd.
   it "identifies this checkout by its source, since a checkout is not version-pinned" do

@@ -71,6 +71,18 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[receiver].local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
+    it "materialises program-wide globals directly into the top-level seeded scope (Slice 7 phase 6)" do
+      # Distinct from a read reached VIA the `program_globals` accumulator (a def body's entry scope): this pins the
+      # top-level seeded scope's OWN `.global` map, which top-level / CLI-probe reads consult directly without going
+      # through the accumulator.
+      program, idx = index_for(<<~RUBY)
+        $verbose = true
+        $verbose
+      RUBY
+
+      expect(idx[program].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
     it "shows branch-internal bindings inside their branch only" do
       program, idx = index_for(<<~RUBY)
         if cond
@@ -653,6 +665,71 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
+  describe "declaration_signature parts (ADR-89 WD1)" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write(name, body)
+      path = File.join(tmpdir, name)
+      File.write(path, body)
+      path
+    end
+
+    it "joins a multi-module include list with a comma (append_ancestry_signature)" do
+      path = write("a.rb", <<~RUBY)
+        module ModA; end
+        module ModB; end
+
+        class Foo
+          include ModA
+          include ModB
+        end
+      RUBY
+      file_index = described_class.discovered_project_index_for_paths([path]).fetch(:def_index)
+      parts = []
+      described_class.append_ancestry_signature(parts, file_index)
+      expect(parts).to include("i:Foo=ModA,ModB")
+    end
+
+    it "joins a multi-parameter signature with a comma (parameter_signature)" do
+      path = write("a.rb", <<~RUBY)
+        class Foo
+          def bar(x, y:, z: 1)
+            x
+          end
+        end
+      RUBY
+      program = parse(File.read(path))
+      idx = described_class.index(program, default_scope: default_scope)
+      def_node = idx[program].user_def_for("Foo", :bar)
+      expect(described_class.parameter_signature(def_node)).to eq("(r:x,kr:y,ko:z)")
+    end
+  end
+
+  describe ".discovered_project_index_incremental (ADR-85 WD2 fold path)" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write(name, body)
+      path = File.join(tmpdir, name)
+      File.write(path, body)
+      path
+    end
+
+    it "Set-unions class_sources across files that reopen the same class (fold_ancestry_tables)" do
+      a = write("a.rb", "class Shared\n  include Comparable\nend\n")
+      b = write("b.rb", "class Shared\n  include Enumerable\nend\n")
+
+      combined = described_class.discovered_project_index_incremental([a, b], seed_bundles: {})
+      di = combined.fetch(:def_index)
+
+      expect(di[:class_sources]["Shared"]).to eq(Set[a, b])
+      expect(di[:includes]["Shared"]).to contain_exactly("Comparable", "Enumerable")
+    end
+  end
+
   describe "declaration overrides (Slice A-declarations)" do
     it "annotates the constant_path of `module Foo` with Singleton[Foo]" do
       program = parse("module Foo\nend")
@@ -982,6 +1059,31 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         type = outer.class_ivars_for("Pure")[:@struct]
         # `.last` is NOT a mutator, so no widening fires; the seed precision is preserved.
         expect(type).to be_a(Rigor::Type::Tuple)
+      end
+
+      it "widens only the Tuple member of a Union-seeded ivar (sibling writes of different shapes)" do
+        program = parse(<<~RUBY)
+          class Multi
+            def initialize
+              @data = [1]
+            end
+
+            def reset
+              @data = "x"
+            end
+
+            def push!
+              @data << 2
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("Multi")[:@data]
+        expect(type).to be_a(Rigor::Type::Union)
+        array_member = type.members.grep(Rigor::Type::Nominal).find { |m| m.class_name == "Array" }
+        expect(array_member.type_args.first).to be_a(Rigor::Type::Dynamic)
+        expect(type.members).to include(Rigor::Type::Combinator.constant_of("x"))
       end
     end
 

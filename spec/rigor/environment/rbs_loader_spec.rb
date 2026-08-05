@@ -693,6 +693,22 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(interface_names).to include("_Writable")
     end
 
+    it "lists every method name declared by a real (non-stubbed) interface" do
+      File.write(
+        File.join(tmpdir, "readable.rbs"),
+        "interface _Readable\n  def read: () -> String\n  def close: () -> void\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.interface_method_names("_Readable")).to contain_exactly(:read, :close)
+    end
+
+    it "returns nil for an interface name that does not resolve" do
+      loader = described_class.new(signature_paths: [tmpdir])
+
+      expect(loader.interface_method_names("_NoSuchInterface")).to be_nil
+    end
+
     it "lands class, namespace, interface and alias stubs from one batch" do
       # All four kinds in a single missing set — the shape that used to take the whole batch down with it,
       # since one buffer carried every declaration.

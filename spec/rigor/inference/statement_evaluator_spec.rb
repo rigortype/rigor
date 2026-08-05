@@ -253,6 +253,102 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "RSpec matcher narrowing (`expect(x)...`, v0.0.3)" do
+    # The AST-shape-matched fallback: `expect(<local>)` followed by `not_to`/`to_not(be_nil)` or
+    # `to(be_a/be_kind_of/be_an_instance_of/be_instance_of(C))` narrows the named local downstream. No RBS for RSpec
+    # is required — the shape is recognised purely from the call nodes.
+    it "narrows a local away from NilClass after `not_to be_nil`" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : nil
+        expect(x).not_to be_nil
+        x
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("Array"))
+    end
+
+    it "narrows a local away from NilClass after `to_not be_nil`" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : nil
+        expect(x).to_not be_nil
+        x
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("Array"))
+    end
+
+    it "does NOT narrow when `be_nil` carries a stray argument (defensive arity guard)" do
+      # `be_nil` takes no arguments; Prism only allocates an `ArgumentsNode` when there is at least one argument
+      # (`be_nil()` and bare `be_nil` both parse with `arguments: nil`), so `matcher.arguments.arguments.empty?`
+      # is reachable ONLY when the matcher is (mis)written with a stray argument like `be_nil(1)`. This proves the
+      # arity guard is live: without it, `not_to be_nil(1)` would incorrectly narrow `x` away from nil.
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : nil
+        expect(x).not_to be_nil(1)
+        x
+      RUBY
+      expect(post.local(:x)).to eq(
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of("Array"), Rigor::Type::Combinator.constant_of(nil)
+        )
+      )
+    end
+
+    it "narrows a local to the named class after `to be_a(C)`" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : "str"
+        expect(x).to be_a(Array)
+        x
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("Array"))
+    end
+
+    it "narrows a local to the named class after `to be_kind_of(C)`" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : "str"
+        expect(x).to be_kind_of(Array)
+        x
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("Array"))
+    end
+
+    it "narrows a local to the named class after `to be_an_instance_of(C)` (exact)" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : "str"
+        expect(x).to be_an_instance_of(Array)
+        x
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("Array"))
+    end
+
+    it "narrows a local to the named class after `to be_instance_of(C)` (exact)" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : "str"
+        expect(x).to be_instance_of(Array)
+        x
+      RUBY
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.nominal_of("Array"))
+    end
+
+    it "leaves the local's type unchanged for an unrecognised matcher (`eq`)" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : "str"
+        expect(x).to eq("str")
+        x
+      RUBY
+      expect(post.local(:x).members.map { |m| m.respond_to?(:class_name) ? m.class_name : m.value })
+        .to contain_exactly("Array", "str")
+    end
+
+    it "leaves the local's type unchanged when the `expect(...)` target is not a bare local" do
+      _, post = evaluate(<<~RUBY)
+        x = rand < 0.5 ? Array.new : "str"
+        expect(x.itself).to be_a(Array)
+        x
+      RUBY
+      expect(post.local(:x).members.map { |m| m.respond_to?(:class_name) ? m.class_name : m.value })
+        .to contain_exactly("Array", "str")
+    end
+  end
+
   describe "loop-exit predicate-assignment narrowing" do
     it "narrows an `until x = expr` target non-nil after the loop" do
       _, post = evaluate(<<~RUBY)
@@ -567,6 +663,22 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     it "for-loop over an Integer Range literal binds the index to Integer" do
       _, post = evaluate(<<~RUBY)
         for i in (1..10)
+        end
+      RUBY
+      nominal = post.local(:i).members.grep(Rigor::Type::Nominal)
+      expect(nominal.map(&:class_name)).to contain_exactly("Integer")
+    end
+
+    it "for-loop over a Type::IntegerRange-narrowed collection binds the index to Integer" do
+      # Distinct from the literal-Range case above: `case n; when 1..10` narrows `n` itself to a `Type::IntegerRange`
+      # carrier (not a `Constant<Range>`), so `for i in n` exercises `collection_element_type`'s `Type::IntegerRange`
+      # branch rather than `constant_element_type`'s `Range` branch.
+      _, post = evaluate(<<~RUBY)
+        n = rand(100)
+        case n
+        when 1..10
+          for i in n
+          end
         end
       RUBY
       nominal = post.local(:i).members.grep(Rigor::Type::Nominal)
@@ -1891,6 +2003,50 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "transitive callee-escape content floor (ADR-57 slice 2 self-call channel)" do
+    # An escaping block may content-mutate a captured local INDIRECTLY, by passing it as an argument to a
+    # self-dispatched helper that mutates its own parameter — `collect_content_mutations` only sees a direct
+    # `local[k] = v` / `local << x` write in the block body, so this channel is a separate resolve-the-callee path
+    # (`floor_callee_escaped_args_for_call` / `callee_content_mutated_parameters`). It needs `top_level_def_for` to
+    # resolve `helper`'s def, which requires a discovery-seeded scope — a bare `Scope.empty` never runs ScopeIndexer,
+    # so (like the cross-method ivar tests above) this goes through `ScopeIndexer.index` directly.
+    it "floors a captured local an escaping block passes to a self-call that mutates it directly" do
+      ast = parse_program(<<~RUBY)
+        def helper(arr)
+          arr << 1
+        end
+
+        data = []
+        Thread.new { helper(data) }
+        data
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      _type, post = index[ast.statements].evaluate(ast.statements)
+      expect(post.local(:data)).to eq(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped])
+      )
+    end
+
+    it "floors a captured local a self-call mutates through ITS OWN nested block (the escaped, not direct, channel)" do
+      ast = parse_program(<<~RUBY)
+        def helper(h)
+          foo.bar { h[:k] = 1 }
+        end
+
+        data = {}
+        Thread.new { helper(data) }
+        data
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      _type, post = index[ast.statements].evaluate(ast.statements)
+      expect(post.local(:data)).to eq(
+        Rigor::Type::Combinator.nominal_of(
+          "Hash", type_args: [Rigor::Type::Combinator.untyped, Rigor::Type::Combinator.untyped]
+        )
+      )
+    end
+  end
+
   describe "captured-local invalidation on closure escape (Slice 6 phase C sub-phase 3c)" do
     let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
 
@@ -1950,6 +2106,81 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       )
       _, post = base.evaluate(parse_program("Thread.new { x = 2 }"))
       expect(post.local_facts(:x, bucket: :local_binding)).to be_empty
+    end
+  end
+
+  describe "escaping-block collection content floor (ADR-57 slice 2)" do
+    # A content-mutating (not rebinding) escaping/unknown block cannot be joined over a bounded evidence set (it may
+    # run later, any number of times), so the sound continuation is the bare-collection floor: Array ->
+    # `Array[Dynamic[top]]`, Hash -> `Hash[untyped, untyped]`, String -> `String` unchanged. These cases exercise
+    # `content_floor_for` / `arrayish?` / `hashish?` / `stringish?` across both the direct-carrier and the
+    # nilable-union pre-state shapes.
+    it "floors a Nominal[Array] captured local to Array[Dynamic[top]]" do
+      _, post = evaluate(<<~RUBY)
+        arr = Array.new
+        Thread.new { arr << 1 }
+        arr
+      RUBY
+      expect(post.local(:arr)).to eq(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped])
+      )
+    end
+
+    it "floors a Nominal[Hash] captured local to Hash[untyped, untyped]" do
+      _, post = evaluate(<<~RUBY)
+        h = Hash.new
+        Thread.new { h[:k] = 1 }
+        h
+      RUBY
+      expect(post.local(:h)).to eq(
+        Rigor::Type::Combinator.nominal_of(
+          "Hash", type_args: [Rigor::Type::Combinator.untyped, Rigor::Type::Combinator.untyped]
+        )
+      )
+    end
+
+    it "leaves a String captured local's carrier unchanged (no element parameter)" do
+      _, post = evaluate(<<~RUBY)
+        s = ""
+        Thread.new { s << "x" }
+        s
+      RUBY
+      expect(post.local(:s)).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "floors a nilable (Array | nil) captured local through the union arrayish? branch" do
+      _, post = evaluate(<<~RUBY)
+        arr = rand < 0.5 ? [] : nil
+        Thread.new { arr << 1 }
+        arr
+      RUBY
+      expect(post.local(:arr)).to eq(
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.untyped])
+      )
+    end
+
+    it "floors a nilable (Hash | nil) captured local through the union hashish? branch" do
+      _, post = evaluate(<<~RUBY)
+        h = rand < 0.5 ? {} : nil
+        Thread.new { h[:k] = 1 }
+        h
+      RUBY
+      expect(post.local(:h)).to eq(
+        Rigor::Type::Combinator.nominal_of(
+          "Hash", type_args: [Rigor::Type::Combinator.untyped, Rigor::Type::Combinator.untyped]
+        )
+      )
+    end
+
+    it "widens a String captured local to its nominal base via the non-escaping join path" do
+      # `join_content_for_param` (the slice-C non-escaping write-back join, not the escaping floor above) hits the
+      # same stringish? contract from its own call site.
+      _, post = evaluate(<<~RUBY)
+        s = ""
+        [1, 2].each { |n| s << n.to_s }
+        s
+      RUBY
+      expect(post.local(:s)).to eq(Rigor::Type::Combinator.nominal_of("String"))
     end
   end
 

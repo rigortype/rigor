@@ -41,25 +41,38 @@ this file is the one that is wrong.
   checkboxes, including the `dry-validation.rule-key-mismatch` `:error` behind two all-or-nothing
   FP gates (2 firing specs against 7 decline specs). #269 (PR #274) — the missing precision
   snapshot; the fixture had been running under a silent `skip`, not a vacuous pass.
-- **Open follow-ups filed from that work**: [#277](https://github.com/rigortype/rigor/issues/277)
-  (a self-recursive method narrows its inferred return, making a live condition read as
-  always-truthy — same FP class as #271, worked around in PR #276 with a `nested:` flag).
+- **Then closed in the same arc**: #277 (PR #278) — and its recorded hypothesis was WRONG in an
+  instructive way: the defect was not ADR-55 recursive-return narrowing but `MutationWidening`
+  ignoring receivers that *select* among variables (`(cond ? a : b)[k] = v`), so both hashes kept
+  their literal `{}` shape; a 12-line non-recursive probe fires the same FP, and the cycle guard
+  had been *masking* the identical wrong body result. #142 (PRs #280 + #281) — LSP multi-buffer
+  fork dispatch, **with a size gate required at review**: the pool measured 0.66x at N=8 and
+  broke even only near N=12, so it now declines below 16 (`RIGOR_LSP_POOL_MIN_BATCH`), the
+  sub-threshold path being the exact computation the code already ran. #121 second slice (PR #279)
+  — `Regexp.union` / `linear_time?`, plus a coverage-table reconciliation that found **12 rows**
+  (8 CGI, 4 URI) marked 🔲 though already implemented. #135 checkbox 1 (PR #282) — seven giant
+  engine files swept, 642 spec lines, no `lib/` change.
 
 ## Next session
 
-- **In flight when this was written** (three agents, results not yet audited): #277 (engine
-  diagnosis, main tree), #142 (LSP pool dispatch — its brief starts with an empirical check that
-  the "needs a persistent Environment" precondition may ALREADY be met), #135 checkbox 1 (the
-  giant-file self-mutation tier, newly affordable thanks to #257 + #270). If they landed, the
-  issues carry the records; if not, their branches are named in the PR list.
+- **Resume #135's giant-file tier at `analysis/runner.rb`** — it is the named boundary, not
+  reached because the run hit an external limit mid-sweep. The file list and the resume point are
+  on the issue; do not re-derive them.
 - **Remaining `ready-for-agent`**: #147 (CLI editor-mode throughput: snapshot cache, `--also`,
-  multi-buffer — note it overlaps #142's buffer machinery, so sequence them rather than running
-  both at once), #135's four remaining checkboxes, #121 as the ongoing P3 fold category (next
-  slice starts by reconciling the stale Regexp doc rows — `escape`/`quote` marked 🔲 though
-  implemented — against `RegexpFolding`).
-- **`ready-for-human` wanting a design pass**: #158 (the spec's `budgets:` table is still unwired),
-  #152 (`&&`/`||` polarity gate beyond Constant-only), #159 (upstreaming staged ruby/rbs signature
-  fixes — external publishing, needs the user's go).
+  multi-buffer — it overlaps the buffer machinery #142 just changed, so read
+  `BufferPoolDispatcher` + `PublishBatcher` first), #135's four remaining checkboxes, #121 as the
+  ongoing P3 fold category (the truthful remaining list is now the URI rows —
+  `encode_www_form` / `decode_www_form` / `parse` / `join` / `extract` — re-verified as genuinely
+  open; **start every slice by probing with `rigor type-of`, never by reading the coverage
+  tables**, which under-report badly enough that auditing one is a legitimate slice by itself).
+- **`ready-for-human` wanting a design pass**: #152 (`&&`/`||` polarity gate beyond Constant-only),
+  #159 (upstreaming staged ruby/rbs signature fixes — external publishing, needs the user's go).
+  **#158 was re-audited 2026-08-02 and the answer is "do not build it yet"** — both preconditions
+  (Layer-1 doc hygiene, and the "exhaustion-as-explanation" observability its acceptance shape
+  lists) are ALREADY satisfied, so the issue is purely demand-gated and the one candidate cliff was
+  refuted. The reasoning and the collection method are on the issue; the non-obvious part is that
+  `BudgetTrace` counters do not cross `fork`, so a trace must run `--workers 0` or a real cliff
+  reads as clean.
 - **The rbs-inline upstream report stays ON HOLD by user decision** (2026-08-01; do not file
   without a fresh ask). Evidence chain: ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764`
   → rescue at `617-621` → `annotations.rb:527-536`; plus a pending one-line ADR-32 correction (its
@@ -86,3 +99,17 @@ this file is the one that is wrong.
 - **Fixture lesson for oracle specs**: equalise the knowledge axis before comparing two oracles —
   #266's brute-force cross-check reported missing cross-file *knowledge* as a closure defect until
   both features were adopted in the fixture.
+- **Queued-work descriptions in this repo systematically under-report what already exists.** Four
+  instances now, on four different surfaces: ROADMAP prose (the L0 docs harness), an issue's
+  premise (#142's "needs a persistent Environment" — already true since slice 7), an issue's
+  acceptance criteria (#158's observability item — `BudgetTrace` already covers every cutoff), and
+  a coverage table (#121's note marked 12 implemented CGI/URI rows as gaps). Budget one `ls` /
+  `grep` / probe per claimed-missing artifact before briefing anyone; it has paid off every time.
+- **A "correct but slower" result is a defect here, not a trade-off to ship.** #142's pool was
+  0.66x at N=8 — squarely a realistic editor burst — and the repo had already fixed this exact
+  shape once (#257's `ForkMap` pessimization). The reviewer's job is to send it back for a gate;
+  the sub-threshold path being *literally the old computation* is what makes such a gate safe.
+- **Salvage an interrupted agent's uncommitted work rather than re-running it**: #135 stopped
+  mid-sweep on an external limit with 642 lines of good specs uncommitted in its worktree. Verify
+  them yourself, commit with the boundary named, and record the resume point — re-running the
+  sweep would have cost far more than reading the diff.

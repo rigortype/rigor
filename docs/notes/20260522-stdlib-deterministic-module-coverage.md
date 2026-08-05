@@ -46,6 +46,20 @@ Option A が低コスト。関数数が増えたら Option B に昇格を検討�
 `Math.methods - Module.methods` → 28 関数（Ruby 4.0.5）。  
 全て `Constant[Float]` または `Tuple[Constant[Float], Constant[Integer]]` へ折りたためる。
 
+**2026-08-05 re-audit** (this slice): `docs/CURRENT_WORK.md` listed this section as "next
+unaudited," but `MathFolding` (`lib/rigor/inference/method_dispatcher/math_folding.rb`) already
+covers all 28 functions — `MATH_UNARY` (22) + `MATH_BINARY` (`atan2`/`hypot`/`ldexp`) +
+`MATH_TUPLE_UNARY` (`frexp`/`lgamma`) + the variadic `log` handler = 28. Re-probed live with
+`rigor type-of` on a scratch fixture (`Math.gamma(5.0)` → `24.0`, `Math.lgamma(-0.5)` →
+`[1.2655121234846454, -1]`, `Math.atan2`/`erf`/`tanh` all exact `Constant[Float]`) rather than
+trusting the table. Nothing was stale; no row changed. This section was fully implemented before
+the four #121 P3 slices even began (`a73aac2f`, predating PR #268) — the "unaudited" label in the
+handoff was itself unverified. The two Refinement follow-ups below remain deliberately deferred,
+not gaps: when the Math argument is a compile-time constant the fold already returns the *exact*
+value, which is strictly more precise than a `positive-float` / `non-negative-float` range tag;
+adding the tag for the non-constant-argument case is a different, unimplemented dispatch path, not
+a UNARY/BINARY set addition, and is left for a session that hits real demand for it.
+
 ### 1-1. メソッド一覧
 
 | メソッド | シグネチャ | 返却型 | 状態 | 備考 |
@@ -124,6 +138,15 @@ Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 
 `Shellwords.methods - Module.methods` → 7 メソッド（実体 3 関数 + エイリアス）。
 
+**2026-08-05 re-audit** (this slice): also listed as "next unaudited" in the handoff, and also
+already fully implemented — `ShellwordsFolding`
+(`lib/rigor/inference/method_dispatcher/shellwords_folding.rb`, `19c3e5bc`, predating even the
+first #121 P3 slice) covers all 7 spellings, including the `String#shellescape` /
+`String#shellsplit` instance-method twins via `ConstantFolding`'s `STRING_ARRAY_UNARY` path.
+Re-probed live with `rigor type-of` (`Shellwords.escape("a b")` → `"a\\ b"`,
+`Shellwords.join(["a", "b c"])` → `"a b\\ c"`, `Shellwords.split("a 'b c'")` →
+`["a", "b c"]`) rather than trusting the table. Nothing was stale; no row changed.
+
 | メソッド | エイリアス | シグネチャ | 返却型 | 状態 | 備考 |
 |----------|-----------|-----------|--------|------|------|
 | `escape(str)` | `shellescape` | String → String | `Constant[String]` | ✅ | `ShellwordsFolding` 実装済み。`""` 入力でも `"''"` を返すため常に非空。 |
@@ -194,6 +217,15 @@ them, confirmed empirically with `rigor type-of` (`CGI.escape("hello world")` �
 `Constant["hello+world"]`, `CGI.escapeElement("<BR><A HREF=\"url\"></A>", "A", "IMG")` →
 `Constant["<BR>&lt;A HREF=&quot;url&quot;&gt;&lt;/A&gt;"]`, etc. — all eight forms checked). This
 whole section is done; no further CGI work is queued.
+
+**2026-08-05 independent re-confirmation** (later this slice): the handoff still listed the "CGI
+rows" as unaudited despite the reconciliation immediately above landing the same day — re-probed
+anyway rather than trusting either the table or the prior note. `CGI.escapeElement("<BR><A
+HREF=\"url\"></A>", "A", "IMG")` → the exact escaped `Constant[String]`, and feeding that through
+`CGI.unescapeElement(..., "A", "IMG")` round-trips to the original literal — confirming the
+element-args path (`fold_cgi_element`), which the original reconciliation note did not call out by
+name. `CGI.unescape`, `CGI.escapeURIComponent` / `unescapeURIComponent` also re-confirmed exact.
+No row changed.
 
 | 機能 | CamelCase | snake_case | エイリアス | 返却型 | 状態 |
 |------|-----------|-----------|-----------|--------|------|
@@ -266,10 +298,12 @@ selects) can surface a diagnostic that does not fire today — bucket-3 / P0, no
 [x] encode_uri_component      → Constant[String] — ドキュメントのみ訂正（2026-08-05）
 [x] decode_uri_component      → Constant[String] — ドキュメントのみ訂正（2026-08-05）
 
-中優先度（未実装、次スライス候補）:
-[ ] encode_www_form → Constant[String] (Tuple / HashShape 引数時)
-[ ] decode_www_form → Tuple[Tuple[Constant[String], Constant[String]]…]
+中優先度:
+[x] encode_www_form → Constant[String] (Tuple / HashShape 引数時) — 実装済み（#121, 2026-08-05）
+[x] decode_www_form → Tuple[Tuple[Constant[String], Constant[String]]…] — 実装済み（#121, 2026-08-05）
 ```
+
+チェックリストがテーブル本体の ✅ と食い違っていた（2026-08-05 訂正、本スライス）。
 
 実装ファイル: `lib/rigor/inference/method_dispatcher/uri_folding.rb`（`URIFolding` モジュール、Tier
 D）。テスト: `spec/integration/fixtures/module_function_folding/demo.rb` +
@@ -304,3 +338,12 @@ D）。テスト: `spec/integration/fixtures/module_function_folding/demo.rb` +
 | ✅ 済 | `URI.encode_www_form` / `decode_www_form` / `extract` | `Constant[String]` / 精密 Tuple（#121 P3, 2026-08-05）。URI 節はこれで全行分類済み |
 | ✅ 済 | `Regexp.union` / `linear_time?` | `Constant[Regexp]` / `Constant[bool]`（#121 P3, 2026-08-05） |
 | ✅ 済 | `Regexp.last_match` | 証明済みマッチ辺での narrowing（ドキュメントのみ 2026-08-05 訂正、実装は既存） |
+
+**2026-08-05, this slice**: `docs/CURRENT_WORK.md` carried forward a stale "next unaudited"
+pointer at Shellwords + Math/CGI. Both were re-audited (probed live with `rigor type-of`, not
+read off the table — Math and Shellwords sections above now carry their own audit notes) and both
+were already fully implemented, predating even the first #121 P3 slice. There is no remaining 🔲
+anywhere in this document — every row across Math, Shellwords, Regexp, CGI, and URI is ✅, 🔷, or
+🚫. This is this repo's fifth confirmed instance of a queued-work description under-reporting what
+already exists (see `docs/CURRENT_WORK.md`'s "What these sessions learned" for the other four); no
+code change accompanies this slice because no genuine gap was found.

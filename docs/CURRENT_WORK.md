@@ -61,62 +61,54 @@ this file is the one that is wrong.
 - **Remaining `ready-for-agent`**: #147 (CLI editor-mode throughput: snapshot cache, `--also`,
   multi-buffer — it overlaps the buffer machinery #142 just changed, so read
   `BufferPoolDispatcher` + `PublishBatcher` first), #135's four remaining checkboxes, #121 as the
-  ongoing P3 fold category. **The whole URI section is now closed** (PRs #283 + #284):
-  `encode_www_form` / `decode_www_form` / `extract` implemented, `parse` / `join` re-classified 🚫
-  — a URI object has no `Constant` representation, and narrowing `parse`'s ten-arm union is
-  bucket-3/P0 because it can surface a diagnostic that does not fire today. Every URI row is now
-  ✅/🔷/🚫. **Start every slice by probing with `rigor type-of`, never by reading the coverage
-  tables** — across four slices roughly half of each "gap list" turned out to be already
-  implemented or out-of-category, so the audit is the work and re-classifications are first-class
-  output. Next unaudited sections in that note: Shellwords, and whatever the Math/CGI rows claim.
+  ongoing P3 fold category. **The whole `20260522-stdlib-deterministic-module-coverage.md` note is
+  now fully classified** — every Math/Shellwords/Regexp/CGI/URI row is ✅/🔷/🚫; this file's own
+  "next unaudited: Shellwords, Math/CGI" pointer was itself wrong (re-probed 2026-08-05, both
+  pre-implemented — see the under-reporting bullet). #121's next slice needs a fresh module
+  enumeration, not a re-read here. **Start every slice by probing `rigor type-of`, not the table.**
 - **`ready-for-human` wanting a design pass**: #152 (`&&`/`||` polarity gate beyond Constant-only),
   #159 (upstreaming staged ruby/rbs signature fixes — external publishing, needs the user's go).
   **#158 was re-audited 2026-08-02 and the answer is "do not build it yet"** — both preconditions
-  (Layer-1 doc hygiene, and the "exhaustion-as-explanation" observability its acceptance shape
-  lists) are ALREADY satisfied, so the issue is purely demand-gated and the one candidate cliff was
-  refuted. The reasoning and the collection method are on the issue; the non-obvious part is that
-  `BudgetTrace` counters do not cross `fork`, so a trace must run `--workers 0` or a real cliff
-  reads as clean.
+  (Layer-1 doc hygiene, the "exhaustion-as-explanation" observability its acceptance shape lists)
+  are ALREADY satisfied, so it is purely demand-gated and the one candidate cliff was refuted.
+  Reasoning is on the issue; non-obvious part: `BudgetTrace` counters do not cross `fork`, so a
+  trace must run `--workers 0` or a real cliff reads as clean.
 - **The rbs-inline upstream report stays ON HOLD by user decision** (2026-08-01; do not file
-  without a fresh ask). Evidence chain: ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764`
-  → rescue at `617-621` → `annotations.rb:527-536`; plus a pending one-line ADR-32 correction (its
-  "upstream docs" citation points at rbs-core's `RBS::InlineParser` doc, not the rbs-inline gem's).
+  without a fresh ask). Evidence chain: ADR-32 WD12 + `annotation_parser.rb:323-326` → `753-764` →
+  rescue at `617-621` → `annotations.rb:527-536`; plus a pending one-line ADR-32 correction (its
+  "upstream docs" citation points at rbs-core's `RBS::InlineParser` doc, not rbs-inline's).
 
 ## What these sessions learned that is not in a commit
 
 - **The delegation brief that works**: fixed design ("do not relitigate") + repo contract verbatim
-  + gates by exit code + parent re-runs the gates independently + **"report contradictions, do not
+  + gates by exit code + parent re-runs gates independently + **"report contradictions, do not
   silently redesign"** + **"run every gate/measurement in the FOREGROUND; never end a turn while
   anything is pending"** (three background-wait stalls before that line was added; none after).
-  The contradiction hatch overturned a premise on five separate tasks — it is the highest-value
+  The contradiction hatch overturned a premise on six separate tasks now — the highest-value
   sentence in the brief.
 - **For an engine FP, add "diagnose and report the root cause even if you also fix it; retreat
   rather than land a half-understood fix"** — that is what produced #271's three-ingredient
   finding instead of a plausible patch.
 - **Two FPs on our own code were found by writing ordinary code, not by looking for FPs** (#271
-  while wiring a cache key, #277 while writing a plugin walker). Dogfooding surfaces the class the
-  project weighs heaviest; treat "I had to work around the checker" in any agent report as a
-  finding to file, not an aside.
+  while wiring a cache key, #277 while writing a plugin walker). Treat "I had to work around the
+  checker" in any agent report as a finding to file, not an aside.
 - **Do not let a measurement agent borrow the main tree's `exe/rigor` while another agent edits
-  that tree** — a diagnostic `warn` landed mid-measurement during the textbringer run. Provably
-  benign that time; the isolation was luck. Pin measurements to a clean checkout or sequence them.
+  that tree** — a diagnostic `warn` landed mid-measurement during the textbringer run, provably
+  benign that time by luck. Pin measurements to a clean checkout or sequence them.
 - **Fixture lesson for oracle specs**: equalise the knowledge axis before comparing two oracles —
-  #266's brute-force cross-check reported missing cross-file *knowledge* as a closure defect until
-  both features were adopted in the fixture.
-- **Queued-work descriptions in this repo systematically under-report what already exists.** Four
-  instances now, on four different surfaces: ROADMAP prose (the L0 docs harness), an issue's
-  premise (#142's "needs a persistent Environment" — already true since slice 7), an issue's
-  acceptance criteria (#158's observability item — `BudgetTrace` already covers every cutoff), and
-  a coverage table (#121's note marked 12 implemented CGI/URI rows as gaps). Budget one `ls` /
-  `grep` / probe per claimed-missing artifact before briefing anyone; it has paid off every time.
+  #266's brute-force cross-check reported missing cross-file *knowledge* as a closure defect
+  until both features were adopted in the fixture.
+- **Queued-work descriptions in this repo systematically under-report what already exists.** Five
+  instances: ROADMAP prose, #142's premise, #158's acceptance criteria, a coverage table (#121's
+  12 CGI/URI rows), and now this handoff's own #121 pointer, wrong before it was written. Budget
+  one `ls`/`grep`/probe per claimed-missing artifact — even when the claim is from this file.
 - **A "correct but slower" result is a defect here, not a trade-off to ship.** #142's pool was
   0.66x at N=8 — squarely a realistic editor burst — and the repo had already fixed this exact
   shape once (#257's `ForkMap` pessimization). The reviewer's job is to send it back for a gate;
   the sub-threshold path being *literally the old computation* is what makes such a gate safe.
 - **Salvage an interrupted agent's uncommitted work rather than re-running it**: #135 stopped
-  mid-sweep on an external limit with 642 lines of good specs uncommitted in its worktree. Verify
-  them yourself, commit with the boundary named, and record the resume point — re-running the
-  sweep would have cost far more than reading the diff.
+  mid-sweep with 642 lines of good specs uncommitted in its worktree. Verify them, commit with the
+  boundary named, and record the resume point — re-running would cost far more than reading the diff.
 - **This repo's formatter hook strips the `*` from `tuple(*array)`** (deterministically — it
   re-applied after correction). It silently turned a limit-guard spec's receiver into a
   one-element tuple holding a Ruby Array, which declines on *shape* before the limit is ever

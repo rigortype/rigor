@@ -103,12 +103,13 @@ module Rigor
       # incremental-vs-full mismatch). Returns nil on any error → the caller falls back to a non-persisted run.
       #
       # Issue #285, wired here by #289 — every value in this snapshot is something the ANALYZER computed, so
-      # `Rigor::VERSION` alone is not enough to identify what produced it. A version pins the engine's bytes for a RubyGems
-      # install and for nothing else, so on a checkout a warm recheck served diagnostics a pre-edit analyzer
-      # had computed: editing `lib/rigor/inference/*.rb` moved no ANALYZED file, the changed set came back
-      # empty, and 357 unchanged files replayed their old answers. {EngineSource.process_identity} closes it,
-      # and answers nil for a version-pinned tree — which adds no part, so a released gem's fingerprint is
-      # byte-identical to the pre-#289 one and its warm snapshots survive the upgrade untouched.
+      # `Rigor::VERSION` alone is not enough to identify what produced it. A version pins the engine's bytes
+      # for a RubyGems install and for nothing else, so on a checkout a warm recheck served diagnostics a
+      # pre-edit analyzer had computed: editing `lib/rigor/inference/*.rb` moved no ANALYZED file, the changed
+      # set came back empty, and 357 unchanged files replayed their old answers.
+      # {EngineSource.process_identity} closes it, and answers nil for a version-pinned tree — which adds no
+      # part, so a released gem's fingerprint is byte-identical to the pre-#289 one and its warm snapshots
+      # survive the upgrade untouched.
       def self.fingerprint(configuration:, roots:)
         parts = [
           "engine:#{Rigor::VERSION}:#{SCHEMA}",

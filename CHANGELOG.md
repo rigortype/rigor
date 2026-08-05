@@ -72,6 +72,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 
 ### Fixed
 
+- **[cache]** Running Rigor from a git checkout — a working copy you are patching, or `gem "rigor", github:` tracking a branch — now keys the caches that hold analysis results (`rigor check`'s run cache and `rigor coverage --protection --mutation`'s per-file cache) on the content of Rigor's own source, so editing the analyzer and re-running recomputes instead of replaying the previous answer; a released gem is unaffected, since its version already identifies its code exactly ([#285](https://github.com/rigortype/rigor/issues/285)).
 - **[engine]** Filling a collection through a receiver that *selects* between variables — `(kind == :required ? required : optional)[key] = value`, an `if`/`else`, or a `||` — now widens every variable the receiver can be, so a later `.empty?` on one of them no longer draws a false `flow.always-truthy-condition` ([#277](https://github.com/rigortype/rigor/issues/277)).
 - **[engine]** A nested `Result = Data.define(...)` (or `Struct.new(...)`) constant is now visible across files, so a call on a factory's return no longer draws a false `call.undefined-method` attributed to a same-named class in the parent namespace ([#271](https://github.com/rigortype/rigor/issues/271)).
 - **[engine]** A class that defines the same method name on both sides — `def helper` plus a `class << self` (or `def self.helper`) twin — no longer draws a false `call.undefined-method` on the class-side call ([#239](https://github.com/rigortype/rigor/issues/239)).

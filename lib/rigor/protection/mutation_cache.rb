@@ -5,6 +5,7 @@ require "json"
 
 require_relative "../analysis/plugin_fact_fingerprint"
 require_relative "../cache/descriptor"
+require_relative "../cache/engine_source"
 require_relative "../cache/file_digest"
 require_relative "../cache/incremental_snapshot"
 require_relative "../cache/store"
@@ -25,7 +26,10 @@ module Rigor
     # The KEY carries the inputs that are known before the measurement and are not files:
     #
     # - `Rigor::VERSION` + this class's {SCHEMA} + the {Cache::Descriptor} schema — an engine upgrade is an ABI
-    #   boundary for a Marshal'd `FileResult` and a measurement-semantics boundary for everything else.
+    #   boundary for a Marshal'd `FileResult` and a measurement-semantics boundary for everything else. A
+    #   VERSION pins the engine's bytes only for a RELEASED gem, so a checkout adds {Cache::EngineSource}'s
+    #   source digest alongside it (#285) — without it, editing the analyzer and re-measuring serves the
+    #   pre-edit kill counts back, which is the exact failure a mutation score exists to detect.
     # - The {Cache::IncrementalSnapshot} fingerprint the dependency edges came from — itself a digest of the
     #   resolved configuration, the analysis roots, `Gemfile.lock`, `rbs_collection.lock.yaml`, and the
     #   project's own `sig/` contents. This is how a config or `sig/` edit invalidates the measurement.
@@ -79,6 +83,7 @@ module Rigor
       NO_SNAPSHOT = "no reusable `rigor check --incremental` snapshot"
       OPAQUE_PLUGIN = "a plugin contributes types with no incremental fingerprint surface"
       UNDIGESTIBLE = "the project-scan tables could not be digested"
+      UNIDENTIFIED_ENGINE = "the engine's own source tree could not be digested"
 
       class << self
         # @param configuration [Rigor::Configuration]
@@ -154,7 +159,7 @@ module Rigor
           tables = table_digest(project_scan)
           return UNDIGESTIBLE if tables.nil?
 
-          [
+          (engine_source_entries + [
             config_entry("engine", "#{Rigor::VERSION}:#{SCHEMA}:#{Cache::Descriptor::SCHEMA_VERSION}"),
             config_entry("snapshot", fingerprint),
             config_entry("sampling", sampling.to_h.sort.map { |k, v| "#{k}=#{v.inspect}" }.join(" ")),
@@ -162,9 +167,21 @@ module Rigor
             config_entry("project-tables", tables),
             config_entry("plugin-facts", facts),
             config_entry("discovery-seed", seed_digest(seed_inputs))
-          ].freeze
+          ]).freeze
+        rescue Cache::EngineSource::Unavailable
+          UNIDENTIFIED_ENGINE
         rescue StandardError
           UNDIGESTIBLE
+        end
+
+        # Issue #285 — one extra slot pinning the ENGINE'S OWN SOURCE when `Rigor::VERSION` does not (a
+        # checkout rather than a released gem). Empty for a released install, so its key composition is
+        # unchanged and {SCHEMA} needs no bump; an engine that cannot be identified raises through to the
+        # `Unavailable` rescue above and disables the cache, which is the only sound reading of a key slot
+        # that could not be computed.
+        def engine_source_entries
+          identity = Cache::EngineSource.identity
+          identity.nil? ? [] : [config_entry("engine-source", identity)]
         end
 
         def config_entry(key, payload)

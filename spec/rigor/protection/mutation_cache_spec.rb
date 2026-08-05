@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "tmpdir"
 
 require "rigor/analysis/project_scan"
+require "rigor/cache/engine_source"
 require "rigor/cache/incremental_snapshot"
 require "rigor/configuration"
 require "rigor/inference/project_patched_methods"
@@ -179,6 +181,47 @@ RSpec.describe Rigor::Protection::MutationCache do
     # including one whose own `deps` never named it.
     File.write("dep.rb", "class Dep\n  def extra = 2\nend\n")
     expect(cache(feature_ids: ids, seed_inputs: seed_inputs).fetch("a.rb")).to be_nil
+  end
+
+  # #285 — `Rigor::VERSION` identifies the engine's bytes only for a released gem, and a mutation score is
+  # measured almost exclusively FROM a checkout, by someone who just changed the analyzer. Serving the
+  # pre-edit kill counts back would invert the exact signal the measurement exists to produce.
+  describe "the engine's own source" do
+    def with_engine_tree(body)
+      root = File.join(Dir.pwd, "engine")
+      FileUtils.mkdir_p(File.join(root, "lib"))
+      File.write(File.join(root, "lib", "narrowing.rb"), body)
+      allow(Rigor::Cache::EngineSource).to receive(:root).and_return(root)
+      root
+    end
+
+    it "misses after the engine is edited, with every other input unmoved" do
+      write_project
+      root = with_engine_tree("# v1\n")
+      store_result
+      expect(cache.fetch("a.rb")).to eq(result)
+
+      File.write(File.join(root, "lib", "narrowing.rb"), "# v2\n")
+      expect(cache.fetch("a.rb")).to be_nil
+    end
+
+    it "disables itself when the engine cannot be identified, rather than keying on VERSION alone" do
+      write_project
+      allow(Rigor::Cache::EngineSource)
+        .to receive(:identity).and_raise(Rigor::Cache::EngineSource::Unavailable)
+      cold = cache
+
+      expect(cold.enabled?).to be(false)
+      expect(cold.reason).to eq(described_class::UNIDENTIFIED_ENGINE)
+      expect(cold.store("a.rb", result)).to be(false)
+      expect(cold.fetch("a.rb")).to be_nil
+    end
+
+    it "adds no slot for a released gem, leaving its key composition unchanged" do
+      allow(Rigor::Cache::EngineSource).to receive(:identity).and_return(nil)
+
+      expect(described_class.engine_source_entries).to eq([])
+    end
   end
 
   # #254 — the dependent-closure oracle makes a file's verdict depend on its DEPENDENTS' diagnostics, which

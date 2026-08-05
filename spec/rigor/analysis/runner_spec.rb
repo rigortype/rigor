@@ -1215,6 +1215,29 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  # Issue #135 self-mutation sweep — the giant >300 LOC engine-file tier. `collect_symbol_fingerprints`
+  # (private) folds one def-source/def-node table pair into the ADR-46 slice-4 fingerprint map; on the
+  # ADR-85 WD3 incremental warm path an unchanged file's entry is a {Inference::DefHandle} carrying the
+  # fingerprint captured when its seed bundle was built, so the fold reads `node.fingerprint` straight off the
+  # handle instead of re-parsing and re-hashing the source slice. No existing spec ever populated the
+  # discovery tables with a DefHandle (every other `symbol_fingerprints` exercise — `runner_lazy_prepass_spec`
+  # — runs on freshly-parsed live `Prism::DefNode`s), so the DefHandle branch was unprotected. Unit-tested via
+  # `.send` on the private fold rather than driving the whole incremental snapshot round-trip, matching this
+  # file's own "cache_store surface" tests just above.
+  describe "#collect_symbol_fingerprints (private, ADR-85 WD3 DefHandle path)" do
+    it "reads a DefHandle's own precomputed fingerprint rather than re-hashing a (non-existent) live node" do
+      runner = described_class.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
+      handle = Rigor::Inference::DefHandle.new(path: "lib/x.rb", node_id: 1, name: "foo", fingerprint: "deadbeef")
+      sources = { "Foo" => { foo: "lib/x.rb:3" } }
+      nodes = { "Foo" => { foo: handle } }
+      result = Hash.new { |h, k| h[k] = {} }
+
+      runner.send(:collect_symbol_fingerprints, result, sources, nodes, "#")
+
+      expect(result["lib/x.rb"]).to eq({ "Foo#foo" => "deadbeef" })
+    end
+  end
+
   describe "CheckRules diagnostics (Slice 7 phase 8)" do
     it "flags an undefined method on a typed Constant receiver" do
       result = analyze("\"hello\".no_such_method\n")

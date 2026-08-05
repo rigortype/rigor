@@ -67,6 +67,8 @@ comparison) appears nowhere else in this index.
 | 2026-06-20 | [OpenCode (ACP) cross-model validation — driving `rigor-next-steps` across 13 models](20260620-opencode-acp-cross-model-validation.md) |
 | 2026-07-04 | [Rails カバレッジ強化オンボーディング — sig-gen carrier トラップと engine-bound な天井（redmine / mastodon）](20260704-rails-coverage-onboarding-carrier-trap.md) |
 | 2026-07-06 | [Mastodon 型カバレッジ穴の provenance 分析 + sig-gen の RBS 妥当性クラッシュ](20260706-mastodon-coverage-provenance-and-siggen-rbs-validity.md) |
+| 2026-08-05 | [`&&` / `\|\|` value-polarity gate — FP-risk evaluation (issue #152)](20260805-issue-152-and-or-polarity-gate-fp-evaluation.md) |
+| 2026-08-05 | [`if` / `unless` truthiness elision — corpus census of what the verdict rests on (issue #286)](20260805-issue-286-if-unless-truthiness-elision-census.md) |
 
 ## Analyzer self-testing (teeth / false-negatives)
 

@@ -239,7 +239,8 @@ and `join` were re-classified 🔲 → 🚫: they are not pending work but out o
 repo's own rule, since a URI object has no `Constant[…]` representation, and the one genuinely
 valuable move (narrowing `parse`'s ten-arm return union to the scheme class a constant string
 selects) can surface a diagnostic that does not fire today — bucket-3 / P0, not an FP-safe fold.
-`extract` remains a real, unclaimed gap.
+`extract` was then implemented too, so **the URI section is now fully classified**: every row is ✅,
+🔷, or 🚫, and none is pending.
 
 | メソッド | シグネチャ | 返却型 | 状態 | 備考 |
 |----------|-----------|--------|------|------|
@@ -251,7 +252,7 @@ selects) can surface a diagnostic that does not fire today — bucket-3 / P0, no
 | `decode_www_form(str)` | String → Array | `Tuple[Tuple[Str,Str]…]` | ✅ | Constant[String] 引数を精密 Tuple に持ち上げる（#121, 2026-08-05）。 |
 | `parse(str)` | String → URI | URI オブジェクト | 🚫 | **カテゴリ外**（🔲 ではない）。`URI::Generic` 系は `ConstantFolding::FOLDABLE_CONSTANT_CLASSES` に無いため `Constant[URI]` は作れない。10 アームの返却 union を scheme クラスへ絞る案は精度上の利得はあるが、gradually-valid な dispatch を精密化して新規診断を surface し得る = bucket-3/P0 であり、FP-safe fold カテゴリ（#121）の範囲外。 |
 | `join(base, *paths)` | String… → URI | URI オブジェクト | 🚫 | `parse` と同じ理由（URI オブジェクトに Constant が無い）。 |
-| `extract(str)` | String → Array[String] | Tuple? | 🔲 | 低優先度。未実装（再確認済み）。 |
+| `extract(str)` | String → Array[String] | `Tuple[Constant[String]…]` | ✅ | 1 引数形式のみ折りたたむ。第 2 引数（schema フィルタ）は辞退。Ruby の obsolete 警告は fold 内で抑止（#121, 2026-08-05）。 |
 | `split(str)` | String → Array[String?] | — | 🔷 | RBS `Array[String?]` で十分。 |
 | `for(scheme, …)` | — | URI | 🚫 | オブジェクト生成。 |
 | `regexp` / `scheme_list` etc. | — | — | 🚫 | 設定 / メタ情報。 |
@@ -300,6 +301,6 @@ D）。テスト: `spec/integration/fixtures/module_function_folding/demo.rb` +
 | ✅ 済 | `Math.atan2` / `hypot` / `frexp` / `lgamma` | `Constant[Float]` / `Tuple` |
 | ✅ 済 | `CGI.escape` / `unescape` (URL) | `Constant[String]`（ドキュメントのみ 2026-08-05 訂正、実装は既存） |
 | ✅ 済 | Math 全 28 関数（`MathFolding`） | `Constant[Float]` / `Tuple` |
-| ✅ 済 | `URI.encode_www_form` / `decode_www_form` | `Constant[String]` / 精密 Tuple（#121 P3, 2026-08-05） |
+| ✅ 済 | `URI.encode_www_form` / `decode_www_form` / `extract` | `Constant[String]` / 精密 Tuple（#121 P3, 2026-08-05）。URI 節はこれで全行分類済み |
 | ✅ 済 | `Regexp.union` / `linear_time?` | `Constant[Regexp]` / `Constant[bool]`（#121 P3, 2026-08-05） |
 | ✅ 済 | `Regexp.last_match` | 証明済みマッチ辺での narrowing（ドキュメントのみ 2026-08-05 訂正、実装は既存） |

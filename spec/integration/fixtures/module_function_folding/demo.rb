@@ -73,6 +73,7 @@ assert_type('"k=v"', URI.encode_www_form({ "k" => "v" }))
 # The inverse lifts to a Tuple of pairs, so a destructuring read reaches the
 # concrete strings instead of the RBS tier's `Array[[String, String]]`.
 assert_type('[["k", "v"], ["x", "1"]]', URI.decode_www_form("k=v&x=1"))
+assert_type('["http://a.example"]', URI.extract("see http://a.example x"))
 
 # --- Non-constant fallback to RBS ---
 

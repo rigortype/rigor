@@ -26,6 +26,8 @@ module Rigor
       # * `decode_www_form(str)` — the inverse, over a `Constant[String]`. Returns a `Tuple` of two-element
       #   `Tuple[Constant[String], Constant[String]]` pairs rather than the RBS tier's
       #   `Array[[String, String]]`, so a destructuring read of a known form gets the concrete strings.
+      # * `extract(str)` — the URIs a constant string contains, as a `Tuple` of `Constant[String]` rather
+      #   than `Array[String]`. Single-argument form only (see {.fold_extract}).
       #
       # === Deliberately NOT folded
       #
@@ -67,6 +69,7 @@ module Rigor
           return nil unless SingletonFolding.receiver?(receiver, "URI")
           return fold_encode_www_form(args) if method_name == :encode_www_form
           return fold_decode_www_form(args) if method_name == :decode_www_form
+          return fold_extract(args) if method_name == :extract
           return nil unless URI_COMPONENT_METHODS.include?(method_name)
 
           fold_uri_call(method_name, args)
@@ -135,6 +138,36 @@ module Rigor
 
         def constant_pair(key, value)
           Type::Combinator.tuple_of(Type::Combinator.constant_of(key), Type::Combinator.constant_of(value))
+        end
+
+        # `URI.extract(str)` — the URIs a constant string contains, as a `Tuple` of `Constant[String]`
+        # instead of the RBS tier's `Array[String]`. Only the single-argument form folds: the optional
+        # second argument is a schema FILTER, and honouring it means reproducing `URI.extract`'s own
+        # argument handling rather than the one call this fold makes, so it declines instead.
+        #
+        # Ruby emits an obsolescence warning for this method under `$VERBOSE`; the fold calls it with
+        # warnings silenced, because a warning about the ANALYZED program's API choice must not appear on
+        # the analyzer's own stderr, where a reader would attribute it to Rigor.
+        def fold_extract(args)
+          return nil unless args.size == 1
+
+          str = SingletonFolding.constant_string(args.first)
+          return nil if str.nil?
+
+          found = silence_warnings { URI.extract(str) }
+          return nil if found.nil? || found.size > FORM_PAIR_LIMIT
+
+          Type::Combinator.tuple_of(*found.map { |uri| Type::Combinator.constant_of(uri) })
+        rescue StandardError
+          nil
+        end
+
+        def silence_warnings
+          previous = $VERBOSE
+          $VERBOSE = nil
+          yield
+        ensure
+          $VERBOSE = previous
         end
 
         def fold_uri_call(method_name, args)

@@ -153,9 +153,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
       expect(fold(:encode_www_form, form)).to be_nil
     end
 
-    it "declines a form longer than the pair limit" do
-      form = tuple(Array.new(65) { |i| tuple(c("k#{i}"), c("v")) })
-      expect(fold(:encode_www_form, form)).to be_nil
+    # Both halves matter: the 65-pair form must decline AND the 64-pair one must still fold. Without the
+    # positive side this example passes for any reason at all — as it briefly did when the receiver was
+    # built as a one-element Tuple holding a Ruby Array, which declines on shape long before the limit is
+    # ever consulted. Built through `Tuple.new` rather than the splatting `tuple` helper on purpose: this
+    # repo's formatter hook strips a `*` from `tuple(*array)`, which is exactly how that happened.
+    def pair_form(count)
+      Rigor::Type::Tuple.new(Array.new(count) { |i| tuple(c("k#{i}"), c("v")) })
+    end
+
+    it "declines a form longer than the pair limit but folds one at the limit" do
+      expect(fold(:encode_www_form, pair_form(65))).to be_nil
+      expect(fold(:encode_www_form, pair_form(64))).to be_a(Rigor::Type::Constant)
     end
   end
 
@@ -174,6 +183,28 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
 
     it "declines a non-constant argument" do
       expect(fold(:decode_www_form, Rigor::Type::Combinator.nominal_of(String))).to be_nil
+    end
+  end
+
+  describe "extract" do
+    it "folds to a Tuple of the URIs found rather than the RBS Array[String]" do
+      result = fold(:extract, c("see http://a.example and https://b.example x"))
+
+      expect(result.elements.map(&:value)).to eq(["http://a.example", "https://b.example"])
+    end
+
+    it "folds an empty Tuple when the string carries no URI" do
+      expect(fold(:extract, c("nothing here")).elements).to be_empty
+    end
+
+    # The second argument is a schema FILTER; honouring it means reproducing `URI.extract`'s own argument
+    # handling rather than the single call this fold makes, so it declines instead of quietly ignoring it.
+    it "declines the two-argument schema-filter form" do
+      expect(fold(:extract, c("http://a.example"), c("https"))).to be_nil
+    end
+
+    it "declines a non-constant argument" do
+      expect(fold(:extract, Rigor::Type::Combinator.nominal_of(String))).to be_nil
     end
   end
 end

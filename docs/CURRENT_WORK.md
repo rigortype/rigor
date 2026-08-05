@@ -61,10 +61,13 @@ this file is the one that is wrong.
 - **Remaining `ready-for-agent`**: #147 (CLI editor-mode throughput: snapshot cache, `--also`,
   multi-buffer — it overlaps the buffer machinery #142 just changed, so read
   `BufferPoolDispatcher` + `PublishBatcher` first), #135's four remaining checkboxes, #121 as the
-  ongoing P3 fold category (the truthful remaining list is now the URI rows —
-  `encode_www_form` / `decode_www_form` / `parse` / `join` / `extract` — re-verified as genuinely
-  open; **start every slice by probing with `rigor type-of`, never by reading the coverage
-  tables**, which under-report badly enough that auditing one is a legitimate slice by itself).
+  ongoing P3 fold category. Its URI row closed in PR #283 (`encode_www_form` / `decode_www_form`
+  implemented; `parse` / `join` re-classified 🚫 — a URI object has no `Constant`, and narrowing
+  `parse`'s ten-arm union is bucket-3/P0 because it can surface a diagnostic that does not fire
+  today), leaving `URI.extract` as the only open URI row. **Start every slice by probing with
+  `rigor type-of`, never by reading the coverage tables** — across three slices roughly half of
+  each "gap list" turned out to be already implemented or out-of-category, so the audit is the
+  work, and re-classifications are first-class output.
 - **`ready-for-human` wanting a design pass**: #152 (`&&`/`||` polarity gate beyond Constant-only),
   #159 (upstreaming staged ruby/rbs signature fixes — external publishing, needs the user's go).
   **#158 was re-audited 2026-08-02 and the answer is "do not build it yet"** — both preconditions

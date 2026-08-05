@@ -66,8 +66,14 @@ RSpec.describe Rigor::Protection::MutationCache do
 
   # A FRESH cache instance every time: an entry must survive to disk and be re-validated there, which is what
   # the next `rigor coverage` process will do. Sharing one instance could pass on the Store's in-process memo.
+  # #289 — each `cache` is a distinct simulated measurement process, so it starts with a fresh
+  # {Cache::EngineSource} memo the way a real one does. `process_identity` computes the engine digest once
+  # per process deliberately (the loaded engine cannot change under a running measurement); carried across
+  # the calls below it would hide the engine edit — and, since `write_project` now populates the memo
+  # through the snapshot fingerprint, it would also outrank a stub installed after it.
   def cache(config: configuration, sampling: self.sampling, feature_ids: [], seed_inputs: nil,
             bypass_reason: nil)
+    Rigor::Cache::EngineSource.reset_process_identity!
     described_class.build(
       configuration: config, roots: config.paths, project_scan: project_scan, sampling: sampling,
       feature_ids: feature_ids, seed_inputs: seed_inputs, bypass_reason: bypass_reason
@@ -195,12 +201,19 @@ RSpec.describe Rigor::Protection::MutationCache do
       root
     end
 
+    # The engine tree is relocated BEFORE `write_project`, which since #289 is load-bearing: the snapshot
+    # fingerprint folds in the engine identity too, so a snapshot saved against the real checkout would not
+    # match a `build` that sees the stand-in tree, and the example would pass on NO_SNAPSHOT without ever
+    # reaching the key it means to test.
     it "misses after the engine is edited, with every other input unmoved" do
-      write_project
       root = with_engine_tree("# v1\n")
+      write_project
       store_result
       expect(cache.fetch("a.rb")).to eq(result)
 
+      # #289 — the snapshot fingerprint now moves on this edit as well, so the outer gate fires first and
+      # the miss arrives as a disabled cache rather than a key miss. Asserted on the property either way:
+      # an engine edit never serves pre-edit kill counts back.
       File.write(File.join(root, "lib", "narrowing.rb"), "# v2\n")
       expect(cache.fetch("a.rb")).to be_nil
     end

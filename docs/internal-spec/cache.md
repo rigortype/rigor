@@ -291,11 +291,12 @@ hands off to the full path, which records its own.
 ### Engine identity in a computed-value key
 
 A cache whose value is a function of what the analyzer *computes* —
-`analysis.run-diagnostics` and `protection.mutation-file-result` — MUST
-key on the engine's source, not only on `Rigor::VERSION`. The version
-pins the bytes for a gem installed from RubyGems and for nothing else,
-so on an edited working tree a warm run replays pre-edit diagnostics and
-a before/after measurement of an engine change reports a zero it did not
+`analysis.run-diagnostics`, `protection.mutation-file-result`, and the
+`IncrementalSnapshot` — MUST key on the engine's source, not only on
+`Rigor::VERSION`. The version pins the bytes for a gem installed from
+RubyGems and for nothing else, so on an edited working tree a warm run
+replays pre-edit diagnostics and a before/after measurement of an engine
+change reports a zero it did not
 earn ([#285](https://github.com/rigortype/rigor/issues/285)).
 
 `Cache::EngineSource.identity` supplies the slot, in two regimes:
@@ -315,12 +316,39 @@ earn ([#285](https://github.com/rigortype/rigor/issues/285)).
   commit.
 
 A mutable tree whose source cannot be read raises
-`EngineSource::Unavailable`, which both callers turn into "no cache for
+`EngineSource::Unavailable`, which every caller turns into "no cache for
 this run". Falling back to the version-only key is forbidden: it restores
-exactly the blind spot the slot exists to close.
+exactly the blind spot the slot exists to close. For
+`IncrementalSnapshot.fingerprint` that means answering `nil`, which
+disables the snapshot on both sides — `IncrementalSession` guards the
+load *and* the save on it, so no `nil`-keyed blob is written for the next
+equally-unidentifiable run to match against.
 
-`IncrementalSnapshot.fingerprint` does **not** carry the slot yet, so
-`rigor check --incremental` retains the same blind spot.
+Production callers read the digest through
+`EngineSource.process_identity`, which computes it once per process. The
+memo is a correctness statement before it is an optimisation: the engine
+that computed a cached value is fixed once requiring finishes, so
+re-reading `lib/` mid-run would key values against source that never ran
+them. A fork-pool worker inheriting the parent's memo is right for the
+same reason — it is running the parent's image. `identity` itself stays
+uncached, as the computation and the seam a spec relocates.
+
+An engine change drops the **whole** `IncrementalSnapshot`, not part of
+it. Every section except `digests` is a value the analyzer computed, so a
+changed engine can move any of it — including the dependency edges, where
+a new engine recording an edge the old one missed would let a recheck
+skip the very file that needed re-analysing. Retaining the one
+engine-independent section would not pay either: `digests` is 2.5% of a
+2.5 MB snapshot of this repo, and re-deriving it is a file-digest walk
+costing ~0.2% of the full run it would be saving. So an engine edit
+behaves exactly as a config or `sig/` edit already does.
+
+`Protection::MutationCache` probes `EngineSource` before it loads a
+snapshot. It is sound either way — an unidentifiable engine yields a
+`nil` fingerprint, which fails the snapshot load and disables the cache —
+but the reason the user sees would otherwise be `NO_SNAPSHOT`, which
+tells them to run `rigor check --incremental`, a fix for a different
+problem.
 
 ### Read fault tolerance
 

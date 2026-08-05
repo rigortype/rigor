@@ -72,7 +72,7 @@ module Rigor
       # {Cache::EngineSource::Unavailable} is left to propagate into `descriptor`'s rescue, which disables
       # the cache for the run: an engine we cannot identify must not be keyed by its version alone.
       def engine_source_entries
-        identity = Cache::EngineSource.identity
+        identity = Cache::EngineSource.process_identity
         return [] if identity.nil?
 
         [config_entry("engine-source", identity)]

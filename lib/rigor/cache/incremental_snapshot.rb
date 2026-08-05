@@ -4,6 +4,8 @@ require "fileutils"
 require "digest"
 require "zlib"
 
+require_relative "engine_source"
+
 module Rigor
   module Cache
     # ADR-46 — disk persistence for the incremental analyzer's per-file state, so a `--incremental` session
@@ -14,8 +16,16 @@ module Rigor
     # this snapshot is loaded UNCONDITIONALLY when the global fingerprint matches — the per-file digests
     # *inside* it drive the incremental re-analysis decision; they do not gate the load. The fingerprint
     # captures the inputs whose change requires a full rebuild — the resolved configuration, the RBS
-    # environment, the engine version — but NOT the analyzed source contents. A fingerprint mismatch (config /
-    # gem / version change) drops the snapshot and forces a full re-analysis, the conservative direction.
+    # environment, the engine version and (on a checkout) the engine's own source — but NOT the analyzed
+    # source contents. A fingerprint mismatch (config / gem / version / engine change) drops the snapshot and
+    # forces a full re-analysis, the conservative direction.
+    #
+    # An engine change drops the WHOLE snapshot rather than part of it, which is a soundness point before it
+    # is a simplicity one: every section here except `digests` is a value the analyzer computed, so a changed
+    # engine can move any of it — including the dependency edges, where a new engine recording an edge the old
+    # one missed would let a recheck skip the very file that needed re-analysing. Retaining the one
+    # engine-independent section would not pay either: `digests` is 2.5% of a 2.5 MB snapshot of this repo,
+    # and re-deriving it is a file-digest walk costing ~0.2% of the full run it would be saving.
     #
     # Every operation is fault-tolerant: a missing, unreadable, schema-mismatched, fingerprint-mismatched, or
     # corrupt snapshot loads as nil (→ a cold full run), and a write failure is swallowed (→ the next run is
@@ -83,14 +93,23 @@ module Rigor
                             :return_summaries, :param_table)
 
       # The global fingerprint that gates a snapshot load: a digest of the inputs whose change requires a full
-      # rebuild — the engine version + schema, the resolved configuration, the analysis **roots** (the path
-      # arguments, e.g. `["lib"]`, NOT the expanded file list — so a snapshot is keyed to an invocation's roots
-      # but adding / removing a file under them is handled incrementally by the session, not a full rebuild),
-      # the resolved gem set (`Gemfile.lock` / `rbs_collection`), and the project's own RBS (`signature_paths`
-      # file contents). Built WITHOUT constructing the RBS environment so the warm path can gate the load
-      # cheaply, before the costly env build. The `--verify-incremental` gate is the safety net for any
-      # under-capture (it would surface as an incremental-vs-full mismatch). Returns nil on any error → the
-      # caller falls back to a non-persisted run.
+      # rebuild — the engine version + schema, the engine's own SOURCE when the version does not pin it, the
+      # resolved configuration, the analysis **roots** (the path arguments, e.g. `["lib"]`, NOT the expanded
+      # file list — so a snapshot is keyed to an invocation's roots but adding / removing a file under them is
+      # handled incrementally by the session, not a full rebuild), the resolved gem set (`Gemfile.lock` /
+      # `rbs_collection`), and the project's own RBS (`signature_paths` file contents). Built WITHOUT
+      # constructing the RBS environment so the warm path can gate the load cheaply, before the costly env
+      # build. The `--verify-incremental` gate is the safety net for any under-capture (it would surface as an
+      # incremental-vs-full mismatch). Returns nil on any error → the caller falls back to a non-persisted run.
+      #
+      # Issue #285, wired here by #289 — every value in this snapshot is something the ANALYZER computed, so
+      # `Rigor::VERSION` alone is not enough to identify what produced it. A version pins the engine's bytes
+      # for a RubyGems install and for nothing else, so on a checkout a warm recheck served diagnostics a
+      # pre-edit analyzer had computed: editing `lib/rigor/inference/*.rb` moved no ANALYZED file, the changed
+      # set came back empty, and 357 unchanged files replayed their old answers.
+      # {EngineSource.process_identity} closes it, and answers nil for a version-pinned tree — which adds no
+      # part, so a released gem's fingerprint is byte-identical to the pre-#289 one and its warm snapshots
+      # survive the upgrade untouched.
       def self.fingerprint(configuration:, roots:)
         parts = [
           "engine:#{Rigor::VERSION}:#{SCHEMA}",
@@ -100,8 +119,15 @@ module Rigor
           "rbs_collection:#{digest_file_if_present('rbs_collection.lock.yaml')}",
           "sig:#{digest_signature_paths(configuration.signature_paths)}"
         ]
+        identity = EngineSource.process_identity
+        parts << "engine-source:#{identity}" if identity
         Digest::SHA256.hexdigest(parts.join("\x00"))
       rescue StandardError
+        # {EngineSource::Unavailable} lands here too, and nil is the answer it requires rather than one it
+        # merely tolerates: an engine we cannot identify must DISABLE the snapshot, never fall back to the
+        # version-only key that is the blind spot above. Nil does disable it on both sides —
+        # {Analysis::IncrementalSession} guards the load AND the save on the fingerprint, so nothing stale is
+        # read and no nil-keyed blob is written for the next equally-unidentifiable run to match against.
         nil
       end
 

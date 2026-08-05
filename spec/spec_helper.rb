@@ -56,6 +56,9 @@ Warning[:experimental] = false if Warning.respond_to?(:[]=)
 ENV["RIGOR_CI_DETECT"] = "0"
 
 require "rigor"
+# Required explicitly: `rigor` boot-slims, so the cache key modules are not on its require graph, and the
+# per-example memo reset below must not depend on which spec file happened to pull this one in first.
+require "rigor/cache/engine_source"
 
 Dir[File.expand_path("support/**/*.rb", __dir__)].each { |f| require f }
 Dir[File.expand_path("integration/**/support/**/*.rb", __dir__)].each { |f| require f }
@@ -91,4 +94,12 @@ RSpec.configure do |config|
       allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(false)
     end
   end
+
+  # Issue #289 — `Cache::EngineSource.process_identity` memoises the engine-source digest for the life of a
+  # process, which is right for `rigor` (the loaded engine is fixed once requiring finishes) and wrong for a
+  # suite, where one process runs thousands of logical runs. Left alone, the first example to compute it
+  # would pin the value for every later one, so a spec stubbing `.root` or `.identity` would quietly measure
+  # the earlier example's engine and pass without exercising anything. Cleared per example instead of asking
+  # each cache spec to remember.
+  config.before { Rigor::Cache::EngineSource.reset_process_identity! }
 end

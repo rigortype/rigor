@@ -48,7 +48,14 @@ RSpec.describe "run-result cache invalidation on an engine-source edit" do
 
   # A FRESH Runner and a FRESH Store every time, so a hit has to come off disk rather than out of the
   # Store's in-process memo — which is what the next `rigor check` process would face.
+  #
+  # #289 — and a fresh {Cache::EngineSource} memo for the same reason. `process_identity` computes the
+  # engine digest once per process ON PURPOSE (the loaded engine cannot change under a running analysis),
+  # so an example simulating three successive `rigor` processes has to start each one where a real process
+  # starts: without the previous one's answer. Left memoised, the edit below is invisible and this spec
+  # passes while asserting nothing.
   def analyse(dir, lib, cache_root)
+    Rigor::Cache::EngineSource.reset_process_identity!
     Dir.chdir(dir) do
       Rigor::Analysis::Runner.new(
         configuration: Rigor::Configuration.new("paths" => [lib]),
@@ -115,6 +122,7 @@ RSpec.describe "run-result cache invalidation on an engine-source edit" do
 
     checkout = Rigor::Analysis::RunCacheKey.descriptor(**args)
     allow(Rigor::Cache::EngineSource).to receive(:identity).and_return(nil)
+    Rigor::Cache::EngineSource.reset_process_identity! # the released gem is a SECOND process (#289)
     released = Rigor::Analysis::RunCacheKey.descriptor(**args)
 
     expect(released.configs.map(&:key)).to contain_exactly("configuration", "engine", "paths")

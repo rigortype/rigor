@@ -61,13 +61,14 @@ this file is the one that is wrong.
 - **Remaining `ready-for-agent`**: #147 (CLI editor-mode throughput: snapshot cache, `--also`,
   multi-buffer — it overlaps the buffer machinery #142 just changed, so read
   `BufferPoolDispatcher` + `PublishBatcher` first), #135's four remaining checkboxes, #121 as the
-  ongoing P3 fold category. Its URI row closed in PR #283 (`encode_www_form` / `decode_www_form`
-  implemented; `parse` / `join` re-classified 🚫 — a URI object has no `Constant`, and narrowing
-  `parse`'s ten-arm union is bucket-3/P0 because it can surface a diagnostic that does not fire
-  today), leaving `URI.extract` as the only open URI row. **Start every slice by probing with
-  `rigor type-of`, never by reading the coverage tables** — across three slices roughly half of
-  each "gap list" turned out to be already implemented or out-of-category, so the audit is the
-  work, and re-classifications are first-class output.
+  ongoing P3 fold category. **The whole URI section is now closed** (PRs #283 + #284):
+  `encode_www_form` / `decode_www_form` / `extract` implemented, `parse` / `join` re-classified 🚫
+  — a URI object has no `Constant` representation, and narrowing `parse`'s ten-arm union is
+  bucket-3/P0 because it can surface a diagnostic that does not fire today. Every URI row is now
+  ✅/🔷/🚫. **Start every slice by probing with `rigor type-of`, never by reading the coverage
+  tables** — across four slices roughly half of each "gap list" turned out to be already
+  implemented or out-of-category, so the audit is the work and re-classifications are first-class
+  output. Next unaudited sections in that note: Shellwords, and whatever the Math/CGI rows claim.
 - **`ready-for-human` wanting a design pass**: #152 (`&&`/`||` polarity gate beyond Constant-only),
   #159 (upstreaming staged ruby/rbs signature fixes — external publishing, needs the user's go).
   **#158 was re-audited 2026-08-02 and the answer is "do not build it yet"** — both preconditions
@@ -116,3 +117,12 @@ this file is the one that is wrong.
   mid-sweep on an external limit with 642 lines of good specs uncommitted in its worktree. Verify
   them yourself, commit with the boundary named, and record the resume point — re-running the
   sweep would have cost far more than reading the diff.
+- **This repo's formatter hook strips the `*` from `tuple(*array)`** (deterministically — it
+  re-applied after correction). It silently turned a limit-guard spec's receiver into a
+  one-element tuple holding a Ruby Array, which declines on *shape* before the limit is ever
+  consulted, so the example passed while testing nothing; it shipped that way in #283 and was
+  repaired in #284. Re-read any spec region after an Edit that reports a formatter modification,
+  and prefer splat-free constructions (`Tuple.new(array)`). The general rule it exposes:
+  **a decline assertion (`expect(...).to be_nil`) is the easiest test to pass by accident**, since
+  every construction error also yields nil — always pair it with the neighbouring case that must
+  still succeed.

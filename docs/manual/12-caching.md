@@ -28,11 +28,22 @@ on:
 - the **content** of the source and `.rbs` files that fed it,
 - the **gems** in play, by name and locked version,
 - the active **plugins**, by ID and version,
-- the relevant **configuration**.
+- the relevant **configuration**,
+- **Rigor itself**, by version.
 
 Change any of those and the dependent entries are recomputed
 automatically. A corrupt or unreadable entry is treated as a
 miss and overwritten — bad cache state cannot wedge a run.
+
+Rigor's version identifies its own code only for a released gem.
+If you run Rigor from a git checkout — a working copy you are
+patching, or `gem "rigor", github:` tracking a branch, where two
+commits share one version number — the entries that hold
+analysis results are keyed on the content of Rigor's own source
+as well, so editing the analyzer and re-running recomputes
+instead of replaying the previous answer. That costs one pass
+over Rigor's source per run (about 20 ms); an installed gem
+neither pays it nor needs it.
 
 The cache is also schema-versioned: after a Rigor upgrade that
 changes the cache format, the stale cache is purged on the

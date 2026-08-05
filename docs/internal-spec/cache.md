@@ -280,6 +280,40 @@ run's diagnostics without loading the inference engine at all. It records
 a hit (so `--cache-stats` still balances) but never a miss — a probe miss
 hands off to the full path, which records its own.
 
+### Engine identity in a computed-value key
+
+A cache whose value is a function of what the analyzer *computes* —
+`analysis.run-diagnostics` and `protection.mutation-file-result` — MUST
+key on the engine's source, not only on `Rigor::VERSION`. The version
+pins the bytes for a gem installed from RubyGems and for nothing else,
+so on an edited working tree a warm run replays pre-edit diagnostics and
+a before/after measurement of an engine change reports a zero it did not
+earn ([#285](https://github.com/rigortype/rigor/issues/285)).
+
+`Cache::EngineSource.identity` supplies the slot, in two regimes:
+
+- **Version-pinned** — the tree sits at `<gem_home>/gems/rigortype-<VERSION>`
+  and holds no `.git`. Answers `nil`; the caller adds **no** config entry,
+  so a released gem's key is byte-identical to the pre-#285 one and costs
+  nothing to compute. The predicate is positive about being pinned, so
+  every unrecognised layout falls to the mutable side.
+- **Mutable** — anything else (a checkout, a `bundle add rigor, github:`
+  clone, a `path:` gem). The caller adds an `engine-source` config entry
+  holding a SHA-256 over every `.rb` under the gem root's `lib/` and
+  `plugins/`, each contributing its **root-relative path** and its
+  **content**. Content, not a stat tuple: a stat tuple is barred from a
+  cache KEY (see `FileEntry`), and a path-relative content digest is what
+  makes the key survive a re-clone or a fresh CI checkout of the same
+  commit.
+
+A mutable tree whose source cannot be read raises
+`EngineSource::Unavailable`, which both callers turn into "no cache for
+this run". Falling back to the version-only key is forbidden: it restores
+exactly the blind spot the slot exists to close.
+
+`IncrementalSnapshot.fingerprint` does **not** carry the slot yet, so
+`rigor check --incremental` retains the same blind spot.
+
 ### Read fault tolerance
 
 A read encountering any of the following silently returns a

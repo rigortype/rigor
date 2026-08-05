@@ -13,6 +13,7 @@ end
 
 require_relative "../version"
 require_relative "../cache/descriptor"
+require_relative "../cache/engine_source"
 require_relative "../cache/rbs_descriptor"
 require_relative "../environment/default_libraries"
 
@@ -51,7 +52,7 @@ module Rigor
       def descriptor(configuration:, files:, explain:, rbs_config_entries:)
         Cache::Descriptor.new(
           gems: [Cache::RbsDescriptor.rbs_gem_entry],
-          configs: rbs_config_entries + [
+          configs: rbs_config_entries + engine_source_entries + [
             config_entry("configuration", Marshal.dump(configuration.to_h)),
             config_entry("engine",
                          "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),
@@ -60,6 +61,21 @@ module Rigor
         )
       rescue StandardError
         nil
+      end
+
+      # Issue #285 — the `engine` slot above pins the engine by VERSION, which identifies the source only
+      # for a released gem. A checkout (a contributor's, or a `bundle add rigor, github:` clone) gets one
+      # extra slot carrying a digest of the engine's own source, so editing `lib/rigor/inference/*.rb` no
+      # longer replays the pre-edit diagnostics out of a warm cache. A released install adds NO entry, so
+      # its key — and its hit rate — are exactly what they were.
+      #
+      # {Cache::EngineSource::Unavailable} is left to propagate into `descriptor`'s rescue, which disables
+      # the cache for the run: an engine we cannot identify must not be keyed by its version alone.
+      def engine_source_entries
+        identity = Cache::EngineSource.identity
+        return [] if identity.nil?
+
+        [config_entry("engine-source", identity)]
       end
 
       def config_entry(key, payload)

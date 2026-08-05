@@ -99,5 +99,81 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
     it "declines for an unsupported method" do
       expect(fold(:parse, c("http://example.com"))).to be_nil
     end
+
+    # `URI.parse` is not merely unimplemented here — it is declined on the repo's own rule, and this
+    # example is the place that says so, since the decline otherwise looks like an oversight to close.
+    # `URI::Generic` and friends are absent from `ConstantFolding::FOLDABLE_CONSTANT_CLASSES`, so this
+    # tier has no `Constant[…]` to return; narrowing its ten-arm union to the scheme class a constant
+    # string selects would be a precision win but can surface a diagnostic that does not fire today,
+    # which is bucket-3 / P0 work rather than this FP-safe category (#121).
+    it "declines URI.join for the same reason as URI.parse — no Constant for a URI object" do
+      expect(fold(:join, c("https://example.com/"), c("a"))).to be_nil
+    end
+  end
+
+  # ── encode_www_form / decode_www_form ─────────────────────────────────
+
+  describe "encode_www_form" do
+    def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)
+
+    it "folds an array-of-pairs literal to the encoded form" do
+      form = tuple(tuple(c("k"), c("v")), tuple(c("x"), c("1")))
+      expect(fold(:encode_www_form, form)).to eq(c("k=v&x=1"))
+    end
+
+    it "folds a hash literal to the encoded form" do
+      shape = Rigor::Type::HashShape.new({ "k" => c("v") })
+      expect(fold(:encode_www_form, shape)).to eq(c("k=v"))
+    end
+
+    it "percent-encodes through the real encoder rather than a re-derived one" do
+      form = tuple(tuple(c("q"), c("a b&c")))
+      expect(fold(:encode_www_form, form)).to eq(c(URI.encode_www_form([["q", "a b&c"]])))
+    end
+
+    it "declines when any value is not constant" do
+      form = tuple(tuple(c("k"), Rigor::Type::Combinator.nominal_of(String)))
+      expect(fold(:encode_www_form, form)).to be_nil
+    end
+
+    # An open or partly-optional shape describes a hash whose real contents the fold cannot see, so
+    # encoding only the known keys would invent a form the program never builds.
+    it "declines an open HashShape" do
+      shape = Rigor::Type::HashShape.new({ "k" => c("v") }, extra_keys: :open)
+      expect(fold(:encode_www_form, shape)).to be_nil
+    end
+
+    it "declines a HashShape carrying an optional key" do
+      shape = Rigor::Type::HashShape.new({ "k" => c("v") }, optional_keys: ["k"])
+      expect(fold(:encode_www_form, shape)).to be_nil
+    end
+
+    it "declines a pair that is not two elements wide" do
+      form = tuple(tuple(c("k"), c("v"), c("extra")))
+      expect(fold(:encode_www_form, form)).to be_nil
+    end
+
+    it "declines a form longer than the pair limit" do
+      form = tuple(Array.new(65) { |i| tuple(c("k#{i}"), c("v")) })
+      expect(fold(:encode_www_form, form)).to be_nil
+    end
+  end
+
+  describe "decode_www_form" do
+    it "folds to a Tuple of constant pairs rather than the RBS Array[[String, String]]" do
+      result = fold(:decode_www_form, c("k=v&x=1"))
+
+      expect(result.elements.map { |pair| pair.elements.map(&:value) }).to eq([%w[k v], %w[x 1]])
+    end
+
+    it "decodes percent-escapes through the real decoder" do
+      result = fold(:decode_www_form, c("q=a+b%26c"))
+
+      expect(result.elements.first.elements.map(&:value)).to eq(["q", "a b&c"])
+    end
+
+    it "declines a non-constant argument" do
+      expect(fold(:decode_www_form, Rigor::Type::Combinator.nominal_of(String))).to be_nil
+    end
   end
 end

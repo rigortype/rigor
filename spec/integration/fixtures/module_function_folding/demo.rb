@@ -66,6 +66,14 @@ _encoded = URI.encode_www_form_component("hello world")
 assert_type('"hello+world"', _encoded)
 assert_type('"hello world"', URI.decode_www_form_component("hello+world"))
 
+# --- URI.encode_www_form / decode_www_form (whole-form) ---
+
+assert_type('"k=v&x=1"', URI.encode_www_form([%w[k v], %w[x 1]]))
+assert_type('"k=v"', URI.encode_www_form({ "k" => "v" }))
+# The inverse lifts to a Tuple of pairs, so a destructuring read reaches the
+# concrete strings instead of the RBS tier's `Array[[String, String]]`.
+assert_type('[["k", "v"], ["x", "1"]]', URI.decode_www_form("k=v&x=1"))
+
 # --- Non-constant fallback to RBS ---
 
 str = rand > 0.5 ? "hello" : "world"
@@ -75,3 +83,5 @@ assert_type("String", URI.encode_www_form_component(str))
 assert_type("Regexp", Regexp.compile(str))
 assert_type("Regexp", Regexp.union(str, "b"))
 assert_type("bool", Regexp.linear_time?(str))
+assert_type("String", URI.encode_www_form([["k", str]]))
+assert_type("Array[[String, String]]", URI.decode_www_form(str))

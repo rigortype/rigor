@@ -36,6 +36,18 @@ RSpec.describe Rigor::SigGen::Generator do
         .to eq([["Widget", :n, "def n: () -> 42"]])
     end
 
+    it "resolves a directory path by recursively globbing every nested *.rb file" do
+      write_fixture("lib/a/one.rb", "class One\n  def n\n    1\n  end\nend\n")
+      write_fixture("lib/b/two.rb", "class Two\n  def n\n    2\n  end\nend\n")
+      write_fixture("lib/README.md", "not ruby")
+      lib_dir = File.join(tmpdir, "lib")
+
+      candidates = generator(paths: [lib_dir]).run
+      new_methods = candidates.select { |c| c.classification == Rigor::SigGen::Classification::NEW_METHOD }
+
+      expect(new_methods.map(&:class_name)).to contain_exactly("One", "Two")
+    end
+
     it "renders required-positional parameters as untyped per ADR-5 clause 2" do
       path = write_fixture("lib/adder.rb", <<~RUBY)
         class Adder
@@ -149,6 +161,17 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
 
       expect(candidate.rbs).to start_with("def m:")
+    end
+
+    it "does not treat the named form `module_function :name` as the bare region toggle" do
+      # `module_function :go` names a SPECIFIC method rather than opening a region; this walker only tracks the
+      # bare-form region toggle, so a subsequent def is unaffected (stays a regular instance method).
+      src = "module Helper\n  module_function :go\n  def go; \"ok\"; end\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :go }
+
+      expect(candidate.rbs).to start_with("def go:")
     end
   end
 
@@ -355,6 +378,21 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidate.class_superclasses["Scm::Adapters::GitAdapter"]).to eq("AbstractAdapter")
     end
 
+    it "records a NAMESPACED-constant-path superclass verbatim (ConstantPathNode superclass)" do
+      # Distinct from the class's own qualified name above: here the SUPERCLASS itself is a `Foo::Bar` path
+      # (`qualified_constant_path`'s recursive `Prism::ConstantPathNode` branch).
+      src = <<~RUBY
+        class Widget < Acme::Base
+          def go; 1; end
+        end
+      RUBY
+      path = write_fixture("lib/widget.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :go }
+
+      expect(candidate.class_superclasses["Widget"]).to eq("Acme::Base")
+    end
+
     # A computed superclass is un-representable in RBS and guessing would misfold. The `Data.define` / `Struct.new`
     # pair is the exception the ADR-48 layouts let us resolve exactly (#227) — everything else stays unrecorded.
     it "does not record a computed superclass it cannot resolve" do
@@ -489,6 +527,15 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(init.rbs).to eq("def initialize: () ?{ (*untyped) -> untyped } -> void")
     end
 
+    it "renders a `*args` constructor rest param as `*untyped`" do
+      src = "class Box\n  def initialize(*args)\n    @args = args\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      init = generator(paths: [path]).run.find { |c| c.method_name == :initialize }
+
+      expect(init.rbs).to eq("def initialize: (*untyped) -> void")
+    end
+
     it "places the block suffix after a keyword-rest param (the mastodon `(**untyped) ?{ … }` shape)" do
       src = "class Box\n  def initialize(**opts, &block)\n    @opts = opts\n  end\nend\n"
       path = write_fixture("lib/box.rb", src)
@@ -551,6 +598,21 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
 
+    it "refuses to classify as tighter when the declared union loses a member and the INFERRED side is ALSO a Union" do
+      # Distinct from the `String?` case above (there the inferred side is a bare Constant, never taking the
+      # `Type::Union` branch of `loses_declared_union_member?`'s inferred-side dispatch). Here both sides are
+      # Unions: declared `String | Integer | nil` vs. an inferred `String | Integer` that drops the `nil` arm.
+      write_fixture("sig/box.rbs", "class Box\n  def fetch: () -> (String | Integer | nil)\nend\n")
+      path = write_fixture(
+        "lib/box.rb", "class Box\n  def fetch\n    rand < 0.5 ? \"hi\" : 1\n  end\nend\n"
+      )
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :fetch }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
     it "refuses to tighten Array[T] to a Tuple shape" do
       write_fixture("sig/box.rbs", "class Box\n  def each: () -> Array[Integer]\nend\n")
       path = write_fixture("lib/box.rb", "class Box\n  def each\n    [1, 2, 3]\n  end\nend\n")
@@ -589,6 +651,21 @@ RSpec.describe Rigor::SigGen::Generator do
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
       method = gen.run.find { |c| c.method_name == :to_h }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "refuses to tighten when a declared Nominal `untyped` type-arg would be replaced (non-HashShape carrier)" do
+      # Distinct from the HashShape case above: `narrows_collection_to_shape?` never fires here (the inferred
+      # value is itself a `Nominal[Array, …]`, not a literal-shape carrier), so this exercises
+      # `replaces_untyped_type_arg?`'s own class_name/type_args comparison directly.
+      write_fixture("sig/box.rbs", "class Box\n  def dup_ints: (Array[Integer] arr) -> Array[untyped]\nend\n")
+      path = write_fixture(
+        "lib/box.rb", "class Box\n  def dup_ints(arr)\n    arr.map { |x| x }\n  end\nend\n"
+      )
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :dup_ints }
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
@@ -730,6 +807,22 @@ RSpec.describe Rigor::SigGen::Generator do
                                  .run.find { |c| c.method_name == :m }
 
       expect(candidate.rbs).to eq(%(def m: ("a" | "b") -> "r"))
+    end
+
+    it "renders multiple observed positional params comma-joined, each unioned independently" do
+      path = write_fixture("lib/box.rb", "class Box\n  def add(a, b)\n    \"x\"\n  end\nend\n")
+      observations = {
+        ["Box", :add] => [
+          [Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of("y")],
+          [Rigor::Type::Combinator.constant_of(2), Rigor::Type::Combinator.constant_of("z")]
+        ]
+      }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidate = described_class.new(configuration: config, paths: [path], observations: observations)
+                                 .run.find { |c| c.method_name == :add }
+
+      expect(candidate.rbs).to eq(%(def add: (1 | 2, "y" | "z") -> "x"))
     end
 
     # attr_reader + initialize-param observations

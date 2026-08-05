@@ -1381,6 +1381,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         expect(dispatch(receiver: non_empty_str, method_name: :*, args: [non_negative_int])).to be_nil
       end
 
+      it "non-empty-string * int<0, 0> (exact-zero IntegerRange) → Constant[\"\"]" do
+        expect(dispatch(receiver: non_empty_str, method_name: :*,
+                        args: [Rigor::Type::Combinator.integer_range(0, 0)])).to eq(constant(""))
+      end
+
+      it "non-empty-string * int<1, 5> (positive IntegerRange) → non-empty-string" do
+        expect(dispatch(receiver: non_empty_str, method_name: :*,
+                        args: [Rigor::Type::Combinator.integer_range(1, 5)])).to eq(non_empty_str)
+      end
+
       it "non-empty-string * Nominal[Integer] → falls through" do
         expect(dispatch(receiver: non_empty_str, method_name: :*,
                         args: [Rigor::Type::Combinator.nominal_of("Integer")])).to be_nil
@@ -1706,6 +1716,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
 
     it "declines `hash.any? { … }`" do
       expect(dispatch(receiver: h, method_name: :any?, block_type: block)).to be_nil
+    end
+  end
+
+  describe "Type::Intersection receiver dispatch (dispatch_intersection)" do
+    it "meets two IntegerRange member projections for (non_empty_string ∩ lowercase_string).size" do
+      intersection = Rigor::Type::Combinator.non_empty_lowercase_string
+      # non_empty_string.size projects positive-int (int<1, max>); lowercase_string.size projects
+      # non-negative-int (int<0, max>) — the meet is the tighter bound, positive-int.
+      expect(dispatch(receiver: intersection, method_name: :size))
+        .to eq(Rigor::Type::Combinator.positive_int)
     end
   end
 end

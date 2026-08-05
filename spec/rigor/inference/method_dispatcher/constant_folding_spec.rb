@@ -734,6 +734,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         # 10 - [0..+∞] = [-∞..10]
         expect(type).to eq(integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 10))
       end
+
+      it "folds a Union mixing Constant<Integer> and IntegerRange members via the bounding interval" do
+        # `1 | int<1, 6>` (e.g. an accumulator's running fixpoint assumption) reduces to the bounding
+        # interval int<1, 6> rather than bailing to Dynamic — `numeric_set_of`'s union_integer_bounds path.
+        mixed = Rigor::Type::Combinator.union(constant_of(1), integer_range(1, 6))
+        type = fold_types(mixed, :+, [constant_of(1)])
+        expect(type).to eq(integer_range(2, 7))
+      end
     end
 
     describe "binary comparison" do

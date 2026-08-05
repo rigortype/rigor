@@ -1104,6 +1104,20 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.pairs.keys).to eq([:a])
     end
 
+    it "per-pair folds Hash#transform_keys into a HashShape when the block yields a constant key" do
+      type = project_scope.type_of(parse_expression("{ a: 1 }.transform_keys { |k| k.to_s }"))
+
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs.keys).to eq(["a"])
+      expect(type.pairs.values.map(&:value)).to eq([1])
+    end
+
+    it "declines Hash#transform_keys (falls back to the nominal Hash carrier) for a non-constant new key" do
+      type = project_scope.type_of(parse_expression("{ a: 1 }.transform_keys { |k| rand }"))
+
+      expect(type.class_name).to eq("Hash")
+    end
+
     it "per-element folds Array#map for &:to_s into a Tuple" do
       type = project_scope.type_of(parse_expression("[1, 2, 3].map(&:to_s)"))
 
@@ -1376,6 +1390,23 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
     end
 
+    it "falls back to a bare Range with no type_args when neither endpoint contributes a typable shape" do
+      type = scope.with_local(:a, Rigor::Type::Combinator.untyped)
+                  .with_local(:b, Rigor::Type::Combinator.untyped)
+                  .type_of(parse_expression("(a..b)", scopes: [%i[a b]]))
+
+      expect(type.class_name).to eq("Range")
+      expect(type.type_args).to be_empty
+    end
+
+    it "derives the Integer element type from a Type::IntegerRange-typed endpoint" do
+      type = scope.with_local(:n, Rigor::Type::Combinator.integer_range(1, 10))
+                  .type_of(parse_expression("(n..20)", scopes: [[:n]]))
+
+      expect(type.class_name).to eq("Range")
+      expect(type.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
     it "types non-interpolated RegularExpressionNode as Constant<Regexp> (v0.0.7)" do
       type = scope.type_of(parse_expression("/foo/"))
 
@@ -1464,6 +1495,25 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       bound = scope.with_local(:tag, union)
       node = parse_expression("\"<\#{tag}>\"", scopes: [[:tag]])
       expect(bound.type_of(node)).to eq(literal_string)
+    end
+  end
+
+  describe "per-element block fold over Constant<Range> receivers (v0.0.6 phase 2)" do
+    it "folds `.map` over a small inclusive Constant<Range> to a per-position Tuple" do
+      type = scope.type_of(parse_expression("(1..3).map { |i| i * 2 }"))
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements.map(&:value)).to eq([2, 4, 6])
+    end
+
+    it "folds `.select` over a small exclusive Constant<Range>, dropping non-matching positions" do
+      type = scope.type_of(parse_expression("(1...4).select { |i| i.odd? }"))
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements.map(&:value)).to eq([1, 3])
+    end
+
+    it "declines (falls back to the nominal Array carrier) above the per-element range cap" do
+      type = scope.type_of(parse_expression("(1..20).map { |i| i * 2 }"))
+      expect(type.class_name).to eq("Array")
     end
   end
 end

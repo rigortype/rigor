@@ -196,6 +196,25 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  describe ".value_pattern_certainty" do
+    it "returns :yes when a pinned value-equality Constant subject equals the pattern value" do
+      expect(described_class.value_pattern_certainty(integer_one, 1)).to eq(:yes)
+    end
+
+    it "returns :no when a pinned value-equality Constant subject differs from the pattern value" do
+      expect(described_class.value_pattern_certainty(integer_one, 2)).to eq(:no)
+    end
+
+    it "returns :maybe when the subject is not a pinned Constant" do
+      expect(described_class.value_pattern_certainty(integer_nominal, 1)).to eq(:maybe)
+    end
+
+    it "returns :maybe for a Constant whose value class has custom `===` semantics" do
+      range_constant = Rigor::Type::Combinator.constant_of(1..5)
+      expect(described_class.value_pattern_certainty(range_constant, 3)).to eq(:maybe)
+    end
+  end
+
   describe ".predicate_scopes" do
     let(:union_int_nil) { Rigor::Type::Combinator.union(integer_nominal, constant_nil) }
 
@@ -226,6 +245,21 @@ RSpec.describe Rigor::Inference::Narrowing do
       truthy, falsey = described_class.predicate_scopes(pred, bound)
       expect(truthy.local(:x)).to eq(constant_nil)
       expect(falsey.local(:x)).to eq(integer_nominal)
+    end
+
+    it "reaches the declared-return polarity analyser for a Union receiver on an unrecognised predicate" do
+      # `.nil?` itself is intercepted earlier (by `dispatch_call`'s dedicated unary-predicate handling), so it
+      # never reaches `analyse_union_predicate_polarity` — the analyser this exercises is specifically the
+      # fallback for predicates with NO dedicated handler (its own doc comment's motivating case is
+      # ActiveSupport's `present?`). `.frozen?` has no dedicated handler either and no core-RBS arm resolves to
+      # a literal boolean, so the analyser declines (`nil`) — but reaching that decision still calls
+      # `Type::Union#members` (the `partition_arms_by_polarity` call, plus the guard's own two reads), which is
+      # what this pins: the call completes and returns the union unchanged on both edges, rather than raising.
+      bound = scope.with_local(:x, union_int_nil)
+      pred = parse_predicate("x.frozen?")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(union_int_nil)
+      expect(falsey.local(:x)).to eq(union_int_nil)
     end
 
     it "swaps truthy/falsey for !x" do
@@ -343,6 +377,19 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey.local(:h)).to eq(integer_nominal)
     end
 
+    it "narrows a Union of two optional-key HashShapes member-wise on both edges of key?" do
+      shape_a = Rigor::Type::HashShape.new({ foo: integer_nominal }, optional_keys: [:foo])
+      shape_b = Rigor::Type::HashShape.new({ foo: string_nominal }, optional_keys: [:foo])
+      bound = scope.with_local(:h, Rigor::Type::Combinator.union(shape_a, shape_b))
+      pred = parse_predicate("h.key?(:foo)", locals: %i[h])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      # Present edge: each member promotes :foo to required, still distinguishable by value type -> stays a Union.
+      expect(truthy.local(:h)).to be_a(Rigor::Type::Union)
+      truthy.local(:h).members.each { |m| expect(m.required_key?(:foo)).to be(true) }
+      # Absent edge: :foo drops from both members, collapsing the (now-identical) empty shapes into one.
+      expect(falsey.local(:h)).to eq(Rigor::Type::HashShape.new({}))
+    end
+
     # §4-4 — Elixir non-empty / tuple_size analogue.
     def array_int
       Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
@@ -382,6 +429,19 @@ RSpec.describe Rigor::Inference::Narrowing do
       truthy, falsey = described_class.predicate_scopes(pred, bound)
       expect(truthy.local(:arr)).to eq(array_int)
       expect(falsey.local(:arr)).to eq(array_int)
+    end
+
+    it "narrows a Union[Array[T1], Array[T2]] receiver member-wise on the false edge of empty?" do
+      array_str = Rigor::Type::Combinator.nominal_of("Array", type_args: [string_nominal])
+      union = Rigor::Type::Combinator.union(array_int, array_str)
+      bound = scope.with_local(:arr, union)
+      pred = parse_predicate("arr.empty?", locals: %i[arr])
+      _truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(falsey.local(:arr)).to eq(
+        Rigor::Type::Combinator.union(
+          non_empty_int, Rigor::Type::Combinator.non_empty_array(string_nominal)
+        )
+      )
     end
 
     it "does not narrow a non-Array receiver (gradual)" do
@@ -590,6 +650,23 @@ RSpec.describe Rigor::Inference::Narrowing do
         )
         expect(multi[0].local_facts(:s, bucket: :relational)).to be_empty
       end
+    end
+  end
+
+  describe ".narrow_for_fact (ADR-7 Slice 4-A public Fact-shaped narrowing entry)" do
+    let(:env) { Rigor::Environment.default }
+    let(:union_int_string) { Rigor::Type::Combinator.union(integer_nominal, string_nominal) }
+
+    it "narrows down to a Nominal-typed Fact's class on the positive edge" do
+      fact = Rigor::FlowContribution::Fact.new(target_kind: :local, target_name: :x, type: integer_nominal)
+      expect(described_class.narrow_for_fact(union_int_string, fact, env)).to eq(integer_nominal)
+    end
+
+    it "removes a Nominal-typed Fact's class on the negative edge" do
+      fact = Rigor::FlowContribution::Fact.new(
+        target_kind: :local, target_name: :x, type: integer_nominal, negative: true
+      )
+      expect(described_class.narrow_for_fact(union_int_string, fact, env)).to eq(string_nominal)
     end
   end
 
@@ -924,6 +1001,12 @@ RSpec.describe Rigor::Inference::Narrowing do
         .to eq(Rigor::Type::Combinator.constant_of(0))
     end
 
+    it "narrows each member of a Union receiver independently via narrow_integer_equal" do
+      union = Rigor::Type::Combinator.union(integer_nominal, Rigor::Type::Combinator.integer_range(-5, 5))
+      expect(described_class.narrow_integer_equal(union, 0))
+        .to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
     it "drops the value at a range endpoint via not_equal" do
       # int<0, 10> != 0  → int<1, 10>
       range = Rigor::Type::Combinator.integer_range(0, 10)
@@ -945,6 +1028,21 @@ RSpec.describe Rigor::Inference::Narrowing do
       # int<-5, 5> != 0 cannot be expressed precisely as a single range.
       range = Rigor::Type::Combinator.integer_range(-5, 5)
       expect(described_class.narrow_integer_not_equal(range, 0)).to eq(range)
+    end
+
+    it "drops a Constant equal to the value to Bot, preserves a different one" do
+      expect(described_class.narrow_integer_not_equal(Rigor::Type::Combinator.constant_of(0), 0))
+        .to be_a(Rigor::Type::Bot)
+      expect(described_class.narrow_integer_not_equal(Rigor::Type::Combinator.constant_of(5), 0))
+        .to eq(Rigor::Type::Combinator.constant_of(5))
+    end
+
+    it "narrows each Union member independently via not_equal" do
+      union = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(0), Rigor::Type::Combinator.constant_of(5)
+      )
+      expect(described_class.narrow_integer_not_equal(union, 0))
+        .to eq(Rigor::Type::Combinator.constant_of(5))
     end
   end
 
@@ -1164,6 +1262,30 @@ RSpec.describe Rigor::Inference::Narrowing do
       # `Nominal[String]` is not integer-rooted; the existing class-narrowing path runs and produces
       # `narrow_class(String, "Numeric")`, which collapses to Bot since String is disjoint from Numeric.
       expect(body.local(:n)).to be_a(Rigor::Type::Bot)
+    end
+
+    it "treats a pinned Constant[Integer] subject as integer-rooted" do
+      bound = scope.with_local(:n, Rigor::Type::Combinator.constant_of(5))
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when 1..10 then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, bound)
+      expect(body.local(:n)).to eq(Rigor::Type::Combinator.constant_of(5))
+    end
+
+    it "treats a Union of integer-rooted members as integer-rooted (member-wise range intersect)" do
+      bound = scope.with_local(
+        :n, Rigor::Type::Combinator.union(integer_nominal, Rigor::Type::Combinator.integer_range(-10, 10))
+      )
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when 1..10 then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, bound)
+      expect(body.local(:n)).to eq(Rigor::Type::Combinator.integer_range(1, 10))
     end
   end
 

@@ -1086,6 +1086,12 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       expect(described_class.new(configuration: inline).send(:comment_ingesting_plugin_loaded?)).to be(true)
       expect(described_class.new(configuration: ordinary).send(:comment_ingesting_plugin_loaded?)).to be(false)
 
+      # Issue #135 self-mutation sweep — the `"gem"` case above never reaches the `|| entry["id"]` fallback
+      # (a Hash `||` short-circuits on the first truthy operand), so a manifest-`"id"`-only entry (no `"gem"`
+      # key) is the only fixture that proves the fallback read, not just the primary one.
+      id_only = Rigor::Configuration.new("paths" => ["x"], "plugins" => [{ "id" => "rigor-rbs-inline" }])
+      expect(described_class.new(configuration: id_only).send(:comment_ingesting_plugin_loaded?)).to be(true)
+
       # With the gate disabled, EVERY changed file is unstable (dependents never skipped), even one whose
       # declaration signature matched.
       session = described_class.new(configuration: inline)

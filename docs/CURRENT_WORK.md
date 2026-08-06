@@ -33,10 +33,11 @@ this file is the one that is wrong.
     normative MUST that names #152, and because the sole measured effect is deleting author-written
     fallbacks (70 firings, e.g. `ESCAPE_MAP[m] || m`).
   - **#286** — the census found **zero** unsound firings (Rigor's unknown carrier is `Dynamic`, not
-    `Nominal[Object]`), so the tightening I proposed is dead. What it found instead is live: 125
-    verdicts rest on an optimistically nil-free carrier, and `if`/`unless` elision is a **third**
-    consumer of `predicate_certainty` that the spec passage does not constrain. A reproducible FP on
-    master is in the issue comment.
+    `Nominal[Object]`), so the tightening I proposed is dead. What is live instead: `if`/`unless`
+    elision is a **third** consumer of `predicate_certainty` that the spec passage does not
+    constrain, and **47** verdicts rest on an optimistically nil-free carrier (the shape census's
+    125 was a proxy; provenance measures it directly — see the Next-session bullet). A reproducible
+    FP on master is in the issue comment.
 
 ## Next session
 

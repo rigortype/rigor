@@ -609,6 +609,18 @@ module Rigor
         elide_or_union(node.predicate, else_type, then_type)
       end
 
+      # Issue #286 — the effective optimistic-nil-free cause of an expression, resolving a bare local read (or
+      # a local write in value position) through its binding. Mirrors `StatementEvaluator#optimistic_origin_for`.
+      def optimistic_origin_for(node)
+        recorded = scope.optimistic_origins[node]
+        return recorded if recorded
+
+        case node
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
+        end
+      end
+
       def if_else_type(subsequent)
         return Type::Combinator.constant_of(nil) if subsequent.nil?
 
@@ -632,6 +644,9 @@ module Rigor
       # `Constant[false]` fold one branch; `Union[true, false]`, `Dynamic[T]`, and `Top` keep both branches live.
       def constant_predicate_polarity(predicate)
         return nil if predicate.nil?
+        # ADR-101 — decline on an optimistically nil-free carrier; see
+        # `StatementEvaluator#optimistic_carrier?` for why the gate is here and not in `Narrowing`.
+        return nil unless optimistic_origin_for(predicate).nil?
 
         Narrowing.predicate_certainty(type_of(predicate))
       end

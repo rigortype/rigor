@@ -114,6 +114,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-98 | [Development-flow document roles: handoff, issues, changelog](98-development-flow-document-roles.md) | Accepted (implemented 2026-07-17; backlog migrated to GitHub Issues, ROADMAP.md dissolved, handoff capped and gated) |
 | ADR-99 | [The config schema is a source of truth: `.rigor.yml` tiers and the reserve pipeline](99-config-schema-authority.md) | Accepted (implemented 2026-07-17; schema named a source of truth, `rigor_rs:` reserved, nested + reserved + URL gates added) |
 | ADR-100 | [The `static.*` diagnostic family shape and the `void_origins` side-table](100-static-diagnostic-family-and-void-origins.md) | Accepted (direct slice shipped; WD4 transitive design added 2026-07-19, slice queued; budget ids deferred) |
+| ADR-101 | [The branch elision may not rest on an optimistically nil-free carrier](101-optimistic-carrier-branch-elision.md) | Accepted (implemented 2026-08-06; 47 of 2,060 corpus verdicts affected, diagnostics byte-identical both directions) |
 
 ## Adding a New ADR
 

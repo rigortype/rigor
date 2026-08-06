@@ -12,6 +12,9 @@ module Rigor
     attr_reader local_origins: Hash[Symbol, Symbol]
     attr_reader ivar_origins: Hash[Symbol, Symbol]
     attr_reader void_origins: Hash[untyped, Inference::VoidOrigin]
+    attr_reader optimistic_origins: Hash[untyped, Symbol]
+    attr_reader optimistic_locals: Hash[Symbol, Symbol]
+    attr_reader optimistic_ivars: Hash[Symbol, Symbol]
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
@@ -39,6 +42,7 @@ module Rigor
     def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
     def run_generation: () -> Object?
     def record_dynamic_origin: (untyped node, Symbol cause) -> Scope
+    def record_optimistic_origin: (untyped node, Symbol cause) -> Scope
 
     def record_void_origin: (untyped node, Inference::VoidOrigin origin) -> Scope
 
@@ -93,9 +97,13 @@ module Rigor
     def global: (String | Symbol name) -> Type::t?
     def local_origin: (String | Symbol name) -> Symbol?
     def ivar_origin: (String | Symbol name) -> Symbol?
+    def optimistic_local: (String | Symbol name) -> Symbol?
+    def optimistic_ivar: (String | Symbol name) -> Symbol?
     def with_local: (String | Symbol name, Type::t type) -> Scope
     def with_ivar: (String | Symbol name, Type::t type) -> Scope
     def with_local_origin: (String | Symbol name, Symbol? cause) -> Scope
+    def with_optimistic_local: (String | Symbol name, Symbol? cause) -> Scope
+    def with_optimistic_ivar: (String | Symbol name, Symbol? cause) -> Scope
     def with_ivar_origin: (String | Symbol name, Symbol? cause) -> Scope
     def with_cvar: (String | Symbol name, Type::t type) -> Scope
     def with_global: (String | Symbol name, Type::t type) -> Scope

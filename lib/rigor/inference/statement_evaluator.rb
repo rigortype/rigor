@@ -247,7 +247,29 @@ module Rigor
 
         bound = bound.without_inferred_param_mark(node.name)
         bound = bound.with_local_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
+        bound = bound.with_optimistic_local(node.name, optimistic_rhs_origin(node.value, post_rhs))
         [rhs_type, bound]
+      end
+
+      # Issue #286 — the optimistic-nil-free counterpart of {#rhs_origin}, differing in two ways. It does not
+      # gate on `Dynamic`: the values this channel marks are ordinary `Union` / `Constant` / `Nominal`
+      # carriers, which is the whole point. And it resolves a bare local read through its binding, so
+      # `w = v` keeps the mark — the same propagation `OriginLookup` performs for the Dynamic channel.
+      def optimistic_rhs_origin(value_node, scope_after_rhs)
+        optimistic_origin_for(value_node, scope_after_rhs)
+      end
+
+      # The effective optimistic-nil-free cause of an expression: the mark on its own node, else — for a bare
+      # local read or a local write used in value position (`if (x = MAP[k])`, where the write has already
+      # bound the mark) — the one propagated onto the binding.
+      def optimistic_origin_for(node, scope)
+        recorded = scope.optimistic_origins[node]
+        return recorded if recorded
+
+        case node
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
+        end
       end
 
       # ADR-82 WD1 — the {Inference::DynamicOrigin} cause to propagate onto a local / ivar being bound to `rhs`.
@@ -277,6 +299,7 @@ module Rigor
         rhs_type, post_rhs = sub_eval(node.value, scope)
         bound = post_rhs.with_ivar(node.name, rhs_type)
         bound = bound.with_ivar_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
+        bound = bound.with_optimistic_ivar(node.name, optimistic_rhs_origin(node.value, post_rhs))
         [rhs_type, bound]
       end
 
@@ -543,17 +566,32 @@ module Rigor
       # non-falsey carriers like `Nominal[Integer]` (Integer is always truthy in Ruby — including 0) also collapse the
       # dead else.
       def live_branch_for_if(node, pred_type, post_pred)
-        case Narrowing.predicate_certainty(pred_type)
+        verdict = optimistic_carrier?(node.predicate, post_pred) ? nil : Narrowing.predicate_certainty(pred_type)
+        case verdict
         when :truthy then eval_branch_or_nil(node.statements, post_pred)
         when :falsey then eval_branch_or_nil(node.subsequent, post_pred)
         end
       end
 
       def live_branch_for_unless(node, pred_type, post_pred)
-        case Narrowing.predicate_certainty(pred_type)
+        verdict = optimistic_carrier?(node.predicate, post_pred) ? nil : Narrowing.predicate_certainty(pred_type)
+        case verdict
         when :truthy then eval_branch_or_nil(node.else_clause, post_pred)
         when :falsey then eval_branch_or_nil(node.statements, post_pred)
         end
+      end
+
+      # ADR-101 — the branch elision MUST NOT conclude truthiness from a carrier whose nil-freeness rests on
+      # the `%a{implicitly-returns-nil}` that `RbsDispatch` reads past. Such a value is optimistic, not proof
+      # (see {Inference::OptimisticOrigin} and docs/internal-spec/inference-engine.md), so eliding an arm on
+      # it deletes a branch the program really takes when the lookup misses.
+      #
+      # The decline lives here and NOT in `Narrowing.falsey_nominal?` / `.narrow_falsey`: `&&=` / `||=` and
+      # the and/or surviving-left edge read those too, and widening the falsey fragment there would re-admit
+      # `nil` into a bound local and buy `possible nil receiver` false positives — a soundness fix paid for
+      # in FPs, which is the wrong trade.
+      def optimistic_carrier?(predicate, scope)
+        !optimistic_origin_for(predicate, scope).nil?
       end
 
       def eval_else(node)

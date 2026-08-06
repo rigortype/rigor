@@ -5,6 +5,7 @@ require_relative "../../type"
 require_relative "../../rbs_extended"
 require_relative "../rbs_type_translator"
 require_relative "../void_origin"
+require_relative "../optimistic_origin"
 require_relative "overload_selector"
 
 module Rigor
@@ -362,6 +363,11 @@ module Rigor
             # to the *direct*-RBS dispatch (the receiver's own resolvable class): the user-class / Object
             # ancestor fallback nils both out (WD4 defers that, murkier, surface).
             record_void_recovery(method_type, scope, call_node, [class_name, method_name, kind])
+            # Issue #286 — the same call site is the one place that still knows the selected overload spelled
+            # its miss as `%a{implicitly-returns-nil}` rather than as `?`; the translator below reads the
+            # return type only, by the deliberate choice the spec records. Mark the result so a certainty
+            # judgment downstream can tell "nil-free because of its class" from "nil-free because we bet".
+            record_optimistic_nil_free(method_definition, method_type, scope, call_node)
 
             full_type_vars = compose_block_type_vars(method_type, type_vars, block_type)
 
@@ -384,6 +390,16 @@ module Rigor
               call_node,
               VoidOrigin.new(class_name: class_name, method_name: method_name, kind: kind)
             )
+          end
+
+          # Issue #286 — record that this value's nil-freeness is a bet rather than a class property. Gated on
+          # `scope` && `call_node` exactly as {#record_void_recovery} is, which scopes it to the direct-RBS
+          # dispatch path.
+          def record_optimistic_nil_free(method_definition, method_type, scope, call_node)
+            return unless scope && call_node
+            return unless OptimisticOrigin.optimistic_overload?(method_definition, method_type)
+
+            scope.record_optimistic_origin(call_node, OptimisticOrigin::IMPLICITLY_RETURNS_NIL)
           end
 
           def void_return?(method_type)

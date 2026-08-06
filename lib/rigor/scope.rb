@@ -24,7 +24,8 @@ module Rigor
                 :declaration_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
                 :dynamic_origins, :local_origins, :ivar_origins,
-                :void_origins
+                :void_origins,
+                :optimistic_origins, :optimistic_locals, :optimistic_ivars
 
     # ADR-53 Track A — the seed-time discovery tables live on the {DiscoveryIndex} the scope carries by a single
     # reference; the per-table readers stay on Scope so engine call sites and plugins are unaffected by the
@@ -149,7 +150,10 @@ module Rigor
       dynamic_origins: {}.compare_by_identity,
       local_origins: EMPTY_ORIGINS,
       ivar_origins: EMPTY_ORIGINS,
-      void_origins: {}.compare_by_identity
+      void_origins: {}.compare_by_identity,
+      optimistic_origins: {}.compare_by_identity,
+      optimistic_locals: EMPTY_ORIGINS,
+      optimistic_ivars: EMPTY_ORIGINS
     )
       @environment = environment
       @locals = locals
@@ -168,7 +172,34 @@ module Rigor
       @local_origins = local_origins
       @ivar_origins = ivar_origins
       @void_origins = void_origins
+      @optimistic_origins = optimistic_origins
+      @optimistic_locals = optimistic_locals
+      @optimistic_ivars = optimistic_ivars
       freeze
+    end
+
+    # Issue #286 — the {Inference::OptimisticOrigin} cause attached to a call node whose result is nil-free
+    # only because `RbsDispatch` reads past `%a{implicitly-returns-nil}`, or `nil` when the value's
+    # nil-freeness is a property of its class. Mirrors {#dynamic_origins} / {#void_origins}: advisory
+    # metadata, ignored by `==` / `hash`, and never varying a flow decision on its own.
+    def record_optimistic_origin(node, cause)
+      @optimistic_origins[node] = cause
+      self
+    end
+
+    def optimistic_local(name) = @optimistic_locals[name.to_sym]
+    def optimistic_ivar(name) = @optimistic_ivars[name.to_sym]
+
+    def with_optimistic_local(name, cause)
+      return self if cause.nil?
+
+      rebuild(optimistic_locals: @optimistic_locals.merge(name.to_sym => cause).freeze)
+    end
+
+    def with_optimistic_ivar(name, cause)
+      return self if cause.nil?
+
+      rebuild(optimistic_ivars: @optimistic_ivars.merge(name.to_sym => cause).freeze)
     end
 
     # ADR-82 WD1 — the propagated origin of the `Dynamic` value currently bound to a local / instance
@@ -215,7 +246,8 @@ module Rigor
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
               declaration_sourced: drop_declaration_sourced_for(:local, name),
-              local_origins: drop_origin(@local_origins, name))
+              local_origins: drop_origin(@local_origins, name),
+              optimistic_locals: drop_origin(@optimistic_locals, name))
     end
 
     def with_fact(fact)
@@ -281,7 +313,8 @@ module Rigor
               indexed_narrowings: new_indexed_narrowings,
               method_chain_narrowings: new_chain_narrowings,
               declaration_sourced: drop_declaration_sourced_for(:ivar, name),
-              ivar_origins: drop_origin(@ivar_origins, name))
+              ivar_origins: drop_origin(@ivar_origins, name),
+              optimistic_ivars: drop_origin(@optimistic_ivars, name))
     end
 
     # ADR-58 WD1 — used by the method-entry seed to mark an ivar whose only provenance is the class-ivar index.
@@ -726,7 +759,10 @@ module Rigor
       dynamic_origins: @dynamic_origins,
       local_origins: @local_origins,
       ivar_origins: @ivar_origins,
-      void_origins: @void_origins
+      void_origins: @void_origins,
+      optimistic_origins: @optimistic_origins,
+      optimistic_locals: @optimistic_locals,
+      optimistic_ivars: @optimistic_ivars
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -741,7 +777,10 @@ module Rigor
         dynamic_origins: dynamic_origins,
         local_origins: local_origins,
         ivar_origins: ivar_origins,
-        void_origins: void_origins
+        void_origins: void_origins,
+        optimistic_origins: optimistic_origins,
+        optimistic_locals: optimistic_locals,
+        optimistic_ivars: optimistic_ivars
       )
     end
 
@@ -779,7 +818,10 @@ module Rigor
         dynamic_origins: @dynamic_origins,
         local_origins: join_origins(@local_origins, other.local_origins),
         ivar_origins: join_origins(@ivar_origins, other.ivar_origins),
-        void_origins: @void_origins
+        void_origins: @void_origins,
+        optimistic_origins: @optimistic_origins,
+        optimistic_locals: join_origins(@optimistic_locals, other.optimistic_locals),
+        optimistic_ivars: join_origins(@optimistic_ivars, other.optimistic_ivars)
       )
     end
 

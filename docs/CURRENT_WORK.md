@@ -19,7 +19,7 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-  `make verify` is green on master at `9e42c9c3`; no open PR of ours (the three open ones are
+  `make verify` is green on master at `acf843a0`; no open PR of ours (the three open ones are
   dependabot, including the deliberately-held rubocop bump).
 - **Closed this arc, with the record on each issue**: #260 #263 #254 #264 #134 (the Tier-2
   measurement cluster), #271 #277 (two engine FPs), #137 #269 #142 #152 #285 #290.
@@ -41,10 +41,17 @@ this file is the one that is wrong.
 ## Next session
 
 - **#286 is the sharpest open item** and is now ADR-shaped, not a code fix: may the `if`/`unless`
-  elision rest on an optimistic nil-free carrier at all? Either extend the spec's exclusion to name
-  this third consumer and say why the bet is acceptable, or stop the elision for non-`Constant`
-  carriers (131 of 2,057 verdicts, 66 dropping a written arm) with its own two-directional FP
-  evaluation. Census: `docs/notes/20260805-issue-286-*.md`.
+  elision rest on an optimistic nil-free carrier at all? The 2026-08-06 provenance census cut this
+  from three options to **two**. "Stop the elision for non-`Constant` carriers" is **retired** — it is
+  over-broad and incomplete at once: only 35 of those 134 verdicts are actually optimistic, and 12
+  optimistic ones carry a `Constant` and survive it (8 are one redmine cluster where the dropped arm
+  is the one that runs). What actually fires is 47 of 2,060 verdicts, 30 dropping a written arm, and
+  declining exactly those is diagnostic-identical on all eleven targets **in both directions** with no
+  precision regression. So: bless the status quo in the spec despite a reproducible FP whose fix
+  measures as free, or decline on provenance. ADR-78 does **not** foreclose the provenance route — it
+  rejected laundering a constant the engine should not have produced, not reading a deliberate value
+  as proof. Harness (do not ship as-is): branch `optimistic-nil-free-provenance-census-286`.
+  Censuses: `docs/notes/20260805-issue-286-*.md`, `docs/notes/20260806-issue-286-*.md`.
 - **#135 checkbox 1 resumes at `analysis/check_rules.rb`** (3036 LOC, no convention spec). Scope it
   as its own arc, probably per rule-family — it is ~9× the last two files and starting it inside one
   budget produces the pile of disconnected assertions the last batch was scoped to avoid. Everything

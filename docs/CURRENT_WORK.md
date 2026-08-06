@@ -19,10 +19,10 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-  `make verify` is green on master at `7f7fcdd0`; no open PR of ours (the three open ones are
+  `make verify` is green on master at `759c4b99`; no open PR of ours (the three open ones are
   dependabot, including the deliberately-held rubocop bump).
 - **Closed this arc, with the record on each issue**: #260 #263 #254 #264 #134 (the Tier-2
-  measurement cluster), #271 #277 (two engine FPs), #137 #269 #142 #152 #285 #290.
+  measurement cluster), #271 #277 (two engine FPs), #137 #269 #142 #152 #285 #290 #286.
 - **The three findings most likely to matter later**, all counter to the issue that produced them:
   - **#254** — `dependent-closure-kill-oracle` is **presumptively non-graduating**. The Mutator
     never mutates `def` signatures and callers read declarations, so a body mutation is
@@ -32,31 +32,20 @@ this file is the one that is wrong.
     corpus diff was clean, because `docs/internal-spec/inference-engine.md:251` forbids it by a
     normative MUST that names #152, and because the sole measured effect is deleting author-written
     fallbacks (70 firings, e.g. `ESCAPE_MAP[m] || m`).
-  - **#286** — the census found **zero** unsound firings (Rigor's unknown carrier is `Dynamic`, not
-    `Nominal[Object]`), so the tightening I proposed is dead. What is live instead: `if`/`unless`
-    elision is a **third** consumer of `predicate_certainty` that the spec passage does not
-    constrain, and **47** verdicts rest on an optimistically nil-free carrier (the shape census's
-    125 was a proxy; provenance measures it directly — see the Next-session bullet). A reproducible
-    FP on master is in the issue comment.
+  - **#286** — closed by [ADR-101](../docs/adr/101-optimistic-carrier-branch-elision.md) / PR #292.
+    Neither of the issue's own two candidate fixes survived measurement: the `Nominal[Object]`
+    tightening fired zero times (the unknown carrier is `Dynamic`), and the carrier-shape gate was
+    wrong in both directions at once. What landed is a provenance gate — the branch elision declines
+    when a value's nil-freeness rests on the ignored `%a{implicitly-returns-nil}` rather than on its
+    class. **Carrier shape is not a proxy for provenance**, and the spec now says so.
 
 ## Next session
 
-- **#286 is the sharpest open item** and is now ADR-shaped, not a code fix: may the `if`/`unless`
-  elision rest on an optimistic nil-free carrier at all? The 2026-08-06 provenance census cut this
-  from three options to **two**. "Stop the elision for non-`Constant` carriers" is **retired** — it is
-  over-broad and incomplete at once: only 35 of those 134 verdicts are actually optimistic, and 12
-  optimistic ones carry a `Constant` and survive it (8 are one redmine cluster where the dropped arm
-  is the one that runs). What actually fires is 47 of 2,060 verdicts, 30 dropping a written arm, and
-  declining exactly those is diagnostic-identical on all eleven targets **in both directions** with no
-  precision regression. So: bless the status quo in the spec despite a reproducible FP whose fix
-  measures as free, or decline on provenance. ADR-78 does **not** foreclose the provenance route — it
-  rejected laundering a constant the engine should not have produced, not reading a deliberate value
-  as proof. Harness (do not ship as-is): branch `optimistic-nil-free-provenance-census-286`.
-  Censuses: `docs/notes/20260805-issue-286-*.md`, `docs/notes/20260806-issue-286-*.md`.
-- **#135 checkbox 1 resumes at `analysis/check_rules.rb`** (3036 LOC, no convention spec). Scope it
-  as its own arc, probably per rule-family — it is ~9× the last two files and starting it inside one
-  budget produces the pile of disconnected assertions the last batch was scoped to avoid. Everything
-  before it in the `analysis/` tier is swept; #135's other four checkboxes are untouched.
+- **#135 checkbox 1 is now the sharpest open item**, resuming at `analysis/check_rules.rb` (3036
+  LOC, no convention spec). Scope it as its own arc, probably per rule-family — it is ~9× the last
+  two files and starting it inside one budget produces the pile of disconnected assertions the last
+  batch was scoped to avoid. Everything before it in the `analysis/` tier is swept; #135's other
+  four checkboxes are untouched.
 - **`ready-for-agent`**: #147 (**demand-gated** — its three items really are unimplemented, verified,
   but the issue waits on a concrete editor-extension author), #135's remainder, #121.
 - **#121 needs a fresh candidate source.** Its whole coverage note
@@ -82,6 +71,10 @@ this file is the one that is wrong.
   overturned a premise on seven separate tasks — it is the highest-value sentence in the brief. For
   an engine FP add: *diagnose and report the root cause even if you also fix it; retreat rather than
   land a half-understood fix.*
+- **A cheap proxy for the property you actually care about can be wrong in BOTH directions at once.**
+  #286's carrier-shape gate would have declined 99 genuine proofs *and* still missed 12 optimistic
+  values, because shape and provenance are different axes. Before scoping work around a proxy, measure
+  the real property once — it cost one instrumented build and retired the option outright.
 - **A measurement's landing rule can be the wrong gate.** I gated #152 on "zero new diagnostics"; it
   passed, and shipping would still have been wrong, because the harm was deleted fallbacks rather
   than new firings. Ask what the damage mode IS before choosing the number to watch.

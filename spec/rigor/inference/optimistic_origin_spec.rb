@@ -73,6 +73,17 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       expect(arms_of(type)).to contain_exactly(1, "none")
     end
 
+    it "declines when the predicate is the read itself, with no intervening binding" do
+      # A distinct path from the cases around it: the mark is read off the call node rather than off a
+      # binding, so this pins the node-keyed side of the channel.
+      type, = evaluate(<<~RUBY)
+        h = { a: "x", b: "y" }
+        if h[key] then 1 else "none" end
+      RUBY
+
+      expect(arms_of(type)).to contain_exactly(1, "none")
+    end
+
     it "propagates the mark through an instance variable" do
       type, = evaluate(<<~RUBY)
         h = { a: "x", b: "y" }

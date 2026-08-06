@@ -19,7 +19,7 @@ this file is the one that is wrong.
 ## Where things stand
 
 - **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-  `make verify` is green on master at `759c4b99`; no open PR of ours (the three open ones are
+  `make verify` is green on master at `62cc4ca9`; no open PR of ours (the three open ones are
   dependabot, including the deliberately-held rubocop bump).
 - **Closed this arc, with the record on each issue**: #260 #263 #254 #264 #134 (the Tier-2
   measurement cluster), #271 #277 (two engine FPs), #137 #269 #142 #152 #285 #290 #286.

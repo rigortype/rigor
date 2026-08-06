@@ -11,6 +11,7 @@ require_relative "../source/constant_path"
 require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "dynamic_origin"
+require_relative "elision_census"
 require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "struct_fold_safety"
 require_relative "closure_escape_analyzer"
@@ -247,7 +248,28 @@ module Rigor
 
         bound = bound.without_inferred_param_mark(node.name)
         bound = bound.with_local_origin(node.name, rhs_origin(node.value, post_rhs, rhs_type))
+        bound = bound.with_optimistic_local(node.name, optimistic_rhs_origin(node.value, post_rhs))
         [rhs_type, bound]
+      end
+
+      # Issue #286 — the optimistic-nil-free counterpart of {#rhs_origin}, differing in two ways. It does not
+      # gate on `Dynamic`: the values this channel marks are ordinary `Union` / `Constant` / `Nominal`
+      # carriers, which is the whole point. And it resolves a bare local read through its binding, so
+      # `w = v` keeps the mark — the same propagation `OriginLookup` performs for the Dynamic channel.
+      def optimistic_rhs_origin(value_node, scope_after_rhs)
+        optimistic_origin_for(value_node, scope_after_rhs)
+      end
+
+      # The effective optimistic-nil-free cause of an expression: the mark on its own node, else — for a bare
+      # local read or a local write used in value position (`if (x = MAP[k])`, where the write has already
+      # bound the mark) — the one propagated onto the binding.
+      def optimistic_origin_for(node, scope)
+        recorded = scope.optimistic_origins[node]
+        return recorded if recorded
+
+        case node
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
+        end
       end
 
       # ADR-82 WD1 — the {Inference::DynamicOrigin} cause to propagate onto a local / ivar being bound to `rhs`.
@@ -543,17 +565,53 @@ module Rigor
       # non-falsey carriers like `Nominal[Integer]` (Integer is always truthy in Ruby — including 0) also collapse the
       # dead else.
       def live_branch_for_if(node, pred_type, post_pred)
-        case Narrowing.predicate_certainty(pred_type)
+        verdict = Narrowing.predicate_certainty(pred_type)
+        census_elision(node, pred_type, post_pred, verdict,
+                       dead: verdict == :truthy ? node.subsequent : node.statements)
+        verdict = nil if decline_optimistic?(node.predicate, post_pred)
+        case verdict
         when :truthy then eval_branch_or_nil(node.statements, post_pred)
         when :falsey then eval_branch_or_nil(node.subsequent, post_pred)
         end
       end
 
       def live_branch_for_unless(node, pred_type, post_pred)
-        case Narrowing.predicate_certainty(pred_type)
+        verdict = Narrowing.predicate_certainty(pred_type)
+        census_elision(node, pred_type, post_pred, verdict,
+                       dead: verdict == :truthy ? node.statements : node.else_clause)
+        verdict = nil if decline_optimistic?(node.predicate, post_pred)
+        case verdict
         when :truthy then eval_branch_or_nil(node.else_clause, post_pred)
         when :falsey then eval_branch_or_nil(node.statements, post_pred)
         end
+      end
+
+      # Issue #286 experiment — decline the elision when the predicate's nil-freeness rests on the ignored
+      # `%a{implicitly-returns-nil}` rather than on the value's class. Behind an env flag so one build can be
+      # A/B'd on the corpus; the decline is deliberately placed here and NOT in `falsey_nominal?` /
+      # `narrow_falsey`, which `&&=` / `||=` and the and/or surviving-left edge also read — widening the falsey
+      # fragment there would re-admit `nil` into a bound local and buy `possible nil receiver` firings.
+      def decline_optimistic?(predicate, scope)
+        return false unless ENV["RIGOR_286_DECLINE_OPTIMISTIC"]
+
+        !optimistic_origin_for(predicate, scope).nil?
+      end
+
+      # Issue #286 instrumentation — inert unless `RIGOR_CENSUS_286` is set. `dead` is the branch this verdict
+      # discards; a non-nil one means a written arm was dropped rather than the implicit `nil` else.
+      def census_elision(node, pred_type, post_pred, verdict, dead:)
+        return unless ElisionCensus.enabled?
+        return unless verdict || ENV["RIGOR_CENSUS_286_ALL"]
+
+        ElisionCensus.record(
+          consumer: :scope,
+          verdict: verdict,
+          type: pred_type,
+          optimistic: !optimistic_origin_for(node.predicate, post_pred).nil?,
+          written_arm_dropped: !dead.nil?,
+          node: node.predicate,
+          source_path: post_pred.source_path
+        )
       end
 
       def eval_else(node)

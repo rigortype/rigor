@@ -12,6 +12,7 @@ require_relative "block_parameter_binder"
 require_relative "body_fixpoint"
 require_relative "budget_trace"
 require_relative "dynamic_origin"
+require_relative "elision_census"
 require_relative "origin_lookup"
 require_relative "fallback"
 require_relative "flow_tracer"
@@ -598,6 +599,7 @@ module Rigor
       def type_of_if(node)
         then_type = statements_or_nil(node.statements)
         else_type = if_else_type(node.subsequent)
+        census_value_elision(node, node.subsequent, node.statements) if ElisionCensus.enabled?
         elide_or_union(node.predicate, then_type, else_type)
       end
 
@@ -606,7 +608,35 @@ module Rigor
       def type_of_unless(node)
         then_type = statements_or_nil(node.statements)
         else_type = if_else_type(node.else_clause)
+        census_value_elision(node, node.statements, node.else_clause) if ElisionCensus.enabled?
         elide_or_union(node.predicate, else_type, then_type)
+      end
+
+      # Issue #286 instrumentation — inert unless `RIGOR_CENSUS_286` is set, so the second `type_of` on the
+      # predicate is only paid under measurement. `dead_when_truthy` / `dead_when_falsey` are the branches the
+      # respective verdicts discard; a non-nil one means a written arm was dropped.
+      def census_value_elision(node, dead_when_truthy, dead_when_falsey)
+        pred_type = type_of(node.predicate)
+        verdict = Narrowing.predicate_certainty(pred_type)
+        return unless verdict
+
+        dead = verdict == :truthy ? dead_when_truthy : dead_when_falsey
+        ElisionCensus.record(
+          consumer: :value, verdict: verdict, type: pred_type,
+          optimistic: !optimistic_origin_for(node.predicate).nil?,
+          written_arm_dropped: !dead.nil?, node: node.predicate, source_path: scope.source_path
+        )
+      end
+
+      # Issue #286 — the effective optimistic-nil-free cause of an expression, resolving a bare local read (or
+      # a local write in value position) through its binding. Mirrors `StatementEvaluator#optimistic_origin_for`.
+      def optimistic_origin_for(node)
+        recorded = scope.optimistic_origins[node]
+        return recorded if recorded
+
+        case node
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
+        end
       end
 
       def if_else_type(subsequent)
@@ -632,6 +662,8 @@ module Rigor
       # `Constant[false]` fold one branch; `Union[true, false]`, `Dynamic[T]`, and `Top` keep both branches live.
       def constant_predicate_polarity(predicate)
         return nil if predicate.nil?
+        # Issue #286 experiment — see `StatementEvaluator#decline_optimistic?`.
+        return nil if ENV["RIGOR_286_DECLINE_OPTIMISTIC"] && !optimistic_origin_for(predicate).nil?
 
         Narrowing.predicate_certainty(type_of(predicate))
       end

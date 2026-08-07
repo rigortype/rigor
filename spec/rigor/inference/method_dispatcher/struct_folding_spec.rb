@@ -267,6 +267,92 @@ RSpec.describe "Struct.new value folding", type: :runner do
     end
   end
 
+  # Issue #293. A member holds a REFERENCE to the container the constructor was handed, so an empty literal's
+  # emptiness is a fact about that argument at construction time, not about the member: "construct empty, then
+  # fill" is the dominant idiom, and the pin is the only member fact whose reads fold to `nil` — the receiver
+  # type that fires `call.undefined-method` on correct code. Both directions are pinned here: the empty literal
+  # widens, everything else keeps folding exactly as before.
+  describe "empty-container members (issue #293)" do
+    it "widens an empty Array / Hash literal member to its bare nominal" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "Hash[Dynamic[top], Dynamic[top]]"])
+        Result = Struct.new(:items, :opts)
+        dump_type(Result.new([], {}).items)
+        dump_type(Result.new([], {}).opts)
+      RUBY
+    end
+
+    it "keeps a NON-empty container member folding precisely" do
+      expect(dumped_types(<<~RUBY)).to eq(["[1, 2]", "1", "{ a: 1 }"])
+        Result = Struct.new(:items, :opts)
+        dump_type(Result.new([1, 2], { a: 1 }).items)
+        dump_type(Result.new([1, 2], { a: 1 }).items.first)
+        dump_type(Result.new([1, 2], { a: 1 }).opts)
+      RUBY
+    end
+
+    it "leaves every non-container member untouched" do
+      expect(dumped_types(<<~RUBY)).to eq(["1", "\"two\"", "nil"])
+        Result = Struct.new(:x, :y, :z)
+        dump_type(Result.new(1, "two").x)
+        dump_type(Result.new(1, "two").y)
+        dump_type(Result.new(1, "two").z)
+      RUBY
+    end
+
+    it "widens an empty literal assigned through a member setter" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]"])
+        Result = Struct.new(:items)
+        r = Result.new([1])
+        r.items = []
+        dump_type(r.items)
+      RUBY
+    end
+
+    it "widens an empty literal introduced by #with" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "[1]"])
+        Result = Struct.new(:items, :other)
+        dump_type(Result.new([1], [2]).with(items: []).items)
+        dump_type(Result.new([1], [2]).with(other: []).items)
+      RUBY
+    end
+
+    # The issue's repro, single-file: the member is filled by `<<` right after construction and read through the
+    # factory's return, so a surviving empty-literal pin folds `.first` to `nil` and fires on correct code.
+    it "stays silent on a member filled after construction" do
+      result = analyze(<<~RUBY)
+        module Pkg
+          class Parser
+            Result = Struct.new(:items, :errors)
+            def self.parse(text)
+              r = Result.new([], [])
+              text.split(",").each { |t| r.items << Item.new(t) }
+              r
+            end
+          end
+          class Item
+            def initialize(name) = @name = name
+            def local = @name
+          end
+        end
+
+        Pkg::Parser.parse("a,b").items.first.local
+      RUBY
+      expect(result.diagnostics.map(&:message).join("\n")).not_to match(/undefined method/i)
+    end
+
+    # The must-still-succeed control for the example above: the same chain over a NON-empty member still folds to
+    # a real element type, so a genuine typo on it is still reported. Without this the silence above could come
+    # from the whole chain having degraded rather than from the widening.
+    it "still reports a genuine typo reached through a non-empty member" do
+      result = analyze(<<~RUBY)
+        Pair = Struct.new(:label, :items)
+        def build = Pair.new("hi", [1, 2])
+        build.items.first.zzz_undefined
+      RUBY
+      expect(result.diagnostics.map(&:message).join("\n")).to include("zzz_undefined")
+    end
+  end
+
   describe "false-positive safety" do
     it "does not flag a member read as an undefined method" do
       result = analyze(<<~RUBY)

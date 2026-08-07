@@ -208,6 +208,50 @@ RSpec.describe "Data.define value folding", type: :runner do
     end
   end
 
+  # Issue #293. `Data` is immutable in its MEMBERS, not in the objects they point at: a member holding a container
+  # is a reference the caller still aliases, so the construction-time emptiness of an empty literal is not a
+  # property of the value object. Same widening, same both-directions pairing, as the `Struct` sibling.
+  describe "empty-container members (issue #293)" do
+    it "widens an empty Array / Hash literal member to its bare nominal" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[Dynamic[top]]", "Hash[Dynamic[top], Dynamic[top]]"])
+        Result = Data.define(:items, :opts)
+        dump_type(Result.new(items: [], opts: {}).items)
+        dump_type(Result.new(items: [], opts: {}).opts)
+      RUBY
+    end
+
+    it "keeps a NON-empty container member folding precisely" do
+      expect(dumped_types(<<~RUBY)).to eq(["[1, 2]", "1"])
+        Result = Data.define(:items)
+        dump_type(Result.new(items: [1, 2]).items)
+        dump_type(Result.new(items: [1, 2]).items.first)
+      RUBY
+    end
+
+    it "stays silent on a member filled after construction" do
+      result = analyze(<<~RUBY)
+        Result = Data.define(:items)
+        def build
+          r = Result.new(items: [])
+          [1, 2].each { |t| r.items << t.to_s }
+          r
+        end
+        build.items.first.upcase
+      RUBY
+      expect(result.diagnostics.map(&:message).join("\n")).not_to match(/undefined method/i)
+    end
+
+    # The must-still-succeed control: the same chain over a non-empty member still folds, so a genuine typo fires.
+    it "still reports a genuine typo reached through a non-empty member" do
+      result = analyze(<<~RUBY)
+        Result = Data.define(:items)
+        def build = Result.new(items: ["a"])
+        build.items.first.zzz_undefined
+      RUBY
+      expect(result.diagnostics.map(&:message).join("\n")).to include("zzz_undefined")
+    end
+  end
+
   describe "false-positive safety" do
     it "does not flag a member read as an undefined method" do
       result = analyze(<<~RUBY)

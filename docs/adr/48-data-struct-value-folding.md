@@ -253,11 +253,27 @@ uncertain. Each degradation is a *precision floor*, never a wrong answer:
    be removed), so member-value folding is unaffected; added methods
    resolve through the user-method path.
 
-Because folding only ever *narrows* a type from `Dynamic[top]` to a
-proven member type, and degrades to the status quo on any uncertainty,
-**this ADR introduces no false-positive surface** — it cannot make a
-working program newly fail a check. It can only make a member read more
-precise.
+6. **Empty container literal as a member argument** (`R.new([], {})`) — a
+   member holds a *reference* to the container the constructor was handed,
+   so its emptiness is a fact about that argument at the instant of
+   construction, not a property of the value object: the caller keeps its
+   own alias, and "construct empty, then fill" (`r = R.new([], []);
+   xs.each { |x| r.items << x }`) is the dominant Ruby shape. An empty
+   `Tuple` / closed empty `HashShape` is therefore recorded **widened** to
+   its bare nominal (`Array[untyped]` / `Hash[untyped, untyped]`), through
+   the same helpers `MutationWidening` uses to retract a mutated local's
+   literal shape. Non-empty literals are untouched: their element evidence
+   survives an append, and their reads never fold to `nil`.
+
+Points 1–5 only ever *narrow* a type from `Dynamic[top]` to a proven
+member type and degrade to the status quo on any uncertainty, so they add
+no false-positive surface. Point 6 is where that reasoning turned out to
+have a hole, and is written from the FP it cost: the emptiness pin was the
+one member fact whose reads fold to `nil`, and `nil` is the receiver type
+`call.undefined-method` fires on. Issue #293 reported it on correct code —
+a factory returning `Struct.new(:items, :errors).new([], [])` filled by
+`<<` on the next line, whose consumer's `.items.first.local` was reported
+undefined. Emptiness aside, the tier stays a pure precision uplift.
 
 ### Severity / diagnostic posture
 

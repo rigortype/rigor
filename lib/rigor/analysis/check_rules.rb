@@ -1271,11 +1271,21 @@ module Rigor
           # presence checks below cannot rule out a sound call.
           return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
 
-          return nil unless union_contains_nil?(receiver_type)
-          return nil unless union_method_present_on_non_nil?(receiver_type, call_node.name, scope)
-          return nil if nil_class_has_method?(call_node.name, scope)
+          return nil unless nil_bearing_union_witnesses?(receiver_type, call_node.name, scope)
 
           build_nil_receiver_diagnostic(path, call_node)
+        end
+
+        # The receiver-type half of the rule, factored out of the node-shape
+        # guards above: the union must carry nil, must carry a non-nil arm the
+        # presence question can be asked of, must support the method on every
+        # non-nil arm (so the call is only wrong on the nil path), and the
+        # method must be absent from `NilClass` (so the nil path really raises).
+        def nil_bearing_union_witnesses?(receiver_type, method_name, scope)
+          union_contains_nil?(receiver_type) &&
+            union_has_nameable_non_nil_arm?(receiver_type) &&
+            union_method_present_on_non_nil?(receiver_type, method_name, scope) &&
+            !nil_class_has_method?(method_name, scope)
         end
 
         def union_contains_nil?(union)
@@ -1300,6 +1310,23 @@ module Rigor
         def nil_member?(member)
           (member.is_a?(Type::Constant) && member.value.nil?) ||
             (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
+        end
+
+        # Possible-nil may witness only where the presence question below is
+        # ANSWERABLE. `method_present_anywhere?` reports "present" for a
+        # nameless arm (Dynamic / Top / Bot) — the permissive polarity the
+        # union-undefined-method rule's FP safety rests on — so a union whose
+        # non-nil arms are ALL nameless satisfied that gate vacuously and fired
+        # on every method name, including names defined on no class anywhere.
+        # That inverted the intent: the gate suppressed exactly where knowledge
+        # exists (`String | nil` calling a nonexistent method stays silent) and
+        # permitted exactly where none does. Requiring one nameable concrete
+        # arm restores the polarity without touching the shared helper:
+        # `String | nil` keeps firing, and so does `Dynamic | String | nil` —
+        # the nameless arm stays permissive inside the all-arms check, which is
+        # only about the arms' method surface.
+        def union_has_nameable_non_nil_arm?(union)
+          union.members.any? { |m| !nil_member?(m) && !concrete_class_name(m).nil? }
         end
 
         # The non-nil members must collectively support the

@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../../type"
 require_relative "../../source/node_children"
+require_relative "../mutation_widening"
 
 module Rigor
   module Inference
@@ -18,6 +19,39 @@ module Rigor
       # Both folders `extend` this module so the projections resolve as their own module functions
       # (matching their `module_function` style).
       module MemberShapeProjection
+        # A value object's member holds a **reference** to whatever the constructor was handed, and an
+        # EMPTY container literal's emptiness is a fact about that argument at the instant of
+        # construction — never a fact about the member. The caller keeps its own alias, and "construct
+        # empty, then fill" (`r = R.new([], []); xs.each { |x| r.items << x }`) is the dominant Ruby
+        # shape, so of every literal a member map can pin, emptiness is the one falsified most often.
+        #
+        # It is also the only one whose reads fold to `nil` — `.first` / `.last` / `[]` on an empty
+        # container — and `nil` is the receiver type that fires `call.undefined-method` on correct code
+        # (issue #293). A non-empty literal's element evidence, by contrast, survives an append and its
+        # reads never fold to `nil`, so it is kept intact.
+        #
+        # So an empty `Tuple` / closed empty `HashShape` is recorded widened to its bare nominal —
+        # the same carrier, through the same helpers, that {Inference::MutationWidening} installs when
+        # it retracts a mutated local's literal shape.
+        def widen_unowned_emptiness(member_map)
+          return member_map if member_map.nil?
+
+          member_map.transform_values { |type| widened_empty_container(type) }
+        end
+
+        def widened_empty_container(type)
+          case type
+          when Type::Tuple
+            type.elements.empty? ? MutationWidening.widen_tuple(type) : type
+          when Type::HashShape
+            # An OPEN shape claims nothing about the keys it does not list — a read of an unlisted key
+            # is already `untyped`, not `nil` — so only the closed literal `{}` carries the emptiness.
+            type.closed? && type.pairs.empty? ? MutationWidening.widen_hash_shape(type) : type
+          else
+            type
+          end
+        end
+
         # A Data/Struct subclass body can redefine a member's synthesised reader (`def x`); when it does,
         # `inst.x` runs that `def`, not the member, so folding the read would be unsound. A real `def` node
         # under the class name is the discriminator (the synthesised reader has none), so an entry in the
@@ -109,7 +143,7 @@ module Rigor
           return nil unless shape.optional_keys.empty?
           return nil unless shape.pairs.keys.all? { |key| instance.members.key?(key) }
 
-          merged = instance.members.merge(shape.pairs)
+          merged = widen_unowned_emptiness(instance.members.merge(shape.pairs))
           yield(merged, instance.class_name)
         end
       end

@@ -141,7 +141,7 @@ module Rigor
           map = member_map_for_new(members, keyword_init, context)
           return degraded_instance if map.nil?
 
-          Type::Combinator.struct_instance_of(members: map, class_name: class_name)
+          Type::Combinator.struct_instance_of(members: widen_unowned_emptiness(map), class_name: class_name)
         end
 
         # Builds the member -> type map honouring the class's `keyword_init` flag: a `keyword_init: true`
@@ -309,7 +309,8 @@ module Rigor
           return scope if member.nil?
 
           rebound = Type::Combinator.struct_instance_of(
-            members: current.members.merge(member => assigned_type), class_name: current.class_name
+            members: widen_unowned_emptiness(current.members.merge(member => assigned_type)),
+            class_name: current.class_name
           )
           scope.with_local(receiver.name, rebound)
         end

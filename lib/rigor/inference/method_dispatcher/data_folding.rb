@@ -116,7 +116,7 @@ module Rigor
           map = member_map_for_new(members, context)
           return degraded_instance(class_name) if map.nil?
 
-          Type::Combinator.data_instance_of(members: map, class_name: class_name)
+          Type::Combinator.data_instance_of(members: widen_unowned_emptiness(map), class_name: class_name)
         end
 
         # Builds the member -> type map from the call's arguments, honouring the keyword vs positional

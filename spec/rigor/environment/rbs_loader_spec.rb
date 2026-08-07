@@ -328,6 +328,90 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "definition build failure warning (#295)" do
+    # A `signature_paths:` file that PARSES cleanly — so `#env` builds successfully and `class_known?`
+    # comes back true — but whose class declares the same method twice without an overload marker. RBS
+    # only detects that when `RBS::DefinitionBuilder` actually builds the definition, which (unlike the
+    # env-build failures exercised above) happens LAZILY: per class, on the first caller that asks. This is
+    # exactly the shape the loader's memoised-nil rescue used to swallow in silence — the class stayed
+    # "known", so every subsequent call to it, real methods and typos alike, degraded to `Dynamic[top]`
+    # unwitnessed.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-definition-build-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    def write_duplicate_method_rbs(tmpdir)
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        "class Widget\n  def bar: () -> void\n  def bar: () -> String\nend\n"
+      )
+    end
+
+    it "warns once, naming the class and the colliding declaration file" do
+      write_duplicate_method_rbs(tmpdir)
+      loader = described_class.new(signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+
+      expect(loader.instance_definition("Widget")).to be_nil
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("RBS definition build failed")
+      expect(messages.first).to include("Widget")
+      expect(messages.first).to include("DuplicatedMethodDefinitionError")
+      expect(messages.first).to include(File.join(tmpdir, "widget.rbs"))
+    end
+
+    it "does not double-warn when both the instance and singleton sides fail for the same class" do
+      write_duplicate_method_rbs(tmpdir)
+      loader = described_class.new(signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+
+      loader.instance_definition("Widget")
+      loader.singleton_definition("Widget")
+      loader.instance_definition("Widget") # per-process memo cache hit — must not re-warn
+
+      expect(messages.size).to eq(1)
+    end
+
+    it "keeps the class known and fails soft: dispatch degrades without a crash or new diagnostic" do
+      write_duplicate_method_rbs(tmpdir)
+      loader = described_class.new(signature_paths: [tmpdir])
+      allow(loader).to receive(:warn)
+
+      expect(loader.class_known?("Widget")).to be(true)
+      expect(loader.instance_definition("Widget")).to be_nil
+      expect(loader.instance_method(class_name: "Widget", method_name: :bar)).to be_nil
+    end
+
+    it "does not warn for a class whose definition builds cleanly" do
+      File.write(File.join(tmpdir, "widget.rbs"), "class Widget\n  def bar: () -> void\nend\n")
+      loader = described_class.new(signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+
+      expect(loader.instance_definition("Widget")).not_to be_nil
+      expect(messages).to be_empty
+    end
+
+    it "warns identically on a cache-hit run (definition builds stay per-process since ADR-54)" do
+      write_duplicate_method_rbs(tmpdir)
+      cache_store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+
+      warm = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
+      allow(warm).to receive(:warn) # populate the env cache; not what this example asserts
+      warm.send(:env)
+
+      loader = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+
+      expect(loader.instance_definition("Widget")).to be_nil
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("RBS definition build failed")
+    end
+  end
+
   describe "#class_type_param_names (Slice 4 phase 2d)" do
     it "returns Array's single element type parameter" do
       expect(loader.class_type_param_names("Array")).to eq([RbsCoreTypeParams.array_element])

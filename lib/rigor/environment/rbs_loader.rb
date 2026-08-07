@@ -695,10 +695,11 @@ module Rigor
         @virtual_rbs = virtual_rbs.map { |name, content| [name.to_s.dup.freeze, content.to_s.dup.freeze].freeze }.freeze
         # Per-loader memoization bucket. Held as a single mutable Hash so the loader instance itself can be
         # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slot
-        # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:builder`, `:reflection`,
-        # `:instance_definitions_table`, `:singleton_definitions_table`. Constructed via `Hash.new` (NOT a
-        # `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't infer a fixed key set from the initial
-        # state and fold post-initial slot reads (e.g. `@state[:env_loaded]`) to a constant `nil`.
+        # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
+        # `:builder`, `:reflection`, `:instance_definitions_table`, `:singleton_definitions_table`.
+        # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
+        # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
+        # `@state[:env_loaded]`) to a constant `nil`.
         @state = Hash.new # rubocop:disable Style/EmptyLiteral
         @instance_definition_cache = {}
         @singleton_definition_cache = {}
@@ -1407,7 +1408,8 @@ module Rigor
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_instance(rbs_name)
-      rescue ::RBS::BaseError
+      rescue ::RBS::BaseError => e
+        warn_about_definition_build_failure(class_name, e)
         nil
       end
 
@@ -1420,8 +1422,79 @@ module Rigor
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_singleton(rbs_name)
-      rescue ::RBS::BaseError
+      rescue ::RBS::BaseError => e
+        warn_about_definition_build_failure(class_name, e)
         nil
+      end
+
+      # The third twin of {#warn_about_quarantined_signatures} / {#warn_about_virtual_rbs_collisions}: name,
+      # once per class per PROCESS, a `RBS::DefinitionBuilder` failure caught in
+      # {#build_instance_definition} / {#build_singleton_definition}'s rescue. Without it, `class_known?`
+      # stays true (it only consults {#known_class_names_set}, never a definition build), so every call on
+      # the class — real methods and typos alike — silently degrades to `Dynamic[top]`.
+      #
+      # STRUCTURAL DIVERGENCE from its two siblings: they fire from the single central site at the end of
+      # {#env}, because the whole env is built eagerly and every quarantine/collision is already known by
+      # then. Definition builds are LAZY (ADR-54 WD1 — built on demand per class the FIRST time a caller asks,
+      # long after {#env} has already run), so there is no later central checkpoint to fire from before the
+      # affected classes even exist. This warns inline at the rescue site instead, gated on
+      # `@state[:definition_build_warned]` (keyed by class name) so the instance and singleton sides — and
+      # any re-entry once the per-process `@instance_definition_cache` / `@singleton_definition_cache`
+      # memoize the failure — warn at most once per class name, cache-hit runs included (a definition build
+      # is per-process regardless of the RBS-env cache tier). `@state` is per-LOADER-INSTANCE, not
+      # process-global, so under the fork-based analysis pool each worker holds its own loader and its own
+      # `@state`: a class whose definition fails can print its warning once per worker that happens to touch
+      # it, i.e. more than once in a single `rigor check` run. Deduplicating that across processes is out of
+      # scope here — see [#295](https://github.com/rigortype/rigor/issues/295).
+      def warn_about_definition_build_failure(class_name, error)
+        warned = (@state[:definition_build_warned] ||= {})
+        key = class_name.to_s
+        return if warned[key]
+
+        warned[key] = true
+        first_line = error.message.to_s.lines.first.to_s.strip
+        buffers = definition_build_conflict_buffers(error)
+        collisions =
+          if buffers.empty?
+            ""
+          else
+            listed = buffers.first(QUARANTINE_WARN_LIMIT)
+            more = buffers.size - listed.size
+            lines = listed.map { |name| "    - #{name}" }
+            lines << "    … and #{more} more" if more.positive?
+            "\n  Colliding declaration(s):\n#{lines.join("\n")}"
+          end
+        warn(
+          "rigor: RBS definition build failed for `#{class_name}`: #{error.class}: #{first_line}\n  " \
+          "Rigor still treats the class as known, so calls into it now silently degrade to\n  " \
+          "`Dynamic[top]` — real methods and typos alike — instead of resolving normally.#{collisions}"
+        )
+      end
+
+      # The definition-build twin of {#env_build_conflict_buffers}: the declaration source file(s) named by a
+      # `RBS::DefinitionBuilder` failure, so {#warn_about_definition_build_failure} can name the colliding
+      # declarations rather than only the exception's class and message. The payload shape varies by error
+      # class (`references/rbs`'s `lib/rbs/errors.rb`): `DuplicatedMethodDefinitionError` and
+      # `InvalidOverloadMethodError` carry `#members` (each with a `#location`);
+      # `DuplicatedInterfaceMethodDefinitionError` carries a single `#member`; most others
+      # (`NoSuperclassFoundError`, `UnknownMethodAliasError`, `RecursiveAncestorError`, …) carry only a bare
+      # `#location`. Falls back to an empty list — the warning still names the class and the exception's own
+      # message — for the remainder (e.g. `SuperclassMismatchError`, which carries neither).
+      def definition_build_conflict_buffers(error)
+        locations =
+          if error.respond_to?(:members) && error.members
+            Array(error.members).map(&:location)
+          elsif error.respond_to?(:member) && error.member
+            [error.member.location]
+          elsif error.respond_to?(:location)
+            [error.location]
+          else
+            []
+          end
+
+        locations.compact.filter_map { |loc| loc.buffer&.name }.map(&:to_s).uniq.freeze
+      rescue ::RBS::BaseError, StandardError
+        [].freeze
       end
 
       # Resolve an RBS class/module ALIAS to its canonical declared name. `class Mutex = Thread::Mutex`

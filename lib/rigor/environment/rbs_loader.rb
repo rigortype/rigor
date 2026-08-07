@@ -65,6 +65,7 @@ module Rigor
         # intentionally read-only and appended LAST so user-supplied `signature_paths` win on name conflicts.
         def build_env_for(libraries:, signature_paths:, virtual_rbs: [])
           rbs_loader = RBS::EnvironmentLoader.new
+          libraries = libraries_without_shadowed_bigdecimal_math(libraries)
           libraries.each do |library|
             next unless rbs_loader.has_library?(library: library, version: nil)
 
@@ -92,6 +93,57 @@ module Rigor
           synthesize_missing_namespaces(env)
           env, resolved = resolve_quarantining_virtual_collisions(env, virtual_rbs)
           stub_missing_referenced_types(env, resolved, project_sig_files(signature_paths))
+        end
+
+        # rbs ships `stdlib/bigdecimal/` and `stdlib/bigdecimal-math/` as two libraries, so
+        # `Environment::DEFAULT_LIBRARIES` names both. But `RBS::EnvironmentLoader` resolves a library to an
+        # INSTALLED GEM's `sig/` in preference to rbs's own `stdlib/` copy, and the `bigdecimal` gem has
+        # shipped `sig/big_math.rbs` — declaring the very same `BigMath` module — since 4.0. On such a host
+        # both declarations land in one environment, `RBS::DefinitionBuilder` raises
+        # `DuplicatedMethodDefinitionError` on `BigMath.E`, and the WHOLE module silently degrades to
+        # `Dynamic[top]` (issue #299) — every `BigMath` call, real method and typo alike, stops being
+        # witnessed.
+        #
+        # `bigdecimal-math` is the entry to drop, not `bigdecimal`: the gem's copy is maintained alongside
+        # the implementation, types `log10` / `log1p` / `expm1` / `tan` / `tanh` (which rbs's copy omits
+        # outright), and accepts `real | BigDecimal` where rbs's accepts only `BigDecimal`. Dropping it is
+        # therefore a strict typing gain, not a trade.
+        #
+        # Host-dependent by construction, and deliberately so: where `bigdecimal` resolves to rbs's own
+        # `stdlib/bigdecimal/` (an older gem with no `sig/`, or no gem at all), nothing collides, nothing is
+        # dropped, and `bigdecimal-math` still supplies `BigMath`.
+        BIGDECIMAL_LIBRARY = "bigdecimal"
+        private_constant :BIGDECIMAL_LIBRARY
+        BIGDECIMAL_MATH_LIBRARY = "bigdecimal-math"
+        private_constant :BIGDECIMAL_MATH_LIBRARY
+        # The one basename that decides it: `BigMath` lives in `big_math.rbs` on both sides.
+        BIG_MATH_SIG_BASENAME = "big_math.rbs"
+        private_constant :BIG_MATH_SIG_BASENAME
+
+        # @param libraries [Array<String>] the resolved library list, `DEFAULT_LIBRARIES` included.
+        # @return [Array<String>] the same list, minus `bigdecimal-math` when `bigdecimal` already brings
+        #   `BigMath` in.
+        def libraries_without_shadowed_bigdecimal_math(libraries)
+          return libraries unless libraries.include?(BIGDECIMAL_LIBRARY) && libraries.include?(BIGDECIMAL_MATH_LIBRARY)
+          return libraries unless bigdecimal_library_declares_big_math?
+
+          libraries - [BIGDECIMAL_MATH_LIBRARY]
+        end
+
+        # Resolves `library: "bigdecimal"` on a THROWAWAY loader (never the one building the env) and reports
+        # whether any directory it resolves to ships `big_math.rbs`. Fails soft to `false`: an unresolvable
+        # library must not take the whole environment build down, and keeping both entries is the
+        # pre-existing behaviour.
+        def bigdecimal_library_declares_big_math?
+          probe = ::RBS::EnvironmentLoader.new(core_root: nil)
+          return false unless probe.has_library?(library: BIGDECIMAL_LIBRARY, version: nil)
+
+          probe.add(library: BIGDECIMAL_LIBRARY, version: nil)
+          shadowed = false
+          probe.each_dir { |_source, dir| shadowed ||= dir.join(BIG_MATH_SIG_BASENAME).file? }
+          shadowed
+        rescue StandardError
+          false
         end
 
         # True when `content` parses as an RBS signature. {#virtual_rbs_collision_quarantined} uses this to

@@ -22,13 +22,41 @@ RBS isn't loaded. The selectors clustered around four families:
    `bundle install` blocker, used by `twitter-text` for IDN
    handling).
 
-These are the six gems vendored here. None of them have RBS in
+Those survey-driven gems are the core of this directory (the
+sibling subdirectories are the canonical inventory — it grows, so
+no count is quoted here). None of them have RBS in
 the rbs-gem stdlib distribution; four (`mysql2`, `nokogiri`,
 `bcrypt`, `redis`) are vendored from
 [`ruby/gem_rbs_collection`](https://github.com/ruby/gem_rbs_collection)
 (MIT) with per-gem `LICENSE.upstream` provenance; two (`pg`,
 `idn-ruby`) are minimal hand-written stubs by Rigor maintainers
 (MPL-2.0) because the collection doesn't carry them.
+
+A stub can also be vendored for a purely **structural** reason:
+`racc/` exists only because `nokogiri.rbs` declares
+`Nokogiri::CSS::Parser < Racc::Parser`, and `RBS::DefinitionBuilder`
+raises `NoSuperclassFoundError` — collapsing the whole subclass to
+`Dynamic[top]` — when a declared superclass has no declaration
+anywhere in the environment.
+
+## Do not re-declare what upstream already declares
+
+The `rbs` gem is in `Environment::DEFAULT_LIBRARIES`, so its ENTIRE
+`sig/` tree loads on every run — including `sig/shims/bundler.rbs`
+and `sig/shims/rubygems.rbs`. A method declared on both sides
+raises `RBS::DuplicatedMethodDefinitionError` inside
+`RBS::DefinitionBuilder`, which does not fail the run: it silently
+degrades the WHOLE class to `Dynamic[top]`, so real methods and
+typos alike stop being witnessed. Declare only what upstream
+omits — even when Rigor's type would have been the better of the
+two. An RBS overload continuation (`| ...`) looks like the way to
+keep both, but it raises `InvalidOverloadMethodError` when the
+base declaration is absent, which breaks every environment built
+without the library that supplies it; a narrower upstream type is
+the cheaper failure.
+`spec/rigor/environment/bundled_rbs_definition_build_spec.rb`
+pins this: it builds each affected class's definition and fails the
+suite if a collision reappears on an `rbs` bump.
 
 ## Layout
 

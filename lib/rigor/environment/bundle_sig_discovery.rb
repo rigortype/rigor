@@ -42,7 +42,8 @@ module Rigor
         "strscan",
         "prism", "rbs",
         # data/vendored_gem_sigs/
-        "pg", "mysql2", "nokogiri", "bcrypt", "redis", "idn-ruby"
+        "pg", "mysql2", "nokogiri", "bcrypt", "redis", "idn-ruby", "racc",
+        "bundler", "rubygems"
       ].freeze
 
       # @param bundle_path [String, Pathname, nil] explicit path to the bundler install root. When `nil`,

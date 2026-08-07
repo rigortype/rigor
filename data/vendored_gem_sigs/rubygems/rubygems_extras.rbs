@@ -8,6 +8,17 @@
 # the upstream RBS already covers, so the loader does not raise
 # `RBS::DuplicatedDeclarationError`.
 #
+# "Upstream RBS" here means BOTH `core/rubygems/*.rbs` and the
+# `rbs` gem's `sig/shims/rubygems.rbs`: `rbs` is in
+# `Environment::DEFAULT_LIBRARIES`, so its whole `sig/` tree —
+# shims included — is in scope on every run. A duplicate against
+# either raises `RBS::DuplicatedMethodDefinitionError` inside
+# `RBS::DefinitionBuilder` and collapses the ENTIRE class to
+# `Dynamic[top]` (issue #299), so a shim-declared reader is left
+# to the shim and only the writer half is declared here.
+# `spec/rigor/environment/bundled_rbs_definition_build_spec.rb`
+# fails the suite if a new collision reappears on an `rbs` bump.
+#
 # Driven by the `references/ruby/lib` survey
 # (`docs/CURRENT_WORK.md` § "Queued engine items") which
 # clusters `undefined-method` on Gem-side selectors most-touched
@@ -62,7 +73,7 @@ class Gem::Platform
   def match_spec?: (untyped) -> bool
   def match_gem?: (untyped, untyped) -> bool
 
-  def self.local: () -> Platform
+  def self.local: () -> Gem::Platform
   def self.match_spec?: (untyped) -> bool
   def self.match_gem?: (untyped, untyped) -> bool
   def self.installable?: (untyped) -> bool
@@ -75,7 +86,9 @@ class Gem::Dependency
   # permissive splat keeps the canonical and the
   # `(name, requirements, type)` invocation forms both silent.
   def initialize: (*untyped) -> void
-  attr_accessor name: String
+  # `#name`'s READER is declared by `sig/shims/rubygems.rbs` (`() -> String`); only the writer is
+  # ours, so this is a `def name=` rather than the `attr_accessor` the other members use.
+  def name=: (String) -> String
   attr_accessor requirement: Gem::Requirement
   attr_accessor type: Symbol
   attr_accessor prerelease: bool
@@ -111,7 +124,9 @@ class Gem::Specification
   def required_ruby_version: () -> Gem::Requirement
   def require_paths: () -> Array[String]
   attr_accessor name: String
-  attr_accessor version: Gem::Version
+  # `#version`'s READER is declared by `sig/shims/rubygems.rbs` (`attr_reader version (): Version`);
+  # only the writer is ours.
+  def version=: (Gem::Version) -> Gem::Version
   attr_accessor full_gem_path: String
   attr_accessor loaded_from: String?
   attr_accessor post_install_message: String?
@@ -131,7 +146,7 @@ end
 
 class Gem::Requirement
   def requirements: () -> Array[untyped]
-  def self.create: (*untyped) -> Gem::Requirement
+  # `.create` — declared by `core/rubygems/requirement.rbs`, and more precisely than this file did.
 end
 
 class Gem::ConfigFile
@@ -172,7 +187,7 @@ class Gem::SourceList
   def include?: (untyped) -> bool
   def each: () { (untyped) -> untyped } -> void
   def to_a: () -> Array[untyped]
-  def from: (untyped) -> SourceList
+  def from: (untyped) -> Gem::SourceList
 end
 
 class Gem::RequestSet
@@ -214,10 +229,6 @@ class Gem::PathSupport
 end
 
 class Gem::Installer
-  def initialize: (*untyped) -> void
-end
-
-class Gem::DependencyInstaller
   def initialize: (*untyped) -> void
 end
 

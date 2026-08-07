@@ -1,0 +1,16 @@
+Source: hand-written by Rigor maintainers (no upstream RBS available —
+        the `racc` gem ships no `sig/`, the `rbs` gem has no
+        `stdlib/racc/`, and `ruby/gem_rbs_collection` carries no entry
+        as of 2026-08-08).
+Reference: racc 1.8.1 `lib/racc/parser.rb` public runtime API.
+License: MPL-2.0 (matches the rest of Rigor).
+
+This stub exists because `data/vendored_gem_sigs/nokogiri/nokogiri.rbs`
+declares `class Nokogiri::CSS::Parser < Racc::Parser`, and an
+undeclared superclass makes `RBS::DefinitionBuilder` raise
+`RBS::NoSuperclassFoundError` — which collapses the whole
+`Nokogiri::CSS::Parser` definition to `Dynamic[top]`. It covers the
+runtime surface a generated parser inherits (`do_parse`, `yyparse`,
+`next_token`, the `yy*` error hooks, and the `racc_*` trace helpers)
+plus `Racc::ParseError`; the `_racc_*` internals are deliberately
+omitted.

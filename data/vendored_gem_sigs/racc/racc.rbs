@@ -1,0 +1,67 @@
+#
+# Rigor-side vendored RBS stub for the `racc` gem's runtime.
+#
+# Vendored for ONE structural reason: `data/vendored_gem_sigs/nokogiri/nokogiri.rbs` declares
+# `class Nokogiri::CSS::Parser < Racc::Parser`, and `RBS::DefinitionBuilder` raises
+# `RBS::NoSuperclassFoundError` when a declared superclass has no declaration anywhere in the
+# environment — which took the whole `Nokogiri::CSS::Parser` definition down to `Dynamic[top]`
+# (issue #299). Dropping the superclass from the nokogiri sig would have hidden the inheritance
+# instead of typing it, and `Racc::Parser` is a real, small, stable class, so it is declared here.
+#
+# Scope is the documented runtime surface a racc-generated parser inherits, plus `Racc::ParseError`
+# (which `Nokogiri::CSS::SyntaxError` and every generated parser raise). The `_racc_*` methods are
+# private implementation detail of the generated parse loop and are deliberately NOT declared —
+# nothing outside racc itself calls them.
+#
+# Returns are `untyped` wherever the value is a grammar-defined semantic value: racc has no way to
+# know what a generated parser's actions produce, and guessing would cost false positives.
+#
+module Racc
+  # Raised by a generated parser on an unrecoverable syntax error.
+  class ParseError < StandardError
+  end
+
+  # The runtime base class every racc-generated parser inherits from.
+  class Parser
+    # Runs the parse loop, pulling tokens from the subclass's `#next_token`. Returns the grammar's
+    # start-rule value.
+    def do_parse: () -> untyped
+
+    # Token source: a generated parser's user code overrides this to return `[token_symbol, value]`,
+    # or `nil` / `[false, ...]` at end of input.
+    def next_token: () -> untyped
+
+    # Runs the parse loop pulling tokens by calling `recv.__send__(mid)` instead of `#next_token`.
+    def yyparse: (untyped recv, Symbol | String mid) -> untyped
+
+    # Error hook: called with the offending token id, its value, and the value stack. The default
+    # implementation raises `Racc::ParseError`; user code overrides it to report and recover.
+    def on_error: (untyped error_token_id, untyped error_value, untyped value_stack) -> void
+
+    # Explicitly signals a syntax error from inside a parser action.
+    def yyerror: () -> void
+
+    # Accepts the input from inside a parser action, ending the parse.
+    def yyaccept: () -> void
+
+    # Clears the error state after `#on_error`, resuming normal parsing.
+    def yyerrok: () -> void
+
+    # Human-readable name for a token id, or `nil` when the id is unknown.
+    def token_to_str: (untyped t) -> String?
+
+    # Debug-trace hooks. Enabled by a generated parser built with racc's `--debug`; harmless no-ops
+    # otherwise.
+    def racc_read_token: (untyped t, untyped tok, untyped val) -> void
+    def racc_shift: (untyped tok, untyped tstack, untyped vstack) -> void
+    def racc_reduce: (untyped toks, untyped sim, untyped tstack, untyped vstack) -> void
+    def racc_accept: () -> void
+    def racc_e_pop: (untyped state, untyped tstack, untyped vstack) -> void
+    def racc_next_state: (untyped curstate, untyped state) -> void
+    def racc_print_stacks: (untyped t, untyped v) -> void
+    def racc_print_states: (untyped s) -> void
+    def racc_token2str: (untyped tok) -> String
+
+    def self.racc_runtime_type: () -> String
+  end
+end

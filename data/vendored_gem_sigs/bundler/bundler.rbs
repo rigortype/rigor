@@ -2,14 +2,12 @@
 # Rigor-side vendored RBS stub for the `bundler` gem.
 #
 # The `bundler` gem does not ship its own `sig/` and is not
-# covered by `ruby/gem_rbs_collection`. The shim in
-# `references/rbs/sig/shims/bundler.rbs` (rbs gem upstream)
-# carries a tiny subset (`LockfileParser`, `LazySpecification`,
-# `Dependency`, `Definition`, `default_lockfile`, `definition`,
-# `Source::Gemspec`) but is only loaded when the user opts in via
-# `library "bundler"` — that's rare in Rigor `.rigor.yml` setups,
-# so most projects analyse bundler-using code with NO `Bundler`
-# RBS in scope.
+# covered by `ruby/gem_rbs_collection`. The rbs gem's own
+# `sig/shims/bundler.rbs` carries a tiny subset (`LockfileParser`,
+# `LazySpecification`, `Dependency`, `Definition`,
+# `default_lockfile`, `definition`, `Source::Gemspec`) — enough to
+# type rbs's own use of bundler, not enough to analyse a project
+# that uses it.
 #
 # This stub covers the Bundler module's top-25 singleton methods
 # surfaced by the `references/ruby/lib` survey
@@ -21,13 +19,23 @@
 # silence `call.undefined-method` rather than infer precise
 # returns.
 #
-# Declarations are intentionally a SUPERSET of the
-# `references/rbs/sig/shims/bundler.rbs` shim. When the user
-# opts into `library "bundler"`, the shim's typed declarations
-# (`LockfileParser#specs -> Array[LazySpecification]`, etc.)
-# would conflict; users who want both should drop the
-# `library "bundler"` entry from their config so this vendored
-# stub wins.
+# The `rbs` gem's own `sig/shims/bundler.rbs` IS always in scope:
+# `rbs` sits in `Environment::DEFAULT_LIBRARIES`, so its `sig/`
+# tree — shims included — loads on every run. This file therefore
+# declares only what the shim does NOT, and never re-declares a
+# shim method: a duplicate raises
+# `RBS::DuplicatedMethodDefinitionError` inside
+# `RBS::DefinitionBuilder` and collapses the ENTIRE class to
+# `Dynamic[top]` (issue #299). Where the shim's type is weaker
+# than Rigor's would have been, the shim still wins: an RBS
+# overload continuation (`| ...`) would append rather than
+# collide, but it raises `InvalidOverloadMethodError` when the
+# base declaration is absent, which breaks every environment
+# built without the `rbs` library. Those spots are marked below.
+#
+# Keep this file and `sig/shims/bundler.rbs` in sync on an `rbs`
+# bump — `spec/rigor/environment/bundled_rbs_definition_build_spec.rb`
+# fails the suite if a new collision reappears.
 #
 module Bundler
   # `Bundler.<name>` — accessors / module-level entry points.
@@ -46,7 +54,13 @@ module Bundler
   def self.require: (*untyped groups) -> untyped
   def self.load: () -> untyped
   def self.environment: () -> untyped
-  def self.definition: (?untyped unlock, ?untyped lockfile) -> Definition
+  # `self.definition` — declared by `sig/shims/bundler.rbs`. Note that the shim types it `() ->
+  # Definition` while the real `Bundler.definition(unlock = nil, lockfile = default_lockfile)` takes
+  # two optional arguments; an `| ...` overload continuation here would restore that arity, but a
+  # continuation with no base declaration raises `RBS::InvalidOverloadMethodError` — so any
+  # environment built WITHOUT the `rbs` library would lose the whole `Bundler` module to
+  # `Dynamic[top]`. The narrower arity is the cheaper of the two failure modes; the fix belongs
+  # upstream in the shim.
   def self.frozen_bundle?: () -> bool
   def self.locked_gems: () -> untyped
   def self.ruby_scope: () -> String
@@ -78,7 +92,7 @@ module Bundler
   def self.local_platform: () -> untyped
   def self.generic_local_platform: () -> untyped
   def self.default_gemfile: () -> Pathname
-  def self.default_lockfile: () -> Pathname
+  # `self.default_lockfile` — declared by `sig/shims/bundler.rbs` with the same type.
   def self.default_bundle_dir: () -> Pathname?
   def self.system_bindir: () -> String?
   def self.preferred_gemfile_name: () -> String
@@ -104,10 +118,9 @@ module Bundler
 
     def initialize: (*untyped) -> void
     def gemfiles: () -> Array[Pathname]
-    def lockfile: () -> Pathname
+    # `#lockfile`, `#locked_gems`, `#dependencies` — declared by `sig/shims/bundler.rbs` with the
+    # same types.
     def lockfile=: (untyped) -> untyped
-    def locked_gems: () -> LockfileParser
-    def dependencies: () -> Array[Dependency]
     def current_dependencies: () -> Array[Dependency]
     def requested_dependencies: () -> Array[Dependency]
     def dependencies_for: (untyped groups) -> Array[Dependency]
@@ -134,8 +147,7 @@ module Bundler
   end
 
   class LockfileParser
-    def initialize: (String body) -> void
-    def specs: () -> Array[LazySpecification]
+    # `#initialize`, `#specs` — declared by `sig/shims/bundler.rbs` with the same types.
     def platforms: () -> Array[untyped]
     def sources: () -> Array[untyped]
     def dependencies: () -> Array[Dependency]
@@ -144,16 +156,16 @@ module Bundler
   end
 
   class LazySpecification
-    def name: () -> String
-    def version: () -> Gem::Version
+    # `#name`, `#version`, `#dependencies` — declared by `sig/shims/bundler.rbs`. The shim types
+    # `#version` as `() -> String` where bundler returns a `Gem::Version`; see the note on
+    # `Bundler.definition` above for why that is left alone rather than corrected with an `| ...`
+    # overload continuation.
     def platform: () -> untyped
-    def dependencies: () -> Array[Gem::Dependency]
     def source: () -> untyped
   end
 
   class Dependency < Gem::Dependency
-    attr_reader autorequire: Array[String]?
-    attr_reader source: untyped
+    # `#autorequire`, `#source` — declared by `sig/shims/bundler.rbs` with the same types.
     attr_reader groups: Array[Symbol]
     attr_reader platforms: Array[Symbol]
   end

@@ -21,6 +21,13 @@
 #      — bound as singleton methods by the C extension; the
 #      gem's RBS only declares the matching instance methods.
 #
+# Loaded ONLY when the `prism` library resolves
+# (`RbsLoader::LIBRARY_SUPPLEMENT_VENDORED_DIRS`): the
+# `ParseResult < Result` re-opening names a superclass only the
+# gem's own RBS declares, so without it `RBS::DefinitionBuilder`
+# raises `NoSuperclassFoundError` and the whole class silently
+# degrades to `Dynamic[top]`.
+#
 module Prism
   class ParseResult < Result
     # Walk the parse result's tree, attaching every comment to

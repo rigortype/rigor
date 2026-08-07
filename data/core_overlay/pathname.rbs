@@ -19,6 +19,11 @@
 #
 # The overlay widens `dir` to `String | Pathname`, matching the runtime
 # delegation and the `File.expand_path` `path` alias used elsewhere in RBS.
+#
+# The `| ...` continuation is safe with no library loaded — unlike the
+# `RbsLoader::LIBRARY_SUPPLEMENT_CORE_OVERLAYS` files, its base declaration
+# lives in rbs's `core/pathname.rbs` on every supported rbs release
+# (3.10 / 4.0 / 4.1), not in the `pathname` stdlib library.
 class Pathname
   def expand_path: (?String | Pathname dir) -> Pathname
                  | ...

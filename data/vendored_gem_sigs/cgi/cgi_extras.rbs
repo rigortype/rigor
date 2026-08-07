@@ -29,6 +29,12 @@
 # `include CGI::Util` + `extend CGI::Util`; adding a sibling
 # `include CGI::QueryExtension` is purely additive.
 #
+# Loaded ONLY when the `cgi` stdlib library resolves
+# (`RbsLoader::LIBRARY_SUPPLEMENT_VENDORED_DIRS`): without it the
+# mixin target does not exist, `RBS::DefinitionBuilder` raises
+# `NoMixinFoundError`, and the whole `CGI` class silently degrades
+# to `Dynamic[top]`.
+#
 class CGI
   include CGI::QueryExtension
 end

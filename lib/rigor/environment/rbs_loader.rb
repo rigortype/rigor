@@ -66,9 +66,10 @@ module Rigor
         def build_env_for(libraries:, signature_paths:, virtual_rbs: [])
           rbs_loader = RBS::EnvironmentLoader.new
           libraries = libraries_without_shadowed_bigdecimal_math(libraries)
-          libraries.each do |library|
-            next unless rbs_loader.has_library?(library: library, version: nil)
-
+          loaded_libraries = libraries.select do |library|
+            rbs_loader.has_library?(library: library, version: nil)
+          end
+          loaded_libraries.each do |library|
             rbs_loader.add(library: library, version: nil)
           end
           # Project `signature_paths:` are loaded per-file by {.add_project_signatures} AFTER `from_loader`,
@@ -77,16 +78,7 @@ module Rigor
           # type-of query then degrades to `Dynamic[top]` — the "sig looks harmful" failure of the 2026-07-06
           # mastodon coverage note). Per-file loading quarantines the broken file instead. Vendored / core-overlay
           # sigs are Rigor-shipped and trusted, so they stay on the loader's fast batch path.
-          vendored_gem_sig_paths.each do |path|
-            rbs_loader.add(path: path) if path.directory?
-          end
-          # Rigor-owned core overlay — loaded LAST so an upstream declaration always wins on conflict; these
-          # reopenings only fill genuine holes (e.g. `Numeric#to_f`/`to_i`/`to_r`, which upstream RBS
-          # declares on the concrete subclasses but not on the abstract `Numeric` that Rigor's
-          # arithmetic-chain widening produces).
-          core_overlay_sig_paths.each do |path|
-            rbs_loader.add(path: path) if path.directory?
-          end
+          add_bundled_signatures(rbs_loader, loaded_libraries.to_set(&:to_s))
           env = RBS::Environment.from_loader(rbs_loader)
           add_project_signatures(env, signature_paths)
           add_virtual_rbs(env, virtual_rbs)
@@ -676,6 +668,71 @@ module Rigor
           return [] unless File.directory?(CORE_OVERLAY_SIGS_ROOT)
 
           [Pathname(CORE_OVERLAY_SIGS_ROOT)]
+        end
+
+        # Bundled signature sources that SUPPLEMENT a stdlib library's own declarations rather than stand
+        # alone: each re-opens a class the named `RBS::EnvironmentLoader` library declares with a mixin
+        # (`CGI::QueryExtension`), a superclass (`Prism::Result`), or an `| ...` overload continuation
+        # (`StringScanner#[]`, `Resolv#initialize`). Loading one into an environment built WITHOUT its
+        # library does not fail the env build — `RBS::DefinitionBuilder` raises later
+        # (`NoMixinFoundError` / `NoSuperclassFoundError` / `InvalidOverloadMethodError`), Rigor fails soft,
+        # and the WHOLE re-opened class silently degrades to `Dynamic[top]` (issue #299's narrow-environment
+        # tail). So each supplement is loaded ONLY when its library actually resolved; in production every
+        # gating library is in `Environment::DEFAULT_LIBRARIES`, so the full environment is unchanged.
+        #
+        # `core_overlay/pathname.rbs` also carries an `| ...` continuation but is deliberately NOT listed:
+        # its base (`Pathname#expand_path`) lives in rbs's `core/pathname.rbs` on every supported rbs
+        # release (3.10 / 4.0 / 4.1), so the continuation is safe — and applicable — with no library loaded.
+        #
+        # Keyed by `data/vendored_gem_sigs/` directory basename.
+        LIBRARY_SUPPLEMENT_VENDORED_DIRS = {
+          "cgi" => "cgi",
+          "prism" => "prism"
+        }.freeze
+        private_constant :LIBRARY_SUPPLEMENT_VENDORED_DIRS
+
+        # Keyed by `data/core_overlay/` file basename. Files not listed here re-open Ruby-core classes (or
+        # add self-contained declarations) and stay unconditional.
+        LIBRARY_SUPPLEMENT_CORE_OVERLAYS = {
+          "resolv.rbs" => "resolv",
+          "string_scanner.rbs" => "strscan"
+        }.freeze
+        private_constant :LIBRARY_SUPPLEMENT_CORE_OVERLAYS
+
+        # Adds the Rigor-shipped signature sources to `rbs_loader`: every `data/vendored_gem_sigs/<gem>/`
+        # directory, then the `data/core_overlay/` files — the overlay LAST so an upstream declaration
+        # always wins on conflict (these reopenings only fill genuine holes, e.g. `Numeric#to_f`/`to_i`/
+        # `to_r`, which upstream RBS declares on the concrete subclasses but not on the abstract `Numeric`
+        # that Rigor's arithmetic-chain widening produces). The overlay is added per-file, not
+        # per-directory, because the `LIBRARY_SUPPLEMENT_CORE_OVERLAYS` files must be gated individually.
+        #
+        # @param loaded_library_names [Set<String>] libraries that actually resolved on this loader.
+        def add_bundled_signatures(rbs_loader, loaded_library_names)
+          vendored_gem_sig_paths.each do |path|
+            next unless path.directory?
+            next unless supplement_dependency_loaded?(LIBRARY_SUPPLEMENT_VENDORED_DIRS, path, loaded_library_names)
+
+            rbs_loader.add(path: path)
+          end
+          core_overlay_sig_paths.each do |dir|
+            next unless dir.directory?
+
+            dir.children.sort.each do |file|
+              next unless file.file? && file.extname == ".rbs"
+              next unless supplement_dependency_loaded?(LIBRARY_SUPPLEMENT_CORE_OVERLAYS, file, loaded_library_names)
+
+              rbs_loader.add(path: file)
+            end
+          end
+        end
+
+        # @param supplements [Hash{String => String}] basename → gating library map.
+        # @param path [Pathname] the vendored directory or overlay file to test.
+        # @param loaded_library_names [Set<String>] libraries that actually resolved on this loader.
+        # @return [Boolean] true when `path` carries no library dependency, or its library loaded.
+        def supplement_dependency_loaded?(supplements, path, loaded_library_names)
+          library = supplements[path.basename.to_s]
+          library.nil? || loaded_library_names.include?(library)
         end
 
         # Rigor-owned per-gem RBS overlays (`data/gem_overlay/<gem>/`), ADR-72. Unlike the unconditional

@@ -91,18 +91,86 @@ RSpec.describe "bundled RBS definition builds" do
 
       expect(ancestors.ancestors.map { |a| a.name.to_s }).to include("::Racc::Parser")
     end
+
+    # The library-gated supplements (`RbsLoader::LIBRARY_SUPPLEMENT_VENDORED_DIRS` /
+    # `LIBRARY_SUPPLEMENT_CORE_OVERLAYS`) must still LAND in the full environment — the gate exists to skip
+    # them in narrow environments, never to silently drop their methods from a normal run.
+    it "resolves CGI#params via the vendored QueryExtension mixin" do
+      definition = builder.build_instance(RBS::TypeName.parse("::CGI"))
+
+      expect(definition.methods[:params]).not_to be_nil
+    end
+
+    it "resolves Prism::ParseResult's Result superclass and the supplemental methods" do
+      definition = builder.build_instance(RBS::TypeName.parse("::Prism::ParseResult"))
+
+      expect(definition.ancestors.ancestors.map { |a| a.name.to_s }).to include("::Prism::Result")
+      expect(definition.methods[:attach_comments!]).not_to be_nil
+    end
+
+    it "resolves StringScanner#[] with the named-capture (Symbol) overload" do
+      definition = builder.build_instance(RBS::TypeName.parse("::StringScanner"))
+      accepted = definition.methods[:[]].method_types.flat_map do |mt|
+        mt.type.required_positionals.map do |p|
+          p.type.to_s
+        end
+      end
+
+      expect(accepted.join(" | ")).to include("Symbol")
+    end
   end
 
   # An exhaustive sweep: no class or module anywhere in the bundled environment may fail to build. This is
   # what actually catches the NEXT collision, wherever it lands.
   it "builds every class and module declared in the bundled environment" do
-    failures = env.class_decls.each_key.with_object([]) do |name, acc|
+    expect(definition_build_failures(env)).to be_empty
+  end
+
+  # Issue #299's narrow-environment tail. The bundled supplements that re-open a stdlib library's classes
+  # (a mixin for `CGI`, a superclass for `Prism::ParseResult`, `| ...` overload continuations for
+  # `StringScanner` / `Resolv`) are library-gated in `RbsLoader.build_env_for`: an environment built
+  # WITHOUT the gating library must skip the supplement outright rather than load a declaration that
+  # fails at definition-build time and silently degrades the whole class to `Dynamic[top]`.
+  describe "narrow environments" do
+    def narrow_env(libraries)
+      Rigor::Environment::RbsLoader.build_env_for(libraries: libraries, signature_paths: [])
+    end
+
+    it "builds every class and module in a core-only environment, with the gated supplements absent" do
+      env = narrow_env([])
+
+      expect(definition_build_failures(env)).to be_empty
+      # Absent outright — not present-but-broken. Each of these names exists ONLY via its gated supplement
+      # once the supplying library is out of the environment.
+      %w[::CGI ::Prism::ParseResult ::StringScanner ::Resolv].each do |name|
+        expect(env.class_decls).not_to have_key(RBS::TypeName.parse(name))
+      end
+      # The unconditional core overlay still applies: `Pathname#expand_path`'s base is rbs CORE, so the
+      # widened `| ...` overload is safe — and wanted — even here.
+      pathname = RBS::DefinitionBuilder.new(env: env).build_instance(RBS::TypeName.parse("::Pathname"))
+      accepted = pathname.methods[:expand_path].method_types.flat_map do |mt|
+        mt.type.optional_positionals.map { |p| p.type.to_s }
+      end
+
+      expect(accepted.join(" | ")).to include("Pathname")
+    end
+
+    it "loads a gated overlay as soon as its own library is present, without dragging the others in" do
+      env = narrow_env(["strscan"])
+
+      expect(definition_build_failures(env)).to be_empty
+      expect(env.class_decls).to have_key(RBS::TypeName.parse("::StringScanner"))
+      expect(env.class_decls).not_to have_key(RBS::TypeName.parse("::Resolv"))
+    end
+  end
+
+  def definition_build_failures(env)
+    builder = RBS::DefinitionBuilder.new(env: env)
+    env.class_decls.each_key.with_object([]) do |name, acc|
       builder.build_instance(name)
       builder.build_singleton(name)
     rescue StandardError => e
       acc << "#{name}: #{e.class}: #{e.message.lines.first.to_s.strip}"
     end
-
-    expect(failures).to be_empty
   end
 end

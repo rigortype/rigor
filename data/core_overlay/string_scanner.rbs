@@ -23,6 +23,11 @@
 # earns its keep for a consumer resolving an older `rbs` inside the
 # gemspec's `>= 3.0, < 5.0` range. It stays until that floor moves;
 # reopening with an identical overload costs nothing on 4.1.
+#
+# Loaded ONLY when the `strscan` library resolves
+# (`RbsLoader::LIBRARY_SUPPLEMENT_CORE_OVERLAYS`): the `| ...` overload
+# continuation is invalid without the base declaration, and the resulting
+# `InvalidOverloadMethodError` would take the whole class down.
 class StringScanner
   def []: (Integer | String | Symbol) -> String?
         | ...

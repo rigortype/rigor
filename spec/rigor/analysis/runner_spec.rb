@@ -1055,6 +1055,69 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  # The possible-nil rule asks "is the method present on every non-nil arm?" before witnessing, and a nameless arm
+  # (Dynamic / Top / Bot) answers "present" permissively. A union whose non-nil arms are ALL nameless therefore
+  # satisfied that gate vacuously and fired for every method name — including names defined on no class anywhere —
+  # while a `String | nil` receiver calling a nonexistent method stayed silent. The decline and the must-still-fire
+  # case are paired here deliberately: a decline-only spec would also pass if the rule stopped firing entirely.
+  describe "possible-nil requires a nameable non-nil arm" do
+    def nil_receiver_diags(result)
+      result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+    end
+
+    it "declines on a `Dynamic | nil` receiver calling a method that exists nowhere" do
+      result = analyze(<<~RUBY)
+        class Consumer
+          def probe(store, cond)
+            v = cond ? store.instance_variable_get(:@data) : nil
+            v.frobnicate_xyz
+          end
+        end
+      RUBY
+      expect(nil_receiver_diags(result)).to be_empty
+    end
+
+    it "declines on a `Dynamic | nil` receiver even for a real method name" do
+      result = analyze(<<~RUBY)
+        class Consumer
+          def probe(store, cond)
+            v = cond ? store.instance_variable_get(:@data) : nil
+            v.upcase
+          end
+        end
+      RUBY
+      expect(nil_receiver_diags(result)).to be_empty
+    end
+
+    it "still fires on a `String | nil` receiver calling a real String method" do
+      result = analyze(<<~RUBY)
+        class Consumer
+          def probe(cond)
+            v = cond ? "hello" : nil
+            v.upcase
+          end
+        end
+      RUBY
+      expect(nil_receiver_diags(result)).not_to be_empty
+    end
+
+    it "still fires when one arm is nameable and another is Dynamic" do
+      result = analyze(<<~RUBY)
+        class Consumer
+          def probe(store, cond)
+            v = if cond == 1
+                  store.instance_variable_get(:@data)
+                elsif cond == 2
+                  "hello"
+                end
+            v.upcase
+          end
+        end
+      RUBY
+      expect(nil_receiver_diags(result)).not_to be_empty
+    end
+  end
+
   describe "ADR-34 slice 1 — call.unresolved-toplevel" do
     def write_main(dir, body)
       path = File.join(dir, "main.rb")

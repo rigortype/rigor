@@ -729,6 +729,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/tuple_hash_inspect_star.rb — Tuple/HashShape #inspect / #to_s and Tuple#* (#121)" do
+    let(:harness) { harness_for("tuple_hash_inspect_star") }
+
+    it "folds inspect/to_s to the real Ruby format and * to the join-alias / repetition result" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/hash_shape_transform.rb — per-pair HashShape transform_keys / transform_values fold" do
     let(:harness) { harness_for("hash_shape_transform") }
 

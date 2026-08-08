@@ -82,6 +82,7 @@ Tracks which methods produce precise `HashShape` results and what is still open.
 | `has_value?` | ✅ | 全値 Constant のとき `Constant[true/false]`。低優先度。 |
 | `include?` | ✅ | `has_key?` の別名。`ShapeDispatch#hash_has_key?` に同一ハンドラ登録。 |
 | `inject` | 🚫 | Enumerable accumulator。 |
+| `inspect` | ✅ | `hash_inspect` — CLOSED かつ optional key なし、かつ全値 Constant のときのみ。実 Hash を再構築して本物の `inspect` を呼ぶ（Ruby 4.0 の `{a: 1}` 形式を再導出しない）。`TUPLE_JOIN_BYTE_LIMIT`（4096）でキャップ。ゲート述語は `URIFolding#hash_form_pairs`（`URI.encode_www_form`）と同じ「closed かつ optional key なし」（#121, 2026-08-08）。 |
 | `invert` | ✅ | `hash_invert` — 全値が Constant[Symbol/String] のとき反転 HashShape を返す。 |
 | `keep_if` | 🚫 | 破壊的変更（`select!` 相当）。 |
 | `key` | ✅ | 値 → キー逆引き。全値 Constant で一意なら `Constant[k]`。低優先度。 |
@@ -128,6 +129,7 @@ Tracks which methods produce precise `HashShape` results and what is still open.
 | `to_h` | ✅ | `hash_to_h` — self を返す。 |
 | `to_hash` | ✅ | `to_h` の別名。HASH_SHAPE_HANDLERS に `to_h` と同じエントリを追加するだけ。低優先度。 |
 | `to_proc` | 🚫 | `Proc` を返す。静的型付けには不要。 |
+| `to_s` | ✅ | `inspect` の厳密な別名（`Hash#to_s` は `Hash#inspect` と同一）。同一ハンドラ `hash_inspect` を登録（#121, 2026-08-08）。 |
 | `to_set` | 🚫 | `Set` を返す。 |
 | `transform_keys` | ✅ | ExpressionTyper `try_hash_shape_block_fold` — キーを変換した新 HashShape。 |
 | `transform_keys!` | ✅ | 同上（bang 形式）。 |

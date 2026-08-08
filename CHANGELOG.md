@@ -20,6 +20,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 ### Fixed
 
 - **[rigor check]** A diagnostic whose severity the configured profile re-stamps (for example `def.return-type-mismatch` under the default `balanced` profile) no longer loses its structured `method_name`, `receiver_type`, and `project_definition_site` fields in JSON output and `rigor triage`.
+- **[engine]** A nil guard on a lookup in a literal hash — `rank = RANKS[name]` followed by `return if rank.nil?`, and the `||` / `&&` spellings that guard two lookups at once — no longer warns that the condition is always true or always false, and the branch it guards is no longer dropped from the inferred type: a key that is not in the table really does read as nil at runtime, so the guard is live code ([#313](https://github.com/rigortype/rigor/issues/313)).
 - **[rigor check]** A `# rigor:disable` / `# rigor:disable-file` marker is now recognised only when it opens the comment, so a comment that merely quotes the syntax — documentation prose, a doc-tool `##` line, or an `=begin` block — no longer silences diagnostics and no longer warns about its own quoted examples; a whole-line or trailing directive keeps working exactly as before, including with no space after the `#` ([#306](https://github.com/rigortype/rigor/issues/306)).
 
 ## [0.3.2] - 2026-08-08

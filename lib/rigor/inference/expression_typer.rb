@@ -19,6 +19,7 @@ require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
 require_relative "narrowing"
+require_relative "optimistic_origin"
 require_relative "struct_fold_safety"
 
 module Rigor
@@ -609,16 +610,11 @@ module Rigor
         elide_or_union(node.predicate, else_type, then_type)
       end
 
-      # Issue #286 — the effective optimistic-nil-free cause of an expression, resolving a bare local read (or
-      # a local write in value position) through its binding. Mirrors `StatementEvaluator#optimistic_origin_for`.
+      # Issue #286 — the effective optimistic-nil-free cause of an expression. {OptimisticOrigin.resolve} owns
+      # the judgment, shared verbatim with `StatementEvaluator#optimistic_origin_for` and the
+      # `flow.always-truthy-condition` collector.
       def optimistic_origin_for(node)
-        recorded = scope.optimistic_origins[node]
-        return recorded if recorded
-
-        case node
-        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
-        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
-        end
+        OptimisticOrigin.resolve(node, scope)
       end
 
       def if_else_type(subsequent)
@@ -663,7 +659,7 @@ module Rigor
       # fallback is preserved.
       def type_of_and_or(node)
         left_type = type_of(node.left)
-        polarity = constant_value_polarity(left_type)
+        polarity = left_operand_polarity(node.left, left_type)
         return short_circuit_for(node, left_type, polarity) if polarity
 
         # The left operand only flows through on the edge that short-circuits: `a || b` yields `a` solely
@@ -687,6 +683,19 @@ module Rigor
         else
           and_node ? left_type : type_of(node.right)
         end
+      end
+
+      # Issue #313 — the node-aware wrapper the `&&` / `||` short-circuit reads. The spec's exclusion binds
+      # this gate as much as it binds `flow.always-truthy-condition`, and a `Constant`-only gate is not by
+      # itself enough to honour it: a literal hash whose values share one type reads as a lone `Constant`
+      # (`UNIFORM[key]` → `Constant[1]`), so the gate would judge the left operand of `UNIFORM[key] || key`
+      # provably truthy and discard the author's fallback — the counter-example the spec names verbatim.
+      # Declining returns the union of both operands, which is what `StatementEvaluator#eval_and_or` produces
+      # anyway, so the two `&&` / `||` typers stay in agreement.
+      def left_operand_polarity(left_node, left_type)
+        return nil unless optimistic_origin_for(left_node).nil?
+
+        constant_value_polarity(left_type)
       end
 
       # Returns `:truthy` / `:falsey` for a `Type::Constant`, nil otherwise. Mirrors

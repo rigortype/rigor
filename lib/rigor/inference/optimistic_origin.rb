@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "prism"
+
 module Rigor
   module Inference
     # Marks a value whose *nil-freeness* rests on Rigor's deliberate choice to ignore core RBS's
@@ -15,9 +17,16 @@ module Rigor
     # attaches to — the value here is *not* `Dynamic`; it is an ordinary `Union` / `Constant` / `Nominal`
     # that happens to have been produced optimistically.
     #
-    # Issue #286: the `if` / `unless` branch elision is a third consumer of `Narrowing.predicate_certainty`,
-    # and unlike `flow.always-truthy-condition` and the `&&` / `||` gate it is not constrained by the spec
-    # passage above. This channel is what lets a certainty judgment tell the two apart.
+    # Issue #286: the `if` / `unless` branch elision is one consumer of `Narrowing.predicate_certainty`; the
+    # other two are `flow.always-truthy-condition` and the `&&` / `||` `constant_value_polarity` gate, and the
+    # spec passage above binds all three. This channel is what lets a certainty judgment tell the two apart.
+    #
+    # Issue #313: the mark is attached to a *value* — the call node that produced it, or the local / ivar it
+    # was bound to — but every one of those consumers reads a *predicate expression*, and a predicate is
+    # rarely the bare carrier. `x.nil?` collapses the carrier's nil-freeness into a `Constant[false]` of its
+    # own, `!x.nil?` inverts it, and `x.nil? || y.nil?` composes two of them; each step produced an unmarked
+    # `Constant` that the gates then read as proof. {.resolve} therefore derives the mark through exactly
+    # those shapes, so the exclusion survives composition instead of stopping at the read.
     module OptimisticOrigin
       # The core-RBS annotation `RbsDispatch` reads the return type past.
       ANNOTATION = "implicitly-returns-nil"
@@ -26,7 +35,63 @@ module Rigor
       # distinguish further optimistic families without changing the table's shape.
       IMPLICITLY_RETURNS_NIL = :implicitly_returns_nil
 
+      # The argument-free unary predicates whose folded result is a statement about the receiver's
+      # *nil-freeness* and nothing else, which is what makes the derivation sound rather than a general taint:
+      # `nil?` answers the exact question the optimism is a bet on, and `!` (which Prism spells as a `CallNode`
+      # named `:!`, covering both `!x` and `not x`) inverts whatever it is applied to. Value predicates —
+      # `empty?`, `zero?`, `any?` — are deliberately absent: they fold from the carrier's *value*, and marking
+      # them would widen this channel into a taint that silences genuine diagnostics.
+      NIL_COLLAPSING_PREDICATES = %i[nil? !].freeze
+
       module_function
+
+      # The effective optimistic-nil-free cause of an expression under `scope`, or nil when its nil-freeness is
+      # a property of the value rather than a bet. The single owner of the judgment: `ExpressionTyper`,
+      # `StatementEvaluator` and `AlwaysTruthyConditionCollector` all route here, so the three consumers the
+      # spec binds cannot drift apart.
+      #
+      # Resolution order — the mark recorded on the node itself, then the binding a bare local / ivar read (or
+      # a write in value position, `if (x = MAP[k])`) resolves through, then the predicate-fold derivation
+      # issue #313 added.
+      #
+      # @param node [Prism::Node, nil]
+      # @param scope [Rigor::Scope, nil]
+      # @return [Symbol, nil]
+      def resolve(node, scope)
+        return nil if node.nil? || scope.nil?
+
+        recorded = scope.optimistic_origins[node]
+        return recorded if recorded
+
+        case node
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
+        when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
+        when Prism::CallNode then resolve_through_predicate(node, scope)
+        when Prism::ParenthesesNode then resolve_through_parentheses(node, scope)
+        end
+      end
+
+      # `recv.nil?` / `!recv` — the fold is a statement about `recv`, so it is exactly as optimistic as `recv`
+      # is. A block or any argument means this is not the unary predicate it looks like (`x.!(y)` is a
+      # user-defined operator), and the derivation declines.
+      def resolve_through_predicate(node, scope)
+        return nil unless NIL_COLLAPSING_PREDICATES.include?(node.name)
+        return nil unless node.block.nil?
+        return nil unless node.arguments.nil? || node.arguments.arguments.empty?
+
+        resolve(node.receiver, scope)
+      end
+
+      # `(x.nil?)` — a single-statement parenthesised body is its own value, and authors do parenthesise a
+      # composed guard. A multi-statement body's value is its last statement, but the earlier statements can
+      # rebind, so only the single-statement form is derived.
+      def resolve_through_parentheses(node, scope)
+        body = node.body
+        return nil unless body.is_a?(Prism::StatementsNode) && body.body.size == 1
+
+        resolve(body.body.first, scope)
+      end
 
       # Whether the overload the selector actually picked carries the ignored annotation. The judgment is
       # per-overload, which is what makes it precise: `Array#first` is optimistic while `Array#first(3)` is

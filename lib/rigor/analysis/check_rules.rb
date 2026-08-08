@@ -2740,17 +2740,13 @@ module Rigor
         #
         # The nil guard below is defence, not dead code. `VISIBILITY_RANK` is a closed literal hash read
         # with a dynamic key, so a symbol outside the table reads as nil at runtime. The engine folds that
-        # read to the nil-free value union `0 | 1 | 2`, which `internal-spec/inference-engine.md`
-        # § "HashShape receivers" declares OPTIMISTIC rather than proof and forbids the `&&`/`||` polarity
-        # gate from concluding on — but the optimism is laundered through the `.nil?` predicate into a bare
-        # `Constant[false]` that the gate then reads unmarked, so `flow.always-truthy-condition` fires. The
-        # bare single-operand form (`return false if parent_rank.nil?`) correctly stays silent; only the
-        # `||` composition misfires. Engine defect, reported as issue #313 — the directive goes when the
-        # `OptimisticOrigin` mark propagates through the predicate fold.
+        # read to the nil-free value union `0 | 1 | 2`, which `internal-spec/inference-engine.md` declares
+        # OPTIMISTIC rather than proof — and since issue #313 that mark survives the `.nil?` fold and the
+        # `||` composition, so no suppression directive is needed here.
         def visibility_reduced?(parent_visibility, override_visibility)
           parent_rank = VISIBILITY_RANK[parent_visibility]
           override_rank = VISIBILITY_RANK[override_visibility]
-          return false if parent_rank.nil? || override_rank.nil? # rigor:disable flow.always-truthy-condition
+          return false if parent_rank.nil? || override_rank.nil?
 
           override_rank < parent_rank
         end

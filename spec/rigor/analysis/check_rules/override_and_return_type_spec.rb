@@ -55,13 +55,14 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(diag.message).to eq("return-type mismatch on `returns_string': declared String, inferred 42")
       end
 
-      it "loses its structured `method_name` to the severity re-stamp (current behaviour)" do
-        # Pinned as an OBSERVATION, not an endorsement. The builder passes `method_name:`, but this
-        # rule is authored `:error` and the default `balanced` profile resolves it to `:warning`;
-        # `SeverityStamp.stamp` rebuilds the Diagnostic on any severity change and its `Diagnostic.new`
-        # does not forward `method_name` / `receiver_type` / `project_definition_site`. The three
-        # override rules below are authored at the severity the profile resolves to, are returned
-        # unchanged, and DO keep `method_name` — that asymmetry is the whole point of this pair.
+      it "keeps its structured `method_name` across the severity re-stamp" do
+        # This rule is the re-stamping path: it is authored `:error` and the default `balanced` profile
+        # resolves it to `:warning`, so `SeverityStamp.stamp` rebuilds the Diagnostic rather than
+        # returning it unchanged. The rebuild used to forward only path/line/column/message/severity/
+        # rule/source_family, dropping `method_name` / `receiver_type` / `project_definition_site` — a
+        # profile-dependent loss (issue #308, fixed in PR #312). The three override rules below are
+        # authored at the severity the profile resolves to and never re-stamp, so they exercise the
+        # other arm; this example is the one that covers the rebuild.
         result = analyze(<<~RUBY, sig: demo_sig)
           class Demo
             def returns_string
@@ -69,7 +70,7 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
             end
           end
         RUBY
-        expect(return_diags(result).first&.method_name).to be_nil
+        expect(return_diags(result).first&.method_name).to eq("returns_string")
       end
 
       it "reports past `self.` on a singleton def" do

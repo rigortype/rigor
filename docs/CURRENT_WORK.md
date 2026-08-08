@@ -18,48 +18,54 @@ this file is the one that is wrong.
 
 ## Where things stand
 
-- **v0.3.1 is released** (2026-07-29). No version bump is due — releases wait for an explicit ask.
-  `make verify` is green on master at `62cc4ca9`; no open PR of ours (the three open ones are
-  dependabot, including the deliberately-held rubocop bump).
-- **Closed this arc, with the record on each issue**: #260 #263 #254 #264 #134 (the Tier-2
-  measurement cluster), #271 #277 (two engine FPs), #137 #269 #142 #152 #285 #290 #286.
-- **The three findings most likely to matter later**, all counter to the issue that produced them:
-  - **#254** — `dependent-closure-kill-oracle` is **presumptively non-graduating**. The Mutator
-    never mutates `def` signatures and callers read declarations, so a body mutation is
-    cross-file-invisible on RBS-typed code *by construction*; textbringer (52 RBS files, dense
-    fan-out — the predicted-favourable corpus) gave byte-identical arms.
-  - **#152** — widening the `&&`/`||` polarity gate was **evaluated and declined** even though the
-    corpus diff was clean, because `docs/internal-spec/inference-engine.md:251` forbids it by a
-    normative MUST that names #152, and because the sole measured effect is deleting author-written
-    fallbacks (70 firings, e.g. `ESCAPE_MAP[m] || m`).
-  - **#286** — closed by [ADR-101](../docs/adr/101-optimistic-carrier-branch-elision.md) / PR #292.
-    Neither of the issue's own two candidate fixes survived measurement: the `Nominal[Object]`
-    tightening fired zero times (the unknown carrier is `Dynamic`), and the carrier-shape gate was
-    wrong in both directions at once. What landed is a provenance gate — the branch elision declines
-    when a value's nil-freeness rests on the ignored `%a{implicitly-returns-nil}` rather than on its
-    class. **Carrier shape is not a proxy for provenance**, and the spec now says so.
+- **v0.3.2 is released** (2026-08-08). No version bump is due — releases wait for an explicit ask.
+  `make verify` is green on master at `13a5b456`, verified on the INTEGRATED tree after this arc's
+  parallel batch (see the collision below for why that matters).
+- **Landed this arc**: #303 (PR #304, argument-position `[T]` binding) · #121's final fold slice
+  (PR #305) · #307 (mutation-harness `SpecMap` directory convention) · #306 (PR #314) · the #135
+  checkbox-1 wave-1 specs (PRs #309/#310/#311) · #308 (PR #312) and its repair (PR #315).
+- **`check_rules.rb` had never been type-checked**, and that is the arc's largest finding. Its own doc
+  comment quotes `` `# rigor:disable-file all` `` in backticks, and the suppression patterns matched
+  anywhere inside a comment, so the documentation file-suppressed the 3,063-line file that defines
+  the rules. Found by an impossible measurement — the mutation recon's `DiagnosticOracle` killed
+  **0 of 914** there against 24/24 on a control. Fixed by anchoring every marker pattern to the start
+  of the comment (#306); the file is now provably live (poisoning a `Diagnostic.from_name_loc` call
+  surfaces six errors). **A structurally impossible measurement is a finding, never a zero to report.**
+- **#313 is the one defect that arc left open**: an optimistic nil-free HashShape read launders
+  through `.nil?` into the `&&`/`||` polarity gate, so `return false if MAP[a].nil? || MAP[b].nil?`
+  fires "always falsey" on live defensive code while the single-operand form correctly stays silent.
+  `check_rules.rb:2743` carries a justified directive whose removal is the acceptance test. Check
+  #152's landed change against the spec clause it was warned to preserve.
+- **Two correct-in-isolation PRs collided and turned master red.** PR #310 pinned #308's
+  then-current broken behaviour; PR #312 fixed #308. Disjoint files, no conflict, both green, red on
+  merge. Two habits follow: a spec pinning known-wrong behaviour MUST carry an in-place "flip this
+  when #N is fixed" comment (PR #310's did — the repair was one line), and **after merging a parallel
+  batch, run the suite on the integrated master**, which is the only place such a collision surfaces.
 
 ## Next session
 
-- **#135 checkbox 1 is the active arc**: `analysis/check_rules.rb` (3036 LOC). A recon pass is
-  producing the mutation survivor map first — the file has SEVEN partial per-topic specs under
-  `spec/rigor/analysis/check_rules/` that the harness's 1:1 `SpecMap` cannot see, so a SpecMap
-  directory-glob extension (tool/ change) plus a fused measurement precede any spec authorship.
-  Wave plan: per-rule-family spec files (disjoint, parallelisable), assigned by de-noised survivor
-  density, then a closing sweep. Everything before it in the `analysis/` tier is swept; #135's
-  other four checkboxes are untouched.
-- **#303 and the #121 remainder both LANDED and merged** (2026-08-08, PRs #304/#305). #303 is
-  closed: method-level `[T]` binds from argument positions behind a two-layer redefinition guard;
-  corpus diff (textbringer/liquid/mangrove, `--no-cache --no-baseline`) showed zero new and zero
-  removed diagnostics. #121 now carries ZERO queued work after six passes — the record, including
-  the `Tuple#concat` / `compare_by_identity` 🚫 adjudications, is on the issue; closing it or
-  leaving it as the standing P3 category is the user's call.
-- **`ready-for-agent`**: #147 (**demand-gated** — its three items really are unimplemented, verified,
-  but the issue waits on a concrete editor-extension author), #135's remainder.
-- **Two new formatter/cop traps recorded this arc** (worth knowing before writing fold or spec
-  code): `Style/ArrayJoin` autocorrects a literal-array `[1, 2] * "-"` into `.join`, silently
-  defeating a `*`-with-String assertion (use a variable receiver); and parallel `make verify` runs
-  in two worktrees flake each other — serialize gate re-runs when auditing parallel agents.
+- **#135 checkbox 1, wave 2 is in flight**: `argument_type` (8 survivors, the ADR-58 ivar-provenance
+  gate in `declaration_sourced_nil_only_mismatch?` the densest cluster) and the small remaining
+  families (`nil_receiver` 5, `undefined_method` 4, `always_raises` 3, `dump_type`/`assert_type` 2,
+  `visibility_mismatch` 1, `pipeline` 1). When it lands, this file's **biteable** survivors are
+  exhausted — but the honest next step is a **re-measure**, because every number on the issue is
+  test-axis-only: the type axis was structurally dead until #306. `--site biteable` is a complete
+  169-site census (~63 min); `--site all` is 914 sites ≈ 6.1 h of rspec and stays infeasible, so
+  745 sites remain unmeasured and the per-family `:all` inventory on the issue is the visible gap.
+  #135's other four checkboxes are untouched.
+- **#121 carries ZERO queued work** after six passes — the record, including the `Tuple#concat` and
+  `compare_by_identity` 🚫 adjudications, is on the issue. Closing it or leaving it as the standing
+  P3 category is the user's call.
+- **`ready-for-agent`**: #313 (the open engine FP above), #147 (**demand-gated** — its three items
+  really are unimplemented, verified, but the issue waits on a concrete editor-extension author),
+  #135's remainder.
+- **Three tooling traps recorded this arc**, all hit for real: `Style/ArrayJoin` autocorrects a
+  literal-array `[1, 2] * "-"` into `.join`, silently defeating a `*`-with-String assertion (use a
+  variable receiver); parallel `make verify` runs in two worktrees flake each other, so serialize
+  gate re-runs when auditing parallel agents; and **poisoning `check_rules.rb` to prove it is
+  checked must break something STATIC, not runtime** — renaming a method the analyzer itself calls
+  yields an internal-analyzer-error, not a diagnostic. Rename a *called* method on a sig-known class
+  (`Diagnostic.from_name_loc`) instead.
 - **#158 was re-audited: do not build it yet.** Both preconditions (Layer-1 doc hygiene, the
   "exhaustion-as-explanation" observability its acceptance shape lists) are already satisfied, so it
   is purely demand-gated. Non-obvious: `BudgetTrace` counters do not cross `fork`, so a trace must

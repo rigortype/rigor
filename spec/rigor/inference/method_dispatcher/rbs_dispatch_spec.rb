@@ -198,6 +198,127 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
     end
 
+    # Issue #303 — method-level `[T]` bound from an argument position. The signatures live in a virtual
+    # RBS buffer so the shapes under test are stated here rather than borrowed from whatever core RBS
+    # happens to spell today.
+    describe "method-level type parameters bound from argument positions (issue #303)" do
+      let(:generic_rbs) do
+        <<~RBS
+          class RigorSpecBox
+            def self.wrap: [T] (T obj) -> T
+            def self.pair: [T] (T obj) -> ::Array[T]
+            def self.both: [T] (T a, T b) -> T
+            def self.boxed: [T] (::Array[T] objs) -> T
+          end
+
+          class RigorSpecCrate[T]
+            def relabel: [T] (T obj) -> T
+          end
+        RBS
+      end
+      let(:generic_environment) do
+        Rigor::Environment.new(
+          rbs_loader: Rigor::Environment::RbsLoader.new(virtual_rbs: [["(spec: issue #303)", generic_rbs]])
+        )
+      end
+      let(:call_node) { Prism.parse("RigorSpecBox.wrap(obj)").value.statements.body.first }
+      let(:box) { Rigor::Type::Combinator.singleton_of("RigorSpecBox") }
+
+      # The permitting call site: a live scope and call node, with nothing discovered that shadows the
+      # resolved method.
+      def bind(receiver, method_name, args, scope: Rigor::Scope.empty(environment: generic_environment))
+        described_class.try_dispatch(cc(
+                                       receiver: receiver,
+                                       method_name: method_name,
+                                       args: args,
+                                       environment: generic_environment,
+                                       scope: scope,
+                                       call_node: call_node
+                                     ))
+      end
+
+      it "binds `[T] (T) -> T` to the argument type" do
+        type = bind(box, :wrap, [Rigor::Type::Combinator.constant_of("x")])
+        expect(type).to eq(Rigor::Type::Combinator.constant_of("x"))
+      end
+
+      it "carries the binding into a generic return type (`-> Array[T]`)" do
+        type = bind(box, :pair, [Rigor::Type::Combinator.constant_of("x")])
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        expect(type.type_args).to eq([Rigor::Type::Combinator.constant_of("x")])
+      end
+
+      it "unions the arguments when one variable occupies several positions" do
+        type = bind(box, :both, [Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of("x")])
+        expect(type).to be_a(Rigor::Type::Union)
+        expect(type.members.map(&:value)).to contain_exactly(1, "x")
+      end
+
+      it "leaves the variable unbound for a `Dynamic[top]` argument (no evidence)" do
+        type = bind(box, :wrap, [Rigor::Type::Combinator.untyped])
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      it "does not walk into a container position (`Array[T] arg` stays unbound)" do
+        arg = Rigor::Type::Combinator.nominal_of(Array, type_args: [Rigor::Type::Combinator.constant_of("x")])
+        expect(bind(box, :boxed, [arg])).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      it "lets a class-level type variable of the same name win over the argument binding" do
+        # `RigorSpecCrate[T]#relabel: [T] (T) -> T` — the receiver already binds `T` to Integer, so the
+        # String argument must NOT displace it.
+        crate = Rigor::Type::Combinator.nominal_of(
+          "RigorSpecCrate", type_args: [Rigor::Type::Combinator.nominal_of(Integer)]
+        )
+        type = bind(crate, :relabel, [Rigor::Type::Combinator.constant_of("x")])
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+      end
+
+      it "declines with no scope threaded (the ancestor-fallback dispatch path)" do
+        type = described_class.try_dispatch(cc(
+                                              receiver: box,
+                                              method_name: :wrap,
+                                              args: [Rigor::Type::Combinator.constant_of("x")],
+                                              environment: generic_environment
+                                            ))
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      # The FP mechanism the guard exists for: a user method shadowing the RBS one turns a bound `T` into a
+      # confidently WRONG type. Both declines are paired with the must-still-bind control above them, since a
+      # decline assertion on its own passes for any reason at all.
+      describe "the user-redefinition guard" do
+        let(:permitting_scope) { Rigor::Scope.empty(environment: generic_environment) }
+
+        it "binds when nothing shadows the resolved method (control)" do
+          type = bind(box, :wrap, [Rigor::Type::Combinator.constant_of("x")], scope: permitting_scope)
+          expect(type).to eq(Rigor::Type::Combinator.constant_of("x"))
+        end
+
+        it "declines when the scope discovered a method of the same name on the resolved class" do
+          shadowed = permitting_scope.with_discovery(
+            Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_methods: { "RigorSpecBox" => { wrap: :singleton } })
+          )
+          type = bind(box, :wrap, [Rigor::Type::Combinator.constant_of("x")], scope: shadowed)
+          expect(type).to equal(Rigor::Type::Combinator.untyped)
+        end
+
+        it "declines when the scope discovered a top-level def of the same name" do
+          def_node = Prism.parse("def wrap(obj) = obj.to_s").value.statements.body.first
+          shadowed = permitting_scope.with_discovery(
+            Rigor::Scope::DiscoveryIndex::EMPTY.with(
+              discovered_def_nodes: {
+                Rigor::Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY => { wrap: def_node }
+              }
+            )
+          )
+          type = bind(box, :wrap, [Rigor::Type::Combinator.constant_of("x")], scope: shadowed)
+          expect(type).to equal(Rigor::Type::Combinator.untyped)
+        end
+      end
+    end
+
     it "returns nil when the environment has no RBS loader" do
       blank_env = Rigor::Environment.new
       expect(blank_env.rbs_loader).to be_nil

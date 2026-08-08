@@ -44,8 +44,11 @@ module Rigor
       # * `block_type:` is ignored; method types that constrain the block return type are not yet honored.
       # * Keyword arguments are not threaded through call_arg_types, so overloads with required keywords
       #   are skipped (they cannot match the empty kwargs we send).
-      # * Method-level type parameters (e.g., `def foo[T]: (T) -> T`) are not bound; their variables remain
-      #   `Dynamic[Top]` after substitution.
+      # * Method-level type parameters bind only from two positions: the block return type (Slice 6 phase C)
+      #   and a positional parameter whose declared type is EXACTLY a type variable (issue #303 —
+      #   `def foo[T]: (T) -> T` binds `T` from the first argument, and carries it into a generic return
+      #   such as `-> Array[T]`). A variable reachable only through a container position (`Array[T] arg`),
+      #   a rest positional (`*T`), or a keyword parameter is still unbound and degrades to `Dynamic[Top]`.
       #
       # See docs/adr/4-type-inference-engine.md for the broader plan.
       # rubocop:disable Metrics/ModuleLength
@@ -60,6 +63,14 @@ module Rigor
         # the `lib` self-check keeps them in lock-step. NOT a place for third-party/core classes whose
         # objects answer to methods their RBS omits (`ActionController::Base`, `Hash`, …).
         ALLOWED_RBS_COMPLETE_ANCESTORS = ["Rigor::Plugin::Base"].freeze
+
+        # Shared empty returns for the argument-position type-variable binding (issue #303). The
+        # no-candidate answer is by far the common case — every non-generic overload takes it — so it must
+        # not allocate.
+        EMPTY_TYPE_VARS = {}.freeze
+        private_constant :EMPTY_TYPE_VARS
+        EMPTY_TYPE_PARAM_NAMES = [].freeze
+        private_constant :EMPTY_TYPE_PARAM_NAMES
 
         # @param receiver [Rigor::Type]
         # @param method_name [Symbol]
@@ -355,21 +366,9 @@ module Rigor
             )
             return nil unless method_type
 
-            # ADR-100 WD2/WD3 — the return-typing tier is where `void → top` widens, so it is the one place
-            # that still knows the RBS return was an author-declared `-> void` before the translator erases
-            # it to a plain `top`. Record the recovery on the scope's `void_origins` side-table, keyed by the
-            # call node, so the `static.value-use.void` check rule can fire when this `top` is used in value
-            # context. Recording is gated on `scope` && `call_node` being present, which naturally scopes it
-            # to the *direct*-RBS dispatch (the receiver's own resolvable class): the user-class / Object
-            # ancestor fallback nils both out (WD4 defers that, murkier, surface).
-            record_void_recovery(method_type, scope, call_node, [class_name, method_name, kind])
-            # Issue #286 — the same call site is the one place that still knows the selected overload spelled
-            # its miss as `%a{implicitly-returns-nil}` rather than as `?`; the translator below reads the
-            # return type only, by the deliberate choice the spec records. Mark the result so a certainty
-            # judgment downstream can tell "nil-free because of its class" from "nil-free because we bet".
-            record_optimistic_nil_free(method_definition, method_type, scope, call_node)
-
-            full_type_vars = compose_block_type_vars(method_type, type_vars, block_type)
+            call_site = [class_name, method_name, kind]
+            record_dispatch_provenance(method_definition, method_type, scope, call_node, call_site)
+            full_type_vars = compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
 
             RbsTypeTranslator.translate(
               method_type.type.return_type,
@@ -377,6 +376,34 @@ module Rigor
               instance_type: instance_type,
               type_vars: full_type_vars
             )
+          end
+
+          # The two provenance side-tables the return-typing tier is the last place able to populate, recorded
+          # together because they share one gate (`scope` && `call_node`) and one call site.
+          #
+          # ADR-100 WD2/WD3 — the return-typing tier is where `void → top` widens, so it is the one place that
+          # still knows the RBS return was an author-declared `-> void` before the translator erases it to a
+          # plain `top`. The recovery lands on the scope's `void_origins` side-table, keyed by the call node,
+          # so the `static.value-use.void` check rule can fire when this `top` is used in value context. The
+          # gate naturally scopes it to the *direct*-RBS dispatch (the receiver's own resolvable class): the
+          # user-class / Object ancestor fallback nils both out (WD4 defers that, murkier, surface).
+          #
+          # Issue #286 — the same call site is the one place that still knows the selected overload spelled
+          # its miss as `%a{implicitly-returns-nil}` rather than as `?`; the translator reads the return type
+          # only, by the deliberate choice the spec records. Mark the result so a certainty judgment
+          # downstream can tell "nil-free because of its class" from "nil-free because we bet".
+          def record_dispatch_provenance(method_definition, method_type, scope, call_node, call_site)
+            record_void_recovery(method_type, scope, call_node, call_site)
+            record_optimistic_nil_free(method_definition, method_type, scope, call_node)
+          end
+
+          # The two method-level type-parameter binding positions, layered in precedence order over the
+          # receiver-derived `type_vars`: the block return type first, then the argument positions (which
+          # never displace an existing key). See {#compose_arg_type_vars} for the argument envelope.
+          def compose_type_vars(method_type, type_vars, args, block_type, scope, call_node, call_site)
+            vars = compose_block_type_vars(method_type, type_vars, block_type)
+            compose_arg_type_vars(method_type, vars, args, scope: scope, call_node: call_node,
+                                                           call_site: call_site)
           end
 
           # Record the `void → top` recovery when the selected overload declares `-> void` and both `scope` and
@@ -432,6 +459,109 @@ module Rigor
             return type_vars if block_var_name.nil?
 
             type_vars.merge(block_var_name => block_type)
+          end
+
+          # Issue #303 — bind method-level type parameters from ARGUMENT positions, layering on top of the
+          # receiver-derived and block-derived `type_vars` exactly as {#compose_block_type_vars} does, so
+          # `Ractor.make_shareable("x")` (`[T] (T) -> T`) answers `"x"` instead of `Dynamic[top]`.
+          #
+          # Envelope, deliberately the narrowest sound shape:
+          #
+          # * only a positional parameter (required or optional) whose declared type is EXACTLY
+          #   `RBS::Types::Variable` — no container walk, so `(Array[T]) -> T` still degrades;
+          # * only names the SELECTED overload declares in its own `type_params` (a class-level variable
+          #   keeps its receiver-derived binding);
+          # * an existing key wins, so the receiver and the block return type both outrank an argument;
+          # * a `Dynamic[Top]` argument carries no evidence and contributes nothing;
+          # * repeated occurrences of one variable union their arguments.
+          #
+          # See {#arg_binding_permitted?} for why the contribution is gated on the call site.
+          def compose_arg_type_vars(method_type, type_vars, args, scope:, call_node:, call_site:)
+            bindings = arg_type_var_bindings(method_type, type_vars, args)
+            return type_vars if bindings.empty?
+            return type_vars unless arg_binding_permitted?(scope, call_node, call_site)
+
+            type_vars.merge(bindings)
+          end
+
+          # The candidate bindings, computed before the guard so a non-generic overload (the overwhelming
+          # majority) never pays for the `scope` probes.
+          def arg_type_var_bindings(method_type, type_vars, args)
+            declared = declared_type_param_names(method_type)
+            return EMPTY_TYPE_VARS if declared.empty? || args.empty?
+
+            fun = method_type.type
+            return EMPTY_TYPE_VARS unless fun.respond_to?(:required_positionals)
+
+            positionals = fun.required_positionals + fun.optional_positionals
+            positionals.zip(args).each_with_object({}) do |(param, arg), bindings|
+              next if arg.nil?
+
+              name = variable_param_name(param, declared, type_vars)
+              next if name.nil?
+              next if no_static_evidence?(arg)
+
+              bindings[name] = bindings.key?(name) ? Type::Combinator.union(bindings[name], arg) : arg
+            end
+          end
+
+          def declared_type_param_names(method_type)
+            params = method_type.respond_to?(:type_params) ? method_type.type_params : nil
+            return EMPTY_TYPE_PARAM_NAMES if params.nil? || params.empty?
+
+            params.map(&:name)
+          end
+
+          # The parameter's binding name when it is spelled as a bare method-level type variable that is
+          # still unbound; nil for every other shape.
+          def variable_param_name(param, declared, type_vars)
+            declared_type = param.type
+            return nil unless declared_type.is_a?(RBS::Types::Variable)
+
+            name = declared_type.name
+            return nil unless declared.include?(name)
+            return nil if type_vars.key?(name)
+
+            name
+          end
+
+          # `Dynamic[top]` is the engine's "we could not tell" answer, so binding a variable to it would
+          # dress up an absence of evidence as an inference. The variable stays unbound and degrades as it
+          # did before, which is the same value anyway.
+          def no_static_evidence?(arg)
+            arg.is_a?(Type::Dynamic) && arg.static_facet.is_a?(Type::Top)
+          end
+
+          # Issue #303 — the FP guard on the argument-position binding.
+          #
+          # Binding an argument makes the RESULT precise, which turns a benign mis-resolution into a
+          # confidently wrong type. The shape that matters is a user method shadowing the RBS method this
+          # dispatch resolved: `spec/integration/fixtures/kernel_functions.rb`'s `def p(node)` self-send
+          # resolves through `Kernel#p: [T] (T) -> T`, and binding `T` would type `p(1)` as `1` when the
+          # real method returns a String.
+          #
+          # Two gates, cheapest first.
+          #
+          # 1. `scope` && `call_node` present, the same evidence surface {#record_void_recovery} reads.
+          #    DIAGNOSED, not assumed: that fixture's `p(1)` reaches here through
+          #    `MethodDispatcher#try_user_class_fallback`, which dispatches with `scope: nil, call_node:
+          #    nil` — so the presence gate alone already declines every call routed through the Object /
+          #    Kernel ancestor fallback, the path a class with no RBS of its own always takes.
+          # 2. The explicit redefinition probe, in the shape `KernelDispatch#user_redefined?` established.
+          #    The presence gate does NOT cover the direct-dispatch spelling of the same hazard — a
+          #    top-level `def p(x)` called from the top level resolves `Nominal[Object]` DIRECTLY, with
+          #    scope and call node both live — so a discovered top-level def, or a discovered method on the
+          #    resolved class itself, declines too. Over-wide by construction (a project class that also
+          #    has RBS declines for its own self-sends, losing precision it could have kept), and
+          #    deliberately so: the cost is a `Dynamic[top]` that was already there.
+          def arg_binding_permitted?(scope, call_node, call_site)
+            return false if scope.nil? || call_node.nil?
+
+            class_name, method_name, kind = call_site
+            return false if method_name.nil?
+            return false if scope.top_level_def_for(method_name)
+
+            !scope.discovered_method?(class_name, method_name, kind)
           end
 
           def method_type_block_return_variable(method_type)

@@ -929,6 +929,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/method_type_param_binding.rb — method-level `[T]` bound from an argument (#303)" do
+    let(:harness) { harness_for("method_type_param_binding") }
+
+    it "self-asserts the identity binding and the no-evidence decline" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/complex_catalog.rb — Complex catalog-driven folding" do
     let(:harness) { harness_for("complex_catalog") }
 

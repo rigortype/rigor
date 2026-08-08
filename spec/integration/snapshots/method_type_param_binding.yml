@@ -1,0 +1,4 @@
+---
+locals:
+  dyn: Dynamic[top]
+  xs: "[1, 2]"

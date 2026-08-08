@@ -41,22 +41,25 @@ this file is the one that is wrong.
 
 ## Next session
 
-- **#135 checkbox 1 is now the sharpest open item**, resuming at `analysis/check_rules.rb` (3036
-  LOC, no convention spec). Scope it as its own arc, probably per rule-family — it is ~9× the last
-  two files and starting it inside one budget produces the pile of disconnected assertions the last
-  batch was scoped to avoid. Everything before it in the `analysis/` tier is swept; #135's other
-  four checkboxes are untouched.
+- **#135 checkbox 1 is the active arc**: `analysis/check_rules.rb` (3036 LOC). A recon pass is
+  producing the mutation survivor map first — the file has SEVEN partial per-topic specs under
+  `spec/rigor/analysis/check_rules/` that the harness's 1:1 `SpecMap` cannot see, so a SpecMap
+  directory-glob extension (tool/ change) plus a fused measurement precede any spec authorship.
+  Wave plan: per-rule-family spec files (disjoint, parallelisable), assigned by de-noised survivor
+  density, then a closing sweep. Everything before it in the `analysis/` tier is swept; #135's
+  other four checkboxes are untouched.
+- **#303 and the #121 remainder both LANDED and merged** (2026-08-08, PRs #304/#305). #303 is
+  closed: method-level `[T]` binds from argument positions behind a two-layer redefinition guard;
+  corpus diff (textbringer/liquid/mangrove, `--no-cache --no-baseline`) showed zero new and zero
+  removed diagnostics. #121 now carries ZERO queued work after six passes — the record, including
+  the `Tuple#concat` / `compare_by_identity` 🚫 adjudications, is on the issue; closing it or
+  leaving it as the standing P3 category is the user's call.
 - **`ready-for-agent`**: #147 (**demand-gated** — its three items really are unimplemented, verified,
-  but the issue waits on a concrete editor-extension author), #135's remainder, #121, #303.
-- **#121's fresh candidate source now exists** (2026-08-08 fold-gap census, recorded on the issue):
-  the genuine in-category remainder is three small items (`Tuple`/`HashShape` `inspect`/`to_s`,
-  `Tuple#*`, `Tuple#concat` pending a MutationWidening adjudication), ~36 lib sites total — the
-  category is nearly dry. `HashShape#compare_by_identity` is adjudicated 🚫 on the issue (shape
-  preservation would fold a runtime-`nil` lookup to a value); do not "close" it later.
-- **#303 is the census's bigger find**: method-level RBS `[T]` never binds from argument positions.
-  A measured prototype is in the issue (+0.13pp lib precision, zero diagnostic delta on this repo's
-  gates, and the one spec failure that defines the required redefinition guard). Not #121-P3 —
-  landing needs a survey-corpus before/after diff.
+  but the issue waits on a concrete editor-extension author), #135's remainder.
+- **Two new formatter/cop traps recorded this arc** (worth knowing before writing fold or spec
+  code): `Style/ArrayJoin` autocorrects a literal-array `[1, 2] * "-"` into `.join`, silently
+  defeating a `*`-with-String assertion (use a variable receiver); and parallel `make verify` runs
+  in two worktrees flake each other — serialize gate re-runs when auditing parallel agents.
 - **#158 was re-audited: do not build it yet.** Both preconditions (Layer-1 doc hygiene, the
   "exhaustion-as-explanation" observability its acceptance shape lists) are already satisfied, so it
   is purely demand-gated. Non-obvious: `BudgetTrace` counters do not cross `fork`, so a trace must

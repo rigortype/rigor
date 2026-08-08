@@ -104,6 +104,14 @@ The rule list is comma- and/or whitespace-separated and uses the rule-ID prefixe
 
 Inline markers are applied before the configured `severity_profile:` and before the project baseline (ADR-22), which is the last suppression layer. See the User Manual § "Diagnostics" for the operational guide.
 
+### Marker position within a comment
+
+A marker is recognised **only when it opens the comment**: the implementation matches every suppression-recognition pattern anchored (`\A`) against the comment token, which begins at the `#`. Both real directive shapes have that form — the whole-line `# rigor:disable-file <rules>` and the trailing `expr # rigor:disable <rules>` — while a comment that merely *mentions* a marker has prose before the quoted `#` and MUST NOT be treated as a directive. This binds the `suppression.*` surveillance rules identically: a quoted marker is not a marker, so it fires neither `suppression.unknown-rule` nor `suppression.empty` nor `suppression.unknown-marker`. Two consequences follow from the same anchor and are normative: a doubled `##` comment (the doc-tool convention) never activates a marker, because the second `#` is neither whitespace nor the marker word; and an `=begin` / `=end` embedded-document comment never activates one either, because its token starts at `=begin`. Whitespace between the `#` and the marker word is allowed, and so is none at all (`#rigor:disable <rules>`).
+
+Position within the *file* is unconstrained and stays so — a file-level marker is honoured wherever it appears, and a line-level marker binds the physical line its comment sits on.
+
+The patterns were unanchored until issue #306, so a directive quoted anywhere inside a doc comment silently took effect — that mis-recognition suppressed every diagnostic on Rigor's own `lib/rigor/analysis/check_rules.rb`.
+
 ### Token resolution
 
 A rule token — in a `# rigor:disable[-file]` marker or in the `.rigor.yml` `disable:` list — is **expanded to a set of canonical rule ids at parse time** (`resolve_rule_token`); the per-line / per-file suppression match is then an exact membership test of the diagnostic's canonical `rule` against that set. Four token shapes are recognised:

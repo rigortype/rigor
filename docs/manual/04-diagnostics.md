@@ -225,6 +225,14 @@ on the line the diagnostic points at; there is no
 `disable-block` form, so an expression spread over several
 lines needs the comment on each line that fires.
 
+The marker has to be the **first thing in the comment** — a
+whole-line `# rigor:disable …` or a trailing
+`expr  # rigor:disable …`. A comment that merely quotes the
+syntax, as this manual does throughout, is ordinary prose: it
+suppresses nothing and warns about nothing. The same goes for a
+doubled `## rigor:disable …` and for a marker written inside an
+`=begin` / `=end` block — neither activates.
+
 A marker that cannot work is flagged rather than silently
 ignored: a token that names no known rule (a typo like
 `call.undefined-metod`) fires

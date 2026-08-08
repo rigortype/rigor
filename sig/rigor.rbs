@@ -58,6 +58,10 @@ module Rigor
       # `node` / `location` are Prism values, received as `untyped`).
       def self.from_node: (untyped node, path: String, message: String, ?severity: Symbol, ?rule: String?, ?source_family: String, ?receiver_type: untyped, ?method_name: untyped, ?project_definition_site: untyped) -> Rigor::Analysis::Diagnostic
       def self.from_location: (untyped location, path: String, message: String, ?severity: Symbol, ?rule: String?, ?source_family: String, ?receiver_type: untyped, ?method_name: untyped, ?project_definition_site: untyped) -> Rigor::Analysis::Diagnostic
+      # `from_message_loc` / `from_name_loc` forward `**` to `from_location`, so their keyword surface is
+      # `from_location`'s; only the positional node differs.
+      def self.from_message_loc: (untyped node, path: String, message: String, ?severity: Symbol, ?rule: String?, ?source_family: String, ?receiver_type: untyped, ?method_name: untyped, ?project_definition_site: untyped) -> Rigor::Analysis::Diagnostic
+      def self.from_name_loc: (untyped node, path: String, message: String, ?severity: Symbol, ?rule: String?, ?source_family: String, ?receiver_type: untyped, ?method_name: untyped, ?project_definition_site: untyped) -> Rigor::Analysis::Diagnostic
     end
 
     class Result

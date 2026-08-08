@@ -660,6 +660,8 @@ module Rigor
             "The token resolves (canonical id, legacy alias, `all`, family wildcard, known engine id).",
             "The token starts with `plugin.` — plugins load dynamically, so their rule vocabulary cannot " \
             "be enumerated statically and under-warning is the FP-safe direction.",
+            "The marker does not open the comment (documentation prose quoting the syntax, a doubled " \
+            "`##` comment, or an `=begin` block) — that is not parsed as a suppression either.",
             "The comment merely mentions the marker followed by non-token text (documentation prose " \
             "like \"`# rigor:disable <rule>` comments\") — that is not parsed as a suppression either."
           ],
@@ -684,6 +686,7 @@ module Rigor
           does_not_fire_when: [
             "At least one token follows the marker (each token is then checked by " \
             "`suppression.unknown-rule` instead).",
+            "The marker does not open the comment (documentation prose quoting the syntax).",
             "Non-token text follows the marker (documentation prose mentioning the syntax)."
           ],
           suppression: "Complete the marker (`# rigor:disable <rule>` / `all`) or delete it; " \
@@ -730,7 +733,7 @@ module Rigor
           summary: "A comment uses a suppression marker Rigor does not recognise " \
                    "(`rigor:disable-next-line`, `rigor:enable`, ...).",
           fires_when: [
-            "A comment carries `rigor:disable-<suffix>` with a suffix other than `file`, or " \
+            "A comment OPENS with `rigor:disable-<suffix>` for a suffix other than `file`, or with " \
             "`rigor:enable[-<suffix>]` — typically the RuboCop reflex `# rigor:disable-next-line " \
             "<rule>` — followed by nothing or a rule-list-shaped remainder.",
             "Such a marker is invisible to the whole suppression grammar, so it silently suppresses " \
@@ -740,6 +743,7 @@ module Rigor
           does_not_fire_when: [
             "The marker is one of the two recognised forms (their tokens are then checked by " \
             "`suppression.unknown-rule` / `suppression.empty` instead).",
+            "The marker does not open the comment (documentation prose quoting the spelling).",
             "Non-token text follows the marker (documentation prose mentioning the spelling)."
           ],
           suppression: "Rewrite as `# rigor:disable <rules>` on the offending line (Rigor has no " \

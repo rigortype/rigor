@@ -21,8 +21,10 @@
 #      wrong here — the SUT bundle IS Rigor's). We inject a plain in-bundle
 #      `system` runner.
 #   2. Per-file coverage-scoped spec selection (tier 0: the convention mapping
-#      `lib/rigor/a/b.rb -> spec/rigor/a/b_spec.rb`), so the test axis runs only
-#      the relevant spec instead of the ~6,300-example suite per mutant.
+#      `lib/rigor/a/b.rb -> spec/rigor/a/b_spec.rb`, falling back to every
+#      `spec/rigor/a/b/*_spec.rb` when a file's specs are split per topic), so
+#      the test axis runs only the relevant specs instead of the ~6,300-example
+#      suite per mutant.
 #
 # The TYPE oracle here is the IN-PROCESS worktree engine, which is sound and the most rule-accurate choice: the engine
 # is loaded once (clean) at startup and a mutation is only ever analysed *input* (the type axis never writes to disk) —
@@ -52,15 +54,24 @@ require "rigor/protection/mutation_scanner"
 require "rigor/protection/test_suite_oracle"
 
 module RigorSelfMutation
-  # Maps a `lib/rigor/**.rb` path to its convention spec, or nil when none exists. Tier 0 of the plan's coverage-guided
-  # selection — cheap and exact for the 1:1 majority; a full `{line -> specs}` coverage index is the precise fallback
-  # (future).
+  # Maps a `lib/rigor/**.rb` path to the list of specs that cover it, or nil when none exist. Tier 0 of the plan's
+  # coverage-guided selection — cheap and exact for the 1:1 majority; a full `{line -> specs}` coverage index is the
+  # precise fallback (future). Two conventions, in priority order:
+  #
+  #   1. the 1:1 sibling  `lib/rigor/a/b.rb -> spec/rigor/a/b_spec.rb`
+  #   2. the per-topic directory `lib/rigor/a/b.rb -> spec/rigor/a/b/*_spec.rb`, used where a file's specs are split
+  #      by topic instead of collected in one sibling. Without it such a file maps to no spec at all, the test axis
+  #      never runs, and every type-survivor over-reports as an implementation hole.
   module SpecMap
     module_function
 
     def for(lib_path)
-      spec = lib_path.sub(%r{\Alib/}, "spec/").sub(/\.rb\z/, "_spec.rb")
-      File.file?(spec) ? spec : nil
+      base = lib_path.sub(%r{\Alib/}, "spec/").sub(/\.rb\z/, "")
+      sibling = "#{base}_spec.rb"
+      return [sibling] if File.file?(sibling)
+
+      topical = Dir.glob(File.join(base, "*_spec.rb"))
+      topical.empty? ? nil : topical
     end
   end
 
@@ -213,8 +224,8 @@ module RigorSelfMutation
         return Outcome.new(path: path, type_killed: 0, test_killed: 0, survivors: [], note: "parse-error")
       end
 
-      spec = @options[:type_only] ? nil : SpecMap.for(path)
-      spec ? measure_fused(path, source, spec) : measure_type_only(path, source)
+      specs = @options[:type_only] ? nil : SpecMap.for(path)
+      specs ? measure_fused(path, source, specs) : measure_type_only(path, source)
     end
 
     # Type axis only (Phase 1): no spec / --type-only. Biteable sites, since a
@@ -229,16 +240,16 @@ module RigorSelfMutation
       )
     end
 
-    # Fused axis: type pass, then the covering spec on each type-survivor.
-    def measure_fused(path, source, spec)
-      command = %w[bundle exec rspec] << spec
+    # Fused axis: type pass, then the covering specs on each type-survivor.
+    def measure_fused(path, source, specs)
+      command = %w[bundle exec rspec] + specs
       oracle = Rigor::Protection::TestSuiteOracle.new(command: command, runner: @runner)
       unless oracle.green?
-        warn "[skip] #{path}: covering spec #{spec} is not green on clean code — type-only"
+        warn "[skip] #{path}: covering spec #{specs.join(' ')} is not green on clean code — type-only"
         return measure_type_only(path, source)
       end
 
-      warn "[fused] #{path}  (spec: #{spec})"
+      warn "[fused] #{path}  (spec: #{specs.join(' ')})"
       r = scanner(@options[:site]).scan_file_fused(path, test_oracle: oracle, source: source)
       Outcome.new(
         path: path, type_killed: r.type_killed, test_killed: r.test_killed,

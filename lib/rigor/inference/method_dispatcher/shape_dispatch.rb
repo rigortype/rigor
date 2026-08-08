@@ -77,6 +77,14 @@ module Rigor
           fetch: :tuple_index,
           dig: :tuple_dig,
           values_at: :tuple_values_at,
+          # `concat` / `<<` are deliberately ABSENT from this table: both mutate the receiver in place
+          # (`ARRAY_MUTATORS` in `MutationWidening`), and a fold tier has no way to write the folded
+          # result back into the caller's binding — it can only return a value for the call expression.
+          # `tuple.concat(other)` would fold correctly as a VALUE (same shape as `tuple + other`) but the
+          # receiver local/ivar would still carry the pre-concat Tuple afterward, which is unsound (#121).
+          # `MutationWidening.widen_after_call` is the actual precision mechanism for a mutator call site:
+          # it forgets the literal-arity carrier so a stale `size`/`empty?` fold cannot survive the
+          # mutation, rather than trying to fold the mutator itself.
           :+ => :tuple_concat,
           compact: :tuple_compact,
           take: :tuple_take,
@@ -98,14 +106,19 @@ module Rigor
           rindex: :tuple_rindex,
           flatten: :tuple_flatten,
           join: :tuple_join,
+          # `inspect` / `to_s` (an exact alias for Array — `Array#to_s` IS `Array#inspect`) — see
+          # {#tuple_inspect}, below the join helpers it shares a byte cap with.
+          inspect: :tuple_inspect,
+          to_s: :tuple_inspect,
+          :* => :tuple_star,
           freeze: :shape_self,
           dup: :shape_self,
           clone: :shape_self,
           itself: :shape_self
         }.freeze
 
-        # Byte cap on a folded `tuple.join` result — a huge tuple times a long separator must not
-        # materialise an unbounded `Constant`.
+        # Byte cap on a folded `tuple.join` / `tuple.inspect` / `hash.inspect` result — a huge tuple or
+        # shape must not materialise an unbounded `Constant`.
         TUPLE_JOIN_BYTE_LIMIT = 4096
         private_constant :TUPLE_JOIN_BYTE_LIMIT
 
@@ -126,6 +139,13 @@ module Rigor
           entries: :hash_to_a,
           to_h: :hash_to_h,
           to_hash: :hash_to_h,
+          # `inspect` / `to_s` (an exact alias for Hash — `Hash#to_s` IS `Hash#inspect`) — see
+          # {#hash_inspect}. Gated CLOSED-no-optional-key, same predicate `URIFolding#hash_form_pairs`
+          # uses for `URI.encode_www_form`'s HashShape argument: an open or partially-optional shape
+          # describes a hash whose real membership this fold cannot see, so its `inspect` string is not
+          # deterministic.
+          inspect: :hash_inspect,
+          to_s: :hash_inspect,
           deconstruct_keys: :hash_deconstruct_keys,
           invert: :hash_invert,
           merge: :hash_merge,
@@ -821,6 +841,59 @@ module Rigor
             return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
 
             arg.value
+          end
+
+          # `tuple.inspect` / `tuple.to_s` (`Array#to_s` is an exact alias of `Array#inspect`) — folds when
+          # every element is a `Constant`, by reconstructing the Ruby Array and calling the REAL `inspect`
+          # so the analyzer's Ruby (4.0.x's `Array#inspect` format) is matched rather than re-derived.
+          # Capped at `TUPLE_JOIN_BYTE_LIMIT` like `#join`, since a large tuple's `inspect` string is
+          # similarly unbounded.
+          def tuple_inspect(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            result = values.inspect
+            return nil if result.bytesize > TUPLE_JOIN_BYTE_LIMIT
+
+            Type::Combinator.constant_of(result)
+          rescue StandardError
+            nil
+          end
+
+          # `tuple * n` — a `Constant[String]` argument is `Array#*`'s join-alias form (identical semantics
+          # to `#join`); a `Constant[Integer]` argument is repetition. Any other argument shape (2+ args,
+          # `Dynamic`, `Float`, no args) declines so the RBS / alias-pass tier answers — for the Integer
+          # case that tier already gives a decent union-of-elements `Array[...]` answer, so a decline here
+          # is not a regression.
+          def tuple_star(tuple, _method_name, args)
+            return nil unless args.size == 1
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant)
+
+            case arg.value
+            when String then tuple_join(tuple, :join, args)
+            when Integer then tuple_repeat(tuple, arg.value)
+            end
+          end
+
+          # `tuple * n` repetition. `n == 0` folds to the empty Tuple (any array repeated 0 times is `[]`,
+          # even for an unbounded/empty receiver). A negative `n` declines — `Array#*` raises
+          # `ArgumentError` at runtime, so no fold should invent a value for it (same fail-soft discipline
+          # every other handler in this catalogue follows). The result element count is capped at
+          # `MAX_SET_OPERATION_SIZE` (64) — the same element-count-cap convention as
+          # `ShellwordsFolding::SHELLWORDS_SPLIT_LIMIT` / `RegexpFolding`'s `Regexp.union` cap / the Tuple
+          # set operations above, reused rather than minting a second constant with the same value.
+          def tuple_repeat(tuple, count)
+            return nil if count.negative?
+            return Type::Combinator.tuple_of if count.zero?
+
+            total = tuple.elements.size * count
+            return nil if total > MAX_SET_OPERATION_SIZE
+
+            Type::Combinator.tuple_of(*(tuple.elements * count))
           end
 
           # `tuple.min` / `tuple.max` — fold when every element is a `Constant` whose values share a
@@ -1594,6 +1667,28 @@ module Rigor
             return nil unless args.empty?
 
             shape
+          end
+
+          # `shape.inspect` / `shape.to_s` (`Hash#to_s` is an exact alias of `Hash#inspect`) — folds only
+          # on a CLOSED shape with no optional keys (an open or partially-optional shape's real membership
+          # is not fully known, so its `inspect` string is not deterministic — the same gate
+          # `URIFolding#hash_form_pairs` uses for `URI.encode_www_form`'s HashShape argument) and only when
+          # every value is a `Constant` ({#constant_pairs}). Reconstructs the Ruby Hash and calls the REAL
+          # `inspect` so the analyzer matches Ruby 4.0.x's `{a: 1}` hash-inspect format rather than
+          # re-deriving it. Capped at `TUPLE_JOIN_BYTE_LIMIT` like the Tuple sibling.
+          def hash_inspect(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed? && shape.optional_keys.empty?
+
+            pairs = constant_pairs(shape)
+            return nil if pairs.nil?
+
+            result = pairs.inspect
+            return nil if result.bytesize > TUPLE_JOIN_BYTE_LIMIT
+
+            Type::Combinator.constant_of(result)
+          rescue StandardError
+            nil
           end
 
           # `shape.invert` — swaps keys and values. Folds when every value is a `Constant` whose value is a

@@ -1674,6 +1674,138 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
   end
 
+  describe "Tuple#inspect / #to_s and HashShape#inspect / #to_s (#121)" do
+    let(:t) { tuple(constant(1), constant("a")) }
+
+    it "folds tuple.inspect to the real Array#inspect string when every element is Constant" do
+      expect(dispatch(receiver: t, method_name: :inspect)).to eq(constant('[1, "a"]'))
+      expect([1, "a"].inspect).to eq('[1, "a"]')
+    end
+
+    it "folds tuple.to_s identically to tuple.inspect (Array#to_s is an exact alias)" do
+      expect(dispatch(receiver: t, method_name: :to_s)).to eq(dispatch(receiver: t, method_name: :inspect))
+    end
+
+    it "folds the empty tuple's inspect to \"[]\"" do
+      expect(dispatch(receiver: tuple, method_name: :inspect)).to eq(constant("[]"))
+    end
+
+    it "declines when an element is not Constant, but still folds an all-Constant sibling" do
+      opaque = tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object"))
+      expect(dispatch(receiver: opaque, method_name: :inspect)).to be_nil
+      expect(dispatch(receiver: t, method_name: :inspect)).to eq(constant('[1, "a"]'))
+    end
+
+    it "declines when called with an argument (Array#inspect takes none)" do
+      expect(dispatch(receiver: t, method_name: :inspect, args: [constant(1)])).to be_nil
+    end
+
+    it "folds a result exactly at the byte cap, and declines just over it" do
+      # `["aaa...a"].inspect` bytesize is element length + 4 (brackets + quotes); 4092 chars lands
+      # exactly on TUPLE_JOIN_BYTE_LIMIT (4096), 4093 chars is one byte over.
+      at_cap = tuple(constant("a" * 4092))
+      over_cap = tuple(constant("a" * 4093))
+      expect(dispatch(receiver: at_cap, method_name: :inspect)).to eq(constant(%(["#{'a' * 4092}"])))
+      expect(dispatch(receiver: over_cap, method_name: :inspect)).to be_nil
+    end
+
+    it "folds hash.inspect to the real Hash#inspect string (Ruby 4.0's `{a: 1}` format) for a closed shape" do
+      h = hash_shape(a: constant(1), b: constant("x"))
+      expect(dispatch(receiver: h, method_name: :inspect)).to eq(constant('{a: 1, b: "x"}'))
+      expect({ a: 1, b: "x" }.inspect).to eq('{a: 1, b: "x"}')
+    end
+
+    it "folds hash.to_s identically to hash.inspect (Hash#to_s is an exact alias)" do
+      h = hash_shape(a: constant(1))
+      expect(dispatch(receiver: h, method_name: :to_s)).to eq(dispatch(receiver: h, method_name: :inspect))
+    end
+
+    it "folds the empty closed shape's inspect to \"{}\"" do
+      expect(dispatch(receiver: hash_shape({}), method_name: :inspect)).to eq(constant("{}"))
+    end
+
+    it "declines on an open shape, but still folds a same-content closed sibling" do
+      open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+      closed_shape = hash_shape(a: constant(1))
+      expect(dispatch(receiver: open_shape, method_name: :inspect)).to be_nil
+      expect(dispatch(receiver: closed_shape, method_name: :inspect)).to eq(constant("{a: 1}"))
+    end
+
+    it "declines on a shape with an optional key, but still folds once the key is required" do
+      optional_shape = Rigor::Type::Combinator.hash_shape_of(
+        { a: constant(1), b: constant(2) },
+        optional_keys: [:b]
+      )
+      required_shape = hash_shape(a: constant(1), b: constant(2))
+      expect(dispatch(receiver: optional_shape, method_name: :inspect)).to be_nil
+      expect(dispatch(receiver: required_shape, method_name: :inspect)).to eq(constant("{a: 1, b: 2}"))
+    end
+
+    it "declines when a value is not Constant, but still folds an all-Constant sibling" do
+      opaque_shape = hash_shape(a: Rigor::Type::Combinator.nominal_of("Object"))
+      closed_shape = hash_shape(a: constant(1))
+      expect(dispatch(receiver: opaque_shape, method_name: :inspect)).to be_nil
+      expect(dispatch(receiver: closed_shape, method_name: :inspect)).to eq(constant("{a: 1}"))
+    end
+
+    it "folds a hash result exactly at the byte cap, and declines just over it" do
+      # `{a: "aaa...a"}.inspect` bytesize is element length + 7 (`{a: "` + `"}`); 4089 chars lands
+      # exactly on TUPLE_JOIN_BYTE_LIMIT (4096), 4090 chars is one byte over.
+      at_cap = hash_shape(a: constant("a" * 4089))
+      over_cap = hash_shape(a: constant("a" * 4090))
+      expect(dispatch(receiver: at_cap, method_name: :inspect)).to eq(constant(%({a: "#{'a' * 4089}"})))
+      expect(dispatch(receiver: over_cap, method_name: :inspect)).to be_nil
+    end
+  end
+
+  describe "Tuple#* (#121)" do
+    let(:t) { tuple(constant(1), constant(2)) }
+
+    it "folds a Constant[String] argument identically to #join (the join-alias form)" do
+      expect(dispatch(receiver: t, method_name: :*, args: [constant("-")]))
+        .to eq(dispatch(receiver: t, method_name: :join, args: [constant("-")]))
+      expect(dispatch(receiver: t, method_name: :*, args: [constant("-")])).to eq(constant("1-2"))
+    end
+
+    it "folds a Constant[Integer] argument to a repeated Tuple" do
+      expect(dispatch(receiver: t, method_name: :*, args: [constant(2)]))
+        .to eq(tuple(constant(1), constant(2), constant(1), constant(2)))
+    end
+
+    it "folds n == 0 to the empty Tuple" do
+      expect(dispatch(receiver: t, method_name: :*, args: [constant(0)])).to eq(tuple)
+    end
+
+    it "declines a negative n, but still folds a non-negative sibling" do
+      expect(dispatch(receiver: t, method_name: :*, args: [constant(-1)])).to be_nil
+      expect { [1, 2] * -1 }.to raise_error(ArgumentError)
+      expect(dispatch(receiver: t, method_name: :*, args: [constant(1)])).to eq(t)
+    end
+
+    it "folds the element count exactly at the 64-element cap, and declines one past it" do
+      single = tuple(constant(1))
+      at_cap = dispatch(receiver: single, method_name: :*, args: [constant(64)])
+      over_cap = dispatch(receiver: single, method_name: :*, args: [constant(65)])
+      expect(at_cap).to eq(tuple(*Array.new(64, constant(1))))
+      expect(over_cap).to be_nil
+    end
+
+    it "declines a Dynamic argument, but still folds a Constant sibling" do
+      dynamic = Rigor::Type::Combinator.nominal_of("Object")
+      expect(dispatch(receiver: t, method_name: :*, args: [dynamic])).to be_nil
+      expect(dispatch(receiver: t, method_name: :*, args: [constant(2)])).not_to be_nil
+    end
+
+    it "declines a Float argument (Array#* only accepts String or Integer)" do
+      expect(dispatch(receiver: t, method_name: :*, args: [constant(2.0)])).to be_nil
+    end
+
+    it "declines with no arguments or 2+ arguments" do
+      expect(dispatch(receiver: t, method_name: :*)).to be_nil
+      expect(dispatch(receiver: t, method_name: :*, args: [constant(1), constant(2)])).to be_nil
+    end
+  end
+
   describe "ADR-76 WD2 / ADR-78 WD3 — pure self-returners preserve the shape carrier" do
     let(:t) { tuple(constant(1), constant(2), constant(3)) }
     let(:h) { hash_shape(reason: constant("boom")) }

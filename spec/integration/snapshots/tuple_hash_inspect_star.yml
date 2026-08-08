@@ -1,0 +1,8 @@
+---
+locals:
+  count: Integer
+  h: '{ a: 1, b: "x" }'
+  mixed: "[1, String]"
+  opaque: String
+  xs: '[1, "a"]'
+  ys: "[1, 2]"

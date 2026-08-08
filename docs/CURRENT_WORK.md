@@ -47,12 +47,16 @@ this file is the one that is wrong.
   batch was scoped to avoid. Everything before it in the `analysis/` tier is swept; #135's other
   four checkboxes are untouched.
 - **`ready-for-agent`**: #147 (**demand-gated** — its three items really are unimplemented, verified,
-  but the issue waits on a concrete editor-extension author), #135's remainder, #121.
-- **#121 needs a fresh candidate source.** Its whole coverage note
-  (`20260522-stdlib-deterministic-module-coverage.md`) is now classified — every Math / Shellwords /
-  Regexp / CGI / URI row is ✅/🔷/🚫, nothing pending. Start the next slice from a `type-scan`
-  report or a real project's `Dynamic` hotspots, and **probe with `rigor type-of` rather than
-  reading any table**.
+  but the issue waits on a concrete editor-extension author), #135's remainder, #121, #303.
+- **#121's fresh candidate source now exists** (2026-08-08 fold-gap census, recorded on the issue):
+  the genuine in-category remainder is three small items (`Tuple`/`HashShape` `inspect`/`to_s`,
+  `Tuple#*`, `Tuple#concat` pending a MutationWidening adjudication), ~36 lib sites total — the
+  category is nearly dry. `HashShape#compare_by_identity` is adjudicated 🚫 on the issue (shape
+  preservation would fold a runtime-`nil` lookup to a value); do not "close" it later.
+- **#303 is the census's bigger find**: method-level RBS `[T]` never binds from argument positions.
+  A measured prototype is in the issue (+0.13pp lib precision, zero diagnostic delta on this repo's
+  gates, and the one spec failure that defines the required redefinition guard). Not #121-P3 —
+  landing needs a survey-corpus before/after diff.
 - **#158 was re-audited: do not build it yet.** Both preconditions (Layer-1 doc hygiene, the
   "exhaustion-as-explanation" observability its acceptance shape lists) are already satisfied, so it
   is purely demand-gated. Non-obvious: `BudgetTrace` counters do not cross `fork`, so a trace must

@@ -20,6 +20,8 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 ### Fixed
 
 - **[rigor check]** A diagnostic whose severity the configured profile re-stamps (for example `def.return-type-mismatch` under the default `balanced` profile) no longer loses its structured `method_name`, `receiver_type`, and `project_definition_site` fields in JSON output and `rigor triage`.
+- **[rigor check]** A `# rigor:disable` / `# rigor:disable-file` marker is now recognised only when it opens the comment, so a comment that merely quotes the syntax — documentation prose, a doc-tool `##` line, or an `=begin` block — no longer silences diagnostics and no longer warns about its own quoted examples; a whole-line or trailing directive keeps working exactly as before, including with no space after the `#` ([#306](https://github.com/rigortype/rigor/issues/306)).
+
 ## [0.3.2] - 2026-08-08
 
 v0.3.2 makes the mutation tier of `rigor coverage` practical on a whole project: each file's measurement is cached, the run forks across workers, and two opt-in bleeding-edge features let it choose sites and judge kills with the same cross-file knowledge `rigor check` already has. The editor surface widens in the same direction, so a save, an in-flight buffer, and a batch of open buffers are all now answered against the whole project rather than one file at a time. The `dry-schema` and `dry-validation` plugins type a Contract's own result shape, and a batch of engine fixes retires false positives on correct code. The largest correctness fix is the least visible: Rigor's own bundled signatures collided with the ones the `rbs` gem ships, silently disabling type checking for `Gem::Specification`, `Time`, `Bundler` and six more classes.

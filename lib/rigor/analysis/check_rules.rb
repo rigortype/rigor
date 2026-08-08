@@ -424,6 +424,12 @@ module Rigor
       #   only. `# rigor:disable all` on a line suppresses
       #   every rule on that line.
       #
+      # Both in-source forms are recognised only when the
+      # marker is the FIRST thing in the comment, so a
+      # directive quoted inside ordinary prose — as the bullets
+      # above quote it — is not a directive. See the pattern
+      # constants below.
+      #
       # Diagnostics with `rule == nil` (parse errors, path
       # errors, internal analyzer errors) are NEVER
       # suppressed — they represent failures the user cannot
@@ -443,17 +449,26 @@ module Rigor
         end
       end
 
-      LINE_SUPPRESSION_PATTERN = /#\s*rigor:disable(?!-file)\s+(?<rules>[\w.,\s-]+)/
+      # Every suppression-recognition pattern below is anchored with `\A` against the COMMENT SLICE —
+      # Prism hands us a slice that starts at the `#`, so `\A#` means "the marker is the first thing in
+      # the comment". A real directive always has that shape, in both the whole-line form and the
+      # trailing `code # rigor:disable <rule>` form; prose that merely quotes a directive
+      # (`... like `# rigor:disable-file all` ...`) has text before the inner `#` and no longer
+      # activates anything. Two consequences worth naming: a doc-tool `##` comment never activates (the
+      # second `#` is neither whitespace nor the marker word), and an `=begin`/`=end` block comment
+      # never activates either (its slice starts at `=begin`). Unanchored, these patterns silently
+      # file-suppressed this very file — see issue #306.
+      LINE_SUPPRESSION_PATTERN = /\A#\s*rigor:disable(?!-file)\s+(?<rules>[\w.,\s-]+)/
       private_constant :LINE_SUPPRESSION_PATTERN
 
-      FILE_SUPPRESSION_PATTERN = /#\s*rigor:disable-file\s+(?<rules>[\w.,\s-]+)/
+      FILE_SUPPRESSION_PATTERN = /\A#\s*rigor:disable-file\s+(?<rules>[\w.,\s-]+)/
       private_constant :FILE_SUPPRESSION_PATTERN
 
       # A `rigor:disable[-file]` marker word regardless of whether any rule tokens follow. Used only by the
       # `suppression.empty` detection — the two suppression patterns above require at least one token
       # character, so a bare `# rigor:disable` never reaches them. The lookahead keeps
       # `rigor:disable-something-else` from counting as a marker.
-      BARE_SUPPRESSION_MARKER = /#\s*rigor:disable(?<file>-file)?(?![\w-])(?<rest>.*)/
+      BARE_SUPPRESSION_MARKER = /\A#\s*rigor:disable(?<file>-file)?(?![\w-])(?<rest>.*)/
       private_constant :BARE_SUPPRESSION_MARKER
 
       # A `rigor:` marker word that is NOT part of Rigor's suppression grammar but reads like an attempted
@@ -463,7 +478,7 @@ module Rigor
       # surveillance they silently suppress nothing. Matches `disable-<suffix>` for any suffix other than
       # `file`, and `enable` with or without a suffix.
       UNKNOWN_SUPPRESSION_MARKER =
-        /#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
+        /\A#\s*rigor:(?<marker>disable-(?!file(?![\w-]))[\w-]+|enable(?:-[\w-]+)?)(?![\w-])(?<rest>.*)/
       private_constant :UNKNOWN_SUPPRESSION_MARKER
 
       # @return [Array<(Hash{Integer => Set}, Set)>] pair of
@@ -527,9 +542,10 @@ module Rigor
       end
 
       # A comment carrying the marker word but not the token-bearing suppression grammar. A remainder of
-      # nothing but whitespace / commas is a genuinely empty marker (`# rigor:disable`); anything else
-      # (documentation prose like "`# rigor:disable <rule>` comments") is left alone as an ordinary
-      # comment, matching the parse path, which never treats it as a suppression either.
+      # nothing but whitespace / commas is a genuinely empty marker (`# rigor:disable`); anything else is
+      # left alone as an ordinary comment, matching the parse path, which never treats it as a
+      # suppression either. Prose that merely quotes a marker is already excluded a step earlier by the
+      # `\A` anchor, since the quotation is not at the start of the comment.
       def diagnose_bare_suppression_marker(path, comment, source, diagnostics)
         bare = BARE_SUPPRESSION_MARKER.match(source)
         if bare
@@ -545,8 +561,9 @@ module Rigor
 
       # `# rigor:disable-next-line <rule>` / `# rigor:enable <rule>` — a marker word Rigor's grammar does
       # not recognise but that reads as an attempted suppression (the RuboCop reflex). Fires only when the
-      # remainder is empty or looks like a rule list, so prose mentioning the spelling in backticks stays
-      # an ordinary comment — the same escape the empty-marker detection observes.
+      # marker opens the comment and the remainder is empty or looks like a rule list, so prose mentioning
+      # the spelling in backticks stays an ordinary comment — the same escape the empty-marker detection
+      # observes.
       def diagnose_unknown_suppression_marker(path, comment, source, diagnostics)
         unknown = UNKNOWN_SUPPRESSION_MARKER.match(source)
         return if unknown.nil?
@@ -2720,10 +2737,20 @@ module Rigor
 
         # Returns true when `override_visibility` is strictly more restrictive than `parent_visibility`
         # under the public > protected > private ordering.
+        #
+        # The nil guard below is defence, not dead code. `VISIBILITY_RANK` is a closed literal hash read
+        # with a dynamic key, so a symbol outside the table reads as nil at runtime. The engine folds that
+        # read to the nil-free value union `0 | 1 | 2`, which `internal-spec/inference-engine.md`
+        # § "HashShape receivers" declares OPTIMISTIC rather than proof and forbids the `&&`/`||` polarity
+        # gate from concluding on — but the optimism is laundered through the `.nil?` predicate into a bare
+        # `Constant[false]` that the gate then reads unmarked, so `flow.always-truthy-condition` fires. The
+        # bare single-operand form (`return false if parent_rank.nil?`) correctly stays silent; only the
+        # `||` composition misfires. Engine defect, reported as issue #313 — the directive goes when the
+        # `OptimisticOrigin` mark propagates through the predicate fold.
         def visibility_reduced?(parent_visibility, override_visibility)
           parent_rank = VISIBILITY_RANK[parent_visibility]
           override_rank = VISIBILITY_RANK[override_visibility]
-          return false if parent_rank.nil? || override_rank.nil?
+          return false if parent_rank.nil? || override_rank.nil? # rigor:disable flow.always-truthy-condition
 
           override_rank < parent_rank
         end

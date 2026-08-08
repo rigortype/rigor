@@ -35,7 +35,8 @@ module Rigor
         Diagnostic.new(
           path: diagnostic.path, line: diagnostic.line, column: diagnostic.column,
           message: diagnostic.message, severity: resolved, rule: diagnostic.rule,
-          source_family: diagnostic.source_family
+          source_family: diagnostic.source_family, receiver_type: diagnostic.receiver_type,
+          method_name: diagnostic.method_name, project_definition_site: diagnostic.project_definition_site
         )
       end
     end

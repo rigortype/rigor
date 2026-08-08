@@ -615,5 +615,23 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
 
       expect(result.map(&:rule)).to eq(["kept.rule"])
     end
+
+    it "preserves the structured fields when the profile re-stamps a diagnostic's severity" do
+      # `def.return-type-mismatch` is authored :error and the default balanced profile resolves it to
+      # :warning, so this exercises SeverityStamp's rebuild path — the one that must carry
+      # receiver_type / method_name / project_definition_site through, not just the positional fields.
+      diagnostic = Rigor::Analysis::Diagnostic.new(
+        path: "a.rb", line: 3, column: 1, message: "return-type mismatch on `to_s'",
+        severity: :error, rule: "def.return-type-mismatch",
+        receiver_type: "String", method_name: "to_s", project_definition_site: "a.rb:3"
+      )
+
+      result = build_aggregator.apply_severity_profile([diagnostic]).first
+
+      expect(result.severity).to eq(:warning)
+      expect(result.method_name).to eq("to_s")
+      expect(result.receiver_type).to eq("String")
+      expect(result.project_definition_site).to eq("a.rb:3")
+    end
   end
 end

@@ -23,6 +23,7 @@ module Rigor
                 :indexed_narrowings, :method_chain_narrowings,
                 :declaration_sourced,
                 :source_path, :discovery, :struct_fold_safe_locals,
+                :opaque_block_self,
                 :dynamic_origins, :local_origins, :ivar_origins,
                 :void_origins,
                 :optimistic_origins, :optimistic_locals, :optimistic_ivars
@@ -147,6 +148,7 @@ module Rigor
       declaration_sourced: EMPTY_DECLARATION_SOURCED,
       source_path: nil,
       struct_fold_safe_locals: EMPTY_FOLD_SAFE,
+      opaque_block_self: false,
       dynamic_origins: {}.compare_by_identity,
       local_origins: EMPTY_ORIGINS,
       ivar_origins: EMPTY_ORIGINS,
@@ -168,6 +170,7 @@ module Rigor
       @declaration_sourced = declaration_sourced
       @source_path = source_path
       @struct_fold_safe_locals = struct_fold_safe_locals
+      @opaque_block_self = opaque_block_self
       @dynamic_origins = dynamic_origins
       @local_origins = local_origins
       @ivar_origins = ivar_origins
@@ -273,6 +276,21 @@ module Rigor
     def with_struct_fold_safe(locals)
       rebuild(struct_fold_safe_locals: locals)
     end
+
+    # Issue #316 — marks a block body whose `self` Rigor does not model. Ruby gives a block no `self` of its
+    # own: the yielding method decides, and `instance_eval` / `instance_exec` (the mechanism behind every
+    # `self`-rebinding DSL — RSpec example groups, `Class.new { … }`, Rake, Sinatra) is indistinguishable from
+    # `Array#each` without knowing the callee. The flag is set at every block entry that leaves `self_type`
+    # unnarrowed and is inherited by every scope derived inside the block; it never leaks past the block,
+    # because `eval_call` returns the caller's scope unchanged.
+    def entering_opaque_block
+      return self if @opaque_block_self
+
+      rebuild(opaque_block_self: true)
+    end
+
+    # True when this scope sits inside a block whose `self` is unmodelled ({#entering_opaque_block}).
+    def opaque_block_self? = @opaque_block_self
 
     # True when `name`'s `Struct` member reads are fold-safe in this body (the local is provably never mutated /
     # aliased / escaped).
@@ -507,6 +525,43 @@ module Rigor
       record_cross_file_toplevel(method_name, entry) if Analysis::DependencyRecorder.active?
       Inference::DefNodeResolver.resolve(entry)
     end
+
+    # Issue #316 — the CONFIDENCE-GATED companion of {#top_level_def_for}, and the only accessor the type
+    # inference may bind through. {#top_level_def_for} stays unrestricted because it also serves the
+    # *suppression* side (`call.unresolved-toplevel`, `call.undefined-method`): a name the project defines at
+    # the top level must never be reported as unresolved, whatever this gate decides.
+    #
+    # Returns nil — decline to bind, stay silent — when BOTH hold:
+    #
+    # 1. The call site sits inside a block whose `self` is unmodelled ({#opaque_block_self?}) and no narrowed
+    #    `self_type` says otherwise. A top-level `def` is a private method on `Object`, so it is *callable*
+    #    from any `self`; what the analyzer cannot see is whether the block's real `self` gained a PUBLIC
+    #    same-named method by `include` / `extend`, which wins the MRO over the private `Object` def. RSpec's
+    #    `output` / `include` / `match` matchers against a project's own `def output` are exactly this.
+    # 2. The `def` lives in a DIFFERENT file from the call site. Collocation is the evidence that the two
+    #    belong to one lexical structure — the `RSpec.describe do; def helper; end; it { helper } end` case
+    #    v0.0.3 A and #319 deliberately serve. Cross-file, the two share only a name.
+    #
+    # Both conditions are required, so a top-level helper called from genuine top-level code keeps resolving
+    # (cross-file included), and a helper defined beside its DSL-block call site keeps resolving too. When the
+    # project pre-pass recorded no source for the name, the file test cannot be answered and the historical
+    # bind is kept.
+    def bindable_top_level_def_for(method_name)
+      node = top_level_def_for(method_name)
+      return node if node.nil?
+      return node unless @opaque_block_self && @self_type.nil?
+
+      same_file_top_level_def?(method_name) ? node : nil
+    end
+
+    def same_file_top_level_def?(method_name)
+      key = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
+      site = discovered_def_sources.dig(key, method_name.to_sym)
+      return true if site.nil? || @source_path.nil?
+
+      File.expand_path(site.sub(/:\d+\z/, "")) == File.expand_path(@source_path)
+    end
+    private :same_file_top_level_def?
 
     # ADR-46 slice 3 — a top-level (`def helper` outside any class) call has NO class ancestry to walk, so unlike
     # {#user_def_for} a miss here records no positive ancestry edge that would re-check the consumer when the
@@ -759,6 +814,7 @@ module Rigor
       declaration_sourced: @declaration_sourced,
       source_path: @source_path,
       struct_fold_safe_locals: @struct_fold_safe_locals,
+      opaque_block_self: @opaque_block_self,
       dynamic_origins: @dynamic_origins,
       local_origins: @local_origins,
       ivar_origins: @ivar_origins,
@@ -777,6 +833,7 @@ module Rigor
         declaration_sourced: declaration_sourced,
         source_path: source_path,
         struct_fold_safe_locals: struct_fold_safe_locals,
+        opaque_block_self: opaque_block_self,
         dynamic_origins: dynamic_origins,
         local_origins: local_origins,
         ivar_origins: ivar_origins,

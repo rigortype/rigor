@@ -23,9 +23,9 @@ this file is the one that is wrong.
   arc's two parallel batches (see the collision below for why that matters).
 - **Landed this arc**: #303 (PR #304, argument-position `[T]` binding) · #121's final fold slice
   (PR #305, and #121 is now CLOSED — six passes, zero queued work) · #307 (mutation-harness `SpecMap`
-  directory convention) · #306 (PR #314) · #313 (PR #327) · #308 (PR #312) and its repair (PR #315) ·
-  the #135 checkbox-1 specs, waves 1 and 2 (PRs #309/#310/#311/#314/#325/#326 — 136 examples, 54
-  survivors closed).
+  directory convention) · #306 (PR #314) · #313 (PR #327) · #324 (PR #328) · #308 (PR #312) and its
+  repair (PR #315) · the #135 checkbox-1 specs, waves 1 and 2 (PRs #309/#310/#311/#314/#325/#326 —
+  136 examples, 54 survivors closed).
 - **`check_rules.rb` had never been type-checked**, and that is the arc's largest finding. Its own doc
   comment quotes `` `# rigor:disable-file all` `` in backticks, and the suppression patterns matched
   anywhere inside a comment, so the documentation file-suppressed the 3,063-line file that defines
@@ -51,22 +51,26 @@ this file is the one that is wrong.
 
 ## Next session
 
-- **#135 checkbox 1: both waves have landed, and a RE-MEASURE is in flight** on branch
-  `check-rules-remeasure-135`. Do not treat any funnel number on the issue as a baseline until it
-  reports: they are all test-axis-only, because `DiagnosticOracle` killed 0/914 on this file until
-  #306 landed, and 136 examples plus #313's engine change have arrived since. The re-measure decides
-  whether a wave 3 is warranted. `--site biteable` is a complete ~169-site census (~63 min);
-  `--site all` is ~914 sites ≈ 6.1 h of rspec and stays infeasible, so ~745 sites remain unmeasured
-  and the per-family `:all` inventory on the issue is the visible gap. Checkbox 1's remaining tier
-  members are the giant files the issue body lists that PRs #282/#287/#289 did not sweep; #135's
-  other four checkboxes are untouched.
-- **#324 is the sharpest open engine item**: the ADR-58 declaration-sourced mark is honoured by
-  `possible-nil-receiver` for an ivar copied into a local but ignored by `argument-type`, so the two
-  rules disagree about exactly the `r = @right; r.key` shape ADR-58's own survey names as the FP
-  driver. Widening an excuse, so the corpus arm can only lose firings. `argument_type_spec.rb`'s
-  "still fires on a LOCAL COPY" example pins the current behaviour and says to flip it.
-- **`ready-for-agent`**: #324, #147 (**demand-gated** — its three items really are unimplemented,
-  verified, but the issue waits on a concrete editor-extension author), #135's remainder.
+- **`check_rules.rb` is DONE: 100 % fused protection, zero survivors** — the re-measure landed
+  (`docs/notes/20260809-check-rules-mutation-remeasure.md`). The recon's 70 de-noised survivors split
+  56 killed by the now-live type axis and 18 by waves 1–2's examples, with **none surviving both**, so
+  **no wave 3**. Note the number is not the interesting part: 100 % is also the shape a broken harness
+  takes, which is why the note carries negative controls (an identity mutant and an env-gated poison
+  both correctly report SURVIVED) and an independent second-seed run. Every earlier funnel figure on
+  #135 is superseded. `--site all` (~914 sites ≈ 6.1 h of rspec) stays unmeasured — ~745 sites, with
+  the per-family inventory in the note, since it was in no issue comment.
+- **#135's remaining work is the OTHER giant files** the issue body lists that PRs #282/#287/#289 did
+  not sweep, plus its four untouched checkboxes. `check_rules.rb` needs nothing further.
+- **`ready-for-agent`**: #329 (write the ADR-58 provenance contract into the binding corpus — it now
+  governs four rules and is stated normatively nowhere, which is precisely how #324's drift happened),
+  #147 (**demand-gated** — its three items really are unimplemented, verified, but the issue waits on
+  a concrete editor-extension author), #135's remainder.
+- **The spec suite leaks `Dir.mktmpdir` directories** into `/tmp/nix-shell.*` (`rigor-spec-{cache,
+  workspace,sig}-*`, `rigor-scanner-spec-*`, `rigor-plugin-spec-cache-*`, `rigor-mutant-*`). One
+  `make test` leaves ~25 entries / ~86 MB; a fused mutation census leaves ~1 GB. 1,482 stale dirs had
+  accumulated and produced a real `Errno::ENOSPC` mid-session, which fails specs in a shape that reads
+  as unrelated flake. The durable fix is block-form `Dir.mktmpdir`; until then, sweep stale
+  `/tmp/nix-shell.*` dirs whose entries are all `rigor-`-prefixed.
 - **Three tooling traps recorded this arc**, all hit for real: `Style/ArrayJoin` autocorrects a
   literal-array `[1, 2] * "-"` into `.join`, silently defeating a `*`-with-String assertion (use a
   variable receiver); parallel `make verify` runs in two worktrees flake each other, so serialize

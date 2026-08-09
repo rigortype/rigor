@@ -112,6 +112,18 @@ module Rigor
         [path, *(@dependents[path] || [])]
       end
 
+      # Release the process-private mutant file now, instead of waiting for `Tempfile`'s finalizer at process
+      # exit. A one-shot `rigor coverage` run does not need this — the process ends and the file goes with it —
+      # but a caller that outlives the oracle does: the spec suite's `after(:suite)` residue check (issue #330)
+      # runs while the process is still alive, so an un-released file reads as a leak there even though it
+      # would have been reclaimed a moment later. Idempotent, and safe on an oracle that never mutated
+      # anything (the file is created lazily).
+      def release!
+        @mutant_file&.close!
+        @mutant_file = nil
+        @mutant_pid = nil
+      end
+
       private
 
       # The diagnostic signatures the dependents of `path` report while `source` stands in for it. Empty (and

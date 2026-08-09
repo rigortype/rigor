@@ -1403,21 +1403,38 @@ module Rigor
       #     (semantically `class << self`).
       #   - `class << Foo` not nested in `class Foo` returns `[Foo]`
       #     so methods defined inside register on Foo's singleton.
+      #   - `class << Foo = <expr>` (#320, the private-singleton-object
+      #     idiom) is the same case: Ruby evaluates the assignment, then
+      #     opens the singleton of the resulting object — which is the
+      #     object `Foo` now holds — so the body's methods are reachable
+      #     as `Foo.<name>` exactly as for a plain constant read.
       #   - Any other expression (variable, method call) returns nil
       #     so the walker falls through and skips the body.
       def singleton_class_prefix(node, qualified_prefix)
-        case node.expression
-        when Prism::SelfNode
-          qualified_prefix
-        when Prism::ConstantReadNode, Prism::ConstantPathNode
-          rendered = Source::ConstantPath.qualified_name(node.expression)
-          return nil unless rendered
+        return qualified_prefix if node.expression.is_a?(Prism::SelfNode)
 
-          if !qualified_prefix.empty? && qualified_prefix.last == rendered
-            qualified_prefix
-          else
-            rendered.split("::")
-          end
+        rendered = singleton_receiver_constant_name(node.expression)
+        return nil unless rendered
+
+        if !qualified_prefix.empty? && qualified_prefix.last == rendered
+          qualified_prefix
+        else
+          rendered.split("::")
+        end
+      end
+
+      # The constant a `class << X` operand names, or nil when the operand is not constant-shaped. Both the
+      # read spellings (`Foo`, `A::Foo`, `::Foo`) and the two constant-*write* spellings (`Foo = expr`,
+      # `A::Foo = expr`) resolve to the same unqualified rendering the read branch uses, so a body opened on
+      # the assignment and one opened on a later plain read land on the same table key.
+      def singleton_receiver_constant_name(expression)
+        case expression
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          Source::ConstantPath.qualified_name(expression)
+        when Prism::ConstantWriteNode
+          expression.name.to_s
+        when Prism::ConstantPathWriteNode
+          Source::ConstantPath.qualified_name(expression.target)
         end
       end
       # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize

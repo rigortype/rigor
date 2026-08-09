@@ -5,6 +5,7 @@ require "prism"
 require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../source/constant_path"
+require_relative "../inference/singleton_object_constant"
 require_relative "../type"
 require_relative "diagnostic"
 require_relative "dependency_recorder"
@@ -674,6 +675,13 @@ module Rigor
           # non-nil constituent (which, for a cross-file project def, would
           # be a working-code false positive).
           receiver_type = safe_navigation_receiver(call_node, scope)
+
+          # #320 — the private-singleton-object idiom (`class << Merger = Object.new`). The body's methods
+          # are recorded on the constant's own name, but the receiver reads back as `Object`, so the
+          # class-keyed probes below cannot see them. Recover the name from the receiver syntax. Scoped to
+          # the recorded name only: `Merger.nope` still fires.
+          return nil if Inference::SingletonObjectConstant.recorded?(call_node, receiver_type, call_node.name, scope)
+
           class_name = concrete_class_name(receiver_type)
           # A union receiver has no single concrete class. The scalar path
           # below cannot reason about it, but the call is still definitely

@@ -19,6 +19,7 @@ require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
 require_relative "narrowing"
+require_relative "singleton_object_constant"
 require_relative "optimistic_origin"
 require_relative "struct_fold_safety"
 
@@ -1168,7 +1169,7 @@ module Rigor
         # `module_function` body, re-type that body with the call args bound. Sits after the RBS dispatch
         # tier, so foreign / RBS-known singletons (`Math.sqrt`) keep their catalog answer; only
         # project-defined singleton methods reach here.
-        singleton_inference = try_singleton_method_inference(receiver, node, arg_types)
+        singleton_inference = try_project_singleton_inference(receiver, node, arg_types)
         return singleton_inference if singleton_inference
 
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and no positive rule resolves the call,
@@ -1341,6 +1342,31 @@ module Rigor
         return result if result.nil?
 
         degrade_if_overridable(result, receiver.class_name, call_node.name, :singleton)
+      rescue StandardError
+        nil
+      end
+
+      # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`
+      # body the project itself wrote. Which of the two tiers applies is decided by the receiver carrier —
+      # `Singleton[Foo]` when the constant names a class or module, `Nominal[…]` when it holds an ordinary
+      # object (#320) — so the two are mutually exclusive and consulting both is one resolution attempt.
+      def try_project_singleton_inference(receiver, call_node, arg_types)
+        try_singleton_method_inference(receiver, call_node, arg_types) ||
+          try_singleton_object_constant_inference(receiver, call_node, arg_types)
+      end
+
+      # #320 — resolves a call whose receiver is a constant holding an ordinary object with a `class << Const`
+      # singleton body, re-typing that body with the call's argument types bound. `self` inside the body IS
+      # that object, so the receiver carrier is passed through unchanged. Own-constant only, and only for a
+      # name the project actually recorded — a miss degrades to today's `Dynamic[top]`, never a false
+      # resolution. `Singleton` receivers never reach here: {#try_singleton_method_inference} owns them.
+      def try_singleton_object_constant_inference(receiver, call_node, arg_types)
+        return nil unless receiver.is_a?(Type::Nominal)
+
+        def_node = SingletonObjectConstant.def_node_for(call_node, receiver, call_node.name, scope)
+        return nil if def_node.nil?
+
+        infer_user_method_return(def_node, receiver, arg_types)
       rescue StandardError
         nil
       end

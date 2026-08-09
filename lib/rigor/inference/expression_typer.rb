@@ -1102,8 +1102,12 @@ module Rigor
       # through `Enumerable#select` / `Object#select` and the caller observes `Array[Elem]` instead of the
       # helper's actual return type. The check fires only for `node.receiver.nil?` (true implicit self), so
       # explicit-receiver dispatch is unaffected.
+      #
+      # Issue #316 — the lookup goes through the confidence-gated `Scope#bindable_top_level_def_for`, not the
+      # raw table: inside a block whose `self` is unmodelled, a top-level `def` from ANOTHER file is not
+      # evidence about which method the call reaches, so the bind is declined and the call widens.
       def try_local_def_dispatch(node, receiver, arg_types)
-        local_def = node.receiver.nil? ? scope.top_level_def_for(node.name) : nil
+        local_def = node.receiver.nil? ? scope.bindable_top_level_def_for(node.name) : nil
         return nil unless local_def
 
         local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
@@ -2479,7 +2483,11 @@ module Rigor
         case block_arg
         when Prism::BlockNode
           bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_arg)
-          block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+          # Issue #316 — mirrors `StatementEvaluator#build_block_entry_scope`: the block body's `self` is the
+          # yielding method's business, so the return-typing pass must see the same unmodelled-self mark.
+          block_scope = bindings.reduce(scope.entering_opaque_block) do |acc, (name, type)|
+            acc.with_local(name, type)
+          end
           block_scope = block_scope.with_self_type(narrowed_self_type) if narrowed_self_type
           type_block_body(block_arg, block_scope)
         when Prism::BlockArgumentNode

@@ -2513,7 +2513,11 @@ module Rigor
       def build_block_entry_scope(call_node, block_node)
         expected = expected_block_param_types_for(call_node)
         bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
-        scope_with_params = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        # Issue #316 — every block body enters with `self` unmodelled (`Scope#entering_opaque_block`); the
+        # yielding method, not the lexical context, decides what `self` is, and Rigor does not track it.
+        scope_with_params = bindings.reduce(scope.entering_opaque_block) do |acc, (name, type)|
+          acc.with_local(name, type)
+        end
         block_local_names(block_node).reduce(scope_with_params) do |acc, name|
           acc.with_local(name, Type::Combinator.constant_of(nil))
         end

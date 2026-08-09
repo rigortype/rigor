@@ -23,6 +23,7 @@ require "spec_helper"
 module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   SCOPE_INSTANCE = %w[
     ==(req:other)
+    bindable_top_level_def_for(req:method_name)
     class_cvars()
     class_cvars_for(req:class_name)
     class_ivars()
@@ -48,6 +49,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     discovered_superclasses()
     discovery()
     dynamic_origins()
+    entering_opaque_block()
     environment()
     eql?(req:other)
     evaluate(req:node,key:tracer)
@@ -74,6 +76,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     locals()
     method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name)
     method_chain_narrowings()
+    opaque_block_self()
+    opaque_block_self?()
     optimistic_ivar(req:name)
     optimistic_ivars()
     optimistic_local(req:name)

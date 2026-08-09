@@ -19,6 +19,7 @@ module Rigor
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
     attr_reader struct_fold_safe_locals: Set[Symbol]
+    attr_reader opaque_block_self: bool
 
     # ADR-53 Track A — the seed-time discovery tables live on the
     # DiscoveryIndex; Scope keeps per-table readers as delegates.
@@ -90,6 +91,8 @@ module Rigor
     def with_source_path: (String? path) -> Scope
     def with_struct_fold_safe: (Set[Symbol] locals) -> Scope
     def struct_fold_safe?: (String | Symbol name) -> bool
+    def entering_opaque_block: () -> Scope
+    def opaque_block_self?: () -> bool
     def with_discovery: (DiscoveryIndex index) -> Scope
     def local: (String | Symbol name) -> Type::t?
     def ivar: (String | Symbol name) -> Type::t?
@@ -123,6 +126,7 @@ module Rigor
     def singleton_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
     def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def top_level_def_for: (String | Symbol method_name) -> untyped?
+    def bindable_top_level_def_for: (String | Symbol method_name) -> untyped?
     def toplevel?: () -> bool
     def discovered_method_visibility: (String | Symbol class_name, String | Symbol method_name) -> Symbol?
     def superclass_of: (String | Symbol class_name) -> String?

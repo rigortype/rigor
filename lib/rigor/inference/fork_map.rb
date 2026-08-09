@@ -37,6 +37,27 @@ module Rigor
         worker_count > 1 && Process.respond_to?(:fork)
       end
 
+      # Where a forked child may put process-private scratch files. `nil` on the parent and on the sequential
+      # path, meaning "you are not in a child — use `Dir.tmpdir`".
+      #
+      # A child ends at {.run_worker}'s `exit!`, which skips `at_exit` AND object finalizers, so a `Tempfile`
+      # a child creates is never reclaimed by the mechanism that reclaims the parent's (issue #330 —
+      # `Protection::ClosureKillOracle`'s per-process mutant file leaked one file per worker per
+      # `rigor coverage --protection --mutation` run). Answering with the directory the parent already removes
+      # once every child has been collected makes the child's scratch state the parent's problem, which is the
+      # only place it can be solved: the names are random, so nothing outside the child could find them.
+      #
+      # The directory check is the belt to {.run_worker}'s braces: the offer is only worth taking while the
+      # parent still has the directory open, and answering `nil` once it is gone degrades to `Dir.tmpdir`
+      # instead of raising `Errno::ENOENT` somewhere far from here.
+      #
+      # @return [String, nil]
+      def child_scratch_dir
+        return nil unless @child_scratch_dir && File.directory?(@child_scratch_dir)
+
+        @child_scratch_dir
+      end
+
       # Forks `worker_count` children over contiguous slices, waits for each, and returns the Marshal'd
       # per-slice payloads in slice order. A child that exits abnormally has its slice re-run in-process.
       def fork_map(items, worker_count, block)
@@ -57,18 +78,31 @@ module Rigor
       # Child-process body: run the block over the slice, Marshal the result to `out_path`, and `exit!`
       # (skipping `at_exit` / stdio flush — the payload is durable on disk). Any failure exits non-zero so
       # the parent re-runs the slice in-process.
+      # The `ensure` is not dead code even though `exit!` never unwinds: {.child_scratch_dir} is module state,
+      # and a caller that drives this body in-process with `exit!` stubbed (the deferred-YJIT spec does exactly
+      # that — a spy in the parent cannot observe a real child) would otherwise leave the offer standing for
+      # the rest of the process, pointing at a directory its `Dir.mktmpdir` block has since removed.
       def run_worker(slice, block, out_path)
-        # Re-arm deferred YJIT in the child, exactly as the check fork pool does
-        # ({Analysis::Runner::PoolCoordinator#run_fork_worker}). The parent's deadline thread does not survive
-        # `fork`, so without this a worker runs its whole slice un-JITted while the parent JITs the tail it no
-        # longer runs — the pool was a *pessimization* on long runs (`coverage --protection --mutation
-        # lib/rigor/analysis`: 37s sequential against 67s at eight workers). The child picks up what is left of
-        # the parent's window rather than a fresh one; {Runtime::Jit.rearm_after_fork} carries the mechanism.
-        Runtime::Jit.rearm_after_fork
-        File.binwrite(out_path, Marshal.dump(block.call(slice)))
-        exit!(0)
-      rescue StandardError
-        exit!(1)
+        status = begin
+          # Re-arm deferred YJIT in the child, exactly as the check fork pool does
+          # ({Analysis::Runner::PoolCoordinator#run_fork_worker}). The parent's deadline thread does not
+          # survive `fork`, so without this a worker runs its whole slice un-JITted while the parent JITs the
+          # tail it no longer runs — the pool was a *pessimization* on long runs (`coverage --protection
+          # --mutation lib/rigor/analysis`: 37s sequential against 67s at eight workers). The child picks up
+          # what is left of the parent's window rather than a fresh one; {Runtime::Jit.rearm_after_fork}
+          # carries the mechanism.
+          Runtime::Jit.rearm_after_fork
+          # Published before the block runs, so anything it lazily creates for this process alone lands in the
+          # parent's tmpdir and dies with it. See {.child_scratch_dir}.
+          @child_scratch_dir = File.dirname(out_path)
+          File.binwrite(out_path, Marshal.dump(block.call(slice)))
+          0
+        rescue StandardError
+          1
+        ensure
+          @child_scratch_dir = nil
+        end
+        exit!(status)
       end
 
       # Waits for every child, placing each successful payload at its slice index; a child that exited

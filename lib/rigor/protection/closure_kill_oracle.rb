@@ -4,6 +4,7 @@ require "tempfile"
 
 require_relative "../analysis/buffer_binding"
 require_relative "../analysis/runner"
+require_relative "../inference/fork_map"
 require_relative "diagnostic_oracle"
 require_relative "discovery_seed"
 require_relative "kill_signature"
@@ -136,11 +137,17 @@ module Rigor
 
       # The process-private mutant file. Created lazily, and re-created after a fork ({CLI::MutationForkScan}
       # workers must not share one path), which the pid guard detects.
+      #
+      # A worker's copy goes in {Inference::ForkMap.child_scratch_dir} rather than the system temp dir: the
+      # worker ends at `exit!`, which runs neither `at_exit` nor `Tempfile`'s finalizer, so a file placed
+      # anywhere else survives the run with nobody left who knows its name (issue #330). On the parent — and
+      # on the sequential path — that reader answers `nil`, which is `Tempfile.new`'s own default, and the
+      # finalizer reclaims the file at normal exit as before.
       def mutant_file
         return @mutant_file if @mutant_file && @mutant_pid == Process.pid
 
         @mutant_pid = Process.pid
-        @mutant_file = Tempfile.new(["rigor-mutant-", ".rb"])
+        @mutant_file = Tempfile.new(["rigor-mutant-", ".rb"], Inference::ForkMap.child_scratch_dir)
       end
 
       def seed_for(buffer)

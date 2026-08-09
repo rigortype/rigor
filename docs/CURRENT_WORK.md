@@ -96,28 +96,19 @@ this file is the one that is wrong.
   overturned a premise on seven separate tasks — it is the highest-value sentence in the brief. For
   an engine FP add: *diagnose and report the root cause even if you also fix it; retreat rather than
   land a half-understood fix.*
-- **A cheap proxy for the property you actually care about can be wrong in BOTH directions at once.**
-  #286's carrier-shape gate would have declined 99 genuine proofs *and* still missed 12 optimistic
-  values, because shape and provenance are different axes. Before scoping work around a proxy, measure
-  the real property once — it cost one instrumented build and retired the option outright.
-- **A measurement's landing rule can be the wrong gate.** I gated #152 on "zero new diagnostics"; it
-  passed, and shipping would still have been wrong, because the harm was deleted fallbacks rather
-  than new firings. Ask what the damage mode IS before choosing the number to watch.
-- **Two harness traps that fabricate a convincing zero**, both hit for real: a project
-  `.rigor-baseline.yml` silences diagnostics on both arms (redmine: 793), and a warm run-result
-  cache used to ignore engine source. The second is fixed (#285/#290 — `Cache::EngineSource`, free
-  for released gems, +7% on a checkout's warm path), but **always pass `--no-cache --no-baseline`
-  for a before/after engine measurement.**
-- **Queued-work descriptions here systematically under-report what already exists** — five instances
-  across ROADMAP prose, an issue premise, an issue's acceptance criteria, a coverage table, and this
-  handoff's own pointer. Budget one `ls`/`grep`/probe per claimed-missing artifact before briefing.
-- **A "correct but slower" result is a defect, not a trade-off**: #142's pool was 0.66x at N=8, a
-  realistic editor burst, and the repo had already fixed that exact shape once (#257). It merged
-  only with a size gate whose sub-threshold path is literally the old computation.
-- **A decline assertion (`expect(...).to be_nil`) is the easiest test to pass by accident**, since
-  every construction error also yields nil — always pair it with a case that must still succeed.
-  This repo's formatter hook also strips the `*` from `foo(*array)`, which is how one such spec
-  shipped testing nothing (#283, repaired in #284). Re-read spec regions after editing.
-- **Salvage an interrupted agent's uncommitted work rather than re-running it** — 642 good spec
-  lines were sitting in a worktree when a run died mid-sweep; verifying and committing them cost far
-  less than the sweep would have.
+- **A structurally impossible measurement is a finding, never a zero to report.** `DiagnosticOracle`
+  killing 0 of 914 mutants against 24/24 on a control is not a protection figure — it is the tell
+  that the subject was not being checked at all (#306). The same instinct inverts: **100 % is also
+  the shape a broken harness takes**, so the re-measure that reported it had to carry negative
+  controls (an identity mutant and an env-gated poison, both correctly SURVIVED) before the number
+  meant anything. Neither extreme is evidence until the instrument can produce the opposite answer.
+- **A spec that deliberately pins known-wrong behaviour is a dependency on that behaviour staying
+  wrong.** It MUST carry an in-place "flip this when #N is fixed" comment. PR #310's did, #308 was
+  fixed independently, the two collided on merge and turned master red, and the comment made the
+  repair one line. Before briefing parallel agents, check the open issues for anything that would
+  invalidate a premise one of them is about to encode.
+- **Ask the provenance question in ONE place.** #324 was two rules spelling the same ADR-58 lookup
+  differently and drifting apart. The fix's value is the shared predicate, not the widening — and
+  #329 exists because the contract it encodes is still stated normatively nowhere.
+- **The gate's exit code, not the pipeline's.** `make docs-check | tail -2` reports `tail`'s status;
+  I pushed a handoff that failed its own line-cap gate that way. Check gates unpiped.

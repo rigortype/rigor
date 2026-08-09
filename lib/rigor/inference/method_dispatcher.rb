@@ -760,7 +760,9 @@ module Rigor
         struct_result = StructFolding.try_dispatch(context)
         return struct_result if struct_result
 
-        meta_result = try_meta_introspection(context.receiver, context.method_name, context.args)
+        meta_result = try_meta_introspection(
+          context.receiver, context.method_name, context.args, context.block_type
+        )
         return meta_result if meta_result
 
         PRECISE_TIERS_HEAD.each do |tier|
@@ -868,10 +870,10 @@ module Rigor
       # `Foo.class` as `Singleton[Class]` (deliberate; calling `.class` on a class object yields
       # `Class`, the metaclass). We also special-case `is_a?`-adjacent calls and the trivial
       # `instance_of?(self)` later as the rule catalogue grows; for now only `class` is handled.
-      def try_meta_introspection(receiver_type, method_name, arg_types = [])
+      def try_meta_introspection(receiver_type, method_name, arg_types = [], block_type = nil)
         case method_name
         when :class then meta_class(receiver_type)
-        when :new then meta_new(receiver_type, arg_types)
+        when :new then meta_new(receiver_type, arg_types, block_type)
         end
       end
 
@@ -891,13 +893,13 @@ module Rigor
       # `Type::Constant::SCALAR_CLASSES` accepts (today: `Pathname`), `.new(Constant<…>)` lifts
       # to a `Constant<…>` carrier so downstream method calls fold through the standard catalog
       # tier.
-      def meta_new(receiver_type, arg_types = [])
+      def meta_new(receiver_type, arg_types = [], block_type = nil)
         return nil unless receiver_type.is_a?(Type::Singleton)
 
         constant_lift = constant_constructor_lift(receiver_type.class_name, arg_types)
         return constant_lift if constant_lift
 
-        array_lift = array_new_lift(receiver_type.class_name, arg_types)
+        array_lift = array_new_lift(receiver_type.class_name, arg_types, block_type)
         return array_lift if array_lift
 
         range_lift = range_new_lift(receiver_type.class_name, arg_types)
@@ -1000,17 +1002,24 @@ module Rigor
       # `Tuple[…]` when `n` is a small `Constant<Integer>`. Cap at `ARRAY_NEW_TUPLE_LIMIT` (16)
       # so a `Array.new(1_000_000)` does not balloon the carrier; oversize calls fall back to
       # `Nominal[Array]`.
+      #
+      # #317 — `Array.new(n) { |i| ... }` fills every slot from the BLOCK's return type instead
+      # of the two-arg `(n, default_value)` overload's `nil` fill. The block and the trailing
+      # `default_value` positional are mutually exclusive per `Array#initialize`'s RBS overload
+      # set (`(int size, ?E default_value) -> void` vs `(int size) { (Integer index) -> E } ->
+      # void`), so a block present at the call site always wins over any (illegal, but tolerated
+      # rather than rejected here) second positional.
       ARRAY_NEW_TUPLE_LIMIT = 16
       private_constant :ARRAY_NEW_TUPLE_LIMIT
 
-      def array_new_lift(class_name, arg_types)
+      def array_new_lift(class_name, arg_types, block_type = nil)
         return nil unless class_name == "Array"
         return nil if arg_types.empty? || arg_types.size > 2
 
         size = array_new_size(arg_types.first)
         return nil if size.nil? || size.negative? || size > ARRAY_NEW_TUPLE_LIMIT
 
-        fill = array_new_fill(arg_types[1])
+        fill = block_type || array_new_fill(arg_types[1])
         Type::Combinator.tuple_of(*Array.new(size, fill))
       end
 

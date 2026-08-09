@@ -24,6 +24,7 @@ Older release notes are archived under [`docs/`](docs/) when the leading version
 - **[engine]** Copying a nilable attribute into a local before passing it — `r = @right` then `insert(r)` — no longer warns about an argument type mismatch when passing the attribute directly would not have: the same value with the same origin now gets the same answer from every check, instead of only from the one that reports calling a method on it ([#324](https://github.com/rigortype/rigor/issues/324)).
 - **[rigor coverage]** A forked `--protection --mutation` worker no longer abandons its scratch file in the system temp directory, so repeated whole-project runs stop accumulating one stray file per worker per run ([#330](https://github.com/rigortype/rigor/issues/330)).
 - **[rigor check]** A `# rigor:disable` / `# rigor:disable-file` marker is now recognised only when it opens the comment, so a comment that merely quotes the syntax — documentation prose, a doc-tool `##` line, or an `=begin` block — no longer silences diagnostics and no longer warns about its own quoted examples; a whole-line or trailing directive keeps working exactly as before, including with no space after the `#` ([#306](https://github.com/rigortype/rigor/issues/306)).
+- **[engine]** `Array.new(n) { ... }` now takes its element type from the block's return value instead of the no-block overload's `nil` fill, so `Array.new(2) { "s" }[0].upcase` no longer warns about calling a method on nil ([#317](https://github.com/rigortype/rigor/issues/317)).
 
 ## [0.3.2] - 2026-08-08
 

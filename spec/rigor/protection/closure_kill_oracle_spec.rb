@@ -92,19 +92,29 @@ RSpec.describe Rigor::Protection::ClosureKillOracle do
     account_source.sub('Account.wrap("account")', "Account.wrap(nil)")
   end
 
+  let(:built_oracles) { [] }
   let(:configuration) { Rigor::Configuration.load(nil) }
   let(:context) { Rigor::LanguageServer::ProjectContext.new(configuration: configuration) }
+
+  after { built_oracles.each(&:release!) }
 
   # `discovery_seed:` is what `discovery-seeded-mutation-sites` supplies. nil (the default here) is the
   # closure feature adopted ALONE: the mutated file's verdict is then the shipped single-file oracle's,
   # unchanged, and the closure is the only thing this class adds.
+  # Every oracle this spec builds is registered for release after the example. The oracle's mutant `Tempfile`
+  # is otherwise reclaimed only by its finalizer at process exit, which is AFTER `after(:suite)` — so the
+  # residue check added for issue #330 saw two `rigor-mutant-*.rb` files and failed the suite on CI while
+  # passing locally, where GC happened to have run first. Registering here rather than at each call site is
+  # what keeps a later example from reintroducing it by forgetting.
   def oracle_for(paths, dependents:, seeded: false)
-    described_class.new(
+    oracle = described_class.new(
       configuration: configuration, environment: context.environment, project_scan: context.project_scan,
       paths: paths, dependents: dependents,
       seed_bundles: Rigor::Protection::DiscoverySeed.bundles(paths: paths),
       discovery_seed: seeded ? discovery_seed_for(paths) : nil
     )
+    built_oracles << oracle
+    oracle
   end
 
   def discovery_seed_for(paths)

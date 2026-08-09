@@ -720,6 +720,33 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Array")
     end
 
+    it "resolves Array.new(2) { \"s\" } as Tuple[\"s\", \"s\"] from the block's return (#317)" do
+      # The block-bearing `(int size) { (Integer index) -> E } -> void` overload of
+      # `Array#initialize` fills every slot from the block's return type, NOT from the
+      # two-arg `(int size, ?E default_value)` overload's implicit `nil` default — those two
+      # overloads are mutually exclusive at a real call site.
+      type = scope.type_of(parse_expression("Array.new(2) { \"s\" }"))
+
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements).to eq([Rigor::Type::Combinator.constant_of("s")] * 2)
+    end
+
+    it "resolves Array.new(3) { |i| i * 2 } as Tuple[Integer, Integer, Integer] (block with index param)" do
+      type = scope.type_of(parse_expression("Array.new(3) { |i| i * 2 }"))
+
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements).to eq([Rigor::Type::Combinator.nominal_of("Integer")] * 3)
+    end
+
+    it "Array.new(2) (no block) still fills with Constant[nil] elements" do
+      # Must-still-fire control: without a block, the two-arg overload's `nil` default
+      # genuinely applies, so a downstream `.upcase` on an element genuinely is an error.
+      type = scope.type_of(parse_expression("Array.new(2)"))
+
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements).to eq([Rigor::Type::Combinator.constant_of(nil)] * 2)
+    end
+
     it "Hash.new(0) lifts to Hash[untyped, Integer] (B9 default-arg fold)" do
       type = scope.type_of(parse_expression("Hash.new(0)"))
 

@@ -354,6 +354,50 @@ Slice 7 phase 3 extends `StatementEvaluator` with **compound writes** for every 
 - The result type for `||=` is `union(Narrowing.narrow_truthy(current), rhs)`; for `&&=` it is `union(Narrowing.narrow_falsey(current), rhs)`; for operator forms (`+=`, `-=`, `*=`, ...) the typer dispatches `current.send(operator, rhs)` through `MethodDispatcher` and falls back to `Dynamic[top]` on a miss.
 - The variable is then rebound into the post-scope through the same `with_*` builder used by the plain write handler. The expression value is the result type, matching Ruby's semantics.
 
+#### Declaration-sourced provenance mark (ADR-58)
+
+[ADR-58](../adr/58-ivar-field-typing.md) splits ivar-sourced optionality in two. A `nil` is **flow-live** when it is assigned or observed on a path that reaches the read inside the method under analysis (a method-local `@x = nil`, a narrowing that put nil back into the binding); it is **declaration-sourced** when its only origin is the cross-method machinery specified above — the class-ivar accumulator's constructor `@x = nil` seed, or the `Constant[nil]` the read-before-write gate contributes for a non-definitely-assigned ivar. Declaration-sourced optionality is real type information and MUST remain in the type the engine reports (`Node | nil` stays `Node | nil`), but it MUST NOT by itself be diagnostic fuel: the working program's cross-method invariant is assumed under [ADR-5](../adr/5-robustness-principle.md), and the ADR's own survey measured the alternative as the single largest false-positive class on idiomatic data-structure Ruby. The mark specified here is the one bit that carries that judgment from the seed to the rules. It is normative because leaving it to the rules produced exactly the drift an unstated contract produces: before issue #324 two rules spelled the lookup independently and disagreed about ADR-58's own motivating shape, one excusing `r = @right; r.key` while another fired on `c = @count; sink.take_int(c)`.
+
+**Carrier and discipline.** `Rigor::Scope` carries a frozen `Set[[Symbol, Symbol]]` of `(kind, name)` refs, threaded by value through every scope transition and read through `Scope#declaration_sourced?(kind, name)`. It is a side channel in the [ADR-75](../adr/75-dynamic-provenance.md) / [ADR-82](../adr/82-dynamic-provenance-wiring.md) sense, and the same discipline binds: it MUST NOT participate in subtyping, consistency, normalization or erasure, no `Rigor::Type` MUST carry or expose it, and **no diagnostic MUST fire *from* it** — a consumer may only ever *withhold* a firing it would otherwise make, so the mark can lose precision but can never manufacture a false positive. It differs from the `dynamic_origins` / `void_origins` advisory tables of § [The `Scope#type_of(node)` Contract](#the-scopetype_ofnode-contract) in two respects a reader MUST NOT generalise away: it is an ordinary immutable scope field rather than a node-keyed table written in place, and it IS included in `Scope#==` (though not in `Scope#hash`).
+
+**Establishment.** There are exactly two establishing transitions, one per carrier kind, and an implementation MUST NOT add a third without treating it as the decision described under *Non-transitivity* below.
+
+- `:ivar` — `StatementEvaluator#seed_instance_ivars` MUST stamp every ivar it seeds out of `Scope#class_ivars_for` through `Scope#seed_declaration_sourced_ivar`, which binds the type and records the mark in one transition. The mark records the **provenance of the binding, not the presence of a nil**: every seeded entry is marked whether or not its type has a nil constituent, and pairing the mark with a nil test is the consumer's job. Because singleton bodies take no ivar seed at all, a `def self.…` body carries no `:ivar` mark. `seed_declaration_sourced_ivar` MUST be used only at method-body entry — unlike `with_ivar` it does not invalidate the indexed / method-chain narrowings keyed on the name.
+- `:local` — `StatementEvaluator#eval_local_write` MUST stamp the written local through `Scope#with_declaration_sourced_local` when, and only when, the write's `value` node is a bare `Prism::InstanceVariableReadNode` whose ivar is marked in the scope reached after evaluating the right-hand side. `with_declaration_sourced_local` MUST perform the ordinary `with_local` first and re-stamp afterward (`with_local_declaration_mark`); the reverse order silently loses the mark, because `with_local` drops it unconditionally.
+
+**Drop.** Every flow-live touch drops the mark, and the drop is implemented in the scope transitions rather than at the rules, so a new caller inherits it automatically:
+
+- `Scope#with_ivar` drops `(:ivar, name)`. Its callers are the method-local ivar write, every `Rigor::Inference::Narrowing` rewrite of an ivar binding (truthiness, nil-guard, `is_a?`, the receiver-chain rewrite), and the mutation-widening path. A narrowing therefore un-marks the ivar even when it leaves the type unchanged.
+- `Scope#with_local` drops `(:local, name)` on **any** rebinding of the name.
+- `Scope#join` **intersects** the `:ivar` and `:local` refs: a ref is marked after a merge only when both branches mark it. If either path made the binding flow-live, the merge is flow-live.
+
+**Non-transitivity, and its exact boundary.** The mark propagates across at most **one** ivar-to-local hop, because `eval_local_write` recognises exactly one right-hand-side shape: a bare `Prism::InstanceVariableReadNode`. Nothing derives a mark from another mark. An implementation MUST NOT widen this by inference at a consumer; widening it is a decision to be taken at `eval_local_write` (or at a documented successor), gated on the ADR-58 WD4 zero-new-firing protocol, and not a slip to be repaired ad hoc — ADR-58's WD1 status records the same conclusion for the broader method-return-transit shape, which was measured, scoped as WD1b, and then demand-gated rather than approximated.
+
+The following shapes carry the mark (verified by probe — `call.possible-nil-receiver` and `call.argument-type-mismatch` both stay silent):
+
+- `r = @x; r.foo` — the direct copy, ADR-58's motivating rotation/traversal shape.
+- `r = @x; r = @x; r.foo` — each write is judged on its own right-hand side, so a rebind from the same pure read re-establishes the mark that `with_local` just dropped.
+- `r = s = @x; s.foo` — the inner write's value is the bare ivar read, so `s` is marked; `r`, whose value node is a write node, is not.
+- `if c then r = @x else r = @x end; r.foo` — both branches stamp `(:local, :r)` and the join's intersection keeps it.
+
+The following carry no mark and MUST keep firing:
+
+- `c = @x; d = c; d.foo` — the second hop. The right-hand side is a local read, not an ivar read.
+- `r = @x if c` and `if c then r = @x else r = nil end` — an asymmetric join, dropped by the intersection.
+- `r ||= @x` in any position, and `r = begin; @x; end` or `r = (@x)` — a compound-write node, a `Prism::BeginNode` and a `Prism::ParenthesesNode` are all "not a bare ivar read".
+- `@x = nil if c; r = @x; r.foo` and `if @x then … end; r = @x; r.foo` — a preceding flow-live write or narrowing un-marked the ivar, so the copy inherits nothing.
+
+**Consumers.** Every consumer MUST ask the question through `Rigor::Analysis::CheckRules::DeclarationSourcedGuard.marked?(node, scope)` — the single predicate that maps a Prism node to the right carrier kind (`InstanceVariableReadNode` → `:ivar`, `LocalVariableReadNode` → `:local`, everything else → false) — and MUST NOT re-derive it from `Scope#declaration_sourced?` or from a node-shape test of its own. That indirection is the fix for issue #324 and the reason this section exists. Today's consumers are four gates across two rules:
+
+| Rule | Gate | Criterion |
+| --- | --- | --- |
+| `call.possible-nil-receiver` | `nil_receiver_diagnostic` | Declines on a marked receiver. The rule restricts itself to a `Prism::LocalVariableReadNode` receiver beforehand, so only the `:local` kind is reachable here. |
+| `call.argument-type-mismatch` | `single_argument_mismatch` (nil channel) | Declines on a marked argument whose type is exactly nil, before the parameter is consulted. |
+| `call.argument-type-mismatch` | `nil_arg_overload_mismatch` (multi-overload nil channel) | The same criterion on the per-overload path. |
+| `call.argument-type-mismatch` | `declaration_sourced_nil_only_mismatch?`, via `argument_genuinely_mismatches?` | Declines only when the argument is marked **and** the rejection is caused solely by the nil constituent — the type with nil removed must be accepted in gradual mode. The argument's type is unchanged; only the firing decision is gated. |
+
+**The `Set` is shared with a second, differently-behaved mark.** [ADR-67](../adr/67-parameter-type-inference.md) WD6b stores its inferred-parameter taint in the same `Scope` set under a third kind, `:inferred_param`, and its semantics are the opposite of ADR-58's on both axes: `Scope#join` merges it by **union** (either branch's taint survives, because firing against an open-call-site lower bound is a false positive on the path that carries it), and it is **sticky** across `with_local`, cleared only by `Scope#without_inferred_param_mark` at a genuine rewrite. A reader or maintainer of `join_declaration_sourced` MUST keep the two policies separate, and `declaration_sourced?(:inferred_param, …)` MUST NOT be used as a spelling of the ADR-67 query — `Scope#inferred_param?` is that query.
+
 ### Lexical constant lookup (Slice A constant-walk)
 
 `ExpressionTyper#type_of_constant_read` and `#type_of_constant_path` MUST resolve a constant by walking the surrounding lexical class context, mirroring Ruby's runtime constant lookup rules at the granularity the analyzer can prove statically:

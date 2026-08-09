@@ -10,6 +10,7 @@ require_relative "diagnostic"
 require_relative "dependency_recorder"
 require_relative "check_rules/rule_ids"
 require_relative "check_rules/inferred_param_guard"
+require_relative "check_rules/declaration_sourced_guard"
 require_relative "check_rules/rule_walk"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
@@ -1272,8 +1273,12 @@ module Rigor
           # principle. The nil stays in the displayed type; only its use as
           # diagnostic fuel is withheld. Any flow-live touch (method-local
           # nil write, failed-guard narrowing) drops the mark upstream, so
-          # flow-observed nil keeps firing exactly as before.
-          return nil if scope.declaration_sourced?(:local, call_node.receiver.name)
+          # flow-observed nil keeps firing exactly as before. The receiver
+          # is already narrowed to a local read above, so this asks
+          # {DeclarationSourcedGuard} exactly what it asked before — but it
+          # now asks it through the predicate the argument-type gates share
+          # (issue #324), which is what keeps the two rules from drifting.
+          return nil if DeclarationSourcedGuard.marked?(call_node.receiver, scope)
 
           # ADR-67 WD6b — an inferred-parameter receiver's type (incl. any nil constituent unioned in from a
           # nil call site) is an open-call-site lower bound; a possible-nil firing against it is an FP by
@@ -2400,13 +2405,16 @@ module Rigor
           params.map { |param| param.type.to_s.delete_prefix("::") }.uniq.join(" | ")
         end
 
-        # ADR-58 parity for the nil channel: a declaration-sourced ivar read
-        # that types as nil is the same not-diagnostic-fuel case the union
-        # path gates in {#declaration_sourced_nil_only_mismatch?}; suppress it
-        # here too so a ctor-seeded `@x = nil` read passed as an argument does
-        # not fire on a working program's cross-method invariant.
+        # ADR-58 parity for the nil channel: a declaration-sourced read that
+        # types as nil is the same not-diagnostic-fuel case the union path
+        # gates in {#declaration_sourced_nil_only_mismatch?}; suppress it here
+        # too so a ctor-seeded `@x = nil` read passed as an argument does not
+        # fire on a working program's cross-method invariant. Issue #324 —
+        # delegates to {DeclarationSourcedGuard}, so a local copy of the ivar
+        # (`c = @count`) is excused on the same terms `possible-nil-receiver`
+        # already excused it.
         def declaration_sourced_nil_argument?(arg, scope)
-          arg.is_a?(Prism::InstanceVariableReadNode) && scope.declaration_sourced?(:ivar, arg.name)
+          DeclarationSourcedGuard.marked?(arg, scope)
         end
 
         def first_argument_mismatch(method_type, call_node, scope, param_overrides)
@@ -2469,14 +2477,15 @@ module Rigor
           !declaration_sourced_nil_only_mismatch?(arg, arg_type, param_type, scope)
         end
 
-        # True when `arg` is a declaration-sourced ivar read whose rejection is
+        # True when `arg` is a declaration-sourced read whose rejection is
         # caused solely by its nil constituent: stripping nil from the argument
         # type yields a type the parameter accepts (gradual mode). Mirrors the
-        # `possible-nil-receiver` WD1 gate, keyed on the ivar provenance mark
-        # rather than a local copy.
+        # `possible-nil-receiver` WD1 gate — since issue #324 through the very
+        # same {DeclarationSourcedGuard} predicate, so the ivar read and its
+        # local copy (`c = @count`) are one case rather than two spellings that
+        # can drift apart again.
         def declaration_sourced_nil_only_mismatch?(arg, arg_type, param_type, scope)
-          return false unless arg.is_a?(Prism::InstanceVariableReadNode)
-          return false unless scope.declaration_sourced?(:ivar, arg.name)
+          return false unless DeclarationSourcedGuard.marked?(arg, scope)
           return false unless arg_type.is_a?(Type::Union)
           return false unless union_contains_nil?(arg_type)
 

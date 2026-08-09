@@ -124,25 +124,72 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
 
     it "still fires once a method-local conditional write makes the nil flow-live" do
       # `@count = nil if flag` inside the reading method drops the declaration-sourced mark upstream
-      # (`Scope#with_ivar`), so the gate's `scope.declaration_sourced?(:ivar, arg.name)` guard (survivor
-      # L2462) returns false and the SAME `1 | nil` argument that is excused above now fires. A mutant that
-      # skipped the mark lookup and gated on "is an ivar read" alone would silently excuse this.
+      # (`Scope#with_ivar`), so the gate's `DeclarationSourcedGuard.marked?` lookup returns false and the SAME
+      # `1 | nil` argument that is excused above now fires. A mutant that skipped the mark lookup and gated on
+      # "is an ivar read" alone would silently excuse this.
       source = holder("@count = nil if flag\n    Sink.new.take_int(@count)").sub("def flush", "def flush(flag)")
       diagnostics = arg_mismatches(source)
       expect(diagnostics.size).to eq(1)
       expect(diagnostics.first.message).to include("expected Integer, got 1?")
     end
 
-    it "still fires on a LOCAL COPY of the same declaration-sourced ivar" do
-      # OBSERVATION, not an endorsement. `declaration_sourced_nil_only_mismatch?` opens with
-      # `arg.is_a?(Prism::InstanceVariableReadNode)` (survivor L2462), so `c = @count` — which DOES inherit
-      # the `:local` provenance mark (`Scope#with_declaration_sourced_local`, and `possible-nil-receiver`
-      # honours it at check_rules.rb ~L1276) — is outside the gate and fires. Suspected ADR-58 parity hole:
-      # the two rules disagree about the copied-into-a-local shape the ADR's own survey named
-      # (`r = @right; r.key`) — filed as issue #324. Pinned as current behaviour; flip this when #324 lands.
-      diagnostics = arg_mismatches(holder("c = @count\n    Sink.new.take_int(c)"))
+    it "suppresses a LOCAL COPY of the same declaration-sourced ivar (issue #324)" do
+      # `c = @count` inherits the `:local` provenance mark (`Scope#with_declaration_sourced_local`), so the
+      # copy carries exactly the provenance the direct read above carries. Before #324 the gate opened with
+      # `arg.is_a?(Prism::InstanceVariableReadNode)` and this fired, disagreeing with `possible-nil-receiver`
+      # — which has honoured the `:local` mark since ADR-58 WD1 — about the copied-into-a-local shape the
+      # ADR's own survey names as the motivating case (`r = @right; r.key`). Both rules now ask one predicate,
+      # `DeclarationSourcedGuard.marked?`, so they cannot drift apart again.
+      expect(arg_mismatches(holder("c = @count\n    Sink.new.take_int(c)"))).to be_empty
+    end
+
+    it "still fires on a local copy whose nil-stripped type the param rejects anyway" do
+      # The #324 widening moves the copy INTO the gate; it does not make the gate say yes. Same
+      # declaration-sourced local, `String` param: stripping nil leaves `1`, which `String` still rejects.
+      # Paired with the decline above exactly as the ivar pair is — identical provenance, opposite verdict.
+      diagnostics = arg_mismatches(holder("c = @count\n    Sink.new.take_string(c)"))
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include("expected String, got 1?")
+    end
+
+    it "still fires on a local copy taken after a method-local write made the nil flow-live" do
+      # The ADR-58 boundary, restated on the copy path: `@count = nil if flag` drops the ivar's mark, so
+      # `c = @count` lands on the plain `with_local` path and carries NO `:local` mark. Losing this would be
+      # a soundness regression, not a parity fix.
+      source = holder("@count = nil if flag\n    c = @count\n    Sink.new.take_int(c)")
+               .sub("def flush", "def flush(flag)")
+      diagnostics = arg_mismatches(source)
       expect(diagnostics.size).to eq(1)
       expect(diagnostics.first.message).to include("expected Integer, got 1?")
+    end
+
+    it "still fires on a SECOND-hop copy, which the scope does not mark" do
+      # The mark is deliberately not transitive: `eval_local_write` stamps `:local` only when the RHS is a
+      # pure read of a declaration-sourced IVAR, so `d = c` is an ordinary local write. #324 widened the gate
+      # to the shapes the scope actually models and invented no propagation of its own — this pins that
+      # boundary, so a later "make it transitive" change has to be a deliberate decision rather than a slip.
+      diagnostics = arg_mismatches(holder("c = @count\n    d = c\n    Sink.new.take_int(d)"))
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include("expected Integer, got 1?")
+    end
+
+    it "still fires on a copy joined out of a conditional" do
+      # `c = nil; c = @count if flag` joins a declaration-sourced arm with a flow-live one; the join carries
+      # no mark, so the union is flow-observed nil and fires. The other half of the not-transitive boundary.
+      source = holder("c = nil\n    if flag\n      c = @count\n    end\n    Sink.new.take_int(c)")
+               .sub("def flush", "def flush(flag)")
+      diagnostics = arg_mismatches(source)
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include("expected Integer, got 1?")
+    end
+
+    it "still fires on a plainly wrong local with no declaration-sourced provenance at all" do
+      # The floor. Nothing about #324 touches an argument whose rejection has no provenance story — a mutant
+      # that made `DeclarationSourcedGuard.marked?` unconditionally true would keep every decline above and
+      # lose exactly this.
+      diagnostics = arg_mismatches("c = \"x\"\nSink.new.take_int(c)\n")
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include("expected Integer, got \"x\"")
     end
 
     it "never reaches the gate when the param admits nil outright" do
@@ -207,6 +254,29 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
       expect(diagnostics.first.message).to eq(
         "argument type mismatch at `plain_pick' on Sink: expected String | Integer, got nil"
       )
+    end
+
+    it "suppresses a LOCAL COPY of the pure-nil ivar on BOTH channels (issue #324)" do
+      # The pure-nil channel had the same parity hole as the union gate above, on both the single-overload
+      # and the multi-overload path, because both consult `declaration_sourced_nil_argument?`. Routing that
+      # predicate through `DeclarationSourcedGuard.marked?` closes all three call sites at once.
+      expect(arg_mismatches(nil_only_holder("c = @label\n    Sink.new.take_int(c)"))).to be_empty
+      expect(arg_mismatches(nil_only_holder("c = @label\n    Sink.new.plain_pick(c)"))).to be_empty
+    end
+
+    it "still fires on a local holding a flow-observed nil" do
+      # `@label = nil` inside `flush` drops the ivar mark, so the copy taken after it is an ordinary local
+      # binding a flow-observed nil. The must-still-fire sibling of the decline above.
+      diagnostics = arg_mismatches(nil_only_holder("@label = nil\n    c = @label\n    Sink.new.take_int(c)"))
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include("expected Integer, got nil")
+    end
+
+    it "still fires on a local bound to a literal nil" do
+      # No ivar anywhere in the story, so no provenance to inherit. The floor for the pure-nil channel.
+      diagnostics = arg_mismatches("c = nil\nSink.new.take_int(c)\n")
+      expect(diagnostics.size).to eq(1)
+      expect(diagnostics.first.message).to include("expected Integer, got nil")
     end
   end
 
